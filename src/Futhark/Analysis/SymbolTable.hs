@@ -30,6 +30,7 @@ module Futhark.Analysis.SymbolTable
     lookupLoopParam,
     aliases,
     available,
+    subExpAvailable,
     consume,
     index,
     index',
@@ -281,6 +282,11 @@ aliases x y vtable = x == y || (x `nameIn` lookupAliases y vtable)
 available :: VName -> SymbolTable rep -> Bool
 available name = maybe False (not . entryConsumed) . M.lookup name . bindings
 
+-- | Constant or 'available'
+subExpAvailable :: SubExp -> SymbolTable rep -> Bool
+subExpAvailable (Var name) = available name
+subExpAvailable Constant {} = const True
+
 index ::
   ASTRep rep =>
   VName ->
@@ -323,7 +329,7 @@ class IndexOp op where
     Maybe Indexed
   indexOp _ _ _ _ = Nothing
 
-instance IndexOp ()
+instance IndexOp (NoOp rep)
 
 indexExp ::
   (IndexOp (Op rep), ASTRep rep) =>
@@ -390,7 +396,7 @@ defBndEntry vtable patElem als stm =
     }
 
 bindingEntries ::
-  (ASTRep rep, Aliases.Aliased rep, IndexOp (Op rep)) =>
+  (Aliases.Aliased rep, IndexOp (Op rep)) =>
   Stm rep ->
   SymbolTable rep ->
   [LetBoundEntry rep]
@@ -436,7 +442,7 @@ insertEntries entries vtable =
     add vtable' (name, entry) = insertEntry name entry vtable'
 
 insertStm ::
-  (ASTRep rep, IndexOp (Op rep), Aliases.Aliased rep) =>
+  (IndexOp (Op rep), Aliases.Aliased rep) =>
   Stm rep ->
   SymbolTable rep ->
   SymbolTable rep
@@ -475,7 +481,7 @@ insertStm stm vtable =
         update' e = e
 
 insertStms ::
-  (ASTRep rep, IndexOp (Op rep), Aliases.Aliased rep) =>
+  (IndexOp (Op rep), Aliases.Aliased rep) =>
   Stms rep ->
   SymbolTable rep ->
   SymbolTable rep

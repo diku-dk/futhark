@@ -123,7 +123,7 @@ jobs:
         cabal update
         try() { cabal install --install-method=copy --overwrite-policy=always --installdir=.; }
         try || try || try
-    - uses: papeloto/action-zip@v1
+    - uses: papeloto/action-zip@v1.1
       with:
         files: futhark.exe
         dest: futhark-nightly-windows-x86_64.zip
@@ -310,81 +310,95 @@ jobs:
         futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests
         make -C tests_lib/python -j
 
-  test-opencl:
+  test-oclgrind:
     runs-on: ubuntu-22.04
     needs: [build-linux-nix]
-
     steps:
     - uses: actions/checkout@v3
-
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind python3-jsonschema
-
+        sudo apt-get install -y opencl-headers oclgrind nvidia-cuda-dev nvidia-opencl-dev
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
-
     - name: Install from nightly tarball
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
-
     - run: |
-        futhark test -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh tests
+        futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+
+  test-opencl:
+    runs-on: opencl
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+    - name: Setup compiler
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
+    - run: |
+        futhark test tests --no-terminal --backend=opencl --cache-extension=cache --concurrency=16
+    - name: Setup python
+      run: |
+        virtualenv --no-site-packages virtualenv
+        source virtualenv/bin/activate
+        pip install jsonschema
+    - run: |
+        source virtualenv/bin/activate
+        FUTHARK_BACKEND=opencl make -C tests_lib/c -j
 
   test-pyopencl:
-    runs-on: ubuntu-22.04
+    runs-on: opencl
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev oclgrind
-        sudo apt-get install -y python3-numpy python3-pyopencl
-
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
+    - name: Setup compiler
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
+        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
+    - name: Setup python
+      run: |
+        virtualenv --no-site-packages virtualenv
+        source virtualenv/bin/activate
+        pip install numpy pyopencl jsonschema
     - run: |
-        futhark test -c --no-terminal --backend=pyopencl --exclude=compiled --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh tests
+        source virtualenv/bin/activate
+        futhark test tests --no-terminal --backend=pyopencl --concurrency=16
 
   test-cuda:
-    runs-on: ubuntu-22.04
+    runs-on: cuda
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-
-    - name: Install OS dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y nvidia-cuda-dev
-
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
+    - name: Setup compiler
       run: |
         tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
+        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
     - run: |
-        futhark test -C --no-terminal --backend=cuda tests
+        futhark test tests --no-terminal --backend=cuda --concurrency=16
+    - name: Setup python
+      run: |
+        virtualenv --no-site-packages virtualenv
+        source virtualenv/bin/activate
+        pip install jsonschema
+    - run: |
+        source virtualenv/bin/activate
+        FUTHARK_BACKEND=cuda make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -398,7 +412,7 @@ jobs:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v3
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 
@@ -425,12 +439,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v7
+    - uses: mymindstorm/setup-emsdk@v11
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v1
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 
@@ -457,12 +471,12 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v7
+    - uses: mymindstorm/setup-emsdk@v11
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
 
-    - uses: actions/setup-node@v1
+    - uses: actions/setup-node@v3.5.1
       with:
         node-version: '16.x'
 
@@ -551,36 +565,67 @@ jobs:
         name: prelude-docs.tar.xz
         path: prelude-docs.tar.xz
 
-  benchmark-opencl:
-    runs-on: ubuntu-22.04
+  benchmark-A100-cuda:
+    runs-on: A100
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
       with:
         submodules: recursive
         fetch-depth: 0
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y opencl-headers nvidia-cuda-dev nvidia-opencl-dev
-
-    - uses: actions/download-artifact@v3
+    - uses: ./.github/actions/benchmark
       with:
-        name: futhark-nightly-linux-x86_64.tar.xz
+        backend: cuda
+        system: A100
 
-    - name: Install from nightly tarball
+  benchmark-A100-opencl:
+    runs-on: A100
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: A100
+
+  benchmark-MI100-opencl:
+    runs-on: MI100
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: MI100
+
+  benchmark-results:
+    runs-on: ubuntu-22.04
+    needs: [benchmark-A100-cuda, benchmark-A100-opencl, benchmark-MI100-opencl]
+    if: github.ref == 'refs/heads/master'
+    steps:
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+    - uses: actions/download-artifact@v3
+    - run: |
+        ls -R
+    - name: Compress JSONs
       run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    - run: |
-        cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
-
-    - run: |
-        futhark test -C --no-terminal --backend=opencl  --pass-compiler-option=--Werror futhark-benchmarks
+        gzip */futhark-*.json
+    - name: scp to server
+      run: |
+        scp -o StrictHostKeyChecking=no */futhark-*.json.gz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
 
   deploy-nightly:
     runs-on: ubuntu-22.04

@@ -13,13 +13,13 @@ import Futhark.Actions
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
-import Futhark.IR (ASTRep, Op, Prog, prettyString)
+import Futhark.IR (Op, Prog, prettyString)
+import Futhark.IR.Aliases (AliasableRep)
 import Futhark.IR.GPU qualified as GPU
 import Futhark.IR.GPUMem qualified as GPUMem
 import Futhark.IR.MC qualified as MC
 import Futhark.IR.MCMem qualified as MCMem
 import Futhark.IR.Parse
-import Futhark.IR.Prop.Aliases (CanBeAliased)
 import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.Seq qualified as Seq
 import Futhark.IR.SeqMem qualified as SeqMem
@@ -155,8 +155,7 @@ data UntypedAction
   | SeqMemAction (BackendAction SeqMem.SeqMem)
   | PolyAction
       ( forall (rep :: Data.Kind.Type).
-        ( ASTRep rep,
-          (CanBeAliased (Op rep)),
+        ( AliasableRep rep,
           (OpMetrics (Op rep))
         ) =>
         Action rep
@@ -507,14 +506,6 @@ commandLineOptions =
       ( NoArg $
           Right $ \opts ->
             opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPU}
-      )
-      "Print last use information.",
-    Option
-      []
-      ["print-last-use-gpu-ss"]
-      ( NoArg $
-          Right $ \opts ->
-            opts {futharkAction = GPUMemAction $ \_ _ _ -> printLastUseGPUSS}
       )
       "Print last use information ss.",
     Option

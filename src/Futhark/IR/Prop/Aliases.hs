@@ -25,23 +25,22 @@ module Futhark.IR.Prop.Aliases
     -- * Extensibility
     AliasTable,
     AliasedOp (..),
-    CanBeAliased (..),
   )
 where
 
 import Data.Bifunctor (first, second)
-import Data.Kind qualified
 import Data.List (find, transpose)
 import Data.Map qualified as M
-import Futhark.IR.Prop (IsOp, NameInfo (..), Scope)
+import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Patterns
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax
 
 -- | The class of representations that contain aliasing information.
-class (RepTypes rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
-  -- | The aliases of the body results.
+class (ASTRep rep, AliasedOp (Op rep), AliasesOf (LetDec rep)) => Aliased rep where
+  -- | The aliases of the body results.  Note that this includes names
+  -- bound in the body!
   bodyAliases :: Body rep -> [Names]
 
   -- | The variables consumed in the body.
@@ -85,45 +84,6 @@ matchAliases l =
   where
     (alses, conses) = unzip l
 
-funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
-funcallAliases args t =
-  returnAliases t [(subExpAliases se, d) | (se, d) <- args]
-
--- | The aliases of an expression, one per non-context value returned.
-expAliases :: (Aliased rep) => Exp rep -> [Names]
-expAliases (Match _ cases defbody _) =
-  matchAliases $ onBody defbody : map (onBody . caseBody) cases
-  where
-    onBody body = (bodyAliases body, consumedInBody body)
-expAliases (BasicOp op) = basicOpAliases op
-expAliases (DoLoop merge _ loopbody) = do
-  (p, als) <-
-    transitive . zip params $ zipWith mappend arg_aliases (bodyAliases loopbody)
-  let als' = als `namesSubtract` param_names
-  if unique $ paramDeclType p
-    then pure mempty
-    else pure als'
-  where
-    arg_aliases = map (subExpAliases . snd) merge
-    params = map fst merge
-    param_names = namesFromList $ map paramName params
-    transitive merge_and_als =
-      let merge_and_als' = map (second expand) merge_and_als
-       in if merge_and_als' == merge_and_als
-            then merge_and_als
-            else transitive merge_and_als'
-      where
-        look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
-        expand als = als <> foldMap look (namesToList als)
-expAliases (Apply _ args t _) =
-  funcallAliases args $ map declExtTypeOf t
-expAliases (WithAcc inputs lam) =
-  concatMap inputAliases inputs ++ drop num_accs (bodyAliases (lambdaBody lam))
-  where
-    inputAliases (_, arrs, _) = replicate (length arrs) mempty
-    num_accs = length inputs
-expAliases (Op op) = opAliases op
-
 returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
   where
@@ -137,6 +97,64 @@ returnAliases rts args = map returnType' rts
       error "returnAliases Acc"
     returnType' Mem {} =
       mconcat $ map (uncurry maskAliases) args
+
+funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
+funcallAliases args t =
+  returnAliases t [(subExpAliases se, d) | (se, d) <- args]
+
+-- | The aliases of an expression, one for each pattern element.
+--
+-- The pattern is important because some aliasing might be through
+-- variables that are no longer in scope (consider the aliases for a
+-- body that returns the same value multiple times).
+expAliases :: (Aliased rep) => [PatElem dec] -> Exp rep -> [Names]
+expAliases pes (Match _ cases defbody _) =
+  -- Repeat mempty in case the pattern has more elements (this
+  -- implies a type error).
+  zipWith grow (map patElemName pes) $ als ++ repeat mempty
+  where
+    als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
+    onBody body = (bodyAliases body, consumedInBody body)
+    bound = foldMap boundInBody $ defbody : map caseBody cases
+    grow v names = (names <> pe_names) `namesSubtract` bound
+      where
+        pe_names =
+          namesFromList
+            . filter (/= v)
+            . map (patElemName . fst)
+            . filter (namesIntersect names . snd)
+            $ zip pes als
+expAliases _ (BasicOp op) = basicOpAliases op
+expAliases _ (DoLoop merge _ loopbody) = do
+  (p, als) <-
+    transitive . zip params $ zipWith mappend arg_aliases (bodyAliases loopbody)
+  let als' = als `namesSubtract` param_names
+  if unique $ paramDeclType p
+    then pure mempty
+    else pure $ als' `namesSubtract` bound
+  where
+    bound = boundInBody loopbody
+    arg_aliases = map (subExpAliases . snd) merge
+    params = map fst merge
+    param_names = namesFromList $ map paramName params
+    transitive merge_and_als =
+      let merge_and_als' = map (second expand) merge_and_als
+       in if merge_and_als' == merge_and_als
+            then merge_and_als
+            else transitive merge_and_als'
+      where
+        look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
+        expand als = als <> foldMap look (namesToList als)
+expAliases _ (Apply _ args t _) =
+  funcallAliases args $ map declExtTypeOf t
+expAliases _ (WithAcc inputs lam) =
+  concatMap inputAliases inputs
+    ++ drop num_accs (map (`namesSubtract` boundInBody body) $ bodyAliases body)
+  where
+    body = lambdaBody lam
+    inputAliases (_, arrs, _) = replicate (length arrs) mempty
+    num_accs = length inputs
+expAliases _ (Op op) = opAliases op
 
 maskAliases :: Names -> Diet -> Names
 maskAliases _ Consume = mempty
@@ -186,9 +204,9 @@ consumedInExp (Op op) = consumedInOp op
 consumedByLambda :: Aliased rep => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
--- | The aliases of each pattern element (including the context).
+-- | The aliases of each pattern element.
 patAliases :: AliasesOf dec => Pat dec -> [Names]
-patAliases = map (aliasesOf . patElemDec) . patElems
+patAliases = map aliasesOf . patElems
 
 -- | Something that contains alias information.
 class AliasesOf a where
@@ -215,28 +233,10 @@ class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 
-instance AliasedOp () where
-  opAliases () = []
-  consumedInOp () = mempty
+instance AliasedOp (NoOp rep) where
+  opAliases NoOp = []
+  consumedInOp NoOp = mempty
 
 -- | Pre-existing aliases for variables.  Used to add transitive
 -- aliases.
 type AliasTable = M.Map VName Names
-
--- | The class of operations that can be given aliasing information.
--- This is a somewhat subtle concept that is only used in the
--- simplifier and when using "rep adapters".
-class AliasedOp (OpWithAliases op) => CanBeAliased op where
-  -- | The op that results when we add aliases to this op.
-  type OpWithAliases op :: Data.Kind.Type
-
-  -- | Remove aliases from this op.
-  removeOpAliases :: OpWithAliases op -> op
-
-  -- | Add aliases to this op.
-  addOpAliases :: AliasTable -> op -> OpWithAliases op
-
-instance CanBeAliased () where
-  type OpWithAliases () = ()
-  removeOpAliases = id
-  addOpAliases = const id

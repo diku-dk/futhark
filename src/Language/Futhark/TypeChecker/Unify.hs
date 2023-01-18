@@ -484,36 +484,44 @@ unifyWith onDims usage = subunify False
               link (not ord) v2 lvl t1'
         ( Scalar (Arrow _ p1 a1 (RetType b1_dims b1)),
           Scalar (Arrow _ p2 a2 (RetType b2_dims b2))
-          ) -> do
-            -- Introduce the existentials as size variables so they
-            -- are subject to unification.  We will remove them again
-            -- afterwards.
-            let (r1, r2) =
-                  swap
-                    ord
-                    (Size Nothing $ Usage Nothing mempty)
-                    (UnknowableSize mempty RigidUnify)
-            lvl <- curLevel
-            modifyConstraints (M.fromList (zip b1_dims $ repeat (lvl, r1)) <>)
-            modifyConstraints (M.fromList (zip b2_dims $ repeat (lvl, r2)) <>)
+          )
+            | uncurry (<) $ swap ord (uniqueness a1) (uniqueness a2) -> do
+                unifyError usage mempty bcs . withIndexLink "unify-consuming-param" $
+                  "Parameter types"
+                    </> indent 2 (pretty a1)
+                    </> "and"
+                    </> indent 2 (pretty a2)
+                    </> "are incompatible regarding consuming their arguments."
+            | otherwise -> do
+                -- Introduce the existentials as size variables so they
+                -- are subject to unification.  We will remove them again
+                -- afterwards.
+                let (r1, r2) =
+                      swap
+                        ord
+                        (Size Nothing $ Usage Nothing mempty)
+                        (UnknowableSize mempty RigidUnify)
+                lvl <- curLevel
+                modifyConstraints (M.fromList (zip b1_dims $ repeat (lvl, r1)) <>)
+                modifyConstraints (M.fromList (zip b2_dims $ repeat (lvl, r2)) <>)
 
-            let bound' = bound <> mapMaybe pname [p1, p2] <> b1_dims <> b2_dims
-            subunify
-              (not ord)
-              bound
-              (breadCrumb (Matching "When matching parameter types.") bcs)
-              a1
-              a2
-            subunify
-              ord
-              bound'
-              (breadCrumb (Matching "When matching return types.") bcs)
-              b1'
-              b2'
+                let bound' = bound <> mapMaybe pname [p1, p2] <> b1_dims <> b2_dims
+                subunify
+                  (not ord)
+                  bound
+                  (breadCrumb (Matching "When matching parameter types.") bcs)
+                  a1
+                  a2
+                subunify
+                  ord
+                  bound'
+                  (breadCrumb (Matching "When matching return types.") bcs)
+                  b1'
+                  b2'
 
-            -- Delete the size variables we introduced to represent
-            -- the existential sizes.
-            modifyConstraints $ \m -> foldl' (flip M.delete) m (b1_dims <> b2_dims)
+                -- Delete the size variables we introduced to represent
+                -- the existential sizes.
+                modifyConstraints $ \m -> foldl' (flip M.delete) m (b1_dims <> b2_dims)
             where
               (b1', b2') =
                 -- Replace one parameter name with the other in the

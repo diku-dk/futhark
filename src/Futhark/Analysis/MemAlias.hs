@@ -64,7 +64,7 @@ newtype Env inner = Env {onInner :: MemAliases -> inner -> MemAliasesM inner Mem
 
 type MemAliasesM inner a = Reader (Env inner) a
 
-analyzeHostOp :: MemAliases -> HostOp GPUMem () -> MemAliasesM (HostOp GPUMem ()) MemAliases
+analyzeHostOp :: MemAliases -> HostOp NoOp GPUMem -> MemAliasesM (HostOp NoOp GPUMem) MemAliases
 analyzeHostOp m (SegOp (SegMap _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m (SegOp (SegRed _ _ _ _ kbody)) =
@@ -75,9 +75,13 @@ analyzeHostOp m (SegOp (SegHist _ _ _ _ kbody)) =
   analyzeStms (kernelBodyStms kbody) m
 analyzeHostOp m SizeOp {} = pure m
 analyzeHostOp m GPUBody {} = pure m
-analyzeHostOp m (OtherOp ()) = pure m
+analyzeHostOp m (OtherOp NoOp) = pure m
 
-analyzeStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => MemAliases -> Stm rep -> MemAliasesM inner MemAliases
+analyzeStm ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  MemAliases ->
+  Stm rep ->
+  MemAliasesM (inner rep) MemAliases
 analyzeStm m (Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) =
   pure $ m <> singleton vname mempty
 analyzeStm m (Let _ _ (Op (Inner inner))) = do
@@ -110,11 +114,18 @@ filterFun :: MemAliases -> (VName, SubExp) -> Maybe (VName, VName)
 filterFun m' (v, Var v') | v' `isIn` m' = Just (v, v')
 filterFun _ _ = Nothing
 
-analyzeStms :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stms rep -> MemAliases -> MemAliasesM inner MemAliases
+analyzeStms ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Stms rep ->
+  MemAliases ->
+  MemAliasesM (inner rep) MemAliases
 analyzeStms =
   flip $ foldM analyzeStm
 
-analyzeFun :: (Mem rep inner, LetDec rep ~ LetDecMem) => FunDef rep -> MemAliasesM inner (Name, MemAliases)
+analyzeFun ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  FunDef rep ->
+  MemAliasesM (inner rep) (Name, MemAliases)
 analyzeFun f =
   funDefParams f
     & mapMaybe justMem
@@ -144,7 +155,10 @@ analyzeSeqMem prog = completeBijection $ runReader (analyze prog) $ Env $ \x _ -
 analyzeGPUMem :: Prog GPUMem -> (MemAliases, M.Map Name MemAliases)
 analyzeGPUMem prog = completeBijection $ runReader (analyze prog) $ Env analyzeHostOp
 
-analyze :: (Mem rep inner, LetDec rep ~ LetDecMem) => Prog rep -> MemAliasesM inner (MemAliases, M.Map Name MemAliases)
+analyze ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Prog rep ->
+  MemAliasesM (inner rep) (MemAliases, M.Map Name MemAliases)
 analyze prog =
   (,)
     <$> (progConsts prog & flip analyzeStms mempty <&> fixPoint transitiveClosure)

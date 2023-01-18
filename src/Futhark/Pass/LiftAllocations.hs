@@ -64,7 +64,10 @@ newtype Env inner = Env
 
 type LiftM inner a = Reader (Env inner) a
 
-liftAllocationsInBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> LiftM inner (Body rep)
+liftAllocationsInBody ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Body rep ->
+  LiftM (inner rep) (Body rep)
 liftAllocationsInBody body = do
   stms <- liftAllocationsInStms (bodyStms body) mempty mempty mempty
   pure $ body {bodyStms = stms}
@@ -79,7 +82,7 @@ liftAllocationsInStms ::
   Stms rep ->
   -- | Names we need to lift
   Names ->
-  LiftM inner (Stms rep)
+  LiftM (inner rep) (Stms rep)
 liftAllocationsInStms Empty lifted acc _ = pure $ lifted <> acc
 liftAllocationsInStms (stms :|> stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _)))) lifted acc to_lift =
   liftAllocationsInStms stms (stm :<| lifted) acc ((freeIn stm <> to_lift) `namesSubtract` oneName vname)
@@ -126,7 +129,7 @@ liftAllocationsInStms (stms :|> stm@(Let pat _ _)) lifted acc to_lift = do
 liftAllocationsInSegOp ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   SegOp lvl rep ->
-  LiftM inner (SegOp lvl rep)
+  LiftM (inner rep) (SegOp lvl rep)
 liftAllocationsInSegOp (SegMap lvl sp tps body) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
   pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
@@ -140,11 +143,11 @@ liftAllocationsInSegOp (SegHist lvl sp histops tps body) = do
   stms <- liftAllocationsInStms (kernelBodyStms body) mempty mempty mempty
   pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
 
-liftAllocationsInHostOp :: HostOp GPUMem () -> LiftM (HostOp GPUMem ()) (HostOp GPUMem ())
+liftAllocationsInHostOp :: HostOp NoOp GPUMem -> LiftM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 liftAllocationsInHostOp (SegOp op) = SegOp <$> liftAllocationsInSegOp op
 liftAllocationsInHostOp op = pure op
 
-liftAllocationsInMCOp :: MCOp MCMem () -> LiftM (MCOp MCMem ()) (MCOp MCMem ())
+liftAllocationsInMCOp :: MCOp NoOp MCMem -> LiftM (MCOp NoOp MCMem) (MCOp NoOp MCMem)
 liftAllocationsInMCOp (ParOp par op) =
   ParOp <$> traverse liftAllocationsInSegOp par <*> liftAllocationsInSegOp op
 liftAllocationsInMCOp op = pure op

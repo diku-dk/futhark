@@ -14,7 +14,6 @@ module Futhark.IR.TypeCheck
     bad,
     context,
     Checkable (..),
-    CheckableOp (..),
     lookupVar,
     lookupAliases,
     checkOpWith,
@@ -53,6 +52,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Futhark.Analysis.Alias
 import Futhark.Analysis.PrimExp
 import Futhark.Construct (instantiateShapes)
 import Futhark.IR.Aliases hiding (lookupAliases)
@@ -276,7 +276,7 @@ instance Monoid Consumption where
 data Env rep = Env
   { envVtable :: M.Map VName (VarBinding rep),
     envFtable :: M.Map Name (FunBinding rep),
-    envCheckOp :: OpWithAliases (Op rep) -> TypeM rep (),
+    envCheckOp :: Op (Aliases rep) -> TypeM rep (),
     envContext :: [T.Text]
   }
 
@@ -375,7 +375,7 @@ collectOccurences m = do
   pure (x, o)
 
 checkOpWith ::
-  (OpWithAliases (Op rep) -> TypeM rep ()) ->
+  (Op (Aliases rep) -> TypeM rep ()) ->
   TypeM rep a ->
   TypeM rep a
 checkOpWith checker = local $ \env -> env {envCheckOp = checker}
@@ -1485,12 +1485,8 @@ requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
   unless (primExpType e == t) . bad . TypeError $
     prettyText e <> " must have type " <> prettyText t
 
-class ASTRep rep => CheckableOp rep where
-  checkOp :: OpWithAliases (Op rep) -> TypeM rep ()
-  -- ^ Used at top level; can be locally changed with 'checkOpWith'.
-
 -- | The class of representations that can be type-checked.
-class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep where
+class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()
@@ -1502,6 +1498,9 @@ class (ASTRep rep, CanBeAliased (Op rep), CheckableOp rep) => Checkable rep wher
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
   matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
   matchLoopResult :: [FParam (Aliases rep)] -> Result -> TypeM rep ()
+
+  -- | Used at top level; can be locally changed with 'checkOpWith'.
+  checkOp :: Op (Aliases rep) -> TypeM rep ()
 
   default checkExpDec :: ExpDec rep ~ () => ExpDec rep -> TypeM rep ()
   checkExpDec = pure

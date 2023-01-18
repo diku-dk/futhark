@@ -626,6 +626,51 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
     onRetType te t =
       ([], EntryType t te)
 
+checkEntryPoint ::
+  SrcLoc ->
+  [TypeParam] ->
+  [Pat] ->
+  Maybe (TypeExp VName) ->
+  StructRetType ->
+  TypeM ()
+checkEntryPoint loc tparams params maybe_tdecl rettype
+  | any isTypeParam tparams =
+      typeError loc mempty $
+        withIndexLink
+          "polymorphic-entry"
+          "Entry point functions may not be polymorphic."
+  | not (all patternOrderZero params)
+      || not (all orderZero rettype_params)
+      || not (orderZero rettype') =
+      typeError loc mempty $
+        withIndexLink
+          "higher-order-entry"
+          "Entry point functions may not be higher-order."
+  | sizes_only_in_ret <-
+      S.fromList (map typeParamName tparams)
+        `S.intersection` freeInType rettype'
+        `S.difference` foldMap freeInType (map patternStructType params ++ rettype_params),
+    not $ S.null sizes_only_in_ret =
+      typeError loc mempty $
+        withIndexLink
+          "size-polymorphic-entry"
+          "Entry point functions must not be size-polymorphic in their return type."
+  | p : _ <- filter nastyParameter params =
+      warn loc $
+        "Entry point parameter\n"
+          </> indent 2 (pretty p)
+          </> "\nwill have an opaque type, so the entry point will likely not be callable."
+  | nastyReturnType maybe_tdecl rettype_t =
+      warn loc $
+        "Entry point return type\n"
+          </> indent 2 (pretty rettype)
+          </> "\nwill have an opaque type, so the result will likely not be usable."
+  | otherwise =
+      pure ()
+  where
+    (RetType _ rettype_t) = rettype
+    (rettype_params, rettype') = unfoldFunType rettype_t
+
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
   top_level <- atTopLevel
@@ -633,45 +678,13 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
     typeError loc mempty $
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
-  (fname', tparams', params', maybe_tdecl', rettype@(RetType _ rettype_t), body') <-
+  (fname', tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  let (rettype_params, rettype') = unfoldFunType rettype_t
-      entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
+  let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
-    Just _
-      | any isTypeParam tparams' ->
-          typeError loc mempty $
-            withIndexLink
-              "polymorphic-entry"
-              "Entry point functions may not be polymorphic."
-      | not (all patternOrderZero params')
-          || not (all orderZero rettype_params)
-          || not (orderZero rettype') ->
-          typeError loc mempty $
-            withIndexLink
-              "higher-order-entry"
-              "Entry point functions may not be higher-order."
-      | sizes_only_in_ret <-
-          S.fromList (map typeParamName tparams')
-            `S.intersection` freeInType rettype'
-            `S.difference` foldMap freeInType (map patternStructType params' ++ rettype_params),
-        not $ S.null sizes_only_in_ret ->
-          typeError loc mempty $
-            withIndexLink
-              "size-polymorphic-entry"
-              "Entry point functions must not be size-polymorphic in their return type."
-      | p : _ <- filter nastyParameter params' ->
-          warn loc $
-            "Entry point parameter\n"
-              </> indent 2 (pretty p)
-              </> "\nwill have an opaque type, so the entry point will likely not be callable."
-      | nastyReturnType maybe_tdecl' rettype_t ->
-          warn loc $
-            "Entry point return type\n"
-              </> indent 2 (pretty rettype)
-              </> "\nwill have an opaque type, so the result will likely not be usable."
+    Just _ -> checkEntryPoint loc tparams' params' maybe_tdecl' rettype
     _ -> pure ()
 
   attrs' <- mapM checkAttr attrs

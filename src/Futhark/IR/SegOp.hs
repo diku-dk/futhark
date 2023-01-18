@@ -71,8 +71,7 @@ import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR
 import Futhark.IR.Aliases
   ( Aliases,
-    removeLambdaAliases,
-    removeStmAliases,
+    CanBeAliased (..),
   )
 import Futhark.IR.Mem
 import Futhark.IR.Prop.Aliases
@@ -280,29 +279,12 @@ instance Rename KernelResult where
 
 -- | Perform alias analysis on a 'KernelBody'.
 aliasAnalyseKernelBody ::
-  ( ASTRep rep,
-    CanBeAliased (Op rep)
-  ) =>
+  Alias.AliasableRep rep =>
   AliasTable ->
   KernelBody rep ->
   KernelBody (Aliases rep)
 aliasAnalyseKernelBody aliases (KernelBody dec stms res) =
   let Body dec' stms' _ = Alias.analyseBody aliases $ Body dec stms []
-   in KernelBody dec' stms' res
-
-removeKernelBodyAliases ::
-  CanBeAliased (Op rep) =>
-  KernelBody (Aliases rep) ->
-  KernelBody rep
-removeKernelBodyAliases (KernelBody (_, dec) stms res) =
-  KernelBody dec (fmap removeStmAliases stms) res
-
-removeKernelBodyWisdom ::
-  CanBeWise (Op rep) =>
-  KernelBody (Wise rep) ->
-  KernelBody rep
-removeKernelBodyWisdom (KernelBody dec stms res) =
-  let Body dec' stms' _ = removeBodyWisdom $ Body dec stms []
    in KernelBody dec' stms' res
 
 -- | The variables consumed in the kernel body.
@@ -549,10 +531,7 @@ segOpType (SegHist _ space ops _ _) = do
 instance TypedOp (SegOp lvl rep) where
   opType = pure . staticShapes . segOpType
 
-instance
-  (ASTRep rep, Aliased rep, ASTConstraints lvl) =>
-  AliasedOp (SegOp lvl rep)
-  where
+instance (ASTConstraints lvl, Aliased rep) => AliasedOp (SegOp lvl rep) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
@@ -776,6 +755,44 @@ mapOnSegOpType tv (Array et shape u) =
   Array et <$> traverse (mapOnSegOpSubExp tv) shape <*> pure u
 mapOnSegOpType _tv (Mem s) = pure $ Mem s
 
+rephraseBinOp ::
+  Monad f =>
+  Rephraser f from rep ->
+  SegBinOp from ->
+  f (SegBinOp rep)
+rephraseBinOp r (SegBinOp comm lam nes shape) =
+  SegBinOp comm <$> rephraseLambda r lam <*> pure nes <*> pure shape
+
+rephraseKernelBody ::
+  Monad f =>
+  Rephraser f from rep ->
+  KernelBody from ->
+  f (KernelBody rep)
+rephraseKernelBody r (KernelBody dec stms res) =
+  KernelBody <$> rephraseBodyDec r dec <*> traverse (rephraseStm r) stms <*> pure res
+
+instance RephraseOp (SegOp lvl) where
+  rephraseInOp r (SegMap lvl space ts body) =
+    SegMap lvl space ts <$> rephraseKernelBody r body
+  rephraseInOp r (SegRed lvl space reds ts body) =
+    SegRed lvl space
+      <$> mapM (rephraseBinOp r) reds
+      <*> pure ts
+      <*> rephraseKernelBody r body
+  rephraseInOp r (SegScan lvl space scans ts body) =
+    SegScan lvl space
+      <$> mapM (rephraseBinOp r) scans
+      <*> pure ts
+      <*> rephraseKernelBody r body
+  rephraseInOp r (SegHist lvl space hists ts body) =
+    SegHist lvl space
+      <$> mapM onOp hists
+      <*> pure ts
+      <*> rephraseKernelBody r body
+    where
+      onOp (HistOp w rf arrs nes shape op) =
+        HistOp w rf arrs nes shape <$> rephraseLambda r op
+
 -- | A helper for defining 'TraverseOpStms'.
 traverseSegOpStms :: Monad m => OpStmsTraverser m (SegOp lvl rep) rep
 traverseSegOpStms f segop = mapSegOpM mapper segop
@@ -899,16 +916,7 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
           </> pretty shape <> PP.comma
           </> pretty op
 
-instance
-  ( ASTRep rep,
-    ASTRep (Aliases rep),
-    CanBeAliased (Op rep),
-    ASTConstraints lvl
-  ) =>
-  CanBeAliased (SegOp lvl rep)
-  where
-  type OpWithAliases (SegOp lvl rep) = SegOp lvl (Aliases rep)
-
+instance CanBeAliased (SegOp lvl) where
   addOpAliases aliases = runIdentity . mapSegOpM alias
     where
       alias =
@@ -919,36 +927,11 @@ instance
           pure
           pure
 
-  removeOpAliases = runIdentity . mapSegOpM remove
-    where
-      remove =
-        SegOpMapper
-          pure
-          (pure . removeLambdaAliases)
-          (pure . removeKernelBodyAliases)
-          pure
-          pure
-
 informKernelBody :: Informing rep => KernelBody rep -> KernelBody (Wise rep)
 informKernelBody (KernelBody dec stms res) =
   mkWiseKernelBody dec (informStms stms) res
 
-instance
-  (CanBeWise (Op rep), ASTRep rep, ASTConstraints lvl) =>
-  CanBeWise (SegOp lvl rep)
-  where
-  type OpWithWisdom (SegOp lvl rep) = SegOp lvl (Wise rep)
-
-  removeOpWisdom = runIdentity . mapSegOpM remove
-    where
-      remove =
-        SegOpMapper
-          pure
-          (pure . removeLambdaWisdom)
-          (pure . removeKernelBodyWisdom)
-          pure
-          pure
-
+instance CanBeWise (SegOp lvl) where
   addOpWisdom = runIdentity . mapSegOpM add
     where
       add =
@@ -1034,7 +1017,7 @@ instance Engine.Simplifiable KernelResult where
       <*> Engine.simplify what
 
 mkWiseKernelBody ::
-  (ASTRep rep, CanBeWise (Op rep)) =>
+  Informing rep =>
   BodyDec rep ->
   Stms (Wise rep) ->
   [KernelResult] ->

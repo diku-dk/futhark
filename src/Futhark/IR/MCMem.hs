@@ -31,30 +31,28 @@ instance RepTypes MCMem where
   type LParamInfo MCMem = LParamMem
   type RetType MCMem = RetTypeMem
   type BranchType MCMem = BranchTypeMem
-  type Op MCMem = MemOp (MCOp MCMem ())
+  type OpC MCMem = MemOp (MCOp NoOp)
 
 instance ASTRep MCMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
-instance OpReturns (MCOp MCMem ()) where
+instance OpReturns (MCOp NoOp MCMem) where
   opReturns (ParOp _ op) = segOpReturns op
-  opReturns (OtherOp ()) = pure []
+  opReturns (OtherOp NoOp) = pure []
 
-instance OpReturns (MCOp (Engine.Wise MCMem) ()) where
+instance OpReturns (MCOp NoOp (Engine.Wise MCMem)) where
   opReturns (ParOp _ op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
 instance PrettyRep MCMem
 
-instance TC.CheckableOp MCMem where
+instance TC.Checkable MCMem where
   checkOp = typeCheckMemoryOp
     where
       typeCheckMemoryOp (Alloc size _) =
         TC.require [Prim int64] size
       typeCheckMemoryOp (Inner op) =
-        typeCheckMCOp pure op
-
-instance TC.Checkable MCMem where
+        typeCheckMCOp (const $ pure ()) op
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
@@ -83,4 +81,4 @@ simplifyProg = simplifyProgGeneric simpleMCMem
 
 simpleMCMem :: Engine.SimpleOps MCMem
 simpleMCMem =
-  simpleGeneric (const mempty) $ simplifyMCOp $ const $ pure ((), mempty)
+  simpleGeneric (const mempty) $ simplifyMCOp $ const $ pure (NoOp, mempty)

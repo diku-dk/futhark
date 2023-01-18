@@ -13,9 +13,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Better syntax errors for invalid use of `!`.
 
+* `futhark literate` now supports a `$loadaudio` builtin function for loading
+  audio to Futhark programs (#1829).
+
+* You can now mix consumption and higher-order terms in slightly more
+  cases (#1836).
+
+* `futhark pkg` now invokes Git directly rather than scraping
+  GitHub/GitLab.  This means package paths can now refer to any Git
+  repository, as long as `git clone` works.  In particular, you can
+  use private and self-hosted repositories.
+
 ### Removed
 
 ### Changed
+
+* The C API function `futhark_context_new_with_command_queue()` for
+  the OpenCL backend has been replaced with a configuration setting
+  `futhark_context_config_set_command_queue()`.
 
 ### Fixed
 
@@ -23,6 +38,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Parser did not recognise custom infix operators that did not have a
   builtin operator as prefix (#1824).
+
+* GPU backends: expansion of irregular nested allocations involving
+  consumption (#1837, #1838).
+
+* CLI executables now handle entry points with names that are not
+  valid C identifiers (#1841).
+
+* Various oversights in the type checking of uniqueness annotations
+  for higher-order functions (#1842).
+
+* Invalid short-circuiting could cause compiler crashes (#1843).
+
+* Defunctionalisation could mess up sum types, leading to invalid code
+  generation by internalisation, leading to a compiler crash (#1847).
 
 ## [0.22.7]
 

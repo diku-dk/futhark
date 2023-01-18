@@ -21,6 +21,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
 import Data.Set qualified as S
+import Futhark.Analysis.LastUse
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem as GPU
@@ -29,7 +30,6 @@ import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
-import Futhark.Optimise.ArrayShortCircuiting.LastUse
 import Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
 import Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
 import Futhark.Util
@@ -39,15 +39,19 @@ type Coalesceable rep inner =
   ( Mem rep inner,
     ASTRep rep,
     CanBeAliased inner,
-    Op rep ~ MemOp inner,
+    AliasableRep rep,
+    Op rep ~ MemOp inner rep,
     HasMemBlock (Aliases rep),
     LetDec rep ~ LetDecMem,
-    TopDownHelper (OpWithAliases inner)
+    TopDownHelper (inner (Aliases rep))
   )
+
+type ComputeScalarTable rep op =
+  ScopeTab rep -> op -> ScalarTableM rep (M.Map VName (PrimExp VName))
 
 -- Helper type for computing scalar tables on ops.
 newtype ComputeScalarTableOnOp rep = ComputeScalarTableOnOp
-  { scalarTableOnOp :: ScopeTab rep -> Op (Aliases rep) -> ScalarTableM rep (M.Map VName (PrimExp VName))
+  { scalarTableOnOp :: ComputeScalarTable rep (Op (Aliases rep))
   }
 
 type ScalarTableM rep a = Reader (ComputeScalarTableOnOp rep) a
@@ -109,7 +113,7 @@ mkCoalsTab prog =
 
 -- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
@@ -267,7 +271,7 @@ shortCircuitGPUMem lutab pat (Inner (GPU.GPUBody _ body)) td_env bu_env = do
     td_env
     bu_env
 shortCircuitGPUMem _ _ (Inner (GPU.SizeOp _)) _ bu_env = pure bu_env
-shortCircuitGPUMem _ _ (Inner (GPU.OtherOp ())) _ bu_env = pure bu_env
+shortCircuitGPUMem _ _ (Inner (GPU.OtherOp NoOp)) _ bu_env = pure bu_env
 
 shortCircuitMCMem ::
   LUTabFun ->
@@ -277,7 +281,7 @@ shortCircuitMCMem ::
   BotUpEnv ->
   ShortCircuitM MCMem BotUpEnv
 shortCircuitMCMem _ _ (Alloc _ _) _ bu_env = pure bu_env
-shortCircuitMCMem _ _ (Inner (MC.OtherOp ())) _ bu_env = pure bu_env
+shortCircuitMCMem _ _ (Inner (MC.OtherOp NoOp)) _ bu_env = pure bu_env
 shortCircuitMCMem lutab pat (Inner (MC.ParOp (Just par_op) op)) td_env bu_env =
   shortCircuitSegOp (const True) lutab pat par_op td_env bu_env
     >>= shortCircuitSegOp (const True) lutab pat op td_env
@@ -771,8 +775,7 @@ mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
           )
   pure
     bu_env
-      { activeCoals =
-          actv_res,
+      { activeCoals = actv_res,
         successCoals = succ_res,
         inhibit = inhibit_res
       }
@@ -1262,10 +1265,10 @@ filterSafetyCond2and5 ::
   TopdownEnv rep ->
   [PatElem (VarAliases, LetDecMem)] ->
   (CoalsTab, InhibitTab)
-filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
-  foldl helper (act_coal, inhb_coal)
+filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
+  foldl helper (act_coal, inhb_coal) pes
   where
-    helper (acc, inhb) patel =
+    helper (acc, inhb) patel = do
       -- For each pattern element in the input list
       case (patElemName patel, patElemDec patel) of
         (b, (_, MemArray tp0 shp0 _ (ArrayIn m_b _idxfn_b))) ->
@@ -1275,27 +1278,33 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env =
             Just info@(CoalsEntry x_mem _ _ vtab _ _) ->
               -- And m_b we're trying to coalesce m_b
               let failed = markFailedCoal (acc, inhb) m_b
-               in case M.lookup b vtab of
-                    Nothing ->
-                      case getDirAliasedIxfn td_env acc b of
-                        Nothing -> failed
-                        Just (_, _, b_indfun') ->
-                          -- And we have the index function of b
-                          case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
-                            Nothing -> failed
-                            Just fv_subst ->
-                              let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
-                                  info' = info {vartab = M.insert b mem_info vtab}
-                               in (M.insert m_b info' acc, inhb)
-                    Just (Coalesced k (MemBlock pt shp _ new_indfun) _) ->
-                      let safe_2 = isInScope td_env x_mem
-                       in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
-                            Just fv_subst
-                              | safe_2 ->
-                                  let mem_info = Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
-                                      info' = info {vartab = M.insert b mem_info vtab}
-                                   in (M.insert m_b info' acc, inhb)
-                            _ -> failed
+               in -- It is not safe to short circuit if some other pattern
+                  -- element is aliased to this one, as this indicates the
+                  -- two pattern elements reference the same physical
+                  -- value somehow.
+                  if any ((`nameIn` aliasesOf patel) . patElemName) pes
+                    then failed
+                    else case M.lookup b vtab of
+                      Nothing ->
+                        case getDirAliasedIxfn td_env acc b of
+                          Nothing -> failed
+                          Just (_, _, b_indfun') ->
+                            -- And we have the index function of b
+                            case freeVarSubstitutions (scope td_env) scals_env b_indfun' of
+                              Nothing -> failed
+                              Just fv_subst ->
+                                let mem_info = Coalesced TransitiveCoal (MemBlock tp0 shp0 x_mem b_indfun') fv_subst
+                                    info' = info {vartab = M.insert b mem_info vtab}
+                                 in (M.insert m_b info' acc, inhb)
+                      Just (Coalesced k (MemBlock pt shp _ new_indfun) _) ->
+                        let safe_2 = isInScope td_env x_mem
+                         in case freeVarSubstitutions (scope td_env) scals_env new_indfun of
+                              Just fv_subst
+                                | safe_2 ->
+                                    let mem_info = Coalesced k (MemBlock pt shp x_mem new_indfun) fv_subst
+                                        info' = info {vartab = M.insert b mem_info vtab}
+                                     in (M.insert m_b info' acc, inhb)
+                              _ -> failed
         _ -> (acc, inhb)
 
 -- |   Pattern matches a potentially coalesced statement and
@@ -1469,8 +1478,8 @@ genSSPointInfoSegOp _ _ _ _ _ =
   Nothing
 
 genSSPointInfoMemOp ::
-  GenSSPoint rep inner ->
-  GenSSPoint rep (MemOp inner)
+  GenSSPoint rep (inner (Aliases rep)) ->
+  GenSSPoint rep (MemOp inner (Aliases rep))
 genSSPointInfoMemOp onOp lutab td_end scopetab pat (Inner op) =
   onOp lutab td_end scopetab pat op
 genSSPointInfoMemOp _ _ _ _ _ _ = Nothing
@@ -1700,11 +1709,8 @@ computeScalarTable scope_table (Let _ _ (Op op)) = do
   on_op scope_table op
 computeScalarTable _ _ = pure mempty
 
-type ComputeScalarTable rep op =
-  ScopeTab rep -> op -> ScalarTableM rep (M.Map VName (PrimExp VName))
-
 computeScalarTableMemOp ::
-  ComputeScalarTable rep inner -> ComputeScalarTable rep (MemOp inner)
+  ComputeScalarTable rep (inner (Aliases rep)) -> ComputeScalarTable rep (MemOp inner (Aliases rep))
 computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
@@ -1721,19 +1727,19 @@ computeScalarTableSegOp scope_table segop = do
     (stmsToList $ kernelBodyStms $ segBody segop)
 
 computeScalarTableGPUMem ::
-  ComputeScalarTable GPUMem (GPU.HostOp (Aliases GPUMem) ())
+  ComputeScalarTable GPUMem (GPU.HostOp NoOp (Aliases GPUMem))
 computeScalarTableGPUMem scope_table (GPU.SegOp segop) =
   computeScalarTableSegOp scope_table segop
 computeScalarTableGPUMem _ (GPU.SizeOp _) = pure mempty
-computeScalarTableGPUMem _ (GPU.OtherOp ()) = pure mempty
+computeScalarTableGPUMem _ (GPU.OtherOp NoOp) = pure mempty
 computeScalarTableGPUMem scope_table (GPU.GPUBody _ body) =
   concatMapM
     (computeScalarTable $ scope_table <> scopeOf (bodyStms body))
     (stmsToList $ bodyStms body)
 
 computeScalarTableMCMem ::
-  ComputeScalarTable MCMem (MC.MCOp (Aliases MCMem) ())
-computeScalarTableMCMem _ (MC.OtherOp ()) = pure mempty
+  ComputeScalarTable MCMem (MC.MCOp NoOp (Aliases MCMem))
+computeScalarTableMCMem _ (MC.OtherOp NoOp) = pure mempty
 computeScalarTableMCMem scope_table (MC.ParOp par_op segop) =
   (<>)
     <$> maybe (pure mempty) (computeScalarTableSegOp scope_table) par_op

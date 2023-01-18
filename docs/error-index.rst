@@ -533,6 +533,32 @@ Programming with such *explicit size witnesses* is a fairly advanced
 technique, but often necessary when writing advanced size-dependent
 code.
 
+.. _unify-consuming-param:
+
+"Parameter types *x* and *y* are incompatible regarding consuming their arguments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs when you provide a function that *does* consume its
+argument in a context that expects a function that *does not* allow a
+function that consumes its argument.
+
+As a simple example, consider the following contrived function that
+does consume its argument:
+
+.. code-block:: futhark
+
+   def f (xs: *[]f32) : f32 = 0f32
+
+Now we define another function that is merely ``f``, but with a type
+annotation that tries to hide the consumption:
+
+.. code-block:: futhark
+
+   def g : []f32 -> f32 = f
+
+Allowing this would permit us to hide the fact that ``f`` consumes its
+argument, which would not be sound, so the type checker complains.
+
 .. _ambiguous-size:
 
 "Ambiguous size *x*"
