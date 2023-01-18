@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid short-circuiting could cause compiler crashes (#1843).
 
+* Defunctionalisation could mess up sum types, leading to invalid code
+  generation by internalisation, leading to a compiler crash (#1847).
+
 ## [0.22.7]
 
 ### Added

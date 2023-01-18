@@ -632,13 +632,14 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e1', _) <- defuncExp e1
   (e2', sv) <- defuncExp e2
   pure (Assert e1' e2' desc loc, sv)
-defuncExp (Constr name es (Info (Scalar (Sum all_fs))) loc) = do
+defuncExp (Constr name es (Info t@(Scalar (Sum all_fs))) loc) = do
   (es', svs) <- unzip <$> mapM defuncExp es
   let sv =
         SumSV name svs $
           M.toList $
             name `M.delete` M.map (map defuncType) all_fs
-  pure (Constr name es' (Info (typeFromSV sv)) loc, sv)
+      t' = combineTypeShapes t (typeFromSV sv)
+  pure (Constr name es' (Info t') loc, sv)
   where
     defuncType ::
       Monoid als =>
