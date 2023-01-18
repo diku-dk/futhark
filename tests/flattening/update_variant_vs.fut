@@ -1,4 +1,4 @@
--- Test with only variant vs.
+-- Test with only variant 'vs'.
 -- ==
 -- input { [3i64,3i64,3i64] }
 -- output { [7i64,7i64,7i64] }
