@@ -199,8 +199,11 @@ elemArr _ env inps (Var v)
         DistInput rt _ -> case resVar rt env of
           Irregular r -> irregularElems r
           Regular vs -> vs
-elemArr segments _ _ se =
-  letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
+elemArr segments _ _ se = do
+  rep  <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
+  dims <- arrayDims <$> lookupType rep
+  n    <- toSubExp "n" $ product $ map pe64 dims
+  letExp "reshape" $ BasicOp $ Reshape ReshapeArbitrary (Shape [n]) rep
 
 -- Get the irregular representation of a var.
 -- Var *must* be irregular
