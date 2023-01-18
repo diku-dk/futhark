@@ -73,15 +73,16 @@ error message like "PAP object entered", then this is a GHC bug.
 
 ## Debugging Internal Type Errors
 
-The Futhark compiler uses a typed core language, and the type checker is
-run after every pass. If a given pass produces a program with
-inconsistent typing, the compiler will report an error and abort. While
-not every compiler bug will manifest itself as a core language type
-error (unfortunately), many will. To write the erroneous core program to
-a file in case of type error, pass `-v filename` to the compiler. This
-will also enable verbose output, so you can tell which pass fails. The
-`-v` option is also useful when the compiler itself crashes, as you can
-at least tell where in the pipeline it got to.
+The Futhark compiler uses a typed core language, and the type checker
+is run after every pass. If a given pass produces a program with
+inconsistent typing, the compiler will report an error and
+abort. While not every compiler bug will manifest itself as a core
+language type error (unfortunately), many will. To write the erroneous
+core program to `filename` in case of type error, pass `-vfilename` to
+the compiler. This will also enable verbose output, so you can tell
+which pass fails. The `-v` option is also useful when the compiler
+itself crashes, as you can at least tell where in the pipeline it got
+to.
 
 ## Checking Generated Code
 
@@ -221,3 +222,27 @@ fusion graph (prior to fusion), do
 and then to render `foo.dot` as `foo.dot.pdf` with GraphViz:
 
     $ dot foo.dot -Tpdf -O
+
+## Using Oclgrind
+
+[Oclgrind](https://github.com/jrprice/oclgrind) is an OpenCL simulator
+similar to Valgrind that can help find memory and synchronisation
+errors.  It runs code somewhat slowly, but it allows testing of OpenCL
+code on systems that are not otherwise capable of executing OpenCL.
+
+It is very easy to run a program in Oclgrind:
+
+    oclgrind ./foo
+
+For use in `futhark test`, we have [a wrapper
+script](tools/oclgrindgrunner.sh) that returns with a nonzero exit
+code if Oclgrind detects a memory error.  You use it as follows:
+
+    futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh
+
+Some versions of Oclgrind have an unfortunate habit of [generating
+code they don't know how to
+execute](https://github.com/jrprice/Oclgrind/issues/204).  To work
+around this, disable optimisations in the OpenCL compiler:
+
+    futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh --pass-option=--build-option=-O0
