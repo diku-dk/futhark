@@ -366,7 +366,8 @@ prettyExp _ (ProjectSection fields _ _) =
     p name = "." <> pretty name
 prettyExp _ (IndexSection idxs _ _) =
   parens $ "." <> brackets (commasep (map pretty idxs))
-prettyExp _ (Constr n cs _ _) = "#" <> pretty n <+> sep (map pretty cs)
+prettyExp _ (Constr n cs t _) =
+  "#" <> pretty n <+> sep (map pretty cs) <> prettyInst t
 prettyExp _ (Attr attr e _) =
   prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e _) = prettyAppExp i e

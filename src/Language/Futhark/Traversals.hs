@@ -219,8 +219,8 @@ instance ASTMappable (ExpBase Info VName) where
       <$> mapM (astMap tv) idxs
       <*> traverse (mapOnPatType tv) t
       <*> pure loc
-  astMap tv (Constr name es ts loc) =
-    Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnPatType tv) ts <*> pure loc
+  astMap tv (Constr name es t loc) =
+    Constr name <$> traverse (mapOnExp tv) es <*> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Attr attr e loc) =
     Attr attr <$> mapOnExp tv e <*> pure loc
   astMap tv (AppExp e res) =
