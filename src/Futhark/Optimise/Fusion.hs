@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
