@@ -306,9 +306,9 @@ data OpaqueOp
 
 -- | Which kind of reshape is this?
 data ReshapeKind
-  = -- | Any kind of reshaping.
+  = -- | New shape is dynamically same as original.
     ReshapeCoerce
-  | -- | New shape is dynamically same as original.
+  | -- | Any kind of reshaping.
     ReshapeArbitrary
   deriving (Eq, Ord, Show)
 
