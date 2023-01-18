@@ -1,5 +1,3 @@
-{-# LANGUAGE Strict #-}
-
 -- | A graph representation of a sequence of Futhark statements
 -- (i.e. a 'Body'), built to handle fusion.  Could perhaps be made
 -- more general.  An important property is that it does not handle
