@@ -8,11 +8,9 @@ import Data.Maybe
 import Data.Text qualified as T
 import Futhark.Compiler
 import Futhark.MonadFreshNames
--- import Futhark.Util (toPOSIX)
 
 import Futhark.Pipeline
 import Futhark.Util.Options
--- import Language.Futhark.Interpreter (interpretExp, ExtOp)
 
 import Futhark.Util.Pretty
 import Language.Futhark
@@ -26,7 +24,6 @@ import System.IO
 import Prelude
 
 main :: String -> [String] -> IO ()
--- main _ _ = putStrLn "Hello World"
 main = mainWithOptions interpreterConfig options "options... <exprs...>" run
   where
     run [] _ = Nothing
@@ -119,14 +116,7 @@ newFutharkiState cfg maybe_file = runExceptT $ do
     badOnLeft T.prettyTypeError . snd $
       T.checkDec imports src T.initialEnv imp $
         mkOpen "/prelude/prelude"
-  -- (tenv2, d2, src'') <-
-  --   badOnLeft T.prettyTypeError . snd $
-  --     T.checkDec imports src' tenv1 imp $
-  --       mkOpen $
-  --         toPOSIX $
-  --           dropExtension file
   ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
-  -- ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
   pure (src', tenv1, ienv2)
   where
     badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
