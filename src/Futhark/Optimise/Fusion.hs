@@ -120,15 +120,6 @@ vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 hFusionFeasability = unreachableEitherDir
 
-tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
-  if G.gelem node_to_fuse_id g
-    then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
-    else pure dg
-  where
-    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
-    node_to_fuse_id = nodeFromLNode node_to_fuse
-
 vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
 vTryFuseNodesInGraph node_1 node_2 dg@DepGraph {dgGraph = g}
@@ -347,8 +338,21 @@ removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
 removeUnusedOutputs :: DepGraphAug FusionM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
+tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
+  if G.gelem node_to_fuse_id g -- Node might have been fused away since.
+    then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+    else pure dg
+  where
+    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
+    node_to_fuse_id = nodeFromLNode node_to_fuse
+
 doVerticalFusion :: DepGraphAug FusionM
-doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes (dgGraph dg)) dg
+doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
+  where
+    relevant (_, StmNode {}) = False
+    relevant (_, ResNode {}) = False
+    relevant _ = True
 
 -- | For each pair of SOAC nodes that share an input, attempt to fuse
 -- them horizontally.
