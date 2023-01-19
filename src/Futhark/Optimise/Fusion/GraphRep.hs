@@ -75,6 +75,8 @@ data EdgeT
 data NodeT
   = StmNode (Stm SOACS)
   | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
+  | -- | First 'VName' is result; last is input.
+    TransNode VName H.ArrayTransform VName
   | -- | Node corresponding to a result of the entire computation
     -- (i.e. the 'Result' of a body).  Any node that is not
     -- transitively reachable from one of these can be considered
@@ -100,6 +102,7 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
   show (SoacNode _ pat _ _) = prettyString pat
+  show (TransNode _ tr _) = prettyString (show tr)
   show (FinalNode _ nt _) = show nt
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
   show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
@@ -295,6 +298,10 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     pure $ DoNode s []
   Match {} ->
     pure $ MatchNode s []
+  e
+    | [output] <- patNames pat,
+      Just (ia, tr) <- H.transformFromExp (stmAuxCerts aux) e ->
+        pure $ TransNode output tr ia
   _ -> pure n
 nodeToSoacNode n = pure n
 
@@ -407,6 +414,7 @@ stmNames = patNames . stmPat
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
   (StmNode stm) -> stmNames stm
+  (TransNode v _ _) -> [v]
   (ResNode _) -> []
   (FreeNode name) -> [name]
   (MatchNode stm _) -> stmNames stm
