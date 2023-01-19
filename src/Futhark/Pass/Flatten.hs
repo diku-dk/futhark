@@ -304,15 +304,15 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           -- Irregular representation of `as`
           IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
           -- Inner indices (1 and 2) of `ns`
-          (_, _, ii1_ns) <- doRepIota ns
-          (_, _, ii2_ns) <- certifying (distCerts inps aux env) $ doSegIota ns
+          (_, _, ii1_vss) <- doRepIota ns
+          (_, _, ii2_vss) <- certifying (distCerts inps aux env) $ doSegIota ns
           -- Number of updates to preform
-          m <- arraySize 0 <$> lookupType ii2_ns
+          m <- arraySize 0 <$> lookupType ii2_vss
           elems' <- letExp "elems_scatter" <=< genScatter elems m $ \gid -> do
-            segment <- letSubExp "segment" =<< eIndex ii1_ns [eSubExp gid]
+            segment <- letSubExp "segment" =<< eIndex ii1_vss [eSubExp gid]
             -- Value to write
             v' <- letSubExp "v" =<< eIndex vs [eSubExp gid]
-            n' <- letSubExp "n" =<< eIndex ii2_ns [eSubExp gid]
+            n' <- letSubExp "n" =<< eIndex ii2_vss [eSubExp gid]
             x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
             s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp segment]
