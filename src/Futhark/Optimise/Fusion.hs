@@ -93,6 +93,9 @@ finalizeNode nt = case nt of
     forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
       letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
   ResNode _ -> pure mempty
+  TransNode output tr ia -> do
+    (cs, e) <- H.transformToExp tr ia
+    runBuilder_ $ certifying cs $ letBindNames [output] e
   FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
@@ -254,11 +257,8 @@ vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
       pure $ Just $ MatchNode stm2 $ (s1, e1s) : dfused
-vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
-  | null infusible,
-    [stm1_out] <- patNames $ stmPat stm1,
-    Just (stm1_in, tr) <-
-      H.transformFromExp (stmAuxCerts (stmAux stm1)) (stmExp stm1) = do
+vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
+  | null infusible = do
       stm1_in_t <- lookupType stm1_in
       let onInput inp
             | H.inputArray inp == stm1_out =
