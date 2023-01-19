@@ -102,9 +102,6 @@ finalizeNode nt = case nt of
   MatchNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
-  FinalNode stms1 nt' stms2 -> do
-    stms' <- finalizeNode nt'
-    pure $ stms1 <> stms' <> stms2
 
 linearizeGraph :: (HasScope SOACS m, MonadFreshNames m) => DepGraph -> m (Stms SOACS)
 linearizeGraph dg =
