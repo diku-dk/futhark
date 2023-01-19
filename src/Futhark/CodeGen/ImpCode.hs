@@ -184,7 +184,7 @@ instance Monoid (Constants a) where
 
 instance Semigroup (Constants a) where
   Constants ps1 c1 <> Constants ps2 c2 =
-    Constants (nubByOrd (comparing paramName) $ ps1 <> ps2) (c1 <> c2)
+    Constants (nubByOrd (comparing (prettyString . paramName)) $ ps1 <> ps2) (c1 <> c2)
 
 -- | A description of an externally meaningful value.
 data ValueDesc
