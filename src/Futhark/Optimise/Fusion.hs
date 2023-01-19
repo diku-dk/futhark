@@ -96,6 +96,7 @@ finalizeNode nt = case nt of
   TransNode output tr ia -> do
     (cs, e) <- H.transformToExp tr ia
     runBuilder_ $ certifying cs $ letBindNames [output] e
+  FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm

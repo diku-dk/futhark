@@ -83,6 +83,10 @@ data NodeT
     -- transitively reachable from one of these can be considered
     -- dead.
     ResNode VName
+  | -- | Node corresponding to a free variable.  These are used to
+    -- safely handle consumption, which also means we don't have to
+    -- create a node for every free single variable.
+    FreeNode VName
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
@@ -100,6 +104,7 @@ instance Show NodeT where
   show (SoacNode _ pat _ _) = prettyString pat
   show (TransNode _ tr _) = prettyString (show tr)
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
+  show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
@@ -118,6 +123,7 @@ getName edgeT = case edgeT of
 -- express ordering due to consumption.
 isRealNode :: NodeT -> Bool
 isRealNode ResNode {} = False
+isRealNode FreeNode {} = False
 isRealNode _ = True
 
 -- | Prettyprint dependency graph.
@@ -162,12 +168,6 @@ makeMapping dg@(DepGraph {dgGraph = g}) =
   where
     gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
-
--- make a table to handle transitive aliases
-makeAliasTable :: Monad m => Stms SOACS -> DepGraphAug m
-makeAliasTable stms dg = do
-  let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
-  pure $ dg {dgAliasTable = aliasTable'}
 
 -- | Apply several graph augmentations in sequence.
 applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
@@ -302,14 +302,16 @@ nodeToSoacNode n = pure n
 emptyGraph :: Body SOACS -> DepGraph
 emptyGraph body =
   DepGraph
-    { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes)) [],
+    { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) [],
       dgProducerMapping = mempty,
-      dgAliasTable = mempty
+      dgAliasTable = aliases
     }
   where
     labelNodes = zip [0 ..]
     stmnodes = map StmNode $ stmsToList $ bodyStms body
     resnodes = map ResNode $ namesToList $ freeIn $ bodyResult body
+    inputnodes = map FreeNode $ namesToList consumed
+    (_, (aliases, consumed)) = Alias.analyseStms mempty $ bodyStms body
 
 getStmRes :: EdgeGenerator
 getStmRes (ResNode name) = [(name, Res name)]
@@ -324,7 +326,6 @@ mkDepGraph body = applyAugs augs $ emptyGraph body
   where
     augs =
       [ makeMapping,
-        makeAliasTable (bodyStms body),
         addDeps,
         addConsAndAliases,
         addExtraCons,
@@ -408,6 +409,7 @@ getOutputs node = case node of
   (StmNode stm) -> stmNames stm
   (TransNode v _ _) -> [v]
   (ResNode _) -> []
+  (FreeNode name) -> [name]
   (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   (SoacNode _ pat _ _) -> patNames pat
