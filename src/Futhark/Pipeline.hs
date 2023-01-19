@@ -103,8 +103,7 @@ catchIO m f = FutharkM $ do
   env <- ask
   (x, s') <-
     liftIO $
-      runFutharkM' m s env `catch` \e -> do
-        putStrLn "there is an exception"
+      runFutharkM' m s env `catch` \e ->
         runFutharkM' (f e) s env
   put s'
   case x of
