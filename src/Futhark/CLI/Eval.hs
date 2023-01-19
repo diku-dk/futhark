@@ -29,7 +29,7 @@ import Prelude
 
 
 import Futhark.Util.Pretty
-import Data.List (foldl')
+import System.Exit
 
 main :: String -> [String] -> IO ()
 -- main _ _ = putStrLn "Hello World"
@@ -40,20 +40,20 @@ main = mainWithOptions interpreterConfig options "options... <exprs...>" run
 
 runExprs :: [String] -> InterpreterConfig -> IO ()
 runExprs exprs cfg = do
-  -- putStrLn "Running expressions"
   let InterpreterConfig _ file = cfg
-  -- putStrLn "File has come up."
   maybe_new_state <- newFutharkiState cfg file
-  -- putStrLn "New state made"
   (src, env, ctx) <- case maybe_new_state of
-    Left _ -> error "Unable to load file."
+    Left _ -> do
+      hPutStrLn stderr $ fromJust file <> ": file not found."
+      exitWith $ ExitFailure 2
     Right s -> pure s
-  -- putStrLn "Starting on the expressions"
-  foldl' (\_ b -> runExpr src env ctx b) (putStr "") exprs
-  putStrLn ""
--- runExprs _ _ = putStrLn "Running Exprs"
+  runExprs' exprs src env ctx
 
-
+runExprs' :: [String] -> VNameSource -> T.Env -> I.Ctx -> IO()
+runExprs' [] _ _ _ = putStrLn ""
+runExprs' (x:xs) src env ctx = do
+  runExpr src env ctx x
+  runExprs' xs src env ctx
 
 -- Use parseExp, checkExp, then interpretExp.
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
@@ -61,10 +61,9 @@ runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of 
     Left _ -> error "Syntax Error"
     Right e -> pure e
-  let (_, expdat) = T.checkExp [] src env uexp
-  fexp <- case expdat of
-    Left _ -> error "Type Error"
-    Right (_,e) -> pure e
+  fexp <- case T.checkExp [] src env uexp of
+    (_, Left _) -> error "Type Error"
+    (_, Right (_,e)) -> pure e
   let ext = I.interpretExp ctx fexp
   pval <- runInterpreter' ext
   val <- case pval of
