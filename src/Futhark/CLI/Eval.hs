@@ -59,15 +59,17 @@ runExprs' (x:xs) src env ctx = do
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
 runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of 
-    Left _ -> error "Syntax Error"
+    Left _ -> error $ "Syntax Error:" <> str
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
-    (_, Left _) -> error "Type Error"
+    (_, Left _) -> error $ "Type Error:" <> str
     (_, Right (_,e)) -> pure e
   let ext = I.interpretExp ctx fexp
   pval <- runInterpreter' ext
   val <- case pval of
-    Left _ -> error ""
+    Left err -> do
+      putDoc $ I.prettyInterpreterError err
+      exitWith $ ExitFailure 0
     Right x -> pure x
   putDoc $ I.prettyValue val <> hardline
 
