@@ -80,8 +80,9 @@ data NodeT
     -- transitively reachable from one of these can be considered
     -- dead.
     ResNode VName
-  | -- | Node corresponding to a free variable.
-    -- Unclear whether we actually need these.
+  | -- | Node corresponding to a free variable.  These are necessary
+    -- to capture common inputs to SOACs for horizontal fusion.  Also
+    -- means we don't care about _all_ free variables.
     FreeNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
@@ -297,19 +298,6 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
   _ -> pure n
 nodeToSoacNode n = pure n
 
-convertGraph :: (HasScope SOACS m, Monad m) => DepGraphAug m
-convertGraph = mapAcrossNodeTs nodeToSoacNode
-
-initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
-initialGraphConstruction =
-  applyAugs
-    [ addDeps,
-      addConsAndAliases,
-      addExtraCons,
-      addResEdges,
-      convertGraph -- Must be done after adding edges
-    ]
-
 -- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Body SOACS -> DepGraph
 emptyGraph body =
@@ -324,6 +312,13 @@ emptyGraph body =
     resnodes = map ResNode $ namesToList $ freeIn $ bodyResult body
     inputnodes = map FreeNode $ namesToList $ freeIn body
 
+getStmRes :: EdgeGenerator
+getStmRes (ResNode name) = [(name, Res name)]
+getStmRes _ = []
+
+addResEdges :: Monad m => DepGraphAug m
+addResEdges = augWithFun getStmRes
+
 -- | Make a dependency graph corresponding to a 'Body'.
 mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
 mkDepGraph body = applyAugs augs $ emptyGraph body
@@ -331,7 +326,11 @@ mkDepGraph body = applyAugs augs $ emptyGraph body
     augs =
       [ makeMapping,
         makeAliasTable (bodyStms body),
-        initialGraphConstruction
+        addDeps,
+        addConsAndAliases,
+        addExtraCons,
+        addResEdges,
+        mapAcrossNodeTs nodeToSoacNode -- Must be done after adding edges
       ]
 
 -- | Make a dependency graph corresponding to a function.
@@ -354,9 +353,6 @@ contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
   pure $ dg {dgGraph = ctx G.& G.delNodes [n1, n2] (dgGraph dg)}
-
-addResEdges :: Monad m => DepGraphAug m
-addResEdges = augWithFun getStmRes
 
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
@@ -407,10 +403,6 @@ expInputs e
 
 stmNames :: Stm SOACS -> [VName]
 stmNames = patNames . stmPat
-
-getStmRes :: EdgeGenerator
-getStmRes (ResNode name) = [(name, Res name)]
-getStmRes _ = []
 
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
