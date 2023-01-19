@@ -1,5 +1,4 @@
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE Strict #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | The type checker checks whether the program is type-consistent.
