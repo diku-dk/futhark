@@ -96,7 +96,6 @@ finalizeNode nt = case nt of
   TransNode output tr ia -> do
     (cs, e) <- H.transformToExp tr ia
     runBuilder_ $ certifying cs $ letBindNames [output] e
-  FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
@@ -120,11 +119,21 @@ fusedSomething x = do
 -- horizontally.  This means we only perform horizontal fusion for
 -- SOACs that use the same input in some way.
 horizontalFusionOnNode :: G.Node -> DepGraphAug FusionM
-horizontalFusionOnNode node dg@DepGraph {dgGraph = g} =
+horizontalFusionOnNode x dg@DepGraph {dgGraph = g} =
   applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) dg
   where
-    incoming_nodes = map fst $ filter (isDep . snd) $ G.lpre g node
-    pairs = [(x, y) | x <- incoming_nodes, y <- incoming_nodes, x < y]
+    pairs = do
+      guard $ G.gelem x g -- Might have been fused away by now.
+      (_, _, SoacNode _ _ soac_x _, _) <- [G.context g x]
+      y <- G.nodes g
+      guard $ x < y
+      (_, _, SoacNode _ _ soac_y _, _) <- [G.context g y]
+      -- Must share an input.
+      guard $
+        any
+          (`elem` mapMaybe H.isVarInput (H.inputs soac_x))
+          (mapMaybe H.isVarInput (H.inputs soac_y))
+      pure (x, y)
 
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
