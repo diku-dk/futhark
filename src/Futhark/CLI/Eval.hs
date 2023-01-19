@@ -1,35 +1,29 @@
 module Futhark.CLI.Eval (main) where
-  
+
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
-
 import Data.Maybe
 import Data.Text qualified as T
-
 import Futhark.Compiler
 import Futhark.MonadFreshNames
 -- import Futhark.Util (toPOSIX)
-import Futhark.Util.Options
 
+import Futhark.Pipeline
+import Futhark.Util.Options
+-- import Language.Futhark.Interpreter (interpretExp, ExtOp)
+
+import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
 import Language.Futhark.Semantic qualified as T
 import Language.Futhark.TypeChecker qualified as T
-
+import System.Exit
 import System.FilePath
-
-import Futhark.Pipeline
-
 import System.IO
 import Prelude
--- import Language.Futhark.Interpreter (interpretExp, ExtOp)
-
-
-import Futhark.Util.Pretty
-import System.Exit
 
 main :: String -> [String] -> IO ()
 -- main _ _ = putStrLn "Hello World"
@@ -49,21 +43,21 @@ runExprs exprs cfg = do
     Right s -> pure s
   runExprs' exprs src env ctx
 
-runExprs' :: [String] -> VNameSource -> T.Env -> I.Ctx -> IO()
+runExprs' :: [String] -> VNameSource -> T.Env -> I.Ctx -> IO ()
 runExprs' [] _ _ _ = putStrLn ""
-runExprs' (x:xs) src env ctx = do
+runExprs' (x : xs) src env ctx = do
   runExpr src env ctx x
   runExprs' xs src env ctx
 
 -- Use parseExp, checkExp, then interpretExp.
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
 runExpr src env ctx str = do
-  uexp <- case parseExp "" (T.pack str) of 
+  uexp <- case parseExp "" (T.pack str) of
     Left _ -> error $ "Syntax Error:" <> str
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
     (_, Left _) -> error $ "Type Error:" <> str
-    (_, Right (_,e)) -> pure e
+    (_, Right (_, e)) -> pure e
   let ext = I.interpretExp ctx fexp
   pval <- runInterpreter' ext
   val <- case pval of
@@ -73,10 +67,10 @@ runExpr src env ctx str = do
     Right x -> pure x
   putDoc $ I.prettyValue val <> hardline
 
-data InterpreterConfig = InterpreterConfig {
-  interpreterPrintWarnings :: Bool,
-  interpreterFile :: Maybe String
-}
+data InterpreterConfig = InterpreterConfig
+  { interpreterPrintWarnings :: Bool,
+    interpreterFile :: Maybe String
+  }
 
 interpreterConfig :: InterpreterConfig
 interpreterConfig = InterpreterConfig True Nothing
@@ -99,7 +93,6 @@ options =
       (NoArg $ Right $ \config -> config {interpreterPrintWarnings = False})
       "Do not print warnings."
   ]
-
 
 newFutharkiState ::
   InterpreterConfig ->
@@ -139,7 +132,7 @@ newFutharkiState cfg maybe_file = runExceptT $ do
     badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
-    
+
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (pure . Right) intOp
   where
