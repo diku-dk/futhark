@@ -112,26 +112,6 @@ fusedSomething x = do
   modify $ \s -> s {fusionCount = 1 + fusionCount s}
   pure $ Just x
 
--- | For each node, find what came before, attempt to fuse them
--- horizontally.  This means we only perform horizontal fusion for
--- SOACs that use the same input in some way.
-horizontalFusionOnNode :: G.Node -> DepGraphAug FusionM
-horizontalFusionOnNode x dg@DepGraph {dgGraph = g} =
-  applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) dg
-  where
-    pairs = do
-      guard $ G.gelem x g -- Might have been fused away by now.
-      (_, _, SoacNode _ _ soac_x _, _) <- [G.context g x]
-      y <- G.nodes g
-      guard $ x < y
-      (_, _, SoacNode _ _ soac_y _, _) <- [G.context g y]
-      -- Must share an input.
-      guard $
-        any
-          (`elem` mapMaybe H.isVarInput (H.inputs soac_x))
-          (mapMaybe H.isVarInput (H.inputs soac_y))
-      pure (x, y)
-
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
   not (any isInf (edgesBetween dg n1 n2))
@@ -370,8 +350,26 @@ removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 doVerticalFusion :: DepGraphAug FusionM
 doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes (dgGraph dg)) dg
 
+-- | For each pair of SOAC nodes that share an input, attempt to fuse
+-- them horizontally.
 doHorizontalFusion :: DepGraphAug FusionM
-doHorizontalFusion dg = applyAugs (map horizontalFusionOnNode (G.nodes (dgGraph dg))) dg
+doHorizontalFusion dg = applyAugs pairs dg
+  where
+    pairs :: [DepGraphAug FusionM]
+    pairs = do
+      (x, SoacNode _ _ soac_x _) <- G.labNodes $ dgGraph dg
+      (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
+      guard $ x < y
+      -- Must share an input.
+      guard $
+        any
+          (`elem` mapMaybe H.isVarInput (H.inputs soac_x))
+          (mapMaybe H.isVarInput (H.inputs soac_y))
+      pure $ \dg' -> do
+        -- Nodes might have been fused away by now.
+        if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')
+          then hTryFuseNodesInGraph x y dg'
+          else pure dg'
 
 doInnerFusion :: DepGraphAug FusionM
 doInnerFusion = mapAcross runInnerFusionOnContext
