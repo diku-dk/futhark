@@ -82,10 +82,6 @@ data NodeT
     -- transitively reachable from one of these can be considered
     -- dead.
     ResNode VName
-  | -- | Node corresponding to a free variable.  These are necessary
-    -- to capture common inputs to SOACs for horizontal fusion.  Also
-    -- means we don't care about _all_ free variables.
-    FreeNode VName
   | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
@@ -105,7 +101,6 @@ instance Show NodeT where
   show (TransNode _ tr _) = prettyString (show tr)
   show (FinalNode _ nt _) = show nt
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
-  show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
 
@@ -124,7 +119,6 @@ getName edgeT = case edgeT of
 -- express ordering due to consumption.
 isRealNode :: NodeT -> Bool
 isRealNode ResNode {} = False
-isRealNode FreeNode {} = False
 isRealNode _ = True
 
 -- | Prettyprint dependency graph.
@@ -309,7 +303,7 @@ nodeToSoacNode n = pure n
 emptyGraph :: Body SOACS -> DepGraph
 emptyGraph body =
   DepGraph
-    { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) [],
+    { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes)) [],
       dgProducerMapping = mempty,
       dgAliasTable = mempty
     }
@@ -317,7 +311,6 @@ emptyGraph body =
     labelNodes = zip [0 ..]
     stmnodes = map StmNode $ stmsToList $ bodyStms body
     resnodes = map ResNode $ namesToList $ freeIn $ bodyResult body
-    inputnodes = map FreeNode $ namesToList $ freeIn body
 
 getStmRes :: EdgeGenerator
 getStmRes (ResNode name) = [(name, Res name)]
@@ -416,7 +409,6 @@ getOutputs node = case node of
   (StmNode stm) -> stmNames stm
   (TransNode v _ _) -> [v]
   (ResNode _) -> []
-  (FreeNode name) -> [name]
   (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
   FinalNode {} -> error "Final nodes cannot generate edges"
