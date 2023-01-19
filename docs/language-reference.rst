@@ -930,7 +930,9 @@ Binding Expressions
 
 Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
-is optional if ``body`` is a ``let`` expression.
+is optional if ``body`` is a ``let`` expression.  The binding is not
+let-generalised, meaning it has a monomorphic type.  This can be
+significant if ``e`` is of functional type.
 
 ``let [n] pat = e in body``
 ...........................
@@ -1075,6 +1077,10 @@ type of a top-level function must be completely inferred at its
 definition site.  Specifically, if a top-level function uses
 overloaded arithmetic operators, the resolution of those overloads
 cannot be influenced by later uses of the function.
+
+Local bindings made with ``let`` are not made polymorphic through
+let-generalisation *unless* they are syntactically functions, meaning
+they have at least one named parameter.
 
 .. _size-types:
 
