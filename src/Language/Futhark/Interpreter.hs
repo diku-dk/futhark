@@ -348,12 +348,11 @@ typeCheckerEnv env =
           T.envVtable = vtable
         }
 
-break :: Loc -> EvalM ()
-break loc = do
-  backtrace <- asks fst
-  case NE.nonEmpty backtrace of
-    Nothing -> pure ()
-    Just backtrace' -> liftF $ ExtOpBreak loc BreakPoint backtrace' ()
+break :: Env -> Loc -> EvalM ()
+break env loc = do
+  imports <- asks snd
+  backtrace <- asks ((StackFrame loc (Ctx env imports) NE.:|) . fst)
+  liftF $ ExtOpBreak loc BreakPoint backtrace ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -991,7 +990,7 @@ eval env (Constr c es (Info t) _) = do
   shape <- typeValueShape env $ toStruct t
   pure $ ValueSum shape c vs
 eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
-  break (locOf loc)
+  break env (locOf loc)
   eval env e
 eval env (Attr (AttrAtom (AtomName "trace") _) e loc) = do
   v <- eval env e

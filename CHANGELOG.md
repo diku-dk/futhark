@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Defunctionalisation could mess up sum types, leading to invalid code
   generation by internalisation, leading to a compiler crash (#1847).
 
+* The `#[break]` attribute now provides the right environment to
+  `futhark repl`, allowing local variables to be inspected.
+
 ## [0.22.7]
 
 ### Added
