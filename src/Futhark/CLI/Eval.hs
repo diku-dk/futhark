@@ -106,13 +106,10 @@ newFutharkiState ::
   Maybe FilePath ->
   IO (Either (Doc AnsiStyle) (VNameSource, T.Env, I.Ctx))
 newFutharkiState cfg maybe_file = runExceptT $ do
-  files <- case maybe_file of
-    Just f -> pure [f]
-    Nothing -> pure []
   (ws, imports, src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
-        ( runExceptT (readProgramFiles [] files)
+        ( runExceptT (readProgramFiles [] $ maybeToList maybe_file)
             `catch` \(err :: IOException) ->
               pure (externalErrorS (show err))
         )
