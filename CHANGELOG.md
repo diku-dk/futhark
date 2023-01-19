@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   repository, as long as `git clone` works.  In particular, you can
   use private and self-hosted repositories.
 
+* Significant reduction in compilation time by doing internal sanity
+  checks in separate thread.
+
 ### Removed
 
 ### Changed
