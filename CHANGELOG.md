@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The `#[break]` attribute now provides the right environment to
   `futhark repl`, allowing local variables to be inspected.
 
+* Simplification of concatenations (#1851).
+
 ## [0.22.7]
 
 ### Added
