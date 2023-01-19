@@ -82,7 +82,6 @@ data NodeT
     -- transitively reachable from one of these can be considered
     -- dead.
     ResNode VName
-  | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
@@ -99,7 +98,6 @@ instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
   show (SoacNode _ pat _ _) = prettyString pat
   show (TransNode _ tr _) = prettyString (show tr)
-  show (FinalNode _ nt _) = show nt
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
   show (DoNode stm _) = "Do: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
@@ -411,7 +409,6 @@ getOutputs node = case node of
   (ResNode _) -> []
   (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
-  FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ pat _ _) -> patNames pat
 
 -- | Is there a possibility of fusion?
