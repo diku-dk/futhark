@@ -20,7 +20,7 @@ let mkFlagArray [m] (aoa_shp: [m]i64) (zero: i64)
     let shp_ind = map2 (\shp ind -> if shp==0 then -1i64 else ind) aoa_shp shp_scn
     in scatter (replicate aoa_len zero) shp_ind aoa_val
 
-let segUpdate [n][m][t] (xss_val : [n]i64) (shp_xss : [t]i64)  (vss_val : [m]i64) 
+let segUpdate [n][m][t] (xss_val : *[n]i64) (shp_xss : [t]i64)  (vss_val : [m]i64) 
                     (shp_vss : [t]i64) (bs : [t]i64) (ss : [t]i64): [n]i64 =
     let fvss = (mkFlagArray shp_vss 0 (1...t :> [t]i64)) :> [m]i64                                     
     let II1 = sgmSumI64 fvss fvss |> map (\x -> x - 1)        
@@ -28,9 +28,9 @@ let segUpdate [n][m][t] (xss_val : [n]i64) (shp_xss : [t]i64)  (vss_val : [m]i64
     let bxss = scan (+) 0 shp_xss_rot                                                                   
     let II2 = sgmSumI64 fvss (replicate m 1) |> map (\x -> x - 1)                                       
     let iss = map (\i -> bxss[II1[i]] + bs[II1[i]] + (II2[i] * ss[II1[i]])) (iota m)                     
-    in scatter (copy xss_val) iss vss_val
+    in scatter xss_val iss vss_val
 
 
-let main [n][m][t] (xss_val : [n]i64) (shp_xss : [t]i64) (vss_val : [m]i64) 
+let main [n][m][t] (xss_val : *[n]i64) (shp_xss : [t]i64) (vss_val : [m]i64) 
                     (shp_vss : [t]i64) (bs : [t]i64) (ss : [t]i64): [n]i64 =
     segUpdate xss_val shp_xss vss_val shp_vss bs ss
