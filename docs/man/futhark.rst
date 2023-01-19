@@ -66,6 +66,12 @@ A Futhark compiler development command, intentionally undocumented and
 intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
 
+futhark eval options... <exprs...>
+----------------------------------
+
+Evaluates expressions given as command-line arguments. Optionally 
+allows a file import.
+
 futhark hash PROGRAM
 --------------------
 
