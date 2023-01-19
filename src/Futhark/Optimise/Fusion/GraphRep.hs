@@ -53,6 +53,7 @@ import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.Graph.Inductive.Tree qualified as G
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.HORep.SOAC qualified as H
@@ -265,7 +266,7 @@ addExtraCons dg =
     mapping = dgProducerMapping dg
     makeEdge (from, to, Cons cname) = do
       let aliases = namesToList $ M.findWithDefault mempty cname alias_table
-          to' = map (mapping M.!) aliases
+          to' = mapMaybe (`M.lookup` mapping) aliases
           p (tonode, toedge) =
             tonode /= from && getName toedge `elem` (cname : aliases)
       (to2, _) <- filter p $ concatMap (G.lpre g) to' <> G.lpre g to
