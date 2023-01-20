@@ -42,7 +42,7 @@ OPTIONS
   generated.
 
 -s int
-  Set the seed used for the RNG.  Zero by default.
+  Set the seed used for the RNG.  1 by default.
 
 --T-bounds=<min:max>
   Set inclusive lower and upper bounds on generated values of type
