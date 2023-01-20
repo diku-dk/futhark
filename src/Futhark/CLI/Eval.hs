@@ -20,6 +20,9 @@ import System.Exit
 import System.FilePath
 import System.IO
 import Prelude
+import qualified Language.Futhark.TypeChecker as I
+import qualified Data.Text.IO as T
+import Futhark.Util (toPOSIX)
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options... <exprs...>" run
@@ -48,13 +51,13 @@ runExprs' (x : xs) src env ctx = do
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
 runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of
-    Left _ -> do
-      hPutStrLn stderr $ "Syntax Error:" <> str
+    Left (SyntaxError _ serr) -> do
+      T.hPutStrLn stderr serr
       exitWith $ ExitFailure 1
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
-    (_, Left _) -> do
-      hPutStrLn stderr $ "Type Error:" <> str
+    (_, Left terr) -> do
+      hPutDoc stderr $ I.prettyTypeError terr
       exitWith $ ExitFailure 1
     (_, Right (_, e)) -> pure e
   let ext = I.interpretExp ctx fexp
@@ -117,8 +120,17 @@ newFutharkiState cfg maybe_file = runExceptT $ do
     badOnLeft T.prettyTypeError . snd $
       T.checkDec imports src T.initialEnv imp $
         mkOpen "/prelude/prelude"
+  (tenv2, d2, src'') <- case maybe_file of
+    Nothing -> pure (tenv1, d1, src')
+    Just file -> badOnLeft T.prettyTypeError . snd $
+      T.checkDec imports src' tenv1 imp $
+        mkOpen $
+          toPOSIX $
+            dropExtension file
+
   ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
-  pure (src', tenv1, ienv2)
+  ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
+  pure (src'', tenv2, ienv3)
   where
     badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
