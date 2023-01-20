@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Significant reduction in compilation time by doing internal sanity
   checks in separate thread.
 
+* New command: `futhark eval`. Evaluates Futhark expressions
+  provided as command line arguments, optionally allowing a file
+  import (#1408).
+
+
 ### Removed
 
 ### Changed
