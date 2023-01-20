@@ -203,6 +203,11 @@ void futhark_context_config_set_platform(struct futhark_context_config *cfg, con
   cfg->ignore_blacklist = 1;
 }
 
+void futhark_context_config_set_command_queue(struct futhark_context_config *cfg, cl_command_queue q) {
+  cfg->queue = q;
+  cfg->queue_set = 1;
+}
+
 struct opencl_device_option {
   cl_platform_id platform;
   cl_device_id device;

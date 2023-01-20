@@ -53,6 +53,7 @@ import Data.Graph.Inductive.Query.DFS qualified as Q
 import Data.Graph.Inductive.Tree qualified as G
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
 import Data.Set qualified as S
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.HORep.SOAC qualified as H
@@ -75,15 +76,17 @@ data EdgeT
 data NodeT
   = StmNode (Stm SOACS)
   | SoacNode H.ArrayTransforms (Pat Type) (H.SOAC SOACS) (StmAux (ExpDec SOACS))
+  | -- | First 'VName' is result; last is input.
+    TransNode VName H.ArrayTransform VName
   | -- | Node corresponding to a result of the entire computation
     -- (i.e. the 'Result' of a body).  Any node that is not
     -- transitively reachable from one of these can be considered
     -- dead.
     ResNode VName
-  | -- | Node corresponding to a free variable.
-    -- Unclear whether we actually need these.
+  | -- | Node corresponding to a free variable.  These are used to
+    -- safely handle consumption, which also means we don't have to
+    -- create a node for every free single variable.
     FreeNode VName
-  | FinalNode (Stms SOACS) NodeT (Stms SOACS)
   | MatchNode (Stm SOACS) [(NodeT, [EdgeT])]
   | DoNode (Stm SOACS) [(NodeT, [EdgeT])]
   deriving (Eq)
@@ -99,7 +102,7 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
   show (SoacNode _ pat _ _) = prettyString pat
-  show (FinalNode _ nt _) = show nt
+  show (TransNode _ tr _) = prettyString (show tr)
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
   show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)
@@ -165,12 +168,6 @@ makeMapping dg@(DepGraph {dgGraph = g}) =
   where
     gen_dep_list :: DepNode -> [(VName, G.Node)]
     gen_dep_list (i, node) = [(name, i) | name <- getOutputs node]
-
--- make a table to handle transitive aliases
-makeAliasTable :: Monad m => Stms SOACS -> DepGraphAug m
-makeAliasTable stms dg = do
-  let (_, (aliasTable', _)) = Alias.analyseStms mempty stms
-  pure $ dg {dgAliasTable = aliasTable'}
 
 -- | Apply several graph augmentations in sequence.
 applyAugs :: Monad m => [DepGraphAug m] -> DepGraphAug m
@@ -243,18 +240,19 @@ addDeps = augWithFun toDep
 addConsAndAliases :: Monad m => DepGraphAug m
 addConsAndAliases = augWithFun edges
   where
-    edges (StmNode s) = consEdges e <> aliasEdges e
+    edges (StmNode s) = consEdges s' <> aliasEdges s'
       where
-        e = Alias.analyseExp mempty $ stmExp s
+        s' = Alias.analyseStm mempty s
     edges _ = mempty
-    consEdges e = zip names (map Cons names)
+    consEdges s = zip names (map Cons names)
       where
-        names = namesToList $ consumedInExp e
+        names = namesToList $ consumedInStm s
     aliasEdges =
       map (\vname -> (vname, Alias vname))
         . namesToList
         . mconcat
-        . expAliases
+        . patAliases
+        . stmPat
 
 -- extra dependencies mask the fact that consuming nodes "depend" on all other
 -- nodes coming before it (now also adds fake edges to aliases - hope this
@@ -268,7 +266,7 @@ addExtraCons dg =
     mapping = dgProducerMapping dg
     makeEdge (from, to, Cons cname) = do
       let aliases = namesToList $ M.findWithDefault mempty cname alias_table
-          to' = map (mapping M.!) aliases
+          to' = mapMaybe (`M.lookup` mapping) aliases
           p (tonode, toedge) =
             tonode /= from && getName toedge `elem` (cname : aliases)
       (to2, _) <- filter p $ concatMap (G.lpre g) to' <> G.lpre g to
@@ -293,21 +291,12 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     pure $ DoNode s []
   Match {} ->
     pure $ MatchNode s []
+  e
+    | [output] <- patNames pat,
+      Just (ia, tr) <- H.transformFromExp (stmAuxCerts aux) e ->
+        pure $ TransNode output tr ia
   _ -> pure n
 nodeToSoacNode n = pure n
-
-convertGraph :: (HasScope SOACS m, Monad m) => DepGraphAug m
-convertGraph = mapAcrossNodeTs nodeToSoacNode
-
-initialGraphConstruction :: (HasScope SOACS m, Monad m) => DepGraphAug m
-initialGraphConstruction =
-  applyAugs
-    [ addDeps,
-      addConsAndAliases,
-      addExtraCons,
-      addResEdges,
-      convertGraph -- Must be done after adding edges
-    ]
 
 -- | Construct a graph with only nodes, but no edges.
 emptyGraph :: Body SOACS -> DepGraph
@@ -315,13 +304,21 @@ emptyGraph body =
   DepGraph
     { dgGraph = G.mkGraph (labelNodes (stmnodes <> resnodes <> inputnodes)) [],
       dgProducerMapping = mempty,
-      dgAliasTable = mempty
+      dgAliasTable = aliases
     }
   where
     labelNodes = zip [0 ..]
     stmnodes = map StmNode $ stmsToList $ bodyStms body
     resnodes = map ResNode $ namesToList $ freeIn $ bodyResult body
-    inputnodes = map FreeNode $ namesToList $ freeIn body
+    inputnodes = map FreeNode $ namesToList consumed
+    (_, (aliases, consumed)) = Alias.analyseStms mempty $ bodyStms body
+
+getStmRes :: EdgeGenerator
+getStmRes (ResNode name) = [(name, Res name)]
+getStmRes _ = []
+
+addResEdges :: Monad m => DepGraphAug m
+addResEdges = augWithFun getStmRes
 
 -- | Make a dependency graph corresponding to a 'Body'.
 mkDepGraph :: (HasScope SOACS m, Monad m) => Body SOACS -> m DepGraph
@@ -329,8 +326,11 @@ mkDepGraph body = applyAugs augs $ emptyGraph body
   where
     augs =
       [ makeMapping,
-        makeAliasTable (bodyStms body),
-        initialGraphConstruction
+        addDeps,
+        addConsAndAliases,
+        addExtraCons,
+        addResEdges,
+        mapAcrossNodeTs nodeToSoacNode -- Must be done after adding edges
       ]
 
 -- | Make a dependency graph corresponding to a function.
@@ -353,9 +353,6 @@ contractEdge :: Monad m => G.Node -> DepContext -> DepGraphAug m
 contractEdge n2 ctx dg = do
   let n1 = G.node' ctx -- n1 remains
   pure $ dg {dgGraph = ctx G.& G.delNodes [n1, n2] (dgGraph dg)}
-
-addResEdges :: Monad m => DepGraphAug m
-addResEdges = augWithFun getStmRes
 
 -- Utils for fusibility/infusibility
 -- find dependencies - either fusible or infusible. edges are generated based on these
@@ -407,18 +404,14 @@ expInputs e
 stmNames :: Stm SOACS -> [VName]
 stmNames = patNames . stmPat
 
-getStmRes :: EdgeGenerator
-getStmRes (ResNode name) = [(name, Res name)]
-getStmRes _ = []
-
 getOutputs :: NodeT -> [VName]
 getOutputs node = case node of
   (StmNode stm) -> stmNames stm
+  (TransNode v _ _) -> [v]
   (ResNode _) -> []
   (FreeNode name) -> [name]
   (MatchNode stm _) -> stmNames stm
   (DoNode stm _) -> stmNames stm
-  FinalNode {} -> error "Final nodes cannot generate edges"
   (SoacNode _ pat _ _) -> patNames pat
 
 -- | Is there a possibility of fusion?

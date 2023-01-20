@@ -24,9 +24,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   repository, as long as `git clone` works.  In particular, you can
   use private and self-hosted repositories.
 
+* Significant reduction in compilation time by doing internal sanity
+  checks in separate thread.
+
 * New command: `futhark eval`. Evaluates Futhark expressions
   provided as command line arguments, optionally allowing a file
   import (#1408).
+
 
 ### Removed
 
@@ -51,6 +55,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Various oversights in the type checking of uniqueness annotations
   for higher-order functions (#1842).
+
+* Invalid short-circuiting could cause compiler crashes (#1843).
+
+* Defunctionalisation could mess up sum types, leading to invalid code
+  generation by internalisation, leading to a compiler crash (#1847).
+
+* The `#[break]` attribute now provides the right environment to
+  `futhark repl`, allowing local variables to be inspected.
+
+* Simplification of concatenations (#1851).
 
 ## [0.22.7]
 

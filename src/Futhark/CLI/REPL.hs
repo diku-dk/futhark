@@ -30,7 +30,7 @@ import Language.Futhark.TypeChecker qualified as T
 import NeatInterpolation (text)
 import System.Console.Haskeline qualified as Haskeline
 import System.Directory
-import System.FilePath
+import System.FilePath (dropExtension)
 import System.IO (stdout)
 import Text.Read (readMaybe)
 
@@ -150,36 +150,22 @@ extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
 
 newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either (Doc AnsiStyle) FutharkiState)
 newFutharkiState count prev_prog maybe_file = runExceptT $ do
-  (prog, tenv, ienv) <- case maybe_file of
-    Nothing -> do
-      -- Load the builtins through the type checker.
-      prog <-
-        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [] M.empty)
-      -- Then into the interpreter.
-      ienv <-
-        foldM
-          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
-          I.initialCtx
-          $ map (fmap fileProg) (lpImports prog)
+  let files = maybeToList maybe_file
+  -- Put code through the type checker.
+  prog <-
+    badOnLeft prettyProgErrors
+      =<< liftIO (reloadProg prev_prog files M.empty)
+  liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
+  -- Then into the interpreter.
+  prog_ienv <-
+    foldM
+      (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
+      I.initialCtx
+      $ map (fmap fileProg) (lpImports prog)
 
-      let (tenv, ienv') =
-            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude"]
-
-      pure (prog, tenv, ienv')
-    Just file -> do
-      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
-      liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
-
-      ienv <-
-        foldM
-          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
-          I.initialCtx
-          $ map (fmap fileProg) (lpImports prog)
-
-      let (tenv, ienv') =
-            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude", dropExtension file]
-
-      pure (prog, tenv, ienv')
+  let (tenv, ienv) =
+        extendEnvs prog (T.initialEnv, prog_ienv) $
+          "/prelude/prelude" : map dropExtension files
 
   pure
     FutharkiState
