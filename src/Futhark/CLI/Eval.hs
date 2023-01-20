@@ -39,13 +39,7 @@ runExprs exprs cfg = do
       hPutStrLn stderr $ fromJust file <> ": file not found."
       exitWith $ ExitFailure 2
     Right s -> pure s
-  runExprs' exprs src env ctx
-
-runExprs' :: [String] -> VNameSource -> T.Env -> I.Ctx -> IO ()
-runExprs' [] _ _ _ = pure ()
-runExprs' (x : xs) src env ctx = do
-  runExpr src env ctx x
-  runExprs' xs src env ctx
+  mapM_ (runExpr src env ctx) exprs
 
 -- Use parseExp, checkExp, then interpretExp.
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
@@ -60,8 +54,7 @@ runExpr src env ctx str = do
       hPutDoc stderr $ I.prettyTypeError terr
       exitWith $ ExitFailure 1
     (_, Right (_, e)) -> pure e
-  let ext = I.interpretExp ctx fexp
-  pval <- runInterpreter' ext
+  pval <- runInterpreter' $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
       hPutDoc stderr $ I.prettyInterpreterError err
