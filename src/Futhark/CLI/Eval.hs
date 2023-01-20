@@ -8,10 +8,8 @@ import Data.Maybe
 import Data.Text qualified as T
 import Futhark.Compiler
 import Futhark.MonadFreshNames
-
 import Futhark.Pipeline
 import Futhark.Util.Options
-
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -41,7 +39,7 @@ runExprs exprs cfg = do
   runExprs' exprs src env ctx
 
 runExprs' :: [String] -> VNameSource -> T.Env -> I.Ctx -> IO ()
-runExprs' [] _ _ _ = putStrLn ""
+runExprs' [] _ _ _ = pure ()
 runExprs' (x : xs) src env ctx = do
   runExpr src env ctx x
   runExprs' xs src env ctx
@@ -50,19 +48,22 @@ runExprs' (x : xs) src env ctx = do
 runExpr :: VNameSource -> T.Env -> I.Ctx -> String -> IO ()
 runExpr src env ctx str = do
   uexp <- case parseExp "" (T.pack str) of
-    Left _ -> error $ "Syntax Error:" <> str
+    Left _ -> do
+      hPutStrLn stderr $ "Syntax Error:" <> str
+      exitWith $ ExitFailure 1
     Right e -> pure e
   fexp <- case T.checkExp [] src env uexp of
-    (_, Left _) -> error $ "Type Error:" <> str
+    (_, Left _) -> do
+      hPutStrLn stderr $ "Type Error:" <> str
+      exitWith $ ExitFailure 1
     (_, Right (_, e)) -> pure e
   let ext = I.interpretExp ctx fexp
   pval <- runInterpreter' ext
-  val <- case pval of
+  case pval of
     Left err -> do
-      putDoc $ I.prettyInterpreterError err
-      exitWith $ ExitFailure 0
-    Right x -> pure x
-  putDoc $ I.prettyValue val <> hardline
+      hPutDoc stderr $ I.prettyInterpreterError err
+      exitWith $ ExitFailure 1
+    Right val -> putDoc $ I.prettyValue val <> hardline
 
 data InterpreterConfig = InterpreterConfig
   { interpreterPrintWarnings :: Bool,
