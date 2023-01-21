@@ -4,16 +4,15 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Pipeline
-import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
 import Futhark.Util.Pretty
-import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
 import Language.Futhark.Semantic qualified as T
@@ -54,7 +53,7 @@ runExpr src env ctx str = do
       hPutDoc stderr $ I.prettyTypeError terr
       exitWith $ ExitFailure 1
     (_, Right (_, e)) -> pure e
-  pval <- runInterpreter' $ I.interpretExp ctx fexp
+  pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
       hPutDoc stderr $ I.prettyInterpreterError err
@@ -105,39 +104,27 @@ newFutharkiState cfg maybe_file = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
-  let imp = T.mkInitialImport "."
-  ienv1 <-
-    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+  ictx <-
+    foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreterNoBreak . I.interpretImport ctx) I.initialCtx $
       map (fmap fileProg) imports
-  (tenv1, d1, src') <-
-    badOnLeft T.prettyTypeError . snd $
-      T.checkDec imports src T.initialEnv imp $
-        mkOpen "/prelude/prelude"
-  (tenv2, d2, src'') <- case maybe_file of
-    Nothing -> pure (tenv1, d1, src')
-    Just file ->
-      badOnLeft T.prettyTypeError . snd $
-        T.checkDec imports src' tenv1 imp $
-          mkOpen $
-            toPOSIX $
-              dropExtension file
 
-  ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
-  ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
-  pure (src'', tenv2, ienv3)
+  let (tenv, ienv) =
+        let (iname, fm) = last imports
+         in ( fileScope fm,
+              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
+            )
+
+  pure (src, tenv, ienv)
   where
     badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
 
-runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (pure . Right) intOp
+runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
       c
     intOp (I.ExtOpBreak _ _ _ c) = c
-
-mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty

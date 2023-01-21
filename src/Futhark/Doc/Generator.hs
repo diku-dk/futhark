@@ -113,7 +113,7 @@ specRow a b c =
 vnameToFileMap :: Imports -> FileMap
 vnameToFileMap = mconcat . map forFile
   where
-    forFile (file, FileModule abs file_env _prog) =
+    forFile (file, FileModule abs file_env _prog _) =
       mconcat (map (vname Type) (M.keys abs))
         <> forEnv file_env
       where
@@ -436,7 +436,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
       ps' <- modParamHtml ps
       pure $ specRow (keyword "module " <> name') ": " (ps' <> sig')
 
-    FileModule _abs Env {envModTable = modtable} _ = fm
+    FileModule _abs Env {envModTable = modtable} _ _ = fm
     envSig (ModEnv e) = renderEnv e
     envSig (ModFun (FunSig _ _ (MTy _ m))) = envSig m
 
