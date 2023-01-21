@@ -31,7 +31,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   provided as command line arguments, optionally allowing a file
   import (#1408).
 
-
 ### Removed
 
 ### Changed
@@ -70,6 +69,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * When a file is loaded with `futhark repl`, `local` declarations are
   now available.
+
+* Missing alias propagation when pattern matching incompletely known
+  sum types (#1855).
 
 ## [0.22.7]
 
