@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Array payloads in sum types no longer need parens (#1853).
 
+* When a file is loaded with `futhark repl`, `local` declarations are
+  now available.
+
 ## [0.22.7]
 
 ### Added

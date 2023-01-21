@@ -143,8 +143,8 @@ envWithImports imports env =
 checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
-  (abs, env, decs') <- checkDecs decs
-  pure (FileModule abs env $ Prog doc decs')
+  (abs, env, decs', full_env) <- checkDecs decs
+  pure (FileModule abs env (Prog doc decs') full_env)
 
 dupDefinitionError ::
   MonadTypeChecker m =>
@@ -378,7 +378,7 @@ checkOneModExp (ModParens e loc) = do
   pure (abs, mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
-  (abstypes, env, decs') <- checkDecs decs
+  (abstypes, env, decs', _) <- checkDecs decs
   pure
     ( abstypes,
       MTy abstypes $ ModEnv env,
@@ -762,17 +762,19 @@ checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
   pure (mempty, env, ValDec vb')
 
-checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
+checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName], Env)
 checkDecs (d : ds) = do
   (d_abstypes, d_env, d') <- checkOneDec d
-  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
+  (ds_abstypes, ds_env, ds', full_env) <- localEnv d_env $ checkDecs ds
   pure
     ( d_abstypes <> ds_abstypes,
       case d' of
         LocalDec {} -> ds_env
         ImportDec {} -> ds_env
         _ -> ds_env <> d_env,
-      d' : ds'
+      d' : ds',
+      full_env
     )
-checkDecs [] =
-  pure (mempty, mempty, [])
+checkDecs [] = do
+  full_env <- askEnv
+  pure (mempty, mempty, [], full_env)

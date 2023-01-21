@@ -12,13 +12,11 @@ import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Data.Reader (readValues)
 import Futhark.Pipeline
-import Futhark.Util (toPOSIX)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Doc, align, hPutDoc, hPutDocLn, pretty, unAnnotate, (<+>))
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Semantic qualified as T
-import Language.Futhark.TypeChecker qualified as T
 import System.Exit
 import System.FilePath
 import System.IO
@@ -112,7 +110,7 @@ newFutharkiState ::
   FilePath ->
   IO (Either (Doc AnsiStyle) (T.Env, I.Ctx))
 newFutharkiState cfg file = runExceptT $ do
-  (ws, imports, src) <-
+  (ws, imports, _src) <-
     badOnLeft prettyCompilerError
       =<< liftIO
         ( runExceptT (readProgramFile [] file)
@@ -124,30 +122,20 @@ newFutharkiState cfg file = runExceptT $ do
       hPutDoc stderr $
         prettyWarnings ws
 
-  let imp = T.mkInitialImport "."
-  ienv1 <-
+  ictx <-
     foldM (\ctx -> badOnLeft I.prettyInterpreterError <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
       map (fmap fileProg) imports
-  (tenv1, d1, src') <-
-    badOnLeft T.prettyTypeError . snd $
-      T.checkDec imports src T.initialEnv imp $
-        mkOpen "/prelude/prelude"
-  (tenv2, d2, _) <-
-    badOnLeft T.prettyTypeError . snd $
-      T.checkDec imports src' tenv1 imp $
-        mkOpen $
-          toPOSIX $
-            dropExtension file
-  ienv2 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv1 d1)
-  ienv3 <- badOnLeft I.prettyInterpreterError =<< runInterpreter' (I.interpretDec ienv2 d2)
-  pure (tenv2, ienv3)
+  let (tenv, ienv) =
+        let (iname, fm) = last imports
+         in ( fileScope fm,
+              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
+            )
+
+  pure (tenv, ienv)
   where
     badOnLeft :: (err -> err') -> Either err a -> ExceptT err' IO a
     badOnLeft _ (Right x) = pure x
     badOnLeft p (Left err) = throwError $ p err
-
-mkOpen :: FilePath -> UncheckedDec
-mkOpen f = OpenDec (ModImport f NoInfo mempty) mempty
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (pure . Right) intOp
