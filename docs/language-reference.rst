@@ -551,6 +551,11 @@ in natural text.
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
   semantically invalid anyway).
 
+* A type application ``pt [n]t`` is parsed as an application of the
+  type constructor ``pt`` to the size argument ``[n]`` and the type
+  ``t``.  To pass a single array-typed parameter, enclose it in
+  parens.
+
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
   operators in the same row have the same precedence.  The rows are

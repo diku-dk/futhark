@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Simplification of concatenations (#1851).
 
+* Array payloads in sum types no longer need parens (#1853).
+
 ## [0.22.7]
 
 ### Added
