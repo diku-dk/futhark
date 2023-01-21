@@ -80,8 +80,12 @@ includeToText (ImportName s _) = T.pack $ Posix.normalise s
 data FileModule = FileModule
   { -- | Abstract types.
     fileAbs :: TySet,
+    -- | The environment made available when importing this module.
     fileEnv :: Env,
-    fileProg :: Prog
+    fileProg :: Prog,
+    -- | The environment at the bottom of the file.  Includes local
+    -- parts.
+    fileScope :: Env
   }
 
 -- | A mapping from import names to imports.  The ordering is significant.
