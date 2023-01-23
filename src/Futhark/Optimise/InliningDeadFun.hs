@@ -10,8 +10,10 @@ where
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
+import Data.Functor
 import Data.List (partition)
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Analysis.CallGraph
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -105,16 +107,69 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             to_inline_later
 
 calledOnce :: CallGraph -> S.Set Name
-calledOnce = S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
+calledOnce =
+  S.fromList . map fst . filter ((== 1) . snd) . M.toList . numOccurences
 
 inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | (length (bodyStms (funDefBody fd)) < 2)
+      | (length (bodyStms (funDefBody fd)) <= length (funDefRetType fd))
           || ("inline" `inAttrs` funDefAttrs fd) =
           S.singleton (funDefName fd)
       | otherwise = mempty
+
+directlyCalledInSOACs :: Prog SOACS -> S.Set Name
+directlyCalledInSOACs =
+  flip execState mempty . mapM_ onFunDef . progFuns
+  where
+    onFunDef = onBody False . funDefBody
+    onBody b = mapM_ (onStm b) . bodyStms
+    onStm b stm = onExp b (stmExp stm) $> stm
+    onExp True (Apply fname _ _ _) = modify $ S.insert fname
+    onExp False Apply {} = pure ()
+    onExp b e = walkExpM (walker b) e
+    onSOAC = void . traverseSOACStms (const (traverse (onStm True)))
+    walker b =
+      identityWalker
+        { walkOnBody = const (onBody b),
+          walkOnOp = onSOAC
+        }
+
+-- Expand set of function names with all reachable functions.
+withTransitiveCalls :: CallGraph -> S.Set Name -> S.Set Name
+withTransitiveCalls cg fs
+  | fs == fs' = fs
+  | otherwise = withTransitiveCalls cg fs'
+  where
+    fs' = fs <> foldMap (`allCalledBy` cg) fs
+
+calledInSOACs :: CallGraph -> Prog SOACS -> S.Set Name
+calledInSOACs cg prog = withTransitiveCalls cg $ directlyCalledInSOACs prog
+
+-- Inline those functions that are used in SOACs, and which involve
+-- arrays of any kind.
+inlineBecauseSOACs :: CallGraph -> Prog SOACS -> S.Set Name
+inlineBecauseSOACs cg prog =
+  S.fromList $ mapMaybe onFunDef $ progFuns prog
+  where
+    called = calledInSOACs cg prog
+    isArray = not . primType
+    onFunDef fd = do
+      guard $ funDefName fd `S.member` called
+      guard $
+        any (isArray . paramType) (funDefParams fd)
+          || any isArray (funDefRetType fd)
+          || arrayInBody (funDefBody fd)
+      Just $ funDefName fd
+    arrayInBody = any arrayInStm . bodyStms
+    arrayInStm stm =
+      any isArray (patTypes (stmPat stm)) || arrayInExp (stmExp stm)
+    arrayInExp (Match _ cases defbody _) =
+      any arrayInBody $ defbody : map caseBody cases
+    arrayInExp (DoLoop _ _ body) =
+      arrayInBody body
+    arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or
 -- have #[inline] on them.
@@ -124,10 +179,10 @@ consInlineFunctions prog =
   where
     cg = buildCallGraph prog
 
--- Inline everything that is not #[noinline].
+-- Inline aggressively; in particular most things called from a SOAC.
 aggInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
-  inlineFunctions 3 cg (S.fromList $ map funDefName $ progFuns prog) prog
+  inlineFunctions 3 cg (inlineBecauseTiny prog <> inlineBecauseSOACs cg prog) prog
   where
     cg = buildCallGraph prog
 
