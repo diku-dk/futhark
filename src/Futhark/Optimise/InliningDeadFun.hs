@@ -111,10 +111,8 @@ inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | length (bodyStms (funDefBody fd))
-          < 2
-          || "inline"
-          `inAttrs` funDefAttrs fd =
+      | (length (bodyStms (funDefBody fd)) < 2)
+          || ("inline" `inAttrs` funDefAttrs fd) =
           S.singleton (funDefName fd)
       | otherwise = mempty
 
@@ -126,6 +124,7 @@ consInlineFunctions prog =
   where
     cg = buildCallGraph prog
 
+-- Inline everything that is not #[noinline].
 aggInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
   inlineFunctions 3 cg (S.fromList $ map funDefName $ progFuns prog) prog
