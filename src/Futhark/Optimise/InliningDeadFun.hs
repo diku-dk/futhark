@@ -123,46 +123,57 @@ progStms :: Prog SOACS -> Stms SOACS
 progStms prog =
   progConsts prog <> foldMap (bodyStms . funDefBody) (progFuns prog)
 
-directlyCalledInSOACs :: Prog SOACS -> S.Set Name
-directlyCalledInSOACs = flip execState mempty . mapM_ (onStm False) . progStms
+data Used = InSOAC | InAD deriving (Eq, Ord, Show)
+
+directlyCalledInSOACs :: Prog SOACS -> M.Map Name Used
+directlyCalledInSOACs = flip execState mempty . mapM_ (onStm Nothing) . progStms
   where
-    onBody b = mapM_ (onStm b) . bodyStms
-    onStm b stm = onExp b (stmExp stm) $> stm
-    onExp True (Apply fname _ _ _) = modify $ S.insert fname
-    onExp False Apply {} = pure ()
-    onExp b e = walkExpM (walker b) e
-    onSOAC = void . traverseSOACStms (const (traverse (onStm True)))
-    walker b =
+    onBody :: Maybe Used -> Body SOACS -> State (M.Map Name Used) ()
+    onBody u = mapM_ (onStm u) . bodyStms
+    onStm u stm = onExp u (stmExp stm) $> stm
+    onExp (Just u) (Apply fname _ _ _) = modify $ M.insert fname u
+    onExp Nothing Apply {} = pure ()
+    onExp u e = walkExpM (walker u) e
+    onSOAC u soac = void $ traverseSOACStms (const (traverse (onStm u'))) soac
+      where
+        u' = max u $ Just $ usage soac
+    usage JVP {} = InAD
+    usage VJP {} = InAD
+    usage _ = InSOAC
+    walker u =
       identityWalker
-        { walkOnBody = const (onBody b),
-          walkOnOp = onSOAC
+        { walkOnBody = const (onBody u),
+          walkOnOp = onSOAC u
         }
 
 -- Expand set of function names with all reachable functions.
-withTransitiveCalls :: CallGraph -> S.Set Name -> S.Set Name
+withTransitiveCalls :: CallGraph -> M.Map Name Used -> M.Map Name Used
 withTransitiveCalls cg fs
   | fs == fs' = fs
   | otherwise = withTransitiveCalls cg fs'
   where
-    fs' = fs <> foldMap (`allCalledBy` cg) fs
+    look :: (Name, Used) -> M.Map Name Used
+    look (f, u) = M.fromList $ zip (S.toList (allCalledBy f cg)) $ repeat u
+    fs' = foldr (M.unionWith max . look) fs $ M.toList fs
 
-calledInSOACs :: CallGraph -> Prog SOACS -> S.Set Name
+calledInSOACs :: CallGraph -> Prog SOACS -> M.Map Name Used
 calledInSOACs cg prog = withTransitiveCalls cg $ directlyCalledInSOACs prog
 
 -- Inline those functions that are used in SOACs, and which involve
--- arrays of any kind.
+-- arrays of any kind, as well as any functions used in AD.
 inlineBecauseSOACs :: CallGraph -> Prog SOACS -> S.Set Name
 inlineBecauseSOACs cg prog =
   S.fromList $ mapMaybe onFunDef (progFuns prog)
   where
     called = calledInSOACs cg prog
     isArray = not . primType
+    inline _ InAD = True
+    inline fd InSOAC =
+      any (isArray . paramType) (funDefParams fd)
+        || any isArray (funDefRetType fd)
+        || arrayInBody (funDefBody fd)
     onFunDef fd = do
-      guard $ funDefName fd `S.member` called
-      guard $
-        any (isArray . paramType) (funDefParams fd)
-          || any isArray (funDefRetType fd)
-          || arrayInBody (funDefBody fd)
+      guard $ maybe False (inline fd) $ M.lookup (funDefName fd) called
       Just $ funDefName fd
     arrayInBody = any arrayInStm . bodyStms
     arrayInStm stm =
