@@ -1217,25 +1217,21 @@ compileCode (Imp.DeclareArray name t vs) = do
   -- to prevent it from going "out-of-scope" before calling
   -- unwrapArray (which internally uses the .ctype method); see
   -- https://docs.scipy.org/doc/numpy/reference/generated/numpy.ndarray.ctypes.html
-  atInit $
-    Assign (Field (Var "self") arr_name) $ case vs of
-      Imp.ArrayValues vs' ->
-        Call
-          (Var "np.array")
-          [ Arg $ List $ map compilePrimValue vs',
-            ArgKeyword "dtype" $ Var $ compilePrimToNp t
-          ]
-      Imp.ArrayZeros n ->
-        Call
-          (Var "np.zeros")
-          [ Arg $ Integer $ fromIntegral n,
-            ArgKeyword "dtype" $ Var $ compilePrimToNp t
-          ]
-  atInit $
-    Assign (Field (Var "self") (compileName name)) $
-      simpleCall "unwrapArray" [Field (Var "self") arr_name]
+  stm $ Assign (Var arr_name) $ case vs of
+    Imp.ArrayValues vs' ->
+      Call
+        (Var "np.array")
+        [ Arg $ List $ map compilePrimValue vs',
+          ArgKeyword "dtype" $ Var $ compilePrimToNp t
+        ]
+    Imp.ArrayZeros n ->
+      Call
+        (Var "np.zeros")
+        [ Arg $ Integer $ fromIntegral n,
+          ArgKeyword "dtype" $ Var $ compilePrimToNp t
+        ]
   name' <- compileVar name
-  stm $ Assign name' $ Field (Var "self") (compileName name)
+  stm $ Assign name' $ simpleCall "unwrapArray" [Var arr_name]
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment (T.unpack s) code'
