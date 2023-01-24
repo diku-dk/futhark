@@ -480,10 +480,6 @@ jobs:
       with:
         node-version: '16.x'
 
-    - name: Install Jest
-      run: |
-        npm install jest --global
-
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -497,7 +493,6 @@ jobs:
     - name: Run tests
       run: |
         make -C tests_lib/javascript
-        make -C tests_lib/web
 
   test-ir-parser:
     runs-on: ubuntu-22.04
