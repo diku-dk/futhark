@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `reduce_by_index` and `hist` were in some cases unable to handle
   input sizes that do not fit in a 32-bit integer.
 
+* A fusion bug related to fusing across transpositions could result in
+  a compiler crash (#1858).
+
 ## [0.22.7]
 
 ### Added

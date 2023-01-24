@@ -231,10 +231,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   guard $ SOAC.width soac_p == SOAC.width soac_c
 
   -- If we are getting rid of a producer output, then it must be used
-  -- without any transformation.
-  let bare_inputs = mapMaybe SOAC.isVarishInput (inputs ker)
-      ker_inputs = map SOAC.inputArray (inputs ker)
-      inputOrUnfus v = v `elem` bare_inputs || v `notElem` ker_inputs
+  -- exclusively without any transformations.
+  let ker_inputs = map SOAC.inputArray (inputs ker)
+      okInput v inp = v /= SOAC.inputArray inp || isJust (SOAC.isVarishInput inp)
+      inputOrUnfus v = all (okInput v) (inputs ker) || v `notElem` ker_inputs
 
   guard $ all inputOrUnfus outVars
 
