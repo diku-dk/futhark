@@ -73,6 +73,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Missing alias propagation when pattern matching incompletely known
   sum types (#1855).
 
+* `reduce_by_index` and `hist` were in some cases unable to handle
+  input sizes that do not fit in a 32-bit integer.
+
 ## [0.22.7]
 
 ### Added
