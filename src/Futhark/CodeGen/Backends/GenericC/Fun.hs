@@ -29,8 +29,9 @@ compileFunBody output_ptrs outputs code = do
       let ctp = primTypeToCType pt
       decl [C.cdecl|$ty:ctp $id:name;|]
 
-    setRetVal' p (MemParam name space) = do
-      resetMem [C.cexp|*$exp:p|] space
+    setRetVal' p (MemParam name space) =
+      -- It is required that the memory block is already initialised
+      -- (although it may be NULL).
       setMem [C.cexp|*$exp:p|] name space
     setRetVal' p (ScalarParam name _) =
       stm [C.cstm|*$exp:p = $id:name;|]
