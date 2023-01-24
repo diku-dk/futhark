@@ -111,6 +111,8 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
+  ctx->peak_mem_usage_default = 0;
+  ctx->cur_mem_usage_default = 0;
   ctx->constants = malloc(sizeof(struct constants));
   ctx->detail_memory = cfg->debugging;
   ctx->debugging = cfg->debugging;
