@@ -366,10 +366,9 @@ doHorizontalFusion dg = applyAugs pairs dg
       (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
       guard $ x < y
       -- Must share an input.
-      let inputVar (H.Input _ v _) = v
       guard $
         any
-          ((`elem` map inputVar (H.inputs soac_x)) . inputVar)
+          ((`elem` map H.inputArray (H.inputs soac_x)) . H.inputArray)
           (H.inputs soac_y)
       pure $ \dg' -> do
         -- Nodes might have been fused away by now.
