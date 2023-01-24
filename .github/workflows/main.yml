@@ -478,11 +478,11 @@ jobs:
 
     - uses: actions/setup-node@v3.5.1
       with:
-        node-version: '18.x'
+        node-version: '16.x'
 
     - name: Install Jest
       run: |
-        npm install jest --global
+        npm install jest@29.3.1 --global
 
     - uses: actions/download-artifact@v3
       with:
