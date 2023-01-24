@@ -119,11 +119,13 @@ inlineBecauseTiny = foldMap onFunDef . progFuns
           S.singleton (funDefName fd)
       | otherwise = mempty
 
+progStms :: Prog SOACS -> Stms SOACS
+progStms prog =
+  progConsts prog <> foldMap (bodyStms . funDefBody) (progFuns prog)
+
 directlyCalledInSOACs :: Prog SOACS -> S.Set Name
-directlyCalledInSOACs =
-  flip execState mempty . mapM_ onFunDef . progFuns
+directlyCalledInSOACs = flip execState mempty . mapM_ (onStm False) . progStms
   where
-    onFunDef = onBody False . funDefBody
     onBody b = mapM_ (onStm b) . bodyStms
     onStm b stm = onExp b (stmExp stm) $> stm
     onExp True (Apply fname _ _ _) = modify $ S.insert fname
@@ -151,7 +153,7 @@ calledInSOACs cg prog = withTransitiveCalls cg $ directlyCalledInSOACs prog
 -- arrays of any kind.
 inlineBecauseSOACs :: CallGraph -> Prog SOACS -> S.Set Name
 inlineBecauseSOACs cg prog =
-  S.fromList $ mapMaybe onFunDef $ progFuns prog
+  S.fromList $ mapMaybe onFunDef (progFuns prog)
   where
     called = calledInSOACs cg prog
     isArray = not . primType
