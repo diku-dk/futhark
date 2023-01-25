@@ -114,10 +114,12 @@ inlineBecauseTiny :: Prog SOACS -> S.Set Name
 inlineBecauseTiny = foldMap onFunDef . progFuns
   where
     onFunDef fd
-      | (length (bodyStms (funDefBody fd)) <= length (funDefRetType fd))
+      | (length (bodyStms (funDefBody fd)) <= k)
           || ("inline" `inAttrs` funDefAttrs fd) =
           S.singleton (funDefName fd)
       | otherwise = mempty
+      where
+        k = length (funDefRetType fd) + length (funDefParams fd)
 
 progStms :: Prog SOACS -> Stms SOACS
 progStms prog =
