@@ -258,6 +258,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Horizontal)
       | not (SOAC.nullTransforms $ fsOutputTransform ker) ->
           fail "Horizontal fusion is invalid in the presence of output transforms."
+    (_, _, Vertical)
+      | unfus_set /= mempty,
+        not (SOAC.nullTransforms $ fsOutputTransform ker) ->
+          fail "Cannot perform diagonal fusion in the presence of output transforms."
     ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
       SOAC.Screma _ (ScremaForm scans_p reds_p _) _,
       _
