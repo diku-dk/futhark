@@ -617,6 +617,7 @@ jobs:
         ls -R
     - name: Prepare package
       run: |
+        mkdir -p package
         cp */futhark-*.json package/
         gzip package/*.json
         for x in package/*.json.gz; do cp $x $(echo $x | sed "s/$GITHUB_SHA/latest/"); done
