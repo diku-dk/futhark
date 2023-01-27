@@ -373,43 +373,49 @@ void cmd_restore(struct server_state *s, const char *args[]) {
   if (f == NULL) {
     failure();
     printf("Failed to open %s: %s\n", fname, strerror(errno));
-  } else {
-    int values = 0;
-    for (int i = 1; arg_exists(args, i); i+=2, values++) {
-      const char *vname = get_arg(args, i);
-      const char *type = get_arg(args, i+1);
-
-      const struct type *t = get_type(s, type);
-      struct variable *v = create_variable(s, vname, t);
-
-      if (v == NULL) {
-        failure();
-        printf("Variable already exists: %s\n", vname);
-        return;
-      }
-
-      errno = 0;
-      if (t->restore(t->aux, f, s->ctx, value_ptr(&v->value)) != 0) {
-        failure();
-        printf("Failed to restore variable %s.\n"
-               "Possibly malformed data in %s (errno: %s)\n",
-               vname, fname, strerror(errno));
-        drop_variable(v);
-        break;
-      }
-    }
-
-    if (end_of_input(f) != 0) {
-      failure();
-      printf("Expected EOF after reading %d values from %s\n",
-             values, fname);
-    }
-
-    fclose(f);
+    return;
   }
 
-  int err = futhark_context_sync(s->ctx);
-  error_check(s, err);
+  int bad = 0;
+  int values = 0;
+  for (int i = 1; arg_exists(args, i); i+=2, values++) {
+    const char *vname = get_arg(args, i);
+    const char *type = get_arg(args, i+1);
+
+    const struct type *t = get_type(s, type);
+    struct variable *v = create_variable(s, vname, t);
+
+    if (v == NULL) {
+      bad = 1;
+      failure();
+      printf("Variable already exists: %s\n", vname);
+      break;
+    }
+
+    errno = 0;
+    if (t->restore(t->aux, f, s->ctx, value_ptr(&v->value)) != 0) {
+      bad = 1;
+      failure();
+      printf("Failed to restore variable %s.\n"
+             "Possibly malformed data in %s (errno: %s)\n",
+             vname, fname, strerror(errno));
+      drop_variable(v);
+      break;
+    }
+  }
+
+  if (!bad && end_of_input(f) != 0) {
+    failure();
+    printf("Expected EOF after reading %d values from %s\n",
+           values, fname);
+  }
+
+  fclose(f);
+
+  if (!bad) {
+    int err = futhark_context_sync(s->ctx);
+    error_check(s, err);
+  }
 }
 
 void cmd_store(struct server_state *s, const char *args[]) {
