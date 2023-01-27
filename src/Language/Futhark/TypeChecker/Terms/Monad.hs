@@ -305,7 +305,7 @@ instance Pretty Checking where
             "Cannot apply"
               <+> dquotes (pretty fname)
               <+> "to"
-              <+> dquotes (shorten $ group $ pretty e) <> " (invalid type)."
+              <+> dquotes (align $ shorten $ group $ pretty e) <> " (invalid type)."
   pretty (CheckingReturn expected actual) =
     "Function body does not have expected type."
       </> "Expected:"
