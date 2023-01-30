@@ -215,13 +215,10 @@ valuesAsVars server names_and_types _ _ (Values vs) = do
     mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
     hClose tmpf_h
     cmdRestore server tmpf names_and_types
-valuesAsVars server names_and_types _ _ (ScriptValues e) =
+valuesAsVars server names_and_types _ dir (ScriptValues e) =
   Script.withScriptServer' server $ \server' -> do
-    e_v <- Script.evalExp noBuiltin server' e
+    e_v <- Script.evalExp (Script.scriptBuiltin dir) server' e
     scriptValueAsVars server names_and_types e_v
-  where
-    noBuiltin f _ = do
-      throwError $ "Unknown builtin procedure: " <> f
 valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
   e <-
     either throwError pure . Script.parseExpFromText f
