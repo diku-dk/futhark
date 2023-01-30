@@ -323,6 +323,8 @@ scriptBuiltin dir "loaddata" vs =
       throwError $
         "$loaddata does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap V.valueType) vs)
+scriptBuiltin _ f _ =
+  throwError $ "Unknown builtin function $" <> prettyText f
 
 -- | Symbol table used for local variable lookups during expression evaluation.
 type VTable = M.Map VarName ExpValue
