@@ -10,6 +10,7 @@ import Futhark.CLI.Bench qualified as Bench
 import Futhark.CLI.C qualified as C
 import Futhark.CLI.CUDA qualified as CCUDA
 import Futhark.CLI.Check qualified as Check
+import Futhark.CLI.CompareBench qualified as CompareBench
 import Futhark.CLI.Datacmp qualified as Datacmp
 import Futhark.CLI.Dataset qualified as Dataset
 import Futhark.CLI.Defs qualified as Defs
@@ -77,7 +78,8 @@ commands =
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
-      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file."))
+      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
+      ("compare-bench", (CompareBench.main, "Compare two Futhark benchmarks."))
     ]
 
 msg :: String
