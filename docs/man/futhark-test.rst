@@ -60,6 +60,7 @@ braces is interpreted as a FutharkScript expression (see
 It must use only functions explicitly declared as entry points.  If
 the expression produces an *n*-element tuple, it will be unpacked and
 its components passed as *n* distinct arguments to the test function.
+The only builtin function supported is ``$loaddata``.
 
 If ``input`` is followed by an ``@`` and a file name (which must not
 contain any whitespace) instead of curly braces, values or
