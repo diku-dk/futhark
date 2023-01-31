@@ -401,22 +401,25 @@ pProgramTest = do
     pInputOutputs =
       "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
 
-validate :: ProgramTest -> Either String ProgramTest
-validate pt = noDups . names . testAction $ pt
+validate :: FilePath -> ProgramTest -> Either String ProgramTest
+validate path pt = do
+  case testAction pt of
+    CompileTimeFailure {} -> pure pt
+    RunCases ios _ _ -> do
+      mapM_ (noDups . map runDescription . iosTestRuns) ios
+      Right pt
   where
-    names CompileTimeFailure {} = mempty
-    names (RunCases ios _ _) = foldMap (map runDescription . iosTestRuns) ios
     noDups xs =
       let xs' = nubOrd xs
        in -- Works because \\ only removes first instance.
           case xs \\ xs' of
-            [] -> Right pt
-            x : _ -> Left $ "Multiple datasets with same name: " <> T.unpack x
+            [] -> Right ()
+            x : _ -> Left $ path <> ": multiple datasets with name " <> show (T.unpack x)
 
 -- | Read the test specification from the given Futhark program.
 testSpecFromProgram :: FilePath -> IO (Either String ProgramTest)
 testSpecFromProgram path =
-  ( either (Left . errorBundlePretty) validate . parse pProgramTest path
+  ( either (Left . errorBundlePretty) (validate path) . parse pProgramTest path
       <$> T.readFile path
   )
     `catch` couldNotRead
