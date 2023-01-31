@@ -37,8 +37,13 @@ as follows::
 
   [tags { tags... }]
   [entry: names...]
-  [compiled|nobench|random|script] input ({ values... } | @ filename)
+  ["name..."] [compiled|nobench|random|script] input ({ values... } | @ filename)
   output { values... } | auto output | error: regex
+
+If a test case begins with a quoted string, that string is reported as
+the dataset name, including in the JSON file produced by
+:ref:`futhark-bench(1)`.  If no name is provided, one is automatically
+generated.  The name must be unique across all test cases.
 
 If ``compiled`` is present before the ``input`` keyword, this test
 case will never be passed to the interpreter.  This is useful for test

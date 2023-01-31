@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `script input` now allows the use of `$loaddata`.
 
+* Datasets used in `futhark test` and `futhark bench` can now be named
+  (#1859).
+
 ### Removed
 
 ### Changed
