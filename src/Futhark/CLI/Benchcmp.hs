@@ -10,6 +10,7 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Futhark.Bench
+import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
 import Statistics.Sample qualified as S
 import System.Console.ANSI (hSupportsANSI)
@@ -79,9 +80,9 @@ nonTtyColors =
 -- | Reads a file without throwing an error.
 readFileSafely :: T.Text -> IO (Either T.Text LBS.ByteString)
 readFileSafely filepath =
-  (Right <$> (LBS.readFile $ T.unpack filepath)) `catch` couldNotRead
+  (Right <$> LBS.readFile (T.unpack filepath)) `catch` couldNotRead
   where
-    couldNotRead e = pure $ Left $ T.pack $ show (e :: IOError)
+    couldNotRead e = pure $ Left $ showText (e :: IOError)
 
 -- | Converts DataResults to a Map with the T.Text as a key.
 toDataResultsMap :: [DataResult] -> M.Map T.Text (Either T.Text Result)
