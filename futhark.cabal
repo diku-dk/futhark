@@ -184,7 +184,7 @@ library
       Futhark.CLI.C
       Futhark.CLI.CUDA
       Futhark.CLI.Check
-      Futhark.CLI.CompareBench
+      Futhark.CLI.Benchcmp
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
       Futhark.CLI.Defs

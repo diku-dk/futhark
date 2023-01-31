@@ -1,8 +1,8 @@
--- | @futhark compare-bench@
-module Futhark.CLI.CompareBench (main) where
+-- | @futhark benchcmp@
+module Futhark.CLI.Benchcmp (main) where
 
 import Control.Exception (catch)
-import Data.Bifunctor (Bifunctor (bimap, second))
+import Data.Bifunctor (Bifunctor (bimap, first, second))
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either qualified as E
 import Data.List qualified as L
@@ -31,20 +31,21 @@ data SpeedUp = SpeedUp
 -- colors ways of emphasising text.
 data Colors = Colors
   { -- | The header color.
-    header :: String,
+    header :: T.Text,
     -- | Okay color
-    okblue :: String,
+    okblue :: T.Text,
     -- | A second okay color
-    okgreen :: String,
+    okgreen :: T.Text,
     -- | Warning color.
-    warning :: String,
+    warning :: T.Text,
     -- | When something fails.
-    failing :: String,
+    failing :: T.Text,
     -- | Default color.
-    endc :: String,
+    endc :: T.Text,
     -- | Bold text.
-    bold :: String,
-    underline :: String -- Underline ^ text.
+    bold :: T.Text,
+    -- | Underline text.
+    underline :: T.Text
   }
 
 -- | Colors to use for a terminal device.
@@ -76,57 +77,58 @@ nonTtyColors =
     }
 
 -- | Reads a file without throwing an error.
-readFileSafely :: String -> IO (Either String LBS.ByteString)
+readFileSafely :: T.Text -> IO (Either T.Text LBS.ByteString)
 readFileSafely filepath =
-  (Right <$> LBS.readFile filepath) `catch` couldNotRead
+  (Right <$> (LBS.readFile $ T.unpack filepath)) `catch` couldNotRead
   where
-    couldNotRead e = pure $ Left $ show (e :: IOError)
+    couldNotRead e = pure $ Left $ T.pack $ show (e :: IOError)
 
--- | Converts DataResults to a Map with the string as a key.
-toDataResultsMap :: [DataResult] -> M.Map String (Either T.Text Result)
+-- | Converts DataResults to a Map with the T.Text as a key.
+toDataResultsMap :: [DataResult] -> M.Map T.Text (Either T.Text Result)
 toDataResultsMap = M.fromList . fmap toTuple
   where
-    toTuple (DataResult dataset dataResults) = (dataset, dataResults)
+    toTuple (DataResult dataset dataResults) = (T.pack dataset, dataResults)
 
 -- | Converts BenchResults to a Map with the file path as a key.
 toBenchResultsMap ::
   [BenchResult] ->
-  M.Map String (M.Map String (Either T.Text Result))
+  M.Map T.Text (M.Map T.Text (Either T.Text Result))
 toBenchResultsMap = M.fromList . fmap toTuple
   where
     toTuple (BenchResult path dataResults) =
-      (path, toDataResultsMap dataResults)
+      (T.pack path, toDataResultsMap dataResults)
 
 -- | Given a file path to a json file which has the form of a futhark benchmark
 -- result, it will try to parse the file to a Map of Maps. The key
 -- in the outer most dictionary is a file path the inner key is the dataset.
 decodeFileBenchResultsMap ::
-  String ->
-  IO (Either String (M.Map String (M.Map String (Either T.Text Result))))
+  T.Text ->
+  IO (Either T.Text (M.Map T.Text (M.Map T.Text (Either T.Text Result))))
 decodeFileBenchResultsMap path = do
   file <- readFileSafely path
-  pure $ toBenchResultsMap <$> (file >>= decodeBenchResults)
+  pure $ toBenchResultsMap <$> (file >>= (first T.pack . decodeBenchResults))
 
--- | Will return a string with an error saying there is a missing program in a
+-- | Will return a T.Text with an error saying there is a missing program in a
 -- given result.
-formatMissingProg :: String -> String -> String -> String
-formatMissingProg = printf "In %s but not %s: program %s"
+formatMissingProg :: T.Text -> T.Text -> T.Text -> T.Text
+formatMissingProg = ((T.pack .) .) . printf "In %s but not %s: program %s"
 
--- | Will return a string with an error saying there is a missing dataset in a
+-- | Will return a T.Text with an error saying there is a missing dataset in a
 -- given result.
-formatMissingData :: String -> String -> String -> String -> String
-formatMissingData = printf "In %s but not %s: program %s dataset %s"
+formatMissingData :: T.Text -> T.Text -> T.Text -> T.Text -> T.Text
+formatMissingData =
+  (((T.pack .) .) .) . printf "In %s but not %s: program %s dataset %s"
 
--- | Will return strings that say there are a missing program.
-formatManyMissingProg :: String -> String -> [String] -> [String]
+-- | Will return T.Texts that say there are a missing program.
+formatManyMissingProg :: T.Text -> T.Text -> [T.Text] -> [T.Text]
 formatManyMissingProg a_path b_path =
   zipWith3 formatMissingProg a_paths b_paths
   where
     a_paths = repeat a_path
     b_paths = repeat b_path
 
--- | Will return strings that say there are missing datasets for a program.
-formatManyMissingData :: String -> String -> String -> [String] -> [String]
+-- | Will return T.Texts that say there are missing datasets for a program.
+formatManyMissingData :: T.Text -> T.Text -> T.Text -> [T.Text] -> [T.Text]
 formatManyMissingData prog a_path b_path =
   L.zipWith4 formatMissingData a_paths b_paths progs
   where
@@ -137,12 +139,12 @@ formatManyMissingData prog a_path b_path =
 -- | Finds the keys two Maps does not have in common and returns a appropiate
 -- error based on the functioned passed.
 missingResults ::
-  (String -> String -> [String] -> [String]) ->
-  String ->
-  String ->
-  M.Map String a ->
-  M.Map String b ->
-  [String]
+  (T.Text -> T.Text -> [T.Text] -> [T.Text]) ->
+  T.Text ->
+  T.Text ->
+  M.Map T.Text a ->
+  M.Map T.Text b ->
+  [T.Text]
 missingResults toMissingMap a_path b_path a_results b_results = missing
   where
     a_keys = M.keys a_results
@@ -188,12 +190,12 @@ compareResult a b =
 -- | Given two Maps containing datasets as keys and results as values, compare
 -- the results and return the errors in a tuple.
 compareDataResults ::
-  String ->
-  String ->
-  String ->
-  M.Map String (Either T.Text Result) ->
-  M.Map String (Either T.Text Result) ->
-  (M.Map String SpeedUp, ([String], [String]))
+  T.Text ->
+  T.Text ->
+  T.Text ->
+  M.Map T.Text (Either T.Text Result) ->
+  M.Map T.Text (Either T.Text Result) ->
+  (M.Map T.Text SpeedUp, ([T.Text], [T.Text]))
 compareDataResults prog a_path b_path a_data b_data = result
   where
     formatMissing = formatManyMissingData prog
@@ -203,17 +205,17 @@ compareDataResults prog a_path b_path a_data b_data = result
     missing = missingResults formatMissing a_path b_path a_data' b_data'
     exists = M.intersectionWith compareResult a_data' b_data'
     errors = a_errors ++ b_errors
-    result = (exists, (T.unpack <$> errors, missing))
+    result = (exists, (errors, missing))
 
 -- | Given two Maps containing program file paths as keys and values as datasets
 -- with results. Compare the results for each dataset in each program and
 -- return the errors in a tuple.
 compareBenchResults ::
-  String ->
-  String ->
-  M.Map String (M.Map String (Either T.Text Result)) ->
-  M.Map String (M.Map String (Either T.Text Result)) ->
-  (M.Map String (M.Map String SpeedUp), ([String], [String]))
+  T.Text ->
+  T.Text ->
+  M.Map T.Text (M.Map T.Text (Either T.Text Result)) ->
+  M.Map T.Text (M.Map T.Text (Either T.Text Result)) ->
+  (M.Map T.Text (M.Map T.Text SpeedUp), ([T.Text], [T.Text]))
 compareBenchResults a_path b_path a_bench b_bench = (exists, errors_missing)
   where
     missing = missingResults formatManyMissingProg a_path b_path a_bench b_bench
@@ -224,60 +226,60 @@ compareBenchResults a_path b_path a_bench b_bench = (exists, errors_missing)
     errors_missing = second (missing ++) errors_missing'
 
 -- | Formats memory usage such that it is human readable. If the memory usage
--- is not significant an empty string is returned.
-memoryFormatter :: Colors -> String -> Double -> String
+-- is not significant an empty T.Text is returned.
+memoryFormatter :: Colors -> T.Text -> Double -> T.Text
 memoryFormatter colors key value
   | value < 0.99 = memoryFormat $ okgreen colors
   | value > 1.01 = memoryFormat $ failing colors
   | otherwise = ""
   where
-    memoryFormat c = printf "%s%4.2fx@%s%s" c value key endc'
+    memoryFormat c = T.pack $ printf "%s%4.2fx@%s%s" c value key endc'
     endc' = endc colors
 
 -- | Given a SpeedUp record the memory usage will be formatted to a colored
--- human readable string.
-toMemoryString :: Colors -> SpeedUp -> String
-toMemoryString colors data_result
-  | null memory_string = ""
-  | otherwise = " (mem: " ++ memory_string ++ ")"
+-- human readable T.Text.
+toMemoryText :: Colors -> SpeedUp -> T.Text
+toMemoryText colors data_result
+  | T.null memory_text = ""
+  | otherwise = " (mem: " <> memory_text <> ")"
   where
-    memory_string = M.foldrWithKey formatFolder "" memory
-    memory = M.mapKeys T.unpack $ memoryUsage data_result
-    formatFolder key value lst = lst ++ memoryFormatter colors key value
+    memory_text = M.foldrWithKey formatFolder "" memory
+    memory = memoryUsage data_result
+    formatFolder key value lst = lst <> memoryFormatter colors key value
 
--- | Given a string shorten it to a given length and add a suffix as the last
+-- | Given a T.Text shorten it to a given length and add a suffix as the last
 -- word.
-shorten :: Int -> String -> String -> String
+shorten :: Int -> T.Text -> T.Text -> T.Text
 shorten c end string
-  | length string > c = (unwords . init $ words shortened) ++ " " ++ end
+  | T.length string > c = (T.unwords . init $ T.words shortened) <> " " <> end
   | otherwise = string
   where
-    end_len = length end
-    (shortened, _) = splitAt (c - end_len) string
+    end_len = T.length end
+    (shortened, _) = T.splitAt (c - end_len) string
 
--- | Given a string add padding to the right of the string in form of spaces.
-rightPadding :: Int -> String -> String
-rightPadding c = printf s
+-- | Given a T.Text add padding to the right of the T.Text in form of spaces.
+rightPadding :: Int -> T.Text -> T.Text
+rightPadding c = T.pack . printf s
   where
-    s = "%-" ++ show c ++ "s"
+    s = "%-" <> show c <> "s"
 
 -- | Given a SpeedUp record print the SpeedUp in a human readable manner.
-printSpeedUp :: Colors -> String -> SpeedUp -> IO ()
+printSpeedUp :: Colors -> T.Text -> SpeedUp -> IO ()
 printSpeedUp colors dataset data_result = do
   let color
         | significant data_result && speedup data_result > 1.01 = okgreen colors
         | significant data_result && speedup data_result < 0.99 = failing colors
         | otherwise = ""
-  let short_dataset = rightPadding 64 . (++ ":") $ shorten 63 "[...]" dataset
-  let memory_string = toMemoryString colors data_result
+  let short_dataset = rightPadding 64 . (<> ":") $ shorten 63 "[...]" dataset
+  let memoryText = toMemoryText colors data_result
   let speedup' = speedup data_result
   let endc' = endc colors
   let format = "  %s%s%10.2fx%s%s"
-  putStrLn $ printf format short_dataset color speedup' endc' memory_string
+  putStrLn $ printf format short_dataset color speedup' endc' memoryText
 
 -- | Given a Map of SpeedUp records where the key is the program, print the
 -- SpeedUp in a human readable manner.
-printProgSpeedUps :: Colors -> String -> M.Map String SpeedUp -> IO ()
+printProgSpeedUps :: Colors -> T.Text -> M.Map T.Text SpeedUp -> IO ()
 printProgSpeedUps colors prog bench_result = do
   putStrLn ""
   putStrLn $ printf "%s%s%s%s" (header colors) (bold colors) prog (endc colors)
@@ -287,19 +289,21 @@ printProgSpeedUps colors prog bench_result = do
 -- the errors and print the speedups in a human readable manner.
 printComparisons ::
   Colors ->
-  M.Map String (M.Map String SpeedUp) ->
-  ([String], [String]) ->
+  M.Map T.Text (M.Map T.Text SpeedUp) ->
+  ([T.Text], [T.Text]) ->
   IO ()
 printComparisons colors speedups (errors, missing) = do
-  mapM_ putStrLn $ L.sort missing
-  mapM_ putStrLn $ L.sort errors
+  mapM_ (putStrLn . T.unpack) $ L.sort missing
+  mapM_ (putStrLn . T.unpack) $ L.sort errors
   mapM_ (uncurry (printProgSpeedUps colors)) $ M.toList speedups
 
--- | Run @futhark compare-bench@
+-- | Run @futhark benchcmp@
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "<file> <file>" f
   where
-    f [a_path, b_path] () = Just $ do
+    f [a_path', b_path'] () = Just $ do
+      let a_path = T.pack a_path'
+      let b_path = T.pack b_path'
       a_either <- decodeFileBenchResultsMap a_path
       b_either <- decodeFileBenchResultsMap b_path
 
@@ -315,8 +319,8 @@ main = mainWithOptions () [] "<file> <file>" f
               . compareBenchResults a_path b_path
 
       case (a_either, b_either) of
-        (Left a, Left b) -> putStrLn (a ++ "\n" ++ b)
-        (Left a, _) -> putStrLn a
-        (_, Left b) -> putStrLn b
+        (Left a, Left b) -> putStrLn . T.unpack $ (a <> "\n" <> b)
+        (Left a, _) -> putStrLn . T.unpack $ a
+        (_, Left b) -> putStrLn . T.unpack $ b
         (Right a, Right b) -> comparePrint a b
     f _ _ = Nothing
