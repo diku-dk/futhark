@@ -17,7 +17,7 @@ printable = getPrintableString <$> arbitrary
 instance Arbitrary DataResult where
   arbitrary =
     DataResult
-      <$> printable
+      <$> (T.pack <$> printable)
       <*> oneof
         [ Left <$> arbText,
           Right
