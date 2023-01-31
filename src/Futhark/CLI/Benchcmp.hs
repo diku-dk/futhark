@@ -84,7 +84,7 @@ readFileSafely filepath =
   where
     couldNotRead e = pure $ Left $ showText (e :: IOError)
 
--- | Converts DataResults to a Map with the T.Text as a key.
+-- | Converts DataResults to a Map with the text as a key.
 toDataResultsMap :: [DataResult] -> M.Map T.Text (Either T.Text Result)
 toDataResultsMap = M.fromList . fmap toTuple
   where
@@ -109,18 +109,18 @@ decodeFileBenchResultsMap path = do
   file <- readFileSafely path
   pure $ toBenchResultsMap <$> (file >>= (first T.pack . decodeBenchResults))
 
--- | Will return a T.Text with an error saying there is a missing program in a
+-- | Will return a text with an error saying there is a missing program in a
 -- given result.
 formatMissingProg :: T.Text -> T.Text -> T.Text -> T.Text
 formatMissingProg = ((T.pack .) .) . printf "In %s but not %s: program %s"
 
--- | Will return a T.Text with an error saying there is a missing dataset in a
+-- | Will return a text with an error saying there is a missing dataset in a
 -- given result.
 formatMissingData :: T.Text -> T.Text -> T.Text -> T.Text -> T.Text
 formatMissingData =
   (((T.pack .) .) .) . printf "In %s but not %s: program %s dataset %s"
 
--- | Will return T.Texts that say there are a missing program.
+-- | Will return texts that say there are a missing program.
 formatManyMissingProg :: T.Text -> T.Text -> [T.Text] -> [T.Text]
 formatManyMissingProg a_path b_path =
   zipWith3 formatMissingProg a_paths b_paths
@@ -128,7 +128,7 @@ formatManyMissingProg a_path b_path =
     a_paths = repeat a_path
     b_paths = repeat b_path
 
--- | Will return T.Texts that say there are missing datasets for a program.
+-- | Will return texts that say there are missing datasets for a program.
 formatManyMissingData :: T.Text -> T.Text -> T.Text -> [T.Text] -> [T.Text]
 formatManyMissingData prog a_path b_path =
   L.zipWith4 formatMissingData a_paths b_paths progs
@@ -227,7 +227,7 @@ compareBenchResults a_path b_path a_bench b_bench = (exists, errors_missing)
     errors_missing = second (missing ++) errors_missing'
 
 -- | Formats memory usage such that it is human readable. If the memory usage
--- is not significant an empty T.Text is returned.
+-- is not significant an empty text is returned.
 memoryFormatter :: Colors -> T.Text -> Double -> T.Text
 memoryFormatter colors key value
   | value < 0.99 = memoryFormat $ okgreen colors
@@ -238,7 +238,7 @@ memoryFormatter colors key value
     endc' = endc colors
 
 -- | Given a SpeedUp record the memory usage will be formatted to a colored
--- human readable T.Text.
+-- human readable text.
 toMemoryText :: Colors -> SpeedUp -> T.Text
 toMemoryText colors data_result
   | T.null memory_text = ""
@@ -248,7 +248,7 @@ toMemoryText colors data_result
     memory = memoryUsage data_result
     formatFolder key value lst = lst <> memoryFormatter colors key value
 
--- | Given a T.Text shorten it to a given length and add a suffix as the last
+-- | Given a text shorten it to a given length and add a suffix as the last
 -- word.
 shorten :: Int -> T.Text -> T.Text -> T.Text
 shorten c end string
@@ -258,7 +258,7 @@ shorten c end string
     end_len = T.length end
     (shortened, _) = T.splitAt (c - end_len) string
 
--- | Given a T.Text add padding to the right of the T.Text in form of spaces.
+-- | Given a text add padding to the right of the text in form of spaces.
 rightPadding :: Int -> T.Text -> T.Text
 rightPadding c = T.pack . printf s
   where
