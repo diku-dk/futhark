@@ -603,7 +603,7 @@ jobs:
         system: MI100
 
   benchmark-titanx-cuda:
-    runs-on: hendrix-titanx
+    runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
@@ -617,8 +617,23 @@ jobs:
         system: titanx
         gpu: titanx:1
 
+  benchmark-titanx-opencl:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: titanx
+        gpu: titanx:1
+
   benchmark-titanrtx-cuda:
-    runs-on: hendrix-titanx
+    runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
@@ -629,6 +644,21 @@ jobs:
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
+        system: titanrtx
+        gpu: titanrtx:1
+
+  benchmark-titanrtx-opencl:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
         system: titanrtx
         gpu: titanrtx:1
 
