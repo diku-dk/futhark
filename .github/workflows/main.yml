@@ -603,7 +603,7 @@ jobs:
         system: MI100
 
   benchmark-titanx-cuda:
-    runs-on: [hendrix-titanx]
+    runs-on: hendrix-titanx
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
