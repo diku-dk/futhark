@@ -27,7 +27,7 @@ import Control.Exception (catch)
 import Control.Monad
 import Data.Char
 import Data.Functor
-import Data.List (foldl')
+import Data.List (foldl', (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -38,7 +38,7 @@ import Futhark.Data.Parser
 import Futhark.Data.Parser qualified as V
 import Futhark.Script qualified as Script
 import Futhark.Test.Values qualified as V
-import Futhark.Util (directoryContents, showText)
+import Futhark.Util (directoryContents, nubOrd, showText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Exit
 import System.FilePath
@@ -46,6 +46,7 @@ import System.IO
 import System.IO.Error
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
+import Text.Megaparsec.Char.Lexer (charLiteral)
 import Text.Regex.TDFA
 import Prelude
 
@@ -240,6 +241,10 @@ parseRunTags = many . try . lexeme' $ do
   guard $ s `notElem` ["input", "structure", "warning"]
   pure s
 
+parseStringLiteral :: Parser () -> Parser T.Text
+parseStringLiteral sep =
+  lexeme sep . fmap T.pack $ char '"' >> manyTill charLiteral (char '"')
+
 parseRunCases :: Parser () -> Parser [TestRun]
 parseRunCases sep = parseRunCases' (0 :: Int)
   where
@@ -247,6 +252,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
       (:) <$> parseRunCase i <*> parseRunCases' (i + 1)
         <|> pure []
     parseRunCase i = do
+      name <- optional $ parseStringLiteral sep
       tags <- parseRunTags
       void $ lexeme sep "input"
       input <-
@@ -257,7 +263,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
               then parseScriptValues sep
               else parseValues sep
       expr <- parseExpectedResult sep
-      pure $ TestRun tags input expr i $ desc i input
+      pure $ TestRun tags input expr i $ fromMaybe (desc i input) name
 
     -- If the file is gzipped, we strip the 'gz' extension from
     -- the dataset name.  This makes it more convenient to rename
@@ -395,10 +401,22 @@ pProgramTest = do
     pInputOutputs =
       "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
 
+validate :: ProgramTest -> Either String ProgramTest
+validate pt = noDups . names . testAction $ pt
+  where
+    names CompileTimeFailure {} = mempty
+    names (RunCases ios _ _) = foldMap (map runDescription . iosTestRuns) ios
+    noDups xs =
+      let xs' = nubOrd xs
+       in -- Works because \\ only removes first instance.
+          case xs \\ xs' of
+            [] -> Right pt
+            x : _ -> Left $ "Multiple datasets with same name: " <> T.unpack x
+
 -- | Read the test specification from the given Futhark program.
 testSpecFromProgram :: FilePath -> IO (Either String ProgramTest)
 testSpecFromProgram path =
-  ( either (Left . errorBundlePretty) Right . parse pProgramTest path
+  ( either (Left . errorBundlePretty) validate . parse pProgramTest path
       <$> T.readFile path
   )
     `catch` couldNotRead
