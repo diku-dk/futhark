@@ -611,11 +611,11 @@ jobs:
       with:
         submodules: recursive
         fetch-depth: 0
-    - uses: diku-dk/futhark-ci/.github/actions/benchmark
+    - uses: ./.github/actions/benchmark
       with:
         backend: cuda
-        system: titanx
-        gpu: titanx
+        system: titanrtx
+        gpu: titanrtx:1
 
   benchmark-results:
     runs-on: ubuntu-22.04
