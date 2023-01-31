@@ -88,6 +88,7 @@ readFileSafely filepath =
 toDataResultsMap :: [DataResult] -> M.Map T.Text (Either T.Text Result)
 toDataResultsMap = M.fromList . fmap toTuple
   where
+    toTuple :: DataResult -> (T.Text, Either T.Text Result)
     toTuple (DataResult dataset dataResults) = (T.pack dataset, dataResults)
 
 -- | Converts BenchResults to a Map with the file path as a key.
