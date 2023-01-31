@@ -38,7 +38,7 @@ import Futhark.Data.Parser
 import Futhark.Data.Parser qualified as V
 import Futhark.Script qualified as Script
 import Futhark.Test.Values qualified as V
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, showText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Exit
 import System.FilePath
@@ -112,7 +112,7 @@ data TestRun = TestRun
     runInput :: Values,
     runExpectedResult :: ExpectedResult Success,
     runIndex :: Int,
-    runDescription :: String
+    runDescription :: T.Text
   }
   deriving (Show)
 
@@ -137,11 +137,11 @@ data GenValue
 
 -- | A prettyprinted representation of type of value produced by a
 -- 'GenValue'.
-genValueType :: GenValue -> String
+genValueType :: GenValue -> T.Text
 genValueType (GenValue (V.ValueType ds t)) =
-  concatMap (\d -> "[" ++ show d ++ "]") ds ++ T.unpack (V.primTypeText t)
+  foldMap (\d -> "[" <> showText d <> "]") ds <> V.primTypeText t
 genValueType (GenPrim v) =
-  T.unpack $ V.valueText v
+  V.valueText v
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -265,22 +265,22 @@ parseRunCases sep = parseRunCases' (0 :: Int)
     -- does not change (which would make comparisons to historical
     -- data harder).
     desc _ (InFile path)
-      | takeExtension path == ".gz" = dropExtension path
-      | otherwise = path
+      | takeExtension path == ".gz" = T.pack $ dropExtension path
+      | otherwise = T.pack path
     desc i (Values vs) =
       -- Turn linebreaks into space.
-      "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
+      "#" <> showText i <> " (\"" <> T.unwords (T.lines vs') <> "\")"
       where
-        vs' = case unwords $ map (T.unpack . V.valueText) vs of
+        vs' = case T.unwords $ map V.valueText vs of
           s
-            | length s > 50 -> take 50 s ++ "..."
+            | T.length s > 50 -> T.take 50 s <> "..."
             | otherwise -> s
     desc _ (GenValues gens) =
-      unwords $ map genValueType gens
+      T.unwords $ map genValueType gens
     desc _ (ScriptValues e) =
-      T.unpack $ prettyTextOneLine e
+      prettyTextOneLine e
     desc _ (ScriptFile path) =
-      path
+      T.pack path
 
 parseExpectedResult :: Parser () -> Parser (ExpectedResult Success)
 parseExpectedResult sep =

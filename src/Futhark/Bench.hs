@@ -54,7 +54,7 @@ data Result = Result
 -- | The results for a single named dataset is either an error message, or
 -- runtime measurements, the number of bytes used, and the stderr that was
 -- produced.
-data DataResult = DataResult String (Either T.Text Result)
+data DataResult = DataResult T.Text (Either T.Text Result)
   deriving (Eq, Show)
 
 -- | The results for all datasets for some benchmark program.
@@ -88,16 +88,16 @@ instance JSON.FromJSON DataResults where
     DataResults <$> mapM datasetResult (JSON.toList o)
     where
       datasetResult (k, v) =
-        DataResult (JSON.toString k)
+        DataResult (JSON.toText k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
         Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
-  (JSON.fromString desc, JSON.toJSON err)
+  (JSON.fromText desc, JSON.toJSON err)
 dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
-  ( JSON.fromString desc,
+  ( JSON.fromText desc,
     JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
         ("bytes", JSON.toJSON bytes)

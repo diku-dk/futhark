@@ -242,7 +242,8 @@ runBenchmark opts futhark (program, cases) = do
 
     relevant = maybe (const True) (==) (optEntryPoint opts) . T.unpack . iosEntryPoint
 
-    pad_to = foldl max 0 $ concatMap (map (length . atMostChars maxDatasetNameLength . runDescription) . iosTestRuns) cases
+    len = T.length . atMostChars maxDatasetNameLength . runDescription
+    pad_to = foldl max 0 $ concatMap (map len . iosTestRuns) cases
 
 runOptions :: ((Int, Maybe Double) -> IO ()) -> BenchOptions -> RunOptions
 runOptions f opts =
@@ -256,8 +257,8 @@ runOptions f opts =
       runResultAction = f
     }
 
-descString :: String -> Int -> String
-descString desc pad_to = desc ++ ": " ++ replicate (pad_to - length desc) ' '
+descText :: T.Text -> Int -> T.Text
+descText desc pad_to = desc <> ": " <> T.replicate (pad_to - T.length desc) " "
 
 progress :: Double -> T.Text
 progress elapsed =
@@ -290,17 +291,17 @@ convergenceBar p spin_count us_sum i rse' = do
 
 data BenchPhase = Initial | Convergence
 
-mkProgressPrompt :: BenchOptions -> Int -> String -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
+mkProgressPrompt :: BenchOptions -> Int -> T.Text -> UTCTime -> IO ((Maybe Int, Maybe Double) -> IO ())
 mkProgressPrompt opts pad_to dataset_desc start_time
   | fancyTerminal = do
       count <- newIORef (0, 0)
       phase_var <- newIORef Initial
       spin_count <- newIORef 0
       pure $ \(us, rse) -> do
-        putStr "\r" -- Go to start of line.
+        T.putStr "\r" -- Go to start of line.
         let p s =
               T.putStr $
-                T.pack (descString (atMostChars maxDatasetNameLength dataset_desc) pad_to) <> s
+                descText (atMostChars maxDatasetNameLength dataset_desc) pad_to <> s
 
         (us_sum, i) <- readIORef count
 
@@ -343,7 +344,7 @@ mkProgressPrompt opts pad_to dataset_desc start_time
         putStr " " -- Just to move the cursor away from the progress bar.
         hFlush stdout
   | otherwise = do
-      putStr $ descString dataset_desc pad_to
+      T.putStr $ descText dataset_desc pad_to
       hFlush stdout
       pure $ const $ pure ()
   where
@@ -390,8 +391,8 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
 
   when fancyTerminal $ do
     clearLine
-    putStr "\r"
-    putStr $ descString (atMostChars maxDatasetNameLength dataset_desc) pad_to
+    T.putStr "\r"
+    T.putStr $ descText (atMostChars maxDatasetNameLength dataset_desc) pad_to
 
   case res of
     Left err -> liftIO $ do
