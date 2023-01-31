@@ -25,7 +25,7 @@ COMMANDS
 ========
 
 futhark benchcmp FILE_A FILE_B
------------------------------
+------------------------------
 
 Compares two Futhark benchmarks and reports changes in performance.
 The files must be formatted in the same manner as a JSON file returned
