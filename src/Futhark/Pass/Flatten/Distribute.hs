@@ -16,6 +16,7 @@ import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
 import Futhark.IR.SOACS
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 
 newtype ResTag = ResTag Int
@@ -163,7 +164,7 @@ distributeMap outer_scope map_pat w arrs lam =
               $ used_free
           stm' =
             DistStm
-              (used_free_types <> used_free)
+              (nubOrd $ used_free_types <> used_free)
               (zipWith DistResult new_tags $ map distType $ patTypes pat)
               stm
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')

@@ -291,7 +291,7 @@ prefixSumBuiltin = buildingBuiltin $ do
 flatteningBuiltins :: [FunDef GPU]
 flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin]
 
--- | Perform a segmented iota. Returns flags,offsets,data.
+-- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
 doSegIota :: VName -> Builder GPU (VName, VName, VName)
 doSegIota ns = do
   ns_t <- lookupType ns
@@ -315,7 +315,8 @@ doSegIota ns = do
       (Safe, mempty, mempty)
   pure (flags, offsets, elems)
 
--- | Returns @(flags, offsets, elems)@.
+-- | Produces @[0,0,0,1,1,2,2,2,...]@.  Returns @(flags, offsets,
+-- elems)@.
 doRepIota :: VName -> Builder GPU (VName, VName, VName)
 doRepIota ns = do
   ns_t <- lookupType ns
