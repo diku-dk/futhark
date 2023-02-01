@@ -57,4 +57,4 @@ if __name__ == '__main__':
             json.dump(then, then_file)
             now_file.flush()
             then_file.flush()
-            os.system('tools/cmp-bench-json.py {} {}'.format(then_file.name, now_file.name))
+            os.system('futhark benchcmp {} {}'.format(then_file.name, now_file.name))
