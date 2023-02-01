@@ -37,7 +37,13 @@ runs:
       shell: bash
       run: |
         module load cuda # Is this always appropriate?
-        python3.9 slurmbench.py --gpu=${{inputs.gpu}} --futhark="$PWD/futhark-nightly-linux-x86_64/bin/futhark" --slurm-options=${{inputs.slurm}} --futhark-options='--ignore-files /lib/ --backend=${{inputs.backend}} --exclude no_${{inputs.system}} ${{inputs.options}}' --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json --benchmarks=futhark-benchmarks
+        python3.9 slurmbench.py \
+          --gpu=${{inputs.gpu}} \
+          --futhark="$PWD/futhark-nightly-linux-x86_64/bin/futhark" \
+          --slurm-options=${{inputs.slurm}} \
+          --futhark-options='--ignore-files /lib/ --backend=${{inputs.backend}} --exclude no_${{inputs.system}} ${{inputs.options}}' \
+          --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
+          --benchmarks=futhark-benchmarks
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
