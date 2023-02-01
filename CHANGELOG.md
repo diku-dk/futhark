@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   repository, as long as `git clone` works.  In particular, you can
   use private and self-hosted repositories.
 
+* Significant reduction in compilation time by doing internal sanity
+  checks in separate thread.
+
+* New command: `futhark eval`. Evaluates Futhark expressions
+  provided as command line arguments, optionally allowing a file
+  import (#1408).
+
+* `script input` now allows the use of `$loaddata`.
+
+* Datasets used in `futhark test` and `futhark bench` can now be named
+  (#1859).
+
 ### Removed
 
 ### Changed
@@ -52,6 +64,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Defunctionalisation could mess up sum types, leading to invalid code
   generation by internalisation, leading to a compiler crash (#1847).
+
+* The `#[break]` attribute now provides the right environment to
+  `futhark repl`, allowing local variables to be inspected.
+
+* Simplification of concatenations (#1851).
+
+* Array payloads in sum types no longer need parens (#1853).
+
+* When a file is loaded with `futhark repl`, `local` declarations are
+  now available.
+
+* Missing alias propagation when pattern matching incompletely known
+  sum types (#1855).
+
+* `reduce_by_index` and `hist` were in some cases unable to handle
+  input sizes that do not fit in a 32-bit integer.
+
+* A fusion bug related to fusing across transpositions could result in
+  a compiler crash (#1858).
 
 ## [0.22.7]
 

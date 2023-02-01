@@ -231,10 +231,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
   guard $ SOAC.width soac_p == SOAC.width soac_c
 
   -- If we are getting rid of a producer output, then it must be used
-  -- without any transformation.
-  let bare_inputs = mapMaybe SOAC.isVarishInput (inputs ker)
-      ker_inputs = map SOAC.inputArray (inputs ker)
-      inputOrUnfus v = v `elem` bare_inputs || v `notElem` ker_inputs
+  -- exclusively without any transformations.
+  let ker_inputs = map SOAC.inputArray (inputs ker)
+      okInput v inp = v /= SOAC.inputArray inp || isJust (SOAC.isVarishInput inp)
+      inputOrUnfus v = all (okInput v) (inputs ker) || v `notElem` ker_inputs
 
   guard $ all inputOrUnfus outVars
 
@@ -258,6 +258,10 @@ fuseSOACwithKer mode unfus_set outVars soac_p ker = do
     (_, _, Horizontal)
       | not (SOAC.nullTransforms $ fsOutputTransform ker) ->
           fail "Horizontal fusion is invalid in the presence of output transforms."
+    (_, _, Vertical)
+      | unfus_set /= mempty,
+        not (SOAC.nullTransforms $ fsOutputTransform ker) ->
+          fail "Cannot perform diagonal fusion in the presence of output transforms."
     ( SOAC.Screma _ (ScremaForm scans_c reds_c _) _,
       SOAC.Screma _ (ScremaForm scans_p reds_p _) _,
       _

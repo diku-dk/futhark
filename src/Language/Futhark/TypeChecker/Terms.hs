@@ -1438,6 +1438,8 @@ inferReturnUniqueness params t =
       uniques = uniqueParamNames params
       delve (Scalar (Record fs)) =
         Scalar $ Record $ M.map delve fs
+      delve (Scalar (Sum cs)) =
+        Scalar $ Sum $ M.map (map delve) cs
       delve t'
         | all (`S.member` uniques) (boundArrayAliases t'),
           not $ any ((`S.member` forbidden) . aliasVar) (aliases t') =

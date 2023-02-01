@@ -480,10 +480,6 @@ jobs:
       with:
         node-version: '16.x'
 
-    - name: Install Jest
-      run: |
-        npm install jest --global
-
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -497,7 +493,6 @@ jobs:
     - name: Run tests
       run: |
         make -C tests_lib/javascript
-        make -C tests_lib/web
 
   test-ir-parser:
     runs-on: ubuntu-22.04
@@ -568,7 +563,7 @@ jobs:
   benchmark-A100-cuda:
     runs-on: A100
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
     - uses: actions/checkout@v3
       with:
@@ -582,7 +577,7 @@ jobs:
   benchmark-A100-opencl:
     runs-on: A100
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
     - uses: actions/checkout@v3
       with:
@@ -596,7 +591,7 @@ jobs:
   benchmark-MI100-opencl:
     runs-on: MI100
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
     steps:
     - uses: actions/checkout@v3
       with:
@@ -620,12 +615,15 @@ jobs:
     - uses: actions/download-artifact@v3
     - run: |
         ls -R
-    - name: Compress JSONs
+    - name: Prepare package
       run: |
-        gzip */futhark-*.json
+        mkdir -p package
+        cp */futhark-*.json package/
+        gzip package/*.json
+        for x in package/*.json.gz; do cp $x $(echo $x | sed "s/$GITHUB_SHA/latest/"); done
     - name: scp to server
       run: |
-        scp -o StrictHostKeyChecking=no */futhark-*.json.gz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
+        scp -o StrictHostKeyChecking=no package/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
 
   deploy-nightly:
     runs-on: ubuntu-22.04

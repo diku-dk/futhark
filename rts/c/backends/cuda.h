@@ -915,6 +915,8 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
+  ctx->peak_mem_usage_device = 0;
+  ctx->cur_mem_usage_device = 0;
 
   ctx->error = cuda_setup(ctx, cuda_program, ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
 

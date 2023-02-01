@@ -164,6 +164,7 @@ import Language.Futhark.Parser.Monad
       hole            { L $$ HOLE }
 
 %left bottom
+%left typeprec
 %left ifprec letprec caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
@@ -183,7 +184,8 @@ import Language.Futhark.Parser.Monad
 %left '*...' '*' '/...' '%...' '//...' '%%...'
 %left '**...'
 %left juxtprec
-%left indexprec
+%left '[' '...[' indexprec
+%left top
 %%
 
 -- The main parser.
@@ -460,27 +462,21 @@ TypeExpDims :: { [Name] }
 TypeExpTerm :: { UncheckedTypeExp }
          : '*' TypeExpTerm
            { TEUnique $2 (srcspan $1 $>) }
-         | '[' SizeExp ']' TypeExpTerm %prec indexprec
-           { TEArray $2 $4 (srcspan $1 $>) }
-         | '...[' SizeExp ']' TypeExpTerm %prec indexprec
-           { TEArray $2 $4 (srcspan $1 $>) }
-         | TypeExpApply %prec sumprec { $1 }
-         | SumType                    { $1 }
+         | TypeExpApply %prec typeprec { $1 }
+         | SumClauses %prec sumprec
+           { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
 
          -- Errors
          | '[' SizeExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
-                T.unlines ["missing array row type.",
+                T.unlines ["Missing array row type.",
                            "Did you mean []"  <> prettyText $2 <> "?"]
            }
          | '...[' SizeExp ']' %prec bottom
            {% parseErrorAt (srcspan $1 $>) $ Just $
-                T.unlines ["missing array row type.",
+                T.unlines ["Missing array row type.",
                            "Did you mean []"  <> prettyText $2 <> "?"]
            }
-
-SumType :: { UncheckedTypeExp }
-SumType  : SumClauses %prec sumprec { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
 
 SumClauses :: { ([(Name, [UncheckedTypeExp])], Loc) }
             : SumClauses '|' SumClause %prec sumprec
@@ -489,11 +485,13 @@ SumClauses :: { ([(Name, [UncheckedTypeExp])], Loc) }
             | SumClause  %prec sumprec
               { let (n, ts, loc) = $1 in ([(n, ts)], loc) }
 
+SumPayload :: { [UncheckedTypeExp] }
+           : %prec bottom           { [] }
+           | TypeExpAtom SumPayload { $1 : $2 }
+
 SumClause :: { (Name, [UncheckedTypeExp], Loc) }
-           : SumClause TypeExpAtom
-             { let (n, ts, loc) = $1 in (n, ts ++ [$2], locOf (srcspan loc $>))}
-           | Constr
-            { (fst $1, [], snd $1) }
+           : Constr SumPayload
+             { (fst $1, $2, locOf (srcspan (snd $1) $>)) }
 
 TypeExpApply :: { UncheckedTypeExp }
               : TypeExpApply TypeArg
@@ -507,15 +505,22 @@ TypeExpAtom :: { UncheckedTypeExp }
              | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) (srcspan $1 $>) }
              | '{' '}'                        { TERecord [] (srcspan $1 $>) }
              | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
+             | '[' SizeExp ']' TypeExpTerm
+               { TEArray $2 $4 (srcspan $1 $>) }
+             | '...[' SizeExp ']' TypeExpTerm
+               { TEArray $2 $4 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (srclocOf (snd $1)) }
 
 Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
 TypeArg :: { TypeArgExp Name }
-         : '[' SizeExp ']'  { TypeArgExpDim $2 (srcspan $1 $>) }
-         | '...[' SizeExp ']' { TypeArgExpDim $2 (srcspan $1 $>) }
-         | TypeExpAtom      { TypeArgExpType $1 }
+         : '[' SizeExp ']' %prec top
+           { TypeArgExpDim $2 (srcspan $1 $>) }
+         | '...[' SizeExp ']' %prec top
+           { TypeArgExpDim $2 (srcspan $1 $>) }
+         | TypeExpAtom
+           { TypeArgExpType $1 }
 
 FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }

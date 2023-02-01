@@ -30,7 +30,6 @@ import Language.Futhark.TypeChecker qualified as T
 import NeatInterpolation (text)
 import System.Console.Haskeline qualified as Haskeline
 import System.Directory
-import System.FilePath
 import System.IO (stdout)
 import Text.Read (readMaybe)
 
@@ -150,36 +149,24 @@ extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
 
 newFutharkiState :: Int -> LoadedProg -> Maybe FilePath -> IO (Either (Doc AnsiStyle) FutharkiState)
 newFutharkiState count prev_prog maybe_file = runExceptT $ do
-  (prog, tenv, ienv) <- case maybe_file of
-    Nothing -> do
-      -- Load the builtins through the type checker.
-      prog <-
-        badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [] M.empty)
-      -- Then into the interpreter.
-      ienv <-
-        foldM
-          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
-          I.initialCtx
-          $ map (fmap fileProg) (lpImports prog)
+  let files = maybeToList maybe_file
+  -- Put code through the type checker.
+  prog <-
+    badOnLeft prettyProgErrors
+      =<< liftIO (reloadProg prev_prog files M.empty)
+  liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
+  -- Then into the interpreter.
+  ictx <-
+    foldM
+      (\ctx -> badOnLeft (pretty . show) <=< runInterpreterNoBreak . I.interpretImport ctx)
+      I.initialCtx
+      $ map (fmap fileProg) (lpImports prog)
 
-      let (tenv, ienv') =
-            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude"]
-
-      pure (prog, tenv, ienv')
-    Just file -> do
-      prog <- badOnLeft prettyProgErrors =<< liftIO (reloadProg prev_prog [file] M.empty)
-      liftIO $ putDoc $ prettyWarnings $ lpWarnings prog
-
-      ienv <-
-        foldM
-          (\ctx -> badOnLeft (pretty . show) <=< runInterpreter' . I.interpretImport ctx)
-          I.initialCtx
-          $ map (fmap fileProg) (lpImports prog)
-
-      let (tenv, ienv') =
-            extendEnvs prog (T.initialEnv, ienv) ["/prelude/prelude", dropExtension file]
-
-      pure (prog, tenv, ienv')
+  let (tenv, ienv) =
+        let (iname, fm) = last $ lpImports prog
+         in ( fileScope fm,
+              ictx {I.ctxEnv = I.ctxImports ictx M.! iname}
+            )
 
   pure
     FutharkiState
@@ -267,7 +254,7 @@ onDec d = do
     Left e -> liftIO $ putDoc $ prettyProgErrors e
     Right prog -> do
       env <- gets futharkiEnv
-      let (tenv, ienv) = extendEnvs prog env (map fst $ decImports d)
+      let (tenv, ienv) = extendEnvs prog env $ map fst $ decImports d
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
@@ -371,8 +358,8 @@ runInterpreter m = runF m (pure . Right) intOp
 
       c
 
-runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
-runInterpreter' m = runF m (pure . Right) intOp
+runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err
     intOp (I.ExtOpTrace w v c) = do

@@ -23,11 +23,13 @@ module Futhark.Pipeline
 where
 
 import Control.Category
+import Control.Exception (SomeException, catch, throwIO)
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer.Strict hiding (pass)
+import Control.Parallel
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Time.Clock
@@ -81,13 +83,32 @@ instance MonadLogger FutharkM where
         modify $ \s -> s {futharkPrevLog = now}
         when verb $ liftIO $ T.hPutStrLn stderr $ T.pack prefix <> msg
 
+runFutharkM' ::
+  FutharkM a ->
+  FutharkState ->
+  FutharkEnv ->
+  IO (Either CompilerError a, FutharkState)
+runFutharkM' (FutharkM m) s =
+  runReaderT (runStateT (runExceptT m) s)
+
 -- | Run a 'FutharkM' action.
 runFutharkM :: FutharkM a -> Verbosity -> IO (Either CompilerError a)
-runFutharkM (FutharkM m) verbose = do
+runFutharkM m verbose = do
   s <- FutharkState <$> getCurrentTime <*> pure blankNameSource
-  runReaderT (evalStateT (runExceptT m) s) newEnv
-  where
-    newEnv = FutharkEnv verbose
+  fst <$> runFutharkM' m s (FutharkEnv verbose)
+
+catchIO :: FutharkM a -> (SomeException -> FutharkM a) -> FutharkM a
+catchIO m f = FutharkM $ do
+  s <- get
+  env <- ask
+  (x, s') <-
+    liftIO $
+      runFutharkM' m s env `catch` \e ->
+        runFutharkM' (f e) s env
+  put s'
+  case x of
+    Left e -> throwError e
+    Right x' -> pure x'
 
 -- | A compilation always ends with some kind of action.
 data Action rep = Action
@@ -105,14 +126,21 @@ data PipelineConfig = PipelineConfig
 -- | A compiler pipeline is conceptually a function from programs to
 -- programs, where the actual representation may change.  Pipelines
 -- can be composed using their 'Category' instance.
-newtype Pipeline fromrep torep = Pipeline {unPipeline :: PipelineConfig -> Prog fromrep -> FutharkM (Prog torep)}
+newtype Pipeline fromrep torep = Pipeline
+  { unPipeline ::
+      forall a.
+      PipelineConfig ->
+      Prog fromrep ->
+      FutharkM ((Prog torep -> FutharkM a) -> FutharkM a)
+  }
 
 instance Category Pipeline where
-  id = Pipeline $ const pure
+  id = Pipeline $ \_ prog -> pure $ \c -> c prog
   p2 . p1 = Pipeline perform
     where
-      perform cfg prog =
-        runPipeline p2 cfg =<< runPipeline p1 cfg prog
+      perform cfg prog = do
+        rc <- unPipeline p1 cfg prog
+        rc $ unPipeline p2 cfg
 
 -- | Run the pipeline on the given program.
 runPipeline ::
@@ -120,7 +148,9 @@ runPipeline ::
   PipelineConfig ->
   Prog fromrep ->
   FutharkM (Prog torep)
-runPipeline = unPipeline
+runPipeline p cfg prog = do
+  rc <- unPipeline p cfg prog
+  rc pure
 
 -- | Construct a pipeline from a single compiler pass.
 onePass ::
@@ -130,16 +160,28 @@ onePass ::
 onePass pass = Pipeline perform
   where
     perform cfg prog = do
-      when (pipelineVerbose cfg) $
-        logMsg $
-          "Running pass " <> T.pack (passName pass)
+      when (pipelineVerbose cfg) . logMsg $
+        "Running pass " <> T.pack (passName pass)
       prog' <- runPass pass prog
-      let prog'' = Alias.aliasAnalysis prog'
-      when (pipelineValidate cfg) $
-        case checkProg prog'' of
-          Left err -> validationError pass prog'' $ show err
-          Right () -> pure ()
-      pure prog'
+      -- Spark validation in a separate task and speculatively execute
+      -- next pass.  If the next pass throws an exception, we better
+      -- be ready to catch it and check if it might be because the
+      -- program was actually ill-typed.
+      let check =
+            if pipelineValidate cfg
+              then validate prog'
+              else Right ()
+      par check $ pure $ \c ->
+        (errorOnError check pure =<< c prog')
+          `catchIO` errorOnError check (liftIO . throwIO)
+    validate prog =
+      let prog' = Alias.aliasAnalysis prog
+       in case checkProg prog' of
+            Left err -> Left (prog', err)
+            Right () -> Right ()
+    errorOnError (Left (prog, err)) _ _ =
+      validationError pass prog $ show err
+    errorOnError _ c x = c x
 
 -- | Conditionally run pipeline if predicate is true.
 condPipeline ::
@@ -148,7 +190,7 @@ condPipeline cond (Pipeline f) =
   Pipeline $ \cfg prog ->
     if cond prog
       then f cfg prog
-      else pure prog
+      else pure $ \c -> c prog
 
 -- | Create a pipeline from a list of passes.
 passes ::

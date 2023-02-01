@@ -437,9 +437,9 @@ encodeAsUnicodeCharar c =
 
 -- | Truncate to at most this many characters, making the last three
 -- characters "..." if truncation is necessary.
-atMostChars :: Int -> String -> String
+atMostChars :: Int -> T.Text -> T.Text
 atMostChars n s
-  | length s > n = take (n - 3) s ++ "..."
+  | T.length s > n = T.take (n - 3) s <> "..."
   | otherwise = s
 
 -- | Invert a map, handling duplicate values (now keys) by
