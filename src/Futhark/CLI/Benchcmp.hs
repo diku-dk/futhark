@@ -10,11 +10,6 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Futhark.Bench
-    ( RunResult(runMicroseconds),
-      Result(memoryMap, runResults),
-      DataResult(..),
-      BenchResult(..),
-      decodeBenchResults )
 import Futhark.Util (showText)
 import Futhark.Util.Options (mainWithOptions)
 import Statistics.Sample qualified as S
@@ -93,7 +88,7 @@ readFileSafely filepath =
 toDataResultsMap :: [DataResult] -> M.Map T.Text (Either T.Text Result)
 toDataResultsMap = M.fromList . fmap toTuple
   where
-    toTuple (DataResult dataset dataResults) = (T.pack dataset, dataResults)
+    toTuple (DataResult dataset dataResults) = (dataset, dataResults)
 
 -- | Converts BenchResults to a Map with the file path as a key.
 toBenchResultsMap ::
