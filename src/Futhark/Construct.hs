@@ -416,8 +416,10 @@ eOutOfBounds arr is = do
             BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
--- | The array element at this index.
+-- | The array element at this index.  Returns array unmodified if
+-- indexes are null (does not even need to be an array in that case).
 eIndex :: MonadBuilder m => VName -> [m (Exp (Rep m))] -> m (Exp (Rep m))
+eIndex arr [] = eSubExp $ Var arr
 eIndex arr is = do
   is' <- mapM (letSubExp "i" =<<) is
   arr_t <- lookupType arr

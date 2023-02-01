@@ -31,6 +31,8 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util.IntegralExp
+import Prelude hiding (rem)
 
 data FlattenEnv = FlattenEnv
 
@@ -206,12 +208,39 @@ elemArr segments _ _ se = do
   letExp "reshape" $ BasicOp $ Reshape ReshapeArbitrary (Shape [n]) rep
 
 -- Get the irregular representation of a var.
--- Var *must* be irregular
 getIrregRep :: Segments -> DistEnv -> DistInputs -> VName -> Builder GPU IrregularRep
-getIrregRep _ env inps v =
+getIrregRep segments env inps v =
   case lookup v inps of
     Just v_inp -> case v_inp of
-      DistInputFree _ _ -> error "getIrregRep: Free variables not handled (yet)"
+      DistInputFree arr t -> do
+        arr_t <- lookupType arr
+        segment_size <-
+          letSubExp "reg_seg_size" <=< toExp $ product $ map pe64 $ arrayDims t
+        segments_arr <-
+          letExp "reg_segments" . BasicOp $
+            Replicate (segmentsShape segments) segment_size
+        num_elems <-
+          letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
+        elems <-
+          letExp "reg_elems" . BasicOp $
+            Reshape ReshapeArbitrary (Shape [num_elems]) arr
+        flags <- letExp "reg_flags" <=< segMap (Solo num_elems) $ \(Solo i) -> do
+          flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
+          pure [subExpRes flag]
+        offsets <- letExp "reg_offsets" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
+          let flat_seg_i =
+                flattenIndex
+                  (map pe64 (shapeDims (segmentsShape segments)))
+                  (map pe64 is)
+          offset <- letSubExp "offset" <=< toExp $ flat_seg_i * pe64 segment_size
+          pure [subExpRes offset]
+        pure $
+          IrregularRep
+            { irregularSegments = segments_arr,
+              irregularFlags = flags,
+              irregularOffsets = offsets,
+              irregularElems = elems
+            }
       DistInput rt _ -> case resVar rt env of
         Irregular r -> pure r
         Regular _ -> error "getIrregRep: Regulat arrays not handled (yet)"
@@ -295,7 +324,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Update _ as slice (Var v)
-      | Just (DistInput _ as_t) <- lookup as inps -> do
+      | Just as_t <- distInputType <$> lookup as inps -> do
           ns <- letExp "slice_sizes"
             <=< renameExp
             <=< segMap (shapeDims (segmentsShape segments))
@@ -315,17 +344,16 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp gid]
             in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
             readInputs segments env [seg_i] $ filter ((/= as) . fst) inps
-            let slice' = fmap pe64 slice
+            v_t <- lookupType v
+            let in_seg_is =
+                  unflattenIndex (map pe64 (arrayDims v_t)) (pe64 in_seg_i)
+                slice' = fmap pe64 slice
                 flat_i =
                   flattenIndex
                     (map pe64 $ arrayDims as_t)
-                    (fixSlice slice' [pe64 in_seg_i])
+                    (fixSlice slice' in_seg_is)
             -- Value to write
-            v_t <- lookupType v
-            v' <-
-              if primType v_t
-                then pure $ Var v
-                else letSubExp "v" =<< eIndex v [eSubExp in_seg_i]
+            v' <- letSubExp "v" =<< eIndex v (map toExp in_seg_is)
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
             -- Index to write `v'` at
             i <- letExp "i" =<< toExp (pe64 o' + flat_i)

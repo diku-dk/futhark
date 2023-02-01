@@ -6,6 +6,7 @@ module Futhark.Pass.Flatten.Distribute
     DistInput (..),
     DistInputs,
     DistType (..),
+    distInputType,
     DistResult (..),
     ResTag,
   )
@@ -34,6 +35,8 @@ data DistInput
 
 type DistInputs = [(VName, DistInput)]
 
+-- | The type of a 'DistInput'.  This corresponds to the parameter
+-- type of the original map nest.
 distInputType :: DistInput -> Type
 distInputType (DistInputFree _ t) = t
 distInputType (DistInput _ t) = t
