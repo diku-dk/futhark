@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Datasets used in `futhark test` and `futhark bench` can now be named
   (#1859).
 
+* New command `futhark benchcmp` by William Due.
+
 ### Removed
 
 ### Changed
