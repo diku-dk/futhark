@@ -294,9 +294,16 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
         fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
-    Update _ as slice@(Slice [DimSlice x n s]) (Var v)
+    Update _ as slice (Var v)
       | Just (DistInput _ as_t) <- lookup as inps -> do
-          ns <- elemArr segments env inps n
+          ns <- letExp "slice_sizes"
+            <=< renameExp
+            <=< segMap (shapeDims (segmentsShape segments))
+            $ \is -> do
+              readInputs segments env is $
+                filter ((`elem` sliceDims slice) . Var . fst) inps
+              n <- letSubExp "n" <=< toExp $ product $ map pe64 $ sliceDims slice
+              pure [subExpRes n]
           -- Irregular representation of `as`
           IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
           -- Inner indices (1 and 2) of `ns`
@@ -304,7 +311,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           (_, _, ii2_vss) <- certifying (distCerts inps aux env) $ doSegIota ns
           -- Number of updates to perform
           m <- arraySize 0 <$> lookupType ii2_vss
-          elems' <- letExp "elems_scatter" <=< genScatter elems m $ \gid -> do
+          elems' <- letExp "elems_scatter" <=< renameExp <=< genScatter elems m $ \gid -> do
             seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp gid]
             in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp gid]
             readInputs segments env [seg_i] $ filter ((/= as) . fst) inps
@@ -314,28 +321,16 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
                     (map pe64 $ arrayDims as_t)
                     (fixSlice slice' [pe64 in_seg_i])
             -- Value to write
-            v' <- letSubExp "v" =<< eIndex v [eSubExp in_seg_i]
+            v_t <- lookupType v
+            v' <-
+              if primType v_t
+                then pure $ Var v
+                else letSubExp "v" =<< eIndex v [eSubExp in_seg_i]
             o' <- letSubExp "o" =<< eIndex offsets [eSubExp seg_i]
             -- Index to write `v'` at
             i <- letExp "i" =<< toExp (pe64 o' + flat_i)
             pure (i, v')
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
-    Update _ as (Slice [DimFix n]) v -> do
-      -- Irregular representation of `as`
-      IrregularRep shape flags offsets elems <- getIrregRep segments env inps as
-      vs <- elemArr segments env inps v
-      ns <- elemArr segments env inps n
-      -- Number of updates to preform
-      m <- arraySize 0 <$> lookupType vs
-      elems' <- letExp "elems_scatter" <=< genScatter elems m $ \gid -> do
-        -- Value to write
-        v' <- letSubExp "v" =<< eIndex vs [eSubExp gid]
-        n' <- letSubExp "n" =<< eIndex ns [eSubExp gid]
-        o' <- letSubExp "o" =<< eIndex offsets [eSubExp gid]
-        -- Index to write `v'` at
-        i' <- letExp "i" =<< toExp (pe64 o' + pe64 n')
-        pure (i', v')
-      pure $ insertIrregular shape flags offsets (distResTag res) elems' env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
