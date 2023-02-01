@@ -1,7 +1,6 @@
 -- Segmented scan with array operator (and not interchangeable).
 -- ==
 -- random input { [10][1][10]i32 } auto output
--- random input { [10][1][10]i32 } auto output
 -- random input { [10][10][1]i32 } auto output
 -- random input { [10][10][10]i32 } auto output
 -- structure gpu { /SegScan 1 /SegScan/DoLoop 1 }

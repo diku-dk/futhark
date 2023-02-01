@@ -22,6 +22,7 @@ module Futhark.Script
 
     -- * Evaluation
     EvalBuiltin,
+    scriptBuiltin,
     evalExp,
     getExpValue,
     evalExpToGround,
@@ -32,6 +33,7 @@ where
 
 import Control.Monad.Except
 import Data.Bifunctor (bimap)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Foldable (toList)
 import Data.Functor
@@ -42,6 +44,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
 import Data.Void
+import Data.Word (Word8)
 import Futhark.Data.Parser qualified as V
 import Futhark.Server
 import Futhark.Server.Values (getValue, putValue)
@@ -50,6 +53,7 @@ import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (line, sep, space, (</>))
 import Language.Futhark.Core (Name, nameFromText, nameToText)
 import Language.Futhark.Tuple (areTupleFields)
+import System.FilePath ((</>))
 import Text.Megaparsec
 import Text.Megaparsec.Char (space)
 import Text.Megaparsec.Char.Lexer (charLiteral)
@@ -289,6 +293,38 @@ valueToExp (V.ValueTuple fs) =
 
 -- | How to evaluate a builtin function.
 type EvalBuiltin m = T.Text -> [V.CompoundValue] -> m V.CompoundValue
+
+loadData ::
+  (MonadIO m, MonadError T.Text m) =>
+  FilePath ->
+  m (V.Compound V.Value)
+loadData datafile = do
+  contents <- liftIO $ LBS.readFile datafile
+  let maybe_vs = V.readValues contents
+  case maybe_vs of
+    Nothing ->
+      throwError $ "Failed to read data file " <> T.pack datafile
+    Just [v] ->
+      pure $ V.ValueAtom v
+    Just vs ->
+      pure $ V.ValueTuple $ map V.ValueAtom vs
+
+-- | Handles the following builtin functions: @loaddata@.  Fails for
+-- everything else.  The 'FilePath' indicates the directory that files
+-- should be read relative to.
+scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
+scriptBuiltin dir "loaddata" vs =
+  case vs of
+    [V.ValueAtom v]
+      | Just path <- V.getValue v -> do
+          let path' = map (chr . fromIntegral) (path :: [Word8])
+          loadData $ dir </> path'
+    _ ->
+      throwError $
+        "$loaddata does not accept arguments of types: "
+          <> T.intercalate ", " (map (prettyText . fmap V.valueType) vs)
+scriptBuiltin _ f _ =
+  throwError $ "Unknown builtin function $" <> prettyText f
 
 -- | Symbol table used for local variable lookups during expression evaluation.
 type VTable = M.Map VarName ExpValue

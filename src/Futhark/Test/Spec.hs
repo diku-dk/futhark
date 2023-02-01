@@ -27,7 +27,7 @@ import Control.Exception (catch)
 import Control.Monad
 import Data.Char
 import Data.Functor
-import Data.List (foldl')
+import Data.List (foldl', (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -38,7 +38,7 @@ import Futhark.Data.Parser
 import Futhark.Data.Parser qualified as V
 import Futhark.Script qualified as Script
 import Futhark.Test.Values qualified as V
-import Futhark.Util (directoryContents)
+import Futhark.Util (directoryContents, nubOrd, showText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import System.Exit
 import System.FilePath
@@ -46,6 +46,7 @@ import System.IO
 import System.IO.Error
 import Text.Megaparsec hiding (many, some)
 import Text.Megaparsec.Char
+import Text.Megaparsec.Char.Lexer (charLiteral)
 import Text.Regex.TDFA
 import Prelude
 
@@ -112,7 +113,7 @@ data TestRun = TestRun
     runInput :: Values,
     runExpectedResult :: ExpectedResult Success,
     runIndex :: Int,
-    runDescription :: String
+    runDescription :: T.Text
   }
   deriving (Show)
 
@@ -137,11 +138,11 @@ data GenValue
 
 -- | A prettyprinted representation of type of value produced by a
 -- 'GenValue'.
-genValueType :: GenValue -> String
+genValueType :: GenValue -> T.Text
 genValueType (GenValue (V.ValueType ds t)) =
-  concatMap (\d -> "[" ++ show d ++ "]") ds ++ T.unpack (V.primTypeText t)
+  foldMap (\d -> "[" <> showText d <> "]") ds <> V.primTypeText t
 genValueType (GenPrim v) =
-  T.unpack $ V.valueText v
+  V.valueText v
 
 -- | How a test case is expected to terminate.
 data ExpectedResult values
@@ -240,6 +241,10 @@ parseRunTags = many . try . lexeme' $ do
   guard $ s `notElem` ["input", "structure", "warning"]
   pure s
 
+parseStringLiteral :: Parser () -> Parser T.Text
+parseStringLiteral sep =
+  lexeme sep . fmap T.pack $ char '"' >> manyTill charLiteral (char '"')
+
 parseRunCases :: Parser () -> Parser [TestRun]
 parseRunCases sep = parseRunCases' (0 :: Int)
   where
@@ -247,6 +252,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
       (:) <$> parseRunCase i <*> parseRunCases' (i + 1)
         <|> pure []
     parseRunCase i = do
+      name <- optional $ parseStringLiteral sep
       tags <- parseRunTags
       void $ lexeme sep "input"
       input <-
@@ -257,7 +263,7 @@ parseRunCases sep = parseRunCases' (0 :: Int)
               then parseScriptValues sep
               else parseValues sep
       expr <- parseExpectedResult sep
-      pure $ TestRun tags input expr i $ desc i input
+      pure $ TestRun tags input expr i $ fromMaybe (desc i input) name
 
     -- If the file is gzipped, we strip the 'gz' extension from
     -- the dataset name.  This makes it more convenient to rename
@@ -265,22 +271,22 @@ parseRunCases sep = parseRunCases' (0 :: Int)
     -- does not change (which would make comparisons to historical
     -- data harder).
     desc _ (InFile path)
-      | takeExtension path == ".gz" = dropExtension path
-      | otherwise = path
+      | takeExtension path == ".gz" = T.pack $ dropExtension path
+      | otherwise = T.pack path
     desc i (Values vs) =
       -- Turn linebreaks into space.
-      "#" ++ show i ++ " (\"" ++ unwords (lines vs') ++ "\")"
+      "#" <> showText i <> " (\"" <> T.unwords (T.lines vs') <> "\")"
       where
-        vs' = case unwords $ map (T.unpack . V.valueText) vs of
+        vs' = case T.unwords $ map V.valueText vs of
           s
-            | length s > 50 -> take 50 s ++ "..."
+            | T.length s > 50 -> T.take 50 s <> "..."
             | otherwise -> s
     desc _ (GenValues gens) =
-      unwords $ map genValueType gens
+      T.unwords $ map genValueType gens
     desc _ (ScriptValues e) =
-      T.unpack $ prettyTextOneLine e
+      prettyTextOneLine e
     desc _ (ScriptFile path) =
-      path
+      T.pack path
 
 parseExpectedResult :: Parser () -> Parser (ExpectedResult Success)
 parseExpectedResult sep =
@@ -395,10 +401,25 @@ pProgramTest = do
     pInputOutputs =
       "--" *> sep *> parseDescription sep *> parseInputOutputs sep <* pEndOfTestBlock
 
+validate :: FilePath -> ProgramTest -> Either String ProgramTest
+validate path pt = do
+  case testAction pt of
+    CompileTimeFailure {} -> pure pt
+    RunCases ios _ _ -> do
+      mapM_ (noDups . map runDescription . iosTestRuns) ios
+      Right pt
+  where
+    noDups xs =
+      let xs' = nubOrd xs
+       in -- Works because \\ only removes first instance.
+          case xs \\ xs' of
+            [] -> Right ()
+            x : _ -> Left $ path <> ": multiple datasets with name " <> show (T.unpack x)
+
 -- | Read the test specification from the given Futhark program.
 testSpecFromProgram :: FilePath -> IO (Either String ProgramTest)
 testSpecFromProgram path =
-  ( either (Left . errorBundlePretty) Right . parse pProgramTest path
+  ( either (Left . errorBundlePretty) (validate path) . parse pProgramTest path
       <$> T.readFile path
   )
     `catch` couldNotRead

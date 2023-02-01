@@ -15,6 +15,7 @@ import Data.List (delete, partition)
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
+import Data.Text.IO qualified as T
 import Futhark.Analysis.Metrics.Type
 import Futhark.Server
 import Futhark.Test
@@ -215,7 +216,7 @@ runInterpretedEntry (FutharkExe futhark) program (InputOutputs entry run_cases) 
   let dir = takeDirectory program
       runInterpretedCase run@(TestRun _ inputValues _ index _) =
         unless (any (`elem` runTags run) ["compiled", "script"]) $
-          context ("Entry point: " <> entry <> "; dataset: " <> T.pack (runDescription run)) $ do
+          context ("Entry point: " <> entry <> "; dataset: " <> runDescription run) $ do
             input <- T.unlines . map valueText <$> getValues (FutharkExe futhark) dir inputValues
             expectedResult' <- getExpectedResult (FutharkExe futhark) program entry run
             (code, output, err) <-
@@ -325,7 +326,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
             "Entry point: "
               <> entry
               <> "; dataset: "
-              <> T.pack (runDescription run)
+              <> runDescription run
 
       context1 case_ctx $ do
         expected <- getExpectedResult futhark program entry run
@@ -491,9 +492,9 @@ reportTable ts = do
   putStatusTable ts
   clearLine
   w <- maybe 80 Terminal.width <$> Terminal.size
-  putStrLn $ atMostChars (w - length labelstr) running
+  T.putStrLn $ atMostChars (w - T.length labelstr) running
   where
-    running = labelstr ++ (unwords . reverse . map testCaseProgram . testStatusRun) ts
+    running = labelstr <> (T.unwords . reverse . map (T.pack . testCaseProgram) . testStatusRun) ts
     labelstr = "Now testing: "
 
 moveCursorToTableTop :: IO ()
