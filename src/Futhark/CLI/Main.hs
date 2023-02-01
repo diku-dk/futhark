@@ -7,6 +7,7 @@ import Data.Maybe
 import Data.Text.IO qualified as T
 import Futhark.CLI.Autotune qualified as Autotune
 import Futhark.CLI.Bench qualified as Bench
+import Futhark.CLI.Benchcmp qualified as Benchcmp
 import Futhark.CLI.C qualified as C
 import Futhark.CLI.CUDA qualified as CCUDA
 import Futhark.CLI.Check qualified as Check
@@ -77,7 +78,8 @@ commands =
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
-      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file."))
+      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
+      ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks."))
     ]
 
 msg :: String
