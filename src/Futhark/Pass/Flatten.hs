@@ -359,6 +359,8 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             i <- letExp "i" =<< toExp (pe64 o' + flat_i)
             pure (i, v')
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
+      | otherwise ->
+          error "Flattening update: destination is not input."
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
