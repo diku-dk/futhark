@@ -227,10 +227,12 @@ fromDataValueWith ::
   SVec.Vector Int ->
   SVec.Vector a ->
   Value m
-fromDataValueWith f shape vector =
-  if SVec.null shape
-    then ValuePrim $ f $ SVec.head vector
-    else
+fromDataValueWith f shape vector
+  | SVec.null shape = ValuePrim $ f $ SVec.head vector
+  | SVec.null vector =
+      toArray (fromDataShape shape) $
+        replicate (SVec.head shape) (fromDataValueWith f shape' vector)
+  | otherwise =
       toArray (fromDataShape shape)
         . map (fromDataValueWith f shape' . SVec.fromList)
         $ chunk (SVec.product shape') (SVec.toList vector)
