@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* A somewhat obscure simplification rule could mess up use of memory.
+
 ## [0.23.1]
 
 ### Added
