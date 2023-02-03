@@ -4,7 +4,7 @@
 -- row-major order.  "Futhark.Pass.ExplicitAllocations" is
 -- conservative and inserts copies to ensure this is the case.  After
 -- simplification, it may turn out that those copies are redundant.
--- This pass removes them.  It's a prettyString simple pass, as it only has
+-- This pass removes them.  It's a pretty simple pass, as it only has
 -- to look at the top level of entry points.
 module Futhark.Optimise.EntryPointMem
   ( entryPointMemGPU,
