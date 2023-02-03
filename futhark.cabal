@@ -448,6 +448,7 @@ library
       Language.Futhark.TypeChecker.Terms.Pat
       Language.Futhark.TypeChecker.Types
       Language.Futhark.TypeChecker.Unify
+      Language.Futhark.Unused
       Language.Futhark.Warnings
   other-modules:
       Language.Futhark.Parser.Parser
