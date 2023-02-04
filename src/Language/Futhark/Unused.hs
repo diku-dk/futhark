@@ -1,26 +1,19 @@
-module Language.Futhark.Unused
-  (findUnused) where
+module Language.Futhark.Unused (findUnused) where
 
-import Futhark.Compiler (Imports, dumpError, fileProg, newFutharkConfig, readProgramFiles)
-import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
-import Language.Futhark (QualName(QualName))
-import Language.Futhark.Syntax 
+import Language.Futhark
 import Language.Futhark.Semantic
 
 -- ignore top level definitions in "root" files.
 -- root files are the given FilePaths.
-findUnused :: [FilePath] -> FutharkM Imports
-findUnused files = do
-  (_w, imports, _vns) <- readProgramFiles [] files
-  pure imports
+findUnused :: Imports -> [QualName VName]
+findUnused imps = do
+  let (_, fm) = head imps
+  allUsedFuncs fm
 
 -- We are looking for QualNames that represent functions.
 allUsedFuncs :: FileModule -> [QualName VName]
-allUsedFuncs (FileModule _ _env (Prog _doc decs) _) = do
-  let funcDecs = filter isFuncDec decs
-  
-  []
-
+allUsedFuncs (FileModule _ _env (Prog _doc decs) _) =
+  concatMap funcsInDef $ filter isFuncDec decs
 
 isFuncDec :: DecBase f vn -> Bool
 isFuncDec (ValDec _) = True
@@ -30,7 +23,7 @@ isFuncDec _ = False
 -- getDecs (Prog _ decs) = decs
 
 funcsInDef :: DecBase Info VName -> [QualName VName]
-funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) = 
+funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
   funcsInDef' body
 funcsInDef _ = []
 
@@ -56,5 +49,5 @@ funcsInDef' (Ascript ex _ _) = funcsInDef' ex
 funcsInDef' _ = []
 
 getFieldExp :: FieldBase Info VName -> ExpBase Info VName
-getFieldExp (RecordFieldExplicit _ exp _) = exp
+getFieldExp (RecordFieldExplicit _ ex _) = ex
 getFieldExp _ = error "placeholder" -- TODO: provide an appropriate error here.
