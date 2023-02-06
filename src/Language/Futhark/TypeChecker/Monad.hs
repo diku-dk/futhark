@@ -151,9 +151,9 @@ underscoreUse loc name =
       <+> dquotes (pretty name)
         <> ": variables prefixed with underscore may not be accessed."
 
--- | A mapping from import strings to 'Env's.  This is used to resolve
--- @import@ declarations.
-type ImportTable = M.Map String Env
+-- | A mapping from import import names to 'Env's.  This is used to
+-- resolve @import@ declarations.
+type ImportTable = M.Map ImportName Env
 
 data Context = Context
   { contextEnv :: Env,
@@ -239,18 +239,18 @@ lookupMTy loc qn = do
     explode = unknownVariable Signature qn loc
 
 -- | Look up an import.
-lookupImport :: SrcLoc -> FilePath -> TypeM (FilePath, Env)
+lookupImport :: SrcLoc -> FilePath -> TypeM (ImportName, Env)
 lookupImport loc file = do
   imports <- asks contextImportTable
   my_path <- asks contextImportName
-  let canonical_import = includeToString $ mkImportFrom my_path file
+  let canonical_import = mkImportFrom my_path file
   case M.lookup canonical_import imports of
     Nothing ->
       typeError loc mempty $
         "Unknown import"
-          <+> dquotes (pretty canonical_import)
+          <+> dquotes (pretty (includeToText canonical_import))
           </> "Known:"
-          <+> commasep (map pretty (M.keys imports))
+          <+> commasep (map (pretty . includeToText) (M.keys imports))
     Just scope -> pure (canonical_import, scope)
 
 -- | Evaluate a 'TypeM' computation within an extended (/not/

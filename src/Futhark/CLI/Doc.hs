@@ -14,6 +14,7 @@ import Futhark.Doc.Generator
 import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
 import Futhark.Util (directoryContents, trim)
 import Futhark.Util.Options
+import Language.Futhark.Semantic (mkInitialImport)
 import Language.Futhark.Syntax (DocComment (..), progDoc)
 import System.Directory (createDirectoryIfMissing)
 import System.Exit
@@ -59,7 +60,7 @@ futFiles dir = filter isFut <$> directoryContents dir
 
 printDecs :: DocConfig -> FilePath -> [FilePath] -> Imports -> IO ()
 printDecs cfg dir files imports = do
-  let direct_imports = map (normalise . dropExtension) files
+  let direct_imports = map (mkInitialImport . normalise . dropExtension) files
       (file_htmls, _warnings) =
         renderFiles direct_imports $
           filter (not . ignored) imports

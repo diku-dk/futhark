@@ -139,7 +139,7 @@ data FutharkiState = FutharkiState
     futharkiLoaded :: Maybe FilePath
   }
 
-extendEnvs :: LoadedProg -> (T.Env, I.Ctx) -> [String] -> (T.Env, I.Ctx)
+extendEnvs :: LoadedProg -> (T.Env, I.Ctx) -> [ImportName] -> (T.Env, I.Ctx)
 extendEnvs prog (tenv, ictx) opens = (tenv', ictx')
   where
     tenv' = T.envWithImports t_imports tenv
@@ -254,13 +254,15 @@ onDec d = do
     Left e -> liftIO $ putDoc $ prettyProgErrors e
     Right prog -> do
       env <- gets futharkiEnv
-      let (tenv, ienv) = extendEnvs prog env $ map fst $ decImports d
+      let (tenv, ienv) =
+            extendEnvs prog env $ map (T.mkInitialImport . fst) $ decImports d
           imports = lpImports prog
           src = lpNameSource prog
       case T.checkDec imports src tenv cur_import d of
         (_, Left e) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc e
         (_, Right (tenv', d', src')) -> do
-          let new_imports = filter ((`notElem` map fst old_imports) . fst) imports
+          let new_imports =
+                filter ((`notElem` map fst old_imports) . fst) imports
           int_r <- runInterpreter $ do
             let onImport ienv' (s, imp) =
                   I.interpretImport ienv' (s, T.fileProg imp)
