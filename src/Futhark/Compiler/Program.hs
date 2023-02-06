@@ -88,7 +88,7 @@ type VFS = M.Map FilePath T.Text
 
 newtype UncheckedImport = UncheckedImport
   { unChecked ::
-      WithErrors (LoadedFile E.UncheckedProg, [(ImportName, MVar UncheckedImport)])
+      WithErrors (LoadedFile E.UncheckedProg, [((ImportName, Loc), MVar UncheckedImport)])
   }
 
 -- | If mapped to Nothing, treat it as present.  This is used when
@@ -99,14 +99,14 @@ newState :: [ImportName] -> IO ReaderState
 newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
 
 orderedImports ::
-  [(ImportName, MVar UncheckedImport)] ->
+  [((ImportName, Loc), MVar UncheckedImport)] ->
   IO [(ImportName, WithErrors (LoadedFile E.UncheckedProg))]
 orderedImports = fmap reverse . flip execStateT [] . mapM_ (spelunk [])
   where
-    spelunk steps (include, mvar)
+    spelunk steps ((include, loc), mvar)
       | include `elem` steps = do
           let problem =
-                ProgError (locOf include) . pretty $
+                ProgError loc . pretty $
                   "Import cycle: "
                     <> intercalate
                       " -> "
@@ -150,8 +150,8 @@ contentsAndModTime filepath vfs = do
       now <- getCurrentTime
       pure $ Just $ Right (file_contents, now)
 
-readImportFile :: ImportName -> VFS -> IO (Either ProgError (LoadedFile T.Text))
-readImportFile include vfs = do
+readImportFile :: ImportName -> Loc -> VFS -> IO (Either ProgError (LoadedFile T.Text))
+readImportFile include loc vfs = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
@@ -161,11 +161,11 @@ readImportFile include vfs = do
     (Just (Right (s, mod_time)), _) ->
       pure $ Right $ loaded filepath s mod_time
     (Just (Left e), _) ->
-      pure $ Left $ ProgError (locOf include) $ pretty e
+      pure $ Left $ ProgError loc $ pretty e
     (Nothing, Just s) ->
       pure $ Right $ loaded prelude_str s startupTime
     (Nothing, Nothing) ->
-      pure $ Left $ ProgError (locOf include) $ pretty not_found
+      pure $ Left $ ProgError loc $ pretty not_found
   where
     prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
@@ -186,10 +186,10 @@ handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_ti
     Left (SyntaxError loc err) ->
       pure . UncheckedImport . Left . NE.singleton $ ProgError loc $ pretty err
     Right prog -> do
-      let imports = map (uncurry (mkImportFrom import_name)) $ E.progImports prog
+      let imports = map (first $ mkImportFrom import_name) $ E.progImports prog
       mvars <-
         mapMaybe sequenceA . zip imports
-          <$> mapM (readImport state_mvar vfs) imports
+          <$> mapM (uncurry $ readImport state_mvar vfs) imports
       let file =
             LoadedFile
               { lfPath = file_name,
@@ -199,14 +199,14 @@ handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_ti
               }
       pure $ UncheckedImport $ Right (file, mvars)
 
-readImport :: ReaderState -> VFS -> ImportName -> IO (Maybe (MVar UncheckedImport))
-readImport state_mvar vfs include =
+readImport :: ReaderState -> VFS -> ImportName -> Loc -> IO (Maybe (MVar UncheckedImport))
+readImport state_mvar vfs include loc =
   modifyMVar state_mvar $ \state ->
     case M.lookup include state of
       Just x -> pure (state, x)
       Nothing -> do
         prog_mvar <- newImportMVar $ do
-          readImportFile include vfs >>= \case
+          readImportFile include loc vfs >>= \case
             Left e -> pure $ UncheckedImport $ Left $ NE.singleton e
             Right file -> handleFile state_mvar vfs file
         pure (M.insert include prog_mvar state, prog_mvar)
@@ -219,16 +219,16 @@ readUntypedLibraryExceptKnown ::
 readUntypedLibraryExceptKnown known vfs fps = do
   state_mvar <- liftIO $ newState known
   let prelude_import = mkInitialImport "/prelude/prelude"
-  prelude_mvar <- liftIO $ readImport state_mvar vfs prelude_import
+  prelude_mvar <- liftIO $ readImport state_mvar vfs prelude_import mempty
   fps_mvars <- liftIO (mapM (onFile state_mvar) fps)
-  let unknown_mvars = onlyUnknown ((prelude_import, prelude_mvar) : fps_mvars)
+  let unknown_mvars = onlyUnknown (((prelude_import, mempty), prelude_mvar) : fps_mvars)
   fmap (map snd) . errorsToTop <$> orderedImports unknown_mvars
   where
     onlyUnknown = mapMaybe sequenceA
     onFile state_mvar fp =
       modifyMVar state_mvar $ \state -> do
         case M.lookup include state of
-          Just prog_mvar -> pure (state, (include, prog_mvar))
+          Just prog_mvar -> pure (state, ((include, mempty), prog_mvar))
           Nothing -> do
             prog_mvar <- newImportMVar $ do
               if takeExtension fp /= ".fut"
@@ -256,7 +256,7 @@ readUntypedLibraryExceptKnown known vfs fps = do
                       pure . UncheckedImport . Left . NE.singleton $
                         ProgError NoLoc $
                           pretty fp <> ": file not found."
-            pure (M.insert include prog_mvar state, (include, prog_mvar))
+            pure (M.insert include prog_mvar state, ((include, mempty), prog_mvar))
       where
         include = mkInitialImport fp_name
         (fp_name, _) = Posix.splitExtension fp
