@@ -1204,23 +1204,23 @@ qualify :: v -> QualName v -> QualName v
 qualify k (QualName ks v) = QualName (k : ks) v
 
 -- | The modules imported by a Futhark program.
-progImports :: ProgBase f vn -> [(String, SrcLoc)]
+progImports :: ProgBase f vn -> [(String, Loc)]
 progImports = concatMap decImports . progDecs
 
 -- | The modules imported by a single declaration.
-decImports :: DecBase f vn -> [(String, SrcLoc)]
+decImports :: DecBase f vn -> [(String, Loc)]
 decImports (OpenDec x _) = modExpImports x
 decImports (ModDec md) = modExpImports $ modExp md
 decImports SigDec {} = []
 decImports TypeDec {} = []
 decImports ValDec {} = []
 decImports (LocalDec d _) = decImports d
-decImports (ImportDec x _ loc) = [(x, loc)]
+decImports (ImportDec x _ loc) = [(x, locOf loc)]
 
-modExpImports :: ModExpBase f vn -> [(String, SrcLoc)]
+modExpImports :: ModExpBase f vn -> [(String, Loc)]
 modExpImports ModVar {} = []
 modExpImports (ModParens p _) = modExpImports p
-modExpImports (ModImport f _ loc) = [(f, loc)]
+modExpImports (ModImport f _ loc) = [(f, locOf loc)]
 modExpImports (ModDecs ds _) = concatMap decImports ds
 modExpImports (ModApply _ me _ _ _) = modExpImports me
 modExpImports (ModAscript me _ _ _) = modExpImports me

@@ -243,7 +243,7 @@ lookupImport :: SrcLoc -> FilePath -> TypeM (FilePath, Env)
 lookupImport loc file = do
   imports <- asks contextImportTable
   my_path <- asks contextImportName
-  let canonical_import = includeToString $ mkImportFrom my_path file loc
+  let canonical_import = includeToString $ mkImportFrom my_path file
   case M.lookup canonical_import imports of
     Nothing ->
       typeError loc mempty $

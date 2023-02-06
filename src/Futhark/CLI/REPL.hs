@@ -245,8 +245,8 @@ onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   old_imports <- gets $ lpImports . futharkiProg
   cur_import <- gets $ T.mkInitialImport . fromMaybe "." . futharkiLoaded
-  let mkImport = uncurry $ T.mkImportFrom cur_import
-      files = map (T.includeToFilePath . mkImport) $ decImports d
+  let mkImport = T.mkImportFrom cur_import
+      files = map (T.includeToFilePath . mkImport . fst) $ decImports d
 
   cur_prog <- gets futharkiProg
   imp_r <- liftIO $ extendProg cur_prog files M.empty
