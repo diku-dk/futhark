@@ -762,7 +762,7 @@ identifierLinks loc (c : s') = (c :) <$> identifierLinks loc s'
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
   current <- asks ctxCurrent
-  let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) mempty <$> file
+  let file' = includeToString . mkImportFrom (mkInitialImport current) <$> file
   env <- lookupEnvForFile file'
   case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
     Nothing -> pure Nothing
