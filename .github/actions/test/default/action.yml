@@ -1,0 +1,26 @@
+name: 'Default Test'
+description: 'Run default test suite'
+inputs:
+  tests:
+    description: 'Tests to run'
+    required: true
+  options:
+    description: 'Options to pass to futhark test'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+    - name: Install from nightly tarball
+      shell: bash
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - name: Run tests
+      shell: bash
+      run: |
+        futhark test ${{inputs.options}} ${{inputs.tests}}

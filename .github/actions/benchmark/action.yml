@@ -18,11 +18,11 @@ inputs:
   gpu:
     description: 'The GPU and numbers of GPUs to use'
     required: false
-    default: ''
+    default: 'none'
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/benchmark/is-slurm
+    - uses: ./.github/actions/is-slurm
       id: slurm
 
     - uses: ./.github/actions/benchmark/default

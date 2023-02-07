@@ -1,0 +1,32 @@
+name: 'Benchmark'
+description: 'Run benchmark suite'
+inputs:
+  tests:
+    description: 'Tests to run'
+    required: true
+  options:
+    description: 'Options to pass to futhark test'
+    required: false
+    default: ''
+  slurm:
+    description: 'Options to pass to srun'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/is-slurm
+      id: slurm
+
+    - uses: ./.github/actions/test/default
+      if: steps.slurm.outputs.is-slurm == 'false'
+      with:
+        tests: ${{inputs.tests}}
+        options: ${{inputs.options}}
+
+    - uses: ./.github/actions/test/slurm
+      if: steps.slurm.outputs.is-slurm == 'true'
+      with:
+        tests: ${{inputs.tests}}
+        options: ${{inputs.options}}
+        slurm: ${{inputs.slurm}}

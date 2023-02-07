@@ -1,5 +1,5 @@
 name: 'Slurm Benchmark'
-description: 'Run benchmark suite'
+description: 'Run slurm benchmark suite'
 inputs:
   backend:
     description: 'Backend to use'
@@ -18,7 +18,7 @@ inputs:
   gpu:
     description: 'The GPU and numbers of GPUs to use'
     required: false
-    default: ''
+    default: 'none'
 runs:
   using: "composite"
   steps:
@@ -36,14 +36,18 @@ runs:
     - name: Run benchmarks
       shell: bash
       run: |
-        module load cuda # Is this always appropriate?
         python3.9 slurmbench.py \
-          --gpu=${{inputs.gpu}} \
+          --partition=gpu \
+          --gres=gpu:${{inputs.gpu}} \
           --futhark="$PWD/futhark-nightly-linux-x86_64/bin/futhark" \
           --slurm-options=${{inputs.slurm}} \
-          --futhark-options='--ignore-files /lib/ --backend=${{inputs.backend}} --exclude no_${{inputs.system}} ${{inputs.options}}' \
+          --ignore-files=/lib/ \
+          --backend=${{inputs.backend}} \
+          --exclude=no_${{inputs.system}} \
+          --futhark-options=${{inputs.options}} \
           --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
-          --benchmarks=futhark-benchmarks
+          --benchmarks=./futhark-benchmarks \
+          --job-name=Futhark_Bench_${{inputs.backend}}_${{inputs.system}}
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
