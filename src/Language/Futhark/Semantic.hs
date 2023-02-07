@@ -30,12 +30,6 @@ import System.FilePath qualified as Native
 import System.FilePath.Posix qualified as Posix
 import Prelude hiding (mod)
 
--- | Canonical reference to a Futhark code file.  Does not include the
--- @.fut@ extension.  This is most often a path relative to the
--- current working directory of the compiler.
-newtype ImportName = ImportName Posix.FilePath
-  deriving (Eq, Ord, Show)
-
 -- | Create an import name immediately from a file path specified by
 -- the user.
 mkInitialImport :: Native.FilePath -> ImportName
@@ -85,7 +79,7 @@ data FileModule = FileModule
   }
 
 -- | A mapping from import names to imports.  The ordering is significant.
-type Imports = [(String, FileModule)]
+type Imports = [(ImportName, FileModule)]
 
 -- | The space inhabited by a name.
 data Namespace

@@ -274,7 +274,7 @@ data CheckedFile = CheckedFile
 asImports :: [LoadedFile CheckedFile] -> Imports
 asImports = map f
   where
-    f lf = (includeToString (lfImportName lf), cfMod $ lfMod lf)
+    f lf = (lfImportName lf, cfMod $ lfMod lf)
 
 typeCheckProg ::
   [LoadedFile CheckedFile] ->
@@ -353,7 +353,7 @@ data LoadedProg = LoadedProg
 lpImports :: LoadedProg -> Imports
 lpImports = map f . lpFiles
   where
-    f lf = (includeToString (lfImportName lf), cfMod $ lfMod lf)
+    f lf = (lfImportName lf, cfMod $ lfMod lf)
 
 -- | All warnings of a 'LoadedProg'.
 lpWarnings :: LoadedProg -> Warnings

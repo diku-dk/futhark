@@ -23,6 +23,7 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark.Parser.Lexer (scanTokens)
 import Language.Futhark.Prop (isBuiltin)
+import Language.Futhark.Semantic (includeToString)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
@@ -36,7 +37,7 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
     [file] -> Just $ do
       (_, prog_imports, _) <- readProgramOrDie file
       liftIO . putStr . unlines . map (++ ".fut") . filter (not . isBuiltin) $
-        map fst prog_imports
+        map (includeToString . fst) prog_imports
     _ -> Nothing
 
 -- | @futhark hash@
