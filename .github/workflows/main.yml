@@ -564,6 +564,8 @@ jobs:
     runs-on: A100
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    env:
+      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:
@@ -578,6 +580,8 @@ jobs:
     runs-on: A100
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    env:
+      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:
@@ -592,6 +596,8 @@ jobs:
     runs-on: MI100
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    env:
+      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:
