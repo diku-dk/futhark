@@ -10,7 +10,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
 import Language.Futhark
-import Language.Futhark.Semantic (FileModule (..), Imports)
+import Language.Futhark.Semantic (FileModule (..), Imports, includeToString)
 import Language.Futhark.Traversals
 import Prelude hiding (abs, mod)
 
@@ -61,7 +61,7 @@ type TySet = S.Set VName
 data Env = Env
   { envScope :: Scope,
     envGenerating :: Bool,
-    envImports :: M.Map String Scope,
+    envImports :: M.Map ImportName Scope,
     envAbs :: TySet
   }
 
@@ -110,7 +110,7 @@ bindingNames names m = do
 generating :: TransformM a -> TransformM a
 generating = local $ \env -> env {envGenerating = True}
 
-bindingImport :: String -> Scope -> TransformM a -> TransformM a
+bindingImport :: ImportName -> Scope -> TransformM a -> TransformM a
 bindingImport name scope = local $ \env ->
   env {envImports = M.insert name scope $ envImports env}
 
@@ -118,10 +118,10 @@ bindingAbs :: TySet -> TransformM a -> TransformM a
 bindingAbs abs = local $ \env ->
   env {envAbs = abs <> envAbs env}
 
-lookupImport :: String -> TransformM Scope
+lookupImport :: ImportName -> TransformM Scope
 lookupImport name = maybe bad pure =<< asks (M.lookup name . envImports)
   where
-    bad = error $ "Defunctorise: unknown import: " ++ name
+    bad = error $ "Defunctorise: unknown import: " ++ includeToString name
 
 lookupMod' :: QualName VName -> Scope -> Either String Mod
 lookupMod' mname scope =

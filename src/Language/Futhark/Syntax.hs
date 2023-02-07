@@ -63,6 +63,7 @@ module Language.Futhark.Syntax
     PatBase (..),
 
     -- * Module language
+    ImportName (..),
     SpecBase (..),
     SigExpBase (..),
     TypeRefBase (..),
@@ -115,6 +116,7 @@ import Language.Futhark.Primitive
     IntType (..),
     IntValue (..),
   )
+import System.FilePath.Posix qualified as Posix
 import Prelude
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -1125,12 +1127,20 @@ deriving instance Show (SigBindBase NoInfo Name)
 instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
 
+-- | Canonical reference to a Futhark code file.  Does not include the
+-- @.fut@ extension.  This is most often a path relative to the
+-- working directory of the compiler.  In a multi-file program, a file
+-- is known by exactly one import name, even if it is referenced
+-- relatively by different names by files in different subdirectories.
+newtype ImportName = ImportName Posix.FilePath
+  deriving (Eq, Ord, Show)
+
 -- | Module expression.
 data ModExpBase f vn
   = ModVar (QualName vn) SrcLoc
   | ModParens (ModExpBase f vn) SrcLoc
   | -- | The contents of another file as a module.
-    ModImport FilePath (f FilePath) SrcLoc
+    ModImport FilePath (f ImportName) SrcLoc
   | ModDecs [DecBase f vn] SrcLoc
   | -- | Functor application.  The first mapping is from parameter
     -- names to argument names, while the second maps names in the
@@ -1201,7 +1211,7 @@ data DecBase f vn
   | ModDec (ModBindBase f vn)
   | OpenDec (ModExpBase f vn) SrcLoc
   | LocalDec (DecBase f vn) SrcLoc
-  | ImportDec FilePath (f FilePath) SrcLoc
+  | ImportDec FilePath (f ImportName) SrcLoc
 
 deriving instance Show (DecBase Info VName)
 

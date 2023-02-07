@@ -93,7 +93,7 @@ type Sizes = M.Map VName Int64
 newtype EvalM a
   = EvalM
       ( ReaderT
-          (Stack, M.Map FilePath Env)
+          (Stack, M.Map ImportName Env)
           (StateT Sizes (F ExtOp))
           a
       )
@@ -102,11 +102,11 @@ newtype EvalM a
       Applicative,
       Functor,
       MonadFree ExtOp,
-      MonadReader (Stack, M.Map FilePath Env),
+      MonadReader (Stack, M.Map ImportName Env),
       MonadState Sizes
     )
 
-runEvalM :: M.Map FilePath Env -> EvalM a -> F ExtOp a
+runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
 runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) mempty
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
@@ -123,7 +123,7 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [Loc]
 stacktrace = asks $ map stackFrameLoc . fst
 
-lookupImport :: FilePath -> EvalM (Maybe Env)
+lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
 putExtSize :: VName -> Int64 -> EvalM ()
@@ -1119,7 +1119,7 @@ evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
 -- is how the REPL works.
 data Ctx = Ctx
   { ctxEnv :: Env,
-    ctxImports :: M.Map FilePath Env
+    ctxImports :: M.Map ImportName Env
   }
 
 nanValue :: PrimValue -> Bool
@@ -1848,7 +1848,7 @@ interpretDec ctx d = do
     pure $ env <> sizes
   pure ctx {ctxEnv = env}
 
-interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
+interpretImport :: Ctx -> (ImportName, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   pure ctx {ctxImports = M.insert fp env $ ctxImports ctx}
