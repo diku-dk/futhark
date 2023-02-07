@@ -370,7 +370,7 @@ containingModule :: Imports -> Pos -> Maybe FileModule
 containingModule imports (Pos file _ _ _) =
   snd <$> find ((== file') . fst) imports
   where
-    file' = includeToString $ mkInitialImport $ fst $ Posix.splitExtension file
+    file' = mkInitialImport $ fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
 data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc
