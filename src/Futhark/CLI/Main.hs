@@ -32,6 +32,8 @@ import Futhark.CLI.REPL qualified as REPL
 import Futhark.CLI.Run qualified as Run
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
+import Futhark.CLI.Unused qualified as Unused
+
 import Futhark.Error
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
@@ -79,6 +81,7 @@ commands =
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
+      ("unused", (Unused.main, "Find Unused functions in a set of Futhark programs.")),
       ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks."))
     ]
 
