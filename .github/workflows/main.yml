@@ -615,12 +615,15 @@ jobs:
     - uses: actions/download-artifact@v3
     - run: |
         ls -R
-    - name: Compress JSONs
+    - name: Prepare package
       run: |
-        gzip */futhark-*.json
+        mkdir -p package
+        cp */futhark-*.json package/
+        gzip package/*.json
+        for x in package/*.json.gz; do cp $x $(echo $x | sed "s/$GITHUB_SHA/latest/"); done
     - name: scp to server
       run: |
-        scp -o StrictHostKeyChecking=no */futhark-*.json.gz futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
+        scp -o StrictHostKeyChecking=no package/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
 
   deploy-nightly:
     runs-on: ubuntu-22.04

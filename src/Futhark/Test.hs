@@ -215,13 +215,10 @@ valuesAsVars server names_and_types _ _ (Values vs) = do
     mapM_ (BS.hPutStr tmpf_h . Bin.encode) vs
     hClose tmpf_h
     cmdRestore server tmpf names_and_types
-valuesAsVars server names_and_types _ _ (ScriptValues e) =
+valuesAsVars server names_and_types _ dir (ScriptValues e) =
   Script.withScriptServer' server $ \server' -> do
-    e_v <- Script.evalExp noBuiltin server' e
+    e_v <- Script.evalExp (Script.scriptBuiltin dir) server' e
     scriptValueAsVars server names_and_types e_v
-  where
-    noBuiltin f _ = do
-      throwError $ "Unknown builtin procedure: " <> f
 valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
   e <-
     either throwError pure . Script.parseExpFromText f
@@ -264,7 +261,8 @@ getGenBS futhark dir gen = liftIO . BS.readFile . (dir </>) =<< getGenFile futha
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
 genValues (FutharkExe futhark) gens = do
-  (code, stdout, stderr) <- readProcessWithExitCode futhark ("dataset" : args) mempty
+  (code, stdout, stderr) <-
+    readProcessWithExitCode futhark ("dataset" : map T.unpack args) mempty
   case code of
     ExitSuccess ->
       pure stdout
@@ -279,7 +277,7 @@ genValues (FutharkExe futhark) gens = do
     argForGen g = ["-g", genValueType g]
 
 genFileName :: GenValue -> FilePath
-genFileName gen = genValueType gen ++ ".in"
+genFileName gen = T.unpack (genValueType gen) <> ".in"
 
 -- | Compute the expected size of the file.  We use this to check
 -- whether an existing file is broken/truncated.
@@ -304,7 +302,7 @@ testRunReferenceOutput prog entry tr =
       <> ":"
       <> T.unpack entry
       <> "-"
-      <> map clean (runDescription tr)
+      <> map clean (T.unpack (runDescription tr))
         <.> "out"
   where
     clean '/' = '_' -- Would this ever happen?

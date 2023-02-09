@@ -4,11 +4,12 @@ module Futhark.CLI.Autotune (main) where
 import Control.Monad
 import Data.ByteString.Char8 qualified as SBS
 import Data.Function (on)
-import Data.List (elemIndex, intersect, isPrefixOf, minimumBy, sort, sortOn)
+import Data.List (elemIndex, intersect, minimumBy, sort, sortOn)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Data.Tree
 import Futhark.Bench
 import Futhark.Server
@@ -73,26 +74,26 @@ runOptions timeout_s opts =
       runResultAction = const $ pure ()
     }
 
-type Path = [(String, Int)]
+type Path = [(T.Text, Int)]
 
-regexGroups :: Regex -> String -> Maybe [String]
+regexGroups :: Regex -> T.Text -> Maybe [T.Text]
 regexGroups regex s = do
   (_, _, _, groups) <-
-    matchM regex s :: Maybe (String, String, String, [String])
+    matchM regex s :: Maybe (T.Text, T.Text, T.Text, [T.Text])
   Just groups
 
-comparisons :: String -> [(String, Int)]
-comparisons = mapMaybe isComparison . lines
+comparisons :: T.Text -> [(T.Text, Int)]
+comparisons = mapMaybe isComparison . T.lines
   where
     regex = makeRegex ("Compared ([^ ]+) <= (-?[0-9]+)" :: String)
     isComparison l = do
       [thresh, val] <- regexGroups regex l
-      val' <- readMaybe val
+      val' <- readMaybe $ T.unpack val
       pure (thresh, val')
 
-type RunDataset = Server -> Int -> Path -> IO (Either String ([(String, Int)], Int))
+type RunDataset = Server -> Int -> Path -> IO (Either String ([(T.Text, Int)], Int))
 
-type DatasetName = String
+type DatasetName = T.Text
 
 serverOptions :: AutotuneOptions -> [String]
 serverOptions opts =
@@ -101,10 +102,10 @@ serverOptions opts =
     : "-L"
     : optExtraOptions opts
 
-setTuningParam :: Server -> String -> Int -> IO ()
+setTuningParam :: Server -> T.Text -> Int -> IO ()
 setTuningParam server name val =
   either (error . T.unpack . T.unlines . failureMsg) (const $ pure ())
-    =<< cmdSetTuningParam server (T.pack name) (showText val)
+    =<< cmdSetTuningParam server name (showText val)
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
@@ -165,9 +166,9 @@ prepare opts futhark prog = do
       pure (dataset, do_run, iosEntryPoint ios)
   where
     run server entry_point trun expected timeout path = do
-      let bestRuntime :: ([RunResult], T.Text) -> ([(String, Int)], Int)
+      let bestRuntime :: ([RunResult], T.Text) -> ([(T.Text, Int)], Int)
           bestRuntime (runres, errout) =
-            ( comparisons (T.unpack errout),
+            ( comparisons errout,
               minimum $ map runMicroseconds runres
             )
 
@@ -196,14 +197,14 @@ prepare opts futhark prog = do
 
 --- Benchmarking a program
 
-data DatasetResult = DatasetResult [(String, Int)] Double
+data DatasetResult = DatasetResult [(T.Text, Int)] Double
   deriving (Show)
 
 --- Finding initial comparisons.
 
 --- Extracting threshold hierarchy.
 
-type ThresholdForest = Forest (String, Bool)
+type ThresholdForest = Forest (T.Text, Bool)
 
 thresholdMin, thresholdMax :: Int
 thresholdMin = 1
@@ -212,7 +213,7 @@ thresholdMax = 2000000000
 -- | Depth-first list of thresholds to tune in order, and a
 -- corresponding assignment of ancestor thresholds to ensure that they
 -- are used.
-tuningPaths :: ThresholdForest -> [(String, Path)]
+tuningPaths :: ThresholdForest -> [(T.Text, Path)]
 tuningPaths = concatMap (treePaths [])
   where
     treePaths ancestors (Node (v, _) children) =
@@ -227,7 +228,7 @@ tuningPaths = concatMap (treePaths [])
 thresholdForest :: FilePath -> IO ThresholdForest
 thresholdForest prog = do
   thresholds <-
-    getThresholds
+    getThresholds . T.pack
       <$> readProcess ("." </> dropExtension prog) ["--print-params"] ""
   let root (v, _) = ((v, False), [])
   pure $
@@ -235,22 +236,22 @@ thresholdForest prog = do
       map root $
         filter (null . snd) thresholds
   where
-    getThresholds = mapMaybe findThreshold . lines
-    regex = makeRegex ("(.*) \\(threshold\\(([^ ]+,)(.*)\\)\\)" :: String)
+    getThresholds = mapMaybe findThreshold . T.lines
+    regex = makeRegex ("(.*) \\(threshold\\(([^ ]+,)(.*)\\)\\)" :: T.Text)
 
-    findThreshold :: String -> Maybe (String, [(String, Bool)])
+    findThreshold :: T.Text -> Maybe (T.Text, [(T.Text, Bool)])
     findThreshold l = do
       [grp1, _, grp2] <- regexGroups regex l
       pure
         ( grp1,
-          filter (not . null . fst)
+          filter (not . T.null . fst)
             $ map
               ( \x ->
-                  if "!" `isPrefixOf` x
-                    then (drop 1 x, False)
+                  if "!" `T.isPrefixOf` x
+                    then (T.drop 1 x, False)
                     else (x, True)
               )
-            $ words grp2
+            $ T.words grp2
         )
 
     unfold thresholds ((parent, parent_cmp), ancestors) =
@@ -276,7 +277,7 @@ tuneThreshold ::
   Server ->
   [(DatasetName, RunDataset, T.Text)] ->
   (Path, M.Map DatasetName Int) ->
-  (String, Path) ->
+  (T.Text, Path) ->
   IO (Path, M.Map DatasetName Int)
 tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) = do
   (tune_result, best_runtimes) <-
@@ -287,21 +288,24 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
     Just (_, threshold) ->
       pure ((v, threshold) : already_tuned, best_runtimes)
   where
-    tuneDataset :: (Maybe (Int, Int), M.Map DatasetName Int) -> (DatasetName, RunDataset, T.Text) -> IO (Maybe (Int, Int), M.Map DatasetName Int)
+    tuneDataset ::
+      (Maybe (Int, Int), M.Map DatasetName Int) ->
+      (DatasetName, RunDataset, T.Text) ->
+      IO (Maybe (Int, Int), M.Map DatasetName Int)
     tuneDataset (thresholds, best_runtimes) (dataset_name, run, entry_point) =
-      if not $ isPrefixOf (T.unpack entry_point ++ ".") v
+      if not $ T.isPrefixOf (entry_point <> ".") v
         then do
           when (optVerbose opts > 0) $
-            putStrLn $
-              unwords [v, "is irrelevant for", T.unpack entry_point]
+            T.putStrLn $
+              T.unwords [v, "is irrelevant for", entry_point]
           pure (thresholds, best_runtimes)
         else do
-          putStrLn $
-            unwords
+          T.putStrLn $
+            T.unwords
               [ "Tuning",
                 v,
                 "on entry point",
-                T.unpack entry_point,
+                entry_point,
                 "and dataset",
                 dataset_name
               ]
@@ -351,16 +355,16 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
                 case dataset_name `M.lookup` best_runtimes of
                   Just rt
                     | fromIntegral rt * epsilon < fromIntegral best_t -> do
-                        putStrLn $
-                          unwords
+                        T.putStrLn $
+                          T.unwords
                             [ "WARNING! Possible non-monotonicity detected. Previous best run-time for dataset",
                               dataset_name,
                               " was",
-                              show rt,
+                              showText rt,
                               "but after tuning threshold",
                               v,
                               "it is",
-                              show best_t
+                              showText best_t
                             ]
                         pure best_runtimes
                   _ ->
@@ -374,7 +378,7 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
     -- We wish to let datasets run for the untuned time + 20% + 1 second.
     timeout elapsed = ceiling (fromIntegral elapsed * 1.2 :: Double) + 1
 
-    candidateEPar :: (Int, Int) -> (String, Int) -> Bool
+    candidateEPar :: (Int, Int) -> (T.Text, Int) -> Bool
     candidateEPar (tMin, tMax) (threshold, ePar) =
       ePar > tMin && ePar < tMax && threshold == v
 
@@ -451,17 +455,17 @@ runAutotuner :: AutotuneOptions -> FilePath -> IO ()
 runAutotuner opts prog = do
   best <- tune opts prog
 
-  let tuning = unlines $ do
+  let tuning = T.unlines $ do
         (s, n) <- sortOn fst best
-        pure $ s ++ "=" ++ show n
+        pure $ s <> "=" <> showText n
 
   case optTuning opts of
     Nothing -> pure ()
     Just suffix -> do
-      writeFile (prog <.> suffix) tuning
+      T.writeFile (prog <.> suffix) tuning
       putStrLn $ "Wrote " ++ prog <.> suffix
 
-  putStrLn $ "Result of autotuning:\n" ++ tuning
+  T.putStrLn $ "Result of autotuning:\n" <> tuning
 
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =
