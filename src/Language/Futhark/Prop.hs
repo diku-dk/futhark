@@ -475,7 +475,7 @@ typeOf (ArrayLit _ (Info t) _) = t
 typeOf (StringLit vs _) =
   Array
     mempty
-    Unique
+    Nonunique
     (Shape [ConstSize $ genericLength vs])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
