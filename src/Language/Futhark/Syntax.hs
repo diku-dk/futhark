@@ -300,7 +300,7 @@ data ScalarTypeBase dim as
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow as PName (TypeBase dim ()) (RetTypeBase dim as)
+    Arrow as PName Diet (TypeBase dim ()) (RetTypeBase dim as)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -308,8 +308,8 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
-  bitraverse f g (Arrow als v t1 t2) =
-    Arrow <$> g als <*> pure v <*> bitraverse f pure t1 <*> bitraverse f g t2
+  bitraverse f g (Arrow als v d t1 t2) =
+    Arrow <$> g als <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f g t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Bifunctor ScalarTypeBase where
@@ -456,21 +456,13 @@ instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
   locOf (TypeArgExpType t) = locOf t
 
--- | Information about which parts of a value/type are consumed.
+-- | Information about which parts of a parameter are consumed.  This
+-- can be considered kind of an effect on the function.
 data Diet
-  = -- | Consumes these fields in the record.
-    RecordDiet (M.Map Name Diet)
-  | -- | Consume these parts of the constructors.
-    SumDiet (M.Map Name [Diet])
-  | -- | A function that consumes its argument(s) like this.
-    -- The final 'Diet' should always be 'Observe', as there
-    -- is no way for a function to consume its return value.
-    FuncDiet Diet Diet
-  | -- | Consumes this value.
-    Consume
-  | -- | Only observes value in this position, does
-    -- not consume.
+  = -- | Does not consume the parameter.
     Observe
+  | -- | Consumes the parameter.
+    Consume
   deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value

@@ -432,8 +432,8 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
       Sum $ M.map (map $ onType except) m
-    onScalar except (Arrow as p t1 (RetType dims t2)) =
-      Arrow as p (onType except' t1) $ RetType dims (onType except' t2)
+    onScalar except (Arrow as p d t1 (RetType dims t2)) =
+      Arrow as p d (onType except' t1) $ RetType dims (onType except' t2)
       where
         except' = case p of
           Named p' -> S.insert p' except

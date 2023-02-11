@@ -48,7 +48,7 @@ import "zip"
 --
 -- **Span:** *O(S(f))*
 def map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
-  intrinsics.map (f, as)
+  intrinsics.map f as
 
 -- | Apply the given function to each element of a single array.
 --
@@ -104,7 +104,7 @@ def map5 'a 'b 'c 'd 'e [n] 'x (f: a -> b -> c -> d -> e -> x) (as: [n]a) (bs: [
 -- Note that the complexity implies that parallelism in the combining
 -- operator will *not* be exploited.
 def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
-  intrinsics.reduce (op, ne, as)
+  intrinsics.reduce op ne as
 
 -- | As `reduce`, but the operator must also be commutative.  This is
 -- potentially faster than `reduce`.  For simple built-in operators,
@@ -115,7 +115,7 @@ def reduce [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- **Span:** *O(log(n) ✕ W(op))*
 def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
-  intrinsics.reduce_comm (op, ne, as)
+  intrinsics.reduce_comm op ne as
 
 -- | `h = hist op ne k is as` computes a generalised `k`-bin histogram
 -- `h`, such that `h[i]` is the sum of those values `as[j]` for which
@@ -130,7 +130,7 @@ def reduce_comm [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): a =
 --
 -- In practice, linear span only occurs if *k* is also very large.
 def hist 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k]a =
-  intrinsics.hist_1d (1, map (\_ -> ne) (0..1..<k), op, ne, is, as)
+  intrinsics.hist_1d 1 (map (\_ -> ne) (0..1..<k)) op ne is as
 
 -- | Like `hist`, but with initial contents of the histogram, and the
 -- complexity is proportional only to the number of input elements,
@@ -143,15 +143,15 @@ def hist 'a [n] (op: a -> a -> a) (ne: a) (k: i64) (is: [n]i64) (as: [n]a) : *[k
 --
 -- In practice, linear span only occurs if *k* is also very large.
 def reduce_by_index 'a [k] [n] (dest : *[k]a) (f : a -> a -> a) (ne : a) (is : [n]i64) (as : [n]a) : *[k]a =
-  intrinsics.hist_1d (1, dest, f, ne, is, as)
+  intrinsics.hist_1d 1 dest f ne is as
 
 -- | As `reduce_by_index`, but with two-dimensional indexes.
 def reduce_by_index_2d 'a [k] [n] [m] (dest : *[k][m]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64)) (as : [n]a) : *[k][m]a =
-  intrinsics.hist_2d (1, dest, f, ne, is, as)
+  intrinsics.hist_2d 1 dest f ne is as
 
 -- | As `reduce_by_index`, but with three-dimensional indexes.
 def reduce_by_index_3d 'a [k] [n] [m] [l] (dest : *[k][m][l]a) (f : a -> a -> a) (ne : a) (is : [n](i64,i64,i64)) (as : [n]a) : *[k][m][l]a =
-  intrinsics.hist_3d (1, dest, f, ne, is, as)
+  intrinsics.hist_3d 1 dest f ne is as
 
 -- | Inclusive prefix scan.  Has the same caveats with respect to
 -- associativity and complexity as `reduce`.
@@ -160,7 +160,7 @@ def reduce_by_index_3d 'a [k] [n] [m] [l] (dest : *[k][m][l]a) (f : a -> a -> a)
 --
 -- **Span:** *O(log(n) ✕ W(op))*
 def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
-  intrinsics.scan (op, ne, as)
+  intrinsics.scan op ne as
 
 -- | Remove all those elements of `as` that do not satisfy the
 -- predicate `p`.
@@ -169,7 +169,7 @@ def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
 --
 -- **Span:** *O(log(n) ✕ W(p))*
 def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
-  let (as', is) = intrinsics.partition (1, \x -> if p x then 0 else 1, as)
+  let (as', is) = intrinsics.partition 1 (\x -> if p x then 0 else 1) as
   in as'[:is[0]]
 
 -- | Split an array into those elements that satisfy the given
@@ -180,7 +180,7 @@ def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 -- **Span:** *O(log(n) ✕ W(p))*
 def partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
   let p' x = if p x then 0 else 1
-  let (as', is) = intrinsics.partition (2, p', as)
+  let (as', is) = intrinsics.partition 2 p' as
   in (as'[0:is[0]], as'[is[0]:n])
 
 -- | Split an array by two predicates, producing three arrays.
@@ -190,7 +190,7 @@ def partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
 -- **Span:** *O(log(n) ✕ (W(p1) + W(p2)))*
 def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
-  let (as', is) = intrinsics.partition (3, p', as)
+  let (as', is) = intrinsics.partition 3 p' as
   in (as'[0:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:n])
 
 -- | Return `true` if the given function returns `true` for all
@@ -223,7 +223,7 @@ def any [n] 'a (f: a -> bool) (as: [n]a): bool =
 --
 -- **Span:** *O(1)*
 def spread 't [n] (k: i64) (x: t) (is: [n]i64) (vs: [n]t): *[k]t =
-  intrinsics.scatter (map (\_ -> x) (0..1..<k), is, vs)
+  intrinsics.scatter (map (\_ -> x) (0..1..<k)) is vs
 
 -- | Like `spread`, but takes an array indicating the initial values,
 -- and has different work complexity.
@@ -232,7 +232,7 @@ def spread 't [n] (k: i64) (x: t) (is: [n]i64) (vs: [n]t): *[k]t =
 --
 -- **Span:** *O(1)*
 def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t): *[k]t =
-  intrinsics.scatter (dest, is, vs)
+  intrinsics.scatter dest is vs
 
 -- | `scatter_2d as is vs` is the equivalent of a `scatter` on a 2-dimensional
 -- array.
@@ -241,7 +241,7 @@ def scatter 't [k] [n] (dest: *[k]t) (is: [n]i64) (vs: [n]t): *[k]t =
 --
 -- **Span:** *O(1)*
 def scatter_2d 't [k] [n] [l] (dest: *[k][n]t) (is: [l](i64, i64)) (vs: [l]t): *[k][n]t =
-  intrinsics.scatter_2d (dest, is, vs)
+  intrinsics.scatter_2d dest is vs
 
 -- | `scatter_3d as is vs` is the equivalent of a `scatter` on a 3-dimensional
 -- array.
@@ -250,4 +250,4 @@ def scatter_2d 't [k] [n] [l] (dest: *[k][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 --
 -- **Span:** *O(1)*
 def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[k][n][o]t =
-  intrinsics.scatter_3d (dest, is, vs)
+  intrinsics.scatter_3d dest is vs
