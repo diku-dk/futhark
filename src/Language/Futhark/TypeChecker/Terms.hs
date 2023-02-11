@@ -234,7 +234,7 @@ checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole _ loc) = do
   t <- newTypeVar loc "t"
-  pure $ Hole (Info $ t `setUniqueness` Nonunique) loc
+  pure $ Hole (Info t) loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
