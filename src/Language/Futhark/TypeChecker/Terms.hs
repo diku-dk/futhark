@@ -234,7 +234,7 @@ checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole _ loc) = do
   t <- newTypeVar loc "t"
-  pure $ Hole (Info $ t `setUniqueness` Unique) loc
+  pure $ Hole (Info $ t `setUniqueness` Nonunique) loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
@@ -281,14 +281,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [ConstSize 0]) Unique
+      t <- arrayOfM loc et (Shape [ConstSize 0]) Nonunique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Unique
+      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -328,7 +328,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         pure (NamedSize $ qualName d, Just d)
 
-  t <- arrayOfM loc start_t (Shape [dim]) Unique
+  t <- arrayOfM loc start_t (Shape [dim]) Nonunique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
@@ -1382,7 +1382,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
         pure (Just retdecl', ret')
       Nothing
         | null params ->
-            pure (Nothing, toStruct $ body_t `setUniqueness` Nonunique)
+            pure (Nothing, toStruct body_t)
         | otherwise -> do
             body_t' <- inferredReturnType loc params'' body_t
             pure (Nothing, body_t')
