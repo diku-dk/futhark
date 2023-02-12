@@ -191,7 +191,7 @@ jobs:
       with:
         test: |
           futhark test -i tests
-        slurm: --cpus-per-task=8
+        slurm: --cpus-per-task=2
 
   test-c:
     runs-on: hendrix
@@ -210,7 +210,7 @@ jobs:
         test: |
           futhark test tests -c --backend=c --no-tuning
           make -C tests_lib/c -j
-        slurm: --cpus-per-task=8
+        slurm: --cpus-per-task=2
 
   test-multicore:
     runs-on: hendrix
@@ -229,7 +229,7 @@ jobs:
         test: |
           futhark test tests -c --backend=multicore --no-tuning
           make -C tests_lib/c FUTHARK_BACKEND=multicore
-        slurm: --cpus-per-task=8
+        slurm: --cpus-per-task=2
 
   test-ispc:
     runs-on: ubuntu-22.04
@@ -282,7 +282,7 @@ jobs:
             --exclude=no_python \
             --exclude=compiled
           make -C tests_lib/python -j
-        slurm: --cpus-per-task=8
+        slurm: --cpus-per-task=2
 
   test-oclgrind:
     runs-on: ubuntu-22.04

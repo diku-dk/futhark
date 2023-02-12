@@ -1,13 +1,9 @@
-name: 'Benchmark'
-description: 'Run benchmark suite'
+name: 'Test'
+description: 'Run Test suite'
 inputs:
-  tests:
+  test:
     description: 'Tests to run'
     required: true
-  options:
-    description: 'Options to pass to futhark test'
-    required: false
-    default: ''
   slurm:
     description: 'Options to pass to srun'
     required: false
@@ -15,18 +11,31 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      shell: bash
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
     - uses: ./.github/actions/is-slurm
       id: slurm
 
-    - uses: ./.github/actions/test/default
-      if: steps.slurm.outputs.is-slurm == 'false'
-      with:
-        tests: ${{inputs.tests}}
-        options: ${{inputs.options}}
-
-    - uses: ./.github/actions/test/slurm
-      if: steps.slurm.outputs.is-slurm == 'true'
-      with:
-        tests: ${{inputs.tests}}
-        options: ${{inputs.options}}
-        slurm: ${{inputs.slurm}}
+    - if: steps.slurm.outputs.is-slurm == 'false'
+      shell: bash
+      run: |
+        printf "#!/bin/bash
+        ${{inputs.test}}" | sh 
+    
+    - if: steps.slurm.outputs.is-slurm == 'true'
+      shell: bash
+      run: |
+        printf "#!/bin/bash
+        ${{inputs.test}}" > temp.sh
+        chmod +x temp.sh
+        srun temp.sh ${{inputs.slurm}}
+        rm temp.sh
