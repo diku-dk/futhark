@@ -442,7 +442,7 @@ jobs:
         submodules: recursive
         fetch-depth: 0
     
-    - run:
+    - run: |
         cd futhark-benchmarks
         ./get-data.sh external-data.txt
 
