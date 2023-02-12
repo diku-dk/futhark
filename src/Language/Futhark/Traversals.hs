@@ -301,10 +301,11 @@ traverseScalarType _ _ _ (Prim t) = pure $ Prim t
 traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseScalarType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
-traverseScalarType f g h (Arrow als v t1 (RetType dims t2)) =
+traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
   Arrow
     <$> h als
     <*> pure v
+    <*> pure u
     <*> traverseType f g pure t1
     <*> (RetType dims <$> traverseType f g h t2)
 traverseScalarType f g h (Sum cs) =

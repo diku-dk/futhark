@@ -419,7 +419,7 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = d
           map typeParamName tparams
             ++ map identName (S.toList $ mconcat $ map patIdents params)
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
-  params' <- noLink' $ mapM patternHtml params
+  params' <- noLink' $ mapM paramHtml params
   pure
     ( keyword "val " <> (H.span ! A.class_ "decl_name") name,
       tparams',
@@ -493,6 +493,10 @@ synopsisValBindBind (name, BoundV tps t) = do
       <> ": "
       <> t'
 
+dietHtml :: Diet -> Html
+dietHtml Consume = "*"
+dietHtml Observe = ""
+
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Array _ u shape et -> do
@@ -513,14 +517,14 @@ typeHtml t = case t of
     targs' <- mapM typeArgHtml targs
     et' <- qualNameHtml et
     pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
-  Scalar (Arrow _ pname t1 t2) -> do
+  Scalar (Arrow _ pname d t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- retTypeHtml t2
     pure $ case pname of
       Named v ->
-        parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
+        parens (vnameHtml v <> ": " <> dietHtml d <> t1') <> " -> " <> t2'
       Unnamed ->
-        t1' <> " -> " <> t2'
+        dietHtml d <> t1' <> " -> " <> t2'
   Scalar (Sum cs) -> pipes <$> mapM ppClause (sortConstrs cs)
     where
       ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
@@ -688,12 +692,12 @@ vnameLink' (VName _ tag) current file =
     then "#" ++ show tag
     else relativise file current ++ ".html#" ++ show tag
 
-patternHtml :: Pat -> DocM Html
-patternHtml pat = do
-  let (pat_param, t) = patternParam pat
+paramHtml :: Pat -> DocM Html
+paramHtml pat = do
+  let (pat_param, d, t) = patternParam pat
   t' <- typeHtml t
   pure $ case pat_param of
-    Named v -> parens (vnameHtml v <> ": " <> t')
+    Named v -> parens (vnameHtml v <> ": " <> dietHtml d <> t')
     Unnamed -> t'
 
 relativise :: FilePath -> FilePath -> FilePath
