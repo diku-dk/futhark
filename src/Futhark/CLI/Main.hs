@@ -7,6 +7,7 @@ import Data.Maybe
 import Data.Text.IO qualified as T
 import Futhark.CLI.Autotune qualified as Autotune
 import Futhark.CLI.Bench qualified as Bench
+import Futhark.CLI.Benchcmp qualified as Benchcmp
 import Futhark.CLI.C qualified as C
 import Futhark.CLI.CUDA qualified as CCUDA
 import Futhark.CLI.Check qualified as Check
@@ -15,6 +16,7 @@ import Futhark.CLI.Dataset qualified as Dataset
 import Futhark.CLI.Defs qualified as Defs
 import Futhark.CLI.Dev qualified as Dev
 import Futhark.CLI.Doc qualified as Doc
+import Futhark.CLI.Eval qualified as Eval
 import Futhark.CLI.LSP qualified as LSP
 import Futhark.CLI.Literate qualified as Literate
 import Futhark.CLI.Misc qualified as Misc
@@ -47,6 +49,7 @@ commands =
   sortOn
     fst
     [ ("dev", (Dev.main, "Run compiler passes directly.")),
+      ("eval", (Eval.main, "Evaluate Futhark expressions passed in as arguments")),
       ("repl", (REPL.main, "Run interactive Read-Eval-Print-Loop.")),
       ("run", (Run.main, "Run a program through the (slow!) interpreter.")),
       ("c", (C.main, "Compile to sequential C.")),
@@ -75,7 +78,8 @@ commands =
       ("literate", (Literate.main, "Process a literate Futhark program.")),
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
-      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file."))
+      ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
+      ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks."))
     ]
 
 msg :: String

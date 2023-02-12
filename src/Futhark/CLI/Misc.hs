@@ -12,8 +12,9 @@ where
 import Control.Monad.State
 import Data.ByteString.Lazy qualified as BS
 import Data.Function (on)
-import Data.List (isInfixOf, nubBy)
+import Data.List (nubBy)
 import Data.Loc (L (..), startPos)
+import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Compiler
 import Futhark.Test
@@ -22,6 +23,7 @@ import Futhark.Util.Options
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark.Parser.Lexer (scanTokens)
 import Language.Futhark.Prop (isBuiltin)
+import Language.Futhark.Semantic (includeToString)
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
@@ -35,7 +37,7 @@ mainImports = mainWithOptions () [] "program" $ \args () ->
     [file] -> Just $ do
       (_, prog_imports, _) <- readProgramOrDie file
       liftIO . putStr . unlines . map (++ ".fut") . filter (not . isBuiltin) $
-        map fst prog_imports
+        map (includeToString . fst) prog_imports
     _ -> Nothing
 
 -- | @futhark hash@
@@ -53,7 +55,7 @@ mainHash = mainWithOptions () [] "program" $ \args () ->
 mainDataget :: String -> [String] -> IO ()
 mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
   case args of
-    [file, dataset] -> Just $ dataget file dataset
+    [file, dataset] -> Just $ dataget file $ T.pack dataset
     _ -> Nothing
   where
     dataget prog dataset = do
@@ -62,7 +64,7 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
       runs <- testSpecRuns <$> testSpecFromProgramOrDie prog
 
       let exact = filter ((dataset ==) . runDescription) runs
-          infixes = filter ((dataset `isInfixOf`) . runDescription) runs
+          infixes = filter ((dataset `T.isInfixOf`) . runDescription) runs
 
       futhark <- FutharkExe <$> getExecutablePath
 
@@ -70,13 +72,13 @@ mainDataget = mainWithOptions () [] "program dataset" $ \args () ->
         if null exact then infixes else exact of
         [x] -> BS.putStr =<< getValuesBS futhark dir (runInput x)
         [] -> do
-          hPutStr stderr $ "No dataset '" ++ dataset ++ "'.\n"
-          hPutStr stderr "Available datasets:\n"
-          mapM_ (hPutStrLn stderr . ("  " ++) . runDescription) runs
+          T.hPutStr stderr $ "No dataset '" <> dataset <> "'.\n"
+          T.hPutStr stderr "Available datasets:\n"
+          mapM_ (T.hPutStrLn stderr . ("  " <>) . runDescription) runs
           exitFailure
         runs' -> do
-          hPutStr stderr $ "Dataset '" ++ dataset ++ "' ambiguous:\n"
-          mapM_ (hPutStrLn stderr . ("  " ++) . runDescription) runs'
+          T.hPutStr stderr $ "Dataset '" <> dataset <> "' ambiguous:\n"
+          mapM_ (T.hPutStrLn stderr . ("  " <>) . runDescription) runs'
           exitFailure
 
     testSpecRuns = testActionRuns . testAction

@@ -95,7 +95,7 @@ type Sizes = M.Map VName Int64
 newtype EvalM a
   = EvalM
       ( ReaderT
-          (Stack, M.Map FilePath Env)
+          (Stack, M.Map ImportName Env)
           (StateT Sizes (F ExtOp))
           a
       )
@@ -104,11 +104,11 @@ newtype EvalM a
       Applicative,
       Functor,
       MonadFree ExtOp,
-      MonadReader (Stack, M.Map FilePath Env),
+      MonadReader (Stack, M.Map ImportName Env),
       MonadState Sizes
     )
 
-runEvalM :: M.Map FilePath Env -> EvalM a -> F ExtOp a
+runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
 runEvalM imports (EvalM m) = evalStateT (runReaderT m (mempty, imports)) mempty
 
 stacking :: SrcLoc -> Env -> EvalM a -> EvalM a
@@ -125,7 +125,7 @@ stacking loc env = local $ \(ss, imports) ->
 stacktrace :: EvalM [Loc]
 stacktrace = asks $ map stackFrameLoc . fst
 
-lookupImport :: FilePath -> EvalM (Maybe Env)
+lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
 putExtSize :: VName -> Int64 -> EvalM ()
@@ -156,8 +156,8 @@ resolveTypeParams names = match
           M.elems $
             M.intersectionWith (zipWith match) poly_fields fields
     match
-      (Scalar (Arrow _ _ poly_t1 (RetType _ poly_t2)))
-      (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+      (Scalar (Arrow _ _ _ poly_t1 (RetType _ poly_t2)))
+      (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
         match poly_t1 t1 <> match poly_t2 t2
     match poly_t t
       | d1 : _ <- shapeDims (arrayShape poly_t),
@@ -350,12 +350,11 @@ typeCheckerEnv env =
           T.envVtable = vtable
         }
 
-break :: Loc -> EvalM ()
-break loc = do
-  backtrace <- asks fst
-  case NE.nonEmpty backtrace of
-    Nothing -> pure ()
-    Just backtrace' -> liftF $ ExtOpBreak loc BreakPoint backtrace' ()
+break :: Env -> Loc -> EvalM ()
+break env loc = do
+  imports <- asks snd
+  backtrace <- asks ((StackFrame loc (Ctx env imports) NE.:|) . fst)
+  liftF $ ExtOpBreak loc BreakPoint backtrace ()
 
 fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
@@ -550,8 +549,8 @@ evalIndex loc env is arr = do
 evalType :: Env -> StructType -> StructType
 evalType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 evalType env (Scalar (Record fs)) = Scalar $ Record $ fmap (evalType env) fs
-evalType env (Scalar (Arrow () p t1 (RetType dims t2))) =
-  Scalar $ Arrow () p (evalType env t1) (RetType dims (evalType env t2))
+evalType env (Scalar (Arrow () p d t1 (RetType dims t2))) =
+  Scalar $ Arrow () p d (evalType env t1) (RetType dims (evalType env t2))
 evalType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = evalType env et
@@ -614,7 +613,7 @@ evalFunction env _ [] body rettype =
   -- Eta-expand the rest to make any sizes visible.
   etaExpand [] env rettype
   where
-    etaExpand vs env' (Scalar (Arrow _ _ pt (RetType _ rt))) =
+    etaExpand vs env' (Scalar (Arrow _ _ _ pt (RetType _ rt))) =
       pure $
         ValueFun $ \v -> do
           env'' <- matchPat env' (Wildcard (Info $ fromStruct pt) noLoc) v
@@ -643,7 +642,7 @@ evalFunctionBinding ::
   EvalM TermBinding
 evalFunctionBinding env tparams ps ret fbody = do
   let ret' = evalType env $ retType ret
-      arrow (xp, xt) yt = Scalar $ Arrow () xp xt $ RetType [] yt
+      arrow (xp, d, xt) yt = Scalar $ Arrow () xp d xt $ RetType [] yt
       ftype = foldr (arrow . patternParam) ret' ps
       retext = case ps of
         [] -> retDims ret
@@ -849,7 +848,7 @@ evalAppExp env _ (LetWith dest src is v body loc) = do
   let t = T.BoundV [] $ toStruct $ unInfo $ identType dest
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
-    oob = bad loc env "Bad update"
+    oob = bad loc env "Update out of bounds"
 evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
   init_v <- eval env init_e
   case form of
@@ -1041,7 +1040,7 @@ eval env (Constr c es (Info t) _) = do
   shape <- typeValueShape env $ toStruct t
   pure $ ValueSum shape c vs
 eval env (Attr (AttrAtom (AtomName "break") _) e loc) = do
-  break (locOf loc)
+  break env (locOf loc)
   eval env e
 eval env (Attr (AttrAtom (AtomName "trace") _) e loc) = do
   v <- eval env e
@@ -1170,7 +1169,7 @@ evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
 -- is how the REPL works.
 data Ctx = Ctx
   { ctxEnv :: Env,
-    ctxImports :: M.Map FilePath Env
+    ctxImports :: M.Map ImportName Env
   }
 
 nanValue :: PrimValue -> Bool
@@ -1282,57 +1281,61 @@ initialCtx =
 
     fun1 f =
       TermValue Nothing $ ValueFun $ \x -> f x
+
     fun2 f =
-      TermValue Nothing $
-        ValueFun $ \x ->
-          pure $ ValueFun $ \y -> f x y
-    fun2t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y] -> f x y
-            _ -> error $ "Expected pair; got: " <> show v
-    fun3t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z] -> f x y z
-            _ -> error $ "Expected triple; got: " <> show v
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y -> f x y
 
-    fun5t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z, a, b] -> f x y z a b
-            _ -> error $ "Expected pentuple; got: " <> show v
+    fun3 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z -> f x y z
 
-    fun6t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z, a, b, c] -> f x y z a b c
-            _ -> error $ "Expected sextuple; got: " <> show v
+    fun5 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z ->
+            pure . ValueFun $ \a ->
+              pure . ValueFun $ \b -> f x y z a b
 
-    fun7t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z, a, b, c, d] -> f x y z a b c d
-            _ -> error $ "Expected septuple; got: " <> show v
+    fun6 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z ->
+            pure . ValueFun $ \a ->
+              pure . ValueFun $ \b ->
+                pure . ValueFun $ \c -> f x y z a b c
 
-    fun8t f =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z, a, b, c, d, e] -> f x y z a b c d e
-            _ -> error $ "Expected sextuple; got: " <> show v
+    fun7 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z ->
+            pure . ValueFun $ \a ->
+              pure . ValueFun $ \b ->
+                pure . ValueFun $ \c ->
+                  pure . ValueFun $ \d -> f x y z a b c d
 
-    fun10t fun =
-      TermValue Nothing $
-        ValueFun $ \v ->
-          case fromTuple v of
-            Just [x, y, z, a, b, c, d, e, f, g] -> fun x y z a b c d e f g
-            _ -> error $ "Expected octuple; got: " <> show v
+    fun8 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z ->
+            pure . ValueFun $ \a ->
+              pure . ValueFun $ \b ->
+                pure . ValueFun $ \c ->
+                  pure . ValueFun $ \d ->
+                    pure . ValueFun $ \e -> f x y z a b c d e
+
+    fun10 f =
+      TermValue Nothing . ValueFun $ \x ->
+        pure . ValueFun $ \y ->
+          pure . ValueFun $ \z ->
+            pure . ValueFun $ \a ->
+              pure . ValueFun $ \b ->
+                pure . ValueFun $ \c ->
+                  pure . ValueFun $ \d ->
+                    pure . ValueFun $ \e ->
+                      pure . ValueFun $ \g ->
+                        pure . ValueFun $ \h -> f x y z a b c d e g h
 
     bopDef fs = fun2 $ \x y ->
       case (x, y) of
@@ -1510,14 +1513,14 @@ initialCtx =
                 _ -> error $ "Cannot unsign: " <> show x
     def s
       | "map_stream" `isPrefixOf` s =
-          Just $ fun2t stream
+          Just $ fun2 stream
     def s | "reduce_stream" `isPrefixOf` s =
-      Just $ fun3t $ \_ f arg -> stream f arg
+      Just $ fun3 $ \_ f arg -> stream f arg
     def "map" = Just $
       TermPoly Nothing $ \t -> pure $
-        ValueFun $ \v ->
-          case (fromTuple v, unfoldFunType t) of
-            (Just [f, xs], ([_], ret_t))
+        ValueFun $ \f -> pure . ValueFun $ \xs ->
+          case unfoldFunType t of
+            ([_, _], ret_t)
               | Just rowshape <- typeRowShape ret_t ->
                   toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
               | otherwise ->
@@ -1525,21 +1528,21 @@ initialCtx =
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
-                  ++ unlines [prettyString t, show v]
+                  ++ unlines [prettyString t, show f, show xs]
       where
         typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
-      fun3t $ \f ne xs ->
+      fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
     def "scan" = Just $
-      fun3t $ \f ne xs -> do
+      fun3 $ \f ne xs -> do
         let next (out, acc) x = do
               x' <- apply2 noLoc mempty f acc x
               pure (x' : out, x')
         toArray' (valueShape ne) . reverse . fst
           <$> foldM next ([], ne) (snd $ fromArray xs)
     def "scatter" = Just $
-      fun3t $ \arr is vs ->
+      fun3 $ \arr is vs ->
         case arr of
           ValueArray shape arr' ->
             pure $
@@ -1554,7 +1557,7 @@ initialCtx =
             then arr' // [(i, v)]
             else arr'
     def "scatter_2d" = Just $
-      fun3t $ \arr is vs ->
+      fun3 $ \arr is vs ->
         case arr of
           ValueArray _ _ ->
             pure $
@@ -1569,7 +1572,7 @@ initialCtx =
         update _ _ =
           error "scatter_2d expects 2-dimensional indices"
     def "scatter_3d" = Just $
-      fun3t $ \arr is vs ->
+      fun3 $ \arr is vs ->
         case arr of
           ValueArray _ _ ->
             pure $
@@ -1583,7 +1586,7 @@ initialCtx =
           fromMaybe arr $ writeArray (map (IndexingFix . asInt64) idxs) arr v
         update _ _ =
           error "scatter_3d expects 3-dimensional indices"
-    def "hist_1d" = Just . fun6t $ \_ arr fun _ is vs ->
+    def "hist_1d" = Just . fun6 $ \_ arr fun _ is vs ->
       foldM
         (update fun)
         arr
@@ -1592,7 +1595,7 @@ initialCtx =
         op = apply2 mempty mempty
         update fun arr (i, v) =
           fromMaybe arr <$> updateArray (op fun) [IndexingFix i] arr v
-    def "hist_2d" = Just . fun6t $ \_ arr fun _ is vs ->
+    def "hist_2d" = Just . fun6 $ \_ arr fun _ is vs ->
       foldM
         (update fun)
         arr
@@ -1604,7 +1607,7 @@ initialCtx =
             <$> updateArray (op fun) (map (IndexingFix . asInt64) idxs) arr v
         update _ _ _ =
           error "hist_2d: bad index value"
-    def "hist_3d" = Just . fun6t $ \_ arr fun _ is vs ->
+    def "hist_3d" = Just . fun6 $ \_ arr fun _ is vs ->
       foldM
         (update fun)
         arr
@@ -1617,7 +1620,7 @@ initialCtx =
         update _ _ _ =
           error "hist_2d: bad index value"
     def "partition" = Just $
-      fun3t $ \k f xs -> do
+      fun3 $ \k f xs -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
 
             next outs x = do
@@ -1637,7 +1640,7 @@ initialCtx =
         insertAt i x (l : ls) = l : insertAt (i - 1) x ls
         insertAt _ _ ls = ls
     def "scatter_stream" = Just $
-      fun3t $ \dest f vs ->
+      fun3 $ \dest f vs ->
         case (dest, vs) of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
@@ -1652,7 +1655,7 @@ initialCtx =
           _ ->
             error $ "scatter_stream expects array, but got: " <> prettyString (show vs, show vs)
     def "hist_stream" = Just $
-      fun5t $ \dest op _ne f vs ->
+      fun5 $ \dest op _ne f vs ->
         case (dest, vs) of
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
@@ -1667,7 +1670,7 @@ initialCtx =
           _ ->
             error $ "hist_stream expects array, but got: " <> prettyString (show dest, show vs)
     def "acc_write" = Just $
-      fun3t $ \acc i v ->
+      fun3 $ \acc i v ->
         case (acc, i) of
           ( ValueAcc op acc_arr,
             ValuePrim (SignedValue (Int64Value i'))
@@ -1681,7 +1684,7 @@ initialCtx =
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
     --
-    def "flat_index_2d" = Just . fun6t $ \arr offset n1 s1 n2 s2 -> do
+    def "flat_index_2d" = Just . fun6 $ \arr offset n1 s1 n2 s2 -> do
       let offset' = asInt64 offset
           n1' = asInt64 n1
           n2' = asInt64 n2
@@ -1700,7 +1703,7 @@ initialCtx =
           bad mempty mempty $
             "Index out of bounds: " <> prettyText [((n1', s1'), (n2', s2'))]
     --
-    def "flat_update_2d" = Just . fun5t $ \arr offset s1 s2 v -> do
+    def "flat_update_2d" = Just . fun5 $ \arr offset s1 s2 v -> do
       let offset' = asInt64 offset
           s1' = asInt64 s1
           s2' = asInt64 s2
@@ -1717,7 +1720,7 @@ initialCtx =
                 "Index out of bounds: " <> prettyText [((n1, s1'), (n2, s2'))]
         s -> error $ "flat_update_2d: invalid arg shape: " ++ show s
     --
-    def "flat_index_3d" = Just . fun8t $ \arr offset n1 s1 n2 s2 n3 s3 -> do
+    def "flat_index_3d" = Just . fun8 $ \arr offset n1 s1 n2 s2 n3 s3 -> do
       let offset' = asInt64 offset
           n1' = asInt64 n1
           n2' = asInt64 n2
@@ -1739,7 +1742,7 @@ initialCtx =
           bad mempty mempty $
             "Index out of bounds: " <> prettyText [((n1', s1'), (n2', s2'), (n3', s3'))]
     --
-    def "flat_update_3d" = Just . fun6t $ \arr offset s1 s2 s3 v -> do
+    def "flat_update_3d" = Just . fun6 $ \arr offset s1 s2 s3 v -> do
       let offset' = asInt64 offset
           s1' = asInt64 s1
           s2' = asInt64 s2
@@ -1757,7 +1760,7 @@ initialCtx =
                 "Index out of bounds: " <> prettyText [((n1, s1'), (n2, s2'), (n3, s3'))]
         s -> error $ "flat_update_3d: invalid arg shape: " ++ show s
     --
-    def "flat_index_4d" = Just . fun10t $ \arr offset n1 s1 n2 s2 n3 s3 n4 s4 -> do
+    def "flat_index_4d" = Just . fun10 $ \arr offset n1 s1 n2 s2 n3 s3 n4 s4 -> do
       let offset' = asInt64 offset
           n1' = asInt64 n1
           n2' = asInt64 n2
@@ -1782,7 +1785,7 @@ initialCtx =
           bad mempty mempty $
             "Index out of bounds: " <> prettyText [(((n1', s1'), (n2', s2')), ((n3', s3'), (n4', s4')))]
     --
-    def "flat_update_4d" = Just . fun7t $ \arr offset s1 s2 s3 s4 v -> do
+    def "flat_update_4d" = Just . fun7 $ \arr offset s1 s2 s3 s4 v -> do
       let offset' = asInt64 offset
           s1' = asInt64 s1
           s2' = asInt64 s2
@@ -1813,7 +1816,7 @@ initialCtx =
         fromPair (Just [x, y]) = (x, y)
         fromPair _ = error "Not a pair"
     def "zip" = Just $
-      fun2t $ \xs ys -> do
+      fun2 $ \xs ys -> do
         let ShapeDim _ xs_rowshape = valueShape xs
             ShapeDim _ ys_rowshape = valueShape ys
         pure $
@@ -1821,7 +1824,7 @@ initialCtx =
             map toTuple $
               transpose [snd $ fromArray xs, snd $ fromArray ys]
     def "concat" = Just $
-      fun2t $ \xs ys -> do
+      fun2 $ \xs ys -> do
         let (ShapeDim _ rowshape, xs') = fromArray xs
             (_, ys') = fromArray ys
         pure $ toArray' rowshape $ xs' ++ ys'
@@ -1835,7 +1838,7 @@ initialCtx =
               genericTake m $
                 transpose (map (snd . fromArray) xs') ++ repeat []
     def "rotate" = Just $
-      fun2t $ \i xs -> do
+      fun2 $ \i xs -> do
         let (shape, xs') = fromArray xs
         pure $
           let idx = if null xs' then 0 else rem (asInt i) (length xs')
@@ -1851,7 +1854,7 @@ initialCtx =
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
         pure $ toArray (ShapeDim (n * m) shape) $ concatMap (snd . fromArray) xs'
     def "unflatten" = Just $
-      fun3t $ \n m xs -> do
+      fun3 $ \n m xs -> do
         let (ShapeDim xs_size innershape, xs') = fromArray xs
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
@@ -1867,10 +1870,10 @@ initialCtx =
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
     def "vjp2" = Just $
-      fun3t $
+      fun3 $
         \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "jvp2" = Just $
-      fun3t $
+      fun3 $
         \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
     def "acc" = Nothing
     def s | nameFromString s `M.member` namesToPrimTypes = Nothing
@@ -1899,7 +1902,7 @@ interpretDec ctx d = do
     pure $ env <> sizes
   pure ctx {ctxEnv = env}
 
-interpretImport :: Ctx -> (FilePath, Prog) -> F ExtOp Ctx
+interpretImport :: Ctx -> (ImportName, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
   env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
   pure ctx {ctxImports = M.insert fp env $ ctxImports ctx}
@@ -1929,7 +1932,7 @@ valueType v =
 
 checkEntryArgs :: VName -> [V.Value] -> StructType -> Either T.Text ()
 checkEntryArgs entry args entry_t
-  | args_ts == param_ts =
+  | args_ts == map snd param_ts =
       pure ()
   | otherwise =
       Left . docText $
@@ -1967,9 +1970,9 @@ interpretFunction ctx fname vs = do
       f <- evalTermVar (ctxEnv ctx) (qualName fname) ft
       foldM (apply noLoc mempty) f vs'
   where
-    updateType (vt : vts) (Scalar (Arrow als u pt (RetType dims rt))) = do
+    updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do
       checkInput vt pt
-      Scalar . Arrow als u (valueStructType vt) . RetType dims <$> updateType vts rt
+      Scalar . Arrow als pn d (valueStructType vt) . RetType dims <$> updateType vts rt
     updateType _ t =
       Right t
 

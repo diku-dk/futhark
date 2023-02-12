@@ -1609,13 +1609,13 @@ isIntrinsicFunction qname args loc = do
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleOps _ _ = Nothing
 
-    handleSOACs [TupLit [lam, arr] _] "map" = Just $ \desc -> do
+    handleSOACs [lam, arr] "map" = Just $ \desc -> do
       arr' <- internaliseExpToVars "map_arr" arr
       arr_ts <- mapM lookupType arr'
       lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
       let w = arraysSize 0 arr_ts
       letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
-    handleSOACs [TupLit [k, lam, arr] _] "partition" = do
+    handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
         arrs <- internaliseExpToVars "partition_input" arr
@@ -1625,43 +1625,43 @@ isIntrinsicFunction qname args loc = do
         fromInt32 (Literal (SignedValue (Int32Value k')) _) = Just k'
         fromInt32 (IntLit k' (Info (E.Scalar (E.Prim (E.Signed Int32)))) _) = Just $ fromInteger k'
         fromInt32 _ = Nothing
-    handleSOACs [TupLit [lam, ne, arr] _] "reduce" = Just $ \desc ->
+    handleSOACs [lam, ne, arr] "reduce" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
           I.Screma w arrs
             <$> I.reduceSOAC [Reduce Noncommutative red_lam nes]
-    handleSOACs [TupLit [lam, ne, arr] _] "reduce_comm" = Just $ \desc ->
+    handleSOACs [lam, ne, arr] "reduce_comm" = Just $ \desc ->
       internaliseScanOrReduce desc "reduce" reduce (lam, ne, arr, loc)
       where
         reduce w red_lam nes arrs =
           I.Screma w arrs
             <$> I.reduceSOAC [Reduce Commutative red_lam nes]
-    handleSOACs [TupLit [lam, ne, arr] _] "scan" = Just $ \desc ->
+    handleSOACs [lam, ne, arr] "scan" = Just $ \desc ->
       internaliseScanOrReduce desc "scan" reduce (lam, ne, arr, loc)
       where
         reduce w scan_lam nes arrs =
           I.Screma w arrs <$> I.scanSOAC [Scan scan_lam nes]
-    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_1d" = Just $ \desc ->
+    handleSOACs [rf, dest, op, ne, buckets, img] "hist_1d" = Just $ \desc ->
       internaliseHist 1 desc rf dest op ne buckets img loc
-    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_2d" = Just $ \desc ->
+    handleSOACs [rf, dest, op, ne, buckets, img] "hist_2d" = Just $ \desc ->
       internaliseHist 2 desc rf dest op ne buckets img loc
-    handleSOACs [TupLit [rf, dest, op, ne, buckets, img] _] "hist_3d" = Just $ \desc ->
+    handleSOACs [rf, dest, op, ne, buckets, img] "hist_3d" = Just $ \desc ->
       internaliseHist 3 desc rf dest op ne buckets img loc
     handleSOACs _ _ = Nothing
 
-    handleAccs [TupLit [dest, f, bs] _] "scatter_stream" = Just $ \desc ->
+    handleAccs [dest, f, bs] "scatter_stream" = Just $ \desc ->
       internaliseStreamAcc desc dest Nothing f bs
-    handleAccs [TupLit [dest, op, ne, f, bs] _] "hist_stream" = Just $ \desc ->
+    handleAccs [dest, op, ne, f, bs] "hist_stream" = Just $ \desc ->
       internaliseStreamAcc desc dest (Just (op, ne)) f bs
-    handleAccs [TupLit [acc, i, v] _] "acc_write" = Just $ \desc -> do
+    handleAccs [acc, i, v] "acc_write" = Just $ \desc -> do
       acc' <- head <$> internaliseExpToVars "acc" acc
       i' <- internaliseExp1 "acc_i" i
       vs <- internaliseExp "acc_v" v
       fmap pure $ letSubExp desc $ BasicOp $ UpdateAcc acc' [i'] vs
     handleAccs _ _ = Nothing
 
-    handleAD [TupLit [f, x, v] _] fname
+    handleAD [f, x, v] fname
       | fname `elem` ["jvp2", "vjp2"] = Just $ \desc -> do
           x' <- internaliseExp "ad_x" x
           v' <- internaliseExp "ad_v" v
@@ -1672,10 +1672,10 @@ isIntrinsicFunction qname args loc = do
               _ -> VJP lam x' v'
     handleAD _ _ = Nothing
 
-    handleRest [E.TupLit [a, si, v] _] "scatter" = Just $ scatterF 1 a si v
-    handleRest [E.TupLit [a, si, v] _] "scatter_2d" = Just $ scatterF 2 a si v
-    handleRest [E.TupLit [a, si, v] _] "scatter_3d" = Just $ scatterF 3 a si v
-    handleRest [E.TupLit [n, m, arr] _] "unflatten" = Just $ \desc -> do
+    handleRest [a, si, v] "scatter" = Just $ scatterF 1 a si v
+    handleRest [a, si, v] "scatter_2d" = Just $ scatterF 2 a si v
+    handleRest [a, si, v] "scatter_3d" = Just $ scatterF 3 a si v
+    handleRest [n, m, arr] "unflatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
       m' <- internaliseExp1 "m" m
@@ -1723,7 +1723,7 @@ isIntrinsicFunction qname args loc = do
             I.ReshapeArbitrary
             (reshapeOuter (I.Shape [k]) 2 $ I.arrayShape arr_t)
             arr'
-    handleRest [TupLit [x, y] _] "concat" = Just $ \desc -> do
+    handleRest [x, y] "concat" = Just $ \desc -> do
       xs <- internaliseExpToVars "concat_x" x
       ys <- internaliseExpToVars "concat_y" y
       outer_size <- arraysSize 0 <$> mapM lookupType xs
@@ -1738,7 +1738,7 @@ isIntrinsicFunction qname args loc = do
       let conc xarr yarr =
             I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
       mapM (letSubExp desc) $ zipWith conc xs ys
-    handleRest [TupLit [offset, e] _] "rotate" = Just $ \desc -> do
+    handleRest [offset, e] "rotate" = Just $ \desc -> do
       offset' <- internaliseExp1 "rotation_offset" offset
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
@@ -1749,24 +1749,24 @@ isIntrinsicFunction qname args loc = do
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
         pure $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
-    handleRest [TupLit [x, y] _] "zip" = Just $ \desc ->
+    handleRest [x, y] "zip" = Just $ \desc ->
       mapM (letSubExp "zip_copy" . BasicOp . Copy)
         =<< ( (++)
                 <$> internaliseExpToVars (desc ++ "_zip_x") x
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
     handleRest [x] "unzip" = Just $ flip internaliseExp x
-    handleRest [TupLit [arr, offset, n1, s1, n2, s2] _] "flat_index_2d" = Just $ \desc -> do
+    handleRest [arr, offset, n1, s1, n2, s2] "flat_index_2d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
-    handleRest [TupLit [arr1, offset, s1, s2, arr2] _] "flat_update_2d" = Just $ \desc -> do
+    handleRest [arr1, offset, s1, s2, arr2] "flat_update_2d" = Just $ \desc -> do
       flatUpdateHelper desc loc arr1 offset [s1, s2] arr2
-    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3] _] "flat_index_3d" = Just $ \desc -> do
+    handleRest [arr, offset, n1, s1, n2, s2, n3, s3] "flat_index_3d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3)]
-    handleRest [TupLit [arr1, offset, s1, s2, s3, arr2] _] "flat_update_3d" = Just $ \desc -> do
+    handleRest [arr1, offset, s1, s2, s3, arr2] "flat_update_3d" = Just $ \desc -> do
       flatUpdateHelper desc loc arr1 offset [s1, s2, s3] arr2
-    handleRest [TupLit [arr, offset, n1, s1, n2, s2, n3, s3, n4, s4] _] "flat_index_4d" = Just $ \desc -> do
+    handleRest [arr, offset, n1, s1, n2, s2, n3, s3, n4, s4] "flat_index_4d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2), (n3, s3), (n4, s4)]
-    handleRest [TupLit [arr1, offset, s1, s2, s3, s4, arr2] _] "flat_update_4d" = Just $ \desc -> do
+    handleRest [arr1, offset, s1, s2, s3, s4, arr2] "flat_update_4d" = Just $ \desc -> do
       flatUpdateHelper desc loc arr1 offset [s1, s2, s3, s4] arr2
     handleRest _ _ = Nothing
 

@@ -113,11 +113,11 @@ specRow a b c =
 vnameToFileMap :: Imports -> FileMap
 vnameToFileMap = mconcat . map forFile
   where
-    forFile (file, FileModule abs file_env _prog) =
+    forFile (file, FileModule abs file_env _prog _) =
       mconcat (map (vname Type) (M.keys abs))
         <> forEnv file_env
       where
-        file' = makeRelative "/" file
+        file' = makeRelative "/" $ includeToFilePath file
         vname ns v = M.singleton (qualLeaf v) (file', ns)
         vname' ((ns, _), v) = vname ns v
 
@@ -133,13 +133,13 @@ vnameToFileMap = mconcat . map forFile
 -- @important_imports@ considered most important.  The HTML files must
 -- be written to the specific locations indicated in the return value,
 -- or the relative links will be wrong.
-renderFiles :: [FilePath] -> Imports -> ([(FilePath, Html)], Warnings)
+renderFiles :: [ImportName] -> Imports -> ([(FilePath, Html)], Warnings)
 renderFiles important_imports imports = runWriter $ do
   (import_pages, documented) <- runWriterT $
     forM imports $ \(current, fm) ->
       let ctx =
             Context
-              { ctxCurrent = makeRelative "/" current,
+              { ctxCurrent = makeRelative "/" $ includeToFilePath current,
                 ctxFileMod = fm,
                 ctxImports = imports,
                 ctxNoLink = mempty,
@@ -155,15 +155,19 @@ renderFiles important_imports imports = runWriter $ do
 
             pure
               ( current,
-                ( H.docTypeHtml ! A.lang "en" $
-                    addBoilerplateWithNav important_imports imports ("doc" </> current) current $
-                      H.main $
-                        maybe_abstract
-                          <> selfLink "synopsis" (H.h2 "Synopsis")
-                          <> (H.div ! A.id "overview") synopsis
-                          <> selfLink "description" (H.h2 "Description")
-                          <> description
-                          <> maybe_sections,
+                ( H.docTypeHtml ! A.lang "en"
+                    $ addBoilerplateWithNav
+                      important_imports
+                      imports
+                      ("doc" </> includeToFilePath current)
+                      (includeToString current)
+                    $ H.main
+                    $ maybe_abstract
+                      <> selfLink "synopsis" (H.h2 "Synopsis")
+                      <> (H.div ! A.id "overview") synopsis
+                      <> selfLink "description" (H.h2 "Description")
+                      <> description
+                      <> maybe_sections,
                   first_paragraph
                 )
               )
@@ -175,7 +179,8 @@ renderFiles important_imports imports = runWriter $ do
       ++ map (importHtml *** fst) import_pages
   where
     file_map = vnameToFileMap imports
-    importHtml import_name = "doc" </> makeRelative "/" import_name <.> "html"
+    importHtml import_name =
+      "doc" </> makeRelative "/" (fromString (includeToString import_name)) <.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -201,7 +206,7 @@ headerDoc prog =
     firstParagraph = unlines . takeWhile (not . paragraphSeparator) . lines
     paragraphSeparator = all isSpace
 
-contentsPage :: [FilePath] -> [(String, Html)] -> Html
+contentsPage :: [ImportName] -> [(ImportName, Html)] -> Html
 contentsPage important_imports pages =
   H.docTypeHtml $
     addBoilerplate "index.html" "Futhark Library Documentation" $
@@ -229,12 +234,15 @@ contentsPage important_imports pages =
         (H.dt ! A.class_ "desc_header") (importLink "index.html" name)
           <> (H.dd ! A.class_ "desc_doc") maybe_abstract
 
-importLink :: FilePath -> String -> Html
+importLink :: FilePath -> ImportName -> Html
 importLink current name =
-  let file = relativise ("doc" </> makeRelative "/" name -<.> "html") current
-   in (H.a ! A.href (fromString file) $ fromString name)
+  let file =
+        relativise
+          ("doc" </> makeRelative "/" (includeToFilePath name) -<.> "html")
+          current
+   in (H.a ! A.href (fromString file) $ fromString (includeToString name))
 
-indexPage :: [FilePath] -> Imports -> Documented -> FileMap -> Html
+indexPage :: [ImportName] -> Imports -> Documented -> FileMap -> Html
 indexPage important_imports imports documented fm =
   H.docTypeHtml $
     addBoilerplateWithNav important_imports imports "doc-index.html" "Index" $
@@ -344,7 +352,7 @@ addBoilerplate current titleText content =
     futhark_doc_url =
       "https://futhark.readthedocs.io/en/latest/man/futhark-doc.html"
 
-addBoilerplateWithNav :: [FilePath] -> Imports -> String -> String -> Html -> Html
+addBoilerplateWithNav :: [ImportName] -> Imports -> String -> String -> Html -> Html
 addBoilerplateWithNav important_imports imports current titleText content =
   addBoilerplate current titleText $
     (H.nav ! A.id "filenav" $ files) <> content
@@ -390,7 +398,7 @@ synopsisOpened (ModParens me _) = do
   Just $ parens <$> me'
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
-  let dest = fromString $ relativise file current <> ".html"
+  let dest = fromString $ relativise (includeToFilePath file) current <> ".html"
   pure $ keyword "import " <> (H.a ! A.href dest) (fromString $ show file)
 synopsisOpened (ModAscript _ se _ _) = Just $ do
   se' <- synopsisSigExp se
@@ -411,7 +419,7 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = d
           map typeParamName tparams
             ++ map identName (S.toList $ mconcat $ map patIdents params)
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
-  params' <- noLink' $ mapM patternHtml params
+  params' <- noLink' $ mapM paramHtml params
   pure
     ( keyword "val " <> (H.span ! A.class_ "decl_name") name,
       tparams',
@@ -436,7 +444,7 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
       ps' <- modParamHtml ps
       pure $ specRow (keyword "module " <> name') ": " (ps' <> sig')
 
-    FileModule _abs Env {envModTable = modtable} _ = fm
+    FileModule _abs Env {envModTable = modtable} _ _ = fm
     envSig (ModEnv e) = renderEnv e
     envSig (ModFun (FunSig _ _ (MTy _ m))) = envSig m
 
@@ -485,6 +493,10 @@ synopsisValBindBind (name, BoundV tps t) = do
       <> ": "
       <> t'
 
+dietHtml :: Diet -> Html
+dietHtml Consume = "*"
+dietHtml Observe = ""
+
 typeHtml :: StructType -> DocM Html
 typeHtml t = case t of
   Array _ u shape et -> do
@@ -505,14 +517,14 @@ typeHtml t = case t of
     targs' <- mapM typeArgHtml targs
     et' <- qualNameHtml et
     pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
-  Scalar (Arrow _ pname t1 t2) -> do
+  Scalar (Arrow _ pname d t1 t2) -> do
     t1' <- typeHtml t1
     t2' <- retTypeHtml t2
     pure $ case pname of
       Named v ->
-        parens (vnameHtml v <> ": " <> t1') <> " -> " <> t2'
+        parens (vnameHtml v <> ": " <> dietHtml d <> t1') <> " -> " <> t2'
       Unnamed ->
-        t1' <> " -> " <> t2'
+        dietHtml d <> t1' <> " -> " <> t2'
   Scalar (Sum cs) -> pipes <$> mapM ppClause (sortConstrs cs)
     where
       ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
@@ -680,12 +692,12 @@ vnameLink' (VName _ tag) current file =
     then "#" ++ show tag
     else relativise file current ++ ".html#" ++ show tag
 
-patternHtml :: Pat -> DocM Html
-patternHtml pat = do
-  let (pat_param, t) = patternParam pat
+paramHtml :: Pat -> DocM Html
+paramHtml pat = do
+  let (pat_param, d, t) = patternParam pat
   t' <- typeHtml t
   pure $ case pat_param of
-    Named v -> parens (vnameHtml v <> ": " <> t')
+    Named v -> parens (vnameHtml v <> ": " <> dietHtml d <> t')
     Unnamed -> t'
 
 relativise :: FilePath -> FilePath -> FilePath
@@ -762,13 +774,13 @@ identifierLinks loc (c : s') = (c :) <$> identifierLinks loc s'
 lookupName :: (Namespace, String, Maybe FilePath) -> DocM (Maybe VName)
 lookupName (namespace, name, file) = do
   current <- asks ctxCurrent
-  let file' = includeToString . flip (mkImportFrom (mkInitialImport current)) mempty <$> file
+  let file' = mkImportFrom (mkInitialImport current) <$> file
   env <- lookupEnvForFile file'
   case M.lookup (namespace, nameFromString name) . envNameMap =<< env of
     Nothing -> pure Nothing
     Just qn -> pure $ Just $ qualLeaf qn
 
-lookupEnvForFile :: Maybe FilePath -> DocM (Maybe Env)
+lookupEnvForFile :: Maybe ImportName -> DocM (Maybe Env)
 lookupEnvForFile Nothing = asks $ Just . fileEnv . ctxFileMod
 lookupEnvForFile (Just file) = asks $ fmap fileEnv . lookup file . ctxImports
 

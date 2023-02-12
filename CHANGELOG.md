@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.23.0]
+## [0.24.0]
+
+### Added
+
+### Removed
+
+### Changed
+
+* If part of a function parameter is marked as consuming ("unique"),
+  the *entire* parameter is now marked as consuming.
+
+### Fixed
+
+* A somewhat obscure simplification rule could mess up use of memory.
+
+* Corner case optimisation for mapping over `iota` (#1874).
+
+## [0.23.1]
 
 ### Added
 
@@ -16,9 +33,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark literate` now supports a `$loadaudio` builtin function for loading
   audio to Futhark programs (#1829).
 
-### Removed
+* You can now mix consumption and higher-order terms in slightly more
+  cases (#1836).
+
+* `futhark pkg` now invokes Git directly rather than scraping
+  GitHub/GitLab.  This means package paths can now refer to any Git
+  repository, as long as `git clone` works.  In particular, you can
+  use private and self-hosted repositories.
+
+* Significant reduction in compilation time by doing internal sanity
+  checks in separate thread.
+
+* New command: `futhark eval`. Evaluates Futhark expressions
+  provided as command line arguments, optionally allowing a file
+  import (#1408).
+
+* `script input` now allows the use of `$loaddata`.
+
+* Datasets used in `futhark test` and `futhark bench` can now be named
+  (#1859).
+
+* New command `futhark benchcmp` by William Due.
 
 ### Changed
+
+* The C API function `futhark_context_new_with_command_queue()` for
+  the OpenCL backend has been replaced with a configuration setting
+  `futhark_context_config_set_command_queue()`.
 
 ### Fixed
 
@@ -26,6 +67,39 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Parser did not recognise custom infix operators that did not have a
   builtin operator as prefix (#1824).
+
+* GPU backends: expansion of irregular nested allocations involving
+  consumption (#1837, #1838).
+
+* CLI executables now handle entry points with names that are not
+  valid C identifiers (#1841).
+
+* Various oversights in the type checking of uniqueness annotations
+  for higher-order functions (#1842).
+
+* Invalid short-circuiting could cause compiler crashes (#1843).
+
+* Defunctionalisation could mess up sum types, leading to invalid code
+  generation by internalisation, leading to a compiler crash (#1847).
+
+* The `#[break]` attribute now provides the right environment to
+  `futhark repl`, allowing local variables to be inspected.
+
+* Simplification of concatenations (#1851).
+
+* Array payloads in sum types no longer need parens (#1853).
+
+* When a file is loaded with `futhark repl`, `local` declarations are
+  now available.
+
+* Missing alias propagation when pattern matching incompletely known
+  sum types (#1855).
+
+* `reduce_by_index` and `hist` were in some cases unable to handle
+  input sizes that do not fit in a 32-bit integer.
+
+* A fusion bug related to fusing across transpositions could result in
+  a compiler crash (#1858).
 
 ## [0.22.7]
 

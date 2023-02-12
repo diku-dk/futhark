@@ -38,8 +38,8 @@ toConcatArg vtable v =
   case ST.lookupBasicOp v vtable of
     Just (ArrayLit ses _, cs) ->
       (ArgArrayLit ses, cs)
-    Just (Replicate shape se, cs) ->
-      (ArgReplicate [shapeSize 0 shape] se, cs)
+    Just (Replicate (Shape [d]) se, cs) ->
+      (ArgReplicate [d] se, cs)
     _ ->
       (ArgVar v, mempty)
 
@@ -132,11 +132,8 @@ simplifyConcat (vtable, _) pat aux (Concat 0 (x :| xs) outer_w)
   | -- We produce the to-be-concatenated arrays in reverse order, so
     -- reverse them back.
     y : ys <-
-      forSingleArray $
-        reverse $
-          foldl' fuseConcatArg mempty $
-            map (toConcatArg vtable) $
-              x : xs,
+      forSingleArray . reverse . foldl' fuseConcatArg mempty $
+        map (toConcatArg vtable) (x : xs),
     length xs /= length ys =
       Simplify $ do
         elem_type <- lookupType x

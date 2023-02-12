@@ -71,7 +71,7 @@ type Allocable fromrep torep inner =
     BodyDec fromrep ~ (),
     BodyDec torep ~ (),
     ExpDec torep ~ (),
-    SizeSubst inner,
+    SizeSubst (inner torep),
     BuilderOps torep
   )
 
@@ -168,7 +168,7 @@ arraySizeInBytes :: MonadBuilder m => Type -> m SubExp
 arraySizeInBytes = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM
 
 allocForArray' ::
-  (MonadBuilder m, Op (Rep m) ~ MemOp inner) =>
+  (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m)) =>
   Type ->
   Space ->
   m VName
@@ -220,7 +220,7 @@ mkMissingIdents idents rts =
     f _ Nothing = newIdent "ext" $ Prim int64
 
 allocsForPat ::
-  (MonadBuilder m, Op (Rep m) ~ MemOp inner) =>
+  (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m)) =>
   Space ->
   [Ident] ->
   [ExpReturns] ->
@@ -274,7 +274,7 @@ instantiateIxFun = traverse $ traverse inst
     inst (Free x) = pure x
 
 summaryForBindage ::
-  (MonadBuilder m, Op (Rep m) ~ MemOp inner) =>
+  (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m)) =>
   Space ->
   Type ->
   ExpHint ->
@@ -472,7 +472,7 @@ allocInMergeParams merge m = do
       pure (mergeparam', se, linearFuncallArg (paramType mergeparam) space)
 
 arrayWithIxFun ::
-  (MonadBuilder m, Op (Rep m) ~ MemOp inner, LetDec (Rep m) ~ LetDecMem) =>
+  (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m), LetDec (Rep m) ~ LetDecMem) =>
   Space ->
   IxFun ->
   Type ->
@@ -1009,9 +1009,9 @@ class SizeSubst op where
   opIsConst :: op -> Bool
   opIsConst = const False
 
-instance SizeSubst ()
+instance SizeSubst (NoOp rep)
 
-instance SizeSubst op => SizeSubst (MemOp op) where
+instance SizeSubst (op rep) => SizeSubst (MemOp op rep) where
   opIsConst (Inner op) = opIsConst op
   opIsConst _ = False
 
@@ -1040,11 +1040,13 @@ mkLetNamesB' space dec names e = do
 mkLetNamesB'' ::
   ( Mem rep inner,
     LetDec rep ~ LetDecMem,
-    OpReturns (Engine.OpWithWisdom inner),
+    OpReturns (inner (Engine.Wise rep)),
     ExpDec rep ~ (),
     Rep m ~ Engine.Wise rep,
     HasScope (Engine.Wise rep) m,
     MonadBuilder m,
+    AliasedOp (inner (Engine.Wise rep)),
+    RephraseOp (MemOp inner),
     Engine.CanBeWise inner
   ) =>
   Space ->
@@ -1059,21 +1061,39 @@ mkLetNamesB'' space names e = do
   where
     nohints = map (const NoHint) names
 
+simplifyMemOp ::
+  Engine.SimplifiableRep rep =>
+  ( inner (Engine.Wise rep) ->
+    Engine.SimpleM rep (inner (Engine.Wise rep), Stms (Engine.Wise rep))
+  ) ->
+  MemOp inner (Engine.Wise rep) ->
+  Engine.SimpleM rep (MemOp inner (Engine.Wise rep), Stms (Engine.Wise rep))
+simplifyMemOp _ (Alloc size space) =
+  (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
+simplifyMemOp onInner (Inner k) = do
+  (k', hoisted) <- onInner k
+  pure (Inner k', hoisted)
+
 simplifiable ::
   ( Engine.SimplifiableRep rep,
     LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    OpReturns (Engine.OpWithWisdom inner),
-    AliasedOp (Engine.OpWithWisdom inner),
-    IndexOp (Engine.OpWithWisdom inner),
-    Mem rep inner
+    Mem (Engine.Wise rep) inner,
+    Engine.CanBeWise inner,
+    RephraseOp inner,
+    IsOp (inner rep),
+    OpReturns (inner (Engine.Wise rep)),
+    AliasedOp (inner (Engine.Wise rep)),
+    IndexOp (inner (Engine.Wise rep))
   ) =>
-  (Engine.OpWithWisdom inner -> UT.UsageTable) ->
-  (Engine.OpWithWisdom inner -> Engine.SimpleM rep (Engine.OpWithWisdom inner, Stms (Engine.Wise rep))) ->
+  (inner (Engine.Wise rep) -> UT.UsageTable) ->
+  ( inner (Engine.Wise rep) ->
+    Engine.SimpleM rep (inner (Engine.Wise rep), Stms (Engine.Wise rep))
+  ) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat simplifyOp
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat (simplifyMemOp simplifyInnerOp)
   where
     mkExpDecS' _ pat e =
       pure $ Engine.mkWiseExpDec pat () e
@@ -1096,12 +1116,6 @@ simplifiable innerUsage simplifyInnerOp =
       mempty
     opUsage (Inner inner) =
       innerUsage inner
-
-    simplifyOp (Alloc size space) =
-      (,) <$> (Alloc <$> Engine.simplify size <*> pure space) <*> pure mempty
-    simplifyOp (Inner k) = do
-      (k', hoisted) <- simplifyInnerOp k
-      pure (Inner k', hoisted)
 
     simplifyPat (Pat pes) e = do
       rets <- expReturns e
@@ -1127,5 +1141,5 @@ data ExpHint
   = NoHint
   | Hint IxFun Space
 
-defaultExpHints :: (Monad m, ASTRep rep) => Exp rep -> m [ExpHint]
-defaultExpHints e = pure $ replicate (expExtTypeSize e) NoHint
+defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
+defaultExpHints e = map (const NoHint) <$> expExtType e

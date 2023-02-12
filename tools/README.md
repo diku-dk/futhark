@@ -14,13 +14,6 @@ Similarly  `run-formatter.sh` is a convienent tool for automatic code formatting
 ./run-formatter.sh src unittests
 ```
 
-Benchmarking
--------------
-Some of the tools in this directory are also helpful for benchmarking
-
-`cmp-bench-json.py` can be used to compare the results of two different file produce by futhark-bench's --json option. This can be useful for comparing the performance variations of different futhark backends.
-```
-./cmp-bench-json.py results_opencl.json results_cuda.json
 ```
 GtkSourceView
 -------------

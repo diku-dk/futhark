@@ -15,7 +15,6 @@
 -- also obtaining information about the storage location of results.
 module Futhark.IR.Prop.TypeOf
   ( expExtType,
-    expExtTypeSize,
     subExpType,
     subExpResType,
     basicOpType,
@@ -145,27 +144,6 @@ expExtType (WithAcc inputs lam) =
     num_accs = length inputs
 expExtType (Op op) = opType op
 
--- | The number of values returned by an expression.
-expExtTypeSize ::
-  (RepTypes rep, TypedOp (Op rep)) =>
-  Exp rep ->
-  Int
-expExtTypeSize = length . feelBad . expExtType
-
--- FIXME, this is a horrible quick hack.
-newtype FeelBad rep a = FeelBad {feelBad :: a}
-
-instance Functor (FeelBad rep) where
-  fmap f = FeelBad . f . feelBad
-
-instance Applicative (FeelBad rep) where
-  pure = FeelBad
-  f <*> x = FeelBad $ feelBad f $ feelBad x
-
-instance RepTypes rep => HasScope rep (FeelBad rep) where
-  lookupType = const $ pure $ Prim $ IntType Int64
-  askScope = pure mempty
-
 -- | Given the parameters of a loop, produce the return type.
 loopExtType :: Typed dec => [Param dec] -> [ExtType]
 loopExtType params =
@@ -178,5 +156,5 @@ loopExtType params =
 class TypedOp op where
   opType :: HasScope t m => op -> m [ExtType]
 
-instance TypedOp () where
-  opType () = pure []
+instance TypedOp (NoOp rep) where
+  opType NoOp = pure []

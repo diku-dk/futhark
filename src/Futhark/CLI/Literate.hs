@@ -24,7 +24,6 @@ import Data.Vector.Storable.ByteString qualified as SVec
 import Data.Void
 import Data.Word (Word32, Word8)
 import Futhark.Data
-import Futhark.Data.Reader
 import Futhark.Script
 import Futhark.Server
 import Futhark.Test
@@ -598,18 +597,6 @@ loadImage imgfile =
     void $ system "convert" [imgfile, "-type", "TrueColorAlpha", bmpfile] mempty
     loadBMP bmpfile
 
-loadData :: FilePath -> ScriptM (Compound Value)
-loadData datafile = do
-  contents <- liftIO $ LBS.readFile datafile
-  let maybe_vs = readValues contents
-  case maybe_vs of
-    Nothing ->
-      throwError $ "Failed to read data file " <> T.pack datafile
-    Just [v] ->
-      pure $ ValueAtom v
-    Just vs ->
-      pure $ ValueTuple $ map ValueAtom vs
-
 loadPCM :: Int -> FilePath -> ScriptM (Compound Value)
 loadPCM num_channels pcmfile = do
   contents <- liftIO $ LBS.readFile pcmfile
@@ -648,16 +635,6 @@ literateBuiltin "loadimg" vs =
       throwError $
         "$loadimg does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin "loaddata" vs =
-  case vs of
-    [ValueAtom v]
-      | Just path <- getValue v -> do
-          let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadData path'
-    _ ->
-      throwError $
-        "$loaddata does not accept arguments of types: "
-          <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
 literateBuiltin "loadaudio" vs =
   case vs of
     [ValueAtom v]
@@ -668,8 +645,8 @@ literateBuiltin "loadaudio" vs =
       throwError $
         "$loadaudio does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap valueType) vs)
-literateBuiltin f _ =
-  throwError $ "Unknown builtin function $" <> prettyText f
+literateBuiltin f vs =
+  scriptBuiltin "." f vs
 
 data Options = Options
   { scriptBackend :: String,

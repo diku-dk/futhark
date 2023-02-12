@@ -64,6 +64,7 @@ module Language.Futhark.Syntax
     PatBase (..),
 
     -- * Module language
+    ImportName (..),
     SpecBase (..),
     SigExpBase (..),
     TypeRefBase (..),
@@ -118,6 +119,7 @@ import Language.Futhark.Primitive
     IntType (..),
     IntValue (..),
   )
+import System.FilePath.Posix qualified as Posix
 import Prelude
 
 -- | No information functor.  Usually used for placeholder type- or
@@ -306,7 +308,7 @@ data ScalarTypeBase dim as
   | Sum (M.Map Name [TypeBase dim as])
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
-    Arrow as PName (TypeBase dim ()) (RetTypeBase dim as)
+    Arrow as PName Diet (TypeBase dim ()) (RetTypeBase dim as)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -314,8 +316,8 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Record fs) = Record <$> traverse (bitraverse f g) fs
   bitraverse f g (TypeVar als u t args) =
     TypeVar <$> g als <*> pure u <*> pure t <*> traverse (traverse f) args
-  bitraverse f g (Arrow als v t1 t2) =
-    Arrow <$> g als <*> pure v <*> bitraverse f pure t1 <*> bitraverse f g t2
+  bitraverse f g (Arrow als v d t1 t2) =
+    Arrow <$> g als <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f g t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Bifunctor ScalarTypeBase where
@@ -462,21 +464,13 @@ instance Located (TypeArgExp vn) where
   locOf (TypeArgExpDim _ loc) = locOf loc
   locOf (TypeArgExpType t) = locOf t
 
--- | Information about which parts of a value/type are consumed.
+-- | Information about which parts of a parameter are consumed.  This
+-- can be considered kind of an effect on the function.
 data Diet
-  = -- | Consumes these fields in the record.
-    RecordDiet (M.Map Name Diet)
-  | -- | Consume these parts of the constructors.
-    SumDiet (M.Map Name [Diet])
-  | -- | A function that consumes its argument(s) like this.
-    -- The final 'Diet' should always be 'Observe', as there
-    -- is no way for a function to consume its return value.
-    FuncDiet Diet Diet
-  | -- | Consumes this value.
-    Consume
-  | -- | Only observes value in this position, does
-    -- not consume.
+  = -- | Does not consume the parameter.
     Observe
+  | -- | Consumes the parameter.
+    Consume
   deriving (Eq, Ord, Show)
 
 -- | An identifier consists of its name and the type of the value
@@ -1149,12 +1143,20 @@ deriving instance Show (SigBindBase NoInfo Name)
 instance Located (SigBindBase f vn) where
   locOf = locOf . sigLoc
 
+-- | Canonical reference to a Futhark code file.  Does not include the
+-- @.fut@ extension.  This is most often a path relative to the
+-- working directory of the compiler.  In a multi-file program, a file
+-- is known by exactly one import name, even if it is referenced
+-- relatively by different names by files in different subdirectories.
+newtype ImportName = ImportName Posix.FilePath
+  deriving (Eq, Ord, Show)
+
 -- | Module expression.
 data ModExpBase f vn
   = ModVar (QualName vn) SrcLoc
   | ModParens (ModExpBase f vn) SrcLoc
   | -- | The contents of another file as a module.
-    ModImport FilePath (f FilePath) SrcLoc
+    ModImport FilePath (f ImportName) SrcLoc
   | ModDecs [DecBase f vn] SrcLoc
   | -- | Functor application.  The first mapping is from parameter
     -- names to argument names, while the second maps names in the
@@ -1225,7 +1227,7 @@ data DecBase f vn
   | ModDec (ModBindBase f vn)
   | OpenDec (ModExpBase f vn) SrcLoc
   | LocalDec (DecBase f vn) SrcLoc
-  | ImportDec FilePath (f FilePath) SrcLoc
+  | ImportDec FilePath (f ImportName) SrcLoc
 
 deriving instance Show (DecBase Info VName)
 

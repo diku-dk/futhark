@@ -24,32 +24,22 @@ where
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Futhark.Util (dropLast, fromPOSIX, toPOSIX)
-import Futhark.Util.Loc
 import Futhark.Util.Pretty
 import Language.Futhark
 import System.FilePath qualified as Native
 import System.FilePath.Posix qualified as Posix
 import Prelude hiding (mod)
 
--- | Canonical reference to a Futhark code file.  Does not include the
--- @.fut@ extension.  This is most often a path relative to the
--- current working directory of the compiler.
-data ImportName = ImportName Posix.FilePath SrcLoc
-  deriving (Eq, Ord, Show)
-
-instance Located ImportName where
-  locOf (ImportName _ loc) = locOf loc
-
 -- | Create an import name immediately from a file path specified by
 -- the user.
 mkInitialImport :: Native.FilePath -> ImportName
-mkInitialImport s = ImportName (Posix.normalise $ toPOSIX s) noLoc
+mkInitialImport = ImportName . Posix.normalise . toPOSIX
 
 -- | We resolve '..' paths here and assume that no shenanigans are
 -- going on with symbolic links.  If there is, too bad.  Don't do
 -- that.
-mkImportFrom :: ImportName -> String -> SrcLoc -> ImportName
-mkImportFrom (ImportName includer _) includee
+mkImportFrom :: ImportName -> String -> ImportName
+mkImportFrom (ImportName includer) includee
   | Posix.isAbsolute includee = ImportName includee
   | otherwise = ImportName $ Posix.normalise $ Posix.joinPath $ includer' ++ includee'
   where
@@ -63,29 +53,33 @@ mkImportFrom (ImportName includer _) includee
 
 -- | Create a @.fut@ file corresponding to an 'ImportName'.
 includeToFilePath :: ImportName -> Native.FilePath
-includeToFilePath (ImportName s _) = fromPOSIX $ Posix.normalise s Posix.<.> "fut"
+includeToFilePath (ImportName s) = fromPOSIX $ Posix.normalise s Posix.<.> "fut"
 
 -- | Produce a human-readable canonicalized string from an
 -- 'ImportName'.
 includeToString :: ImportName -> String
-includeToString (ImportName s _) = Posix.normalise s
+includeToString (ImportName s) = Posix.normalise s
 
 -- | Produce a human-readable canonicalized text from an
 -- 'ImportName'.
 includeToText :: ImportName -> T.Text
-includeToText (ImportName s _) = T.pack $ Posix.normalise s
+includeToText (ImportName s) = T.pack $ Posix.normalise s
 
 -- | The result of type checking some file.  Can be passed to further
 -- invocations of the type checker.
 data FileModule = FileModule
   { -- | Abstract types.
     fileAbs :: TySet,
+    -- | The environment made available when importing this module.
     fileEnv :: Env,
-    fileProg :: Prog
+    fileProg :: Prog,
+    -- | The environment at the bottom of the file.  Includes local
+    -- parts.
+    fileScope :: Env
   }
 
 -- | A mapping from import names to imports.  The ordering is significant.
-type Imports = [(String, FileModule)]
+type Imports = [(ImportName, FileModule)]
 
 -- | The space inhabited by a name.
 data Namespace

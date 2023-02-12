@@ -143,8 +143,8 @@ envWithImports imports env =
 checkProgM :: UncheckedProg -> TypeM FileModule
 checkProgM (Prog doc decs) = do
   checkForDuplicateDecs decs
-  (abs, env, decs') <- checkDecs decs
-  pure (FileModule abs env $ Prog doc decs')
+  (abs, env, decs', full_env) <- checkDecs decs
+  pure (FileModule abs env (Prog doc decs') full_env)
 
 dupDefinitionError ::
   MonadTypeChecker m =>
@@ -378,7 +378,7 @@ checkOneModExp (ModParens e loc) = do
   pure (abs, mty, ModParens e' loc)
 checkOneModExp (ModDecs decs loc) = do
   checkForDuplicateDecs decs
-  (abstypes, env, decs') <- checkDecs decs
+  (abstypes, env, decs', _) <- checkDecs decs
   pure
     ( abstypes,
       MTy abstypes $ ModEnv env,
@@ -617,14 +617,59 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     pname (Named v) = baseName v
     pname Unnamed = "_"
-    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
       let (xs, y) = onRetType (Just t2_te) t2
        in (EntryParam (maybe "_" baseName p) (EntryType t1 (Just t1_te)) : xs, y)
-    onRetType _ (Scalar (Arrow _ p t1 (RetType _ t2))) =
+    onRetType _ (Scalar (Arrow _ p _ t1 (RetType _ t2))) =
       let (xs, y) = onRetType Nothing t2
        in (EntryParam (pname p) (EntryType t1 Nothing) : xs, y)
     onRetType te t =
       ([], EntryType t te)
+
+checkEntryPoint ::
+  SrcLoc ->
+  [TypeParam] ->
+  [Pat] ->
+  Maybe (TypeExp VName) ->
+  StructRetType ->
+  TypeM ()
+checkEntryPoint loc tparams params maybe_tdecl rettype
+  | any isTypeParam tparams =
+      typeError loc mempty $
+        withIndexLink
+          "polymorphic-entry"
+          "Entry point functions may not be polymorphic."
+  | not (all orderZero param_ts)
+      || not (orderZero rettype') =
+      typeError loc mempty $
+        withIndexLink
+          "higher-order-entry"
+          "Entry point functions may not be higher-order."
+  | sizes_only_in_ret <-
+      S.fromList (map typeParamName tparams)
+        `S.intersection` freeInType rettype'
+        `S.difference` foldMap freeInType param_ts,
+    not $ S.null sizes_only_in_ret =
+      typeError loc mempty $
+        withIndexLink
+          "size-polymorphic-entry"
+          "Entry point functions must not be size-polymorphic in their return type."
+  | p : _ <- filter nastyParameter params =
+      warn loc $
+        "Entry point parameter\n"
+          </> indent 2 (pretty p)
+          </> "\nwill have an opaque type, so the entry point will likely not be callable."
+  | nastyReturnType maybe_tdecl rettype_t =
+      warn loc $
+        "Entry point return type\n"
+          </> indent 2 (pretty rettype)
+          </> "\nwill have an opaque type, so the result will likely not be usable."
+  | otherwise =
+      pure ()
+  where
+    (RetType _ rettype_t) = rettype
+    (rettype_params, rettype') = unfoldFunType rettype_t
+    param_ts = map patternStructType params ++ map snd rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
@@ -633,45 +678,13 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
     typeError loc mempty $
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
-  (fname', tparams', params', maybe_tdecl', rettype@(RetType _ rettype_t), body') <-
+  (fname', tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
-  let (rettype_params, rettype') = unfoldFunType rettype_t
-      entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
+  let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
 
   case entry' of
-    Just _
-      | any isTypeParam tparams' ->
-          typeError loc mempty $
-            withIndexLink
-              "polymorphic-entry"
-              "Entry point functions may not be polymorphic."
-      | not (all patternOrderZero params')
-          || not (all orderZero rettype_params)
-          || not (orderZero rettype') ->
-          typeError loc mempty $
-            withIndexLink
-              "higher-order-entry"
-              "Entry point functions may not be higher-order."
-      | sizes_only_in_ret <-
-          S.fromList (map typeParamName tparams')
-            `S.intersection` freeInType rettype'
-            `S.difference` foldMap freeInType (map patternStructType params' ++ rettype_params),
-        not $ S.null sizes_only_in_ret ->
-          typeError loc mempty $
-            withIndexLink
-              "size-polymorphic-entry"
-              "Entry point functions must not be size-polymorphic in their return type."
-      | p : _ <- filter nastyParameter params' ->
-          warn loc $
-            "Entry point parameter\n"
-              </> indent 2 (pretty p)
-              </> "\nwill have an opaque type, so the entry point will likely not be callable."
-      | nastyReturnType maybe_tdecl' rettype_t ->
-          warn loc $
-            "Entry point return type\n"
-              </> indent 2 (pretty rettype)
-              </> "\nwill have an opaque type, so the result will likely not be usable."
+    Just _ -> checkEntryPoint loc tparams' params' maybe_tdecl' rettype
     _ -> pure ()
 
   attrs' <- mapM checkAttr attrs
@@ -692,9 +705,9 @@ nastyType t@Array {} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType Nothing (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+nastyReturnType Nothing (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   nastyType t1 || nastyReturnType Nothing t2
-nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   (not (niceTypeExp te1) && nastyType t1)
     || nastyReturnType (Just te2) t2
 nastyReturnType (Just te) _
@@ -749,17 +762,19 @@ checkOneDec (ValDec vb) = do
   (env, vb') <- checkValBind vb
   pure (mempty, env, ValDec vb')
 
-checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName])
+checkDecs :: [DecBase NoInfo Name] -> TypeM (TySet, Env, [DecBase Info VName], Env)
 checkDecs (d : ds) = do
   (d_abstypes, d_env, d') <- checkOneDec d
-  (ds_abstypes, ds_env, ds') <- localEnv d_env $ checkDecs ds
+  (ds_abstypes, ds_env, ds', full_env) <- localEnv d_env $ checkDecs ds
   pure
     ( d_abstypes <> ds_abstypes,
       case d' of
         LocalDec {} -> ds_env
         ImportDec {} -> ds_env
         _ -> ds_env <> d_env,
-      d' : ds'
+      d' : ds',
+      full_env
     )
-checkDecs [] =
-  pure (mempty, mempty, [])
+checkDecs [] = do
+  full_env <- askEnv
+  pure (mempty, mempty, [], full_env)

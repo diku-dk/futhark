@@ -37,15 +37,13 @@ import Futhark.Pass
 data MC
 
 instance RepTypes MC where
-  type Op MC = MCOp MC (SOAC MC)
+  type OpC MC = MCOp SOAC
 
 instance ASTRep MC where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TypeCheck.CheckableOp MC where
+instance TypeCheck.Checkable MC where
   checkOp = typeCheckMCOp typeCheckSOAC
-
-instance TypeCheck.Checkable MC
 
 instance Buildable MC where
   mkBody = Body ()

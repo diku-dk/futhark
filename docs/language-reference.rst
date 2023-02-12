@@ -551,6 +551,11 @@ in natural text.
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
   semantically invalid anyway).
 
+* A type application ``pt [n]t`` is parsed as an application of the
+  type constructor ``pt`` to the size argument ``[n]`` and the type
+  ``t``.  To pass a single array-typed parameter, enclose it in
+  parens.
+
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
   operators in the same row have the same precedence.  The rows are
@@ -930,7 +935,9 @@ Binding Expressions
 
 Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 (see :ref:`patterns`) while evaluating ``body``.  The ``in`` keyword
-is optional if ``body`` is a ``let`` expression.
+is optional if ``body`` is a ``let`` expression.  The binding is not
+let-generalised, meaning it has a monomorphic type.  This can be
+significant if ``e`` is of functional type.
 
 ``let [n] pat = e in body``
 ...........................
@@ -1075,6 +1082,10 @@ type of a top-level function must be completely inferred at its
 definition site.  Specifically, if a top-level function uses
 overloaded arithmetic operators, the resolution of those overloads
 cannot be influenced by later uses of the function.
+
+Local bindings made with ``let`` are not made polymorphic through
+let-generalisation *unless* they are syntactically functions, meaning
+they have at least one named parameter.
 
 .. _size-types:
 
@@ -1423,15 +1434,27 @@ prefixing it with an asterisk.  For a return type, we can mark it as
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
 
-For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.  In the parameter declaration ``a:
-*[i32]``, the asterisk means that the function ``modify`` has been
-given "ownership" of the array ``a``, meaning that any caller of
-``modify`` will never reference array ``a`` after the call again.
-This allows the ``with`` expression to perform an in-place update.
+A parameter that is not consuming is called *observing*.  In the
+parameter declaration ``a: *[i32]``, the asterisk means that the
+function ``modify`` has been given "ownership" of the array ``a``,
+meaning that any caller of ``modify`` will never reference array ``a``
+after the call again.  This allows the ``with`` expression to perform
+an in-place update.  After a call ``modify a i x``, neither ``a`` or
+any variable that *aliases* ``a`` may be used on any following
+execution path.
 
-After a call ``modify a i x``, neither ``a`` or any variable that
-*aliases* ``a`` may be used on any following execution path.
+If an asterisk is present at *any point* inside a tuple parameter
+type, the parameter as a whole is considered consuming.  For example::
+
+  def consumes_both ((a,b): (*[]i32,[]i32)) = ...
+
+This is usually not desirable behaviour.  Use multiple parameters
+instead::
+
+  def consumes_first_arg (a: *[]i32) (b: []i32) = ...
+
+For bulk in-place updates with multiple values, use the ``scatter``
+function in the basis library.
 
 Alias Analysis
 ~~~~~~~~~~~~~~

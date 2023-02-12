@@ -153,7 +153,7 @@ usageInBody = foldMap consumedUsage . namesToList . consumedInBody
 
 -- | Produce a usage table reflecting the use of the free variables in
 -- a single statement.
-usageInStm :: (ASTRep rep, Aliased rep) => Stm rep -> UsageTable
+usageInStm :: Aliased rep => Stm rep -> UsageTable
 usageInStm (Let pat rep e) =
   mconcat
     [ usageInPat pat `without` patNames pat,

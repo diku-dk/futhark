@@ -31,18 +31,20 @@ type SimplifyMemory rep inner =
     LetDec rep ~ LetDecMem,
     ExpDec rep ~ (),
     BodyDec rep ~ (),
-    CanBeWise (Op rep),
+    CanBeWise (OpC rep),
     BuilderOps (Wise rep),
-    OpReturns (OpWithWisdom inner),
-    ST.IndexOp (OpWithWisdom inner),
-    AliasedOp (OpWithWisdom inner),
-    Mem rep inner
+    OpReturns (inner (Wise rep)),
+    ST.IndexOp (inner (Wise rep)),
+    AliasedOp (inner (Wise rep)),
+    Mem rep inner,
+    CanBeWise inner,
+    RephraseOp inner
   )
 
 simpleGeneric ::
   (SimplifyMemory rep inner) =>
-  (OpWithWisdom inner -> UT.UsageTable) ->
-  Simplify.SimplifyOp rep (OpWithWisdom inner) ->
+  (inner (Wise rep) -> UT.UsageTable) ->
+  Simplify.SimplifyOp rep (inner (Wise rep)) ->
   Simplify.SimpleOps rep
 simpleGeneric = simplifiable
 
@@ -85,17 +87,17 @@ simplifyStmsGeneric ops stms = do
     scope
     stms
 
-isResultAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
+isResultAlloc :: OpC rep ~ MemOp op => Engine.BlockPred rep
 isResultAlloc _ usage (Let (Pat [pe]) _ (Op Alloc {})) =
   UT.isInResult (patElemName pe) usage
 isResultAlloc _ _ _ = False
 
-isAlloc :: Op rep ~ MemOp op => Engine.BlockPred rep
+isAlloc :: OpC rep ~ MemOp op => Engine.BlockPred rep
 isAlloc _ _ (Let _ _ (Op Alloc {})) = True
 isAlloc _ _ _ = False
 
 blockers ::
-  (Op rep ~ MemOp inner) =>
+  (OpC rep ~ MemOp inner) =>
   Simplify.HoistBlockers rep
 blockers =
   Engine.noExtraHoistBlockers
@@ -108,8 +110,7 @@ callKernelRules :: SimplifyMemory rep inner => RuleBook (Wise rep)
 callKernelRules =
   standardRules
     <> ruleBook
-      [ RuleBasicOp copyCopyToCopy,
-        RuleMatch unExistentialiseMemory,
+      [ RuleMatch unExistentialiseMemory,
         RuleOp decertifySafeAlloc
       ]
       []
@@ -180,34 +181,6 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
       | otherwise =
           fixable
 unExistentialiseMemory _ _ _ _ = Skip
-
--- | If we are copying something that is itself a copy, just copy the
--- original one instead.
-copyCopyToCopy ::
-  ( BuilderOps rep,
-    LetDec rep ~ (VarWisdom, MemBound u)
-  ) =>
-  TopDownRuleBasicOp rep
-copyCopyToCopy vtable pat@(Pat [pat_elem]) _ (Copy v1)
-  | Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable,
-    Just (_, MemArray _ _ _ (ArrayIn srcmem src_ixfun)) <-
-      ST.entryLetBoundDec =<< ST.lookup v1 vtable,
-    Just (Mem src_space) <- ST.lookupType srcmem vtable,
-    (_, MemArray _ _ _ (ArrayIn destmem dest_ixfun)) <- patElemDec pat_elem,
-    Just (Mem dest_space) <- ST.lookupType destmem vtable,
-    src_space == dest_space,
-    dest_ixfun == src_ixfun =
-      Simplify $ certifying v1_cs $ letBind pat $ BasicOp $ Copy v2
-copyCopyToCopy vtable pat _ (Copy v0)
-  | Just (BasicOp (Rearrange perm v1), v0_cs) <- ST.lookupExp v0 vtable,
-    Just (BasicOp (Copy v2), v1_cs) <- ST.lookupExp v1 vtable = Simplify $ do
-      v0' <-
-        certifying (v0_cs <> v1_cs) $
-          letExp "rearrange_v0" $
-            BasicOp $
-              Rearrange perm v2
-      letBind pat $ BasicOp $ Copy v0'
-copyCopyToCopy _ _ _ _ = Skip
 
 -- If an allocation is statically known to be safe, then we can remove
 -- the certificates on it.  This can help hoist things that would

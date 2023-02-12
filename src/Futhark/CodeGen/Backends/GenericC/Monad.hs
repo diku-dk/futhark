@@ -25,8 +25,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     CompilerEnv (..),
     getUserState,
     modifyUserState,
-    contextContents,
-    contextFinalInits,
+    generateProgramStruct,
     runCompilerM,
     inNewFunction,
     cachingMemory,
@@ -37,7 +36,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     stm,
     stms,
     decl,
-    atInit,
     headerDecl,
     publicDef,
     publicDef_,
@@ -76,7 +74,6 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     fatMemUnRef,
     criticalSection,
     module Futhark.CodeGen.Backends.SimpleRep,
-    isValidCName,
   )
 where
 
@@ -84,7 +81,6 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (first)
-import Data.Char (isAlpha, isAlphaNum)
 import Data.DList qualified as DL
 import Data.List (unzip4)
 import Data.Loc
@@ -109,12 +105,11 @@ type ArrayType = (Signedness, PrimType, Int)
 data CompilerState s = CompilerState
   { compArrayTypes :: M.Map ArrayType Publicness,
     compEarlyDecls :: DL.DList C.Definition,
-    compInit :: [C.Stm],
     compNameSrc :: VNameSource,
     compUserState :: s,
     compHeaderDecls :: M.Map HeaderSection (DL.DList C.Definition),
     compLibDecls :: DL.DList C.Definition,
-    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe C.Stm),
+    compCtxFields :: DL.DList (C.Id, C.Type, Maybe C.Exp, Maybe (C.Stm, C.Stm)),
     compProfileItems :: DL.DList C.BlockItem,
     compClearItems :: DL.DList C.BlockItem,
     compDeclaredMem :: [(VName, Space)],
@@ -126,7 +121,6 @@ newCompilerState src s =
   CompilerState
     { compArrayTypes = mempty,
       compEarlyDecls = mempty,
-      compInit = [],
       compNameSrc = src,
       compUserState = s,
       compHeaderDecls = mempty,
@@ -260,13 +254,34 @@ contextContents = do
           | (name, ty) <- zip field_names field_types
         ]
       init_fields =
-        [ [C.cstm|ctx->$id:name = $exp:e;|]
+        [ [C.cstm|ctx->program->$id:name = $exp:e;|]
           | (name, Just e) <- zip field_names field_values
         ]
-  pure (fields, init_fields, catMaybes field_frees)
+      (setup, free) = unzip $ catMaybes field_frees
+  pure (fields, init_fields <> setup, free)
 
-contextFinalInits :: CompilerM op s [C.Stm]
-contextFinalInits = gets compInit
+generateProgramStruct :: CompilerM op s ()
+generateProgramStruct = do
+  (fields, init_fields, free_fields) <- contextContents
+  mapM_
+    earlyDecl
+    [C.cunit|struct program {
+               $sdecls:fields
+             };
+             static void setup_program(struct futhark_context* ctx) {
+               (void)ctx;
+               int error = 0;
+               (void)error;
+               ctx->program = malloc(sizeof(struct program));
+               $stms:init_fields
+             }
+             static void teardown_program(struct futhark_context *ctx) {
+               (void)ctx;
+               int error = 0;
+               (void)error;
+               $stms:free_fields
+               free(ctx->program);
+             }|]
 
 newtype CompilerM op s a
   = CompilerM (ReaderT (CompilerEnv op s) (State (CompilerState s)) a)
@@ -299,10 +314,6 @@ getUserState = gets compUserState
 modifyUserState :: (s -> s) -> CompilerM op s ()
 modifyUserState f = modify $ \compstate ->
   compstate {compUserState = f $ compUserState compstate}
-
-atInit :: C.Stm -> CompilerM op s ()
-atInit x = modify $ \s ->
-  s {compInit = compInit s ++ [x]}
 
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = snd <$> collect' m
@@ -389,9 +400,9 @@ contextField :: C.Id -> C.Type -> Maybe C.Exp -> CompilerM op s ()
 contextField name ty initial = modify $ \s ->
   s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Nothing)}
 
-contextFieldDyn :: C.Id -> C.Type -> Maybe C.Exp -> C.Stm -> CompilerM op s ()
-contextFieldDyn name ty initial free = modify $ \s ->
-  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, initial, Just free)}
+contextFieldDyn :: C.Id -> C.Type -> C.Stm -> C.Stm -> CompilerM op s ()
+contextFieldDyn name ty create free = modify $ \s ->
+  s {compCtxFields = compCtxFields s <> DL.singleton (name, ty, Nothing, Just (create, free))}
 
 profileReport :: C.BlockItem -> CompilerM op s ()
 profileReport x = modify $ \s ->
@@ -661,11 +672,3 @@ configType :: CompilerM op s C.Type
 configType = do
   name <- publicName "context_config"
   pure [C.cty|struct $id:name|]
-
--- | Is this name a valid C identifier?  If not, it should be escaped
--- before being emitted into C.
-isValidCName :: T.Text -> Bool
-isValidCName = maybe True check . T.uncons
-  where
-    check (c, cs) = isAlpha c && T.all constituent cs
-    constituent c = isAlphaNum c || c == '_'

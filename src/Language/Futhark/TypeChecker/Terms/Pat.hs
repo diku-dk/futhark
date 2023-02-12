@@ -283,7 +283,7 @@ checkPat' _ (Id name NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   pure $ Id name' (Info t) loc
 checkPat' _ (Wildcard _ loc) (Ascribed t) =
-  pure $ Wildcard (Info $ t `setUniqueness` Nonunique) loc
+  pure $ Wildcard (Info t) loc
 checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   pure $ Wildcard (Info t) loc
@@ -364,7 +364,9 @@ checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
       pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do
   t' <- newTypeVar loc "t"
-  ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
+  ps' <- forM ps $ \p -> do
+    p_t <- newTypeVar (srclocOf p) "t"
+    checkPat' sizes p $ Ascribed $ addAliasesFromType p_t t
   mustHaveConstr usage n t' (patternStructType <$> ps')
   unify usage t' (toStruct t)
   t'' <- normTypeFully t

@@ -43,6 +43,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.RWS
+import Data.Char (isAlpha, isAlphaNum)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -319,6 +320,23 @@ executableOptions =
 functionExternalValues :: Imp.EntryPoint -> [Imp.ExternalValue]
 functionExternalValues entry =
   map snd (Imp.entryPointResults entry) ++ map snd (Imp.entryPointArgs entry)
+
+-- | Is this name a valid Python identifier?  If not, it should be escaped
+-- before being emitted.
+isValidPyName :: T.Text -> Bool
+isValidPyName = maybe True check . T.uncons
+  where
+    check (c, cs) = isAlpha c && T.all constituent cs
+    constituent c = isAlphaNum c || c == '_'
+
+-- | If the provided text is a valid identifier, then return it
+-- verbatim.  Otherwise, escape it such that it becomes valid.
+escapeName :: Name -> T.Text
+escapeName v
+  | isValidPyName v' = v'
+  | otherwise = zEncodeText v'
+  where
+    v' = nameToText v
 
 opaqueDefs :: Imp.Functions a -> M.Map T.Text [PyExp]
 opaqueDefs (Imp.Functions funs) =
@@ -875,9 +893,15 @@ compileEntryFun sync timing fun
 
       pure $
         Just
-          ( Def (nameToString ename) ("self" : params) $
+          ( Def (T.unpack (escapeName ename)) ("self" : params) $
               prepareIn ++ do_run ++ prepareOut ++ sync ++ [ret],
-            (String (nameToText ename), Tuple [List (map String pts), List (map String rts)])
+            ( String (nameToText ename),
+              Tuple
+                [ String (escapeName ename),
+                  List (map String pts),
+                  List (map String rts)
+                ]
+            )
           )
   | otherwise = pure Nothing
 
@@ -919,7 +943,7 @@ callEntryFun pre_timing fun@(fname, Imp.Function (Just entry) _ _ _) = do
 
   str_output <- printValue res
 
-  let fname' = "entry_" ++ nameToString fname
+  let fname' = "entry_" ++ T.unpack (escapeName fname)
 
   pure $
     Just
@@ -1193,25 +1217,21 @@ compileCode (Imp.DeclareArray name t vs) = do
   -- to prevent it from going "out-of-scope" before calling
   -- unwrapArray (which internally uses the .ctype method); see
   -- https://docs.scipy.org/doc/numpy/reference/generated/numpy.ndarray.ctypes.html
-  atInit $
-    Assign (Field (Var "self") arr_name) $ case vs of
-      Imp.ArrayValues vs' ->
-        Call
-          (Var "np.array")
-          [ Arg $ List $ map compilePrimValue vs',
-            ArgKeyword "dtype" $ Var $ compilePrimToNp t
-          ]
-      Imp.ArrayZeros n ->
-        Call
-          (Var "np.zeros")
-          [ Arg $ Integer $ fromIntegral n,
-            ArgKeyword "dtype" $ Var $ compilePrimToNp t
-          ]
-  atInit $
-    Assign (Field (Var "self") (compileName name)) $
-      simpleCall "unwrapArray" [Field (Var "self") arr_name]
+  stm $ Assign (Var arr_name) $ case vs of
+    Imp.ArrayValues vs' ->
+      Call
+        (Var "np.array")
+        [ Arg $ List $ map compilePrimValue vs',
+          ArgKeyword "dtype" $ Var $ compilePrimToNp t
+        ]
+    Imp.ArrayZeros n ->
+      Call
+        (Var "np.zeros")
+        [ Arg $ Integer $ fromIntegral n,
+          ArgKeyword "dtype" $ Var $ compilePrimToNp t
+        ]
   name' <- compileVar name
-  stm $ Assign name' $ Field (Var "self") (compileName name)
+  stm $ Assign name' $ simpleCall "unwrapArray" [Var arr_name]
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment (T.unpack s) code'

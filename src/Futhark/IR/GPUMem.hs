@@ -16,6 +16,7 @@ where
 
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.UsageTable qualified as UT
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.GPU.Op
 import Futhark.IR.GPU.Simplify (simplifyKernelOp)
 import Futhark.IR.Mem
@@ -34,30 +35,33 @@ instance RepTypes GPUMem where
   type LParamInfo GPUMem = LParamMem
   type RetType GPUMem = RetTypeMem
   type BranchType GPUMem = BranchTypeMem
-  type Op GPUMem = MemOp (HostOp GPUMem ())
+  type OpC GPUMem = MemOp (HostOp NoOp)
 
 instance ASTRep GPUMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
-instance OpReturns (HostOp GPUMem ()) where
+instance OpReturns (HostOp NoOp GPUMem) where
   opReturns (SegOp op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
-instance OpReturns (HostOp (Engine.Wise GPUMem) ()) where
+instance OpReturns (HostOp NoOp (Engine.Wise GPUMem)) where
   opReturns (SegOp op) = segOpReturns op
   opReturns k = extReturns <$> opType k
 
 instance PrettyRep GPUMem
 
-instance TC.CheckableOp GPUMem where
+instance TC.Checkable GPUMem where
   checkOp = typeCheckMemoryOp Nothing
     where
+      -- GHC 9.2 goes into an infinite loop without the type annotation.
+      typeCheckMemoryOp ::
+        Maybe SegLevel ->
+        MemOp (HostOp NoOp) (Aliases GPUMem) ->
+        TC.TypeM GPUMem ()
       typeCheckMemoryOp _ (Alloc size _) =
         TC.require [Prim int64] size
       typeCheckMemoryOp lvl (Inner op) =
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ pure ()) op
-
-instance TC.Checkable GPUMem where
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
   checkLetBoundDec = checkMemInfo
@@ -90,7 +94,7 @@ simplifyStms = simplifyStmsGeneric simpleGPUMem
 
 simpleGPUMem :: Engine.SimpleOps GPUMem
 simpleGPUMem =
-  simpleGeneric usage $ simplifyKernelOp $ const $ pure ((), mempty)
+  simpleGeneric usage $ simplifyKernelOp $ const $ pure (NoOp, mempty)
   where
     -- Slightly hackily and very inefficiently, we look at the inside
     -- of SegOps to figure out the sizes of local memory allocations,

@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:           futhark
-version:        0.23.0
+version:        0.24.0
 synopsis:       An optimising compiler for a functional, array-oriented language.
 
 description:    Futhark is a small programming language designed to be compiled to
@@ -174,7 +174,6 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
-      Futhark.Analysis.Rephrase
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -185,11 +184,13 @@ library
       Futhark.CLI.C
       Futhark.CLI.CUDA
       Futhark.CLI.Check
+      Futhark.CLI.Benchcmp
       Futhark.CLI.Datacmp
       Futhark.CLI.Dataset
       Futhark.CLI.Defs
       Futhark.CLI.Dev
       Futhark.CLI.Doc
+      Futhark.CLI.Eval
       Futhark.CLI.Literate
       Futhark.CLI.LSP
       Futhark.CLI.Main
@@ -301,6 +302,7 @@ library
       Futhark.IR.Prop.TypeOf
       Futhark.IR.Prop.Types
       Futhark.IR.Rep
+      Futhark.IR.Rephrase
       Futhark.IR.RetType
       Futhark.IR.SOACS
       Futhark.IR.SOACS.SOAC
@@ -350,7 +352,6 @@ library
       Futhark.Optimise.ArrayShortCircuiting
       Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
       Futhark.Optimise.ArrayShortCircuiting.DataStructs
-      Futhark.Optimise.ArrayShortCircuiting.LastUse
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
       Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
@@ -509,7 +510,6 @@ library
     , transformers >=0.3
     , vector >=0.12
     , versions >=5.0.0
-    , zip-archive >=0.3.1.1
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
@@ -519,7 +519,7 @@ library
 executable futhark
   import: common
   main-is: src/main.hs
-  ghc-options: -threaded -rtsopts "-with-rtsopts=-N -qg1 -A16M"
+  ghc-options: -threaded -rtsopts "-with-rtsopts=-maxN16 -qg1 -A16M"
   build-depends: base, futhark
 
 test-suite unit

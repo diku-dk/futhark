@@ -35,7 +35,7 @@ type FirstOrderRep rep =
     BuilderOps rep,
     LetDec SOACS ~ LetDec rep,
     LParamInfo SOACS ~ LParamInfo rep,
-    CanBeAliased (Op rep)
+    Alias.AliasableRep rep
   )
 
 -- | First-order-transform a single function, with the given scope
@@ -69,7 +69,7 @@ type Transformer m =
     Buildable (Rep m),
     BuilderOps (Rep m),
     LParamInfo SOACS ~ LParamInfo (Rep m),
-    CanBeAliased (Op (Rep m))
+    Alias.AliasableRep (Rep m)
   )
 
 transformBody ::
@@ -375,7 +375,7 @@ transformLambda ::
     LocalScope somerep m,
     SameScope somerep rep,
     LetDec rep ~ LetDec SOACS,
-    CanBeAliased (Op rep)
+    Alias.AliasableRep rep
   ) =>
   Lambda SOACS ->
   m (AST.Lambda rep)

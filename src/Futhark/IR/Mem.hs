@@ -105,6 +105,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Foldable (traverse_)
 import Data.Function ((&))
+import Data.Kind qualified
 import Data.List (elemIndex, find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -115,6 +116,7 @@ import Futhark.Analysis.PrimExp.Simplify
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR.Aliases
   ( Aliases,
+    CanBeAliased (..),
     removeExpAliases,
     removePatAliases,
     removeScopeAliases,
@@ -163,8 +165,9 @@ type Mem rep inner =
     RetType rep ~ RetTypeMem,
     BranchType rep ~ BranchTypeMem,
     ASTRep rep,
-    OpReturns inner,
-    Op rep ~ MemOp inner
+    OpReturns (inner rep),
+    RephraseOp inner,
+    Op rep ~ MemOp inner rep
   )
 
 instance IsRetType FunReturns where
@@ -174,29 +177,33 @@ instance IsRetType FunReturns where
 instance IsBodyType BodyReturns where
   primBodyType = MemPrim
 
-data MemOp inner
+data MemOp (inner :: Data.Kind.Type -> Data.Kind.Type) (rep :: Data.Kind.Type)
   = -- | Allocate a memory block.
     Alloc SubExp Space
-  | Inner inner
+  | Inner (inner rep)
   deriving (Eq, Ord, Show)
 
 -- | A helper for defining 'TraverseOpStms'.
 traverseMemOpStms ::
   Monad m =>
-  OpStmsTraverser m inner rep ->
-  OpStmsTraverser m (MemOp inner) rep
+  OpStmsTraverser m (inner rep) rep ->
+  OpStmsTraverser m (MemOp inner rep) rep
 traverseMemOpStms _ _ op@Alloc {} = pure op
 traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
 
-instance FreeIn inner => FreeIn (MemOp inner) where
+instance RephraseOp inner => RephraseOp (MemOp inner) where
+  rephraseInOp _ (Alloc e space) = pure (Alloc e space)
+  rephraseInOp r (Inner x) = Inner <$> rephraseInOp r x
+
+instance FreeIn (inner rep) => FreeIn (MemOp inner rep) where
   freeIn' (Alloc size _) = freeIn' size
   freeIn' (Inner k) = freeIn' k
 
-instance TypedOp inner => TypedOp (MemOp inner) where
+instance TypedOp (inner rep) => TypedOp (MemOp inner rep) where
   opType (Alloc _ space) = pure [Mem space]
   opType (Inner k) = opType k
 
-instance AliasedOp inner => AliasedOp (MemOp inner) where
+instance AliasedOp (inner rep) => AliasedOp (MemOp inner rep) where
   opAliases Alloc {} = [mempty]
   opAliases (Inner k) = opAliases k
 
@@ -204,31 +211,27 @@ instance AliasedOp inner => AliasedOp (MemOp inner) where
   consumedInOp (Inner k) = consumedInOp k
 
 instance CanBeAliased inner => CanBeAliased (MemOp inner) where
-  type OpWithAliases (MemOp inner) = MemOp (OpWithAliases inner)
-  removeOpAliases (Alloc se space) = Alloc se space
-  removeOpAliases (Inner k) = Inner $ removeOpAliases k
-
   addOpAliases _ (Alloc se space) = Alloc se space
   addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
-instance Rename inner => Rename (MemOp inner) where
+instance Rename (inner rep) => Rename (MemOp inner rep) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
   rename (Inner k) = Inner <$> rename k
 
-instance Substitute inner => Substitute (MemOp inner) where
+instance Substitute (inner rep) => Substitute (MemOp inner rep) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
-instance PP.Pretty inner => PP.Pretty (MemOp inner) where
+instance PP.Pretty (inner rep) => PP.Pretty (MemOp inner rep) where
   pretty (Alloc e DefaultSpace) = "alloc" <> PP.apply [PP.pretty e]
   pretty (Alloc e s) = "alloc" <> PP.apply [PP.pretty e, PP.pretty s]
   pretty (Inner k) = PP.pretty k
 
-instance OpMetrics inner => OpMetrics (MemOp inner) where
+instance OpMetrics (inner rep) => OpMetrics (MemOp inner rep) where
   opMetrics Alloc {} = seen "Alloc"
   opMetrics (Inner k) = opMetrics k
 
-instance IsOp inner => IsOp (MemOp inner) where
+instance IsOp (inner rep) => IsOp (MemOp inner rep) where
   safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
   safeOp (Inner k) = safeOp k
@@ -236,13 +239,10 @@ instance IsOp inner => IsOp (MemOp inner) where
   cheapOp Alloc {} = True
 
 instance CanBeWise inner => CanBeWise (MemOp inner) where
-  type OpWithWisdom (MemOp inner) = MemOp (OpWithWisdom inner)
-  removeOpWisdom (Alloc size space) = Alloc size space
-  removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
   addOpWisdom (Alloc size space) = Alloc size space
   addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
-instance ST.IndexOp inner => ST.IndexOp (MemOp inner) where
+instance ST.IndexOp (inner rep) => ST.IndexOp (MemOp inner rep) where
   indexOp vtable k (Inner op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
@@ -473,7 +473,7 @@ existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
 
 instance PP.Pretty MemReturn where
   pretty (ReturnsInBlock v ixfun) =
-    PP.parens $ pretty v <+> "->" PP.</> PP.pretty ixfun
+    pretty v <+> "->" PP.</> PP.pretty ixfun
   pretty (ReturnsNewBlock space i ixfun) =
     "?" <> pretty i <> PP.pretty space <+> "->" PP.</> PP.pretty ixfun
 
@@ -1117,12 +1117,12 @@ class IsOp op => OpReturns op where
   opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 
-instance OpReturns inner => OpReturns (MemOp inner) where
+instance OpReturns (inner rep) => OpReturns (MemOp inner rep) where
   opReturns (Alloc _ space) = pure [MemMem space]
   opReturns (Inner op) = opReturns op
 
-instance OpReturns () where
-  opReturns () = pure []
+instance OpReturns (NoOp rep) where
+  opReturns NoOp = pure []
 
 applyFunReturns ::
   Typed dec =>

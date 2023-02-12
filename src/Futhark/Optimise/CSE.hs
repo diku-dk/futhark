@@ -60,10 +60,7 @@ import Futhark.Transform.Substitute
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSE ::
-  ( ASTRep rep,
-    CanBeAliased (Op rep),
-    CSEInOp (OpWithAliases (Op rep))
-  ) =>
+  (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
   Bool ->
   Pass rep rep
 performCSE cse_arrays =
@@ -87,10 +84,7 @@ performCSE cse_arrays =
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSEOnFunDef ::
-  ( ASTRep rep,
-    CanBeAliased (Op rep),
-    CSEInOp (OpWithAliases (Op rep))
-  ) =>
+  (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
   Bool ->
   FunDef rep ->
   FunDef rep
@@ -104,10 +98,7 @@ performCSEOnFunDef cse_arrays =
 -- memory information, since at that point arrays have identity beyond their
 -- value.
 performCSEOnStms ::
-  ( ASTRep rep,
-    CanBeAliased (Op rep),
-    CSEInOp (OpWithAliases (Op rep))
-  ) =>
+  (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
   Bool ->
   Stms rep ->
   Stms rep
@@ -125,7 +116,7 @@ performCSEOnStms cse_arrays =
           (newCSEState cse_arrays)
 
 cseInFunDef ::
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   Bool ->
   FunDef rep ->
   FunDef rep
@@ -151,7 +142,7 @@ cseInFunDef cse_arrays fundec =
 type CSEM rep = Reader (CSEState rep)
 
 cseInBody ::
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   [Diet] ->
   Body rep ->
   CSEM rep (Body rep)
@@ -168,7 +159,7 @@ cseInBody ds (Body bodydec stms res) = do
     consumeResult _ _ = mempty
 
 cseInLambda ::
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   Lambda rep ->
   CSEM rep (Lambda rep)
 cseInLambda lam = do
@@ -176,7 +167,7 @@ cseInLambda lam = do
   pure lam {lambdaBody = body'}
 
 cseInStms ::
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   Names ->
   [Stm rep] ->
   CSEM rep a ->
@@ -288,8 +279,8 @@ class CSEInOp op where
   -- | Perform CSE within any nested expressions.
   cseInOp :: op -> CSEM rep op
 
-instance CSEInOp () where
-  cseInOp () = pure ()
+instance CSEInOp (NoOp rep) where
+  cseInOp NoOp = pure NoOp
 
 subCSE :: CSEM rep r -> CSEM otherrep r
 subCSE m = do
@@ -297,12 +288,11 @@ subCSE m = do
   pure $ runReader m $ newCSEState cse_arrays
 
 instance
-  ( ASTRep rep,
-    Aliased rep,
+  ( Aliased rep,
     CSEInOp (Op rep),
-    CSEInOp op
+    CSEInOp (op rep)
   ) =>
-  CSEInOp (GPU.HostOp rep op)
+  CSEInOp (GPU.HostOp op rep)
   where
   cseInOp (GPU.SegOp op) = GPU.SegOp <$> cseInOp op
   cseInOp (GPU.OtherOp op) = GPU.OtherOp <$> cseInOp op
@@ -311,12 +301,11 @@ instance
   cseInOp x = pure x
 
 instance
-  ( ASTRep rep,
-    Aliased rep,
+  ( Aliased rep,
     CSEInOp (Op rep),
-    CSEInOp op
+    CSEInOp (op rep)
   ) =>
-  CSEInOp (MC.MCOp rep op)
+  CSEInOp (MC.MCOp op rep)
   where
   cseInOp (MC.ParOp par_op op) =
     MC.ParOp <$> traverse cseInOp par_op <*> cseInOp op
@@ -324,7 +313,7 @@ instance
     MC.OtherOp <$> cseInOp op
 
 instance
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   CSEInOp (GPU.SegOp lvl rep)
   where
   cseInOp =
@@ -333,22 +322,19 @@ instance
         (GPU.SegOpMapper pure cseInLambda cseInKernelBody pure pure)
 
 cseInKernelBody ::
-  (ASTRep rep, Aliased rep, CSEInOp (Op rep)) =>
+  (Aliased rep, CSEInOp (Op rep)) =>
   GPU.KernelBody rep ->
   CSEM rep (GPU.KernelBody rep)
 cseInKernelBody (GPU.KernelBody bodydec stms res) = do
   Body _ stms' _ <- cseInBody (map (const Observe) res) $ Body bodydec stms []
   pure $ GPU.KernelBody bodydec stms' res
 
-instance CSEInOp op => CSEInOp (Memory.MemOp op) where
+instance CSEInOp (op rep) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 
 instance
-  ( ASTRep rep,
-    CanBeAliased (Op rep),
-    CSEInOp (OpWithAliases (Op rep))
-  ) =>
+  (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
   CSEInOp (SOAC.SOAC (Aliases rep))
   where
   cseInOp = subCSE . SOAC.mapSOACM (SOAC.SOACMapper pure cseInLambda pure)

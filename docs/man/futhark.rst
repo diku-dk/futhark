@@ -24,6 +24,13 @@ documented below.
 COMMANDS
 ========
 
+futhark benchcmp FILE_A FILE_B
+------------------------------
+
+Compares two Futhark benchmarks and reports changes in performance.
+The files must be formatted in the same manner as a JSON file returned
+from :ref:`futhark-bench(1)`.
+
 futhark check [-w] PROGRAM
 --------------------------
 
@@ -65,6 +72,12 @@ futhark dev options... PROGRAM
 A Futhark compiler development command, intentionally undocumented and
 intended for use in developing the Futhark compiler, not for
 programmers writing in Futhark.
+
+futhark eval [-f FILE] [-w] <exprs...>
+--------------------------------------
+
+Evaluates expressions given as command-line arguments. Optionally
+allows a file import using ``-f``.
 
 futhark hash PROGRAM
 --------------------

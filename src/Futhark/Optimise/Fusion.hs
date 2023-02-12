@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | Perform horizontal and vertical fusion of SOACs.  See the paper
 -- /A T2 Graph-Reduction Approach To Fusion/ for the basic idea (some
 -- extensions discussed in /Design and GPGPU Performance of Futhark’s
@@ -91,6 +93,9 @@ finalizeNode nt = case nt of
     forM_ (zip (patNames outputs) untransformed_outputs) $ \(output, v) ->
       letBindNames [output] . BasicOp . SubExp . Var =<< H.applyTransforms ots v
   ResNode _ -> pure mempty
+  TransNode output tr ia -> do
+    (cs, e) <- H.transformToExp tr ia
+    runBuilder_ $ certifying cs $ letBindNames [output] e
   FreeNode _ -> pure mempty
   DoNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
@@ -98,9 +103,6 @@ finalizeNode nt = case nt of
   MatchNode stm lst -> do
     lst' <- mapM (finalizeNode . fst) lst
     pure $ mconcat lst' <> oneStm stm
-  FinalNode stms1 nt' stms2 -> do
-    stms' <- finalizeNode nt'
-    pure $ stms1 <> stms' <> stms2
 
 linearizeGraph :: (HasScope SOACS m, MonadFreshNames m) => DepGraph -> m (Stms SOACS)
 linearizeGraph dg =
@@ -111,16 +113,6 @@ fusedSomething x = do
   modify $ \s -> s {fusionCount = 1 + fusionCount s}
   pure $ Just x
 
--- | For each node, find what came before, attempt to fuse them
--- horizontally.  This means we only perform horizontal fusion for
--- SOACs that use the same input in some way.
-horizontalFusionOnNode :: G.Node -> DepGraphAug FusionM
-horizontalFusionOnNode node dg@DepGraph {dgGraph = g} =
-  applyAugs (map (uncurry hTryFuseNodesInGraph) pairs) dg
-  where
-    incoming_nodes = map fst $ filter (isDep . snd) $ G.lpre g node
-    pairs = [(x, y) | x <- incoming_nodes, y <- incoming_nodes, x < y]
-
 vFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
   not (any isInf (edgesBetween dg n1 n2))
@@ -128,15 +120,6 @@ vFusionFeasability dg@DepGraph {dgGraph = g} n1 n2 =
 
 hFusionFeasability :: DepGraph -> G.Node -> G.Node -> Bool
 hFusionFeasability = unreachableEitherDir
-
-tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
-tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} =
-  if G.gelem node_to_fuse_id g
-    then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
-    else pure dg
-  where
-    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
-    node_to_fuse_id = nodeFromLNode node_to_fuse
 
 vTryFuseNodesInGraph :: G.Node -> G.Node -> DepGraphAug FusionM
 -- find the neighbors -> verify that fusion causes no cycles -> fuse
@@ -252,11 +235,8 @@ vFuseNodeT _ infusible (s1, _, e1s) (MatchNode stm2 dfused, _)
   | isRealNode s1,
     null infusible =
       pure $ Just $ MatchNode stm2 $ (s1, e1s) : dfused
-vFuseNodeT _ infusible (StmNode stm1, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
-  | null infusible,
-    [stm1_out] <- patNames $ stmPat stm1,
-    Just (stm1_in, tr) <-
-      H.transformFromExp (stmAuxCerts (stmAux stm1)) (stmExp stm1) = do
+vFuseNodeT _ infusible (TransNode stm1_out tr stm1_in, _, _) (SoacNode ots2 pats2 soac2 aux2, _)
+  | null infusible = do
       stm1_in_t <- lookupType stm1_in
       let onInput inp
             | H.inputArray inp == stm1_out =
@@ -359,11 +339,42 @@ removeUnusedOutputsFromContext (incoming, n1, nodeT, outgoing) =
 removeUnusedOutputs :: DepGraphAug FusionM
 removeUnusedOutputs = mapAcross removeUnusedOutputsFromContext
 
-doVerticalFusion :: DepGraphAug FusionM
-doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ G.labNodes (dgGraph dg)) dg
+tryFuseNodeInGraph :: DepNode -> DepGraphAug FusionM
+tryFuseNodeInGraph node_to_fuse dg@DepGraph {dgGraph = g} = do
+  if G.gelem node_to_fuse_id g -- Node might have been fused away since.
+    then applyAugs (map (vTryFuseNodesInGraph node_to_fuse_id) fuses_with) dg
+    else pure dg
+  where
+    fuses_with = map fst $ filter (isDep . snd) $ G.lpre g (nodeFromLNode node_to_fuse)
+    node_to_fuse_id = nodeFromLNode node_to_fuse
 
+doVerticalFusion :: DepGraphAug FusionM
+doVerticalFusion dg = applyAugs (map tryFuseNodeInGraph $ reverse $ filter relevant $ G.labNodes (dgGraph dg)) dg
+  where
+    relevant (_, StmNode {}) = False
+    relevant (_, ResNode {}) = False
+    relevant _ = True
+
+-- | For each pair of SOAC nodes that share an input, attempt to fuse
+-- them horizontally.
 doHorizontalFusion :: DepGraphAug FusionM
-doHorizontalFusion dg = applyAugs (map horizontalFusionOnNode (G.nodes (dgGraph dg))) dg
+doHorizontalFusion dg = applyAugs pairs dg
+  where
+    pairs :: [DepGraphAug FusionM]
+    pairs = do
+      (x, SoacNode _ _ soac_x _) <- G.labNodes $ dgGraph dg
+      (y, SoacNode _ _ soac_y _) <- G.labNodes $ dgGraph dg
+      guard $ x < y
+      -- Must share an input.
+      guard $
+        any
+          ((`elem` map H.inputArray (H.inputs soac_x)) . H.inputArray)
+          (H.inputs soac_y)
+      pure $ \dg' -> do
+        -- Nodes might have been fused away by now.
+        if G.gelem x (dgGraph dg') && G.gelem y (dgGraph dg')
+          then hTryFuseNodesInGraph x y dg'
+          else pure dg'
 
 doInnerFusion :: DepGraphAug FusionM
 doInnerFusion = mapAcross runInnerFusionOnContext

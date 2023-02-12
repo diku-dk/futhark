@@ -138,6 +138,9 @@ instance Substitute Rank where
 instance Substitute () where
   substituteNames _ = id
 
+instance Substitute (NoOp rep) where
+  substituteNames _ = id
+
 instance Substitute d => Substitute (ShapeBase d) where
   substituteNames substs (Shape es) =
     Shape $ map (substituteNames substs) es

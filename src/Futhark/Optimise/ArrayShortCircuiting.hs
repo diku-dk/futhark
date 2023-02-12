@@ -46,10 +46,7 @@ optimiseMCMem = pass "short-circuit-mc" "Array Short-Circuiting (MC)" mkCoalsTab
 replaceInParams :: CoalsTab -> [Param FParamMem] -> (Names, [Param FParamMem])
 replaceInParams coalstab fparams =
   let (mem_allocs_to_remove, fparams') =
-        foldl
-          replaceInParam
-          (mempty, mempty)
-          fparams
+        foldl replaceInParam (mempty, mempty) fparams
    in (mem_allocs_to_remove, reverse fparams')
   where
     replaceInParam (to_remove, acc) (Param attrs name dec) =
@@ -71,11 +68,11 @@ removeAllocsInStms stms = do
     & pure
 
 pass ::
-  (Mem rep inner, LetDec rep ~ LetDecMem, CanBeAliased inner) =>
+  (Mem rep inner, LetDec rep ~ LetDecMem, AliasableRep rep) =>
   String ->
   String ->
   (Prog (Aliases rep) -> Pass.PassM (M.Map Name CoalsTab)) ->
-  (inner -> UpdateM inner inner) ->
+  (inner rep -> UpdateM (inner rep) (inner rep)) ->
   (CoalsTab -> [FParam (Aliases rep)] -> (Names, [FParam (Aliases rep)])) ->
   Pass rep rep
 pass flag desc mk on_inner on_fparams =
@@ -107,12 +104,18 @@ replaceResMem coaltab res =
     Just entry -> res {resSubExp = Var $ dstmem entry}
     Nothing -> res
 
-updateStms :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stms rep -> UpdateM inner (Stms rep)
+updateStms ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Stms rep ->
+  UpdateM (inner rep) (Stms rep)
 updateStms stms = do
   stms' <- mapM replaceInStm stms
   removeAllocsInStms stms'
 
-replaceInStm :: (Mem rep inner, LetDec rep ~ LetDecMem) => Stm rep -> UpdateM inner (Stm rep)
+replaceInStm ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Stm rep ->
+  UpdateM (inner rep) (Stm rep)
 replaceInStm (Let (Pat elems) d e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
@@ -123,7 +126,11 @@ replaceInStm (Let (Pat elems) d e) = do
       fromMaybe p <$> lookupAndReplace vname PatElem u
     replaceInPatElem p = pure p
 
-replaceInExp :: (Mem rep inner, LetDec rep ~ LetDecMem) => [PatElem LetDecMem] -> Exp rep -> UpdateM inner (Exp rep)
+replaceInExp ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  [PatElem LetDecMem] ->
+  Exp rep ->
+  UpdateM (inner rep) (Exp rep)
 replaceInExp _ e@(BasicOp _) = pure e
 replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
   defbody' <- replaceInIfBody defbody
@@ -149,7 +156,7 @@ replaceInExp _ e@Apply {} = pure e
 replaceInSegOp ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   SegOp lvl rep ->
-  UpdateM inner (SegOp lvl rep)
+  UpdateM (inner rep) (SegOp lvl rep)
 replaceInSegOp (SegMap lvl sp tps body) = do
   stms <- updateStms $ kernelBodyStms body
   pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
@@ -163,11 +170,11 @@ replaceInSegOp (SegHist lvl sp hist_ops tps body) = do
   stms <- updateStms $ kernelBodyStms body
   pure $ SegHist lvl sp hist_ops tps $ body {kernelBodyStms = stms}
 
-replaceInHostOp :: HostOp GPUMem () -> UpdateM (HostOp GPUMem ()) (HostOp GPUMem ())
+replaceInHostOp :: HostOp NoOp GPUMem -> UpdateM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 replaceInHostOp (SegOp op) = SegOp <$> replaceInSegOp op
 replaceInHostOp op = pure op
 
-replaceInMCOp :: MCOp MCMem () -> UpdateM (MCOp MCMem ()) (MCOp MCMem ())
+replaceInMCOp :: MCOp NoOp MCMem -> UpdateM (MCOp NoOp MCMem) (MCOp NoOp MCMem)
 replaceInMCOp (ParOp par_op op) =
   ParOp <$> traverse replaceInSegOp par_op <*> replaceInSegOp op
 replaceInMCOp op = pure op
@@ -187,7 +194,7 @@ generalizeIxfun
       else pure m
 generalizeIxfun _ _ m = pure m
 
-replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> UpdateM inner (Body rep)
+replaceInIfBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> UpdateM (inner rep) (Body rep)
 replaceInIfBody b@(Body _ stms res) = do
   coaltab <- asks envCoalesceTab
   stms' <- updateStms stms

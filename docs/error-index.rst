@@ -149,6 +149,41 @@ inserting copies to break the aliasing:
 
   def main (xs: *[]i32) : (*[]i32, *[]i32) = (xs, copy xs)
 
+.. _self-aliasing-arg:
+
+"Argument passed for consuming parameter is self-aliased."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Caused by programs like the following:
+
+.. code-block:: futhark
+
+  def g (t: *([]i64, []i64)) = 0
+
+  def f n =
+    let x = iota n
+    in g (x,x)
+
+The function ``g`` expects to consume two separate ``[]i64`` arrays,
+but ``f`` passes it a tuple containing two references to the same
+physical array.  This is not allowed, as ``g`` must be allowed to
+assume that components of consuming record- or tuple parameters have
+no internal aliases.  We can fix this by inserting copies to break the
+aliasing:
+
+.. code-block:: futhark
+
+  def f n =
+    let x = iota n
+    in g (copy (x,x))
+
+Alternative, we could duplicate the expression producing the array:
+
+.. code-block:: futhark
+
+  def f n =
+    g (iota n, iota n))
+
 .. _consuming-parameter:
 
 "Consuming parameter passed non-unique argument"
@@ -532,6 +567,32 @@ Then ``uncurry f`` works just fine and has the following type:
 Programming with such *explicit size witnesses* is a fairly advanced
 technique, but often necessary when writing advanced size-dependent
 code.
+
+.. _unify-consuming-param:
+
+"Parameter types *x* and *y* are incompatible regarding consuming their arguments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs when you provide a function that *does* consume its
+argument in a context that expects a function that *does not* allow a
+function that consumes its argument.
+
+As a simple example, consider the following contrived function that
+does consume its argument:
+
+.. code-block:: futhark
+
+   def f (xs: *[]f32) : f32 = 0f32
+
+Now we define another function that is merely ``f``, but with a type
+annotation that tries to hide the consumption:
+
+.. code-block:: futhark
+
+   def g : []f32 -> f32 = f
+
+Allowing this would permit us to hide the fact that ``f`` consumes its
+argument, which would not be sound, so the type checker complains.
 
 .. _ambiguous-size:
 

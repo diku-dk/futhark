@@ -39,12 +39,12 @@ class Server:
 
     def _cmd_inputs(self, args):
         entry = self._get_arg(args, 0)
-        for t in self._get_entry_point(entry)[0]:
+        for t in self._get_entry_point(entry)[1]:
             print(t)
 
     def _cmd_outputs(self, args):
         entry = self._get_arg(args, 0)
-        for t in self._get_entry_point(entry)[1]:
+        for t in self._get_entry_point(entry)[2]:
             print(t)
 
     def _cmd_dummy(self, args):
@@ -65,8 +65,9 @@ class Server:
 
     def _cmd_call(self, args):
         entry = self._get_entry_point(self._get_arg(args, 0))
-        num_ins = len(entry[0])
-        num_outs = len(entry[1])
+        entry_fname = entry[0]
+        num_ins = len(entry[1])
+        num_outs = len(entry[2])
         exp_len = 1 + num_outs + num_ins
 
         if len(args) != exp_len:
@@ -81,7 +82,7 @@ class Server:
         ins = [ self._get_var(in_vname) for in_vname in in_vnames ]
 
         try:
-            (runtime, vals) = getattr(self._ctx, args[0])(*ins)
+            (runtime, vals) = getattr(self._ctx, entry_fname)(*ins)
         except Exception as e:
             raise self.Failure(str(e))
 
@@ -175,7 +176,11 @@ class Server:
                  }
 
     def _process_line(self, line):
-        words = shlex.split(line)
+        lex = shlex.shlex(line)
+        lex.quotes = '"'
+        lex.whitespace_split = True
+        lex.commenters = ''
+        words = list(lex)
         if words == []:
             raise self.Failure('Empty line')
         else:

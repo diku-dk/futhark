@@ -722,8 +722,8 @@ histKernelLocalPass
 
         sOp $ Imp.Barrier Imp.FenceLocal
 
-        kernelLoop pgtid_in_segment threads_per_segment (sExt32 segment_size') $ \ie -> do
-          dPrimV_ i_in_segment $ sExt64 ie
+        kernelLoop (sExt64 pgtid_in_segment) (sExt64 threads_per_segment) segment_size' $ \ie -> do
+          dPrimV_ i_in_segment ie
 
           -- We execute the bucket function once and update each histogram
           -- serially.  This also involves writing to the mapout arrays if

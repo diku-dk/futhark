@@ -66,6 +66,7 @@ module Futhark.Analysis.HORep.SOAC
     ViewL (..),
     ArrayTransform (..),
     transformFromExp,
+    transformToExp,
     soacToStream,
   )
 where
@@ -233,6 +234,22 @@ transformFromExp cs (BasicOp (Futhark.Replicate shape (Var v))) =
   Just (v, Replicate cs shape)
 transformFromExp _ _ = Nothing
 
+-- | Turn an array transform on an array back into an expression.
+transformToExp :: (Monad m, HasScope rep m) => ArrayTransform -> VName -> m (Certs, Exp rep)
+transformToExp (Replicate cs n) ia =
+  pure (cs, BasicOp $ Futhark.Replicate n (Var ia))
+transformToExp (Rearrange cs perm) ia = do
+  r <- arrayRank <$> lookupType ia
+  pure (cs, BasicOp $ Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia)
+transformToExp (Reshape cs k shape) ia = do
+  pure (cs, BasicOp $ Futhark.Reshape k shape ia)
+transformToExp (ReshapeOuter cs k shape) ia = do
+  shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
+  pure (cs, BasicOp $ Futhark.Reshape k shape' ia)
+transformToExp (ReshapeInner cs k shape) ia = do
+  shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
+  pure (cs, BasicOp $ Futhark.Reshape k shape' ia)
+
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
 -- this type; other arguments, such as initial accumulator values, are
@@ -285,24 +302,16 @@ addInitialTransforms :: ArrayTransforms -> Input -> Input
 addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
 applyTransform :: MonadBuilder m => ArrayTransform -> VName -> m VName
-applyTransform (Replicate cs n) ia =
-  certifying cs . letExp "repeat" . BasicOp $
-    Futhark.Replicate n (Var ia)
-applyTransform (Rearrange cs perm) ia = do
-  r <- arrayRank <$> lookupType ia
-  certifying cs . letExp "rearrange" . BasicOp $
-    Futhark.Rearrange (perm ++ [length perm .. r - 1]) ia
-applyTransform (Reshape cs k shape) ia =
-  certifying cs . letExp "reshape" . BasicOp $
-    Futhark.Reshape k shape ia
-applyTransform (ReshapeOuter cs k shape) ia = do
-  shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
-  certifying cs . letExp "reshape_outer" . BasicOp $
-    Futhark.Reshape k shape' ia
-applyTransform (ReshapeInner cs k shape) ia = do
-  shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
-  certifying cs . letExp "reshape_inner" . BasicOp $
-    Futhark.Reshape k shape' ia
+applyTransform tr ia = do
+  (cs, e) <- transformToExp tr ia
+  certifying cs $ letExp s e
+  where
+    s = case tr of
+      Replicate {} -> "replicate"
+      Rearrange {} -> "rearrange"
+      Reshape {} -> "reshape"
+      ReshapeOuter {} -> "reshape_outer"
+      ReshapeInner {} -> "reshape_inner"
 
 applyTransforms :: MonadBuilder m => ArrayTransforms -> VName -> m VName
 applyTransforms (ArrayTransforms ts) a = foldlM (flip applyTransform) a ts

@@ -66,7 +66,10 @@ newtype Env inner = Env
 
 type LowerM inner a = Reader (Env inner) a
 
-lowerAllocationsInBody :: (Mem rep inner, LetDec rep ~ LetDecMem) => Body rep -> LowerM inner (Body rep)
+lowerAllocationsInBody ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  Body rep ->
+  LowerM (inner rep) (Body rep)
 lowerAllocationsInBody body = do
   stms <- lowerAllocationsInStms (bodyStms body) mempty mempty
   pure $ body {bodyStms = stms}
@@ -79,7 +82,7 @@ lowerAllocationsInStms ::
   M.Map VName (Stm rep) ->
   -- | The other statements processed so far
   Stms rep ->
-  LowerM inner (Stms rep)
+  LowerM (inner rep) (Stms rep)
 lowerAllocationsInStms Empty allocs acc = pure $ acc <> Seq.fromList (M.elems allocs)
 lowerAllocationsInStms (stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _))) :<| stms) allocs acc =
   lowerAllocationsInStms stms (M.insert vname stm allocs) acc
@@ -120,7 +123,7 @@ insertLoweredAllocs frees alloc acc =
 lowerAllocationsInSegOp ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   SegOp lvl rep ->
-  LowerM inner (SegOp lvl rep)
+  LowerM (inner rep) (SegOp lvl rep)
 lowerAllocationsInSegOp (SegMap lvl sp tps body) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
   pure $ SegMap lvl sp tps $ body {kernelBodyStms = stms}
@@ -134,11 +137,11 @@ lowerAllocationsInSegOp (SegHist lvl sp histops tps body) = do
   stms <- lowerAllocationsInStms (kernelBodyStms body) mempty mempty
   pure $ SegHist lvl sp histops tps $ body {kernelBodyStms = stms}
 
-lowerAllocationsInHostOp :: HostOp GPUMem () -> LowerM (HostOp GPUMem ()) (HostOp GPUMem ())
+lowerAllocationsInHostOp :: HostOp NoOp GPUMem -> LowerM (HostOp NoOp GPUMem) (HostOp NoOp GPUMem)
 lowerAllocationsInHostOp (SegOp op) = SegOp <$> lowerAllocationsInSegOp op
 lowerAllocationsInHostOp op = pure op
 
-lowerAllocationsInMCOp :: MCOp MCMem () -> LowerM (MCOp MCMem ()) (MCOp MCMem ())
+lowerAllocationsInMCOp :: MCOp NoOp MCMem -> LowerM (MCOp NoOp MCMem) (MCOp NoOp MCMem)
 lowerAllocationsInMCOp (ParOp par op) =
   ParOp <$> traverse lowerAllocationsInSegOp par <*> lowerAllocationsInSegOp op
 lowerAllocationsInMCOp op = pure op

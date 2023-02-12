@@ -1,4 +1,3 @@
-{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
@@ -33,6 +32,9 @@ class
   where
   ppExpDec :: ExpDec rep -> Exp rep -> Maybe (Doc a)
   ppExpDec _ _ = Nothing
+
+instance Pretty (NoOp rep) where
+  pretty NoOp = "noop"
 
 instance Pretty VName where
   pretty (VName vn i) = pretty vn <> "_" <> pretty (show i)
@@ -271,7 +273,7 @@ instance PrettyRep rep => Pretty (Case (Body rep)) where
 instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     "if"
-      <+> info'
+      <> info'
       <+> pretty c
       </> "then"
       <+> maybeNest t
@@ -282,8 +284,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
     where
       info' = case ifsort of
         MatchNormal -> mempty
-        MatchFallback -> "<fallback>"
-        MatchEquiv -> "<equiv>"
+        MatchFallback -> " <fallback>"
+        MatchEquiv -> " <equiv>"
   pretty (Match ses cs defb (MatchDec ret ifsort)) =
     ("match" <+> info' <+> ppTuple' (map pretty ses))
       </> stack (map pretty cs)
@@ -295,8 +297,8 @@ instance PrettyRep rep => Pretty (Exp rep) where
     where
       info' = case ifsort of
         MatchNormal -> mempty
-        MatchFallback -> "<fallback>"
-        MatchEquiv -> "<equiv>"
+        MatchFallback -> " <fallback>"
+        MatchEquiv -> " <equiv>"
   pretty (BasicOp op) = pretty op
   pretty (Apply fname args ret (safety, _, _)) =
     applykw

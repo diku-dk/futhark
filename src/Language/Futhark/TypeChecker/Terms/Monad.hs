@@ -172,8 +172,9 @@ allConsumed = S.unions . map (fromMaybe mempty . consumed)
 allOccurring :: Occurrences -> Names
 allOccurring occs = allConsumed occs <> allObserved occs
 
+-- | Find any consumption that references a variable in scope.
 anyConsumption :: Occurrences -> Maybe Occurrence
-anyConsumption = find (isJust . consumed)
+anyConsumption = find (maybe False (not . null) . consumed)
 
 seqOccurrences :: Occurrences -> Occurrences -> Occurrences
 seqOccurrences occurs1 occurs2 =
@@ -304,7 +305,7 @@ instance Pretty Checking where
             "Cannot apply"
               <+> dquotes (pretty fname)
               <+> "to"
-              <+> dquotes (shorten $ group $ pretty e) <> " (invalid type)."
+              <+> dquotes (align $ shorten $ group $ pretty e) <> " (invalid type)."
   pretty (CheckingReturn expected actual) =
     "Function body does not have expected type."
       </> "Expected:"
@@ -676,9 +677,9 @@ instance MonadTypeChecker TermTypeM where
         argtype <- newTypeVar loc "t"
         equalityType usage argtype
         pure $
-          Scalar . Arrow mempty Unnamed argtype . RetType [] $
+          Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
             Scalar $
-              Arrow mempty Unnamed argtype $
+              Arrow mempty Unnamed Observe argtype $
                 RetType [] $
                   Scalar $
                     Prim Bool
@@ -686,7 +687,7 @@ instance MonadTypeChecker TermTypeM where
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts usage argtype
         let (pts', rt') = instOverloaded argtype pts rt
-            arrow xt yt = Scalar $ Arrow mempty Unnamed xt $ RetType [] yt
+            arrow xt yt = Scalar $ Arrow mempty Unnamed Observe xt $ RetType [] yt
         pure $ fromStruct $ foldr arrow rt' pts'
 
     observe $ Ident name (Info t) loc
@@ -1001,7 +1002,7 @@ initialTermScope =
     initialVtable = M.fromList $ mapMaybe addIntrinsicF $ M.toList intrinsics
 
     prim = Scalar . Prim
-    arrow x y = Scalar $ Arrow mempty Unnamed x y
+    arrow x y = Scalar $ Arrow mempty Unnamed Observe x y
 
     addIntrinsicF (name, IntrinsicMonoFun pts t) =
       Just (name, BoundV Global [] $ arrow pts' $ RetType [] $ prim t)
@@ -1014,15 +1015,8 @@ initialTermScope =
     addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
       Just
         ( name,
-          BoundV Global tvs $
-            fromStruct $
-              Scalar $
-                Arrow mempty Unnamed pts' rt
+          BoundV Global tvs $ fromStruct $ foldFunType pts rt
         )
-      where
-        pts' = case pts of
-          [pt] -> pt
-          _ -> Scalar $ tupleRecord pts
     addIntrinsicF (name, IntrinsicEquality) =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
