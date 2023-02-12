@@ -34,8 +34,9 @@ runs:
     - if: steps.slurm.outputs.is-slurm == 'true'
       shell: bash
       run: |
-        printf "#!/bin/bash
-        ${{inputs.test}}" > temp.sh
+        printf '#!/bin/bash
+        ${{inputs.test}}' > temp.sh
         chmod +x temp.sh
+        cat temp.sh
         srun temp.sh ${{inputs.slurm}}
         rm temp.sh
