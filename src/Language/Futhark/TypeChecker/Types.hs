@@ -72,7 +72,7 @@ mustBeExplicitInBinding bind_t =
           M.fromList $
             zip (S.toList $ freeInType ret) $
               repeat True
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
@@ -102,8 +102,8 @@ returnType appres (Scalar (TypeVar als Nonunique t targs)) d arg =
   Scalar $ TypeVar (appres <> als <> arg_als) Unique t targs
   where
     arg_als = aliases $ maskAliases arg d
-returnType _ (Scalar (Arrow old_als v t1 (RetType dims t2))) d arg =
-  Scalar $ Arrow als v (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
+returnType _ (Scalar (Arrow old_als v pd t1 (RetType dims t2))) d arg =
+  Scalar $ Arrow als v pd (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
   where
     -- Make sure to propagate the aliases of an existing closure.
     als = old_als <> aliases (maskAliases arg d)
@@ -119,12 +119,6 @@ maskAliases ::
   TypeBase shape as
 maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
-maskAliases (Scalar (Record ets)) (RecordDiet ds) =
-  Scalar $ Record $ M.intersectionWith maskAliases ets ds
-maskAliases (Scalar (Sum ets)) (SumDiet ds) =
-  Scalar $ Sum $ M.intersectionWith (zipWith maskAliases) ets ds
-maskAliases t FuncDiet {} = t
-maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
 -- | The two types are assumed to be structurally equal, but not
 -- necessarily regarding sizes.  Combines aliases.
@@ -140,9 +134,9 @@ addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
     sort (M.keys ts1) == sort (M.keys ts2) =
       Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
 addAliasesFromType
-  (Scalar (Arrow als1 mn1 pt1 (RetType dims1 rt1)))
-  (Scalar (Arrow als2 _ _ (RetType _ rt2))) =
-    Scalar (Arrow (als1 <> als2) mn1 pt1 (RetType dims1 rt1'))
+  (Scalar (Arrow als1 mn1 d1 pt1 (RetType dims1 rt1)))
+  (Scalar (Arrow als2 _ _ _ (RetType _ rt2))) =
+    Scalar (Arrow (als1 <> als2) mn1 d1 pt1 (RetType dims1 rt1'))
     where
       rt1' = addAliasesFromType rt1 rt2
 addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
@@ -203,9 +197,9 @@ unifyScalarTypes uf (Record ts1) (Record ts2)
           (M.intersectionWith (,) ts1 ts2)
 unifyScalarTypes
   uf
-  (Arrow as1 mn1 t1 (RetType dims1 t1'))
-  (Arrow as2 _ t2 (RetType _ t2')) =
-    Arrow (as1 <> as2) mn1
+  (Arrow as1 mn1 d1 t1 (RetType dims1 t1'))
+  (Arrow as2 _ _ t2 (RetType _ t2')) =
+    Arrow (as1 <> as2) mn1 d1
       <$> unifyTypesU (flip uf) t1 t2
       <*> (RetType dims1 <$> unifyTypesU uf t1' t2')
 unifyScalarTypes uf (Sum cs1) (Sum cs2)
@@ -339,7 +333,7 @@ evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
       pure
         ( TEArrow (Just v') t1' t2' loc,
           svars1 ++ dims1 ++ svars2,
-          RetType [] $ Scalar $ Arrow mempty (Named v') st1 (RetType dims2 st2),
+          RetType [] $ Scalar $ Arrow mempty (Named v') (diet st1) st1 (RetType dims2 st2),
           Lifted
         )
 --
@@ -349,7 +343,9 @@ evalTypeExp (TEArrow Nothing t1 t2 loc) = do
   pure
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
-      RetType [] $ Scalar $ Arrow mempty Unnamed st1 $ RetType dims2 st2,
+      RetType [] . Scalar $
+        Arrow mempty Unnamed (diet st1) (st1 `setUniqueness` Nonunique) $
+          RetType dims2 st2,
       Lifted
     )
 --
@@ -741,8 +737,8 @@ substTypesRet lookupSubst ot =
           pure $ Scalar $ TypeVar als u v targs'
     onType (Scalar (Record ts)) =
       Scalar . Record <$> traverse onType ts
-    onType (Scalar (Arrow als v t1 t2)) =
-      Scalar <$> (Arrow als v <$> onType t1 <*> onRetType t2)
+    onType (Scalar (Arrow als v d t1 t2)) =
+      Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
 

@@ -149,6 +149,41 @@ inserting copies to break the aliasing:
 
   def main (xs: *[]i32) : (*[]i32, *[]i32) = (xs, copy xs)
 
+.. _self-aliasing-arg:
+
+"Argument passed for consuming parameter is self-aliased."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Caused by programs like the following:
+
+.. code-block:: futhark
+
+  def g (t: *([]i64, []i64)) = 0
+
+  def f n =
+    let x = iota n
+    in g (x,x)
+
+The function ``g`` expects to consume two separate ``[]i64`` arrays,
+but ``f`` passes it a tuple containing two references to the same
+physical array.  This is not allowed, as ``g`` must be allowed to
+assume that components of consuming record- or tuple parameters have
+no internal aliases.  We can fix this by inserting copies to break the
+aliasing:
+
+.. code-block:: futhark
+
+  def f n =
+    let x = iota n
+    in g (copy (x,x))
+
+Alternative, we could duplicate the expression producing the array:
+
+.. code-block:: futhark
+
+  def f n =
+    g (iota n, iota n))
+
 .. _consuming-parameter:
 
 "Consuming parameter passed non-unique argument"
