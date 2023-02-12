@@ -221,7 +221,7 @@ transformFName loc fname t
       ( i - 1,
         AppExp
           (Apply f size_arg (Info (Observe, Nothing)) loc)
-          (Info $ AppRes (foldFunType (replicate i i64) (RetType [] (fromStruct t))) [])
+          (Info $ AppRes (foldFunType (replicate i (Observe, i64)) (RetType [] (fromStruct t))) [])
       )
 
     applySizeArgs fname' t' size_args =
@@ -233,7 +233,7 @@ transformFName loc fname t
               (qualName fname')
               ( Info
                   ( foldFunType
-                      (map (const i64) size_args)
+                      (map (const (Observe, i64)) size_args)
                       (RetType [] $ fromStruct t')
                   )
               )
@@ -540,7 +540,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
               (Info (Observe, xext))
               loc
           )
-          (Info $ AppRes (Scalar $ Arrow mempty yp ytype (RetType [] t)) [])
+          (Info $ AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
       rettype' =
         let onDim (NamedSize d)
               | Named p <- xp, qualLeaf d == p = NamedSize $ qualName v1
@@ -580,7 +580,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
       pure (v, id, var_e, [pat])
 
 desugarProjectSection :: [Name] -> PatType -> SrcLoc -> MonoM Exp
-desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
+desugarProjectSection fields (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "project_p"
   let body = foldl project (Var (qualName p) (Info t1') mempty) fields
   pure $
@@ -606,7 +606,7 @@ desugarProjectSection fields (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
 desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " ++ prettyString t
 
 desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
-desugarIndexSection idxs (Scalar (Arrow _ _ t1 (RetType dims t2))) loc = do
+desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "index_i"
   let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2 []))
   pure $
@@ -719,8 +719,8 @@ noNamedParams = f
   where
     f (Array () u shape t) = Array () u shape (f' t)
     f (Scalar t) = Scalar $ f' t
-    f' (Arrow () _ t1 (RetType dims t2)) =
-      Arrow () Unnamed (f t1) (RetType dims (f t2))
+    f' (Arrow () _ d1 t1 (RetType dims t2)) =
+      Arrow () Unnamed d1 (f t1) (RetType dims (f t2))
     f' (Record fs) =
       Record $ fmap f fs
     f' (Sum cs) =
@@ -737,7 +737,7 @@ monomorphiseBinding ::
   MonoM (VName, InferSizeArgs, ValBind)
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
   replaceRecordReplacements rr $ do
-    let bind_t = foldFunType (map patternStructType params) rettype
+    let bind_t = funType params rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
         rettype' = applySubst (`M.lookup` substs') rettype
@@ -840,7 +840,7 @@ typeSubstsM loc orig_t1 orig_t2 =
         (map snd $ sortFields fields1)
         (map snd $ sortFields fields2)
     sub (Scalar Prim {}) (Scalar Prim {}) = pure ()
-    sub (Scalar (Arrow _ _ t1a (RetType _ t1b))) (Scalar (Arrow _ _ t2a t2b)) = do
+    sub (Scalar (Arrow _ _ _ t1a (RetType _ t1b))) (Scalar (Arrow _ _ _ t2a t2b)) = do
       sub t1a t2a
       subRet t1b t2b
     sub (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
@@ -940,11 +940,10 @@ transformValBind valbind = do
     Nothing -> pure ()
     Just (Info entry) -> do
       t <-
-        removeTypeVariablesInType
-          $ foldFunType
-            (map patternStructType (valBindParams valbind))
-          $ unInfo
-          $ valBindRetType valbind
+        removeTypeVariablesInType $
+          funType (valBindParams valbind) $
+            unInfo $
+              valBindRetType valbind
       (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
       entry' <- transformEntryPoint entry
       tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just $ Info entry'})

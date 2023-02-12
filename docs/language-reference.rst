@@ -1434,15 +1434,27 @@ prefixing it with an asterisk.  For a return type, we can mark it as
   def modify (a: *[]i32) (i: i32) (x: i32): *[]i32 =
     a with [i] = a[i] + x
 
-For bulk in-place updates with multiple values, use the ``scatter``
-function in the basis library.  In the parameter declaration ``a:
-*[i32]``, the asterisk means that the function ``modify`` has been
-given "ownership" of the array ``a``, meaning that any caller of
-``modify`` will never reference array ``a`` after the call again.
-This allows the ``with`` expression to perform an in-place update.
+A parameter that is not consuming is called *observing*.  In the
+parameter declaration ``a: *[i32]``, the asterisk means that the
+function ``modify`` has been given "ownership" of the array ``a``,
+meaning that any caller of ``modify`` will never reference array ``a``
+after the call again.  This allows the ``with`` expression to perform
+an in-place update.  After a call ``modify a i x``, neither ``a`` or
+any variable that *aliases* ``a`` may be used on any following
+execution path.
 
-After a call ``modify a i x``, neither ``a`` or any variable that
-*aliases* ``a`` may be used on any following execution path.
+If an asterisk is present at *any point* inside a tuple parameter
+type, the parameter as a whole is considered consuming.  For example::
+
+  def consumes_both ((a,b): (*[]i32,[]i32)) = ...
+
+This is usually not desirable behaviour.  Use multiple parameters
+instead::
+
+  def consumes_first_arg (a: *[]i32) (b: []i32) = ...
+
+For bulk in-place updates with multiple values, use the ``scatter``
+function in the basis library.
 
 Alias Analysis
 ~~~~~~~~~~~~~~

@@ -44,7 +44,7 @@
 -- }
 
 
-def tridagSeq [n][m] (a:  [n]f32,b: *[m]f32,c: [m]f32,y: *[m]f32 ): *[m]f32 =
+def tridagSeq [n][m] (a:  [n]f32) (b: *[m]f32) (c: [m]f32) (y: *[m]f32 ): *[m]f32 =
     let (y,b) = loop ((y, b))
       for i < n-1 do
         let i    = i + 1
@@ -71,7 +71,8 @@ def implicitMethod [n][m] (myD:  [m][3]f32,  myDD: [m][3]f32,
                                    , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
                                    , 0.0   - 0.5*(mu*d[2] + 0.5*var*dd[2])))
                               (zip4 (mu_row) (var_row) myD myDD))
-         in tridagSeq( a, copy b, c, copy u_row )) (zip3 myMu myVar u)
+         in tridagSeq a (copy b) c (copy u_row))
+      (zip3 myMu myVar u)
 
 def main [m][n] (myD:  [m][3]f32) (myDD: [m][3]f32)
                 (myMu: [n][m]f32) (myVar: [n][m]f32)

@@ -153,11 +153,18 @@ pScalarType :: Parser (ScalarTypeBase Size ())
 pScalarType = choice [try pFun, pScalarNonFun]
   where
     pFun =
-      uncurry (Arrow ()) <$> pParam <* lexeme "->" <*> pStructRetType
+      pParam <* lexeme "->" <*> pStructRetType
     pParam =
-      choice [try pNamedParam, (Unnamed,) <$> pNonFunType]
-    pNamedParam =
-      parens $ (,) <$> (Named <$> pVName) <* lexeme ":" <*> pStructType
+      choice
+        [ try pNamedParam,
+          do
+            t <- pNonFunType
+            pure $ Arrow () Unnamed (diet t) t
+        ]
+    pNamedParam = parens $ do
+      v <- pVName <* lexeme ":"
+      t <- pStructType
+      pure $ Arrow () (Named v) (diet t) t
 
 pStructRetType :: Parser StructRetType
 pStructRetType =

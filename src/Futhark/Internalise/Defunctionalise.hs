@@ -384,7 +384,7 @@ defuncFun tparams pats e0 ret loc = do
         [pat'] -> (pat', ret, e0)
         (pat' : pats') ->
           ( pat',
-            RetType [] $ foldFunType (map (toStruct . patternType) pats') ret,
+            RetType [] $ funType pats' ret,
             Lambda pats' e0 Nothing (Info (mempty, ret)) loc
           )
 
@@ -533,15 +533,6 @@ defuncExp (AppExp (If e1 e2 e3 loc) res) = do
   (e2', sv) <- defuncExp e2
   (e3', _) <- defuncExp e3
   pure (AppExp (If e1' e2' e3' loc) res, sv)
-defuncExp e@(AppExp (Apply f@(Var f' _ _) arg d loc) res)
-  | baseTag (qualLeaf f') <= maxIntrinsicTag,
-    TupLit es tuploc <- arg = do
-      -- defuncSoacExp also works fine for non-SOACs.
-      es' <- mapM defuncSoacExp es
-      pure
-        ( AppExp (Apply f (TupLit es' tuploc) d loc) res,
-          Dynamic $ typeOf e
-        )
 defuncExp e@(AppExp Apply {} _) = defuncApply 0 e
 defuncExp (Negate e0 loc) = do
   (e0', sv) <- defuncExp e0
@@ -720,15 +711,19 @@ etaExpand e_t e = do
                 (Info (AppRes (foldFunType argtypes ret) []))
           )
           e
-          $ zip3 vars (map snd ps) (drop 1 $ tails $ map snd ps)
+          $ zip3 vars (map (snd . snd) ps) (drop 1 $ tails $ map snd ps)
   pure (pats, e', second (const ()) ret)
   where
-    getType (RetType _ (Scalar (Arrow _ p t1 t2))) =
-      let (ps, r) = getType t2 in ((p, t1) : ps, r)
+    getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
+      let (ps, r) = getType t2 in ((p, (d, t1)) : ps, r)
     getType t = ([], t)
 
-    f prev (p, t) = do
-      let t' = fromStruct t
+    f prev (p, (d, t)) = do
+      let t' =
+            fromStruct t
+              `setUniqueness` case d of
+                Consume -> Unique
+                Observe -> Nonunique
       x <- case p of
         Named x | x `notElem` prev -> pure x
         _ -> newNameFromString "x"
@@ -820,10 +815,9 @@ defuncApply :: Int -> Exp -> DefM (Exp, StaticVal)
 defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
   let (argtypes, _) = unfoldFunType ret
   (e1', sv1) <- defuncApply (depth + 1) e1
-  (e2', sv2) <- defuncExp e2
-  let e' = AppExp (Apply e1' e2' d loc) t
   case sv1 of
     LambdaSV pat e0_t e0 closure_env -> do
+      (e2', sv2) <- defuncExp e2
       let env' = matchPatSV pat sv2
           dims = mempty
       (e0', sv) <-
@@ -880,13 +874,15 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
 
       let t1 = toStruct $ typeOf e1'
           t2 = toStruct $ typeOf e2'
+          d1 = Observe
+          d2 = Observe
           fname' = qualName fname
           fname'' =
             Var
               fname'
               ( Info
-                  ( Scalar . Arrow mempty Unnamed t1 . RetType [] $
-                      Scalar . Arrow mempty Unnamed t2 $
+                  ( Scalar . Arrow mempty Unnamed d1 t1 . RetType [] $
+                      Scalar . Arrow mempty Unnamed d2 t2 $
                         RetType [] lifted_rettype
                   )
               )
@@ -896,7 +892,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
 
           innercallret =
             AppRes
-              (Scalar $ Arrow mempty Unnamed t2 $ RetType [] lifted_rettype)
+              (Scalar $ Arrow mempty Unnamed d2 t2 $ RetType [] lifted_rettype)
               []
 
       pure
@@ -918,6 +914,7 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
     -- but we update the types since it may be partially applied or return
     -- a higher-order term.
     DynamicFun _ sv -> do
+      (e2', _) <- defuncExp e2
       let (argtypes', rettype) = dynamicFunType sv argtypes
           restype = foldFunType argtypes' (RetType [] rettype) `setAliases` aliases ret
           callret = AppRes (combineTypeShapes ret restype) ext
@@ -925,8 +922,14 @@ defuncApply depth e@(AppExp (Apply e1 e2 d loc) t@(Info (AppRes ret ext))) = do
       pure (apply_e, sv)
     -- Propagate the 'IntrinsicsSV' until we reach the outermost application,
     -- where we construct a dynamic static value with the appropriate type.
-    IntrinsicSV -> intrinsicOrHole argtypes e' sv1
-    HoleSV {} -> intrinsicOrHole argtypes e' sv1
+    IntrinsicSV -> do
+      e2' <- defuncSoacExp e2
+      let e' = AppExp (Apply e1' e2' d loc) t
+      intrinsicOrHole argtypes e' sv1
+    HoleSV {} -> do
+      (e2', _) <- defuncExp e2
+      let e' = AppExp (Apply e1' e2' d loc) t
+      intrinsicOrHole argtypes e' sv1
     _ ->
       error $
         "Application of an expression\n"
@@ -1129,9 +1132,10 @@ typeFromSV IntrinsicSV =
 
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
-dynamicFunType :: StaticVal -> [StructType] -> ([PatType], PatType)
+dynamicFunType :: StaticVal -> [(Diet, StructType)] -> ([(Diet, PatType)], PatType)
 dynamicFunType (DynamicFun _ sv) (p : ps) =
-  let (ps', ret) = dynamicFunType sv ps in (fromStruct p : ps', ret)
+  let (ps', ret) = dynamicFunType sv ps
+   in (second fromStruct p : ps', ret)
 dynamicFunType sv _ = ([], typeFromSV sv)
 
 -- | Match a pattern with its static value. Returns an environment with

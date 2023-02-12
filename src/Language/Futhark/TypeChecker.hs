@@ -617,10 +617,10 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     pname (Named v) = baseName v
     pname Unnamed = "_"
-    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+    onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
       let (xs, y) = onRetType (Just t2_te) t2
        in (EntryParam (maybe "_" baseName p) (EntryType t1 (Just t1_te)) : xs, y)
-    onRetType _ (Scalar (Arrow _ p t1 (RetType _ t2))) =
+    onRetType _ (Scalar (Arrow _ p _ t1 (RetType _ t2))) =
       let (xs, y) = onRetType Nothing t2
        in (EntryParam (pname p) (EntryType t1 Nothing) : xs, y)
     onRetType te t =
@@ -639,8 +639,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
         withIndexLink
           "polymorphic-entry"
           "Entry point functions may not be polymorphic."
-  | not (all patternOrderZero params)
-      || not (all orderZero rettype_params)
+  | not (all orderZero param_ts)
       || not (orderZero rettype') =
       typeError loc mempty $
         withIndexLink
@@ -649,7 +648,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
         `S.intersection` freeInType rettype'
-        `S.difference` foldMap freeInType (map patternStructType params ++ rettype_params),
+        `S.difference` foldMap freeInType param_ts,
     not $ S.null sizes_only_in_ret =
       typeError loc mempty $
         withIndexLink
@@ -670,6 +669,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
+    param_ts = map patternStructType params ++ map snd rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
@@ -705,9 +705,9 @@ nastyType t@Array {} = nastyType $ stripArray 1 t
 nastyType _ = True
 
 nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
-nastyReturnType Nothing (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+nastyReturnType Nothing (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   nastyType t1 || nastyReturnType Nothing t2
-nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ t1 (RetType _ t2))) =
+nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   (not (niceTypeExp te1) && nastyType t1)
     || nastyReturnType (Just te2) t2
 nastyReturnType (Just te) _

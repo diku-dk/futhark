@@ -149,8 +149,8 @@ newNamesForMTy orig_mty = do
           Scalar $ Sum $ (fmap . fmap) substituteInType ts
         substituteInType (Array () u shape t) =
           arrayOf u (substituteInShape shape) (substituteInType $ Scalar t)
-        substituteInType (Scalar (Arrow als v t1 (RetType dims t2))) =
-          Scalar $ Arrow als v (substituteInType t1) $ RetType dims $ substituteInType t2
+        substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
+          Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
         substituteInShape (Shape ds) =
           Shape $ map substituteInDim ds
