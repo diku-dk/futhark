@@ -443,8 +443,8 @@ jobs:
         fetch-depth: 0
     
     - run:
-      cd futhark-benchmarks
-      ./get-data.sh external-data.txt
+        cd futhark-benchmarks
+        ./get-data.sh external-data.txt
 
     - uses: ./.github/actions/test
       with:
