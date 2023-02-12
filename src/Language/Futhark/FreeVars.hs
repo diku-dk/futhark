@@ -148,7 +148,7 @@ freeInType t =
       mempty
     Scalar (Sum cs) ->
       foldMap (foldMap freeInType) cs
-    Scalar (Arrow _ v t1 (RetType dims t2)) ->
+    Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
       S.filter (notV v) $ S.filter (`notElem` dims) $ freeInType t1 <> freeInType t2
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
