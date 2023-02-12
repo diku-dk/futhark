@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A somewhat obscure simplification rule could mess up use of memory.
 
+* Corner case optimisation for mapping over `iota` (#1874).
+
 ## [0.23.1]
 
 ### Added

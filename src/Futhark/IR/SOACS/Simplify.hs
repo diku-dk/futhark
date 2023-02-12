@@ -749,6 +749,9 @@ arrayOps ::
   S.Set (Pat (LetDec rep), ArrayOp)
 arrayOps cs = mconcat . map onStm . stmsToList . bodyStms
   where
+    -- It is not safe to move everything out of branches (#1874);
+    -- probably we need to put some more intelligence in here somehow.
+    onStm (Let _ _ Match {}) = mempty
     onStm (Let pat aux e) =
       case isArrayOp (cs <> stmAuxCerts aux) e of
         Just op -> S.singleton (pat, op)
