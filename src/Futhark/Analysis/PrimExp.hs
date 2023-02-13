@@ -108,7 +108,7 @@ instance Traversable PrimExp where
   traverse _ (ValueExp v) =
     pure $ ValueExp v
   traverse f (BinOpExp op x y) =
-    constFoldPrimExp <$> (BinOpExp op <$> traverse f x <*> traverse f y)
+    BinOpExp op <$> traverse f x <*> traverse f y
   traverse f (CmpOpExp op x y) =
     CmpOpExp op <$> traverse f x <*> traverse f y
   traverse f (ConvOpExp op x) =
@@ -230,6 +230,8 @@ constFoldPrimExp (BinOpExp LogOr x y)
   | zeroIshExp y = x
 constFoldPrimExp (UnOpExp Abs {} x)
   | not $ negativeIshExp x = x
+constFoldPrimExp (UnOpExp Not {} (ValueExp (BoolValue x))) =
+  ValueExp $ BoolValue $ not x
 constFoldPrimExp (BinOpExp UMod {} x y)
   | sameIshExp x y,
     IntType it <- primExpType x =
@@ -243,6 +245,15 @@ constFoldPrimExp (BinOpExp SRem {} x y)
     IntType it <- primExpType x =
       ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp e = e
+
+constFoldCmpExp :: Eq v => PrimExp v -> PrimExp v
+constFoldCmpExp (CmpOpExp (CmpEq _) x y)
+  | x == y =
+      untyped true
+constFoldCmpExp (CmpOpExp (CmpEq _) (ValueExp x) (ValueExp y))
+  | x /= y =
+      untyped false
+constFoldCmpExp e = constFoldPrimExp e
 
 -- | The class of numeric types that can be used for constructing
 -- 'TPrimExp's.
@@ -465,44 +476,40 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
   sgn _ = Nothing
 
 -- | Lifted logical conjunction.
-(.&&.) :: TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+(.&&.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .&&. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogAnd x y
 
 -- | Lifted logical conjunction.
-(.||.) :: TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+(.||.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .||. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogOr x y
 
 -- | Lifted relational operators; assuming signed numbers in case of
 -- integers.
-(.<.), (.>.), (.<=.), (.>=.), (.==.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp Bool v
+(.<.), (.>.), (.<=.), (.>=.), (.==.) :: Eq v => TPrimExp t v -> TPrimExp t v -> TPrimExp Bool v
 TPrimExp x .<. TPrimExp y =
-  TPrimExp $
-    constFoldPrimExp $
-      CmpOpExp cmp x y
+  TPrimExp $ constFoldCmpExp $ CmpOpExp cmp x y
   where
     cmp = case primExpType x of
       IntType t -> CmpSlt t
       FloatType t -> FCmpLt t
       _ -> CmpLlt
 TPrimExp x .<=. TPrimExp y =
-  TPrimExp $
-    constFoldPrimExp $
-      CmpOpExp cmp x y
+  TPrimExp $ constFoldCmpExp $ CmpOpExp cmp x y
   where
     cmp = case primExpType x of
       IntType t -> CmpSle t
       FloatType t -> FCmpLe t
       _ -> CmpLle
 TPrimExp x .==. TPrimExp y =
-  TPrimExp $
-    constFoldPrimExp $
-      CmpOpExp (CmpEq $ primExpType x `min` primExpType y) x y
+  TPrimExp $ constFoldCmpExp $ CmpOpExp (CmpEq t) x y
+  where
+    t = primExpType x `min` primExpType y
 x .>. y = y .<. x
 x .>=. y = y .<=. x
 
 -- | Lifted bitwise operators.  The right-shift is logical, *not* arithmetic.
-(.&.), (.|.), (.^.), (.>>.), (.<<.) :: TPrimExp t v -> TPrimExp t v -> TPrimExp t v
-bitPrimExp :: (IntType -> BinOp) -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+(.&.), (.|.), (.^.), (.>>.), (.<<.) :: Eq v => TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+bitPrimExp :: Eq v => (IntType -> BinOp) -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
 bitPrimExp op (TPrimExp x) (TPrimExp y) =
   TPrimExp $
     constFoldPrimExp $
