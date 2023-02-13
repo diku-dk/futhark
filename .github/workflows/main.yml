@@ -191,7 +191,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test -i tests
@@ -209,7 +209,7 @@ jobs:
         pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test tests -c --backend=c --no-tuning
@@ -228,7 +228,7 @@ jobs:
         pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test tests -c --backend=multicore --no-tuning
@@ -276,7 +276,7 @@ jobs:
         module load python/3.9.9
         pip install numpy
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test tests \
@@ -321,7 +321,7 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test tests \
@@ -344,7 +344,7 @@ jobs:
         source virtualenv/bin/activate
         pip install numpy pyopencl jsonschema
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           source virtualenv/bin/activate
@@ -364,7 +364,7 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
 
-    - uses: ./.github/actions/test
+    - uses: ./.github/actions/slurm
       with:
         test: |
           futhark test tests --no-terminal --backend=cuda
@@ -435,32 +435,6 @@ jobs:
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1 -s PTHREAD_POOL_SIZE=12" # 2gb - 64kb... largest value of memory
         futhark test -c --backend=wasm-multicore --runner=./tools/node-threaded.sh --no-tuning --exclude=no_wasm tests
-
-  benchmark-titanrtx-opencl-wip:
-    runs-on: hendrix
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
-        fetch-depth: 0
-
-    - run: |
-        module load cuda/11.8
-        cd futhark-benchmarks
-        ./get-data.sh external-data.txt
-
-    - uses: ./.github/actions/test
-      with:
-        test: |
-          futhark bench futhark-benchmarks --backend=opencl --exclude=no_hendrix --json=futhark-opencl-hendrix-$GITHUB_SHA.json --ignore-files=/lib/
-        slurm: -p gpu --gres=gpu:titanrtx:1
-
-    - uses: actions/upload-artifact@v1
-      with:
-        name: futhark-opencl-hendrix-${{ github.sha }}.json
-        path: futhark-opencl-hendrix-${{ github.sha }}.json
 
   test-wasm-lib:
     runs-on: ubuntu-22.04
@@ -620,7 +594,7 @@ jobs:
         backend: cuda
         system: titanx
         gpu: titanx:1
-        options: --exclude=mem_16gb
+        futhark-options: --exclude=mem_16gb
 
   benchmark-titanx-opencl:
     runs-on: hendrix
@@ -636,7 +610,7 @@ jobs:
         backend: opencl
         system: titanx
         gpu: titanx:1
-        options: --exclude=mem_16gb
+        futhark-options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
     runs-on: hendrix

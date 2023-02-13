@@ -7,36 +7,41 @@ inputs:
   system:
     description: 'Name of system (e.g. GPU name)'
     required: true
-  options:
+  futhark-options:
     description: 'Options to pass to futhark bench'
     required: false
     default: ''
-  slurm:
+  slurm-options:
     description: 'Options to pass to srun'
     required: false
     default: ''
   gpu:
     description: 'The GPU and numbers of GPUs to use'
     required: false
-    default: 'none'
+    default: ''
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/is-slurm
-      id: slurm
-
-    - uses: ./.github/actions/benchmark/default
-      if: steps.slurm.outputs.is-slurm == 'false'
-      with:
-        backend: ${{inputs.backend}}
-        options: ${{inputs.options}}
-        system: ${{inputs.system}}
-
     - uses: ./.github/actions/benchmark/slurm
       if: steps.slurm.outputs.is-slurm == 'true'
+      run: |
+        module load cuda/11.8
+
+    - run: |
+        cd futhark-benchmarks
+        ./get-data.sh external-data.txt
+
+    - uses: ./.github/actions/slurm
       with:
-        backend: ${{inputs.backend}}
-        system: ${{inputs.system}}
-        options: ${{inputs.options}}
-        slurm: ${{inputs.slurm}}
-        gpu: ${{inputs.gpu}}
+        test: |
+          futhark bench futhark-benchmarks \
+            --backend=${{inputs.backend}} \
+            --exclude=no_${{inputs.system}} \ 
+            --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
+            --ignore-files=/lib/ ${{inputs.futhark-options}}
+        slurm: -p gpu --gres:${{inputs.gpu}} ${{inputs.slurm}} 
+    
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
+        path: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
