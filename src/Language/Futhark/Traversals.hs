@@ -76,8 +76,8 @@ instance ASTMappable (AppExpBase Info VName) where
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*> pure loc
   astMap tv (Match e cases loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
-  astMap tv (Apply f arg d loc) =
-    Apply <$> mapOnExp tv f <*> mapOnExp tv arg <*> pure d <*> pure loc
+  astMap tv (Apply f args loc) =
+    Apply <$> mapOnExp tv f <*> traverse (traverse $ mapOnExp tv) args <*> pure loc
   astMap tv (LetPat sizes pat e body loc) =
     LetPat <$> astMap tv sizes <*> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
@@ -301,10 +301,11 @@ traverseScalarType _ _ _ (Prim t) = pure $ Prim t
 traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
 traverseScalarType f g h (TypeVar als u t args) =
   TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
-traverseScalarType f g h (Arrow als v t1 (RetType dims t2)) =
+traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
   Arrow
     <$> h als
     <*> pure v
+    <*> pure u
     <*> traverseType f g pure t1
     <*> (RetType dims <$> traverseType f g h t2)
 traverseScalarType f g h (Sum cs) =
@@ -496,8 +497,8 @@ bareExp (AppExp appexp _) =
           BinOp fname NoInfo (bareExp x, NoInfo) (bareExp y, NoInfo) loc
         If c texp fexp loc ->
           If (bareExp c) (bareExp texp) (bareExp fexp) loc
-        Apply f arg _ loc ->
-          Apply (bareExp f) (bareExp arg) NoInfo loc
+        Apply f args loc ->
+          Apply (bareExp f) (fmap ((NoInfo,) . bareExp . snd) args) loc
         LetPat sizes pat e body loc ->
           LetPat sizes (barePat pat) (bareExp e) (bareExp body) loc
         LetFun name (fparams, params, ret, _, e) body loc ->
