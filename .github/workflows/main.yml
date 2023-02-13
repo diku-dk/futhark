@@ -620,6 +620,7 @@ jobs:
         backend: cuda
         system: titanx
         gpu: titanx:1
+        options: --exclude=mem_16gb
 
   benchmark-titanx-opencl:
     runs-on: hendrix
@@ -635,6 +636,7 @@ jobs:
         backend: opencl
         system: titanx
         gpu: titanx:1
+        options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
     runs-on: hendrix
