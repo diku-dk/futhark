@@ -302,8 +302,10 @@ prettyAppExp _ (If c t f _) =
     <+> align (pretty t)
     </> "else"
     <+> align (pretty f)
-prettyAppExp p (Apply f arg _ _) =
-  parensIf (p >= 10) $ prettyExp 0 f <+> prettyExp 10 arg
+prettyAppExp p (Apply f args _) =
+  parensIf (p >= 10) $
+    prettyExp 0 f
+      <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)

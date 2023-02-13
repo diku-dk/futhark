@@ -778,12 +778,15 @@ evalAppExp
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env _ (Apply f x (Info (_, ext)) loc) = do
-  -- It is important that 'x' is evaluated first in order to bring any
-  -- sizes into scope that may be used in the type of 'f'.
-  x' <- evalArg env x ext
+evalAppExp env _ (Apply f args loc) = do
+  -- It is important that 'arguments' are evaluated in reverse order
+  -- in order to bring any sizes into scope that may be used in the
+  -- type of the functions.
+  args' <- reverse <$> mapM evalArg' (reverse $ NE.toList args)
   f' <- eval env f
-  apply loc env f' x'
+  foldM (apply loc env) f' args'
+  where
+    evalArg' (Info (_, ext), x) = evalArg env x ext
 evalAppExp env _ (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e

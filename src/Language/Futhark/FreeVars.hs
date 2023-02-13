@@ -76,7 +76,7 @@ freeInExp expr = case expr of
     )
       <> (freeInExp e2 `freeWithout` S.singleton vn)
   AppExp (If e1 e2 e3 _) _ -> freeInExp e1 <> freeInExp e2 <> freeInExp e3
-  AppExp (Apply e1 e2 _ _) _ -> freeInExp e1 <> freeInExp e2
+  AppExp (Apply f args _) _ -> freeInExp f <> foldMap (freeInExp . snd) args
   Negate e _ -> freeInExp e
   Not e _ -> freeInExp e
   Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
