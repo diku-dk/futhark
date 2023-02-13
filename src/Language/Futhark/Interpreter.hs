@@ -814,25 +814,18 @@ evalAppExp
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env t app@(Apply f x (Info (_, ext, automap)) loc)
-  | automap == mempty = do
-      -- It is important that 'x' is evaluated first in order to bring any
-      -- sizes into scope that may be used in the type of 'f'.
-      x' <- evalArg env x ext
-      f' <- eval env f
-      apply loc env f' x'
-  | otherwise = do
-      (f', args, ams) <- unrollApply $ AppExp app (Info (AppRes (fromStruct t) []))
-      withAutoMap t ams args $ foldM (apply loc env) f'
+evalAppExp env t (Apply f args loc) = do
+  -- It is important that 'arguments' are evaluated in reverse order
+  -- in order to bring any sizes into scope that may be used in the
+  -- type of the functions.
+  (args', ams) <- unzip . reverse <$> mapM evalArg' (reverse $ NE.toList args)
+  f' <- eval env f
+  if all (== mempty) ams
+    then foldM (apply loc env) f' args'
+    else withAutoMap t ams args' $ foldM (apply loc env) f'
   where
-    unrollApply :: Exp -> EvalM (Value, [Value], [AutoMap])
-    unrollApply (AppExp (Apply e1 e2 (Info (_, ext', am)) _) _) = do
-      arg <- evalArg env e2 ext'
-      (f', args, ams) <- unrollApply e1
-      pure (f', args ++ [arg], ams ++ [am])
-    unrollApply f' = do
-      f'' <- eval env f'
-      pure (f'', mempty, mempty)
+    evalArg' (Info (_, ext, automap), x) =
+      (,automap) <$> evalArg env x ext
 evalAppExp env _ (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e

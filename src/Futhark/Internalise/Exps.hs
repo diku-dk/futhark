@@ -1450,14 +1450,13 @@ data Function
   deriving (Show)
 
 findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName, AutoMap)])
-findFuncall (E.Apply f arg (Info (_, argext, automap)) _)
-  | E.AppExp f_e _ <- f =
-      let (f_e', args) = findFuncall f_e
-       in (f_e', args ++ [(arg, argext, automap)])
+findFuncall (E.Apply f args _)
   | E.Var fname _ _ <- f =
-      (FunctionName fname, [(arg, argext, automap)])
+      (FunctionName fname, map onArg $ NE.toList args)
   | E.Hole (Info t) loc <- f =
-      (FunctionHole t loc, [(arg, argext, automap)])
+      (FunctionHole t loc, map onArg $ NE.toList args)
+  where
+    onArg (Info (_, argext, am), e) = (e, argext, am)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 

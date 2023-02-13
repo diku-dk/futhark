@@ -32,6 +32,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -219,9 +220,10 @@ transformFName loc fname t
 
     applySizeArg (i, f) size_arg =
       ( i - 1,
-        AppExp
-          (Apply f size_arg (Info (Observe, Nothing, mempty)) loc)
-          (Info $ AppRes (foldFunType (replicate i (Observe, i64)) (RetType [] (fromStruct t))) [])
+        mkApply
+          f
+          [(Observe, Nothing, mempty, size_arg)]
+          (AppRes (foldFunType (replicate i (Observe, i64)) (RetType [] (fromStruct t))) [])
       )
 
     applySizeArgs fname' t' size_args =
@@ -310,8 +312,13 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         <*> pure (Info res)
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
-transformAppExp (Apply e1 e2 d loc) res =
-  AppExp <$> (Apply <$> transformExp e1 <*> transformExp e2 <*> pure d <*> pure loc) <*> pure (Info res)
+transformAppExp (Apply fe args _) res =
+  mkApply
+    <$> transformExp fe
+    <*> (NE.toList <$> traverse onArg args)
+    <*> pure res
+  where
+    onArg (Info (d, ext, am), e) = (d,ext,am,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   e1' <- transformExp e1
   form' <- case form of
@@ -324,7 +331,7 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   -- sizes for them.
   (pat_sizes, pat') <- sizesForPat pat
   pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
-transformAppExp (BinOp (fname, _) (Info t) (e1, Info (_, d1, a1)) (e2, Info (_, d2, a2)) loc) (AppRes ret ext) = do
+transformAppExp (BinOp (fname, _) (Info t) (e1, Info (_, ext1, a1)) (e2, Info (_, ext2, a2)) loc) (AppRes ret ext) = do
   let fname' = qualLeaf fname
   fname'' <- transformFName loc (QualName [] fname') $ toStruct t
   e1' <- transformExp e1
@@ -358,17 +365,10 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, Info (_, d1, a1)) (e2, Info (_, 
           (Info (AppRes ret mempty))
   where
     applyOp fname' x y =
-      AppExp
-        ( Apply
-            ( AppExp
-                (Apply fname' x (Info (Observe, d1, a1)) loc)
-                (Info $ AppRes (foldFunType [(Observe, typeOf y)] (RetType [] ret)) mempty)
-            )
-            y
-            (Info (Observe, d2, a2))
-            loc
-        )
-        (Info (AppRes ret ext))
+      mkApply
+        (mkApply fname' [(Observe, ext1, a1, x)] (AppRes ret mempty))
+        [(Observe, ext2, a2, y)]
+        (AppRes ret ext)
 
     makeVarParam arg = do
       let argtype = typeOf arg
@@ -534,14 +534,10 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
   (v1, wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
   (v2, wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
   let apply_left =
-        AppExp
-          ( Apply
-              op
-              e1
-              (Info (Observe, xext, mempty))
-              loc
-          )
-          (Info $ AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
+        mkApply
+          op
+          [(Observe, xext, mempty, e1)]
+          (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
       rettype' =
         let onDim (NamedSize d)
               | Named p <- xp, qualLeaf d == p = NamedSize $ qualName v1
@@ -549,14 +545,7 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
             onDim d = d
          in first onDim rettype
       body =
-        AppExp
-          ( Apply
-              apply_left
-              e2
-              (Info (Observe, yext, mempty))
-              loc
-          )
-          (Info $ AppRes rettype' retext)
+        mkApply apply_left [(Observe, yext, mempty, e2)] (AppRes rettype' retext)
       rettype'' = toStruct rettype'
   pure $
     wrap_left $

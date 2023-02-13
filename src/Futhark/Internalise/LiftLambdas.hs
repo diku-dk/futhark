@@ -55,9 +55,11 @@ replacing v e = local $ \env ->
 
 existentials :: Exp -> S.Set VName
 existentials e =
-  let here = case e of
-        AppExp (Apply _ _ (Info (_, pdim, _)) _) (Info res) ->
-          S.fromList (maybeToList pdim ++ appResExt res)
+  let onArg (Info (_, pdim, _), _) =
+        maybeToList pdim
+      here = case e of
+        AppExp (Apply _ args _) (Info res) ->
+          S.fromList (foldMap onArg args <> appResExt res)
         AppExp _ (Info res) ->
           S.fromList (appResExt res)
         _ ->
@@ -129,7 +131,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
     apply f [] = f
     apply f (p : rem_ps) =
       let inner_ret = AppRes (fromStruct (augType rem_ps)) mempty
-          inner = AppExp (Apply f (freeVar p) (Info (Observe, Nothing, mempty)) mempty) (Info inner_ret)
+          inner = mkApply f [(Observe, Nothing, mempty, freeVar p)] inner_ret
        in apply inner rem_ps
 
 transformExp :: Exp -> LiftM Exp
