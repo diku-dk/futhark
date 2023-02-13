@@ -140,8 +140,7 @@ applyExp es =
           <+> align (pretty index)
       where
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
-    op f x =
-      pure $ AppExp (Apply f x NoInfo (srcspan f x)) NoInfo
+    op f x = pure $ mkApplyUT f x
 
 patternExp :: UncheckedPat -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
