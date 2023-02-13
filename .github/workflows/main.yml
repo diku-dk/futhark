@@ -329,7 +329,7 @@ jobs:
             --cache-extension=cache
           source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm: -p=gpu --gres=gpu:titanx:1
+        slurm: -p gpu --gres=gpu:titanrtx:1
 
   test-pyopencl:
     runs-on: hendrix
@@ -349,7 +349,7 @@ jobs:
         test: |
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
-        slurm: -p=gpu --gres=gpu:titanx:1
+        slurm: -p gpu --gres=gpu:titanrtx:1
   
   test-cuda:
     runs-on: hendrix
@@ -370,7 +370,7 @@ jobs:
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm: -p=gpu --gres=gpu:titanx:1
+        slurm: -p gpu --gres=gpu:titanrtx:1
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -455,7 +455,7 @@ jobs:
       with:
         test: |
           futhark bench futhark-benchmarks --backend=opencl --exclude=no_hendrix --json=futhark-opencl-hendrix-$GITHUB_SHA.json --ignore-files=/lib/
-        slurm: -p=gpu --gres=gpu:titanrtx:1
+        slurm: -p gpu --gres=gpu:titanrtx:1
     
     - uses: actions/upload-artifact@v1
       with:
