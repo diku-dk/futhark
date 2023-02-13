@@ -193,7 +193,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test -i tests
         slurm: --cpus-per-task=2
 
@@ -211,7 +211,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test tests -c --backend=c --no-tuning
           make -C tests_lib/c -j
         slurm: --cpus-per-task=2
@@ -230,7 +230,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test tests -c --backend=multicore --no-tuning
           make -C tests_lib/c FUTHARK_BACKEND=multicore
         slurm: --cpus-per-task=2
@@ -278,7 +278,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test tests \
             -c \
             --no-tuning \
@@ -323,7 +323,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache
@@ -346,7 +346,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
         slurm: -p gpu --gres=gpu:1
@@ -366,7 +366,7 @@ jobs:
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
