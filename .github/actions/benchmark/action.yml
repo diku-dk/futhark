@@ -32,10 +32,10 @@ runs:
       with:
         script: |
           futhark bench futhark-benchmarks \
-            --backend=${{inputs.backend}} \
-            --exclude=no_${{inputs.system}} \ 
-            --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
-            --ignore-files=/lib/ ${{inputs.futhark-options}}
+            --backend ${{inputs.backend}} \
+            --exclude no_${{inputs.system}} \ 
+            --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
+            --ignore-files /lib/ ${{inputs.futhark-options}}
         slurm: -p gpu --gres:${{inputs.gpu}} ${{inputs.slurm-options}} 
     
     - uses: actions/upload-artifact@v1
