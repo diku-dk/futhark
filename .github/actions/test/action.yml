@@ -35,8 +35,9 @@ runs:
       shell: bash
       run: |
         printf '#!/bin/bash
+        #SBATCH --wait --output=/dev/fd/1 ${{inputs.slurm}}
+
         ${{inputs.test}}' > temp.sh
         chmod +x temp.sh
-        cat temp.sh
-        srun temp.sh ${{inputs.slurm}}
+        sbatch temp.sh
         rm temp.sh
