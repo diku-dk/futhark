@@ -22,18 +22,15 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/benchmark/slurm
-      if: steps.slurm.outputs.is-slurm == 'true'
+    - name: Download Benchmarks.
+      shell: bash
       run: |
-        module load cuda/11.8
-
-    - run: |
         cd futhark-benchmarks
         ./get-data.sh external-data.txt
 
     - uses: ./.github/actions/slurm
       with:
-        test: |
+        script: |
           futhark bench futhark-benchmarks \
             --backend=${{inputs.backend}} \
             --exclude=no_${{inputs.system}} \ 
