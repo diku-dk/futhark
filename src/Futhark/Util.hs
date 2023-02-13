@@ -57,6 +57,7 @@ import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
+import Control.Monad.State
 import Crypto.Hash.MD5 as MD5
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as Base16
@@ -96,18 +97,23 @@ nubByOrd cmp = map NE.head . NE.groupBy eq . sortBy cmp
   where
     eq x y = cmp x y == EQ
 
--- | Like 'Data.Traversable.mapAccumL', but monadic.
+-- | Like 'Data.Traversable.mapAccumL', but monadic and generalised to
+-- any 'Traversable'.
 mapAccumLM ::
-  Monad m =>
+  (Monad m, Traversable t) =>
   (acc -> x -> m (acc, y)) ->
   acc ->
-  [x] ->
-  m (acc, [y])
-mapAccumLM _ acc [] = pure (acc, [])
-mapAccumLM f acc (x : xs) = do
-  (acc', x') <- f acc x
-  (acc'', xs') <- mapAccumLM f acc' xs
-  pure (acc'', x' : xs')
+  t x ->
+  m (acc, t y)
+mapAccumLM op initial l = do
+  (l', acc) <- runStateT (traverse f l) initial
+  pure (acc, l')
+  where
+    f x = do
+      acc <- get
+      (acc', y) <- lift $ op acc x
+      put acc'
+      pure y
 
 -- | @chunk n a@ splits @a@ into @n@-size-chunks.  If the length of
 -- @a@ is not divisible by @n@, the last chunk will have fewer than

@@ -21,6 +21,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -203,31 +204,6 @@ unscopeType tloc unscoped t = do
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
-
--- 'checkApplyExp' is like 'checkExp', but tries to find the "root
--- function", for better error messages.
-checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
-checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  arg <- checkArg e2
-  (e1', (fname, i)) <- checkApplyExp e1
-  t <- expType e1'
-  (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg
-  pure
-    ( AppExp
-        (Apply e1' (argExp arg) (Info (d1, argext)) loc)
-        (Info $ AppRes rt exts),
-      (fname, i + 1)
-    )
-checkApplyExp e = do
-  e' <- checkExp e
-  pure
-    ( e',
-      ( case e' of
-          Var qn _ _ -> Just qn
-          _ -> Nothing,
-        0
-      )
-    )
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
@@ -437,7 +413,23 @@ checkExp (Negate arg loc) = do
 checkExp (Not arg loc) = do
   arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
   pure $ Not arg' loc
-checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
+checkExp (AppExp (Apply fe args loc) NoInfo) = do
+  fe' <- checkExp fe
+  args' <- mapM (checkArg . snd) args
+  t <- expType fe'
+  let fname =
+        case fe' of
+          Var v _ _ -> Just v
+          _ -> Nothing
+  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
+  where
+    onArg fname (i, all_exts, t) arg' = do
+      (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
+      pure
+        ( (i + 1, all_exts <> exts, rt),
+          (Info (d1, argext), argExp arg')
+        )
 checkExp (AppExp (LetPat sizes pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
@@ -1041,9 +1033,17 @@ causalityCheck binding_body = do
       onExp known e@(AppExp (LetPat _ _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         pure e
-      onExp known e@(AppExp (Apply f arg (Info (_, p)) _) (Info res)) = do
-        sequencePoint known arg f $ maybeToList p ++ appResExt res
+      onExp known e@(AppExp (Apply f args _) (Info res)) = do
+        seqArgs known $ reverse $ NE.toList args
         pure e
+        where
+          seqArgs known' [] = do
+            void $ onExp known' f
+            modify (S.fromList (appResExt res) <>)
+          seqArgs known' ((Info (_, p), x) : xs) = do
+            new_known <- lift $ execStateT (onExp known' x) mempty
+            void $ seqArgs (new_known <> known') xs
+            modify ((new_known <> S.fromList (maybeToList p)) <>)
       onExp
         known
         e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
