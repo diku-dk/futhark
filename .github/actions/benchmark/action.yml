@@ -36,7 +36,7 @@ runs:
             --exclude=no_${{inputs.system}} \ 
             --json=futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
             --ignore-files=/lib/ ${{inputs.futhark-options}}
-        slurm: -p gpu --gres:${{inputs.gpu}} ${{inputs.slurm}} 
+        slurm: -p gpu --gres:${{inputs.gpu}} ${{inputs.slurm-options}} 
     
     - uses: actions/upload-artifact@v1
       with:
