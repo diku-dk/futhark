@@ -15,10 +15,11 @@ import System.FilePath
 -- ∘ Find top level definitions in non-root files.
 -- ∘ Remove the used VNames from the non-root VNames, and we get the unused functions.
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [VName]
+findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
 findUnused files imps = do
   let (directImports, realImports) = partition ((`elem` map (normalise . dropExtension) files) . fst) imps
       used = concatMap (usedFuncsInMod . snd) directImports
-      outside = concatMap (unusedInMod used . snd) realImports
+      outside = concatMap (\(fp, im) -> map (\(x,y) -> (fp,x,y)) $ unusedInMod used im) realImports
   outside --, used, map (fmToDecs . snd) directImports)
   
 
@@ -28,21 +29,25 @@ usedFuncsInMod (FileModule _ _env (Prog _doc decs) _) =
   map getVName $ concatMap funcsInDef $ filter isFuncDec decs
 
 
-unusedInMod :: [VName] -> FileModule -> [VName]
+unusedInMod :: [VName] -> FileModule -> [(VName,SrcLoc)]
 unusedInMod used (FileModule _ _env (Prog _doc decs) _) = do
   let allD = filter isFuncDec decs
-      allN = map gvn allD
+      allN = map gvnl allD
       allU = foldr (\x y ->
         if gvn x `elem` y 
           then y <> map getVName (funcsInDef x)
           else y
         ) used allD
-  allN \\ allU
+  filter (\(vn,_) -> vn `notElem` allU) allN
 
 
 gvn :: DecBase f vn -> vn
 gvn (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr _loc)) = vn
 gvn _ = error "" -- TODO: remove this in favour of different error.
+
+gvnl :: DecBase f a -> (a, SrcLoc)
+gvnl (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr loc)) = (vn,loc)
+gvnl _ = error "" -- TODO: remove this in favour of different error.
 
 isFuncDec :: DecBase f vn -> Bool
 isFuncDec (ValDec _) = True

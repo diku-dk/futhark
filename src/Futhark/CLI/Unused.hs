@@ -5,6 +5,7 @@
 -- | @futhark doc@
 module Futhark.CLI.Unused (main) where
 
+import Language.Futhark
 import Control.Monad.State
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
 import Futhark.Pipeline (Verbosity (..), runFutharkM)
@@ -30,7 +31,7 @@ printUnused files = do
       -- print $ length decs
       -- print $ head decs
       print $ map fst imp
-      print $ findUnused files imp
+      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ findUnused files imp
 
 data CheckConfig = CheckConfig Bool
 
