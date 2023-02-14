@@ -229,7 +229,11 @@ diffBasicOp pat aux e m =
           updateSubExpAdj v adj_i
 
 vjpOps :: VjpOps
-vjpOps = VjpOps diffLambda diffStm
+vjpOps =
+  VjpOps
+    { vjpLambda = diffLambda,
+      vjpStm = diffStm
+    }
 
 diffStm :: Stm SOACS -> ADM () -> ADM ()
 diffStm (Let pat aux (BasicOp e)) m =
