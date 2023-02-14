@@ -482,15 +482,15 @@ unifyWith onDims usage = subunify False
         (_, Scalar (TypeVar _ _ (QualName [] v2) []))
           | Just lvl <- nonrigid v2 ->
               link (not ord) v2 lvl t1'
-        ( Scalar (Arrow _ p1 a1 (RetType b1_dims b1)),
-          Scalar (Arrow _ p2 a2 (RetType b2_dims b2))
+        ( Scalar (Arrow _ p1 d1 a1 (RetType b1_dims b1)),
+          Scalar (Arrow _ p2 d2 a2 (RetType b2_dims b2))
           )
-            | uncurry (<) $ swap ord (uniqueness a1) (uniqueness a2) -> do
+            | uncurry (<) $ swap ord d1 d2 -> do
                 unifyError usage mempty bcs . withIndexLink "unify-consuming-param" $
-                  "Parameter types"
-                    </> indent 2 (pretty a1)
+                  "Parameters"
+                    </> indent 2 (pretty d1 <> pretty a1)
                     </> "and"
-                    </> indent 2 (pretty a2)
+                    </> indent 2 (pretty d2 <> pretty a2)
                     </> "are incompatible regarding consuming their arguments."
             | otherwise -> do
                 -- Introduce the existentials as size variables so they

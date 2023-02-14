@@ -76,7 +76,7 @@ freeInExp expr = case expr of
     )
       <> (freeInExp e2 `freeWithout` S.singleton vn)
   AppExp (If e1 e2 e3 _) _ -> freeInExp e1 <> freeInExp e2 <> freeInExp e3
-  AppExp (Apply e1 e2 _ _) _ -> freeInExp e1 <> freeInExp e2
+  AppExp (Apply f args _) _ -> freeInExp f <> foldMap (freeInExp . snd) args
   Negate e _ -> freeInExp e
   Not e _ -> freeInExp e
   Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
@@ -148,7 +148,7 @@ freeInType t =
       mempty
     Scalar (Sum cs) ->
       foldMap (foldMap freeInType) cs
-    Scalar (Arrow _ v t1 (RetType dims t2)) ->
+    Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
       S.filter (notV v) $ S.filter (`notElem` dims) $ freeInType t1 <> freeInType t2
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs

@@ -88,7 +88,7 @@ expDefs e =
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
-          let name_t = foldFunType (map patternStructType params) ret
+          let name_t = foldFunType (map (undefined . patternStructType) params) ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map patternDefs params)
@@ -111,7 +111,7 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     vbind_t =
-      foldFunType (map patternStructType (valBindParams vbind)) $
+      foldFunType (map (undefined . patternStructType) (valBindParams vbind)) $
         unInfo $
           valBindRetType vbind
 
@@ -370,7 +370,7 @@ containingModule :: Imports -> Pos -> Maybe FileModule
 containingModule imports (Pos file _ _ _) =
   snd <$> find ((== file') . fst) imports
   where
-    file' = includeToString $ mkInitialImport $ fst $ Posix.splitExtension file
+    file' = mkInitialImport $ fst $ Posix.splitExtension file
 
 -- | Information about what is at the given source location.
 data AtPos = AtName (QualName VName) (Maybe BoundTo) Loc
