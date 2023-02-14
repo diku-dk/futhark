@@ -224,7 +224,7 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
       declMem name space
     stubParam (ScalarParam name ty) = do
       let ty' = primTypeToCType ty
-      decl [C.cdecl|$ty:ty' $id:name;|]
+      decl [C.cdecl|$ty:ty' $id:name = $exp:(blankPrimValue ty);|]
 
     vdType (TransparentValue (ScalarValue pt signed _)) =
       prettySigned (signed == Unsigned) pt

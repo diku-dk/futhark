@@ -115,6 +115,10 @@ prettyRetType _ (RetType dims t) =
 instance Pretty (Shape dim) => Pretty (RetTypeBase dim as) where
   pretty = prettyRetType 0
 
+instance Pretty Diet where
+  pretty Consume = "*"
+  pretty Observe = ""
+
 prettyScalarType :: Pretty (Shape dim) => Int -> ScalarTypeBase dim as -> Doc a
 prettyScalarType _ (Prim et) = pretty et
 prettyScalarType p (TypeVar _ u v targs) =
@@ -128,11 +132,16 @@ prettyScalarType _ (Record fs)
   where
     ppField (name, t) = pretty (nameToString name) <> colon <+> align (pretty t)
     fs' = map ppField $ M.toList fs
-prettyScalarType p (Arrow _ (Named v) t1 t2) =
+prettyScalarType p (Arrow _ (Named v) d t1 t2) =
   parensIf (p > 1) $
-    parens (prettyName v <> colon <+> align (pretty t1)) <+> "->" <+> prettyRetType 1 t2
-prettyScalarType p (Arrow _ Unnamed t1 t2) =
-  parensIf (p > 1) $ prettyType 2 t1 <+> "->" <+> prettyRetType 1 t2
+    parens (prettyName v <> colon <+> pretty d <> align (pretty t1))
+      <+> "->"
+      <+> prettyRetType 1 t2
+prettyScalarType p (Arrow _ Unnamed d t1 t2) =
+  parensIf (p > 1) $
+    (pretty d <> prettyType 2 t1)
+      <+> "->"
+      <+> prettyRetType 1 t2
 prettyScalarType p (Sum cs) =
   parensIf (p > 0) $
     group (align (mconcat $ punctuate (" |" <> line) cs'))
@@ -293,8 +302,10 @@ prettyAppExp _ (If c t f _) =
     <+> align (pretty t)
     </> "else"
     <+> align (pretty f)
-prettyAppExp p (Apply f arg _ _) =
-  parensIf (p >= 10) $ prettyExp 0 f <+> prettyExp 10 arg
+prettyAppExp p (Apply f args _) =
+  parensIf (p >= 10) $
+    prettyExp 0 f
+      <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
@@ -353,7 +364,7 @@ prettyExp p (Lambda params body rettype _ _) =
   parensIf (p /= -1) $
     "\\" <> hsep (map pretty params) <> ppAscription rettype
       <+> "->"
-      </> indent 2 (pretty body)
+      </> indent 2 (align (pretty body))
 prettyExp _ (OpSection binop _ _) =
   parens $ pretty binop
 prettyExp _ (OpSectionLeft binop _ x _ _ _) =
