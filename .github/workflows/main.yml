@@ -185,78 +185,55 @@ jobs:
   #         nix-shell --pure --run "make docs"
 
   test-interpreter:
-    runs-on: ubuntu-22.04
+    runs-on: hendrix
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
 
-    - uses: actions/download-artifact@v3
+    - uses: ./.github/actions/slurm
       with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    - run: |
-        futhark test -i tests
+        script: |
+          futhark test -i tests
+        slurm: --cpus-per-task=2
 
   test-c:
-    runs-on: ubuntu-22.04
+    runs-on: hendrix
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-jsonschema
-
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
     - run: |
+        module load python/3.9.9
+        pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=c tests --no-tuning
-        make -C tests_lib/c -j
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          futhark test tests -c --backend=c --no-tuning
+          make -C tests_lib/c -j
+        slurm: --cpus-per-task=2
 
   test-multicore:
-    runs-on: ubuntu-22.04
+    runs-on: hendrix
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-jsonschema
-
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
     - run: |
+        module load python/3.9.9
+        pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-        futhark test -c --backend=multicore tests --no-tuning
-        make -C tests_lib/c FUTHARK_BACKEND=multicore
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          futhark test tests -c --backend=multicore --no-tuning
+          make -C tests_lib/c FUTHARK_BACKEND=multicore
+        slurm: --cpus-per-task=2
 
   test-ispc:
     runs-on: ubuntu-22.04
@@ -289,30 +266,27 @@ jobs:
         nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
-    runs-on: ubuntu-22.04
+    runs-on: hendrix
     needs: [build-linux-nix]
-
+    if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-numpy
-
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-
-    - name: Install from nightly tarball
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
     - run: |
-        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests
-        make -C tests_lib/python -j
+        module load python/3.9.9
+        pip install numpy
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          futhark test tests \
+            -c \
+            --no-tuning \
+            --backend=python \
+            --exclude=no_python \
+            --exclude=compiled
+          make -C tests_lib/python -j
+        slurm: --cpus-per-task=2
 
   test-oclgrind:
     runs-on: ubuntu-22.04
@@ -335,74 +309,68 @@ jobs:
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   test-opencl:
-    runs-on: opencl
+    runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-    - name: Setup compiler
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
+
     - run: |
-        futhark test tests --no-terminal --backend=opencl --cache-extension=cache --concurrency=16
-    - name: Setup python
-      run: |
-        virtualenv --no-site-packages virtualenv
+        module load python/3.9.9
+        virtualenv virtualenv
         source virtualenv/bin/activate
         pip install jsonschema
-    - run: |
-        source virtualenv/bin/activate
-        FUTHARK_BACKEND=opencl make -C tests_lib/c -j
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          futhark test tests \
+            --backend=opencl \
+            --cache-extension=cache
+          source virtualenv/bin/activate
+          FUTHARK_BACKEND=opencl make -C tests_lib/c -j
+        slurm: -p gpu --gres=gpu:1
 
   test-pyopencl:
-    runs-on: opencl
+    runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-    - name: Setup compiler
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
-    - name: Setup python
-      run: |
-        virtualenv --no-site-packages virtualenv
+
+    - run: |
+        module load python/3.9.9
+        virtualenv virtualenv
         source virtualenv/bin/activate
         pip install numpy pyopencl jsonschema
-    - run: |
-        source virtualenv/bin/activate
-        futhark test tests --no-terminal --backend=pyopencl --concurrency=16
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          source virtualenv/bin/activate
+          futhark test tests --no-terminal --backend=pyopencl
+        slurm: -p gpu --gres=gpu:1
 
   test-cuda:
-    runs-on: cuda
+    runs-on: hendrix
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
     - uses: actions/checkout@v3
-    - uses: actions/download-artifact@v3
-      with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-    - name: Setup compiler
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
+
     - run: |
-        futhark test tests --no-terminal --backend=cuda --concurrency=16
-    - name: Setup python
-      run: |
-        virtualenv --no-site-packages virtualenv
+        module load python/3.9.9
+        virtualenv virtualenv
         source virtualenv/bin/activate
         pip install jsonschema
-    - run: |
-        source virtualenv/bin/activate
-        FUTHARK_BACKEND=cuda make -C tests_lib/c -j
+
+    - uses: ./.github/actions/slurm
+      with:
+        script: |
+          futhark test tests --no-terminal --backend=cuda
+          source virtualenv/bin/activate
+          FUTHARK_BACKEND=cuda make -C tests_lib/c -j
+        slurm: -p gpu --gres=gpu:1
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -626,6 +594,7 @@ jobs:
         backend: cuda
         system: titanx
         gpu: titanx:1
+        futhark-options: --exclude=mem_16gb
 
   benchmark-titanx-opencl:
     runs-on: hendrix
@@ -641,6 +610,7 @@ jobs:
         backend: opencl
         system: titanx
         gpu: titanx:1
+        futhark-options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
     runs-on: hendrix

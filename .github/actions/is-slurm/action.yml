@@ -1,4 +1,4 @@
-name: 'IsSlurmInstalled'
+name: 'Is Slurm Installed'
 description: 'Checks if slurm is installed by checking if srun can be used.'
 
 outputs:
