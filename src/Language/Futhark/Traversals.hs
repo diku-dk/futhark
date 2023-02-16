@@ -76,8 +76,16 @@ instance ASTMappable (AppExpBase Info VName) where
     If <$> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*> pure loc
   astMap tv (Match e cases loc) =
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
-  astMap tv (Apply f args loc) =
-    Apply <$> mapOnExp tv f <*> traverse (traverse $ mapOnExp tv) args <*> pure loc
+  astMap tv (Apply f args loc) = do
+    f' <- mapOnExp tv f
+    args' <- traverse (traverse $ mapOnExp tv) args
+    -- Safe to disregard return type because existentials cannot be
+    -- instantiated here, as the return is necessarily a function.
+    pure $ case f' of
+      AppExp (Apply f_inner args_inner _) _ ->
+        Apply f_inner (args_inner <> args') loc
+      _ ->
+        Apply f' args' loc
   astMap tv (LetPat sizes pat e body loc) =
     LetPat <$> astMap tv sizes <*> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
