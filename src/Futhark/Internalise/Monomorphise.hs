@@ -32,6 +32,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
 import Data.List (partition)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -311,14 +312,13 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         <*> pure (Info res)
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
-transformAppExp (Apply fe args loc) res =
-  AppExp
-    <$> ( Apply
-            <$> transformExp fe
-            <*> traverse (traverse transformExp) args
-            <*> pure loc
-        )
-    <*> pure (Info res)
+transformAppExp (Apply fe args _) res =
+  mkApply
+    <$> transformExp fe
+    <*> mapM onArg (NE.toList args)
+    <*> pure res
+  where
+    onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   e1' <- transformExp e1
   form' <- case form of
