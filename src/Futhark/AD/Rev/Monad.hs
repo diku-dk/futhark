@@ -230,10 +230,12 @@ adjVal (AdjVal se) = letExp "const_adj" $ BasicOp $ SubExp se
 adjVal (AdjSparse sparse) = sparseArray sparse
 adjVal (AdjZero shape t) = zeroArray shape $ Prim t
 
+-- | Set a specific adjoint.
 setAdj :: VName -> Adj -> ADM ()
 setAdj v v_adj = modify $ \env ->
   env {stateAdjs = M.insert v v_adj $ stateAdjs env}
 
+-- | Set an 'AdjVal' adjoint.  Simple wrapper around 'setAdj'.
 insAdj :: VName -> VName -> ADM ()
 insAdj v = setAdj v . AdjVal . Var
 
@@ -471,6 +473,7 @@ updateAdjIndex v (check, i) se = do
 isActive :: VName -> ADM Bool
 isActive = fmap (/= Prim Unit) . lookupType
 
+-- | Ignore any changes to adjoints made while evaluating this action.
 subAD :: ADM a -> ADM a
 subAD m = do
   old_state_adjs <- gets stateAdjs

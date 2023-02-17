@@ -21,6 +21,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -204,37 +205,12 @@ unscopeType tloc unscoped t = do
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
 
--- 'checkApplyExp' is like 'checkExp', but tries to find the "root
--- function", for better error messages.
-checkApplyExp :: UncheckedExp -> TermTypeM (Exp, ApplyOp)
-checkApplyExp (AppExp (Apply e1 e2 _ loc) _) = do
-  arg <- checkArg e2
-  (e1', (fname, i)) <- checkApplyExp e1
-  t <- expType e1'
-  (t1, rt, argext, exts) <- checkApply loc (fname, i) t arg
-  pure
-    ( AppExp
-        (Apply e1' (argExp arg) (Info (diet t1, argext)) loc)
-        (Info $ AppRes rt exts),
-      (fname, i + 1)
-    )
-checkApplyExp e = do
-  e' <- checkExp e
-  pure
-    ( e',
-      ( case e' of
-          Var qn _ _ -> Just qn
-          _ -> Nothing,
-        0
-      )
-    )
-
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole _ loc) = do
   t <- newTypeVar loc "t"
-  pure $ Hole (Info $ t `setUniqueness` Unique) loc
+  pure $ Hole (Info t) loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val NoInfo loc) = do
@@ -281,14 +257,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [ConstSize 0]) Unique
+      t <- arrayOfM loc et (Shape [ConstSize 0]) Nonunique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Unique
+      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -328,7 +304,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         pure (NamedSize $ qualName d, Just d)
 
-  t <- arrayOfM loc start_t (Shape [dim]) Unique
+  t <- arrayOfM loc start_t (Shape [dim]) Nonunique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
@@ -347,8 +323,8 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
-  (p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
+  (_, p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
+  (_, p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
 
   pure $
     AppExp
@@ -437,7 +413,23 @@ checkExp (Negate arg loc) = do
 checkExp (Not arg loc) = do
   arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
   pure $ Not arg' loc
-checkExp e@(AppExp Apply {} _) = fst <$> checkApplyExp e
+checkExp (AppExp (Apply fe args loc) NoInfo) = do
+  fe' <- checkExp fe
+  args' <- mapM (checkArg . snd) args
+  t <- expType fe'
+  let fname =
+        case fe' of
+          Var v _ _ -> Just v
+          _ -> Nothing
+  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
+  where
+    onArg fname (i, all_exts, t) arg' = do
+      (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
+      pure
+        ( (i + 1, all_exts <> exts, rt),
+          (Info (d1, argext), argExp arg')
+        )
 checkExp (AppExp (LetPat sizes pat e body loc) _) =
   sequentially (checkExp e) $ \e' e_occs -> do
     -- Not technically an ascription, but we want the pattern to have
@@ -471,8 +463,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
       bindSpaced [(Term, name)] $ do
         name' <- checkName Term name loc
 
-        let arrow (xp, xt) yt = RetType [] $ Scalar $ Arrow () xp xt yt
-            RetType _ ftype = foldr (arrow . patternParam) rettype params'
+        let ftype = funType params' rettype
             entry = BoundV Local tparams' $ ftype `setAliases` closure'
             bindF scope =
               scope
@@ -627,12 +618,11 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
     -- are parameters, or are used in parameters.
     inferReturnSizes params' ret = do
       cur_lvl <- curLevel
-      let named (Named x, _) = Just x
-          named (Unnamed, _) = Nothing
+      let named (Named x, _, _) = Just x
+          named (Unnamed, _, _) = Nothing
           param_names = mapMaybe (named . patternParam) params'
           pos_sizes =
-            sizeNamesPos . foldFunType (map patternStructType params') $
-              RetType [] ret
+            sizeNamesPos $ foldFunTypeFromParams params' $ RetType [] ret
           hide k (lvl, _) =
             lvl >= cur_lvl && k `notElem` param_names && k `S.notMember` pos_sizes
 
@@ -650,9 +640,9 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
-  (t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
+  (_, t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
   case (ftype, rt) of
-    (Scalar (Arrow _ m1 _ _), Scalar (Arrow _ m2 t2 rettype)) ->
+    (Scalar (Arrow _ m1 _ _ _), Scalar (Arrow _ m2 _ t2 rettype)) ->
       pure $
         OpSectionLeft
           op'
@@ -668,12 +658,12 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
   case ftype of
-    Scalar (Arrow as1 m1 t1 (RetType [] (Scalar (Arrow as2 m2 t2 (RetType dims2 ret))))) -> do
-      (t2', ret', argext, _) <-
+    Scalar (Arrow as1 m1 d1 t1 (RetType [] (Scalar (Arrow as2 m2 d2 t2 (RetType dims2 ret))))) -> do
+      (_, t2', ret', argext, _) <-
         checkApply
           loc
           (Just op', 1)
-          (Scalar $ Arrow as2 m2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 t1 $ RetType [] ret)
+          (Scalar $ Arrow as2 m2 d2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 d1 t1 $ RetType [] ret)
           e_arg
       pure $
         OpSectionRight
@@ -690,13 +680,13 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  let ft = Scalar $ Arrow mempty Unnamed (toStruct a) $ RetType [] b
+  let ft = Scalar $ Arrow mempty Unnamed Observe (toStruct a) $ RetType [] b
   pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType loc "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
-  let ft = Scalar $ Arrow mempty Unnamed t $ RetType retext $ fromStruct t'
+  let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ fromStruct t'
   pure $ IndexSection slice' (Info ft) loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
@@ -841,7 +831,7 @@ boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
     f TypeArgDim {} = mempty
 boundInsideType (Scalar (Record fs)) = foldMap boundInsideType fs
 boundInsideType (Scalar (Sum cs)) = foldMap (foldMap boundInsideType) cs
-boundInsideType (Scalar (Arrow _ pn t1 (RetType dims t2))) =
+boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
   pn' <> boundInsideType t1 <> S.fromList dims <> boundInsideType t2
   where
     pn' = case pn of
@@ -863,11 +853,11 @@ checkApply ::
   ApplyOp ->
   PatType ->
   Arg ->
-  TermTypeM (StructType, PatType, Maybe VName, [VName])
+  TermTypeM (Diet, StructType, PatType, Maybe VName, [VName])
 checkApply
   loc
   (fname, _)
-  (Scalar (Arrow as pname tp1 tp2))
+  (Scalar (Arrow as pname d1 tp1 tp2))
   (argexp, argtype, dflow, argloc) =
     onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
       expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
@@ -896,14 +886,14 @@ checkApply
            in zeroOrderType (mkUsage argloc "potential consumption in expression") msg tp1
         _ -> pure ()
 
-      arg_consumed <- consumedByArg argloc argtype' (diet tp1')
+      arg_consumed <- consumedByArg (locOf argloc) argtype' d1
       checkIfConsumable loc $ mconcat arg_consumed
       occur $ dflow `seqOccurrences` map (`consumption` argloc) arg_consumed
 
       -- Unification ignores uniqueness in higher-order arguments, so
       -- we check for that here.
       unless (toStructural argtype' `subtypeOf` setUniqueness (toStructural tp1') Nonunique) $
-        typeError loc mempty "Consumption/aliasing does not match."
+        typeError loc mempty "Difference in whether argument is consumed."
 
       (argext, parsubst) <-
         case pname of
@@ -923,18 +913,16 @@ checkApply
       v <- newID "internal_app_result"
       modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
       let appres = S.singleton $ AliasFree v
-      let tp2'' = applySubst parsubst $ returnType appres tp2' (diet tp1') argtype'
+      let tp2'' = applySubst parsubst $ returnType appres tp2' d1 argtype'
 
-      pure (tp1', tp2'', argext, ext)
+      pure (d1, tp1', tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   -- Change the uniqueness of the argument type because we never want
   -- to infer that a function is consuming.
   let argt_nonunique = toStruct (argType arg) `setUniqueness` Nonunique
   unify (mkUsage loc "use as function") (toStruct tfun) $
-    Scalar $
-      Arrow mempty Unnamed argt_nonunique $
-        RetType [] tv
+    Scalar (Arrow mempty Unnamed Observe argt_nonunique $ RetType [] tv)
   tfun' <- normPatType tfun
   checkApply loc fname tfun' arg
 checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
@@ -962,27 +950,21 @@ checkApply loc (fname, prev_applied) ftype (argexp, _, _, _) = do
       | prev_applied == 1 = "argument"
       | otherwise = "arguments"
 
-consumedByArg :: SrcLoc -> PatType -> Diet -> TermTypeM [Aliasing]
-consumedByArg loc (Scalar (Record ets)) (RecordDiet ds) =
-  mconcat . M.elems <$> traverse (uncurry $ consumedByArg loc) (M.intersectionWith (,) ets ds)
-consumedByArg loc (Scalar (Sum ets)) (SumDiet ds) =
-  mconcat <$> traverse (uncurry $ consumedByArg loc) (concat $ M.elems $ M.intersectionWith zip ets ds)
-consumedByArg loc (Scalar (Arrow _ _ t1 _)) (FuncDiet d _)
-  | not $ contravariantArg t1 d =
-      typeError loc mempty . withIndexLink "consuming-argument" $
-        "Non-consuming higher-order parameter passed consuming argument."
+aliasParts :: PatType -> [Aliasing]
+aliasParts (Scalar (Record ts)) = foldMap aliasParts $ M.elems ts
+aliasParts t = [aliases t]
+
+consumedByArg :: Loc -> PatType -> Diet -> TermTypeM [Aliasing]
+consumedByArg loc at Consume = do
+  let parts = aliasParts at
+  foldM_ check mempty parts
+  pure parts
   where
-    contravariantArg (Array _ Unique _ _) Observe =
-      False
-    contravariantArg (Scalar (TypeVar _ Unique _ _)) Observe =
-      False
-    contravariantArg (Scalar (Record ets)) (RecordDiet ds) =
-      and (M.intersectionWith contravariantArg ets ds)
-    contravariantArg (Scalar (Arrow _ _ tp (RetType _ tr))) (FuncDiet dp dr) =
-      contravariantArg tp dp && contravariantArg tr dr
-    contravariantArg _ _ =
-      True
-consumedByArg _ at Consume = pure [aliases at]
+    check seen als
+      | any (`S.member` seen) als =
+          typeError loc mempty . withIndexLink "self-aliasing-arg" $
+            "Argument passed for consuming parameter is self-aliased."
+      | otherwise = pure $ als <> seen
 consumedByArg _ _ _ = pure []
 
 -- | Type-check a single expression in isolation.  This expression may
@@ -1051,9 +1033,17 @@ causalityCheck binding_body = do
       onExp known e@(AppExp (LetPat _ _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         pure e
-      onExp known e@(AppExp (Apply f arg (Info (_, p)) _) (Info res)) = do
-        sequencePoint known arg f $ maybeToList p ++ appResExt res
+      onExp known e@(AppExp (Apply f args _) (Info res)) = do
+        seqArgs known $ reverse $ NE.toList args
         pure e
+        where
+          seqArgs known' [] = do
+            void $ onExp known' f
+            modify (S.fromList (appResExt res) <>)
+          seqArgs known' ((Info (_, p), x) : xs) = do
+            new_known <- lift $ execStateT (onExp known' x) mempty
+            void $ seqArgs (new_known <> known') xs
+            modify ((new_known <> S.fromList (maybeToList p)) <>)
       onExp
         known
         e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
@@ -1283,8 +1273,8 @@ hiddenParamNames :: [Pat] -> Names
 hiddenParamNames params = hidden
   where
     param_all_names = mconcat $ map patNames params
-    named (Named x, _) = Just x
-    named (Unnamed, _) = Nothing
+    named (Named x, _, _) = Just x
+    named (Unnamed, _, _) = Nothing
     param_names =
       S.fromList $ mapMaybe (named . patternParam) params
     hidden = param_all_names `S.difference` param_names
@@ -1382,7 +1372,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
         pure (Just retdecl', ret')
       Nothing
         | null params ->
-            pure (Nothing, toStruct $ body_t `setUniqueness` Nonunique)
+            pure (Nothing, toStruct body_t)
         | otherwise -> do
             body_t' <- inferredReturnType loc params'' body_t
             pure (Nothing, body_t')
@@ -1399,7 +1389,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 -- | Extract all the shape names that occur in positive position
 -- (roughly, left side of an arrow) in a given type.
 sizeNamesPos :: TypeBase Size als -> S.Set VName
-sizeNamesPos (Scalar (Arrow _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos t2
+sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesPos t2
   where
     onParam :: TypeBase Size als -> S.Set VName
     onParam (Scalar Arrow {}) = mempty
@@ -1511,7 +1501,7 @@ verifyFunctionParams fname params =
       where
         forbidden' =
           case patternParam p of
-            (Named v, _) -> forbidden `S.difference` S.singleton v
+            (Named v, _, _) -> forbidden `S.difference` S.singleton v
             _ -> forbidden
     verifyParams _ [] = pure ()
 
@@ -1536,8 +1526,8 @@ injectExt ext ret = RetType ext_here $ deeper ret
     deeper (Scalar (Prim t)) = Scalar $ Prim t
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
-    deeper (Scalar (Arrow als p t1 (RetType t2_ext t2))) =
-      Scalar $ Arrow als p t1 $ injectExt (ext_there <> t2_ext) t2
+    deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
+      Scalar $ Arrow als p d1 t1 $ injectExt (ext_there <> t2_ext) t2
     deeper (Scalar (TypeVar as u tn targs)) =
       Scalar $ TypeVar as u tn $ map deeperArg targs
     deeper t@Array {} = t
@@ -1571,7 +1561,8 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       injectExt (retext ++ mapMaybe mkExt (S.toList $ freeInType ret)) ret
     )
   where
-    t = foldFunType paramts $ RetType [] ret
+    -- Diet does not matter here.
+    t = foldFunType (zip (repeat Observe) paramts) $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
     visible = typeVars t <> freeInType t
 

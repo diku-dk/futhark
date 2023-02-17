@@ -62,7 +62,7 @@ def reverse [n] 't (x: [n]t): [n]t = x[::-1]
 -- **Work:** O(n).
 --
 -- **Span:** O(1).
-def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = intrinsics.concat (xs, ys)
+def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = intrinsics.concat xs ys
 
 -- | An old-fashioned way of saying `++`.
 def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[]t = xs ++ ys
@@ -83,7 +83,7 @@ def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]
 --
 -- Note: In most cases, `rotate` will be fused with subsequent
 -- operations such as `map`, in which case it is free.
-def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate (r, xs)
+def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate r xs
 
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
@@ -143,7 +143,7 @@ def flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): []t =
 --
 -- **Complexity:** O(1).
 def unflatten [p] 't (n: i64) (m: i64) (xs: [p]t): [n][m]t =
-  intrinsics.unflatten (n, m, xs) :> [n][m]t
+  intrinsics.unflatten n m xs :> [n][m]t
 
 -- | Like `unflatten`, but produces three dimensions.
 def unflatten_3d [p] 't (n: i64) (m: i64) (l: i64) (xs: [p]t): [n][m][l]t =
