@@ -309,19 +309,22 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           ns <- elemArr segments env inps n
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
           pure $ insertIrregular ns flags offsets (distResTag res) elems env
-    Iota n x s Int64 -> do
+    Iota n x s it -> do
       ns <- elemArr segments env inps n
       xs <- elemArr segments env inps x
       ss <- elemArr segments env inps s
       (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
       (_, _, repiota_elems) <- doRepIota ns
       m <- arraySize 0 <$> lookupType elems
-      elems' <- letExp "elems_fixed" <=< segMap (Solo m) $ \(Solo i) -> do
+      elems' <- letExp "iota_elems_fixed" <=< segMap (Solo m) $ \(Solo i) -> do
         segment <- letSubExp "segment" =<< eIndex repiota_elems [eSubExp i]
         v' <- letSubExp "v" =<< eIndex elems [eSubExp i]
         x' <- letSubExp "x" =<< eIndex xs [eSubExp segment]
         s' <- letSubExp "s" =<< eIndex ss [eSubExp segment]
-        fmap (subExpsRes . pure) . letSubExp "v" =<< toExp (pe64 x' + pe64 v' * pe64 s')
+        fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
+          primExpFromSubExp (IntType it) x'
+            ~+~ sExt it (untyped (pe64 v'))
+              ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Update _ as slice (Var v)
       | Just as_t <- distInputType <$> lookup as inps -> do
@@ -447,11 +450,16 @@ distResCerts env = Certs . map f
 transformDistributed :: Segments -> Distributed -> Builder GPU ()
 transformDistributed segments (Distributed dstms resmap) = do
   env <- foldM (transformDistStm segments) mempty dstms
-  forM_ (M.toList resmap) $ \(rt, (cs_inps, v)) ->
+  forM_ (M.toList resmap) $ \(rt, (cs_inps, v, v_t)) ->
     certifying (distResCerts env cs_inps) $
       case resVar rt env of
         Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
-        Irregular {} -> error $ "Result is irregular: " ++ prettyString v
+        Irregular irreg -> do
+          -- It might have an irregular representation, but we know
+          -- that it is actually regular because it is a result.
+          let shape = segmentsShape segments <> arrayShape v_t
+          letBindNames [v] $
+            BasicOp (Reshape ReshapeArbitrary shape (irregularElems irreg))
 
 transformStm :: Scope SOACS -> Stm SOACS -> PassM (Stms GPU)
 transformStm scope (Let pat _ (Op (Screma w arrs form)))
