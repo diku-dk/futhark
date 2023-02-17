@@ -64,7 +64,11 @@ data DistStm = DistStm
   deriving (Eq, Ord, Show)
 
 -- | First element of tuple are certificates for this result.
-type ResMap = M.Map ResTag ([DistInput], VName)
+--
+-- Second is the name to which is should be bound.
+--
+-- Third is the element type (i.e. excluding segments).
+type ResMap = M.Map ResTag ([DistInput], VName, Type)
 
 data Distributed = Distributed [DistStm] ResMap
   deriving (Eq, Ord, Show)
@@ -113,13 +117,13 @@ resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
 resultMap avail_inputs stms pat res = mconcat $ map f stms
   where
     f stm =
-      foldMap g $ zip (distStmResult stm) (patNames (stmPat (distStm stm)))
-    g (DistResult rt _, v) =
-      maybe mempty (M.singleton rt) $ findRes v
-    findRes v = do
+      foldMap g $ zip (distStmResult stm) (patElems (stmPat (distStm stm)))
+    g (DistResult rt _, pe) =
+      maybe mempty (M.singleton rt) $ findRes pe
+    findRes (PatElem v v_t) = do
       (SubExpRes cs _, pv) <-
         L.find ((Var v ==) . resSubExp . fst) $ zip res $ patNames pat
-      Just (map findCert $ unCerts cs, pv)
+      Just (map findCert $ unCerts cs, pv, v_t)
     findCert v = fromMaybe (DistInputFree v (Prim Unit)) $ lookup v avail_inputs
 
 splitIrregDims :: Names -> Type -> (Rank, Type)
