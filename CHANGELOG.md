@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Corner case optimisation for mapping over `iota` (#1874).
 
+* AD for certain combinations of `map` and indexing (#1878).
+
 ## [0.23.1]
 
 ### Added
