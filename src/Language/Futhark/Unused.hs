@@ -10,10 +10,18 @@ import System.FilePath
 
 -- import Data.Map.Strict as Map
 
+-- Pending work:
+-- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
+-- ∘ Gather the immediate information you need into your own bespoke data structures, and then work on those.
+-- ∘ Keeping in mind the previous point: Find transitive dependencies in the top level definitions.
+-- ∘ take care of modules and their main problem as described in https://github.com/diku-dk/futhark/issues/550#issuecomment-1428229674
+
 -- Steps:
--- ∘ Find used functions in every root file
--- ∘ Find top level definitions in non-root files.
--- ∘ Remove the used VNames from the non-root VNames, and we get the unused functions.
+-- ∘ For each definition of a VName x in any file (corresponding to a top level definition), find which VNames are mentioned in the definition of x. (Intuitively, which functions are called directly.)
+-- ∘ Compute the transitive closure of the information gathered in (1), which means you now have a mapping from each VName to the set of VNames used in its definition (even indirectly).
+-- ∘ For those VNames defined in root files, take the union of their reachable names.
+-- ∘ Subtract the set produced in (3) from the set of all VNames. This gives you a set of VNames that are not reachable from the root files.
+
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [VName]
 findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
 findUnused files imps = do
@@ -26,7 +34,7 @@ findUnused files imps = do
 -- We are looking for VNames that represent functions.
 usedFuncsInMod :: FileModule -> [VName]
 usedFuncsInMod (FileModule _ _env (Prog _doc decs) _) =
-  map getVName $ concatMap funcsInDef $ filter isFuncDec decs
+  concatMap funcsInDef $ filter isFuncDec decs
 
 
 unusedInMod :: [VName] -> FileModule -> [(VName,SrcLoc)]
@@ -35,7 +43,7 @@ unusedInMod used (FileModule _ _env (Prog _doc decs) _) = do
       allN = map gvnl allD
       allU = foldr (\x y ->
         if gvn x `elem` y 
-          then y <> map getVName (funcsInDef x)
+          then y <> funcsInDef x
           else y
         ) used allD
   filter (\(vn,_) -> vn `notElem` allU) allN
@@ -56,9 +64,9 @@ isFuncDec _ = False
 getDecs :: ProgBase Info VName -> [DecBase Info VName]
 getDecs (Prog _ decs) = decs
 
-funcsInDef :: DecBase Info VName -> [QualName VName]
+funcsInDef :: DecBase Info VName -> [VName]
 funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
-  funcsInDef' body
+  map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
 
 -- Handles every constructor in ExpBase that can contain a function usage.
@@ -124,9 +132,3 @@ getFieldExp _ = error "placeholder" -- TODO: provide an appropriate error here.
 getBody :: DecBase f vn -> ExpBase f vn
 getBody (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) = body
 getBody _ = error ""
-
-fmToDecs :: FileModule -> [DecBase Info VName]
-fmToDecs (FileModule _ _env (Prog _doc decs) _) = decs
-
-getVName :: QualName vn -> vn
-getVName (QualName _ vn) = vn
