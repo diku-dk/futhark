@@ -4,7 +4,7 @@ inputs:
   script:
     description: 'Script to run'
     required: true
-  slurm-options:
+  slurm:
     description: 'Options to pass to srun'
     required: false
     default: ''
@@ -28,13 +28,16 @@ runs:
     - if: steps.slurm.outputs.is-slurm == 'false'
       shell: bash
       run: |
-        ${{inputs.script}}
+        printf "#!/bin/bash
+        ${{inputs.script}}" | sh 
     
     - if: steps.slurm.outputs.is-slurm == 'true'
       shell: bash
       run: |
         printf '#!/bin/bash
+        #SBATCH --wait --output=/dev/fd/1 ${{inputs.slurm}}
+
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
-        srun ${{inputs.slurm-options}} temp.sh
+        sbatch temp.sh
         rm temp.sh

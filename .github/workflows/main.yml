@@ -191,11 +191,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test -i tests
-        slurm-options: --cpus-per-task=2
+        slurm: --cpus-per-task=2
 
   test-c:
     runs-on: hendrix
@@ -209,12 +209,12 @@ jobs:
         pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test tests -c --backend=c --no-tuning
           make -C tests_lib/c -j
-        slurm-options: --cpus-per-task=2
+        slurm: --cpus-per-task=2
 
   test-multicore:
     runs-on: hendrix
@@ -228,12 +228,12 @@ jobs:
         pip install jsonschema
         export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test tests -c --backend=multicore --no-tuning
           make -C tests_lib/c FUTHARK_BACKEND=multicore
-        slurm-options: --cpus-per-task=2
+        slurm: --cpus-per-task=2
 
   test-ispc:
     runs-on: ubuntu-22.04
@@ -276,7 +276,7 @@ jobs:
         module load python/3.9.9
         pip install numpy
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test tests \
@@ -286,7 +286,7 @@ jobs:
             --exclude=no_python \
             --exclude=compiled
           make -C tests_lib/python -j
-        slurm-options: --cpus-per-task=2
+        slurm: --cpus-per-task=2
 
   test-oclgrind:
     runs-on: ubuntu-22.04
@@ -321,7 +321,7 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test tests \
@@ -329,7 +329,7 @@ jobs:
             --cache-extension=cache
           source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1
+        slurm: -p gpu --gres=gpu:1
 
   test-pyopencl:
     runs-on: hendrix
@@ -344,12 +344,12 @@ jobs:
         source virtualenv/bin/activate
         pip install numpy pyopencl jsonschema
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --gres=gpu:1
+        slurm: -p gpu --gres=gpu:1
 
   test-cuda:
     runs-on: hendrix
@@ -364,13 +364,13 @@ jobs:
         source virtualenv/bin/activate
         pip install jsonschema
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1
+        slurm: -p gpu --gres=gpu:1
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -402,12 +402,7 @@ jobs:
       run: |
         node --version
         export EMCFLAGS="-sINITIAL_MEMORY=2147418112 -O1" # 2gb - 64kb... largest value of memory
-        futhark test \
-          -c \
-          --backend=wasm \
-          --runner=./tools/node-simd.sh \
-          --no-tuning \
-          --exclude=no_wasm tests
+        futhark test -c --backend=wasm --runner=./tools/node-simd.sh --no-tuning --exclude=no_wasm tests
 
   test-wasm-multicore:
     runs-on: ubuntu-22.04
@@ -598,7 +593,7 @@ jobs:
       with:
         backend: cuda
         system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1
+        gpu: titanx:1
         futhark-options: --exclude=mem_16gb
 
   benchmark-titanx-opencl:
@@ -614,7 +609,7 @@ jobs:
       with:
         backend: opencl
         system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1
+        gpu: titanx:1
         futhark-options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
@@ -630,7 +625,7 @@ jobs:
       with:
         backend: cuda
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1
+        gpu: titanrtx:1
 
   benchmark-titanrtx-opencl:
     runs-on: hendrix
@@ -645,7 +640,7 @@ jobs:
       with:
         backend: opencl
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1
+        gpu: titanrtx:1
 
   benchmark-results:
     runs-on: ubuntu-22.04

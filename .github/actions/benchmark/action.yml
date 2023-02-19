@@ -15,6 +15,10 @@ inputs:
     description: 'Options to pass to srun'
     required: false
     default: ''
+  gpu:
+    description: 'The GPU and numbers of GPUs to use'
+    required: false
+    default: '1'
 runs:
   using: "composite"
   steps:
@@ -24,15 +28,11 @@ runs:
         cd futhark-benchmarks
         ./get-data.sh external-data.txt
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: ./.github/actions/slurm
       with:
         script: |
-          futhark bench futhark-benchmarks \
-            --backend ${{inputs.backend}} \
-            --exclude no_${{inputs.system}} \
-            --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
-            --ignore-files /lib/ ${{inputs.futhark-options}}
-        slurm-options: ${{inputs.slurm-options}} 
+          futhark bench futhark-benchmarks --backend ${{inputs.backend}} --exclude no_${{inputs.system}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json --ignore-files /lib/ ${{inputs.futhark-options}}
+        slurm: -p gpu --gres=gpu:${{inputs.gpu}} ${{inputs.slurm-options}} 
     
     - uses: actions/upload-artifact@v1
       with:
