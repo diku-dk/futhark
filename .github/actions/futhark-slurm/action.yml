@@ -1,5 +1,5 @@
-name: 'Script'
-description: 'Run script on slurm if available.'
+name: 'Futhark Script'
+description: 'Run script on slurm if available where Futhark will be available.'
 inputs:
   script:
     description: 'Script to run'
@@ -36,5 +36,5 @@ runs:
         printf '#!/bin/bash
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
-        srun ${{inputs.slurm-options}} temp.sh
+        srun -time=0-08:00:00 ${{inputs.slurm-options}} temp.sh
         rm temp.sh
