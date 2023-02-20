@@ -185,55 +185,73 @@ jobs:
   #         nix-shell --pure --run "make docs"
 
   test-interpreter:
-    runs-on: hendrix
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+
     steps:
     - uses: actions/checkout@v3
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: actions/download-artifact@v3
       with:
-        script: |
-          futhark test -i tests
-        slurm-options: --cpus-per-task=2
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        futhark test -i tests
 
   test-c:
-    runs-on: hendrix
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+
     steps:
     - uses: actions/checkout@v3
 
-    - run: |
-        module load python/3.9.9
-        pip install jsonschema
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-
-    - uses: ./.github/actions/futhark-slurm
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
+    - uses: actions/download-artifact@v3
       with:
-        script: |
-          futhark test tests -c --backend=c --no-tuning
-          make -C tests_lib/c -j
-        slurm-options: --cpus-per-task=2
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        futhark test -c --backend=c tests --no-tuning
+        make -C tests_lib/c -j
 
   test-multicore:
-    runs-on: hendrix
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+
     steps:
     - uses: actions/checkout@v3
 
-    - run: |
-        module load python/3.9.9
-        pip install jsonschema
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
-
-    - uses: ./.github/actions/futhark-slurm
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-jsonschema
+    - uses: actions/download-artifact@v3
       with:
-        script: |
-          futhark test tests -c --backend=multicore --no-tuning
-          make -C tests_lib/c FUTHARK_BACKEND=multicore
-        slurm-options: --cpus-per-task=2
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        futhark test -c --backend=multicore tests --no-tuning
+        make -C tests_lib/c FUTHARK_BACKEND=multicore
 
   test-ispc:
     runs-on: ubuntu-22.04
