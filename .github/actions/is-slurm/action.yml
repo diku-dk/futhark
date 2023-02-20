@@ -1,0 +1,21 @@
+name: 'Is Slurm Installed'
+description: 'Checks if slurm is installed by checking if srun can be used.'
+
+outputs:
+  is-slurm:
+    description: "If slurm is used."
+    value: ${{ steps.slurm.outputs.is-slurm }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check if slurm can be run
+      id: slurm
+      shell: bash
+      run: |
+        printf '#!/bin/bash
+        if ! srun --version &> /dev/null; then
+            echo "is-slurm=false"
+        else
+            echo "is-slurm=true"
+        fi' | bash >> $GITHUB_OUTPUT

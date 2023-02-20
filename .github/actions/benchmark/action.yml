@@ -7,33 +7,33 @@ inputs:
   system:
     description: 'Name of system (e.g. GPU name)'
     required: true
-  options:
+  futhark-options:
     description: 'Options to pass to futhark bench'
+    required: false
+    default: ''
+  slurm-options:
+    description: 'Options to pass to srun'
     required: false
     default: ''
 runs:
   using: "composite"
   steps:
-    - uses: actions/download-artifact@v3
+    - name: Download Benchmarks.
+      shell: bash
+      run: |
+        cd futhark-benchmarks
+        ./get-data.sh external-data.txt
+
+    - uses: ./.github/actions/futhark-slurm
       with:
-        name: futhark-nightly-linux-x86_64.tar.xz
-    - name: Setup compiler
-      shell: bash
-      run: |
-        tar xvf futhark-nightly-linux-x86_64.tar.xz
-        echo "$PWD/futhark-nightly-linux-x86_64/bin" >> $GITHUB_PATH
-    - name: Get data
-      shell: bash
-      run: |
-        cd futhark-benchmarks && pwd && ./get-data.sh external-data.txt
-    - name: Debug
-      shell: bash
-      run: |
-        env
-    - name: Run benchmarks
-      shell: bash
-      run: |
-        futhark bench futhark-benchmarks --ignore-files /lib/ --backend=${{inputs.backend}} --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json --exclude no_${{inputs.system}} ${{inputs.options}}
+        script: |
+          futhark bench futhark-benchmarks \
+            --backend ${{inputs.backend}} \
+            --exclude no_${{inputs.system}} \
+            --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
+            --ignore-files /lib/ ${{inputs.futhark-options}}
+        slurm-options: ${{inputs.slurm-options}} 
+    
     - uses: actions/upload-artifact@v1
       with:
         name: futhark-${{inputs.backend}}-${{inputs.system}}-${{ github.sha }}.json
