@@ -29,7 +29,7 @@ runs:
       shell: bash
       run: |
         ${{inputs.script}}
-    
+
     - if: steps.slurm.outputs.is-slurm == 'true'
       shell: bash
       run: |
