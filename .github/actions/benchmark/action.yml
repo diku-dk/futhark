@@ -27,6 +27,7 @@ runs:
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
+          hostname
           futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \
