@@ -303,6 +303,21 @@ def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
         img {{
             width: {width}%
         }}
+        body {{
+            font-family: sans-serif;
+            padding: 0px;
+            margin: 0px;
+            margin-left: auto;
+            margin-right: auto;
+            overflow-y: scroll;
+            line-height: 1.7;
+        }}
+        section {{
+            border: 2px solid transparent;
+        }}
+        section:target {{
+            border: 2px solid black;
+        }}
     </style>
     <nav>
         <ul>
