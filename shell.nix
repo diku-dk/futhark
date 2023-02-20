@@ -31,6 +31,7 @@ pkgs.stdenv.mkDerivation {
       ispc
       python3Packages.numpy
       python3Packages.pyopencl
+      python3Packages.matplotlib
       python3Packages.jsonschema
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex
