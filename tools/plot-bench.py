@@ -231,7 +231,7 @@ def make_plot_jobs_and_directories(
     data: Dict[str, Dict[str, Dict[str, Any]]],
     plots: Set[str],
     filetype: str,
-    exnteded_path: str = 'assets') -> Dict[str, Dict[str, Dict[str, Any]]]:
+    exnteded_path: str = 'graphs') -> Dict[str, Dict[str, Dict[str, Any]]]:
     """Makes dictionary with plot jobs where plot_jobs are the jobs."""
     
     html_data = dict()
