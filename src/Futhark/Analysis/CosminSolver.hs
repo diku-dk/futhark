@@ -14,7 +14,7 @@ data SolverInput = SolverInput
     assertions :: [PrimExp VName],
     -- | Pairs where the 'VName' is known to be strictly less than the 'PrimExp'.
     less_thans :: [(VName, PrimExp VName)],
-    -- | 'PrimExp' that is known to strictly greater than zero.
+    -- | 'PrimExp' that is known to greater than or equal to zero.
     non_negatives :: [PrimExp VName]
   }
 
