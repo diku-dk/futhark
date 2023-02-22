@@ -452,12 +452,10 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
       pure mempty
 
-  free_all_mem <- GC.freeAllocatedMem
   let ftask_err = fpar_task <> "_err"
       code =
         [C.citems|int $id:ftask_err = scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);
                   if ($id:ftask_err != 0) {
-                    $items:free_all_mem;
                     err = $id:ftask_err;
                     goto cleanup;
                   }|]
