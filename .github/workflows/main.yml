@@ -347,7 +347,7 @@ jobs:
             --cache-extension=cache
           source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-opencl-test
+        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-pyopencl:
     runs-on: hendrix
@@ -367,7 +367,7 @@ jobs:
         script: |
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-pyopencl-test
+        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
     runs-on: hendrix
@@ -388,7 +388,7 @@ jobs:
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-cuda-test
+        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -616,7 +616,7 @@ jobs:
       with:
         backend: cuda
         system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx
+        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
         futhark-options: --exclude=mem_16gb
 
   benchmark-titanx-opencl:
@@ -632,7 +632,7 @@ jobs:
       with:
         backend: opencl
         system: titanx
-        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx
+        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
         futhark-options: --exclude=mem_16gb
 
   benchmark-titanrtx-cuda:
@@ -648,7 +648,7 @@ jobs:
       with:
         backend: cuda
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx
+        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-titanrtx-opencl:
     runs-on: hendrix
@@ -663,7 +663,7 @@ jobs:
       with:
         backend: opencl
         system: titanrtx
-        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx
+        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   benchmark-results:
     runs-on: ubuntu-22.04
