@@ -1,14 +1,16 @@
 module Language.Futhark.Unused (findUnused, getBody, getDecs) where
 
+import Data.List (concatMap, elem, filter, map, partition, (\\))
 import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
 import Data.Maybe (catMaybes, maybeToList)
 import Language.Futhark
 import Language.Futhark.Semantic
-    ( FileModule(FileModule), Imports )
-import Data.List ( filter, map, elem, concatMap, (\\), partition)
+  ( FileModule (FileModule),
+    Imports,
+  )
 import System.FilePath
-
--- import Data.Map.Strict as Map
+import qualified Data.Bifunctor
 
 -- Pending work:
 -- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
@@ -22,39 +24,48 @@ import System.FilePath
 -- ∘ For those VNames defined in root files, take the union of their reachable names.
 -- ∘ Subtract the set produced in (3) from the set of all VNames. This gives you a set of VNames that are not reachable from the root files.
 
+-- Guidelines:
+-- (1) create a mapping for functions in *any* import to the directly usable functions in it.
+-- (2) create a mapping from normalized filename to top-level functions inside the filename.
+-- (3) Compute transitive closure for the map in (1)
+
+-- data FunUsed = FunUsed VName [VName]
+data TopLvl = TopLvl FilePath [(VName, SrcLoc)]
+
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [VName]
 findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
 findUnused files imps = do
   let (directImports, realImports) = partition ((`elem` map (normalise . dropExtension) files) . fst) imps
       used = concatMap (usedFuncsInMod . snd) directImports
-      outside = concatMap (\(fp, im) -> map (\(x,y) -> (fp,x,y)) $ unusedInMod used im) realImports
-  outside --, used, map (fmToDecs . snd) directImports)
-  
+      outside = concatMap (\(fp, im) -> map (\(x, y) -> (fp, x, y)) $ unusedInMod used im) realImports
+  outside
 
 -- We are looking for VNames that represent functions.
 usedFuncsInMod :: FileModule -> [VName]
 usedFuncsInMod (FileModule _ _env (Prog _doc decs) _) =
   concatMap funcsInDef $ filter isFuncDec decs
 
-
-unusedInMod :: [VName] -> FileModule -> [(VName,SrcLoc)]
+unusedInMod :: [VName] -> FileModule -> [(VName, SrcLoc)]
 unusedInMod used (FileModule _ _env (Prog _doc decs) _) = do
   let allD = filter isFuncDec decs
       allN = map gvnl allD
-      allU = foldr (\x y ->
-        if gvn x `elem` y 
-          then y <> funcsInDef x
-          else y
-        ) used allD
-  filter (\(vn,_) -> vn `notElem` allU) allN
-
+      allU =
+        foldr
+          ( \x y ->
+              if gvn x `elem` y
+                then y <> funcsInDef x
+                else y
+          )
+          used
+          allD
+  filter (\(vn, _) -> vn `notElem` allU) allN
 
 gvn :: DecBase f vn -> vn
 gvn (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr _loc)) = vn
 gvn _ = error "" -- TODO: remove this in favour of different error.
 
 gvnl :: DecBase f a -> (a, SrcLoc)
-gvnl (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr loc)) = (vn,loc)
+gvnl (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr loc)) = (vn, loc)
 gvnl _ = error "" -- TODO: remove this in favour of different error.
 
 isFuncDec :: DecBase f vn -> Bool
@@ -68,6 +79,22 @@ funcsInDef :: DecBase Info VName -> [VName]
 funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
   map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
+
+partDefFuncs :: [FilePath] -> [(FilePath,FileModule)] -> (M.Map VName [VName], M.Map VName [VName])
+partDefFuncs fp fml = do
+  let af = map (Data.Bifunctor.second defFuncs) fml
+      bf = concatMap snd $ filter (\(ifp,_) -> ifp `elem` fp ) af
+  (M.fromList $ concatMap snd af, M.fromList bf)
+
+
+defFuncs :: FileModule -> [(VName,[VName])]
+defFuncs (FileModule _ _env (Prog _doc decs) _) =
+  map funcsInDefNew $ filter isFuncDec decs
+
+funcsInDefNew :: DecBase Info VName -> (VName, [VName])
+funcsInDefNew (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
+  (vn, map (\(QualName _ v) -> v) $ funcsInDef' body)
+funcsInDefNew _ = error "not a val dec." -- TODO: change error
 
 -- Handles every constructor in ExpBase that can contain a function usage.
 funcsInDef' :: ExpBase Info VName -> [QualName VName]
