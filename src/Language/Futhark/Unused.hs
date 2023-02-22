@@ -1,9 +1,9 @@
 module Language.Futhark.Unused (findUnused, getBody, getDecs) where
 
-import Data.List (concatMap, elem, filter, map, partition, (\\))
+import Data.List (concatMap, elem, filter, map, partition, (\\), nub)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, maybeToList)
+import Data.Maybe (catMaybes, maybeToList, fromMaybe)
 import Language.Futhark
 import Language.Futhark.Semantic
   ( FileModule (FileModule),
@@ -11,6 +11,7 @@ import Language.Futhark.Semantic
   )
 import System.FilePath
 import qualified Data.Bifunctor
+import Data.Function (fix)
 
 -- Pending work:
 -- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
@@ -80,12 +81,18 @@ funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
   map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
 
+tClosure :: M.Map VName [VName] -> M.Map VName [VName] -> M.Map VName [VName]
+tClosure bf af = until (\x -> x == tStep af x) (tStep af) bf
+
+
+tStep :: M.Map VName [VName] -> M.Map VName [VName] -> M.Map VName [VName]
+tStep af = M.map (nub . concatMap (af M.!))
+
 partDefFuncs :: [FilePath] -> [(FilePath,FileModule)] -> (M.Map VName [VName], M.Map VName [VName])
 partDefFuncs fp fml = do
   let af = map (Data.Bifunctor.second defFuncs) fml
       bf = concatMap snd $ filter (\(ifp,_) -> ifp `elem` fp ) af
   (M.fromList $ concatMap snd af, M.fromList bf)
-
 
 defFuncs :: FileModule -> [(VName,[VName])]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
