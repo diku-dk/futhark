@@ -271,7 +271,7 @@ diffScan ops ys w as scan = do
         pure $ Scan lam' $ scanNeutral s
 
     splitScanRes sc res d =
-      concat $ take (div d $ specialScans sc) <$> orderArgs sc res
+      concatMap (take (div d $ specialScans sc)) (orderArgs sc res)
 
 diffScanVec ::
   VjpOps ->

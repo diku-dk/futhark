@@ -550,7 +550,7 @@ videoBlock opts f = "\n\n![](" <> T.pack f <> ")" <> opts' <> "\n\n"
 
 plottable :: CompoundValue -> Maybe [Value]
 plottable (ValueTuple vs) = do
-  (vs', ns') <- unzip <$> mapM inspect vs
+  (vs', ns') <- mapAndUnzipM inspect vs
   guard $ length (nubOrd ns') == 1
   Just vs'
   where
