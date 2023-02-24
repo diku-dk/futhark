@@ -1171,7 +1171,7 @@ errorMsgString (Imp.ErrorMsg parts) = do
       onPart (Imp.ErrorVal FloatType {} x) = ("%f",) <$> compileExp x
       onPart (Imp.ErrorVal Imp.Bool x) = ("%r",) <$> compileExp x
       onPart (Imp.ErrorVal Unit {} x) = ("%r",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  (formatstrs, formatargs) <- mapAndUnzipM onPart parts
   pure (mconcat formatstrs, formatargs)
 
 compileCode :: Imp.Code op -> CompilerM op s ()

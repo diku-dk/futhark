@@ -144,7 +144,7 @@ transformExp (Op (Inner (SegOp (SegHist lvl space ops ts kbody)))) = do
     onOp op lam = op {histOp = lam}
 transformExp (WithAcc inputs lam) = do
   lam' <- transformLambda lam
-  (input_alloc_stms, inputs') <- unzip <$> mapM onInput inputs
+  (input_alloc_stms, inputs') <- mapAndUnzipM onInput inputs
   pure
     ( mconcat input_alloc_stms,
       WithAcc inputs' lam'
@@ -533,7 +533,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the sum of the sizes required by different threads.
-  (alloc_stms, rebases) <- unzip <$> mapM expand variant_allocs'
+  (alloc_stms, rebases) <- mapAndUnzipM expand variant_allocs'
 
   pure (slice_stms' <> stmsFromList alloc_stms, mconcat rebases)
   where

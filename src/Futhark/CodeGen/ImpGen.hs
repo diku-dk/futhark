@@ -657,7 +657,7 @@ compileOutParams ::
   Maybe [EntryResult] ->
   ImpM rep r op (Maybe [(Uniqueness, Imp.ExternalValue)], [Imp.Param], [ValueDestination])
 compileOutParams types orig_rts maybe_orig_epts = do
-  (maybe_params, dests) <- unzip <$> mapM compileOutParam orig_rts
+  (maybe_params, dests) <- mapAndUnzipM compileOutParam orig_rts
   evs <- case maybe_orig_epts of
     Just orig_epts ->
       Just <$> compileExternalValues types orig_rts orig_epts maybe_params

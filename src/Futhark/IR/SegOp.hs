@@ -1123,7 +1123,7 @@ simplifySegOp (SegRed lvl space reds ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (reds', reds_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
-      unzip <$> mapM (simplifySegBinOp (segFlat space)) reds
+      mapAndUnzipM (simplifySegBinOp (segFlat space)) reds
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
   pure
@@ -1137,7 +1137,7 @@ simplifySegOp (SegScan lvl space scans ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
   (scans', scans_hoisted) <-
     Engine.localVtable (<> scope_vtable) $
-      unzip <$> mapM (simplifySegBinOp (segFlat space)) scans
+      mapAndUnzipM (simplifySegBinOp (segFlat space)) scans
   (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
   pure

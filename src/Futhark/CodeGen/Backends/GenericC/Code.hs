@@ -36,7 +36,7 @@ errorMsgString (ErrorMsg parts) = do
       onPart (ErrorVal (FloatType Float16) x) = ("%f",) . asDouble <$> compileExp x
       onPart (ErrorVal (FloatType Float32) x) = ("%f",) . asDouble <$> compileExp x
       onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
-  (formatstrs, formatargs) <- unzip <$> mapM onPart parts
+  (formatstrs, formatargs) <- mapAndUnzipM onPart parts
   pure (mconcat formatstrs, formatargs)
 
 compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName

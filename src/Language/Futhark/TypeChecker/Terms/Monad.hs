@@ -553,7 +553,7 @@ instantiateTypeScheme ::
   TermTypeM ([VName], PatType)
 instantiateTypeScheme qn loc tparams t = do
   let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam qn loc) tparams
+  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
   let substs = M.fromList $ zip tnames tparam_substs
       t' = applySubst (`M.lookup` substs) t
   pure (tparam_names, t')

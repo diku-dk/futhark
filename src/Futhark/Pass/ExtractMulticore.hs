@@ -191,7 +191,7 @@ transformRedomap ::
 transformRedomap rename onBody w reds map_lam arrs = do
   (gtid, space) <- mkSegSpace w
   kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
-  (reds_stms, reds') <- unzip <$> mapM reduceToSegBinOp reds
+  (reds_stms, reds') <- mapAndUnzipM reduceToSegBinOp reds
   op' <-
     renameIfNeeded rename $
       SegRed () space reds' (lambdaReturnType map_lam) kbody
@@ -208,7 +208,7 @@ transformHist ::
 transformHist rename onBody w hists map_lam arrs = do
   (gtid, space) <- mkSegSpace w
   kbody <- mapLambdaToKernelBody onBody gtid map_lam arrs
-  (hists_stms, hists') <- unzip <$> mapM histToSegBinOp hists
+  (hists_stms, hists') <- mapAndUnzipM histToSegBinOp hists
   op' <-
     renameIfNeeded rename $
       SegHist () space hists' (lambdaReturnType map_lam) kbody
@@ -244,7 +244,7 @@ transformSOAC pat _ (Screma w arrs form)
   | Just (scans, map_lam) <- isScanomapSOAC form = do
       (gtid, space) <- mkSegSpace w
       kbody <- mapLambdaToKernelBody transformBody gtid map_lam arrs
-      (scans_stms, scans') <- unzip <$> mapM scanToSegBinOp scans
+      (scans_stms, scans') <- mapAndUnzipM scanToSegBinOp scans
       pure $
         mconcat scans_stms
           <> oneStm

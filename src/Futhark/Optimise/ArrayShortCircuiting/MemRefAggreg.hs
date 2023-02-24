@@ -52,7 +52,7 @@ freeVarSubstitutions scope0 scals0 indfun =
     freeVarSubstitutions' subs [] = Just subs
     freeVarSubstitutions' subs0 fvs =
       let fvs_not_in_scope = filter (`M.notMember` scope0) fvs
-       in case unzip <$> mapM getSubstitution fvs_not_in_scope of
+       in case mapAndUnzipM getSubstitution fvs_not_in_scope of
             -- We require that all free variables can be substituted
             Just (subs, new_fvs) ->
               freeVarSubstitutions' (subs0 <> mconcat subs) $ concat new_fvs

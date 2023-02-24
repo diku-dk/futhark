@@ -532,7 +532,7 @@ runTests config paths = do
         case testAction $ testCaseTest tc of
           CompileTimeFailure _ -> 1
           RunCases ios sts wts ->
-            (length . concat) (iosTestRuns <$> ios)
+            length (concatMap iosTestRuns ios)
               + length sts
               + length wts
 

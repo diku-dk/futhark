@@ -1216,9 +1216,7 @@ reuses (i, t) n
   | isArray t =
       do
         body_depth <- outermostCopyableArray n
-        case body_depth of
-          Just bd -> recordCopyableMemory i bd
-          Nothing -> pure ()
+        forM_ body_depth (recordCopyableMemory i)
   | otherwise =
       pure ()
 

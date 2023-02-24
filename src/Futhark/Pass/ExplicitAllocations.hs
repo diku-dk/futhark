@@ -906,7 +906,7 @@ allocInExp (Apply fname args rettype loc) = do
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
-  (cases', cases_reqs) <- unzip <$> mapM onCase cases
+  (cases', cases_reqs) <- mapAndUnzipM onCase cases
   let reqs = zipWith (foldl combMemReqTypes) def_reqs (transpose cases_reqs)
   defbody'' <- addCtxToMatchBody reqs defbody'
   cases'' <- mapM (traverse $ addCtxToMatchBody reqs) cases'
