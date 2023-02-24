@@ -451,14 +451,14 @@ $entry_point_decls
     Definitions types consts (Functions funs) = prog
 
     compileProgAction = do
-      (memfuns, memreport) <- unzip <$> mapM defineMemorySpace spaces
+      (memfuns, memreport) <- mapAndUnzipM defineMemorySpace spaces
 
       get_consts <- compileConstants consts
 
       ctx_ty <- contextType
 
       (prototypes, functions) <-
-        unzip <$> mapM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
+        mapAndUnzipM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       (entry_points, entry_points_manifest) <-
         unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs

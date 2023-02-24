@@ -177,7 +177,7 @@ transformExp aliases e =
     Match ses cases defbody dec -> do
       let transformCase (Case vs body) =
             first (Case vs) <$> transformBody aliases body
-      (cases', cases_deps) <- unzip <$> mapM transformCase cases
+      (cases', cases_deps) <- mapAndUnzipM transformCase cases
       (defbody', defbody_deps) <- transformBody aliases defbody
       let deps = depsOf ses <> mconcat cases_deps <> defbody_deps <> depsOf dec
       pure (Match ses cases' defbody' dec, deps)
