@@ -130,6 +130,14 @@ vjpSOAC ops pat _aux (Screma w as form) m
         redomapToMapAndReduce pat (w, reds, map_lam, as)
       vjpStm ops mapstm $ vjpStm ops redstm m
 
+-- Differentiating Scanomaps
+vjpSOAC ops pat _aux (Screma w as form) m
+  | Just (scans, map_lam) <-
+      isScanomapSOAC form = do
+      (mapstm, scanstm) <-
+        scanomapToMapAndScan pat (w, scans, map_lam, as)
+      vjpStm ops mapstm $ vjpStm ops scanstm m
+
 -- Differentiating Scatter
 vjpSOAC ops pat aux (Scatter w lam ass written_info) m =
   vjpScatter ops pat aux (w, lam, ass, written_info) m
