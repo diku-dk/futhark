@@ -8,173 +8,205 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import json
-import io
 import os
 import pathlib
 import textwrap
 import re
 import time
+import random
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from abc import ABC, abstractmethod
-from typing import Union, Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, List
 from itertools import islice
 from PIL import ImageFile
+from collections import OrderedDict
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-class Plotter(ABC):
-    """Class that will plot and save many figures on a process."""
+def to_file_path(dest: str, plot_type_name: str, extension: str) -> str:
+    '''
+    Will create the path to a given file based on the plot type and extension.
+    '''
 
-    def __init__(self, dpi: Any = 'figure', transparent: bool = False) -> None:
-        self.dpi = dpi
-        self.fig, self.ax = plt.subplots()
-        self.transparent = transparent
-        self.backends = {
-            '.png': 'AGG',
-            '.pdf': 'PDF',
-            '.ps': 'PS',
-            '.eps': 'PS',
-            '.svg': 'SVG',
-            '.pgf': 'PGF'
-        }
-    
-    def _default_title(self, program: str = None, dataset: str = None):
-        """Sets the title for the current axes."""
+    return f'{dest}_{plot_type_name}.{extension}'
+
+
+class PlotType(ABC):
+
+    def _default_title(self, ax, program: str = None, dataset: str = None):
+        '''Sets the title for the current axes.'''
         if dataset is None or program is None:
             return
 
-        self.ax.set_title(textwrap.shorten(fr'{program}: {dataset}',  50))
-
-    def plot(self, data: Dict[Union[io.BufferedWriter, str], Any]):
-        """
-        Will use the plotter function on all the given data. The data is a
-        dictionary where the key is the destination and the value is the values
-        that will be passed to the plotter function.
-        """
-
-        for dest, datapoint in data.items():
-            self.plotter(**datapoint)
-            file_extension = pathlib.Path(dest).suffix
-            
-            # For some reason a syntax error may occour but the savefig function
-            # will for some reason work afterwards.
-            for _ in range(10):
-                try:
-                    self.fig.savefig(
-                        dest,
-                        bbox_inches='tight',
-                        dpi=self.dpi,
-                        backend=self.backends[file_extension],
-                        transparent=self.transparent
-                    )
-                    print(f'Done creating: {dest}')
-                    break
-                except SyntaxError:
-                    time.sleep(1)
-            else:
-                print((f'Figure "{dest}" did not get saved this is most likely an internal error.'
-                    'try specifying the specific program with --program.'))
-            
-            self.ax.cla()
-        plt.close(self.fig)
-
+        ax.set_title(textwrap.shorten(fr'{program}: {dataset}',  50))
 
     @abstractmethod
-    def plotter(self, **kwargs):
-        """Method used to create a plot."""
+    def plot(self, ax, **kwargs):
+        '''Method used to create a plot.'''
+        raise NotImplementedError()
+    
+    @classmethod
+    @abstractmethod
+    def name(cls):
+        '''The name of the plot.'''
         raise NotImplementedError()
 
 
-class PerRun(Plotter):
-    """Create a plot with runtime vs iteration number as plot."""
+class PerRun(PlotType):
+    '''Create a plot with runtime vs iteration number as plot.'''
 
-    def plotter(self, runtimes=None, **kwargs):
-        self._default_title(**kwargs)
+    def plot(self, ax, runtimes=None, **kwargs):
+        self._default_title(ax, **kwargs)
         x = np.arange(len(runtimes))
         y = runtimes
-        runtimes = self.ax.scatter(x, y, marker='.')
-        self.ax.legend([runtimes], ['Runtimes'])
-        self.ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
-        self.ax.set_ylabel('Runtime')
-        self.ax.set_xlabel('Iteration Number')
-        self.ax.grid()
+        runtimes = ax.scatter(x, y, marker='.')
+        ax.legend([runtimes], ['Runtimes'])
+        ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
+        ax.set_ylabel('Runtime')
+        ax.set_xlabel('Iteration Number')
+        ax.grid()
     
-    def __str__(self) -> str:
-        return 'Per Run Plot'
+    @classmethod
+    def name(cls) -> str:
+        return 'per_run'
 
 
-class CumsumPerRun(Plotter):
-    """Create a plot with cumulative runtime vs iteration number as plot."""
+class CumsumPerRun(PlotType):
+    '''Create a plot with cumulative runtime vs iteration number as plot.'''
     
-    def plotter(self, runtimes=None, **kwargs):
-        self._default_title(**kwargs)
+    def plot(self, ax, runtimes=None, **kwargs):
+        self._default_title(ax, **kwargs)
         x = np.arange(len(runtimes))
         y = np.cumsum(runtimes) / 1000
         X = np.vstack([x, np.ones(len(x))]).T
         slope, intercept = np.linalg.lstsq(X, y, rcond=None)[0]
-        self.ax.scatter(x, y, marker='.')
-        self.ax.plot(x, slope * x + intercept, color='black')
-        self.ax.set_ylabel('Cumulative Runtime')
-        self.ax.set_xlabel('Iteration Number')
-        self.ax.yaxis.set_major_formatter(FormatStrFormatter('$%dms$'))
-        self.ax.grid()
+        ax.scatter(x, y, marker='.')
+        ax.plot(x, slope * x + intercept, color='black')
+        ax.set_ylabel('Cumulative Runtime')
+        ax.set_xlabel('Iteration Number')
+        ax.yaxis.set_major_formatter(FormatStrFormatter('$%dms$'))
+        ax.grid()
+
+    @classmethod
+    def name(cls) -> str:
+        return 'cumsum_per_run'
 
 
-class RuntimeDensities(Plotter):
-    """Creates a plots the probability density of the runtimes."""
+class RuntimeDensities(PlotType):
+    '''Creates a plots the probability density of the runtimes.'''
 
-    def plotter(self, runtimes=None, **kwargs):
-        self._default_title(**kwargs)
+    def plot(self, ax, runtimes=None, **kwargs):
+        self._default_title(ax, **kwargs)
         y = np.bincount(runtimes) / len(runtimes)
         x = np.arange(len(y))
-        self.ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
-        mean = self.ax.axvline(x = runtimes.mean(), color = 'k', label = 'mean')
-        self.ax.legend([mean], ['Mean Runtime'])
-        self.ax.set_xlabel('Runtimes')
-        self.ax.set_ylabel('Probability')
-        self.ax.plot(x, y, linestyle='-')
-        self.ax.grid()
+        ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
+        mean = ax.axvline(x = runtimes.mean(), color = 'k', label = 'mean')
+        ax.legend([mean], ['Mean Runtime'])
+        ax.set_xlabel('Runtimes')
+        ax.set_ylabel('Probability')
+        ax.plot(x, y, linestyle='-')
+        ax.grid()
+    
+    @classmethod
+    def name(cls) -> str:
+        return 'runtime_densities'
 
 
-class LagPlot(Plotter):
-    """
+class LagPlot(PlotType):
+    '''
     Creates a lag plot where given some runtimes it copies the array and
     shifts them by one and then plots the two data points vs each other.
-    """
+    '''
 
-    def plotter(self, runtimes=None, **kwargs):
-        self._default_title(**kwargs)
+    def plot(self, ax, runtimes=None, **kwargs):
+        self._default_title(ax, **kwargs)
         x = runtimes
         y = np.roll(x, 1)
-        self.ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
-        self.ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
-        self.ax.set_xlabel('Runtime at the $i$th index')
-        self.ax.set_ylabel('Runtime at the $1 + i$th index')
-        self.ax.scatter(x, y, marker='.')
-        self.ax.grid()
+        ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
+        ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
+        ax.set_xlabel('Runtime at the $i$th index')
+        ax.set_ylabel('Runtime at the $1 + i$th index')
+        ax.scatter(x, y, marker='.')
+        ax.grid()
+    
+    @classmethod
+    def name(cls) -> str:
+        return 'lag_plot'
 
 
-def plotters_factory(dpi: Any = 200, transparent: bool = False) -> Dict[str, Plotter]:
-    """A dictionary where each key value pair creates a Plotter."""
+ALL_PLOT_TYPES = OrderedDict({
+    plot_type.name():  plot_type for plot_type in PlotType.__subclasses__()
+})
 
-    return {
-        'lag_plot': lambda : LagPlot(dpi=dpi, transparent=transparent),
-        'runtime_densities': lambda: RuntimeDensities(dpi=dpi, transparent=transparent),
-        'cumsum_per_run': lambda: CumsumPerRun(dpi=dpi, transparent=transparent),
-        'per_run': lambda: PerRun(dpi=dpi, transparent=transparent)
-    }
+class Plotter:
+    '''Class that will plot and save many figures on a process.'''
+
+    def __init__(
+            self,
+            plot_types: List[PlotType],
+            dpi: Any = '200',
+            transparent: bool = False,
+            backend='AGG') -> None:
+        self.dpi = dpi
+        self.plot_types = plot_types
+        self.fig, self.ax = plt.subplots()
+        self.transparent = transparent
+        backends = {
+            'AGG': 'png',
+            'PDF': 'pdf',
+            'PS': 'ps',
+            'PS': 'eps',
+            'SVG': 'svg',
+            'PGF': 'pgf' 
+        }
+        self.filetype = backends[backend]
+        self.backend = backend
+
+    def plot(self, data: Dict[str, Any]):
+        '''
+        Will use the plotter function on all the given data. The data is a
+        dictionary where the key is the destination and the value is the values
+        that will be passed to the plotter function.
+        '''
+
+        for plotter in self.plot_types:
+            for dest, datapoint in data.items():
+                plotter.plot(self.ax, **datapoint)
+                
+                # For some reason a syntax error may occour but the savefig function
+                # will for some reason work afterwards.
+                for _ in range(10):
+                    try:
+                        path = to_file_path(dest, plotter.name(), self.filetype)
+                        self.fig.savefig(
+                            path,
+                            bbox_inches='tight',
+                            dpi=self.dpi,
+                            backend=self.backend,
+                            transparent=self.transparent
+                        )
+                        print(f'Done creating: {path}')
+                        break
+                    except SyntaxError:
+                        time.sleep(1)
+                else:
+                    print((f'Figure "{dest}" did not get saved this is most likely an internal ' 
+                           'error. try specifying the specific program with --program.'))
+            
+                self.ax.cla()
+        plt.close(self.fig)
 
 
 def chunks(data: Dict, size: int):
-    """Generator that makes sub-dictionaries of a maximum size."""
+    '''Generator that makes sub-dictionaries of a maximum size.'''
     it = iter(data)
     for _ in range(0, len(data), size):
         yield {k:data[k] for k in islice(it, size)}
 
 
 def get_args() -> Any:
-    """Gets the arguments used in the program."""
+    '''Gets the arguments used in the program.'''
     parser = argparse.ArgumentParser(
         prog='Futhark Plots',
         description='Makes plots for futhark benchmarks.'
@@ -185,22 +217,21 @@ def get_args() -> Any:
         help='the specific programs the plots will be generated from. Default is all programs.')
     parser.add_argument('--plots', metavar="PLOTTYPE0,PLOTTYPE1,...",
         help=(f'the type of plots that will be generated which can be '
-              f'{", ".join(plotters_factory().keys())}. Default is all plots.'))
+              f'{", ".join(ALL_PLOT_TYPES.keys())}. Default is all plots.'))
     parser.add_argument('--backend', default='pdf', metavar='BACKEND',
         help='the type of backend used, these can be found on the matplotlib website.')
     parser.add_argument('--filetype', default='png',  metavar='BACKEND',
         help='the file type used, these can be found on the matplotlib website.')
     parser.add_argument('--transparent', action='store_true',
         help='flag to use if the bagground should be transparent.')
-    parser.add_argument('--output', help='the output path')
 
     return parser.parse_args()
 
 
 def format_arg_list(args: Optional[str]) -> Optional[str]:
-    """
+    '''
     Takes a string of form 'a, b, c, d' and makes a list ['a', 'b', 'c', 'd']
-    """
+    '''
     if args is None:
         return None
     
@@ -210,11 +241,11 @@ def format_arg_list(args: Optional[str]) -> Optional[str]:
 def iter_datasets(
     data: Dict[str, Dict[str, Dict[str, Any]]],
     programs: Set[str]):
-    """Makes iteration easier for make_plot_jobs_and_directories."""
+    '''Makes iteration easier for make_plot_jobs_and_directories.'''
     
     for program_path in programs:
         datasets = data.get(program_path).get('datasets')
-        program = pathlib.Path(program_path).name.replace('.fut', '')
+        program = pathlib.Path(program_path).name.replace('.fut', '').replace('.in', '')
         program_directory = os.path.dirname(program_path)
         for dataset_path, dataset_dict in datasets.items():
             dataset_directory = os.path.dirname(dataset_path)
@@ -227,14 +258,14 @@ def iter_datasets(
 
 def make_plot_jobs_and_directories(
     programs: Set[str],
-    plot_jobs: Dict[str, Dict[str, Dict[str, Any]]],
     data: Dict[str, Dict[str, Dict[str, Any]]],
-    plots: Set[str],
-    filetype: str,
+    plot_types: List[str],
+    file_type: str,
     exnteded_path: str = 'graphs') -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Makes dictionary with plot jobs where plot_jobs are the jobs."""
+    '''Makes dictionary with plot jobs where plot_jobs are the jobs.'''
     
     html_data = dict()
+    plot_jobs = dict()
 
     def remove_characters(characters, text):
 
@@ -248,57 +279,56 @@ def make_plot_jobs_and_directories(
         os.makedirs(directory, exist_ok=True)
 
         if html_data.get(program) is None:
-            html_data[program] = dict() 
-        
-        html_data[program][dataset] = []
-        
-        for plot in sorted(plots):
-            dataset_filename = textwrap.shorten(dataset, 100).replace(' ', '_')
-            raw_filename =  f'{program}_{dataset_filename}_{plot}.{filetype}'
-            filename = remove_characters([' ', '#', '"'], raw_filename)
-            plot_file = os.path.join(directory, filename)
-            plot_jobs[plot][plot_file] = {
-                'program': program,
-                'dataset': dataset,
-                'runtimes': runtimes
-            }
+            html_data[program] = dict()
 
-            html_data[program][dataset].append(plot_file)
-    
-    return html_data
+        dataset_filename = textwrap.shorten(dataset, 100).replace(' ', '_')
+        raw_filename =  f'{program}_{dataset_filename}'
+        filename = remove_characters([' ', '#', '"'], raw_filename)
+        plot_file = os.path.join(directory, filename)
+        html_data[program][dataset] = [to_file_path(plot_file, plot_type, file_type) for plot_type in plot_types]
+        plot_jobs[plot_file] = {
+            'program': program,
+            'dataset': dataset,
+            'runtimes': runtimes
+        }
+
+    return html_data, plot_jobs
 
 
 def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
-    """Makes a simpel html document with links to each section with plots."""
+    '''Makes a simpel html document with links to each section with plots.'''
     
+    lowercase = lambda x: x[0].casefold()
+
     def li(id, text):
         return rf'<li><a href=#{id}>{text}</a></li>'
 
-    def section(id, plot_files):
+    def subsection(id, plot_files, dataset):
         plots = ''.join(map(lambda path: f'<img src=\'{path}\'/>', plot_files))
-        return rf'<section id={id}>{plots}</section>'
+        return rf'<section id={id}><h3>{dataset}</h3>{plots}</section>'
+
+    def dataset_html(program, dataset, plot_files):
+        id = ''.join(e for e in (program + dataset) if e.isalnum()) + str(random.randint(0, 10**10))
+        return li(id, dataset), subsection(id, plot_files, dataset)
     
+    def program_html(program, datasets):
+        id = ''.join(e for e in program if e.isalnum()) + str(random.randint(0, 10**10))
+        sub = map(lambda a: dataset_html(program, *a), sorted(datasets.items(), key = lowercase))
+        sub_lis, sub_sections = map(lambda a: ''.join(a), zip(*sub))
+        sub_lis_html = rf'<li><a href=#{id}>{program}</a><ul>{sub_lis}</ul></li>'
+        sub_subsections_html = rf'<section id={id}><h2>{program}</h2>{sub_sections}</section>'
+        return sub_lis_html, sub_subsections_html
+
     width = 0
     for datasets in html_data.values():
         for plot_files in datasets.values():
             width = int(100 / len(plot_files))
             break
 
-    id_num = 0
-    lis = []
-    sections = []
-    lowercase = lambda x: x[0].casefold()
-    for program, datasets in sorted(html_data.items(), key = lowercase):
-        for dataset, plot_files in sorted(datasets.items(), key = lowercase):
-            id = ''.join(e for e in (program + dataset) if e.isalnum()) + str(id_num)
-            lis.append(li(id, f'{program}, {dataset}'))
-            sections.append(section(id, plot_files))
-            id_num += 1
+    programs = map(lambda a: program_html(*a), sorted(html_data.items(), key = lowercase))
+    lis, sections = map(lambda a: ''.join(a), zip(*programs))
 
-    lis_str = ''.join(lis)
-    sections_str = ''.join(sections)
-
-    return f"""<head>
+    return f'''<head>
     <style type="text/css">
         img {{
             width: {width}%
@@ -321,20 +351,24 @@ def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
     </style>
     <nav>
         <ul>
-            {lis_str}
+            {lis}
         </ul>
     </nav>
-    {sections_str}
-</head>"""
+    {sections}
+</head>'''
 
 
-def task(plot, data):
-    """Begins plotting, it is used"""
-    global plotters
-    plotters[plot]().plot(data)
+def task(data):
+    '''Begins plotting, it is used'''
+    global plots
+    plot_types = [plot_type() for key, plot_type in ALL_PLOT_TYPES.items() if key in plot_types_used]
+    plotter = Plotter(plot_types, dpi=200, transparent=transparent)
+    plotter.plot(data)
+
 
 def main():
-    global plotters
+    global plot_types_used
+    global transparent
     plt.rcParams.update({
         'ytick.color': 'black',
         'xtick.color': 'black',
@@ -347,38 +381,25 @@ def main():
 
     args = get_args()
     data = json.load(open(args.filename, 'r'))
-    plots = format_arg_list(args.plots)
     programs = format_arg_list(args.programs)
+    plot_types_used = format_arg_list(args.plots)
     filetype = args.filetype
     transparent = args.transparent
     matplotlib.use(args.backend)
-    
-    plotters = plotters_factory(transparent=transparent)
-    plot_jobs = dict({k: dict() for k in plotters.keys()})
 
-    if plots is None:
-        plots = set(plot_jobs.keys())
+    if plot_types_used is None:
+        plot_types_used = set(ALL_PLOT_TYPES.keys())
 
     if programs is None:
         programs = set(data.keys())
 
-    html_data = make_plot_jobs_and_directories(programs, plot_jobs, data, plots, filetype)
-    
-    def plot_jobs_chunks(plot_jobs, size):
-        for plot, data in plot_jobs.items():
-            for data_chunk in chunks(data, size):
-                yield plot, data_chunk
-
-    processes = 16
-    total_benchmarks = len(plot_jobs[next(iter(plot_jobs))])
-    plottypes = len(plots)
-    chunksize = (total_benchmarks * plottypes) // (2 * processes)
+    html_data, plot_jobs = make_plot_jobs_and_directories(programs, data, plot_types_used, filetype)
 
     with open('index.html', 'w') as fp:
         fp.write(make_html(html_data))
     
-    with Pool(processes) as p:
-        p.starmap(task, plot_jobs_chunks(plot_jobs, max(chunksize, 1)))
+    with Pool(16) as p:
+        p.map(task, chunks(plot_jobs, len(plot_jobs) // 32))
 
 if __name__ == '__main__':
     main()
