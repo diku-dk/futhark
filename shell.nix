@@ -14,10 +14,10 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc924
-      haskell.packages.ghc924.ormolu_0_5_0_1
-      haskell.packages.ghc924.weeder
-      haskell.packages.ghc924.haskell-language-server
+      haskell.compiler.ghc926
+      haskell.packages.ghc926.ormolu
+      haskell.packages.ghc926.weeder
+      haskell.packages.ghc926.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
@@ -31,6 +31,7 @@ pkgs.stdenv.mkDerivation {
       ispc
       python3Packages.numpy
       python3Packages.pyopencl
+      python3Packages.matplotlib
       python3Packages.jsonschema
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex

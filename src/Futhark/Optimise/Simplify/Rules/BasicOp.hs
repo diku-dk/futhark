@@ -81,7 +81,7 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
     let perm = [i] ++ [0 .. i - 1] ++ [i + 1 .. r - 1],
     Just (x', x_cs) <- transposedBy perm x,
-    Just (xs', xs_cs) <- unzip <$> mapM (transposedBy perm) xs = Simplify $ do
+    Just (xs', xs_cs) <- mapAndUnzipM (transposedBy perm) xs = Simplify $ do
       concat_rearrange <-
         certifying (x_cs <> mconcat xs_cs) $
           letExp "concat_rearrange" $
@@ -98,12 +98,8 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
 -- Removing a concatenation that involves only a single array.  This
 -- may be produced as a result of other simplification rules.
 simplifyConcat _ pat aux (Concat _ (x :| []) _) =
-  Simplify $
-    -- Still need a copy because Concat produces a fresh array.
-    auxing aux $
-      letBind pat $
-        BasicOp $
-          Copy x
+  -- Still need a copy because Concat produces a fresh array.
+  Simplify $ auxing aux $ letBind pat $ BasicOp $ Copy x
 -- concat xs (concat ys zs) == concat xs ys zs
 simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
   | x' /= x || concat xs' /= xs =

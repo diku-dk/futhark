@@ -56,7 +56,7 @@ compileOutput (MemParam name space) = do
 
 compileFun :: [C.BlockItem] -> [C.Param] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
-  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  (outparams, out_ptrs) <- mapAndUnzipM compileOutput outputs
   inparams <- mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
@@ -91,7 +91,7 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = 
 -- memory non-lexxical or do anything fancy).
 compileVoidFun :: [C.BlockItem] -> (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileVoidFun get_constants (fname, func@(Function _ outputs inputs body)) = inNewFunction $ do
-  (outparams, out_ptrs) <- unzip <$> mapM compileOutput outputs
+  (outparams, out_ptrs) <- mapAndUnzipM compileOutput outputs
   inparams <- mapM compileInput inputs
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do

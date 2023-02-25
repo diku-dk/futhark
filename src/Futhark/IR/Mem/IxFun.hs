@@ -50,6 +50,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Traversable
 import Futhark.Analysis.AlgSimplify qualified as AlgSimplify
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -217,16 +218,16 @@ instance FreeIn num => FreeIn (LMADDim num) where
   freeIn' (LMADDim s n _ _) = freeIn' s <> freeIn' n
 
 instance Functor LMAD where
-  fmap f = runIdentity . traverse (pure . f)
+  fmap = fmapDefault
 
 instance Functor IxFun where
-  fmap f = runIdentity . traverse (pure . f)
+  fmap = fmapDefault
 
 instance Foldable LMAD where
-  foldMap f = execWriter . traverse (tell . f)
+  foldMap = foldMapDefault
 
 instance Foldable IxFun where
-  foldMap f = execWriter . traverse (tell . f)
+  foldMap = foldMapDefault
 
 instance Traversable LMAD where
   traverse f (LMAD offset dims) =
@@ -1043,9 +1044,11 @@ disjoint2 _ _ less_thans non_negatives lmad1 lmad2 =
             && isNothing
               ( selfOverlap () () less_thans (map (flip LeafExp $ IntType Int64) $ namesToList non_negatives) interval2''
               )
-            && any
-              (not . uncurry (intervalOverlap less_thans non_negatives))
-              (zip interval1'' interval2'')
+            && not
+              ( all
+                  (uncurry (intervalOverlap less_thans non_negatives))
+                  (zip interval1'' interval2'')
+              )
         _ ->
           False
 
@@ -1079,9 +1082,10 @@ disjoint3 scope asserts less_thans non_negatives lmad1 lmad2 =
                 (Nothing, Nothing) ->
                   case namesFromList <$> mapM justLeafExp non_negatives of
                     Just non_negatives' ->
-                      any
-                        (not . uncurry (intervalOverlap less_thans non_negatives'))
-                        (zip is1 is2)
+                      not $
+                        all
+                          (uncurry (intervalOverlap less_thans non_negatives'))
+                          (zip is1 is2)
                     _ -> False
                 (Just overlapping_dim, _) ->
                   let expanded_offset = AlgSimplify.simplifySofP' <$> expandOffset offset is1

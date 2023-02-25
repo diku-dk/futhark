@@ -1,0 +1,40 @@
+name: 'Futhark Script'
+description: 'Run script on slurm if available where Futhark will be available.'
+inputs:
+  script:
+    description: 'Script to run'
+    required: true
+  slurm-options:
+    description: 'Options to pass to srun'
+    required: false
+    default: ''
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      shell: bash
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - uses: ./.github/actions/is-slurm
+      id: slurm
+
+    - if: steps.slurm.outputs.is-slurm == 'false'
+      shell: bash
+      run: |
+        ${{inputs.script}}
+
+    - if: steps.slurm.outputs.is-slurm == 'true'
+      shell: bash
+      run: |
+        printf '#!/bin/bash
+        ${{inputs.script}}' > temp.sh
+        chmod +x temp.sh
+        srun --time=0-08:00:00 ${{inputs.slurm-options}} temp.sh
+        rm temp.sh

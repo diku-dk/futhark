@@ -447,10 +447,10 @@ defuncExp (QualParens qn e loc) = do
   (e', sv) <- defuncExp e
   pure (QualParens qn e' loc, sv)
 defuncExp (TupLit es loc) = do
-  (es', svs) <- unzip <$> mapM defuncExp es
+  (es', svs) <- mapAndUnzipM defuncExp es
   pure (TupLit es' loc, RecordSV $ zip tupleFieldNames svs)
 defuncExp (RecordLit fs loc) = do
-  (fs', names_svs) <- unzip <$> mapM defuncField fs
+  (fs', names_svs) <- mapAndUnzipM defuncField fs
   pure (RecordLit fs' loc, RecordSV names_svs)
   where
     defuncField (RecordFieldExplicit vn e loc') = do
@@ -625,7 +625,7 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   pure (Assert e1' e2' desc loc, sv)
 defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
-  (es', svs) <- unzip <$> mapM defuncExp es
+  (es', svs) <- mapAndUnzipM defuncExp es
   let sv =
         SumSV name svs $
           M.toList $
