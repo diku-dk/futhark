@@ -399,7 +399,7 @@ def main():
         fp.write(make_html(html_data))
     
     with Pool(16) as p:
-        p.map(task, chunks(plot_jobs, len(plot_jobs) // 32))
+        p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
 
 if __name__ == '__main__':
     main()
