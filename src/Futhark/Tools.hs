@@ -5,6 +5,7 @@
 module Futhark.Tools
   ( module Futhark.Construct,
     redomapToMapAndReduce,
+    scanomapToMapAndScan,
     dissectScrema,
     sequentialStreamWholeArray,
     partitionChunkedFoldParameters,
@@ -47,6 +48,28 @@ redomapToMapAndReduce (Pat pes) (w, reds, map_lam, arrs) = do
     Let red_pat (defAux ()) . Op
       <$> (Screma w red_arrs <$> reduceSOAC reds)
   pure (map_stm, red_stm)
+
+scanomapToMapAndScan ::
+  ( MonadFreshNames m,
+    Buildable rep,
+    ExpDec rep ~ (),
+    Op rep ~ SOAC rep
+  ) =>
+  Pat (LetDec rep) ->
+  ( SubExp,
+    [Scan rep],
+    Lambda rep,
+    [VName]
+  ) ->
+  m (Stm rep, Stm rep)
+scanomapToMapAndScan (Pat pes) (w, scans, map_lam, arrs) = do
+  (map_pat, scan_pat, scan_arrs) <-
+    splitScanOrRedomap pes w map_lam $ map scanNeutral scans
+  let map_stm = mkLet map_pat $ Op $ Screma w arrs (mapSOAC map_lam)
+  scan_stm <-
+    Let scan_pat (defAux ()) . Op
+      <$> (Screma w scan_arrs <$> scanSOAC scans)
+  pure (map_stm, scan_stm)
 
 splitScanOrRedomap ::
   (Typed dec, MonadFreshNames m) =>
