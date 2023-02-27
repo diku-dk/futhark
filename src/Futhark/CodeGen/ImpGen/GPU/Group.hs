@@ -256,7 +256,7 @@ groupCoverSegSpace virt space m = do
           groupLoop iterations $ \i -> do
             dIndexSpace (zip ltids dims') $ sExt64 i
             m
-        Just num_chunks -> do
+        Just num_chunks -> localOps threadOperations $ do
           let ltid = kernelLocalThreadId constants
           sFor "chunk_i" num_chunks $ \chunk_i -> do
             i <- dPrimVE "i" $ chunk_i * sExt32 group_size + ltid
