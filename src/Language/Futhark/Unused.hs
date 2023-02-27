@@ -1,17 +1,17 @@
 module Language.Futhark.Unused (findUnused, getBody, getDecs) where
 
-import Data.List (concatMap, elem, filter, map, partition, (\\), nub)
+import Data.Bifunctor qualified as BI
+import Data.Function (fix)
+import Data.List (concatMap, elem, filter, map, nub, partition, (\\))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, maybeToList, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, maybeToList)
 import Language.Futhark
 import Language.Futhark.Semantic
   ( FileModule (FileModule),
     Imports,
   )
 import System.FilePath
-import qualified Data.Bifunctor
-import Data.Function (fix)
 
 -- Pending work:
 -- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
@@ -81,20 +81,34 @@ funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
   map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
 
-tClosure :: M.Map VName [VName] -> M.Map VName [VName] -> M.Map VName [VName]
-tClosure bf af = until (\x -> x == tStep af x) (tStep af) bf
+findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
+findUnused2 fp fml = do
+  let (af,bf,imf) = partDefFuncs fp fml
+      uf = tClosure bf af
+  []
+
+type VMap = M.Map VName [VName]
+
+-- possible future optimization:  remove VNames that aren't referenced in any top level import
+tClosure :: VMap -> VMap -> VMap
+tClosure bf af =
+  let bf' = tStep af bf
+   in if bf /= bf'
+        then tClosure bf af
+        else bf
+
+tStep :: VMap -> VMap -> VMap
+tStep af = M.map (\x -> x <> nub (concatMap (af M.!) x))
 
 
-tStep :: M.Map VName [VName] -> M.Map VName [VName] -> M.Map VName [VName]
-tStep af = M.map (nub . concatMap (af M.!))
-
-partDefFuncs :: [FilePath] -> [(FilePath,FileModule)] -> (M.Map VName [VName], M.Map VName [VName])
+partDefFuncs :: (Ord a, Foldable t) => t a -> [(a, FileModule)] -> (M.Map VName [VName], M.Map VName [VName], M.Map a [(VName, [VName])])
 partDefFuncs fp fml = do
-  let af = map (Data.Bifunctor.second defFuncs) fml
-      bf = concatMap snd $ filter (\(ifp,_) -> ifp `elem` fp ) af
-  (M.fromList $ concatMap snd af, M.fromList bf)
+  let af = map (BI.second defFuncs) fml
+      bfu = M.fromList . concatMap snd
+      (bf, imf) = BI.bimap bfu M.fromList $ partition (\(ifp, _) -> ifp `elem` fp) af
+  (M.fromList $ concatMap snd af, bf, imf)
 
-defFuncs :: FileModule -> [(VName,[VName])]
+defFuncs :: FileModule -> [(VName, [VName])]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDefNew $ filter isFuncDec decs
 
