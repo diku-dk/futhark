@@ -286,11 +286,13 @@ compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
   updateAcc acc is vs
 compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
   flat <- newVName "rep_flat"
-  is <- replicateM (shapeRank ds) (newVName "rep_i")
+  is <- replicateM (arrayRank dest_t) (newVName "rep_i")
   let is' = map le64 is
-  groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ shapeDims ds) $
-    copyDWIMFix (patElemName dest) is' se []
+  groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ arrayDims dest_t) $
+    copyDWIMFix (patElemName dest) is' se (drop (shapeRank ds) is')
   sOp $ Imp.Barrier Imp.FenceLocal
+  where
+    dest_t = patElemType dest
 compileGroupExp (Pat [dest]) (BasicOp (Rotate rs arr)) = do
   ds <- map pe64 . arrayDims <$> lookupType arr
   groupCoverSpace ds $ \is -> do
