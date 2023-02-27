@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * AD for certain combinations of `map` and indexing (#1878).
 
+* Barrier divergence in generated code in some exotic cases (#1883).
+
 ## [0.23.1]
 
 ### Added
