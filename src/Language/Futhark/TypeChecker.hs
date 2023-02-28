@@ -203,7 +203,7 @@ bindingTypeParams tparams = localEnv env
 
 checkTypeDecl ::
   UncheckedTypeExp ->
-  TypeM ([VName], TypeExp VName, StructType, Liftedness)
+  TypeM ([VName], TypeExp Info VName, StructType, Liftedness)
 checkTypeDecl te = do
   (te', svars, RetType dims st, l) <- checkTypeExp te
   pure (svars ++ dims, te', st, l)
@@ -593,7 +593,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
           TypeBind name' l tps' te' (Info elab_t) doc loc
         )
 
-entryPoint :: [Pat] -> Maybe (TypeExp VName) -> StructRetType -> EntryPoint
+entryPoint :: [Pat] -> Maybe (TypeExp Info VName) -> StructRetType -> EntryPoint
 entryPoint params orig_ret_te (RetType ret orig_ret) =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
@@ -630,7 +630,7 @@ checkEntryPoint ::
   SrcLoc ->
   [TypeParam] ->
   [Pat] ->
-  Maybe (TypeExp VName) ->
+  Maybe (TypeExp Info VName) ->
   StructRetType ->
   TypeM ()
 checkEntryPoint loc tparams params maybe_tdecl rettype
@@ -704,7 +704,7 @@ nastyType (Scalar Prim {}) = False
 nastyType t@Array {} = nastyType $ stripArray 1 t
 nastyType _ = True
 
-nastyReturnType :: Monoid als => Maybe (TypeExp VName) -> TypeBase dim als -> Bool
+nastyReturnType :: Monoid als => Maybe (TypeExp Info VName) -> TypeBase dim als -> Bool
 nastyReturnType Nothing (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   nastyType t1 || nastyReturnType Nothing t2
 nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
@@ -729,9 +729,9 @@ nastyParameter p = nastyType (patternType p) && not (ascripted p)
     ascripted (PatParens p' _) = ascripted p'
     ascripted _ = False
 
-niceTypeExp :: TypeExp VName -> Bool
+niceTypeExp :: TypeExp Info VName -> Bool
 niceTypeExp (TEVar (QualName [] _) _) = True
-niceTypeExp (TEApply te TypeArgExpDim {} _) = niceTypeExp te
+niceTypeExp (TEApply te TypeArgExpSize {} _) = niceTypeExp te
 niceTypeExp (TEArray _ te _) = niceTypeExp te
 niceTypeExp (TEUnique te _) = niceTypeExp te
 niceTypeExp _ = False
