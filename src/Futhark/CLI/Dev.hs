@@ -433,7 +433,7 @@ commandLineOptions =
       "Disable type-checking.",
     Option
       []
-      ["prettyString-print"]
+      ["pretty-print"]
       ( NoArg $
           Right $ \opts ->
             opts {futharkPipeline = PrettyPrint}
