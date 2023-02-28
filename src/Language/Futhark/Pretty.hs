@@ -91,7 +91,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
   pretty (SizeExp e _) = brackets $ pretty e
 
 instance Pretty (Shape Size) where
-  pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
+  pretty (Shape ds) = mconcat (map pretty ds)
 
 instance Pretty (Shape ()) where
   pretty (Shape ds) = mconcat $ replicate (length ds) "[]"
@@ -169,7 +169,7 @@ instance Pretty (TypeArg Size) where
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
   pretty (TEUnique t _) = "*" <> pretty t
-  pretty (TEArray d at _) = brackets (pretty d) <> pretty at
+  pretty (TEArray d at _) = pretty d <> pretty at
   pretty (TETuple ts _) = parens $ commasep $ map pretty ts
   pretty (TERecord fs _) = braces $ commasep $ map ppField fs
     where
