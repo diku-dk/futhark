@@ -16,7 +16,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Either
-import Data.List (find, foldl', partition)
+import Data.List (find, foldl', genericLength, partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -147,7 +147,7 @@ checkAscript ::
   SrcLoc ->
   UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeExp VName, Exp)
+  TermTypeM (TypeExp Info VName, Exp)
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -162,7 +162,7 @@ checkCoerce ::
   SrcLoc ->
   UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeExp VName, StructType, Exp, [VName])
+  TermTypeM (TypeExp Info VName, StructType, Exp, [VName])
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
   e' <- checkExp e
@@ -264,7 +264,7 @@ checkExp (ArrayLit all_es _ loc) =
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [ConstSize $ length all_es]) Nonunique
+      t <- arrayOfM loc et' (Shape [ConstSize $ genericLength all_es]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -1178,7 +1178,7 @@ checkFunDef ::
     ( VName,
       [TypeParam],
       [Pat],
-      Maybe (TypeExp VName),
+      Maybe (TypeExp Info VName),
       StructRetType,
       Exp
     )
@@ -1342,7 +1342,7 @@ checkBinding ::
   TermTypeM
     ( [TypeParam],
       [Pat],
-      Maybe (TypeExp VName),
+      Maybe (TypeExp Info VName),
       StructRetType,
       Exp
     )

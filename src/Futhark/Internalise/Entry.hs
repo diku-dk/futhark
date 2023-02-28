@@ -30,7 +30,7 @@ visibleTypes = VisibleTypes . foldMap (modTypes . snd)
     decTypes (E.TypeDec tb) = [tb]
     decTypes _ = []
 
-findType :: VName -> VisibleTypes -> Maybe (E.TypeExp VName)
+findType :: VName -> VisibleTypes -> Maybe (E.TypeExp E.Info VName)
 findType v (VisibleTypes ts) = E.typeExp <$> find ((== v) . E.typeAlias) ts
 
 valueType :: I.TypeBase I.Rank Uniqueness -> I.ValueType
@@ -39,18 +39,18 @@ valueType (I.Array pt rank _) = I.ValueType I.Signed rank pt
 valueType I.Acc {} = error "valueType Acc"
 valueType I.Mem {} = error "valueType Mem"
 
-withoutDims :: E.TypeExp VName -> (Int, E.TypeExp VName)
+withoutDims :: E.TypeExp E.Info VName -> (Int, E.TypeExp E.Info VName)
 withoutDims (E.TEArray _ te _) =
   let (d, te') = withoutDims te
    in (d + 1, te')
 withoutDims te = (0 :: Int, te)
 
-rootType :: E.TypeExp VName -> E.TypeExp VName
-rootType (E.TEApply te E.TypeArgExpDim {} _) = rootType te
+rootType :: E.TypeExp E.Info VName -> E.TypeExp E.Info VName
+rootType (E.TEApply te E.TypeArgExpSize {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
 rootType te = te
 
-typeExpOpaqueName :: E.TypeExp VName -> Name
+typeExpOpaqueName :: E.TypeExp E.Info VName -> Name
 typeExpOpaqueName = f . rootType
   where
     f (E.TEArray _ te _) =
@@ -66,7 +66,7 @@ runGenOpaque = flip runState mempty
 addType :: Name -> I.OpaqueType -> GenOpaque ()
 addType s t = modify (<> I.OpaqueTypes [(s, t)])
 
-isRecord :: VisibleTypes -> E.TypeExp VName -> Maybe (M.Map Name (E.TypeExp VName))
+isRecord :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name (E.TypeExp E.Info VName))
 isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
 isRecord _ (E.TETuple fs _) = Just $ E.tupleFields fs
 isRecord types (E.TEVar v _) = isRecord types =<< findType (E.qualLeaf v) types
@@ -75,7 +75,7 @@ isRecord _ _ = Nothing
 recordFields ::
   VisibleTypes ->
   M.Map Name E.StructType ->
-  Maybe (E.TypeExp VName) ->
+  Maybe (E.TypeExp E.Info VName) ->
   [(Name, E.EntryType)]
 recordFields types fs t =
   case isRecord types . rootType =<< t of

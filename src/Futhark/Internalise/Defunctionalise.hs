@@ -143,18 +143,11 @@ replaceStaticValSizes globals orig_substs sv =
         loc
     onExp substs e = onAST substs e
 
-    onTypeExpDim substs d@(SizeExpNamed v loc) =
-      case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') ->
-          SizeExpNamed v' loc
-        Just (SubstConst x) ->
-          SizeExpConst x loc
-        Nothing ->
-          d
-    onTypeExpDim _ d = d
+    onTypeExpDim substs (SizeExp e loc) = SizeExp (onExp substs e) loc
+    onTypeExpDim _ (SizeExpAny loc) = SizeExpAny loc
 
-    onTypeArgExp substs (TypeArgExpDim d loc) =
-      TypeArgExpDim (onTypeExpDim substs d) loc
+    onTypeArgExp substs (TypeArgExpSize d) =
+      TypeArgExpSize (onTypeExpDim substs d)
     onTypeArgExp substs (TypeArgExpType te) =
       TypeArgExpType (onTypeExp substs te)
 
@@ -287,7 +280,7 @@ patternArraySizes = arraySizes . patternStructType
 
 data SizeSubst
   = SubstNamed (QualName VName)
-  | SubstConst Int
+  | SubstConst Int64
   deriving (Eq, Ord, Show)
 
 dimMapping ::

@@ -206,7 +206,7 @@ contains a pos =
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
-atPosInTypeExp :: TypeExp VName -> Pos -> Maybe RawAtPos
+atPosInTypeExp :: TypeExp Info VName -> Pos -> Maybe RawAtPos
 atPosInTypeExp te pos =
   case te of
     TEVar qn loc -> do
@@ -229,12 +229,10 @@ atPosInTypeExp te pos =
     TEDim _ t _ ->
       atPosInTypeExp t pos
   where
-    inArg (TypeArgExpDim dim _) = inDim dim
+    inArg (TypeArgExpSize dim) = inDim dim
     inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos
-    inDim (SizeExpNamed qn loc) = do
-      guard $ loc `contains` pos
-      Just $ RawAtName qn $ locOf loc
-    inDim _ = Nothing
+    inDim (SizeExp e _) = atPosInExp e pos
+    inDim SizeExpAny {} = Nothing
 
 atPosInPat :: Pat -> Pos -> Maybe RawAtPos
 atPosInPat (Id vn _ loc) pos = do

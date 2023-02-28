@@ -264,7 +264,7 @@ transformNames x = do
               astMap (substituter $ modScope mod <> scope) e'
         _ -> astMap (substituter scope) e
 
-transformTypeExp :: TypeExp VName -> TransformM (TypeExp VName)
+transformTypeExp :: TypeExp Info VName -> TransformM (TypeExp Info VName)
 transformTypeExp = transformNames
 
 transformStructType :: StructType -> TransformM StructType

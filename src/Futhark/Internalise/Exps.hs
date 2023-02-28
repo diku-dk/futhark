@@ -2142,7 +2142,7 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [this_one])
           (resultBodyM [next_one])
 
-typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
   pure [ErrorString $ prettyText qn]
 typeExpForError (E.TEUnique te _) =
@@ -2152,10 +2152,8 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> prettyText d <> "]"
-typeExpForError (E.TEArray d te _) = do
-  d' <- dimExpForError d
-  te' <- typeExpForError te
-  pure $ ["[", d', "]"] ++ te'
+typeExpForError (E.TEArray d te _) =
+  (<>) <$> sizeExpForError d <*> typeExpForError te
 typeExpForError (E.TETuple tes _) = do
   tes' <- mapM typeExpForError tes
   pure $ ["("] ++ intercalate [", "] tes' ++ [")"]
@@ -2173,7 +2171,7 @@ typeExpForError (E.TEApply t arg _) = do
   t' <- typeExpForError t
   arg' <- case arg of
     TypeArgExpType argt -> typeExpForError argt
-    TypeArgExpDim d _ -> pure <$> dimExpForError d
+    TypeArgExpSize d -> sizeExpForError d
   pure $ t' ++ [" "] ++ arg'
 typeExpForError (E.TESum cs _) = do
   cs' <- mapM (onClause . snd) cs
@@ -2183,16 +2181,11 @@ typeExpForError (E.TESum cs _) = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
 
-dimExpForError :: E.SizeExp VName -> InternaliseM (ErrorMsgPart SubExp)
-dimExpForError (SizeExpNamed d _) = do
-  substs <- lookupSubst $ E.qualLeaf d
-  d' <- case substs of
-    Just [v] -> pure v
-    _ -> pure $ I.Var $ E.qualLeaf d
-  pure $ ErrorVal int64 d'
-dimExpForError (SizeExpConst d _) =
-  pure $ ErrorString $ prettyText d
-dimExpForError SizeExpAny = pure ""
+sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
+sizeExpForError (SizeExp e _) = do
+  e' <- internaliseExp1 "size" e
+  pure ["[", ErrorVal int64 e', "]"]
+sizeExpForError SizeExpAny {} = pure ["[]"]
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

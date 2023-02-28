@@ -1374,7 +1374,7 @@ progHoles = foldMap holesInDec . progDecs
 type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An expression with no type annotations.
-type UncheckedTypeExp = TypeExp Name
+type UncheckedTypeExp = TypeExp NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name
