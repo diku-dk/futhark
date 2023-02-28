@@ -237,7 +237,7 @@ SigExp :: { UncheckedSigExp }
                                 in SigArrow (Just name) $4 $7 (srcspan $1 $>) }
         | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
 
-TypeRef :: { TypeRefBase Name }
+TypeRef :: { TypeRefBase NoInfo Name }
          : QualName TypeParams '=' TypeExpTerm
            { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
@@ -466,18 +466,6 @@ TypeExpTerm :: { UncheckedTypeExp }
          | SumClauses %prec sumprec
            { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
 
-         -- Errors
-         | '[' SizeExp ']' %prec bottom
-           {% parseErrorAt (srcspan $1 $>) $ Just $
-                T.unlines ["Missing array row type.",
-                           "Did you mean []"  <> prettyText $2 <> "?"]
-           }
-         | '...[' SizeExp ']' %prec bottom
-           {% parseErrorAt (srcspan $1 $>) $ Just $
-                T.unlines ["Missing array row type.",
-                           "Did you mean []"  <> prettyText $2 <> "?"]
-           }
-
 SumClauses :: { ([(Name, [UncheckedTypeExp])], Loc) }
             : SumClauses '|' SumClause %prec sumprec
               { let (cs, loc1) = $1; (c, ts, loc2) = $3
@@ -505,20 +493,16 @@ TypeExpAtom :: { UncheckedTypeExp }
              | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) (srcspan $1 $>) }
              | '{' '}'                        { TERecord [] (srcspan $1 $>) }
              | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
-             | '[' SizeExp ']' TypeExpTerm
-               { TEArray $2 $4 (srcspan $1 $>) }
-             | '...[' SizeExp ']' TypeExpTerm
-               { TEArray $2 $4 (srcspan $1 $>) }
+             | SizeExp TypeExpTerm
+               { TEArray $1 $2 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (srclocOf (snd $1)) }
 
 Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
-TypeArg :: { TypeArgExp Name }
-         : '[' SizeExp ']' %prec top
-           { TypeArgExpDim $2 (srcspan $1 $>) }
-         | '...[' SizeExp ']' %prec top
-           { TypeArgExpDim $2 (srcspan $1 $>) }
+TypeArg :: { TypeArgExp NoInfo Name }
+         : SizeExp %prec top
+           { TypeArgExpSize $1 }
          | TypeExpAtom
            { TypeArgExpType $1 }
 
@@ -533,17 +517,12 @@ TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
-SizeExp :: { SizeExp Name }
-        : QualName
-          { SizeExpNamed (fst $1) (srclocOf (snd $1)) }
-        | intlit
-          { let L loc (INTLIT n) = $1
-            in SizeExpConst (fromIntegral n) (srclocOf loc) }
-        | natlit
-          { let L loc (NATLIT _ n) = $1
-            in SizeExpConst (fromIntegral n) (srclocOf loc) }
-        |
-          { SizeExpAny }
+
+SizeExp :: { SizeExp NoInfo Name }
+         : '[' Exp ']'    { SizeExp $2 (srcspan $1 $>) }
+         | '['     ']'    { SizeExpAny (srcspan $1 $>) }
+         | '...[' Exp ']' { SizeExp $2 (srcspan $1 $>) }
+         | '...['     ']' { SizeExpAny (srcspan $1 $>) }
 
 FunParam :: { PatBase NoInfo Name }
 FunParam : InnerPat { $1 }
