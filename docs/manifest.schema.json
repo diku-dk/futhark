@@ -19,9 +19,9 @@
                             "type": "object",
                             "properties": {
                                 "type": {"type": "string"},
-                                "unique": {"type": "boolean"},
-                                "additionalProperties": false
-                            }
+                                "unique": {"type": "boolean"}
+                            },
+                            "additionalProperties": false
                         }
                     },
                     "inputs": {
@@ -31,9 +31,9 @@
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},
-                                "unique": {"type": "boolean"},
-                                "additionalProperties": false
-                            }
+                                "unique": {"type": "boolean"}
+                            },
+                            "additionalProperties": false
                         }
                     }
                 }
