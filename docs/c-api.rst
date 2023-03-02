@@ -239,7 +239,7 @@ when appropriate.  Memory management is entirely manual.  All values
 that are created with a ``new`` function, or returned from an entry
 point, *must* at some point be freed manually.  Values are internally
 reference counted, so even for entry points that return their input
-unchanged, you should still free both the input and the output - this
+unchanged, you must still free both the input and the output - this
 will not result in a double free.
 
 .. c:struct:: futhark_i32_1d
@@ -281,7 +281,7 @@ will not result in a double free.
 
    Return a pointer to the shape of the array, with one element per
    dimension.  The lifetime of the shape is the same as ``arr``, and
-   should *not* be manually freed.  Assuming ``arr`` is a valid
+   must *not* be manually freed.  Assuming ``arr`` is a valid
    object, this function cannot fail.
 
 .. _opaques:
@@ -501,7 +501,7 @@ The following API functions are available only when using the
    Use exactly this command queue for the context.  If this is set,
    all other device/platform configuration options are ignored.  Once
    the context is active, the command queue belongs to Futhark and
-   should not be used by anything else.  This is useful for
+   must not be used by anything else.  This is useful for
    implementing custom device selection logic in application code.
 
 .. c:function:: cl_command_queue futhark_context_get_command_queue(struct futhark_context *ctx)
