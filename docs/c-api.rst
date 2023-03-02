@@ -286,18 +286,17 @@ will not result in a double free.
 
 .. _opaques:
 
-Opaque values
+Opaque Values
 ~~~~~~~~~~~~~
 
 Each instance of a complex type in an entry point (records, nested
 tuples, etc) is represented by an opaque C struct named
 ``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
-of the internal representation.  However, if you insert explicit type
-annotations in the entry point (and the type name contains only
-characters valid for C identifiers), the indicated name will be used.
-Note that arrays contain brackets, which are usually not valid in
-identifiers.  Defining a simple type abbreviation is the best way
-around this.
+of the internal representation.  However, if you insert an explicit
+type annotations in the entry point (and the type name contains only
+characters valid in C identifiers), that name will be used.  Note that
+arrays contain brackets, which are not valid in identifiers.  Defining
+a type abbreviation is the best way around this.
 
 The API for opaque values is similar to that of arrays, and the same
 rules for memory management apply.  You cannot construct them from
@@ -354,7 +353,7 @@ Records
 ~~~~~~~
 
 A record is an opaque type (see above) that supports additional
-functions to *project* individual fields (read their values) to
+functions to *project* individual fields (read their values) and to
 construct a value given values for the fields.  An opaque type is a
 record if its definition is a record at the Futhark level.
 
