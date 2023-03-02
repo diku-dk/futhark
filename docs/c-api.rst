@@ -133,7 +133,7 @@ configuration may *not* be used for multiple concurrent contexts.
    or stale, the program performs initialisation from scratch.  There
    is no machine-readable way to get information about whether the
    cache was hit succesfully, but you can enable logging to see what
-   hapens.
+   happens.
 
    The lifespan of ``fname`` must exceed the lifespan of the
    configuration object.  Pass ``NULL`` to disable caching (this is
