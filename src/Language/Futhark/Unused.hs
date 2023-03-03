@@ -81,11 +81,12 @@ funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
   map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
 
-findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
+findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused2 fp fml = do
-  let (af,bf,imf) = partDefFuncs fp fml
-      uf = tClosure bf af
-  []
+  let (af,bf) = partDefFuncs fp fml
+      uf = concatMap snd $ M.toList $ tClosure bf af
+      imf = M.fromList $ map (BI.second importFuncs) $filter (\(p,_) -> p `notElem` fp) fml
+  M.map (filter (\(vn,_) -> vn `notElem` uf)) imf
 
 type VMap = M.Map VName [VName]
 
@@ -101,16 +102,20 @@ tStep :: VMap -> VMap -> VMap
 tStep af = M.map (\x -> x <> nub (concatMap (af M.!) x))
 
 
-partDefFuncs :: (Ord a, Foldable t) => t a -> [(a, FileModule)] -> (M.Map VName [VName], M.Map VName [VName], M.Map a [(VName, [VName])])
+-- get all functions and base functions, both as maps.
+partDefFuncs :: [FilePath] -> [(FilePath, FileModule)] -> (VMap, VMap)
 partDefFuncs fp fml = do
-  let af = map (BI.second defFuncs) fml
-      bfu = M.fromList . concatMap snd
-      (bf, imf) = BI.bimap bfu M.fromList $ partition (\(ifp, _) -> ifp `elem` fp) af
-  (M.fromList $ concatMap snd af, bf, imf)
+  let af = concatMap (defFuncs . snd) fml
+      bf = M.fromList $ concatMap (defFuncs . snd) $ filter (\(ifp, _) -> ifp `notElem` fp) fml
+  (M.fromList af, bf)
 
-defFuncs :: FileModule -> [(VName, [VName])]
+defFuncs :: FileModule -> [(VName,[VName])]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDefNew $ filter isFuncDec decs
+
+importFuncs :: FileModule -> [(VName, SrcLoc)]
+importFuncs (FileModule _ _env (Prog _doc decs) _) =
+  map (\(ValDec (ValBind {valBindName = vn, valBindLocation = loc})) -> (vn,loc) ) $ filter isFuncDec decs
 
 funcsInDefNew :: DecBase Info VName -> (VName, [VName])
 funcsInDefNew (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
