@@ -64,7 +64,7 @@ class PerRun(PlotType):
         ax.legend([runtimes], ['Runtimes'])
         ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
         ax.set_ylabel('Runtime')
-        ax.set_xlabel('Iteration Number')
+        ax.set_xlabel('$i$th Runtime')
         ax.grid()
     
     @classmethod
@@ -84,7 +84,7 @@ class CumsumPerRun(PlotType):
         ax.scatter(x, y, marker='.')
         ax.plot(x, slope * x + intercept, color='black')
         ax.set_ylabel('Cumulative Runtime')
-        ax.set_xlabel('Iteration Number')
+        ax.set_xlabel('$i$th Runtime')
         ax.yaxis.set_major_formatter(FormatStrFormatter('$%dms$'))
         ax.grid()
 
@@ -102,8 +102,12 @@ class RuntimeDensities(PlotType):
         x = np.arange(len(y))
         ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
         mean = ax.axvline(x = runtimes.mean(), color = 'k', label = 'mean')
+        ymin = y.min()
+        ymax = y.max()
+        padding = abs(ymax - ymin) * 0.05
+        ax.set_ylim(ymin - padding, ymax + padding)
         ax.legend([mean], ['Mean Runtime'])
-        ax.set_xlabel('Runtimes')
+        ax.set_xlabel('Runtime')
         ax.set_ylabel('Probability')
         ax.plot(x, y, linestyle='-')
         ax.grid()
@@ -125,8 +129,8 @@ class LagPlot(PlotType):
         y = np.roll(x, 1)
         ax.yaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
         ax.xaxis.set_major_formatter(FormatStrFormatter('$%d\\mu s$'))
-        ax.set_xlabel('Runtime at the $i$th index')
-        ax.set_ylabel('Runtime at the $1 + i$th index')
+        ax.set_xlabel('The $i$th Runtime')
+        ax.set_ylabel('The $i$th + 1 Runtime')
         ax.scatter(x, y, marker='.')
         ax.grid()
     
@@ -253,7 +257,8 @@ def iter_datasets(
             directory = '.' if directory == '' else directory
             dataset = pathlib.Path(dataset_path).name
             runtimes = np.array(dataset_dict.get('runtimes'))
-            yield directory, program, dataset, runtimes
+            memory = dataset_dict.get('bytes')
+            yield  program_path, directory, program, dataset, runtimes, memory
 
 
 def make_plot_jobs_and_directories(
@@ -273,19 +278,25 @@ def make_plot_jobs_and_directories(
         pattern = re.compile("|".join(rep.keys()))
         return pattern.sub(lambda m: rep[re.escape(m.group(0))], text)
 
-    for directory, program, dataset, runtimes in iter_datasets(data, programs):
-        
-        directory = os.path.join(exnteded_path, directory)
+    for program_path, directory, program, dataset, runtimes, memory in iter_datasets(data, programs):
         os.makedirs(directory, exist_ok=True)
 
-        if html_data.get(program) is None:
-            html_data[program] = dict()
+        if html_data.get(program_path) is None:
+            html_data[program_path] = dict()
 
         dataset_filename = textwrap.shorten(dataset, 100).replace(' ', '_')
         raw_filename =  f'{program}_{dataset_filename}'
         filename = remove_characters([' ', '#', '"'], raw_filename)
         plot_file = os.path.join(directory, filename)
-        html_data[program][dataset] = [to_file_path(plot_file, plot_type, file_type) for plot_type in plot_types]
+        mean = runtimes.mean()
+        mpe = 100 / runtimes.shape[0] * ((runtimes - mean) / runtimes).sum()
+        bound = 0.95 * runtimes.std(ddof=1) / np.sqrt(runtimes.shape[0])
+        html_data[program_path][dataset] = {
+            'plots': [to_file_path(plot_file, plot_type, file_type) for plot_type in plot_types],
+            'bytes': memory,
+            'MPE': mpe,
+            'ci': (mean - bound, mean + bound)
+        }
         plot_jobs[plot_file] = {
             'program': program,
             'dataset': dataset,
@@ -303,13 +314,28 @@ def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
     def li(id, text):
         return rf'<li><a href=#{id}>{text}</a></li>'
 
-    def subsection(id, plot_files, dataset):
+    def subsection(id, data, dataset):
+        plot_files = data['plots']
+        mpe = data['MPE']
+        memory = data['bytes']
+        ci = data['ci']
         plots = ''.join(map(lambda path: f'<img src=\'{path}\'/>', plot_files))
-        return rf'<section id={id}><h3>{dataset}</h3>{plots}</section>'
+        measures = f"""<div style="width: 100%; display: table;" align="center">
+    <div style="display: table-row">
+        Mean Percentage Error: {mpe}%
+    </div>
+    <div style="display: table-row">
+        Memory Usage: {','.join([f'{b}bytes@{device}' for device, b in memory.items()])}
+    </div>
+    <div style="display: table-row">
+        95% Confidence Interval: [{ci[0]}; {ci[1]}]
+    </div>
+</div>"""
+        return rf'<section id={id}><h3>{dataset}</h3>{plots}{measures}</section>'
 
-    def dataset_html(program, dataset, plot_files):
+    def dataset_html(program, dataset, data):
         id = ''.join(e for e in (program + dataset) if e.isalnum()) + str(random.randint(0, 10**10))
-        return li(id, dataset), subsection(id, plot_files, dataset)
+        return li(id, dataset), subsection(id, data, dataset)
     
     def program_html(program, datasets):
         id = ''.join(e for e in program if e.isalnum()) + str(random.randint(0, 10**10))
@@ -320,9 +346,9 @@ def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
         return sub_lis_html, sub_subsections_html
 
     width = 0
-    for datasets in html_data.values():
-        for plot_files in datasets.values():
-            width = int(100 / len(plot_files))
+    for program in html_data.values():
+        for dataset in program.values():
+            width = int(100 / len(dataset['plots']))
             break
 
     programs = map(lambda a: program_html(*a), sorted(html_data.items(), key = lowercase))
