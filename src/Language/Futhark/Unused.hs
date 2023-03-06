@@ -1,17 +1,20 @@
-module Language.Futhark.Unused (findUnused, getBody, getDecs) where
+module Language.Futhark.Unused (findUnused, findUnused2, partDefFuncs, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.Function (fix)
 import Data.List (concatMap, elem, filter, map, nub, partition, (\\))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, fromMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe, maybeToList)
 import Language.Futhark
 import Language.Futhark.Semantic
   ( FileModule (FileModule),
     Imports,
   )
+
+import Debug.Trace
 import System.FilePath
+import Data.Containers.ListUtils (nubOrd)
 
 -- Pending work:
 -- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
@@ -83,30 +86,35 @@ funcsInDef _ = error "not a val dec."
 
 findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused2 fp fml = do
-  let (af,bf) = partDefFuncs fp fml
-      uf = concatMap snd $ M.toList $ tClosure bf af
-      imf = M.fromList $ map (BI.second importFuncs) $filter (\(p,_) -> p `notElem` fp) fml
+  let nfp = map (normalise . dropExtension) fp
+      (af,bf) = partDefFuncs nfp fml
+      uf = concatMap snd $ M.toList $ tClosure (traceShowId bf) af
+      imf = M.fromList $ map (BI.second importFuncs) $ filter (\(p,_) -> p `notElem` nfp) fml
   M.map (filter (\(vn,_) -> vn `notElem` uf)) imf
 
 type VMap = M.Map VName [VName]
 
+d a b = if a==b then Nothing else Just $ b++a
+
 -- possible future optimization:  remove VNames that aren't referenced in any top level import
+-- convert to sets since list equality is incorrect
 tClosure :: VMap -> VMap -> VMap
 tClosure bf af =
-  let bf' = tStep af bf
-   in if bf /= bf'
-        then tClosure bf af
-        else bf
+  let bf' = tStep af bf in
+  traceShow bf' $
+  if bf == bf'
+        then bf
+        else tClosure bf' af
 
 tStep :: VMap -> VMap -> VMap
-tStep af = M.map (\x -> x <> nub (concatMap (af M.!) x))
+tStep af = M.map (\x -> nubOrd $ x <> concat (mapMaybe (`M.lookup` af) x))
 
 
 -- get all functions and base functions, both as maps.
 partDefFuncs :: [FilePath] -> [(FilePath, FileModule)] -> (VMap, VMap)
 partDefFuncs fp fml = do
   let af = concatMap (defFuncs . snd) fml
-      bf = M.fromList $ concatMap (defFuncs . snd) $ filter (\(ifp, _) -> ifp `notElem` fp) fml
+      bf = M.fromList $ concatMap (defFuncs . snd) $ filter (\(ifp, _) -> ifp `elem` fp) fml
   (M.fromList af, bf)
 
 defFuncs :: FileModule -> [(VName,[VName])]
