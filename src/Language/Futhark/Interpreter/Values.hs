@@ -94,9 +94,15 @@ typeShape shapes = go
 structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
 structTypeShape shapes = fmap dim . typeShape shapes'
   where
-    dim (ConstSize d) = Just $ fromIntegral d
+    dim (SizeExpr (Literal (SignedValue (Int64Value d)) _)) = Just $ fromIntegral d
     dim _ = Nothing
-    shapes' = M.map (fmap $ ConstSize . fromIntegral) shapes
+    shapes' =
+      M.map
+        ( fmap $
+            (\n -> SizeExpr $ Literal (SignedValue $ Int64Value n) mempty)
+              . fromIntegral
+        )
+        shapes
 
 -- | A fully evaluated Futhark value.
 data Value m

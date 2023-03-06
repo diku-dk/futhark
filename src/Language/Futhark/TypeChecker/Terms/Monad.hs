@@ -578,7 +578,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, SizeSubst $ NamedSize $ qualName v)
+      pure (v, SizeSubst $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) loc)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -733,12 +733,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( NamedSize $ qualName d,
+        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc,
           Just d
         )
     Just d ->
       pure
-        ( NamedSize $ qualName d,
+        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc,
           Just d
         )
 
@@ -765,7 +765,7 @@ newArrayType loc desc r = do
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique (Shape $ map (NamedSize . qualName) dims) rowt,
+    ( Array () Nonunique (Shape $ map (\n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) loc) dims) rowt,
       Scalar rowt
     )
 
@@ -782,7 +782,7 @@ allDimsFreshInType loc r desc t =
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ NamedSize $ qualName v
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -826,7 +826,7 @@ termCheckTypeExp te = do
 
   -- Observe the sizes so we do not get any warnings about them not
   -- being used.
-  mapM_ observeDim $ freeInType st
+  mapM_ observeDim $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType st
   pure (te', svars, RetType dims st)
   where
     observeDim v =
@@ -858,10 +858,10 @@ isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 _ = Nothing
 
 maybeDimFromExp :: Exp -> Maybe Size
-maybeDimFromExp (Var v _ _) = Just $ NamedSize v
+maybeDimFromExp (Var v typ loc) = Just $ SizeExpr $ Var v typ loc
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = ConstSize . fromIntegral <$> isInt64 e
+maybeDimFromExp e = SizeExpr . (flip Literal mempty) . SignedValue . Int64Value . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e

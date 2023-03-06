@@ -479,11 +479,11 @@ typeOf (RecordLit fs _) =
         t
           `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
-typeOf (StringLit vs _) =
+typeOf (StringLit vs loc) =
   Array
     mempty
     Nonunique
-    (Shape [ConstSize $ genericLength vs])
+    (Shape [SizeExpr $ Literal (SignedValue $ Int64Value $ genericLength vs) loc])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -1112,7 +1112,10 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = Shape . map (NamedSize . qualName)
+    shape =
+      Shape
+        . map
+          (flip sizeFromName mempty . qualName)
 
     tuple_arr x y s =
       Array
@@ -1125,8 +1128,8 @@ intrinsics =
     arr x y = Scalar $ Arrow mempty Unnamed Observe x (RetType [] y)
     carr x y = Scalar $ Arrow mempty Unnamed Consume x (RetType [] y)
 
-    array_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
-    uarray_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
+    array_ka = Array () Nonunique (Shape [sizeFromName (qualName k) mempty]) t_a
+    uarray_ka = Array () Unique (Shape [sizeFromName (qualName k) mempty]) t_a
 
     accType t =
       TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]

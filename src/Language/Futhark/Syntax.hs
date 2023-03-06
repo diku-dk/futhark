@@ -93,6 +93,7 @@ module Language.Futhark.Syntax
     QualName (..),
     mkApply,
     mkApplyUT,
+    sizeFromName,
   )
 where
 
@@ -219,18 +220,42 @@ data AttrInfo vn
 
 -- | The elaborated size of a dimension.
 data Size
-  = -- | The size of the dimension is this name, which
-    -- must be in scope.  In a return type, this will
-    -- give rise to an assertion.
-    NamedSize (QualName VName)
-  | -- | The size is a constant.
-    ConstSize Int64
+  = {-  Removing to be replaced by expressions
+          -- | The size of the dimension is this name, which
+          -- must be in scope.  In a return type, this will
+          -- give rise to an assertion.
+          NamedSize (QualName VName)
+        | -- | The size is a constant.
+          ConstSize Int64
+      -}
+
+    -- | The size of the dimension is this expression
+    -- all non-trivial expression should have variable in scope.
+    -- In a return type, existential name don't appear in expression.
+    SizeExpr (ExpBase Info VName)
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
     -- defunctorisation and monomorphisation.
     AnySize (Maybe VName)
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+-- Workaround to not break the compiler.
+-- Somewhere these are used but types in Expr are not well managed currently
+instance Eq Size where
+  AnySize m1 == AnySize m2 = m1 == m2
+  SizeExpr (Var v1 _ _) == SizeExpr (Var v2 _ _) = v1 == v2
+  SizeExpr e1 == SizeExpr e2 = e1 == e2
+  _ == _ = False
+
+instance Ord Size where
+  AnySize m1 <= AnySize m2 = m1 <= m2
+  SizeExpr (Var v1 _ _) <= SizeExpr (Var v2 _ _) = v1 <= v2
+  SizeExpr e1 <= SizeExpr e2 = e1 <= e2
+  _ <= _ = False
+
+sizeFromName :: QualName VName -> SrcLoc -> Size
+sizeFromName name loc = SizeExpr $ Var name (Info <$> Scalar $ Prim $ Unsigned Int64) loc
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.

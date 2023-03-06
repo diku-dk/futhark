@@ -40,12 +40,12 @@ mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
   execState (traverseDims onDim t) mempty
   where
-    onDim bound _ (NamedSize d)
+    onDim bound _ (SizeExpr (Var d _ _))
       | qualLeaf d `S.member` bound =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (NamedSize d) =
+    onDim _ PosImmediate (SizeExpr (Var d _ _)) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (NamedSize d) =
+    onDim _ _ (SizeExpr (Var d _ _)) =
       modify $ M.insertWith (&&) (qualLeaf d) True
     onDim _ _ _ =
       pure ()
@@ -70,7 +70,7 @@ mustBeExplicitInBinding bind_t =
       alsoRet =
         M.unionWith (&&) $
           M.fromList $
-            zip (S.toList $ freeInType ret) $
+            zip (S.toList $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType ret) $
               repeat True
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
@@ -230,7 +230,12 @@ renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let m = M.fromList $ zip dims $ map (SizeSubst . NamedSize . qualName) dims'
+      let m =
+            M.fromList $
+              zip dims $
+                map
+                  (SizeSubst . (\qn -> SizeExpr $ Var qn (Info <$> Scalar $ Prim $ Unsigned Int64) mempty) . qualName)
+                  dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
   | otherwise =
@@ -241,14 +246,14 @@ checkExpForSize ::
   ExpBase NoInfo Name ->
   m (Exp, Size)
 checkExpForSize (IntLit x NoInfo loc) =
-  pure (IntLit x int64_info loc, ConstSize $ fromInteger x)
+  pure (IntLit x int64_info loc, SizeExpr $ Literal (SignedValue $ Int64Value $ fromInteger x) loc)
   where
     int64_info = Info (Scalar (Prim (Signed Int64)))
 checkExpForSize (Literal (SignedValue (Int64Value x)) loc) =
-  pure (Literal (SignedValue (Int64Value x)) loc, ConstSize x)
+  pure (Literal (SignedValue (Int64Value x)) loc, SizeExpr $ Literal (SignedValue $ Int64Value x) loc)
 checkExpForSize (Var v NoInfo vloc) = do
   v' <- checkNamedSize vloc v
-  pure (Var v' int64_info vloc, NamedSize v')
+  pure (Var v' int64_info vloc, SizeExpr $ Var v' int64_info vloc)
   where
     int64_info = Info (Scalar (Prim (Signed Int64)))
 checkExpForSize e =
@@ -324,7 +329,7 @@ evalTypeExp (TEArray d t loc) = do
   where
     checkSizeExp (SizeExpAny dloc) = do
       dv <- newTypeName "d"
-      pure ([dv], SizeExpAny dloc, NamedSize $ qualName dv)
+      pure ([dv], SizeExpAny dloc, SizeExpr $ Var (qualName dv) (Info <$> Scalar $ Prim $ Unsigned Int64) dloc)
     checkSizeExp (SizeExp e dloc) = do
       (e', sz) <- checkExpForSize e
       pure ([], SizeExp e' dloc, sz)
@@ -463,7 +468,7 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          SizeSubst $ NamedSize $ qualName d
+          SizeSubst $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -612,7 +617,7 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (NamedSize $ qualName v) ploc
+  TypeArgDim (SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) ploc) ploc
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
 
@@ -665,7 +670,7 @@ instance Substitutable (TypeBase Size Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
 
 instance Substitutable Size where
-  applySubst f (NamedSize (QualName _ v))
+  applySubst f (SizeExpr (Var (QualName _ v) _ _))
     | Just (SizeSubst d) <- f v = d
   applySubst _ d = d
 
@@ -727,7 +732,12 @@ substTypesRet lookupSubst ot =
         else do
           let start = maximum $ map baseTag seen_ext
               ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              extsubsts = M.fromList $ zip ext $ map (SizeSubst . NamedSize . qualName) ext'
+              extsubsts =
+                M.fromList $
+                  zip ext $
+                    map
+                      (SizeSubst . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty)
+                      ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
@@ -797,7 +807,7 @@ substTypesAny lookupSubst ot =
       -- AnySize.  This should _never_ happen during type-checking, but
       -- may happen as we substitute types during monomorphisation and
       -- defunctorisation later on. See Note [AnySize]
-      let toAny (NamedSize v)
+      let toAny (SizeExpr (Var v _ _))
             | qualLeaf v `elem` dims = AnySize Nothing
           toAny d = d
        in first toAny ot'

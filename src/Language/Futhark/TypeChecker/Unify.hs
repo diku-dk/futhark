@@ -251,7 +251,7 @@ prettySource ctx loc (RigidCond t1 t2) =
 -- t'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
 dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
-dimNotes ctx (NamedSize d) = do
+dimNotes ctx (SizeExpr (Var d _ _)) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
@@ -263,8 +263,10 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . NamedSize . qualName)
+    . mapM (dimNotes ctx . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty)
     . S.toList
+    . M.foldrWithKey (\k _ -> S.insert k) S.empty
+    . unFV
     . freeInType
 
 typeVarNotes :: MonadUnify m => VName -> m Notes
@@ -371,8 +373,8 @@ instantiateEmptyArrayDims tloc r (RetType dims t) = do
   pure (first (onDim $ zip dims dims') t, dims')
   where
     new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (NamedSize d) =
-      NamedSize $ maybe d qualName (lookup (qualLeaf d) dims')
+    onDim dims' (SizeExpr (Var d typ loc)) =
+      SizeExpr $ Var (maybe d qualName (lookup (qualLeaf d) dims')) typ loc
     onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
@@ -531,7 +533,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ NamedSize $ qualName p1'
+                          | v == p2' = Just $ SizeSubst $ SizeExpr $ Var (qualName p1') (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -560,10 +562,10 @@ unifyWith onDims usage = subunify False
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
   | d1 == d2 = pure ()
-unifyDims usage bcs _ nonrigid (NamedSize (QualName _ d1)) d2
+unifyDims usage bcs _ nonrigid (SizeExpr (Var (QualName _ d1) _ _)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
-unifyDims usage bcs _ nonrigid d1 (NamedSize (QualName _ d2))
+unifyDims usage bcs _ nonrigid d1 (SizeExpr (Var (QualName _ d2) _ _))
   | Just lvl2 <- nonrigid d2 =
       linkVarToDim usage bcs d2 lvl2 d1
 unifyDims usage bcs _ _ d1 d2 = do
@@ -587,11 +589,11 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
       | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
-    onDims bcs bound nonrigid (NamedSize (QualName _ d1)) d2
+    onDims bcs bound nonrigid (SizeExpr (Var (QualName _ d1) _ _)) d2
       | Just lvl1 <- nonrigid d1,
         not (boundParam bound d2) || (d1 `elem` bound) =
           linkVarToDim usage bcs d1 lvl1 d2
-    onDims bcs bound nonrigid d1 (NamedSize (QualName _ d2))
+    onDims bcs bound nonrigid d1 (SizeExpr (Var (QualName _ d2) _ _))
       | Just lvl2 <- nonrigid d2,
         not (boundParam bound d1) || (d2 `elem` bound) =
           linkVarToDim usage bcs d2 lvl2 d1
@@ -604,7 +606,7 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
           <+> dquotes (pretty d2)
           <+> "do not match."
 
-    boundParam bound (NamedSize (QualName _ d)) = d `elem` bound
+    boundParam bound (SizeExpr (Var (QualName _ d) _ _)) = d `elem` bound
     boundParam _ _ = False
 
 occursCheck ::
@@ -635,7 +637,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> freeInType t
+      mapM_ (check constraints) $ typeVars t <> (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t)
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -705,7 +707,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
 
       arrayElemTypeWith usage (unliftedBcs unlift_usage) tp
-      when (any (`elem` bound) (freeInType tp)) $
+      when (any (`elem` bound) (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp)) $
         unifyError usage mempty bcs $
           "Type variable"
             <+> prettyName vn
@@ -741,7 +743,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
               let tp' = Scalar $ Record $ required_fields <> tp_fields -- Crucially left-biased.
-                  ext = filter (`S.member` freeInType tp') bound
+                  ext = filter (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedFields onDims usage bound bcs required_fields' tp_fields
@@ -783,7 +785,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
-                  ext = filter (`S.member` freeInType tp') bound
+                  ext = filter (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
@@ -842,7 +844,7 @@ linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
 
   case dim of
-    NamedSize dim'
+    SizeExpr (Var dim' _ _)
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
         dim_lvl > lvl ->
           case c of
@@ -1174,11 +1176,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ NamedSize $ qualName d
+            Just d -> pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ NamedSize $ qualName d
+              pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.

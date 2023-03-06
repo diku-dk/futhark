@@ -36,10 +36,10 @@ someDimsFreshInType ::
   TermTypeM (TypeBase Size als)
 someDimsFreshInType loc r desc sizes = bitraverse onDim pure
   where
-    onDim (NamedSize d)
+    onDim (SizeExpr (Var d typ _))
       | qualLeaf d `S.member` sizes = do
           v <- newDimVar loc r desc
-          pure $ NamedSize $ qualName v
+          pure $ SizeExpr $ Var (qualName v) typ loc
     onDim d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -54,15 +54,15 @@ freshDimsInType ::
 freshDimsInType loc r desc sizes t =
   second M.elems <$> runStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedSize d)
+    onDim (SizeExpr (Var d typ _))
       | qualLeaf d `S.member` sizes = do
           prev_subst <- gets $ M.lookup $ qualLeaf d
           case prev_subst of
-            Just d' -> pure $ NamedSize $ qualName d'
+            Just d' -> pure $ SizeExpr $ Var (qualName d') typ loc
             Nothing -> do
               v <- lift $ newDimVar loc r desc
               modify $ M.insert (qualLeaf d) v
-              pure $ NamedSize $ qualName v
+              pure $ SizeExpr $ Var (qualName v) typ loc
     onDim d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
@@ -262,7 +262,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- new_dims in the pattern is unique and distinct.
           let onDims _ x y
                 | x == y = pure x
-              onDims _ (NamedSize v) d
+              onDims _ (SizeExpr (Var v typ _)) d
                 | qualLeaf v `elem` new_dims = do
                     case M.lookup (qualLeaf v) new_dims_to_initial_dim of
                       Just d'
@@ -270,7 +270,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                             modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
                       _ ->
                         modify $ second (qualLeaf v :)
-                    pure $ NamedSize v
+                    pure $ SizeExpr $ Var v typ loc
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t

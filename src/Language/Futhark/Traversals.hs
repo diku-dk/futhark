@@ -268,8 +268,7 @@ instance ASTMappable (SizeExp Info VName) where
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
 instance ASTMappable Size where
-  astMap tv (NamedSize vn) = NamedSize <$> astMap tv vn
-  astMap _ (ConstSize k) = pure $ ConstSize k
+  astMap tv (SizeExpr expr) = SizeExpr <$> astMap tv expr
   astMap tv (AnySize vn) = AnySize <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where

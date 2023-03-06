@@ -83,8 +83,7 @@ instance Pretty PrimValue where
 instance Pretty Size where
   pretty (AnySize Nothing) = mempty
   pretty (AnySize (Just v)) = "?" <> prettyName v
-  pretty (NamedSize v) = pretty v
-  pretty (ConstSize n) = pretty n
+  pretty (SizeExpr e) = pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
   pretty SizeExpAny {} = brackets mempty

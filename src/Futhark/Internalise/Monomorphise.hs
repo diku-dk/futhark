@@ -166,7 +166,7 @@ type MonoType = TypeBase MonoSize ()
 monoType :: TypeBase Size als -> MonoType
 monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
-    onDim bound _ (NamedSize d)
+    onDim bound _ (SizeExpr (Var d _ _))
       -- A locally bound size.
       | qualLeaf d `S.member` bound = pure $ MonoAnon $ qualLeaf d
     onDim _ _ d = do
@@ -267,7 +267,7 @@ sizesForPat pat = do
     onDim (AnySize _) = do
       v <- lift $ newVName "size"
       modify (v :)
-      pure $ NamedSize $ qualName v
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
     onDim d = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
@@ -538,9 +538,9 @@ desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (Ret
           [(Observe, xext, e1)]
           (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
       rettype' =
-        let onDim (NamedSize d)
-              | Named p <- xp, qualLeaf d == p = NamedSize $ qualName v1
-              | Named p <- yp, qualLeaf d == p = NamedSize $ qualName v2
+        let onDim (SizeExpr (Var d typ _))
+              | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
+              | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
             onDim d = d
          in first onDim rettype
       body =
@@ -610,7 +610,7 @@ desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
 noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . freeInType
+noticeDims = mapM_ notice . M.foldrWithKey (\k _ -> S.insert k) S.empty . unFV . freeInType
   where
     notice v = void $ transformFName mempty (qualName v) i64
 
@@ -676,11 +676,11 @@ dimMapping ::
   DimInst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (NamedSize d2)
+    f bound d1 (SizeExpr (Var d2 _ _))
       | qualLeaf d2 `elem` bound = pure d1
-    f _ (NamedSize d1) d2 = do
+    f _ (SizeExpr (Var d1 typ loc)) d2 = do
       modify $ M.insert (qualLeaf d1) d2
-      pure $ NamedSize d1
+      pure $ SizeExpr $ Var d1 typ loc
     f _ d _ = pure d
 
 inferSizeArgs :: [TypeParam] -> StructType -> StructType -> [Exp]
@@ -689,9 +689,9 @@ inferSizeArgs tparams bind_t t =
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just (NamedSize d) ->
+        Just (SizeExpr (Var d _ _)) ->
           Just $ Var d (Info i64) mempty
-        Just (ConstSize x) ->
+        Just (SizeExpr (Literal (SignedValue (Int64Value x)) _)) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
           Just $ Literal (SignedValue $ Int64Value 0) mempty
@@ -853,9 +853,9 @@ typeSubstsM loc orig_t1 orig_t2 =
           d <- lift $ lift $ newVName "d"
           tell [TypeParamDim d loc]
           put (ts, M.insert i d sizes)
-          pure $ NamedSize $ qualName d
+          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
         Just d ->
-          pure $ NamedSize $ qualName d
+          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
     onDim (MonoAnon v) = pure $ AnySize $ Just v
 
 -- Perform a given substitution on the types in a pattern.

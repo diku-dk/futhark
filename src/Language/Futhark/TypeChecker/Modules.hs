@@ -154,14 +154,16 @@ newNamesForMTy orig_mty = do
 
         substituteInShape (Shape ds) =
           Shape $ map substituteInDim ds
-        substituteInDim (NamedSize (QualName qs v)) =
-          NamedSize $ QualName (map substitute qs) $ substitute v
+        substituteInDim (SizeExpr (Var (QualName qs v) typ loc)) =
+          SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc
         substituteInDim d = d
 
-        substituteInTypeArg (TypeArgDim (NamedSize (QualName qs v)) loc) =
-          TypeArgDim (NamedSize $ QualName (map substitute qs) $ substitute v) loc
-        substituteInTypeArg (TypeArgDim (ConstSize x) loc) =
-          TypeArgDim (ConstSize x) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr (Var (QualName qs v) typ _)) loc) =
+          TypeArgDim (SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr (Literal (SignedValue (Int64Value x)) _)) loc) =
+          TypeArgDim (SizeExpr $ flip Literal loc $ SignedValue $ Int64Value x) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr _) _) =
+          error "Arbitrary Expression not supported yet"
         substituteInTypeArg (TypeArgDim (AnySize v) loc) =
           TypeArgDim (AnySize v) loc
         substituteInTypeArg (TypeArgType t loc) =
@@ -390,7 +392,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (SizeSubst . NamedSize) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (SizeSubst . \n -> SizeExpr $ Var n (Info <$> Scalar $ Prim $ Unsigned Int64) mempty) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -616,7 +618,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ SizeSubst $ NamedSize $ qualName v
+        _ -> Just $ SizeSubst $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'

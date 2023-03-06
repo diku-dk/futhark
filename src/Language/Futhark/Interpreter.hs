@@ -136,7 +136,7 @@ extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
 valueStructType :: ValueType -> StructType
-valueStructType = first (ConstSize . fromIntegral)
+valueStructType = first $ \x -> SizeExpr (Literal (SignedValue $ Int64Value $ fromIntegral x) mempty)
 
 resolveTypeParams :: [VName] -> StructType -> StructType -> Env
 resolveTypeParams names = match
@@ -163,7 +163,7 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims (NamedSize (QualName _ d1)) (ConstSize d2)
+    matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (Literal (SignedValue (Int64Value d2)) _))
       | d1 `elem` names =
           i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
@@ -185,7 +185,7 @@ resolveExistentials names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) rowshape
     match _ _ = mempty
 
-    matchDims (NamedSize (QualName _ d1)) d2
+    matchDims (SizeExpr (Var (QualName _ d1) _ _)) d2
       | d1 `elem` names = M.singleton d1 d2
     matchDims _ _ = mempty
 
@@ -555,26 +555,26 @@ evalType env t@(Array _ u shape _) =
       shape' = fmap evalDim shape
    in arrayOf u shape' et'
   where
-    evalDim (NamedSize qn)
+    evalDim (SizeExpr (Var qn _ loc))
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
           lookupVar qn env =
-          ConstSize $ fromIntegral x
+          SizeExpr (Literal (SignedValue $ Int64Value $ fromIntegral x) loc)
     evalDim d = d
 evalType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType _ t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (NamedSize v) = fromMaybe (NamedSize v) $ M.lookup (qualLeaf v) substs
+          onDim (SizeExpr (Var v typ loc)) = fromMaybe (SizeExpr (Var v typ loc)) $ M.lookup (qualLeaf v) substs
           onDim d = d
        in if null ps
             then first onDim t'
             else evalType (Env mempty types mempty <> env) $ first onDim t'
     Nothing -> t
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (NamedSize qv) _) =
-      (M.singleton p $ NamedSize qv, mempty)
-    matchPtoA (TypeParamDim p _) (TypeArgDim (ConstSize k) _) =
-      (M.singleton p $ ConstSize k, mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Var qv typ loc)) _) =
+      (M.singleton p $ SizeExpr (Var qv typ loc), mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Literal k loc)) _) =
+      (M.singleton p $ SizeExpr (Literal k loc), mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
       let t'' = evalType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -598,7 +598,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
-    dim (ConstSize x) = Just $ fromIntegral x
+    dim (SizeExpr (Literal (SignedValue (Int64Value x)) _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
@@ -1040,9 +1040,10 @@ substituteInModule substs = onModule
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (NamedSize v) = NamedSize $ replaceQ v
-    onDim (ConstSize x) = ConstSize x
+    onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
+    onDim (SizeExpr (Literal x loc)) = SizeExpr (Literal x loc)
     onDim (AnySize v) = AnySize v
+    onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =

@@ -127,8 +127,9 @@ internaliseDim ::
 internaliseDim exts d =
   case d of
     E.AnySize _ -> Ext <$> newId
-    E.ConstSize n -> pure $ Free $ intConst I.Int64 $ toInteger n
-    E.NamedSize name -> pure $ namedDim name
+    E.SizeExpr (E.Literal (E.SignedValue (E.Int64Value n)) _) -> pure $ Free $ intConst I.Int64 $ toInteger n
+    E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
+    E.SizeExpr _ -> error "Arbitrary Expression not supported yet"
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = I.Ext x

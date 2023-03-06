@@ -88,15 +88,17 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
               foldMap freeInType $ M.elems $ unFV immediate_free
             sizes =
               freeSizes $
-                sizes_in_free
-                  <> foldMap freeInPat params
-                  <> freeInType ret
+                M.foldrWithKey (\k _ -> S.insert k) S.empty $
+                  unFV $
+                    sizes_in_free
+                      <> foldMap freeInPat params
+                      <> freeInType ret
          in M.toList $ unFV $ immediate_free <> (sizes `freeWithout` bound)
 
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
         foldMap freeInType (ret : map snd free ++ map patternStructType params)
-      isSize (v, _) = v `S.member` sizes_in_types
+      isSize (v, _) = v `M.member` (unFV sizes_in_types)
       (free_dims, free_nondims) = partition isSize free
 
       free_params =

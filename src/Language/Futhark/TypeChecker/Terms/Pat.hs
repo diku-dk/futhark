@@ -34,7 +34,7 @@ nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
 nonrigidFor [] t = pure t -- Minor optimisation.
 nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedSize (QualName _ v))
+    onDim (SizeExpr (Var (QualName _ v) typ loc))
       | Just size <- find ((== v) . sizeName) sizes = do
           prev <- gets $ lookup v
           case prev of
@@ -42,9 +42,9 @@ nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
               v' <- lift $ newID $ baseName v
               lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
               modify ((v, v') :)
-              pure $ NamedSize $ qualName v'
+              pure $ SizeExpr $ Var (qualName v') typ loc
             Just v' ->
-              pure $ NamedSize $ qualName v'
+              pure $ SizeExpr $ Var (qualName v') typ loc
     onDim d = pure d
 
 -- | The set of in-scope variables that are being aliased.
@@ -242,7 +242,7 @@ bindingPat sizes p t m = do
           Ident v (Info (Scalar $ Prim $ Signed Int64)) loc
     mapM_ (observe . ident) sizes
 
-    let used_sizes = freeInType $ patternStructType p'
+    let used_sizes = M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType $ patternStructType p'
     case filter ((`S.notMember` used_sizes) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size

@@ -705,8 +705,9 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: Size -> DocM Html
-dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml (SizeExpr (Var v _ _)) = brackets <$> qualNameHtml v
+dimDeclHtml (SizeExpr (Literal (SignedValue (Int64Value n)) _)) = pure $ brackets $ toHtml (show n)
+dimDeclHtml (SizeExpr _) = error "Arbitrary Expression not supported yet"
 dimDeclHtml AnySize {} = pure $ brackets mempty
 
 dimExpHtml :: SizeExp Info VName -> DocM Html
