@@ -234,7 +234,7 @@ renameRetType (RetType dims st)
             M.fromList $
               zip dims $
                 map
-                  (SizeSubst . (\qn -> SizeExpr $ Var qn (Info <$> Scalar $ Prim $ Unsigned Int64) mempty) . qualName)
+                  (SizeSubst . (\qn -> SizeExpr $ Var qn (Info <$> Scalar $ Prim $ Signed Int64) mempty) . qualName)
                   dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
@@ -245,22 +245,14 @@ checkExpForSize ::
   MonadTypeChecker m =>
   ExpBase NoInfo Name ->
   m (Exp, Size)
-checkExpForSize (IntLit x NoInfo loc) =
-  pure (IntLit x int64_info loc, SizeExpr $ Literal (SignedValue $ Int64Value $ fromInteger x) loc)
-  where
-    int64_info = Info (Scalar (Prim (Signed Int64)))
-checkExpForSize (Literal (SignedValue (Int64Value x)) loc) =
-  pure (Literal (SignedValue (Int64Value x)) loc, SizeExpr $ Literal (SignedValue $ Int64Value x) loc)
 checkExpForSize (Var v NoInfo vloc) = do
   v' <- checkNamedSize vloc v
   pure (Var v' int64_info vloc, SizeExpr $ Var v' int64_info vloc)
   where
     int64_info = Info (Scalar (Prim (Signed Int64)))
-checkExpForSize e =
-  typeError
-    (locOf e)
-    mempty
-    "Only variables and i64 literals are allowed in size expressions."
+checkExpForSize e = do
+  e' <- checkSizeExpM e
+  pure (e', SizeExpr e')
 
 evalTypeExp ::
   MonadTypeChecker m =>
@@ -329,7 +321,7 @@ evalTypeExp (TEArray d t loc) = do
   where
     checkSizeExp (SizeExpAny dloc) = do
       dv <- newTypeName "d"
-      pure ([dv], SizeExpAny dloc, SizeExpr $ Var (qualName dv) (Info <$> Scalar $ Prim $ Unsigned Int64) dloc)
+      pure ([dv], SizeExpAny dloc, SizeExpr $ Var (qualName dv) (Info <$> Scalar $ Prim $ Signed Int64) dloc)
     checkSizeExp (SizeExp e dloc) = do
       (e', sz) <- checkExpForSize e
       pure ([], SizeExp e' dloc, sz)
@@ -468,7 +460,7 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          SizeSubst $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+          SizeSubst $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -617,7 +609,7 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) ploc) ploc
+  TypeArgDim (SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) ploc) ploc
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
 
@@ -736,7 +728,7 @@ substTypesRet lookupSubst ot =
                 M.fromList $
                   zip ext $
                     map
-                      (SizeSubst . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty)
+                      (SizeSubst . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Signed Int64) mempty)
                       ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'

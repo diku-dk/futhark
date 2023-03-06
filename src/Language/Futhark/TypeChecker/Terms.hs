@@ -8,6 +8,7 @@
 -- will require the programmer to fall back on type annotations.
 module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
+    checkSizeExp,
     checkFunDef,
   )
 where
@@ -86,11 +87,11 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           modify (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
-          lift $ SizeExpr . flip (flip Var (Info <$> Scalar $ Prim $ Unsigned Int64)) loc . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $ SizeExpr . flip (flip Var (Info <$> Scalar $ Prim $ Signed Int64)) loc . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
-          pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+          pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -196,11 +197,11 @@ unscopeType tloc unscoped t = do
     inst loc d = do
       prev <- gets $ M.lookup d
       case prev of
-        Just d' -> pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+        Just d' -> pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Signed Int64) loc
         Nothing -> do
           d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
           modify $ M.insert d d'
-          pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+          pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Signed Int64) loc
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
@@ -257,14 +258,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [SizeExpr $ flip Literal mempty $ SignedValue $ Int64Value 0]) Nonunique
+      t <- arrayOfM loc et (Shape [SizeExpr $ IntLit 0 (Info <$> Scalar $ Prim $ Signed Int64) mempty]) Nonunique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [SizeExpr $ flip Literal mempty $ SignedValue $ Int64Value $ genericLength all_es]) Nonunique
+      t <- arrayOfM loc et' (Shape [SizeExpr $ IntLit (genericLength all_es) (Info <$> Scalar $ Prim $ Signed Int64) mempty]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -302,7 +303,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
-        pure (SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty, Just d)
+        pure (SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) mempty, Just d)
 
   t <- arrayOfM loc start_t (Shape [dim]) Nonunique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
@@ -971,7 +972,7 @@ consumedByArg _ _ _ = pure []
 -- turn out to be polymorphic, in which case the list of type
 -- parameters will be non-empty.
 checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
-checkOneExp e = fmap fst . runTermTypeM $ do
+checkOneExp e = fmap fst . runTermTypeM checkExp $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
   (tparams, _, _) <-
@@ -981,6 +982,16 @@ checkOneExp e = fmap fst . runTermTypeM $ do
   localChecks e''
   causalityCheck e''
   pure (tparams, e'')
+
+-- | Type-check a single size expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case it is unified with i64.
+checkSizeExp :: UncheckedExp -> TypeM Exp
+checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
+  e' <- checkExp e
+  let t = toStruct $ typeOf e'
+  expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  e'' <- updateTypes e'
+  pure e''
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1185,7 +1196,7 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
-  fmap fst . runTermTypeM $ do
+  fmap fst . runTermTypeM checkExp $ do
     (tparams', params', maybe_retdecl', RetType dims rettype', body') <-
       checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
 
@@ -1583,7 +1594,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ SizeExpr $ Var (qualName k) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+          notes <- dimNotes defloc $ SizeExpr $ Var (qualName k) (Info <$> Scalar $ Prim $ Signed Int64) mempty
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> dquotes (prettyName k)

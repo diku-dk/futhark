@@ -136,7 +136,7 @@ extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
 valueStructType :: ValueType -> StructType
-valueStructType = first $ \x -> SizeExpr (Literal (SignedValue $ Int64Value $ fromIntegral x) mempty)
+valueStructType = first $ \x -> SizeExpr (IntLit (toInteger x) (Info <$> Scalar $ Prim $ Signed Int64) mempty)
 
 resolveTypeParams :: [VName] -> StructType -> StructType -> Env
 resolveTypeParams names = match
@@ -163,7 +163,7 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (Literal (SignedValue (Int64Value d2)) _))
+    matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (IntLit d2 _ _))
       | d1 `elem` names =
           i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
@@ -558,7 +558,7 @@ evalType env t@(Array _ u shape _) =
     evalDim (SizeExpr (Var qn _ loc))
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
           lookupVar qn env =
-          SizeExpr (Literal (SignedValue $ Int64Value $ fromIntegral x) loc)
+          SizeExpr (IntLit (toInteger x) (Info <$> Scalar $ Prim $ Signed Int64) loc)
     evalDim d = d
 evalType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType tn env of
@@ -598,7 +598,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
-    dim (SizeExpr (Literal (SignedValue (Int64Value x)) _)) = Just $ fromIntegral x
+    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
@@ -1041,7 +1041,7 @@ substituteInModule substs = onModule
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
-    onDim (SizeExpr (Literal x loc)) = SizeExpr (Literal x loc)
+    onDim (SizeExpr (IntLit x ty loc)) = SizeExpr (IntLit x ty loc)
     onDim (AnySize v) = AnySize v
     onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
 

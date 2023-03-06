@@ -263,7 +263,7 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty)
+    . mapM (dimNotes ctx . flip sizeFromName mempty . qualName)
     . S.toList
     . M.foldrWithKey (\k _ -> S.insert k) S.empty
     . unFV
@@ -533,7 +533,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ SizeExpr $ Var (qualName p1') (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+                          | v == p2' = Just $ SizeSubst $ sizeFromName (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -1176,11 +1176,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+            Just d -> pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+              pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.

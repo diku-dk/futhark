@@ -164,5 +164,5 @@ freeInType t =
     notV Unnamed = const True
     notV (Named v) = (/= v)
 
-    onSize (SizeExpr (Var qn (Info ty) _)) = FV $ M.singleton (qualLeaf qn) $ toStruct ty
+    onSize (SizeExpr e) = freeInExp e
     onSize _ = mempty

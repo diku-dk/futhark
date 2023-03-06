@@ -161,7 +161,8 @@ data Context = Context
     contextImportName :: ImportName,
     -- | Currently type-checking at the top level?  If false, we are
     -- inside a module.
-    contextAtTopLevel :: Bool
+    contextAtTopLevel :: Bool,
+    contextCheckExp :: UncheckedExp -> TypeM Exp
   }
 
 data TypeState = TypeState
@@ -204,10 +205,11 @@ runTypeM ::
   ImportTable ->
   ImportName ->
   VNameSource ->
+  (UncheckedExp -> TypeM Exp) ->
   TypeM a ->
   (Warnings, Either TypeError (a, VNameSource))
-runTypeM env imports fpath src (TypeM m) = do
-  let ctx = Context env imports fpath True
+runTypeM env imports fpath src checker (TypeM m) = do
+  let ctx = Context env imports fpath True checker
       s = TypeState src mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
@@ -297,6 +299,8 @@ class Monad m => MonadTypeChecker m where
             <+> "has type:"
             </> pretty t
 
+  checkSizeExpM :: UncheckedExp -> m Exp
+
   typeError :: Located loc => loc -> Notes -> Doc () -> m a
 
 -- | Elaborate the given name in the given namespace at the given
@@ -377,6 +381,10 @@ instance MonadTypeChecker TypeM where
                     fromStruct $
                       qualifyTypeVars outer_env mempty qs t'
                   )
+
+  checkSizeExpM e = do
+    checker <- asks contextCheckExp
+    checker e
 
   typeError loc notes s = throwError $ TypeError (locOf loc) notes s
 

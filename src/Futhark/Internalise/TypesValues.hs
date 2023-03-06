@@ -127,7 +127,7 @@ internaliseDim ::
 internaliseDim exts d =
   case d of
     E.AnySize _ -> Ext <$> newId
-    E.SizeExpr (E.Literal (E.SignedValue (E.Int64Value n)) _) -> pure $ Free $ intConst I.Int64 $ toInteger n
+    E.SizeExpr (E.IntLit n _ _) -> pure $ Free $ intConst I.Int64 n
     E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
     E.SizeExpr _ -> error "Arbitrary Expression not supported yet"
   where

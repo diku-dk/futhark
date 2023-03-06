@@ -74,7 +74,7 @@ replaceTypeSizes substs = first onDim
     onDim (SizeExpr (Var v typ loc)) =
       case M.lookup (qualLeaf v) substs of
         Just (SubstNamed v') -> SizeExpr (Var v' typ loc)
-        Just (SubstConst d) -> SizeExpr (Literal (SignedValue $ Int64Value d) loc)
+        Just (SubstConst d) -> SizeExpr (IntLit (toInteger d) (Info <$> Scalar $ Prim $ Signed Int64) loc)
         Nothing -> SizeExpr (Var v typ loc)
     onDim d = d
 
@@ -296,8 +296,8 @@ dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
     f _ (SizeExpr (Var d1 typ loc)) (SizeExpr (Var d2 _ _)) = do
       modify $ M.insert (qualLeaf d1) $ SubstNamed d2
       pure $ SizeExpr $ Var d1 typ loc
-    f _ (SizeExpr (Var d1 typ loc)) (SizeExpr (Literal (SignedValue (Int64Value d2)) _)) = do
-      modify $ M.insert (qualLeaf d1) $ SubstConst d2
+    f _ (SizeExpr (Var d1 typ loc)) (SizeExpr (IntLit d2 _ _)) = do
+      modify $ M.insert (qualLeaf d1) $ SubstConst $ fromInteger d2
       pure $ SizeExpr $ Var d1 typ loc
     f _ d _ = pure d
 
@@ -786,11 +786,11 @@ sizesForAll bound_sizes params = do
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (AnySize (Just v)) = do
       modify $ S.insert v
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
     onDim (AnySize Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
     onDim (SizeExpr (Var d typ loc)) = do
       unless (qualLeaf d `S.member` bound) $
         modify $

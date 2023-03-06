@@ -267,7 +267,7 @@ sizesForPat pat = do
     onDim (AnySize _) = do
       v <- lift $ newVName "size"
       modify (v :)
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
     onDim d = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
@@ -691,7 +691,7 @@ inferSizeArgs tparams bind_t t =
       case M.lookup (typeParamName tp) dinst of
         Just (SizeExpr (Var d _ _)) ->
           Just $ Var d (Info i64) mempty
-        Just (SizeExpr (Literal (SignedValue (Int64Value x)) _)) ->
+        Just (SizeExpr (IntLit x _ _)) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         _ ->
           Just $ Literal (SignedValue $ Int64Value 0) mempty
@@ -853,9 +853,9 @@ typeSubstsM loc orig_t1 orig_t2 =
           d <- lift $ lift $ newVName "d"
           tell [TypeParamDim d loc]
           put (ts, M.insert i d sizes)
-          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) mempty
         Just d ->
-          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) mempty
+          pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) mempty
     onDim (MonoAnon v) = pure $ AnySize $ Just v
 
 -- Perform a given substitution on the types in a pattern.

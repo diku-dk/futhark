@@ -377,7 +377,8 @@ instance Pretty Checking where
 data TermEnv = TermEnv
   { termScope :: TermScope,
     termChecking :: Maybe Checking,
-    termLevel :: Level
+    termLevel :: Level,
+    termChecker :: UncheckedExp -> TermTypeM Exp
   }
 
 data TermScope = TermScope
@@ -578,7 +579,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, SizeSubst $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) loc)
+      pure (v, SizeSubst $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) loc)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -621,6 +622,14 @@ localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
+  checkSizeExpM e = do
+    checker <- asks termChecker
+    e' <- checker e
+    let t = toStruct $ typeOf e'
+    expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+    e'' <- updateTypes e'
+    pure e''
+
   warn loc problem = liftTypeM $ warn loc problem
   newName = liftTypeM . newName
   newID = liftTypeM . newID
@@ -733,12 +742,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc,
+        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc,
           Just d
         )
     Just d ->
       pure
-        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Unsigned Int64) loc,
+        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc,
           Just d
         )
 
@@ -765,7 +774,7 @@ newArrayType loc desc r = do
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique (Shape $ map (\n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Unsigned Int64) loc) dims) rowt,
+    ( Array () Nonunique (Shape $ map (\n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Signed Int64) loc) dims) rowt,
       Scalar rowt
     )
 
@@ -782,7 +791,7 @@ allDimsFreshInType loc r desc t =
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Unsigned Int64) loc
+      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) loc
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -861,7 +870,7 @@ maybeDimFromExp :: Exp -> Maybe Size
 maybeDimFromExp (Var v typ loc) = Just $ SizeExpr $ Var v typ loc
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = SizeExpr . (flip Literal mempty) . SignedValue . Int64Value . fromIntegral <$> isInt64 e
+maybeDimFromExp e = SizeExpr . flip (flip IntLit (Info <$> Scalar $ Prim $ Signed Int64)) mempty . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e
@@ -1023,14 +1032,15 @@ initialTermScope =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: TermTypeM a -> TypeM (a, Occurrences)
-runTermTypeM (TermTypeM m) = do
+runTermTypeM :: (UncheckedExp -> TermTypeM Exp) -> TermTypeM a -> TypeM (a, Occurrences)
+runTermTypeM checker (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   let initial_tenv =
         TermEnv
           { termScope = initial_scope,
             termChecking = Nothing,
-            termLevel = 0
+            termLevel = 0,
+            termChecker = checker
           }
   second stateOccs
     <$> runStateT
