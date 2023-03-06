@@ -97,7 +97,7 @@ We build such binary snapshots for the following operating systems:
   `futhark-nightly-linux-x86_64.tar.xz <https://futhark-lang.org/releases/futhark-nightly-linux-x86_64.tar.xz>`_
 
 **macOS (x86_64)**
-  `futhark-nightly-macos-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-x86_64.zip>`_
+  `futhark-nightly-macos-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-macos-x86_64.tar.xz>`_
 
 **Windows (x86_64)**
   `futhark-nightly-windows-x86_64.zip <https://futhark-lang.org/releases/futhark-nightly-windows-x86_64.zip>`_
