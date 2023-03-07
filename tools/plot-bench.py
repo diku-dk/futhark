@@ -421,11 +421,13 @@ def main():
 
     html_data, plot_jobs = make_plot_jobs_and_directories(programs, data, plot_types_used, filetype)
 
+    with Pool(16) as p:
+        p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
+
     with open('index.html', 'w') as fp:
         fp.write(make_html(html_data))
 
-    with Pool(16) as p:
-        p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
+    print('Done!  Open index.html in a browser to view plots.')
 
 if __name__ == '__main__':
     main()
