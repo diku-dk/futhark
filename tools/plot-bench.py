@@ -45,7 +45,7 @@ class PlotType(ABC):
     def plot(self, ax, **kwargs):
         '''Method used to create a plot.'''
         raise NotImplementedError()
-    
+
     @classmethod
     @abstractmethod
     def name(cls):
@@ -66,7 +66,7 @@ class PerRun(PlotType):
         ax.set_ylabel('Runtime')
         ax.set_xlabel('$i$th Runtime')
         ax.grid()
-    
+
     @classmethod
     def name(cls) -> str:
         return 'per_run'
@@ -74,7 +74,7 @@ class PerRun(PlotType):
 
 class CumsumPerRun(PlotType):
     '''Create a plot with cumulative runtime vs iteration number as plot.'''
-    
+
     def plot(self, ax, runtimes=None, **kwargs):
         self._default_title(ax, **kwargs)
         x = np.arange(len(runtimes))
@@ -111,7 +111,7 @@ class RuntimeDensities(PlotType):
         ax.set_ylabel('Probability')
         ax.plot(x, y, linestyle='-')
         ax.grid()
-    
+
     @classmethod
     def name(cls) -> str:
         return 'runtime_densities'
@@ -133,7 +133,7 @@ class LagPlot(PlotType):
         ax.set_ylabel('The $i$th + 1 Runtime')
         ax.scatter(x, y, marker='.')
         ax.grid()
-    
+
     @classmethod
     def name(cls) -> str:
         return 'lag_plot'
@@ -162,7 +162,7 @@ class Plotter:
             'PS': 'ps',
             'PS': 'eps',
             'SVG': 'svg',
-            'PGF': 'pgf' 
+            'PGF': 'pgf'
         }
         self.filetype = backends[backend]
         self.backend = backend
@@ -177,7 +177,7 @@ class Plotter:
         for plotter in self.plot_types:
             for dest, datapoint in data.items():
                 plotter.plot(self.ax, **datapoint)
-                
+
                 # For some reason a syntax error may occour but the savefig function
                 # will for some reason work afterwards.
                 for _ in range(10):
@@ -195,9 +195,9 @@ class Plotter:
                     except SyntaxError:
                         time.sleep(1)
                 else:
-                    print((f'Figure "{dest}" did not get saved this is most likely an internal ' 
+                    print((f'Figure "{dest}" did not get saved this is most likely an internal '
                            'error. try specifying the specific program with --program.'))
-            
+
                 self.ax.cla()
         plt.close(self.fig)
 
@@ -238,7 +238,7 @@ def format_arg_list(args: Optional[str]) -> Optional[str]:
     '''
     if args is None:
         return None
-    
+
     return set(map(lambda arg: arg.strip(), args.split(',')))
 
 
@@ -246,7 +246,7 @@ def iter_datasets(
     data: Dict[str, Dict[str, Dict[str, Any]]],
     programs: Set[str]):
     '''Makes iteration easier for make_plot_jobs_and_directories.'''
-    
+
     for program_path in programs:
         datasets = data.get(program_path).get('datasets')
         program = pathlib.Path(program_path).name.replace('.fut', '').replace('.in', '')
@@ -268,7 +268,7 @@ def make_plot_jobs_and_directories(
     file_type: str,
     exnteded_path: str = 'graphs') -> Dict[str, Dict[str, Dict[str, Any]]]:
     '''Makes dictionary with plot jobs where plot_jobs are the jobs.'''
-    
+
     html_data = dict()
     plot_jobs = dict()
 
@@ -308,7 +308,7 @@ def make_plot_jobs_and_directories(
 
 def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
     '''Makes a simpel html document with links to each section with plots.'''
-    
+
     lowercase = lambda x: x[0].casefold()
 
     def li(id, text):
@@ -336,7 +336,7 @@ def make_html(html_data: Dict[str, Dict[str, Dict[str, Any]]]):
     def dataset_html(program, dataset, data):
         id = ''.join(e for e in (program + dataset) if e.isalnum()) + str(random.randint(0, 10**10))
         return li(id, dataset), subsection(id, data, dataset)
-    
+
     def program_html(program, datasets):
         id = ''.join(e for e in program if e.isalnum()) + str(random.randint(0, 10**10))
         sub = map(lambda a: dataset_html(program, *a), sorted(datasets.items(), key = lowercase))
@@ -423,7 +423,7 @@ def main():
 
     with open('index.html', 'w') as fp:
         fp.write(make_html(html_data))
-    
+
     with Pool(16) as p:
         p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
 
