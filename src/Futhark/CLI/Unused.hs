@@ -12,6 +12,7 @@ import Futhark.Pipeline (Verbosity (..), runFutharkM)
 import Futhark.Util.Options
 import Language.Futhark.Unused
 import System.Exit
+import Data.Map.Strict qualified as M
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialCheckConfig [] "files..." find
@@ -30,8 +31,13 @@ printUnused files = do
       -- let decs = getDecs fm
       -- print $ length decs
       -- print $ head decs
-      print $ map fst imp
-      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ findUnused files imp
+      -- print $ map fst imp
+      -- putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ findUnused files imp
+      putStrLn "did some stuff"
+      -- print $ partDefFuncs files imp
+      let u2 = concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused2 files imp
+      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) u2
+
 
 data CheckConfig = CheckConfig Bool
 
