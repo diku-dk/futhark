@@ -5,6 +5,9 @@ import Data.Map qualified as M
 import Futhark.Analysis.PrimExp
 import Futhark.IR.Mem.Interval (Interval (..))
 import Futhark.IR.Syntax
+--import Futhark.Util.Pretty
+
+import Debug.Trace
 
 -- | Input for CosminSolver
 data SolverInput = SolverInput
@@ -18,6 +21,13 @@ data SolverInput = SolverInput
     non_negatives :: [PrimExp VName]
   }
 
+prettySolver :: SolverInput -> String
+prettySolver env =
+    "Solver Environment:\n\tAssertions\n\t\t" ++
+    prettyString (assertions env) ++ "\n\tLessThans:\n\t\t" ++
+    concatMap (\(nm,pe) -> prettyString nm ++ " < " ++ prettyString pe ++ ", ") (less_thans env) ++ "\n\tPositives:\n\t\t" ++
+    concatMap (\p -> prettyString p ++ " >= 0, ") (non_negatives env) ++ "\n\n"
+    
 -- | Given 'SolverInput', returns 'Nothing' if there is no overlap or 'Just
 -- the_problem_interval' if the 'Interval' list self-overlaps.
 selfOverlap :: SolverInput -> [Interval] -> Maybe Interval
@@ -50,5 +60,6 @@ lessThanOrEqual solver_input pe1 pe2 =
 -- | Given 'SolverInput', returns 'True' if the first 'PrimExp' is proven to be
 -- strictly less the second.
 lessThan :: SolverInput -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> Bool
-lessThan _solver_input _pe1 _pe2 =
-  False -- TODO
+lessThan solver_input pe1 pe2 =
+  trace ("Problem: " ++ prettyString pe1 ++ " < " ++ prettyString pe2 ++ " given: \n" ++ prettySolver solver_input)
+    False -- TODO
