@@ -7,7 +7,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import Data.List (partition, sortOn, tails)
+import Data.List (partition, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -706,13 +706,10 @@ etaExpand e_t e = do
           map (SizeSubst . NamedSize . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
       e' =
-        foldl'
-          ( \e1 (e2, t2, argtypes) ->
-              mkApply e1 [(diet t2, Nothing, e2)] $
-                AppRes (foldFunType argtypes ret') ext'
-          )
+        mkApply
           e
-          $ zip3 vars (map (snd . snd) ps) (drop 1 $ tails $ map snd ps)
+          (zip3 (map (diet . snd . snd) ps) (repeat Nothing) vars)
+          (AppRes (retType ret') ext')
   pure (pats, e', second (const ()) ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
