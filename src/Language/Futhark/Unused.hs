@@ -1,10 +1,11 @@
-module Language.Futhark.Unused (findUnused, findUnused2, partDefFuncs, getBody, getDecs) where
+module Language.Futhark.Unused (findUnused2, partDefFuncs, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.Function (fix)
 import Data.List (concatMap, elem, filter, map, nub, partition, (\\))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe, maybeToList)
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -37,19 +38,19 @@ import Data.Containers.ListUtils (nubOrd)
 data TopLvl = TopLvl FilePath [(VName, SrcLoc)]
 
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [VName]
-findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
-findUnused files imps = do
-  let (directImports, realImports) = partition ((`elem` map (normalise . dropExtension) files) . fst) imps
-      used = concatMap (usedFuncsInMod . snd) directImports
-      outside = concatMap (\(fp, im) -> map (\(x, y) -> (fp, x, y)) $ unusedInMod used im) realImports
-  outside
+-- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
+-- findUnused files imps = do
+--   let (directImports, realImports) = partition ((`elem` map (normalise . dropExtension) files) . fst) imps
+--       used = map (usedFuncsInMod . snd) directImports
+--       outside = concatMap (\(fp, im) -> map (\(x, y) -> (fp, x, y)) $ unusedInMod used im) realImports
+--   outside
 
 -- We are looking for VNames that represent functions.
-usedFuncsInMod :: FileModule -> [VName]
+usedFuncsInMod :: FileModule -> S.Set VName
 usedFuncsInMod (FileModule _ _env (Prog _doc decs) _) =
-  concatMap funcsInDef $ filter isFuncDec decs
+  S.unions $ map funcsInDef $ filter isFuncDec decs
 
-unusedInMod :: [VName] -> FileModule -> [(VName, SrcLoc)]
+unusedInMod :: S.Set VName -> FileModule -> [(VName, SrcLoc)]
 unusedInMod used (FileModule _ _env (Prog _doc decs) _) = do
   let allD = filter isFuncDec decs
       allN = map gvnl allD
@@ -79,22 +80,20 @@ isFuncDec _ = False
 getDecs :: ProgBase Info VName -> [DecBase Info VName]
 getDecs (Prog _ decs) = decs
 
-funcsInDef :: DecBase Info VName -> [VName]
+funcsInDef :: DecBase Info VName -> S.Set VName
 funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
-  map (\(QualName _ vn) -> vn) $ funcsInDef' body
+  S.fromList $ map (\(QualName _ vn) -> vn) $ funcsInDef' body
 funcsInDef _ = error "not a val dec."
 
 findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused2 fp fml = do
   let nfp = map (normalise . dropExtension) fp
       (af,bf) = partDefFuncs nfp fml
-      uf = concatMap snd $ M.toList $ tClosure (traceShowId bf) af
+      uf = S.unions $ map snd $ M.toList $ tClosure (traceShowId bf) af
       imf = M.fromList $ map (BI.second importFuncs) $ filter (\(p,_) -> p `notElem` nfp) fml
   M.map (filter (\(vn,_) -> vn `notElem` uf)) imf
 
-type VMap = M.Map VName [VName]
-
-d a b = if a==b then Nothing else Just $ b++a
+type VMap = M.Map VName (S.Set VName)
 
 -- possible future optimization:  remove VNames that aren't referenced in any top level import
 -- convert to sets since list equality is incorrect
@@ -107,7 +106,7 @@ tClosure bf af =
         else tClosure bf' af
 
 tStep :: VMap -> VMap -> VMap
-tStep af = M.map (\x -> nubOrd $ x <> concat (mapMaybe (`M.lookup` af) x))
+tStep af = M.map (S.unions . S.foldl (<>) [] . S.map (\y -> maybeToList $ y `M.lookup` af))
 
 
 -- get all functions and base functions, both as maps.
@@ -117,7 +116,7 @@ partDefFuncs fp fml = do
       bf = M.fromList $ concatMap (defFuncs . snd) $ filter (\(ifp, _) -> ifp `elem` fp) fml
   (M.fromList af, bf)
 
-defFuncs :: FileModule -> [(VName,[VName])]
+defFuncs :: FileModule -> [(VName,S.Set VName)]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDefNew $ filter isFuncDec decs
 
@@ -125,9 +124,9 @@ importFuncs :: FileModule -> [(VName, SrcLoc)]
 importFuncs (FileModule _ _env (Prog _doc decs) _) =
   map (\(ValDec (ValBind {valBindName = vn, valBindLocation = loc})) -> (vn,loc) ) $ filter isFuncDec decs
 
-funcsInDefNew :: DecBase Info VName -> (VName, [VName])
+funcsInDefNew :: DecBase Info VName -> (VName, S.Set VName)
 funcsInDefNew (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
-  (vn, map (\(QualName _ v) -> v) $ funcsInDef' body)
+  (vn, S.fromList $ map (\(QualName _ v) -> v) $ funcsInDef' body)
 funcsInDefNew _ = error "not a val dec." -- TODO: change error
 
 -- Handles every constructor in ExpBase that can contain a function usage.
