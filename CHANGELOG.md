@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Barrier divergence in generated code in some exotic cases (#1883).
 
+* Handling of higher-order holes (#1885).
+
 ## [0.23.1]
 
 ### Added
