@@ -23,6 +23,7 @@ import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
 import Futhark.Util.Pretty (align, docText, pretty)
 import Language.Futhark as E hiding (TypeArg)
+import Language.Futhark.TypeChecker.Types qualified as E
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -331,15 +332,19 @@ internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@E.Apply {} =
+internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
   case findFuncall e of
-    (FunctionHole t loc, _args) -> do
+    (FunctionHole loc, _args) -> do
       -- The function we are supposed to call doesn't exist, but we
       -- have to synthesize some fake values of the right type.  The
       -- easy way to do this is to just ignore the arguments and
       -- create a hole whose type is the type of the entire
-      -- application.
-      internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
+      -- application.  One caveat is that we need to replace any
+      -- existential sizes, too (with zeroes, because they don't
+      -- matter).
+      let subst = zip ext $ repeat $ E.SizeSubst $ E.ConstSize 0
+          et' = E.applySubst (`lookup` subst) et
+      internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
@@ -1439,15 +1444,15 @@ simpleCmpOp desc op x y =
 
 data Function
   = FunctionName (E.QualName VName)
-  | FunctionHole E.PatType SrcLoc
+  | FunctionHole SrcLoc
   deriving (Show)
 
 findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
 findFuncall (E.Apply f args _)
   | E.Var fname _ _ <- f =
       (FunctionName fname, map onArg $ NE.toList args)
-  | E.Hole (Info t) loc <- f =
-      (FunctionHole t loc, map onArg $ NE.toList args)
+  | E.Hole (Info _) loc <- f =
+      (FunctionHole loc, map onArg $ NE.toList args)
   where
     onArg (Info (_, argext), e) = (e, argext)
 findFuncall e =
