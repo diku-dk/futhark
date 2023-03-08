@@ -884,7 +884,8 @@ dimFromExp rf e
       extSize (srclocOf e) $ rf e
 
 sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Size, Maybe VName)
-sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
+-- sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
+sizeFromArg _ e = pure (SizeExpr e, Nothing)
 
 -- | Any argument sizes created with 'extSize' inside the given action
 -- will be removed once the action finishes.  This is to ensure that

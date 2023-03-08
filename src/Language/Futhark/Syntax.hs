@@ -232,32 +232,28 @@ data Size
   deriving (Show)
 
 expSizeEq :: (ExpBase Info VName) -> (ExpBase Info VName) -> Bool
-
 expSizeEq (Parens e1 _) e2 = expSizeEq e1 e2
 expSizeEq e1 (Parens e2 _) = expSizeEq e1 e2
 expSizeEq (Attr _ e1 _) e2 = expSizeEq e1 e2
 expSizeEq e1 (Attr _ e2 _) = expSizeEq e1 e2
 expSizeEq (Assert _ e1 _ _) e2 = expSizeEq e1 e2
 expSizeEq e1 (Assert _ e2 _ _) = expSizeEq e1 e2
-
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int8Value v2)) _)    = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int16Value v2)) _)   = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int32Value v2)) _)   = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int64Value v2)) _)   = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int8Value v2)) _)  = v1 == toInteger v2
+expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int8Value v2)) _) = v1 == toInteger v2
+expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int16Value v2)) _) = v1 == toInteger v2
+expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int32Value v2)) _) = v1 == toInteger v2
+expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int64Value v2)) _) = v1 == toInteger v2
+expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int8Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int16Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int32Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int64Value v2)) _) = v1 == toInteger v2
-
-expSizeEq (Literal (SignedValue (Int8Value v1)) _)    (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int16Value v1)) _)   (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int32Value v1)) _)   (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int64Value v1)) _)   (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (UnsignedValue (Int8Value v1)) _)  (IntLit v2 _ _) = toInteger v1 == v2
+expSizeEq (Literal (SignedValue (Int8Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
+expSizeEq (Literal (SignedValue (Int16Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
+expSizeEq (Literal (SignedValue (Int32Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
+expSizeEq (Literal (SignedValue (Int64Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
+expSizeEq (Literal (UnsignedValue (Int8Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
 expSizeEq (Literal (UnsignedValue (Int16Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
 expSizeEq (Literal (UnsignedValue (Int32Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
 expSizeEq (Literal (UnsignedValue (Int64Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-
 expSizeEq (IntLit v1 _ _) (IntLit v2 _ _) = v1 == v2
 expSizeEq (FloatLit v1 _ _) (FloatLit v2 _ _) = v1 == v2
 expSizeEq (StringLit v1 _) (StringLit v2 _) = v1 == v2
@@ -265,12 +261,12 @@ expSizeEq (Var qn1 _ _) (Var qn2 _ _) = qn1 == qn2
 expSizeEq (TupLit es1 _) (TupLit es2 _) = length es1 == length es2 && all (uncurry expSizeEq) (zip es1 es2)
 expSizeEq (ArrayLit es1 _ _) (ArrayLit es2 _ _) = length es1 == length es2 && all (uncurry expSizeEq) (zip es1 es2)
 expSizeEq (RecordLit fs1 _) (RecordLit fs2 _) =
-    length fs1 == length fs2 && all (uncurry fieldsEq) (zip fs1 fs2)
-    where
-        fieldsEq (RecordFieldExplicit n1 e1 _) (RecordFieldExplicit n2 e2 _) =
-            n1 == n2 && expSizeEq e1 e2
-        fieldsEq (RecordFieldImplicit n1 _ _) (RecordFieldImplicit n2 _ _) = n1 == n2
-        fieldsEq _ _ = False
+  length fs1 == length fs2 && all (uncurry fieldsEq) (zip fs1 fs2)
+  where
+    fieldsEq (RecordFieldExplicit n1 e1 _) (RecordFieldExplicit n2 e2 _) =
+      n1 == n2 && expSizeEq e1 e2
+    fieldsEq (RecordFieldImplicit n1 _ _) (RecordFieldImplicit n2 _ _) = n1 == n2
+    fieldsEq _ _ = False
 expSizeEq (Project n1 e1 _ _) (Project n2 e2 _ _) = n1 == n2 && expSizeEq e1 e2
 expSizeEq (Negate e1 _) (Negate e2 _) = expSizeEq e1 e2
 expSizeEq (Not e1 _) (Not e2 _) = expSizeEq e1 e2
@@ -280,48 +276,48 @@ expSizeEq (OpSectionLeft n1 _ e1 _ _ _) (OpSectionLeft n2 _ e2 _ _ _) = n1 == n2
 expSizeEq (OpSectionRight n1 _ e1 _ _ _) (OpSectionRight n2 _ e2 _ _ _) = n1 == n2 && expSizeEq e1 e2
 expSizeEq (ProjectSection ns1 _ _) (ProjectSection ns2 _ _) = length ns1 == length ns2 && all (uncurry (==)) (zip ns1 ns2)
 expSizeEq (AppExp app1 _) (AppExp app2 _) =
-    appEq app1 app2
-    where
-        appEq (Apply f1 as1 _) (Apply f2 as2 _) =
-            expSizeEq f1 f2 &&
-            all (uncurry expSizeEq) (NE.zipWith (\a1 a2 -> (snd a1, snd a2)) as1 as2)
-        appEq (Coerce e1 _ _) (Coerce e2 _ _) = expSizeEq e1 e2
-        appEq (Range e11 e12 e13 _) (Range e21 e22 e23 _) =
-            expSizeEq e11 e21 &&
-            not ((expSizeEq <$> e12 <*> e22) == Just False) &&
-            incEq e13 e23
-        appEq (LetPat bind1 pat1 e1 e1' _) (LetPat bind2 pat2 e2 e2' _)=
-            length bind1 == length bind2 &&
-            all (uncurry (==)) (zipWith (\b1 b2 -> (sizeName b1, sizeName b2)) bind1 bind2) &&
-            pat1 == pat2 &&
-            expSizeEq e1 e2 &&
-            expSizeEq e1' e2'
-        appEq (LetFun f1 (pars1, pats1, _, _, e1) e1' _) (LetFun f2 (pars2, pats2, _, _, e2) e2' _) =
-            f1 == f2 &&
-            all (uncurry (==)) (zip pars1 pars2) &&
-            all (uncurry (==)) (zip pats1 pats2) &&
-            expSizeEq e1 e2 &&
-            expSizeEq e1' e2'
-        appEq (If ec1 et1 ef1 _) (If ec2 et2 ef2 _) =
-            expSizeEq ec1 ec2 &&
-            expSizeEq et1 et2 &&
-            expSizeEq ef1 ef2
-        -- appEq DoLoop
-        appEq (BinOp (o1,_) _ (el1, _) (er1, _) _) (BinOp (o2,_) _ (el2, _) (er2, _) _) =
-            o1 == o2 &&
-            expSizeEq el1 el2 &&
-            expSizeEq er1 er2
-        -- appEq LetWith
-        -- appEq Index
-        -- appEq Match
-        appEq a1 a2 = a1 == a2
+  appEq app1 app2
+  where
+    appEq (Apply f1 as1 _) (Apply f2 as2 _) =
+      expSizeEq f1 f2
+        && all (uncurry expSizeEq) (NE.zipWith (\a1 a2 -> (snd a1, snd a2)) as1 as2)
+    appEq (Coerce e1 _ _) (Coerce e2 _ _) = expSizeEq e1 e2
+    appEq (Range e11 e12 e13 _) (Range e21 e22 e23 _) =
+      expSizeEq e11 e21
+        && not ((expSizeEq <$> e12 <*> e22) == Just False)
+        && incEq e13 e23
+    appEq (LetPat bind1 pat1 e1 e1' _) (LetPat bind2 pat2 e2 e2' _) =
+      length bind1 == length bind2
+        && all (uncurry (==)) (zipWith (\b1 b2 -> (sizeName b1, sizeName b2)) bind1 bind2)
+        && pat1 == pat2
+        && expSizeEq e1 e2
+        && expSizeEq e1' e2'
+    appEq (LetFun f1 (pars1, pats1, _, _, e1) e1' _) (LetFun f2 (pars2, pats2, _, _, e2) e2' _) =
+      f1 == f2
+        && all (uncurry (==)) (zip pars1 pars2)
+        && all (uncurry (==)) (zip pats1 pats2)
+        && expSizeEq e1 e2
+        && expSizeEq e1' e2'
+    appEq (If ec1 et1 ef1 _) (If ec2 et2 ef2 _) =
+      expSizeEq ec1 ec2
+        && expSizeEq et1 et2
+        && expSizeEq ef1 ef2
+    -- appEq DoLoop
+    appEq (BinOp (o1, _) _ (el1, _) (er1, _) _) (BinOp (o2, _) _ (el2, _) (er2, _) _) =
+      o1 == o2
+        && expSizeEq el1 el2
+        && expSizeEq er1 er2
+    -- appEq LetWith
+    -- appEq Index
+    -- appEq Match
+    appEq a1 a2 = a1 == a2
 
-        incEq (DownToExclusive e1) (DownToExclusive e2) = expSizeEq e1 e2
-        incEq (ToInclusive e1) (ToInclusive e2) = expSizeEq e1 e2
-        incEq (UpToExclusive e1) (UpToExclusive e2) = expSizeEq e1 e2
-        incEq _ _ = False
-
+    incEq (DownToExclusive e1) (DownToExclusive e2) = expSizeEq e1 e2
+    incEq (ToInclusive e1) (ToInclusive e2) = expSizeEq e1 e2
+    incEq (UpToExclusive e1) (UpToExclusive e2) = expSizeEq e1 e2
+    incEq _ _ = False
 expSizeEq e1 e2 = e1 == e2
+
 {-
   | Hole (f PatType) SrcLoc -> Something giving a hint could be cool (futur work)
   | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc ????
@@ -339,7 +335,6 @@ expSizeEq e1 e2 = e1 == e2
     Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
 -}
 
-
 -- Workaround to not break the compiler.
 -- Somewhere these are used but types in Expr are not well managed currently
 instance Eq Size where
@@ -352,7 +347,6 @@ instance Ord Size where
   SizeExpr (Var v1 _ _) <= SizeExpr (Var v2 _ _) = v1 <= v2
   SizeExpr e1 <= SizeExpr e2 = e1 <= e2
   _ <= _ = False
-
 
 sizeFromName :: QualName VName -> SrcLoc -> Size
 sizeFromName name loc = SizeExpr $ Var name (Info <$> Scalar $ Prim $ Signed Int64) loc

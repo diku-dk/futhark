@@ -661,10 +661,37 @@ instance Substitutable (TypeBase Size ()) where
 instance Substitutable (TypeBase Size Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
 
+instance Substitutable Exp where
+  applySubst f = runIdentity . mapOnExp
+    where
+      mapOnExp (Var (QualName _ v) _ _)
+        | Just (SizeSubst (SizeExpr e')) <- f v = pure e'
+      mapOnExp e' = astMap mapper e'
+
+      mapper =
+        ASTMapper
+          { mapOnExp,
+            mapOnName = pure,
+            mapOnStructType = pure . applySubst f,
+            mapOnPatType = pure . applySubst f,
+            mapOnStructRetType = pure . applySubst f,
+            mapOnPatRetType = pure . applySubst f
+          }
+
 instance Substitutable Size where
   applySubst f (SizeExpr (Var (QualName _ v) _ _))
-    | Just (SizeSubst d) <- f v = d
-  applySubst _ d = d
+    | Just (SizeSubst (AnySize vn)) <- f v = AnySize vn
+  applySubst f size = runIdentity $ astMap mapper size
+    where
+      mapper =
+        ASTMapper
+          { mapOnExp = pure . applySubst f,
+            mapOnName = pure,
+            mapOnStructType = pure . applySubst f,
+            mapOnPatType = pure . applySubst f,
+            mapOnStructRetType = pure . applySubst f,
+            mapOnPatRetType = pure . applySubst f
+          }
 
 instance Substitutable d => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
@@ -674,7 +701,7 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = pure,
+          { mapOnExp = pure . applySubst f,
             mapOnName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
