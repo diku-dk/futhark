@@ -1377,6 +1377,8 @@ bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
 bareTypeExp = undefined
 
+-- | Remove all annotations from an expression, but retain the
+-- name/scope information.
 bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
 bareExp (Var name _ loc) = Var name NoInfo loc
 bareExp (Hole _ loc) = Hole NoInfo loc
@@ -1457,7 +1459,8 @@ bareExp (AppExp appexp _) =
 bareExp (Attr attr e loc) =
   Attr attr (bareExp e) loc
 
-
+-- | Remove all annotations, parentesis, assertion and attribute from an expression, but retain the
+-- name/scope information.
 bareCleanExp :: ExpBase Info VName -> ExpBase NoInfo VName
 bareCleanExp (Var name _ loc) = Var name NoInfo loc
 bareCleanExp (Hole _ loc) = Hole NoInfo loc
