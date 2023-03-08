@@ -23,7 +23,16 @@ import Futhark.MonadFreshNames
 compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version =
   traverse
-    (GC.compileProg "c" version operations generateBoilerplate mempty (DefaultSpace, [DefaultSpace]) [])
+    ( GC.compileProg
+        "c"
+        version
+        mempty
+        operations
+        generateBoilerplate
+        mempty
+        (DefaultSpace, [DefaultSpace])
+        []
+    )
     <=< ImpGen.compileProg
   where
     operations :: GC.Operations Imp.Sequential ()

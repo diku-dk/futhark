@@ -122,6 +122,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   ctx->error = NULL;
   ctx->log = stderr;
   if (backend_context_setup(ctx) == 0) {
+    set_tuning_params(ctx);
     setup_program(ctx);
     init_constants(ctx);
     (void)futhark_context_clear_caches(ctx);

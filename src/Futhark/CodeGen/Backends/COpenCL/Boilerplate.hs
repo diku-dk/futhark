@@ -14,13 +14,11 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     kernelRuntime,
     kernelRuns,
     sizeLoggingCode,
-    generateTuningParams,
   )
 where
 
 import Control.Monad.State
 import Data.Map qualified as M
-import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -28,7 +26,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (backendsOpenclH)
-import Futhark.Util (chunk, zEncodeText)
+import Futhark.Util (chunk)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -69,23 +67,6 @@ profilingEvent name =
           : opencl_get_event(ctx,
                              &ctx->program->$id:(kernelRuns name),
                              &ctx->program->$id:(kernelRuntime name))|]
-
-generateTuningParams :: M.Map Name SizeClass -> GC.CompilerM op a ()
-generateTuningParams sizes = do
-  let strinit s = [C.cinit|$string:(T.unpack s)|]
-      intinit x = [C.cinit|$int:x|]
-      size_name_inits = map (strinit . prettyText) $ M.keys sizes
-      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys sizes
-      size_class_inits = map (strinit . prettyText) $ M.elems sizes
-      size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) $ M.elems sizes
-      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys sizes
-      num_sizes = length sizes
-  GC.earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
-  GC.earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_sizes;|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
-  GC.earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
-  GC.earlyDecl [C.cedecl|static typename int64_t tuning_param_defaults[] = { $inits:size_default_inits };|]
 
 releaseKernel :: (KernelName, KernelSafety) -> C.Stm
 releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->program->$id:name));|]
@@ -148,10 +129,9 @@ generateBoilerplate ::
   [Name] ->
   M.Map KernelName KernelSafety ->
   [PrimType] ->
-  M.Map Name SizeClass ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_program opencl_prelude cost_centres kernels types sizes failures = do
+generateBoilerplate opencl_program opencl_prelude cost_centres kernels types failures = do
   let opencl_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
@@ -162,7 +142,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
         | FloatType Float64 `elem` types = [C.cexp|1|]
         | otherwise = [C.cexp|0|]
       max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
-  generateTuningParams sizes
   mapM_
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
@@ -190,17 +169,6 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types siz
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_command_queue(struct futhark_context_config *cfg, typename cl_command_queue);|]
   GC.headerDecl GC.MiscDecl [C.cedecl|typename cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx);|]
-
-  let set_tuning_params =
-        zipWith
-          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
-          [(0 :: Int) ..]
-          $ M.keys sizes
-
-  GC.earlyDecl
-    [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
-                $stms:set_tuning_params
-              }|]
 
   GC.generateProgramStruct
 

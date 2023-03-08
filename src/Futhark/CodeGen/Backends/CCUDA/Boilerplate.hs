@@ -19,7 +19,6 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyScalarToDev,
     costCentreReport,
     failureMsgFunction,
-    generateTuningParams,
     kernelRuns,
     kernelRuntime,
   )
@@ -89,10 +88,9 @@ generateBoilerplate ::
   T.Text ->
   [Name] ->
   M.Map KernelName KernelSafety ->
-  M.Map Name SizeClass ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failures = do
+generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
   let cuda_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
@@ -100,7 +98,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
         [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program]
       program_fragments = cuda_program_fragments ++ [[C.cinit|NULL|]]
   let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
-  generateTuningParams sizes
   mapM_
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
@@ -122,17 +119,6 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels sizes failure
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
-
-  let set_tuning_params =
-        zipWith
-          (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
-          [(0 :: Int) ..]
-          $ M.keys sizes
-
-  GC.earlyDecl
-    [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
-                $stms:set_tuning_params
-              }|]
 
   GC.generateProgramStruct
 
