@@ -34,8 +34,10 @@ import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
+import Futhark.Util (zEncodeText)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
@@ -324,6 +326,7 @@ compileProg' ::
   MonadFreshNames m =>
   T.Text ->
   T.Text ->
+  M.Map Name SizeClass ->
   Operations op s ->
   s ->
   CompilerM op s () ->
@@ -332,7 +335,7 @@ compileProg' ::
   [Option] ->
   Definitions op ->
   m (CParts, CompilerState s)
-compileProg' backend version ops def extra header_extra (arr_space, spaces) options prog = do
+compileProg' backend version params ops def extra header_extra (arr_space, spaces) options prog = do
   src <- getNameSource
   let ((prototypes, definitions, entry_point_decls, manifest), endstate) =
         runCompilerM ops src def compileProgAction
@@ -473,10 +476,20 @@ $entry_point_decls
       headerDecl InitDecl [C.cedecl|void futhark_context_free(struct futhark_context* cfg);|]
       headerDecl MiscDecl [C.cedecl|int futhark_context_sync(struct futhark_context* ctx);|]
 
+      generateTuningParams params
       extra
 
-      mapM_ earlyDecl $ concat memfuns
+      let set_tuning_params =
+            zipWith
+              (\i k -> [C.cstm|ctx->tuning_params.$id:k = &ctx->cfg->tuning_params[$int:i];|])
+              [(0 :: Int) ..]
+              $ M.keys params
+      earlyDecl
+        [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
+                $stms:set_tuning_params
+              }|]
 
+      mapM_ earlyDecl $ concat memfuns
       type_funs <- generateAPITypes arr_space types
       generateCommonLibFuns memreport
 
@@ -493,6 +506,7 @@ compileProg ::
   MonadFreshNames m =>
   T.Text ->
   T.Text ->
+  M.Map Name SizeClass ->
   Operations op () ->
   CompilerM op () () ->
   T.Text ->
@@ -500,8 +514,25 @@ compileProg ::
   [Option] ->
   Definitions op ->
   m CParts
-compileProg backend version ops extra header_extra (arr_space, spaces) options prog =
-  fst <$> compileProg' backend version ops () extra header_extra (arr_space, spaces) options prog
+compileProg backend version params ops extra header_extra (arr_space, spaces) options prog =
+  fst <$> compileProg' backend version params ops () extra header_extra (arr_space, spaces) options prog
+
+generateTuningParams :: M.Map Name SizeClass -> CompilerM op a ()
+generateTuningParams params = do
+  let strinit s = [C.cinit|$string:(T.unpack s)|]
+      intinit x = [C.cinit|$int:x|]
+      size_name_inits = map (strinit . prettyText) $ M.keys params
+      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys params
+      size_class_inits = map (strinit . prettyText) $ M.elems params
+      size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) $ M.elems params
+      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys params
+      num_params = length params
+  earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
+  earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
+  earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
+  earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
+  earlyDecl [C.cedecl|static typename int64_t tuning_param_defaults[] = { $inits:size_default_inits };|]
 
 generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 generateCommonLibFuns memreport = do
