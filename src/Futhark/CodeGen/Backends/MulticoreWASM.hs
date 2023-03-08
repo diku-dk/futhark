@@ -48,6 +48,7 @@ compileProg version prog = do
     GC.compileProg
       "wasm_multicore"
       version
+      mempty
       MC.operations
       generateBoilerplate
       ""
