@@ -94,6 +94,7 @@ module Language.Futhark.Syntax
     mkApply,
     mkApplyUT,
     sizeFromName,
+    bareExp,
   )
 where
 
@@ -231,13 +232,7 @@ data Size
     AnySize (Maybe VName)
   deriving (Show)
 
-expSizeEq :: (ExpBase Info VName) -> (ExpBase Info VName) -> Bool
-expSizeEq (Parens e1 _) e2 = expSizeEq e1 e2
-expSizeEq e1 (Parens e2 _) = expSizeEq e1 e2
-expSizeEq (Attr _ e1 _) e2 = expSizeEq e1 e2
-expSizeEq e1 (Attr _ e2 _) = expSizeEq e1 e2
-expSizeEq (Assert _ e1 _ _) e2 = expSizeEq e1 e2
-expSizeEq e1 (Assert _ e2 _ _) = expSizeEq e1 e2
+expSizeEq :: (ExpBase NoInfo VName) -> (ExpBase NoInfo VName) -> Bool
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int8Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int16Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int32Value v2)) _) = v1 == toInteger v2
@@ -254,98 +249,18 @@ expSizeEq (Literal (UnsignedValue (Int8Value v1)) _) (IntLit v2 _ _) = toInteger
 expSizeEq (Literal (UnsignedValue (Int16Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
 expSizeEq (Literal (UnsignedValue (Int32Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
 expSizeEq (Literal (UnsignedValue (Int64Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (IntLit v1 _ _) (IntLit v2 _ _) = v1 == v2
-expSizeEq (FloatLit v1 _ _) (FloatLit v2 _ _) = v1 == v2
-expSizeEq (StringLit v1 _) (StringLit v2 _) = v1 == v2
-expSizeEq (Var qn1 _ _) (Var qn2 _ _) = qn1 == qn2
-expSizeEq (TupLit es1 _) (TupLit es2 _) = length es1 == length es2 && all (uncurry expSizeEq) (zip es1 es2)
-expSizeEq (ArrayLit es1 _ _) (ArrayLit es2 _ _) = length es1 == length es2 && all (uncurry expSizeEq) (zip es1 es2)
-expSizeEq (RecordLit fs1 _) (RecordLit fs2 _) =
-  length fs1 == length fs2 && all (uncurry fieldsEq) (zip fs1 fs2)
-  where
-    fieldsEq (RecordFieldExplicit n1 e1 _) (RecordFieldExplicit n2 e2 _) =
-      n1 == n2 && expSizeEq e1 e2
-    fieldsEq (RecordFieldImplicit n1 _ _) (RecordFieldImplicit n2 _ _) = n1 == n2
-    fieldsEq _ _ = False
-expSizeEq (Project n1 e1 _ _) (Project n2 e2 _ _) = n1 == n2 && expSizeEq e1 e2
-expSizeEq (Negate e1 _) (Negate e2 _) = expSizeEq e1 e2
-expSizeEq (Not e1 _) (Not e2 _) = expSizeEq e1 e2
-expSizeEq (Constr n1 as1 _ _) (Constr n2 as2 _ _) = n1 == n2 && length as1 == length as2 && all (uncurry expSizeEq) (zip as1 as2)
-expSizeEq (OpSection n1 _ _) (OpSection n2 _ _) = n1 == n2
-expSizeEq (OpSectionLeft n1 _ e1 _ _ _) (OpSectionLeft n2 _ e2 _ _ _) = n1 == n2 && expSizeEq e1 e2
-expSizeEq (OpSectionRight n1 _ e1 _ _ _) (OpSectionRight n2 _ e2 _ _ _) = n1 == n2 && expSizeEq e1 e2
-expSizeEq (ProjectSection ns1 _ _) (ProjectSection ns2 _ _) = length ns1 == length ns2 && all (uncurry (==)) (zip ns1 ns2)
-expSizeEq (AppExp app1 _) (AppExp app2 _) =
-  appEq app1 app2
-  where
-    appEq (Apply f1 as1 _) (Apply f2 as2 _) =
-      expSizeEq f1 f2
-        && all (uncurry expSizeEq) (NE.zipWith (\a1 a2 -> (snd a1, snd a2)) as1 as2)
-    appEq (Coerce e1 _ _) (Coerce e2 _ _) = expSizeEq e1 e2
-    appEq (Range e11 e12 e13 _) (Range e21 e22 e23 _) =
-      expSizeEq e11 e21
-        && not ((expSizeEq <$> e12 <*> e22) == Just False)
-        && incEq e13 e23
-    appEq (LetPat bind1 pat1 e1 e1' _) (LetPat bind2 pat2 e2 e2' _) =
-      length bind1 == length bind2
-        && all (uncurry (==)) (zipWith (\b1 b2 -> (sizeName b1, sizeName b2)) bind1 bind2)
-        && pat1 == pat2
-        && expSizeEq e1 e2
-        && expSizeEq e1' e2'
-    appEq (LetFun f1 (pars1, pats1, _, _, e1) e1' _) (LetFun f2 (pars2, pats2, _, _, e2) e2' _) =
-      f1 == f2
-        && all (uncurry (==)) (zip pars1 pars2)
-        && all (uncurry (==)) (zip pats1 pats2)
-        && expSizeEq e1 e2
-        && expSizeEq e1' e2'
-    appEq (If ec1 et1 ef1 _) (If ec2 et2 ef2 _) =
-      expSizeEq ec1 ec2
-        && expSizeEq et1 et2
-        && expSizeEq ef1 ef2
-    -- appEq DoLoop
-    appEq (BinOp (o1, _) _ (el1, _) (er1, _) _) (BinOp (o2, _) _ (el2, _) (er2, _) _) =
-      o1 == o2
-        && expSizeEq el1 el2
-        && expSizeEq er1 er2
-    -- appEq LetWith
-    -- appEq Index
-    -- appEq Match
-    appEq a1 a2 = a1 == a2
-
-    incEq (DownToExclusive e1) (DownToExclusive e2) = expSizeEq e1 e2
-    incEq (ToInclusive e1) (ToInclusive e2) = expSizeEq e1 e2
-    incEq (UpToExclusive e1) (UpToExclusive e2) = expSizeEq e1 e2
-    incEq _ _ = False
 expSizeEq e1 e2 = e1 == e2
-
-{-
-  | Hole (f PatType) SrcLoc -> Something giving a hint could be cool (futur work)
-  | QualParens (QualName vn, SrcLoc) (ExpBase f vn) SrcLoc ????
-  | Update (ExpBase f vn) (SliceBase f vn) (ExpBase f vn) SrcLoc ????
-  | RecordUpdate (ExpBase f vn) [Name] (ExpBase f vn) (f PatType) SrcLoc ????
-  | Lambda
-      [PatBase f vn]
-      (ExpBase f vn)
-      (Maybe (TypeExp f vn))
-      (f (Aliasing, StructRetType))
-      SrcLoc
-  | -- | Array indexing as a section: @(.[i,j])@.
-    IndexSection (SliceBase f vn) (f PatType) SrcLoc
-  | -- | Type ascription: @e : t@.
-    Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
--}
 
 -- Workaround to not break the compiler.
 -- Somewhere these are used but types in Expr are not well managed currently
 instance Eq Size where
   AnySize m1 == AnySize m2 = m1 == m2
-  SizeExpr e1 == SizeExpr e2 = expSizeEq e1 e2
+  SizeExpr e1 == SizeExpr e2 = expSizeEq (bareCleanExp e1) (bareCleanExp e2)
   _ == _ = False
 
 instance Ord Size where
   AnySize m1 <= AnySize m2 = m1 <= m2
-  SizeExpr (Var v1 _ _) <= SizeExpr (Var v2 _ _) = v1 <= v2
-  SizeExpr e1 <= SizeExpr e2 = e1 <= e2
+  SizeExpr e1 <= SizeExpr e2 = bareCleanExp e1 <= bareCleanExp e2
   _ <= _ = False
 
 sizeFromName :: QualName VName -> SrcLoc -> Size
@@ -1427,3 +1342,198 @@ instance Pretty BinOp where
   pretty Geq = ">="
   pretty PipeLeft = "<|"
   pretty PipeRight = "|>"
+
+bareField :: FieldBase Info VName -> FieldBase NoInfo VName
+bareField (RecordFieldExplicit name e loc) =
+  RecordFieldExplicit name (bareExp e) loc
+bareField (RecordFieldImplicit name _ loc) =
+  RecordFieldImplicit name NoInfo loc
+
+barePat :: PatBase Info VName -> PatBase NoInfo VName
+barePat (TuplePat ps loc) = TuplePat (map barePat ps) loc
+barePat (RecordPat fs loc) = RecordPat (map (fmap barePat) fs) loc
+barePat (PatParens p loc) = PatParens (barePat p) loc
+barePat (Id v _ loc) = Id v NoInfo loc
+barePat (Wildcard _ loc) = Wildcard NoInfo loc
+barePat (PatAscription pat t loc) = PatAscription (barePat pat) (bareTypeExp t) loc
+barePat (PatLit v _ loc) = PatLit v NoInfo loc
+barePat (PatConstr c _ ps loc) = PatConstr c NoInfo (map barePat ps) loc
+barePat (PatAttr attr p loc) = PatAttr attr (barePat p) loc
+
+bareDimIndex :: DimIndexBase Info VName -> DimIndexBase NoInfo VName
+bareDimIndex (DimFix e) =
+  DimFix $ bareExp e
+bareDimIndex (DimSlice x y z) =
+  DimSlice (bareExp <$> x) (bareExp <$> y) (bareExp <$> z)
+
+bareLoopForm :: LoopFormBase Info VName -> LoopFormBase NoInfo VName
+bareLoopForm (For (Ident i _ loc) e) = For (Ident i NoInfo loc) (bareExp e)
+bareLoopForm (ForIn pat e) = ForIn (barePat pat) (bareExp e)
+bareLoopForm (While e) = While (bareExp e)
+
+bareCase :: CaseBase Info VName -> CaseBase NoInfo VName
+bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
+
+bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
+bareTypeExp = undefined
+
+bareExp :: ExpBase Info VName -> ExpBase NoInfo VName
+bareExp (Var name _ loc) = Var name NoInfo loc
+bareExp (Hole _ loc) = Hole NoInfo loc
+bareExp (Literal v loc) = Literal v loc
+bareExp (IntLit val _ loc) = IntLit val NoInfo loc
+bareExp (FloatLit val _ loc) = FloatLit val NoInfo loc
+bareExp (Parens e loc) = Parens (bareExp e) loc
+bareExp (QualParens name e loc) = QualParens name (bareExp e) loc
+bareExp (TupLit els loc) = TupLit (map bareExp els) loc
+bareExp (StringLit vs loc) = StringLit vs loc
+bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
+bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
+bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
+bareExp (Negate x loc) = Negate (bareExp x) loc
+bareExp (Not x loc) = Not (bareExp x) loc
+bareExp (Update src slice v loc) =
+  Update (bareExp src) (map bareDimIndex slice) (bareExp v) loc
+bareExp (RecordUpdate src fs v _ loc) =
+  RecordUpdate (bareExp src) fs (bareExp v) NoInfo loc
+bareExp (Project field e _ loc) =
+  Project field (bareExp e) NoInfo loc
+bareExp (Assert e1 e2 _ loc) = Assert (bareExp e1) (bareExp e2) NoInfo loc
+bareExp (Lambda params body ret _ loc) =
+  Lambda (map barePat params) (bareExp body) (fmap bareTypeExp ret) NoInfo loc
+bareExp (OpSection name _ loc) = OpSection name NoInfo loc
+bareExp (OpSectionLeft name _ arg _ _ loc) =
+  OpSectionLeft name NoInfo (bareExp arg) (NoInfo, NoInfo) (NoInfo, NoInfo) loc
+bareExp (OpSectionRight name _ arg _ _ loc) =
+  OpSectionRight name NoInfo (bareExp arg) (NoInfo, NoInfo) NoInfo loc
+bareExp (ProjectSection fields _ loc) = ProjectSection fields NoInfo loc
+bareExp (IndexSection slice _ loc) =
+  IndexSection (map bareDimIndex slice) NoInfo loc
+bareExp (Constr name es _ loc) =
+  Constr name (map bareExp es) NoInfo loc
+bareExp (AppExp appexp _) =
+  AppExp appexp' NoInfo
+  where
+    appexp' =
+      case appexp of
+        Match e cases loc ->
+          Match (bareExp e) (fmap bareCase cases) loc
+        DoLoop _ mergepat mergeexp form loopbody loc ->
+          DoLoop
+            []
+            (barePat mergepat)
+            (bareExp mergeexp)
+            (bareLoopForm form)
+            (bareExp loopbody)
+            loc
+        LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body loc ->
+          LetWith
+            (Ident dest NoInfo destloc)
+            (Ident src NoInfo srcloc)
+            (map bareDimIndex idxexps)
+            (bareExp vexp)
+            (bareExp body)
+            loc
+        BinOp fname _ (x, _) (y, _) loc ->
+          BinOp fname NoInfo (bareExp x, NoInfo) (bareExp y, NoInfo) loc
+        If c texp fexp loc ->
+          If (bareExp c) (bareExp texp) (bareExp fexp) loc
+        Apply f args loc ->
+          Apply (bareExp f) (fmap ((NoInfo,) . bareExp . snd) args) loc
+        LetPat sizes pat e body loc ->
+          LetPat sizes (barePat pat) (bareExp e) (bareExp body) loc
+        LetFun name (fparams, params, ret, _, e) body loc ->
+          LetFun
+            name
+            (fparams, map barePat params, fmap bareTypeExp ret, NoInfo, bareExp e)
+            (bareExp body)
+            loc
+        Range start next end loc ->
+          Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
+        Coerce e te loc ->
+          Coerce (bareExp e) (bareTypeExp te) loc
+        Index arr slice loc ->
+          Index (bareExp arr) (map bareDimIndex slice) loc
+bareExp (Attr attr e loc) =
+  Attr attr (bareExp e) loc
+
+
+bareCleanExp :: ExpBase Info VName -> ExpBase NoInfo VName
+bareCleanExp (Var name _ loc) = Var name NoInfo loc
+bareCleanExp (Hole _ loc) = Hole NoInfo loc
+bareCleanExp (Literal v loc) = Literal v loc
+bareCleanExp (IntLit val _ loc) = IntLit val NoInfo loc
+bareCleanExp (FloatLit val _ loc) = FloatLit val NoInfo loc
+bareCleanExp (Parens e _) = bareCleanExp e --
+bareCleanExp (QualParens _ e _) = bareCleanExp e --
+bareCleanExp (TupLit els loc) = TupLit (map bareCleanExp els) loc
+bareCleanExp (StringLit vs loc) = StringLit vs loc
+bareCleanExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
+bareCleanExp (ArrayLit els _ loc) = ArrayLit (map bareCleanExp els) NoInfo loc
+bareCleanExp (Ascript e te loc) = Ascript (bareCleanExp e) (bareTypeExp te) loc
+bareCleanExp (Negate x loc) = Negate (bareCleanExp x) loc
+bareCleanExp (Not x loc) = Not (bareCleanExp x) loc
+bareCleanExp (Update src slice v loc) =
+  Update (bareCleanExp src) (map bareDimIndex slice) (bareCleanExp v) loc
+bareCleanExp (RecordUpdate src fs v _ loc) =
+  RecordUpdate (bareCleanExp src) fs (bareCleanExp v) NoInfo loc
+bareCleanExp (Project field e _ loc) =
+  Project field (bareCleanExp e) NoInfo loc
+bareCleanExp (Assert _ e2 _ _) = bareCleanExp e2 --
+bareCleanExp (Lambda params body ret _ loc) =
+  Lambda (map barePat params) (bareCleanExp body) (fmap bareTypeExp ret) NoInfo loc
+bareCleanExp (OpSection name _ loc) = OpSection name NoInfo loc
+bareCleanExp (OpSectionLeft name _ arg _ _ loc) =
+  OpSectionLeft name NoInfo (bareCleanExp arg) (NoInfo, NoInfo) (NoInfo, NoInfo) loc
+bareCleanExp (OpSectionRight name _ arg _ _ loc) =
+  OpSectionRight name NoInfo (bareCleanExp arg) (NoInfo, NoInfo) NoInfo loc
+bareCleanExp (ProjectSection fields _ loc) = ProjectSection fields NoInfo loc
+bareCleanExp (IndexSection slice _ loc) =
+  IndexSection (map bareDimIndex slice) NoInfo loc
+bareCleanExp (Constr name es _ loc) =
+  Constr name (map bareCleanExp es) NoInfo loc
+bareCleanExp (AppExp appexp _) =
+  AppExp appexp' NoInfo
+  where
+    appexp' =
+      case appexp of
+        Match e cases loc ->
+          Match (bareCleanExp e) (fmap bareCase cases) loc
+        DoLoop _ mergepat mergeexp form loopbody loc ->
+          DoLoop
+            []
+            (barePat mergepat)
+            (bareCleanExp mergeexp)
+            (bareLoopForm form)
+            (bareCleanExp loopbody)
+            loc
+        LetWith (Ident dest _ destloc) (Ident src _ srcloc) idxexps vexp body loc ->
+          LetWith
+            (Ident dest NoInfo destloc)
+            (Ident src NoInfo srcloc)
+            (map bareDimIndex idxexps)
+            (bareCleanExp vexp)
+            (bareCleanExp body)
+            loc
+        BinOp fname _ (x, _) (y, _) loc ->
+          BinOp fname NoInfo (bareCleanExp x, NoInfo) (bareCleanExp y, NoInfo) loc
+        If c texp fexp loc ->
+          If (bareCleanExp c) (bareCleanExp texp) (bareCleanExp fexp) loc
+        Apply f args loc ->
+          Apply (bareCleanExp f) (fmap ((NoInfo,) . bareCleanExp . snd) args) loc
+        LetPat sizes pat e body loc ->
+          LetPat sizes (barePat pat) (bareCleanExp e) (bareCleanExp body) loc
+        LetFun name (fparams, params, ret, _, e) body loc ->
+          LetFun
+            name
+            (fparams, map barePat params, fmap bareTypeExp ret, NoInfo, bareCleanExp e)
+            (bareCleanExp body)
+            loc
+        Range start next end loc ->
+          Range (bareCleanExp start) (fmap bareCleanExp next) (fmap bareCleanExp end) loc
+        Coerce e te loc ->
+          Coerce (bareCleanExp e) (bareTypeExp te) loc
+        Index arr slice loc ->
+          Index (bareCleanExp arr) (map bareDimIndex slice) loc
+bareCleanExp (Attr _ e _) =
+  bareCleanExp e --
