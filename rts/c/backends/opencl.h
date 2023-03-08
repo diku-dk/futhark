@@ -1209,8 +1209,6 @@ int backend_context_setup(struct futhark_context* ctx) {
                    CL_MEM_READ_WRITE,
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
-
-  set_tuning_params(ctx);
   return 0;
 }
 
