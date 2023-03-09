@@ -95,6 +95,7 @@ module Language.Futhark.Syntax
     mkApplyUT,
     sizeFromName,
     bareExp,
+    bareCleanExp,
   )
 where
 

@@ -185,23 +185,45 @@ unscopeType ::
   PatType ->
   TermTypeM (PatType, [VName])
 unscopeType tloc unscoped t = do
-  (t', m) <- runStateT (traverseDims onDim t) mempty
+  (t', m) <- runStateT (onType t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
-    onDim bound _ (SizeExpr (Var d _ _))
-      | Just loc <- srclocOf <$> M.lookup (qualLeaf d) unscoped,
-        not $ qualLeaf d `S.member` bound =
-          inst loc $ qualLeaf d
-    onDim _ _ d = pure d
+    -- using StateT (M.Map Exp VName) TermTypeM a
+    onScalar (Record fs) =
+      Record <$> traverse onType fs
+    onScalar (Sum cs) =
+      Sum <$> (traverse . traverse) onType cs
+    onScalar (Arrow as argName d argT (RetType dims retT)) = do
+      retT' <- onType retT
+      dims' <- pure dims -- TODO mess intros
+      flip (Arrow as argName d) (RetType dims' retT') <$> onType argT
+    onScalar ty = pure ty
 
-    inst loc d = do
-      prev <- gets $ M.lookup d
-      case prev of
-        Just d' -> pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Signed Int64) loc
-        Nothing -> do
-          d' <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope loc d) "d"
-          modify $ M.insert d d'
-          pure $ SizeExpr $ Var (qualName d') (Info <$> Scalar $ Prim $ Signed Int64) loc
+    onType ::
+      TypeBase Size as ->
+      StateT (M.Map (ExpBase NoInfo VName) VName) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
+    onType (Array as u shape scalar) =
+      Array as u <$> traverse (onSize) shape <*> onScalar scalar
+    onType (Scalar ty) =
+      Scalar <$> onScalar ty
+
+    onSize (SizeExpr e) =
+      SizeExpr <$> onExp e
+    onSize s = pure s
+
+    onExp e =
+      if (M.keysSet $ unFV $ freeInExp e) `S.disjoint` (M.keysSet unscoped)
+        then pure e
+        else do
+          let e' = bareCleanExp e
+          prev <- gets $ M.lookup e'
+          case prev of
+            Just vn -> pure $ Var (qualName vn) (Info <$> Scalar $ Prim $ Signed Int64) (srclocOf e)
+            Nothing -> do
+              -- the Rigid info as to be redo...
+              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) (S.findMin $ M.keysSet unscoped)) "d"
+              modify $ M.insert e' vn
+              pure $ Var (qualName vn) (Info <$> Scalar $ Prim $ Signed Int64) (srclocOf e)
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
