@@ -20,7 +20,6 @@ import System.Directory
 import System.Environment (getExecutablePath)
 import System.Exit
 import System.FilePath
-import System.Process
 import Text.Read (readMaybe)
 import Text.Regex.TDFA
 
@@ -102,10 +101,12 @@ serverOptions opts =
     : "-L"
     : optExtraOptions opts
 
+checkCmd :: Either CmdFailure a -> IO a
+checkCmd = either (error . T.unpack . T.unlines . failureMsg) pure
+
 setTuningParam :: Server -> T.Text -> Int -> IO ()
 setTuningParam server name val =
-  either (error . T.unpack . T.unlines . failureMsg) (const $ pure ())
-    =<< cmdSetTuningParam server name (showText val)
+  void $ checkCmd =<< cmdSetTuningParam server name (showText val)
 
 setTuningParams :: Server -> Path -> IO ()
 setTuningParams server = mapM_ (uncurry $ setTuningParam server)
@@ -225,25 +226,29 @@ tuningPaths = concatMap (treePaths [])
     t False = thresholdMax
     t True = thresholdMin
 
-thresholdForest :: FilePath -> IO ThresholdForest
-thresholdForest prog = do
-  thresholds <-
-    getThresholds . T.pack
-      <$> readProcess ("." </> dropExtension prog) ["--print-params"] ""
+allTuningParams :: Server -> IO [(T.Text, T.Text)]
+allTuningParams server = do
+  entry_points <- checkCmd =<< cmdEntryPoints server
+  param_names <- concat <$> mapM (checkCmd <=< cmdTuningParams server) entry_points
+  param_classes <- mapM (checkCmd <=< cmdTuningParamClass server) param_names
+  pure $ zip param_names param_classes
+
+thresholdForest :: Server -> IO ThresholdForest
+thresholdForest server = do
+  thresholds <- mapMaybe findThreshold <$> allTuningParams server
   let root (v, _) = ((v, False), [])
   pure $
     unfoldForest (unfold thresholds) $
       map root $
         filter (null . snd) thresholds
   where
-    getThresholds = mapMaybe findThreshold . T.lines
-    regex = makeRegex ("(.*) \\(threshold\\(([^ ]+,)(.*)\\)\\)" :: T.Text)
+    regex = makeRegex ("threshold\\(([^ ]+,)(.*)\\)" :: T.Text)
 
-    findThreshold :: T.Text -> Maybe (T.Text, [(T.Text, Bool)])
-    findThreshold l = do
-      [grp1, _, grp2] <- regexGroups regex l
+    findThreshold :: (T.Text, T.Text) -> Maybe (T.Text, [(T.Text, Bool)])
+    findThreshold (name, param_class) = do
+      [_, grp] <- regexGroups regex param_class
       pure
-        ( grp1,
+        ( name,
           filter (not . T.null . fst)
             $ map
               ( \x ->
@@ -251,7 +256,7 @@ thresholdForest prog = do
                     then (T.drop 1 x, False)
                     else (x, True)
               )
-            $ T.words grp2
+            $ T.words grp
         )
 
     unfold thresholds ((parent, parent_cmp), ancestors) =
@@ -292,8 +297,9 @@ tuneThreshold opts server datasets (already_tuned, best_runtimes0) (v, _v_path) 
       (Maybe (Int, Int), M.Map DatasetName Int) ->
       (DatasetName, RunDataset, T.Text) ->
       IO (Maybe (Int, Int), M.Map DatasetName Int)
-    tuneDataset (thresholds, best_runtimes) (dataset_name, run, entry_point) =
-      if not $ T.isPrefixOf (entry_point <> ".") v
+    tuneDataset (thresholds, best_runtimes) (dataset_name, run, entry_point) = do
+      relevant <- checkCmd =<< cmdTuningParams server entry_point
+      if v `notElem` relevant
         then do
           when (optVerbose opts > 0) $
             T.putStrLn $
@@ -437,17 +443,15 @@ tune opts prog = do
   putStrLn $ "Compiling " ++ prog ++ "..."
   datasets <- prepare opts futhark prog
 
-  forest <- thresholdForest prog
-  when (optVerbose opts > 0) $
-    putStrLn $
-      ("Threshold forest:\n" ++) $
-        drawForest $
-          map (fmap show) forest
-
-  let progbin = "." </> dropExtension prog
   putStrLn $ "Running with options: " ++ unwords (serverOptions opts)
+  let progbin = "." </> dropExtension prog
+  withServer (futharkServerCfg progbin (serverOptions opts)) $ \server -> do
+    forest <- thresholdForest server
+    when (optVerbose opts > 0) $
+      putStrLn $
+        ("Threshold forest:\n" <>) $
+          drawForest (map (fmap show) forest)
 
-  withServer (futharkServerCfg progbin (serverOptions opts)) $ \server ->
     fmap fst . foldM (tuneThreshold opts server datasets) ([], mempty) $
       tuningPaths forest
 
