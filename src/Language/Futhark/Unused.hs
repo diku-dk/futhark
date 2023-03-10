@@ -80,6 +80,32 @@ defFuncs :: FileModule -> [(VName,S.Set VName)]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDefNew $ filter isFuncDec decs
 
+
+
+isModDec :: DecBase f vn -> Bool
+isModDec (ModDec _) = True
+isModDec _ = False
+
+getMaps :: DecBase f vn -> [M.Map VName VName]
+getMaps (ModDec (ModBind {modExp = me})) = getMaps' me
+
+getMaps' :: ModExpBase Info VName -> [M.Map VName VName]
+getMaps' (ModParens me _) = getMaps' me
+getMaps' (ModDecs db _) = concatMap getMaps db
+getMaps' (ModApply _ _ _ (Info mp) _) = [mp]
+getMaps' (ModAscript me _ (Info mp) _) = getMaps' me <> [mp]
+getMaps' (ModLambda _ mmp me _) = getMaps' me <> map (\(_, Info mp) -> mp) (maybeToList mmp)
+getMaps' _ = []
+
+
+defMods :: FileModule -> [(VName,VName)]
+defMods (FileModule _ _env (Prog _doc decs) _) = do
+  let a = filter isModDec decs
+  []
+
+modFunsMaps :: DecBase f vn -> [VName]
+modFunsMaps db = []
+
 importFuncs :: FileModule -> [(VName, SrcLoc)]
 importFuncs (FileModule _ _env (Prog _doc decs) _) =
   map (\(ValDec (ValBind {valBindName = vn, valBindLocation = loc})) -> (vn,loc) ) $ filter isFuncDec decs
