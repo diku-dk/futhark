@@ -1,22 +1,15 @@
 module Language.Futhark.Unused (findUnused2, partDefFuncs, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
-import Data.Function (fix)
-import Data.List (concatMap, elem, filter, map, nub, partition, (\\))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe, maybeToList)
+import Data.Maybe (catMaybes, maybeToList)
 import Language.Futhark
-import Language.Futhark.Semantic
-  ( FileModule (FileModule),
-    Imports,
-  )
+import Language.Futhark.Semantic (FileModule (FileModule))
 
 import Debug.Trace
 import System.FilePath
-import Data.Containers.ListUtils (nubOrd)
-
 -- Pending work:
 -- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
 -- ∘ Gather the immediate information you need into your own bespoke data structures, and then work on those.
@@ -34,9 +27,6 @@ import Data.Containers.ListUtils (nubOrd)
 -- (2) create a mapping from normalized filename to top-level functions inside the filename.
 -- (3) Compute transitive closure for the map in (1)
 
--- data FunUsed = FunUsed VName [VName]
-data TopLvl = TopLvl FilePath [(VName, SrcLoc)]
-
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [VName]
 -- findUnused :: [FilePath] -> [(FilePath, FileModule)] -> [(FilePath, VName, SrcLoc)]
 -- findUnused files imps = do
@@ -46,32 +36,6 @@ data TopLvl = TopLvl FilePath [(VName, SrcLoc)]
 --   outside
 
 -- We are looking for VNames that represent functions.
-usedFuncsInMod :: FileModule -> S.Set VName
-usedFuncsInMod (FileModule _ _env (Prog _doc decs) _) =
-  S.unions $ map funcsInDef $ filter isFuncDec decs
-
-unusedInMod :: S.Set VName -> FileModule -> [(VName, SrcLoc)]
-unusedInMod used (FileModule _ _env (Prog _doc decs) _) = do
-  let allD = filter isFuncDec decs
-      allN = map gvnl allD
-      allU =
-        foldr
-          ( \x y ->
-              if gvn x `elem` y
-                then y <> funcsInDef x
-                else y
-          )
-          used
-          allD
-  filter (\(vn, _) -> vn `notElem` allU) allN
-
-gvn :: DecBase f vn -> vn
-gvn (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr _loc)) = vn
-gvn _ = error "" -- TODO: remove this in favour of different error.
-
-gvnl :: DecBase f a -> (a, SrcLoc)
-gvnl (ValDec (ValBind _en vn _rd _rt _tp _bp _body _doc _attr loc)) = (vn, loc)
-gvnl _ = error "" -- TODO: remove this in favour of different error.
 
 isFuncDec :: DecBase f vn -> Bool
 isFuncDec (ValDec _) = True
@@ -80,10 +44,6 @@ isFuncDec _ = False
 getDecs :: ProgBase Info VName -> [DecBase Info VName]
 getDecs (Prog _ decs) = decs
 
-funcsInDef :: DecBase Info VName -> S.Set VName
-funcsInDef (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) =
-  S.fromList $ map (\(QualName _ vn) -> vn) $ funcsInDef' body
-funcsInDef _ = error "not a val dec."
 
 findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused2 fp fml = do
