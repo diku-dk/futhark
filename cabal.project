@@ -1,5 +1,5 @@
 packages: futhark.cabal
-index-state: 2022-12-07T11:58:45Z
+index-state: 2023-03-10T13:52:14Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie

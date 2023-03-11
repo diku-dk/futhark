@@ -75,6 +75,7 @@ module Futhark.CodeGen.ImpCode
     lexicalMemoryUsage,
     calledFuncs,
     callGraph,
+    ParamMap,
 
     -- * Typed enumerations
     Bytes,
@@ -105,7 +106,7 @@ import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.GPU.Sizes (Count (..))
+import Futhark.IR.GPU.Sizes (Count (..), SizeClass (..))
 import Futhark.IR.Pretty ()
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax.Core
@@ -405,6 +406,10 @@ callGraph f (Functions funs) =
       let grow v = maybe (S.singleton v) (S.insert v) (M.lookup v cur)
           next = M.map (foldMap grow) cur
        in if next == cur then cur else loop next
+
+-- | A mapping from names of tuning parameters to their class, as well
+-- as which functions make use of them (including transitively).
+type ParamMap = M.Map Name (SizeClass, S.Set Name)
 
 -- | A side-effect free expression whose execution will produce a
 -- single primitive value.

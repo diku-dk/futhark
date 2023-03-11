@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericC
   ( compileProg,
     compileProg',
     defaultOperations,
+    ParamMap,
     CParts (..),
     asLibrary,
     asExecutable,
@@ -18,10 +19,12 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor (second)
 import Data.DList qualified as DL
 import Data.Loc
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.CLI (cliDefs)
 import Futhark.CodeGen.Backends.GenericC.Code
@@ -322,11 +325,15 @@ asServer :: CParts -> T.Text
 asServer parts =
   gnuSource <> disableWarnings <> cHeader parts <> cUtils parts <> cServer parts <> cLib parts
 
+relevantParams :: Name -> ParamMap -> [Name]
+relevantParams fname m =
+  map fst $ filter ((fname `S.member`) . snd . snd) $ M.toList m
+
 compileProg' ::
   MonadFreshNames m =>
   T.Text ->
   T.Text ->
-  M.Map Name SizeClass ->
+  ParamMap ->
   Operations op s ->
   s ->
   CompilerM op s () ->
@@ -464,7 +471,8 @@ $entry_point_decls
         mapAndUnzipM (compileFun get_consts [[C.cparam|$ty:ctx_ty *ctx|]]) funs
 
       (entry_points, entry_points_manifest) <-
-        unzip . catMaybes <$> mapM (uncurry (onEntryPoint get_consts)) funs
+        fmap (unzip . catMaybes) $ forM funs $ \(fname, fun) ->
+          onEntryPoint get_consts (relevantParams fname params) fname fun
 
       headerDecl InitDecl [C.cedecl|struct futhark_context_config;|]
       headerDecl InitDecl [C.cedecl|struct futhark_context_config* futhark_context_config_new(void);|]
@@ -506,7 +514,7 @@ compileProg ::
   MonadFreshNames m =>
   T.Text ->
   T.Text ->
-  M.Map Name SizeClass ->
+  ParamMap ->
   Operations op () ->
   CompilerM op () () ->
   T.Text ->
@@ -517,15 +525,17 @@ compileProg ::
 compileProg backend version params ops extra header_extra (arr_space, spaces) options prog =
   fst <$> compileProg' backend version params ops () extra header_extra (arr_space, spaces) options prog
 
-generateTuningParams :: M.Map Name SizeClass -> CompilerM op a ()
+generateTuningParams :: ParamMap -> CompilerM op a ()
 generateTuningParams params = do
-  let strinit s = [C.cinit|$string:(T.unpack s)|]
+  let (param_names, (param_classes, _param_users)) =
+        second unzip $ unzip $ M.toList params
+      strinit s = [C.cinit|$string:(T.unpack s)|]
       intinit x = [C.cinit|$int:x|]
-      size_name_inits = map (strinit . prettyText) $ M.keys params
-      size_var_inits = map (strinit . zEncodeText . prettyText) $ M.keys params
-      size_class_inits = map (strinit . prettyText) $ M.elems params
-      size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) $ M.elems params
-      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) $ M.keys params
+      size_name_inits = map (strinit . prettyText) param_names
+      size_var_inits = map (strinit . zEncodeText . prettyText) param_names
+      size_class_inits = map (strinit . prettyText) param_classes
+      size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
+      size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
       num_params = length params
   earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
