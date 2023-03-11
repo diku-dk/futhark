@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The manifest file now lists which tuning parameters are relevant for
+  each entry point. (#1884)
+
+* A command `tuning_params` has been added to the server protocol.
+
 ### Removed
 
 ### Changed
