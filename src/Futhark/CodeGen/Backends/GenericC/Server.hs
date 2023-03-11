@@ -212,7 +212,7 @@ entryTypeBoilerplate manifest =
     manifest
 
 oneEntryBoilerplate :: Manifest -> (T.Text, EntryPoint) -> ([C.Definition], C.Initializer)
-oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
+oneEntryBoilerplate manifest (name, EntryPoint cfun tuning_params outputs inputs) =
   let call_f = "call_" <> nameFromText name
       out_types = map outputType outputs
       in_types = map inputType inputs
@@ -220,6 +220,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
       in_types_name = nameFromText name <> "_in_types"
       out_unique_name = nameFromText name <> "_out_unique"
       in_unique_name = nameFromText name <> "_in_unique"
+      tuning_params_name = nameFromText name <> "_tuning_params"
       (out_items, out_args)
         | null out_types = ([C.citems|(void)outs;|], mempty)
         | otherwise = unzip $ zipWith loadOut [0 ..] out_types
@@ -241,6 +242,10 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
                 bool $id:in_unique_name[] = {
                   $inits:(map inputUniqueInit inputs)
                 };
+                const char* $id:tuning_params_name[] = {
+                  $inits:(map textInit tuning_params),
+                  NULL
+                };
                 int $id:call_f(struct futhark_context *ctx, void **outs, void **ins) {
                   $items:out_items
                   $items:in_items
@@ -250,6 +255,7 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
         [C.cinit|{
             .name = $string:(T.unpack name),
             .f = $id:call_f,
+            .tuning_params = $id:tuning_params_name,
             .in_types = $id:in_types_name,
             .out_types = $id:out_types_name,
             .in_unique = $id:in_unique_name,
@@ -273,6 +279,8 @@ oneEntryBoilerplate manifest (name, EntryPoint cfun outputs inputs) =
        in ( [C.citem|$ty:(cType manifest tname) $id:v = *($ty:(cType manifest tname)*)ins[$int:i];|],
             [C.cexp|$id:v|]
           )
+
+    textInit t = [C.cinit|$string:(T.unpack t)|]
 
 entryBoilerplate :: Manifest -> ([C.Definition], [C.Initializer])
 entryBoilerplate manifest =

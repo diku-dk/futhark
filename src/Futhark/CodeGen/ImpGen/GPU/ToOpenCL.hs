@@ -12,6 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
+import Data.Foldable (toList)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -45,10 +46,11 @@ translateGPU ::
   ImpGPU.Program ->
   ImpOpenCL.Program
 translateGPU target prog =
-  let ( prog',
+  let env = envFromProg prog
+      ( prog',
         ToOpenCL kernels device_funs used_types sizes failures
         ) =
-          (`runState` initialOpenCL) . (`runReaderT` envFromProg prog) $ do
+          (`runState` initialOpenCL) . (`runReaderT` env) $ do
             let ImpGPU.Definitions
                   types
                   (ImpGPU.Constants ps consts)
@@ -78,7 +80,7 @@ translateGPU target prog =
         opencl_prelude
         kernels'
         (S.toList used_types)
-        (cleanSizes sizes)
+        (findParamUsers env prog' (cleanSizes sizes))
         failures
         prog'
   where
@@ -95,6 +97,31 @@ cleanSizes m = M.map clean m
     clean (SizeThreshold path def) =
       SizeThreshold (filter ((`elem` known) . fst) path) def
     clean s = s
+
+findParamUsers ::
+  Env ->
+  Definitions ImpOpenCL.OpenCL ->
+  M.Map Name SizeClass ->
+  ParamMap
+findParamUsers env defs = M.mapWithKey onParam
+  where
+    cg = envCallGraph env
+
+    getSize (ImpOpenCL.GetSize _ v) = Just v
+    getSize (ImpOpenCL.CmpSizeLe _ v _) = Just v
+    getSize (ImpOpenCL.GetSizeMax {}) = Nothing
+    getSize (ImpOpenCL.LaunchKernel {}) = Nothing
+    directUseInFun fun = mapMaybe getSize $ toList $ functionBody fun
+    direct_uses = map (second directUseInFun) $ unFunctions $ defFuns defs
+
+    calledBy fname = M.findWithDefault mempty fname cg
+    indirectUseInFun fname =
+      ( fname,
+        foldMap snd $ filter ((`S.member` calledBy fname) . fst) direct_uses
+      )
+    indirect_uses = direct_uses <> map (indirectUseInFun . fst) direct_uses
+
+    onParam k c = (c, S.fromList $ map fst $ filter ((k `elem`) . snd) indirect_uses)
 
 pointerQuals :: String -> [C.TypeQual]
 pointerQuals "global" = [C.ctyquals|__global|]
@@ -142,7 +169,8 @@ initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
 
 data Env = Env
   { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
-    envFunsMayFail :: S.Set Name
+    envFunsMayFail :: S.Set Name,
+    envCallGraph :: M.Map Name (S.Set Name)
   }
 
 codeMayFail :: (a -> Bool) -> ImpGPU.Code a -> Bool
@@ -172,7 +200,7 @@ funsMayFail cg (Functions funs) =
       any (`elem` base_mayfail) $ fname : S.toList (M.findWithDefault mempty fname cg)
 
 envFromProg :: ImpGPU.Program -> Env
-envFromProg prog = Env funs (funsMayFail cg funs)
+envFromProg prog = Env funs (funsMayFail cg funs) cg
   where
     funs = defFuns prog
     cg = ImpGPU.callGraph calledInHostOp funs

@@ -15,8 +15,8 @@ import Futhark.CodeGen.ImpCode.OpenCL
   ( ErrorMsg (..),
     ErrorMsgPart (..),
     FailureMsg (..),
+    ParamMap,
     PrimType (..),
-    SizeClass (..),
     errorMsgArgTypes,
     sizeDefault,
     untyped,
@@ -31,7 +31,7 @@ errorMsgNumArgs = length . errorMsgArgTypes
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
-openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> [FailureMsg] -> T.Text
+openClInit :: [PrimType] -> String -> ParamMap -> [FailureMsg] -> T.Text
 openClInit types assign sizes failures =
   [text|
 size_heuristics=$size_heuristics
@@ -76,10 +76,10 @@ formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
     onPart (ErrorString s) = formatEscape $ T.unpack s
     onPart ErrorVal {} = "{}"
 
-sizeClassesToPython :: M.Map Name SizeClass -> PyExp
+sizeClassesToPython :: ParamMap -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
   where
-    f (size_name, size_class) =
+    f (size_name, (size_class, _)) =
       ( String $ prettyText size_name,
         Dict
           [ (String "class", String $ prettyText size_class),

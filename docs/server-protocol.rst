@@ -146,10 +146,24 @@ Corresponds to :c:func:`futhark_context_unpause_profiling`.
 
 Corresponds to :c:func:`futhark_context_report`.
 
-``set_tuning_param``
-....................
+``set_tuning_param`` *param* *value*
+....................................
 
 Corresponds to :c:func:`futhark_context_config_set_tuning_param`.
+
+``tuning_params`` *entry*
+.........................
+
+For each tuning parameters relevant to the given entry point, print
+its name, then a space, then its class.
+
+This is similar to on :c:func:`futhark_tuning_params_for_sum`, but
+note that this command prints *names* and not *integers*.
+
+``tuning_param_class`` *param*
+..............................
+
+Corresponds to :c:func:`futhark_get_tuning_param_class`.
 
 Record Commands
 ~~~~~~~~~~~~~~~

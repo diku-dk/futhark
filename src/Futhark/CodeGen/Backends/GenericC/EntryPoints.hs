@@ -133,13 +133,17 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
 entryName :: Name -> T.Text
 entryName = ("entry_" <>) . escapeName . nameToText
 
+tuningParamsName :: Name -> T.Text
+tuningParamsName = ("tuning_params_for_" <>) . escapeName . nameToText
+
 onEntryPoint ::
   [C.BlockItem] ->
+  [Name] ->
   Name ->
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
-onEntryPoint _ _ (Function Nothing _ _ _) = pure Nothing
-onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
+onEntryPoint _ _ _ (Function Nothing _ _ _) = pure Nothing
+onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -148,6 +152,7 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
   decl_mem <- declAllocatedMem
 
   entry_point_function_name <- publicName $ entryName ename
+  tuning_params_name <- publicName $ tuningParamsName ename
 
   (inputs', unpack_entry_inputs) <- prepareEntryInputs $ map snd args
   let (entry_point_input_params, entry_point_input_checks) = unzip inputs'
@@ -163,6 +168,10 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
                                      ($ty:ctx_ty *ctx,
                                       $params:entry_point_output_params,
                                       $params:entry_point_input_params);|]
+
+  headerDecl
+    MiscDecl
+    [C.cedecl|const int* $id:tuning_params_name(void);|]
 
   let checks = catMaybes entry_point_input_checks
       check_input =
@@ -206,11 +215,13 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
          $items:(criticalSection ops critical)
 
          return ret;
-       }|]
+       }
+       |]
 
       manifest =
         Manifest.EntryPoint
           { Manifest.entryPointCFun = entry_point_function_name,
+            Manifest.entryPointTuningParams = map nameToText relevant_params,
             -- Note that our convention about what is "input/output"
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.
