@@ -524,10 +524,10 @@ def main() -> None:
     filetype = args.filetype
     transparent = args.transparent
 
-    root = f'{filename}/graphs'
+    root = f'{filename}-plots'
 
-    if os.path.exists(filename):
-        raise Exception(f'The folder "{filename}" must be removed before the plots can be made.')
+    if os.path.exists(root):
+        raise Exception(f'The folder "{root}" must be removed before the plots can be made.')
 
     if plot_types_used is None:
         plot_types_used = set(ALL_PLOT_TYPES.keys())
