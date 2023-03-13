@@ -185,27 +185,45 @@ unscopeType ::
   PatType ->
   TermTypeM (PatType, [VName])
 unscopeType tloc unscoped t = do
-  (t', m) <- runStateT (onType t) mempty
+  scope <- asks termScope
+  (t', m) <- runStateT (onType scope t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
     -- using StateT (M.Map Exp VName) TermTypeM a
-    onScalar (Record fs) =
-      Record <$> traverse onType fs
-    onScalar (Sum cs) =
-      Sum <$> (traverse . traverse) onType cs
-    onScalar (Arrow as argName d argT (RetType dims retT)) = do
-      retT' <- onType retT
-      dims' <- pure dims -- TODO mess intros
-      flip (Arrow as argName d) (RetType dims' retT') <$> onType argT
-    onScalar ty = pure ty
+    onScalar env (Record fs) =
+      Record <$> traverse (onType env) fs
+    onScalar env (Sum cs) =
+      Sum <$> (traverse . traverse) (onType env) cs
+    onScalar env (Arrow as argName d argT (RetType dims retT)) = do
+      argT' <- onType env argT
+      predBind <- get
+      retT' <- onType env retT
+      newBind <- get
+      let rs = newBind `M.difference` predBind
+      let rl = M.filterWithKey (const . not . (S.disjoint intros) . M.keysSet . unFV . freeInExp . unSizeExpr) rs
+      modify $ flip M.difference rl
+      let dims' = dims <> M.elems rl
+      pure $ Arrow as argName d argT' (RetType dims' retT')
+      where
+        -- to check : completeness of the filter
+        intros = S.filter (flip M.notMember (scopeVtable env)) argset
+        argset =
+          (M.keysSet $ unFV $ freeInType argT)
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+        unSizeExpr (SizeExpr e) = e
+        unSizeExpr _ = error "internal error in unscopeType"
+    onScalar _ ty = pure ty
 
     onType ::
+      TermScope ->
       TypeBase Size as ->
-      StateT (M.Map (ExpBase NoInfo VName) VName) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
-    onType (Array as u shape scalar) =
-      Array as u <$> traverse (onSize) shape <*> onScalar scalar
-    onType (Scalar ty) =
-      Scalar <$> onScalar ty
+      StateT (M.Map Size VName) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
+    onType env (Array as u shape scalar) =
+      Array as u <$> traverse (onSize) shape <*> onScalar env scalar
+    onType env (Scalar ty) =
+      Scalar <$> onScalar env ty
 
     onSize (SizeExpr e) =
       SizeExpr <$> onExp e
@@ -215,7 +233,7 @@ unscopeType tloc unscoped t = do
       if (M.keysSet $ unFV $ freeInExp e) `S.disjoint` (M.keysSet unscoped)
         then pure e
         else do
-          let e' = bareCleanExp e
+          let e' = SizeExpr e
           prev <- gets $ M.lookup e'
           case prev of
             Just vn -> pure $ Var (qualName vn) (Info <$> Scalar $ Prim $ Signed Int64) (srclocOf e)
