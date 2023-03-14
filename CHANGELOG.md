@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Accumulators (produced by AD) had defective code generation for
+  intra-group GPU kernel versions. (#1895)
+
 ## [0.24.1]
 
 ### Added
