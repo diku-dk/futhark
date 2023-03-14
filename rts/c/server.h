@@ -10,6 +10,9 @@ int futhark_context_clear_caches(struct futhark_context *ctx);
 int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
                                             const char *param_name,
                                             size_t new_value);
+int futhark_get_tuning_param_count(void);
+const char* futhark_get_tuning_param_name(int i);
+const char* futhark_get_tuning_param_class(int i);
 
 typedef int (*restore_fn)(const void*, FILE *, struct futhark_context*, void*);
 typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
@@ -154,6 +157,7 @@ typedef int (*entry_point_fn)(struct futhark_context*, void**, void**);
 struct entry_point {
   const char *name;
   entry_point_fn f;
+  const char** tuning_params;
   const struct type **out_types;
   bool *out_unique;
   const struct type **in_types;
@@ -566,6 +570,39 @@ void cmd_set_tuning_param(struct server_state *s, const char *args[]) {
   }
 }
 
+void cmd_tuning_params(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  const char **params = e->tuning_params;
+  for (int i = 0; params[i] != NULL; i++) {
+    printf("%s\n", params[i]);
+  }
+}
+
+void cmd_tuning_param_class(struct server_state *s, const char *args[]) {
+  (void)s;
+  const char *param = get_arg(args, 0);
+
+  int n = futhark_get_tuning_param_count();
+
+  for (int i = 0; i < n; i++) {
+    if (strcmp(futhark_get_tuning_param_name(i), param) == 0) {
+      printf("%s\n", futhark_get_tuning_param_class(i));
+      return;
+    }
+  }
+
+  failure();
+  printf("Unknown tuning parameter: %s\n", param);
+}
+
 void cmd_fields(struct server_state *s, const char *args[]) {
   const char *type = get_arg(args, 0);
   const struct type *t = get_type(s, type);
@@ -784,6 +821,10 @@ void process_line(struct server_state *s, char *line) {
     cmd_report(s, tokens+1);
   } else if (strcmp(command, "set_tuning_param") == 0) {
     cmd_set_tuning_param(s, tokens+1);
+  } else if (strcmp(command, "tuning_params") == 0) {
+    cmd_tuning_params(s, tokens+1);
+  } else if (strcmp(command, "tuning_param_class") == 0) {
+    cmd_tuning_param_class(s, tokens+1);
   } else if (strcmp(command, "fields") == 0) {
     cmd_fields(s, tokens+1);
   } else if (strcmp(command, "new") == 0) {

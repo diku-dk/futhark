@@ -33,7 +33,7 @@ import NeatInterpolation (untrimming)
 -- | Compile the program to C with calls to CUDA.
 compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
-  (ws, Program cuda_code cuda_prelude kernels _ sizes failures prog') <-
+  (ws, Program cuda_code cuda_prelude kernels _ params failures prog') <-
     ImpGen.compileProg prog
   let cost_centres =
         [ copyDevToDev,
@@ -48,12 +48,12 @@ compileProg version prog = do
           cuda_prelude
           cost_centres
           kernels
-          sizes
           failures
   (ws,)
     <$> GC.compileProg
       "cuda"
       version
+      params
       operations
       extra
       cuda_includes
@@ -277,7 +277,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
   args_arr <- newVName "kernel_args"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
-  (args', shared_vars) <- unzip <$> mapM mkArgs args
+  (args', shared_vars) <- mapAndUnzipM mkArgs args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc

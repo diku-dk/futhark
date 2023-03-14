@@ -133,7 +133,7 @@ configuration may *not* be used for multiple concurrent contexts.
    or stale, the program performs initialisation from scratch.  There
    is no machine-readable way to get information about whether the
    cache was hit succesfully, but you can enable logging to see what
-   hapens.
+   happens.
 
    The lifespan of ``fname`` must exceed the lifespan of the
    configuration object.  Pass ``NULL`` to disable caching (this is
@@ -239,7 +239,7 @@ when appropriate.  Memory management is entirely manual.  All values
 that are created with a ``new`` function, or returned from an entry
 point, *must* at some point be freed manually.  Values are internally
 reference counted, so even for entry points that return their input
-unchanged, you should still free both the input and the output - this
+unchanged, you must still free both the input and the output - this
 will not result in a double free.
 
 .. c:struct:: futhark_i32_1d
@@ -281,23 +281,22 @@ will not result in a double free.
 
    Return a pointer to the shape of the array, with one element per
    dimension.  The lifetime of the shape is the same as ``arr``, and
-   should *not* be manually freed.  Assuming ``arr`` is a valid
+   must *not* be manually freed.  Assuming ``arr`` is a valid
    object, this function cannot fail.
 
 .. _opaques:
 
-Opaque values
+Opaque Values
 ~~~~~~~~~~~~~
 
 Each instance of a complex type in an entry point (records, nested
 tuples, etc) is represented by an opaque C struct named
 ``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
-of the internal representation.  However, if you insert explicit type
-annotations in the entry point (and the type name contains only
-characters valid for C identifiers), the indicated name will be used.
-Note that arrays contain brackets, which are usually not valid in
-identifiers.  Defining a simple type abbreviation is the best way
-around this.
+of the internal representation.  However, if you insert an explicit
+type annotations in the entry point (and the type name contains only
+characters valid in C identifiers), that name will be used.  Note that
+arrays contain brackets, which are not valid in identifiers.  Defining
+a type abbreviation is the best way around this.
 
 The API for opaque values is similar to that of arrays, and the same
 rules for memory management apply.  You cannot construct them from
@@ -354,7 +353,7 @@ Records
 ~~~~~~~
 
 A record is an opaque type (see above) that supports additional
-functions to *project* individual fields (read their values) to
+functions to *project* individual fields (read their values) and to
 construct a value given values for the fields.  An opaque type is a
 record if its definition is a record at the Futhark level.
 
@@ -501,7 +500,7 @@ The following API functions are available only when using the
    Use exactly this command queue for the context.  If this is set,
    all other device/platform configuration options are ignored.  Once
    the context is active, the command queue belongs to Futhark and
-   should not be used by anything else.  This is useful for
+   must not be used by anything else.  This is useful for
    implementing custom device selection logic in application code.
 
 .. c:function:: cl_command_queue futhark_context_get_command_queue(struct futhark_context *ctx)

@@ -638,11 +638,11 @@ transformPat (Id v (Info (Scalar (Record fs))) loc) = do
     )
 transformPat (Id v t loc) = pure (Id v t loc, mempty)
 transformPat (TuplePat pats loc) = do
-  (pats', rrs) <- unzip <$> mapM transformPat pats
+  (pats', rrs) <- mapAndUnzipM transformPat pats
   pure (TuplePat pats' loc, mconcat rrs)
 transformPat (RecordPat fields loc) = do
   let (field_names, field_pats) = unzip fields
-  (field_pats', rrs) <- unzip <$> mapM transformPat field_pats
+  (field_pats', rrs) <- mapAndUnzipM transformPat field_pats
   pure (RecordPat (zip field_names field_pats') loc, mconcat rrs)
 transformPat (PatParens pat loc) = do
   (pat', rr) <- transformPat pat
@@ -658,7 +658,7 @@ transformPat (PatAscription pat td loc) = do
   pure (PatAscription pat' td loc, rr)
 transformPat (PatLit e t loc) = pure (PatLit e t loc, mempty)
 transformPat (PatConstr name t all_ps loc) = do
-  (all_ps', rrs) <- unzip <$> mapM transformPat all_ps
+  (all_ps', rrs) <- mapAndUnzipM transformPat all_ps
   pure (PatConstr name t all_ps' loc, mconcat rrs)
 
 wildcard :: PatType -> SrcLoc -> Pat
@@ -738,7 +738,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
-    (params'', rrs) <- unzip <$> mapM transformPat params'
+    (params'', rrs) <- mapAndUnzipM transformPat params'
 
     mapM_ noticeDims $ retType rettype : map patternStructType params''
 

@@ -72,6 +72,7 @@ compileProg version prog = do
       ( GC.compileProg'
           "ispc"
           version
+          mempty
           operations
           (ISPCState mempty mempty)
           ( do
@@ -229,22 +230,21 @@ compileBuiltinFun (fname, func@(Function _ outputs inputs _))
           extra_c = [[C.cparam|struct futhark_context * ctx|]]
           extra_exp = [[C.cexp|$id:p|] | C.Param (Just p) _ _ _ <- extra]
 
-      (inparams_c, in_args_c) <- unzip <$> mapM (compileInputsExtern []) inputs
-      (outparams_c, out_args_c) <- unzip <$> mapM (compileOutputsExtern []) outputs
+      (inparams_c, in_args_c) <- mapAndUnzipM (compileInputsExtern []) inputs
+      (outparams_c, out_args_c) <- mapAndUnzipM (compileOutputsExtern []) outputs
 
-      (inparams_extern, _) <- unzip <$> mapM (compileInputsExtern [C.ctyquals|$tyqual:uniform|]) inputs
-      (outparams_extern, _) <- unzip <$> mapM (compileOutputsExtern [C.ctyquals|$tyqual:uniform|]) outputs
+      (inparams_extern, _) <- mapAndUnzipM (compileInputsExtern [C.ctyquals|$tyqual:uniform|]) inputs
+      (outparams_extern, _) <- mapAndUnzipM (compileOutputsExtern [C.ctyquals|$tyqual:uniform|]) outputs
 
-      (inparams_uni, in_args_noderef) <- unzip <$> mapM compileInputsUniform inputs
-      (outparams_uni, out_args_noderef) <- unzip <$> mapM compileOutputsUniform outputs
+      (inparams_uni, in_args_noderef) <- mapAndUnzipM compileInputsUniform inputs
+      (outparams_uni, out_args_noderef) <- mapAndUnzipM compileOutputsUniform outputs
 
       (inparams_varying, in_args_vary, prebody_in') <- unzip3 <$> mapM compileInputsVarying inputs
       (outparams_varying, out_args_vary, prebody_out', postbody_out') <- unzip4 <$> mapM compileOutputsVarying outputs
       let (prebody_in, prebody_out, postbody_out) = over each concat (prebody_in', prebody_out', postbody_out')
 
       GC.libDecl
-        =<< pure
-          [C.cedecl|int $id:(funName fname <> "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
+        [C.cedecl|int $id:(funName fname <> "_extern")($params:extra_c, $params:outparams_c, $params:inparams_c) {
                   return $id:(funName fname)($args:extra_exp, $args:out_args_c, $args:in_args_c);
                 }|]
 

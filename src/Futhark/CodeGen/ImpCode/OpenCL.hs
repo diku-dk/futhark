@@ -39,7 +39,7 @@ data Program = Program
     -- | So we can detect whether the device is capable.
     openClUsedTypes :: [PrimType],
     -- | Runtime-configurable constants.
-    openClSizes :: M.Map Name SizeClass,
+    openClParams :: ParamMap,
     -- | Assertion failure error messages.
     openClFailures :: [FailureMsg],
     hostDefinitions :: Definitions OpenCL

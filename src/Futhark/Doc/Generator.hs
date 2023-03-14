@@ -627,7 +627,7 @@ synopsisSpec spec = case spec of
     specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
   IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisSigExp e
 
-typeExpHtml :: TypeExp VName -> DocM Html
+typeExpHtml :: TypeExp Info VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
   TEArray d at _ -> do
@@ -709,13 +709,12 @@ dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
 dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
 dimDeclHtml AnySize {} = pure $ brackets mempty
 
-dimExpHtml :: SizeExp VName -> DocM Html
-dimExpHtml SizeExpAny = pure $ brackets mempty
-dimExpHtml (SizeExpNamed v _) = brackets <$> qualNameHtml v
-dimExpHtml (SizeExpConst n _) = pure $ brackets $ toHtml (show n)
+dimExpHtml :: SizeExp Info VName -> DocM Html
+dimExpHtml (SizeExpAny _) = pure $ brackets mempty
+dimExpHtml (SizeExp e _) = pure $ brackets $ toHtml $ prettyString e
 
-typeArgExpHtml :: TypeArgExp VName -> DocM Html
-typeArgExpHtml (TypeArgExpDim d _) = dimExpHtml d
+typeArgExpHtml :: TypeArgExp Info VName -> DocM Html
+typeArgExpHtml (TypeArgExpSize d) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
 typeParamHtml :: TypeParam -> Html

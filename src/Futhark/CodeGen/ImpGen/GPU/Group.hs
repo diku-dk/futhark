@@ -256,7 +256,7 @@ groupCoverSegSpace virt space m = do
           groupLoop iterations $ \i -> do
             dIndexSpace (zip ltids dims') $ sExt64 i
             m
-        Just num_chunks -> do
+        Just num_chunks -> localOps threadOperations $ do
           let ltid = kernelLocalThreadId constants
           sFor "chunk_i" num_chunks $ \chunk_i -> do
             i <- dPrimVE "i" $ chunk_i * sExt32 group_size + ltid
@@ -286,11 +286,13 @@ compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) =
   updateAcc acc is vs
 compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
   flat <- newVName "rep_flat"
-  is <- replicateM (shapeRank ds) (newVName "rep_i")
+  is <- replicateM (arrayRank dest_t) (newVName "rep_i")
   let is' = map le64 is
-  groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ shapeDims ds) $
-    copyDWIMFix (patElemName dest) is' se []
+  groupCoverSegSpace SegVirt (SegSpace flat $ zip is $ arrayDims dest_t) $
+    copyDWIMFix (patElemName dest) is' se (drop (shapeRank ds) is')
   sOp $ Imp.Barrier Imp.FenceLocal
+  where
+    dest_t = patElemType dest
 compileGroupExp (Pat [dest]) (BasicOp (Rotate rs arr)) = do
   ds <- map pe64 . arrayDims <$> lookupType arr
   groupCoverSpace ds $ \is -> do
@@ -682,19 +684,25 @@ data Precomputed = Precomputed
 segOpSizes :: Stms GPUMem -> SegOpSizes
 segOpSizes = onStms
   where
-    onStms = foldMap (onExp . stmExp)
-    onExp (Op (Inner (SegOp op))) =
+    onStms = foldMap onStm
+    onStm (Let _ _ (Op (Inner (SegOp op)))) =
       case segVirt $ segLevel op of
         SegNoVirtFull seq_dims ->
           S.singleton $ map snd $ snd $ partitionSeqDims seq_dims $ segSpace op
         _ -> S.singleton $ map snd $ unSegSpace $ segSpace op
-    onExp (BasicOp (Replicate shape _)) =
-      S.singleton $ shapeDims shape
-    onExp (Match _ cases defbody _) =
+    onStm (Let (Pat [pe]) _ (BasicOp (Replicate {}))) =
+      S.singleton $ arrayDims $ patElemType pe
+    onStm (Let (Pat [pe]) _ (BasicOp (Iota {}))) =
+      S.singleton $ arrayDims $ patElemType pe
+    onStm (Let (Pat [pe]) _ (BasicOp (Copy {}))) =
+      S.singleton $ arrayDims $ patElemType pe
+    onStm (Let (Pat [pe]) _ (BasicOp (Manifest {}))) =
+      S.singleton $ arrayDims $ patElemType pe
+    onStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (onStms . bodyStms . caseBody) cases <> onStms (bodyStms defbody)
-    onExp (DoLoop _ _ body) =
+    onStm (Let _ _ (DoLoop _ _ body)) =
       onStms (bodyStms body)
-    onExp _ = mempty
+    onStm _ = mempty
 
 -- | Precompute various constants and useful information.
 precomputeConstants :: Count GroupSize (Imp.TExp Int64) -> Stms GPUMem -> CallKernelGen Precomputed

@@ -224,7 +224,7 @@ data Size
     -- give rise to an assertion.
     NamedSize (QualName VName)
   | -- | The size is a constant.
-    ConstSize Int
+    ConstSize Int64
   | -- | No known size.  If @Nothing@, then this is a name distinct
     -- from any other.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
@@ -387,49 +387,58 @@ type StructRetType = RetTypeBase Size ()
 -- | The return type version of 'PatType'.
 type PatRetType = RetTypeBase Size Aliasing
 
--- | A size expression for use in a 'TypeExp'.
-data SizeExp vn
-  = -- | The size of the dimension is this name, which
-    -- must be in scope.
-    SizeExpNamed (QualName vn) SrcLoc
-  | -- | The size is a constant.
-    SizeExpConst Int SrcLoc
+-- | A dimension declaration expression for use in a 'TypeExp'.
+-- Syntactically includes the brackets.
+data SizeExp f vn
+  = -- | The size of the dimension is this expression, all of which
+    -- free variables must be in scope.
+    SizeExp (ExpBase f vn) SrcLoc
   | -- | No dimension declaration.
-    SizeExpAny
-  deriving (Show)
+    SizeExpAny SrcLoc
 
-deriving instance Eq (SizeExp Name)
+instance Located (SizeExp f vn) where
+  locOf (SizeExp _ loc) = locOf loc
+  locOf (SizeExpAny loc) = locOf loc
 
-deriving instance Eq (SizeExp VName)
+deriving instance Show (SizeExp Info VName)
 
-deriving instance Ord (SizeExp Name)
+deriving instance Show vn => Show (SizeExp NoInfo vn)
 
-deriving instance Ord (SizeExp VName)
+deriving instance Eq (SizeExp NoInfo VName)
+
+deriving instance Eq (SizeExp Info VName)
+
+deriving instance Ord (SizeExp NoInfo VName)
+
+deriving instance Ord (SizeExp Info VName)
 
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
 -- These are used to construct 'TypeBase's in the type checker.
-data TypeExp vn
+data TypeExp f vn
   = TEVar (QualName vn) SrcLoc
-  | TETuple [TypeExp vn] SrcLoc
-  | TERecord [(Name, TypeExp vn)] SrcLoc
-  | TEArray (SizeExp vn) (TypeExp vn) SrcLoc
-  | TEUnique (TypeExp vn) SrcLoc
-  | TEApply (TypeExp vn) (TypeArgExp vn) SrcLoc
-  | TEArrow (Maybe vn) (TypeExp vn) (TypeExp vn) SrcLoc
-  | TESum [(Name, [TypeExp vn])] SrcLoc
-  | TEDim [vn] (TypeExp vn) SrcLoc
-  deriving (Show)
+  | TETuple [TypeExp f vn] SrcLoc
+  | TERecord [(Name, TypeExp f vn)] SrcLoc
+  | TEArray (SizeExp f vn) (TypeExp f vn) SrcLoc
+  | TEUnique (TypeExp f vn) SrcLoc
+  | TEApply (TypeExp f vn) (TypeArgExp f vn) SrcLoc
+  | TEArrow (Maybe vn) (TypeExp f vn) (TypeExp f vn) SrcLoc
+  | TESum [(Name, [TypeExp f vn])] SrcLoc
+  | TEDim [vn] (TypeExp f vn) SrcLoc
 
-deriving instance Eq (TypeExp Name)
+deriving instance Show (TypeExp Info VName)
 
-deriving instance Eq (TypeExp VName)
+deriving instance Show vn => Show (TypeExp NoInfo vn)
 
-deriving instance Ord (TypeExp Name)
+deriving instance Eq (TypeExp NoInfo VName)
 
-deriving instance Ord (TypeExp VName)
+deriving instance Eq (TypeExp Info VName)
 
-instance Located (TypeExp vn) where
+deriving instance Ord (TypeExp NoInfo VName)
+
+deriving instance Ord (TypeExp Info VName)
+
+instance Located (TypeExp f vn) where
   locOf (TEArray _ _ loc) = locOf loc
   locOf (TETuple _ loc) = locOf loc
   locOf (TERecord _ loc) = locOf loc
@@ -441,21 +450,24 @@ instance Located (TypeExp vn) where
   locOf (TEDim _ _ loc) = locOf loc
 
 -- | A type argument expression passed to a type constructor.
-data TypeArgExp vn
-  = TypeArgExpDim (SizeExp vn) SrcLoc
-  | TypeArgExpType (TypeExp vn)
-  deriving (Show)
+data TypeArgExp f vn
+  = TypeArgExpSize (SizeExp f vn)
+  | TypeArgExpType (TypeExp f vn)
 
-deriving instance Eq (TypeArgExp Name)
+deriving instance Show (TypeArgExp Info VName)
 
-deriving instance Eq (TypeArgExp VName)
+deriving instance Show vn => Show (TypeArgExp NoInfo vn)
 
-deriving instance Ord (TypeArgExp Name)
+deriving instance Eq (TypeArgExp NoInfo VName)
 
-deriving instance Ord (TypeArgExp VName)
+deriving instance Eq (TypeArgExp Info VName)
 
-instance Located (TypeArgExp vn) where
-  locOf (TypeArgExpDim _ loc) = locOf loc
+deriving instance Ord (TypeArgExp NoInfo VName)
+
+deriving instance Ord (TypeArgExp Info VName)
+
+instance Located (TypeArgExp f vn) where
+  locOf (TypeArgExpSize e) = locOf e
   locOf (TypeArgExpType t) = locOf t
 
 -- | Information about which parts of a parameter are consumed.  This
@@ -638,7 +650,7 @@ data AppExpBase f vn
       (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
       SrcLoc
   | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeExp vn) SrcLoc
+    Coerce (ExpBase f vn) (TypeExp f vn) SrcLoc
   | Range
       (ExpBase f vn)
       (Maybe (ExpBase f vn))
@@ -654,7 +666,7 @@ data AppExpBase f vn
       vn
       ( [TypeParamBase vn],
         [PatBase f vn],
-        Maybe (TypeExp vn),
+        Maybe (TypeExp f vn),
         f StructRetType,
         ExpBase f vn
       )
@@ -766,7 +778,7 @@ data ExpBase f vn
   | Lambda
       [PatBase f vn]
       (ExpBase f vn)
-      (Maybe (TypeExp vn))
+      (Maybe (TypeExp f vn))
       (f (Aliasing, StructRetType))
       SrcLoc
   | -- | @+@; first two types are operands, third is result.
@@ -792,7 +804,7 @@ data ExpBase f vn
   | -- | Array indexing as a section: @(.[i,j])@.
     IndexSection (SliceBase f vn) (f PatType) SrcLoc
   | -- | Type ascription: @e : t@.
-    Ascript (ExpBase f vn) (TypeExp vn) SrcLoc
+    Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Show (ExpBase Info VName)
@@ -908,7 +920,7 @@ data PatBase f vn
   | PatParens (PatBase f vn) SrcLoc
   | Id vn (f PatType) SrcLoc
   | Wildcard (f PatType) SrcLoc -- Nothing, i.e. underscore.
-  | PatAscription (PatBase f vn) (TypeExp vn) SrcLoc
+  | PatAscription (PatBase f vn) (TypeExp f vn) SrcLoc
   | PatLit PatLit (f PatType) SrcLoc
   | PatConstr Name (f PatType) [PatBase f vn] SrcLoc
   | PatAttr (AttrInfo vn) (PatBase f vn) SrcLoc
@@ -947,7 +959,7 @@ instance Located DocComment where
 -- maybe also an ascribed type expression.
 data EntryType = EntryType
   { entryType :: StructType,
-    entryAscribed :: Maybe (TypeExp VName)
+    entryAscribed :: Maybe (TypeExp Info VName)
   }
   deriving (Show)
 
@@ -977,7 +989,7 @@ data ValBindBase f vn = ValBind
     -- may refer to abstract types that are no longer in scope.
     valBindEntryPoint :: Maybe (f EntryPoint),
     valBindName :: vn,
-    valBindRetDecl :: Maybe (TypeExp vn),
+    valBindRetDecl :: Maybe (TypeExp f vn),
     -- | If 'valBindParams' is null, then the 'retDims' are brought
     -- into scope at this point.
     valBindRetType :: f StructRetType,
@@ -1001,7 +1013,7 @@ data TypeBindBase f vn = TypeBind
   { typeAlias :: vn,
     typeLiftedness :: Liftedness,
     typeParams :: [TypeParamBase vn],
-    typeExp :: TypeExp vn,
+    typeExp :: TypeExp f vn,
     typeElab :: f StructRetType,
     typeDoc :: Maybe DocComment,
     typeBindLocation :: SrcLoc
@@ -1059,7 +1071,7 @@ data SpecBase f vn
   = ValSpec
       { specName :: vn,
         specTypeParams :: [TypeParamBase vn],
-        specTypeExp :: TypeExp vn,
+        specTypeExp :: TypeExp f vn,
         specType :: f StructType,
         specDoc :: Maybe DocComment,
         specLocation :: SrcLoc
@@ -1086,7 +1098,7 @@ data SigExpBase f vn
   = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
   | SigParens (SigExpBase f vn) SrcLoc
   | SigSpecs [SpecBase f vn] SrcLoc
-  | SigWith (SigExpBase f vn) (TypeRefBase vn) SrcLoc
+  | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
   | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
 
 deriving instance Show (SigExpBase Info VName)
@@ -1094,13 +1106,13 @@ deriving instance Show (SigExpBase Info VName)
 deriving instance Show (SigExpBase NoInfo Name)
 
 -- | A type refinement.
-data TypeRefBase vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeExp vn) SrcLoc
+data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeExp f vn) SrcLoc
 
-deriving instance Show (TypeRefBase VName)
+deriving instance Show (TypeRefBase Info VName)
 
-deriving instance Show (TypeRefBase Name)
+deriving instance Show (TypeRefBase NoInfo Name)
 
-instance Located (TypeRefBase vn) where
+instance Located (TypeRefBase f vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
 
 instance Located (SigExpBase f vn) where

@@ -929,8 +929,6 @@ int backend_context_setup(struct futhark_context* ctx) {
   CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
   // The +1 is to avoid zero-byte allocations.
   CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
-
-  set_tuning_params(ctx);
   return 0;
 }
 

@@ -7,7 +7,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
-import Data.List (partition, sortOn, tails)
+import Data.List (partition, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -17,6 +17,7 @@ import Futhark.MonadFreshNames
 import Futhark.Util (mapAccumLM)
 import Language.Futhark
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
@@ -143,18 +144,11 @@ replaceStaticValSizes globals orig_substs sv =
         loc
     onExp substs e = onAST substs e
 
-    onTypeExpDim substs d@(SizeExpNamed v loc) =
-      case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') ->
-          SizeExpNamed v' loc
-        Just (SubstConst x) ->
-          SizeExpConst x loc
-        Nothing ->
-          d
-    onTypeExpDim _ d = d
+    onTypeExpDim substs (SizeExp e loc) = SizeExp (onExp substs e) loc
+    onTypeExpDim _ (SizeExpAny loc) = SizeExpAny loc
 
-    onTypeArgExp substs (TypeArgExpDim d loc) =
-      TypeArgExpDim (onTypeExpDim substs d) loc
+    onTypeArgExp substs (TypeArgExpSize d) =
+      TypeArgExpSize (onTypeExpDim substs d)
     onTypeArgExp substs (TypeArgExpType te) =
       TypeArgExpType (onTypeExp substs te)
 
@@ -287,7 +281,7 @@ patternArraySizes = arraySizes . patternStructType
 
 data SizeSubst
   = SubstNamed (QualName VName)
-  | SubstConst Int
+  | SubstConst Int64
   deriving (Eq, Ord, Show)
 
 dimMapping ::
@@ -447,10 +441,10 @@ defuncExp (QualParens qn e loc) = do
   (e', sv) <- defuncExp e
   pure (QualParens qn e' loc, sv)
 defuncExp (TupLit es loc) = do
-  (es', svs) <- unzip <$> mapM defuncExp es
+  (es', svs) <- mapAndUnzipM defuncExp es
   pure (TupLit es' loc, RecordSV $ zip tupleFieldNames svs)
 defuncExp (RecordLit fs loc) = do
-  (fs', names_svs) <- unzip <$> mapM defuncField fs
+  (fs', names_svs) <- mapAndUnzipM defuncField fs
   pure (RecordLit fs' loc, RecordSV names_svs)
   where
     defuncField (RecordFieldExplicit vn e loc') = do
@@ -494,7 +488,7 @@ defuncExp e@(Var qn (Info t) loc) = do
     -- Intrinsic functions used as variables are eta-expanded, so we
     -- can get rid of them.
     IntrinsicSV -> do
-      (pats, body, tp) <- etaExpand (typeOf e) e
+      (pats, body, tp) <- etaExpand (RetType [] (typeOf e)) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
     HoleSV _ hole_loc ->
       pure (Hole (Info t) hole_loc, sv)
@@ -625,7 +619,7 @@ defuncExp (Assert e1 e2 desc loc) = do
   (e2', sv) <- defuncExp e2
   pure (Assert e1' e2' desc loc, sv)
 defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
-  (es', svs) <- unzip <$> mapM defuncExp es
+  (es', svs) <- mapAndUnzipM defuncExp es
   let sv =
         SumSV name svs $
           M.toList $
@@ -693,29 +687,34 @@ defuncSoacExp (Lambda params e0 decl tp loc) = do
   pure $ Lambda params e0' decl tp loc
 defuncSoacExp e
   | Scalar Arrow {} <- typeOf e = do
-      (pats, body, tp) <- etaExpand (typeOf e) e
+      (pats, body, tp) <- etaExpand (RetType [] (typeOf e)) e
       let env = foldMap envFromPat pats
       body' <- localEnv env $ defuncExp' body
       pure $ Lambda pats body' Nothing (Info (mempty, tp)) mempty
   | otherwise = defuncExp' e
 
-etaExpand :: PatType -> Exp -> DefM ([Pat], Exp, StructRetType)
+etaExpand :: PatRetType -> Exp -> DefM ([Pat], Exp, StructRetType)
 etaExpand e_t e = do
-  let (ps, ret) = getType $ RetType [] e_t
+  let (ps, ret) = getType e_t
   -- Some careful hackery to avoid duplicate names.
   (_, (pats, vars)) <- second unzip <$> mapAccumLM f [] ps
-  let e' =
-        foldl'
-          ( \e1 (e2, t2, argtypes) ->
-              mkApply e1 [(diet t2, Nothing, e2)] $
-                AppRes (foldFunType argtypes ret) []
-          )
+  -- Important that we synthesize new existential names and substitute
+  -- them into the (body) return type.
+  ext' <- mapM newName $ retDims ret
+  let extsubst =
+        M.fromList . zip (retDims ret) $
+          map (SizeSubst . NamedSize . qualName) ext'
+      ret' = applySubst (`M.lookup` extsubst) ret
+      e' =
+        mkApply
           e
-          $ zip3 vars (map (snd . snd) ps) (drop 1 $ tails $ map snd ps)
+          (zip3 (map (diet . snd . snd) ps) (repeat Nothing) vars)
+          (AppRes (retType ret') ext')
   pure (pats, e', second (const ()) ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
-      let (ps, r) = getType t2 in ((p, (d, t1)) : ps, r)
+      let (ps, r) = getType t2
+       in ((p, (d, t1)) : ps, r)
     getType t = ([], t)
 
     f prev (p, (d, t)) = do
@@ -965,7 +964,7 @@ defuncApply f args appres loc = do
       if null $ fst $ unfoldFunType $ appResType appres
         then pure (e', Dynamic $ appResType appres)
         else do
-          (pats, body, tp) <- etaExpand (typeOf e') e'
+          (pats, body, tp) <- etaExpand (RetType [] (typeOf e')) e'
           defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
@@ -1231,9 +1230,9 @@ svFromType t = Dynamic t
 -- boolean is true if the function is a 'DynamicFun'.
 defuncValBind :: ValBind -> DefM (ValBind, Env)
 -- Eta-expand entry points with a functional return type.
-defuncValBind (ValBind entry name _ (Info (RetType _ rettype)) tparams params body _ attrs loc)
-  | Scalar Arrow {} <- rettype = do
-      (body_pats, body', rettype') <- etaExpand (fromStruct rettype) body
+defuncValBind (ValBind entry name _ (Info rettype) tparams params body _ attrs loc)
+  | Scalar Arrow {} <- retType rettype = do
+      (body_pats, body', rettype') <- etaExpand (second (const mempty) rettype) body
       defuncValBind $
         ValBind
           entry

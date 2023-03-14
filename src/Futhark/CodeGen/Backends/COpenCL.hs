@@ -38,7 +38,7 @@ compileProg version prog = do
       opencl_prelude
       kernels
       types
-      sizes
+      params
       failures
       prog'
     ) <-
@@ -54,6 +54,7 @@ compileProg version prog = do
     <$> GC.compileProg
       "opencl"
       version
+      params
       operations
       ( generateBoilerplate
           opencl_code
@@ -61,7 +62,6 @@ compileProg version prog = do
           cost_centres
           kernels
           types
-          sizes
           failures
       )
       include_opencl_h

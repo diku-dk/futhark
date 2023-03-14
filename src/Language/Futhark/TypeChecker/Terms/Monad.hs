@@ -553,7 +553,7 @@ instantiateTypeScheme ::
   TermTypeM ([VName], PatType)
 instantiateTypeScheme qn loc tparams t = do
   let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- unzip <$> mapM (instantiateTypeParam qn loc) tparams
+  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
   let substs = M.fromList $ zip tnames tparam_substs
       t' = applySubst (`M.lookup` substs) t
   pure (tparam_names, t')
@@ -812,7 +812,9 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-termCheckTypeExp :: TypeExp Name -> TermTypeM (TypeExp VName, [VName], StructRetType)
+termCheckTypeExp ::
+  TypeExp NoInfo Name ->
+  TermTypeM (TypeExp Info VName, [VName], StructRetType)
 termCheckTypeExp te = do
   (te', svars, rettype, _l) <- checkTypeExp te
 
@@ -830,7 +832,7 @@ termCheckTypeExp te = do
     observeDim v =
       observe $ Ident v (Info $ Scalar $ Prim $ Signed Int64) mempty
 
-checkTypeExpNonrigid :: TypeExp Name -> TermTypeM (TypeExp VName, StructType, [VName])
+checkTypeExpNonrigid :: TypeExp NoInfo Name -> TermTypeM (TypeExp Info VName, StructType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
@@ -838,9 +840,9 @@ checkTypeExpNonrigid te = do
   pure (te', st, svars ++ dims)
 
 checkTypeExpRigid ::
-  TypeExp Name ->
+  TypeExp NoInfo Name ->
   RigidSource ->
-  TermTypeM (TypeExp VName, StructType, [VName])
+  TermTypeM (TypeExp Info VName, StructType, [VName])
 checkTypeExpRigid te rsrc = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
