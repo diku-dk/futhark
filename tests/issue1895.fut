@@ -41,7 +41,7 @@ def fun atom_coords : real =
   in f32.sum dists
 
 -- ==
--- random input { [1][32][20][3]f32 }
+-- compiled random input { [1][32][20][3]f32 }
 -- auto output
 entry main coords =
   map (grad fun) (map_3d to_vec3 coords)
