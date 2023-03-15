@@ -242,8 +242,8 @@ bindingPat sizes p t m = do
           Ident v (Info (Scalar $ Prim $ Signed Int64)) loc
     mapM_ (observe . ident) sizes
 
-    let used_sizes = M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType $ patternStructType p'
-    case filter ((`S.notMember` used_sizes) . sizeName) sizes of
+    let used_sizes = unFV $ freeInType $ patternStructType p'
+    case filter ((`M.notMember` used_sizes) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
 

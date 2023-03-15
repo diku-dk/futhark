@@ -64,14 +64,14 @@ freeInExp expr = case expr of
   Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeInExp e
   AppExp (Coerce e _ _) (Info ar) ->
-    freeInExp e <> (freeInType (appResType ar))
+    freeInExp e <> (freeInType $ appResType ar)
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
-      <> ( ((freeInPat pat) <> freeInExp e2)
+      <> ( (freeInPat pat <> freeInExp e2)
              `freeWithout` (patNames pat <> S.fromList (map sizeName let_sizes))
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
-    ( (freeInExp e1 <> (foldMap freeInPat pats))
+    ( (freeInExp e1 <> foldMap freeInPat pats)
         `freeWithout` ( foldMap patNames pats
                           <> S.fromList (map typeParamName tparams)
                       )
@@ -82,7 +82,7 @@ freeInExp expr = case expr of
   Negate e _ -> freeInExp e
   Not e _ -> freeInExp e
   Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
-    ((foldMap freeInPat pats) <> freeInExp e0 <> (freeInType t))
+    (foldMap freeInPat pats <> freeInExp e0 <> freeInType t)
       `freeWithout` (foldMap patNames pats <> S.fromList dims)
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeInExp e
@@ -118,7 +118,7 @@ freeInExp expr = case expr of
   AppExp (Match e cs _) _ -> freeInExp e <> foldMap caseFV cs
     where
       caseFV (CasePat p eCase _) =
-        ((freeInPat p) <> freeInExp eCase)
+        (freeInPat p <> freeInExp eCase)
           `freeWithout` patNames p
 
 freeInDimIndex :: DimIndexBase Info VName -> FV
@@ -152,9 +152,9 @@ freeInType t =
       foldMap (foldMap freeInType) cs
     Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
       FV $
-        M.filterWithKey (\key _ -> notV v key) $
-          M.filterWithKey (\key _ -> key `notElem` dims) $
-            (unFV $ freeInType t1) <> (unFV $ freeInType t2)
+        M.filterWithKey (\k _ -> notV v k && notElem k dims) $
+          unFV $
+            freeInType t1 <> freeInType t2
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
   where

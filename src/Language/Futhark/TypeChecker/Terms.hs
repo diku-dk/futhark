@@ -674,7 +674,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
             | name `S.member` hidden_sizes = S.singleton name
           onDim _ = mempty
 
-      pure $ RetType (S.toList $ foldMap onDim $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType ret) ret
+      pure $ RetType (S.toList $ foldMap onDim $ M.keysSet $ unFV $ freeInType ret) ret
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
   pure $ OpSection op' (Info ftype) loc
@@ -1043,11 +1043,10 @@ causalityCheck binding_body = do
   let checkCausality what known t loc
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
-              S.toList $
-                M.foldrWithKey (\k _ -> S.insert k) S.empty $
-                  unFV $
-                    freeInType $
-                      toStruct t =
+              M.keys $
+                unFV $
+                  freeInType $
+                    toStruct t =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
@@ -1448,7 +1447,7 @@ sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesP
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
-    onParam t = M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t
+    onParam t = M.keysSet $ unFV $ freeInType t
     onTypeArg (TypeArgDim (SizeExpr (Var d _ _)) _) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _ _) = mempty
     onTypeArg (TypeArgType t _) = onParam t
@@ -1537,7 +1536,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInPat p) `S.intersection` forbidden =
+      | d : _ <- S.toList $ (M.keysSet $ unFV $ freeInPat p) `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> dquotes (pretty p)
@@ -1611,13 +1610,13 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (S.toList $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType ret)) ret
+      injectExt (retext ++ mapMaybe mkExt (M.keys $ unFV $ freeInType ret)) ret
     )
   where
     -- Diet does not matter here.
     t = foldFunType (zip (repeat Observe) paramts) $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
-    visible = typeVars t <> (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t)
+    visible = typeVars t <> (M.keysSet $ unFV $ freeInType t)
 
     (produced_sizes, param_sizes) = dimUses t
 
@@ -1691,7 +1690,7 @@ letGeneralise defname defloc tparams params rettype =
 
     let used_sizes =
           foldMap freeInType $ rettype'' : map patternStructType params
-    case filter ((`S.notMember` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV used_sizes)) . typeParamName) $
+    case filter ((`M.notMember` unFV used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
       tp : _ -> unusedSize $ SizeBinder (typeParamName tp) (srclocOf tp)

@@ -554,7 +554,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
     (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
     let elab_t = RetType (svars ++ dims) t
 
-    let used_dims = M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t
+    let used_dims = M.keysSet $ unFV $ freeInType t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
       [] -> pure ()
@@ -647,8 +647,8 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           "Entry point functions may not be higher-order."
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
-        `S.intersection` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType rettype')
-        `S.difference` foldMap (M.foldrWithKey (\k _ -> S.insert k) S.empty . unFV . freeInType) param_ts,
+        `S.intersection` (M.keysSet $ unFV $ freeInType rettype')
+        `S.difference` foldMap (M.keysSet . unFV . freeInType) param_ts,
     not $ S.null sizes_only_in_ret =
       typeError loc mempty $
         withIndexLink

@@ -325,7 +325,7 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
-  (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInPat param)
+  (M.keysSet $ unFV $ freeInPat param)
     <> S.map identName (S.filter couldBeSize $ patIdents param)
   where
     couldBeSize ident =
@@ -751,7 +751,7 @@ defuncLet ::
   DefM ([VName], [Pat], Exp, StaticVal)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
-      let bound_by_pat = (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInPat pat))
+      let bound_by_pat = (`M.member` (unFV $ freeInPat pat))
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPat pat <> envFromDimNames pat_dims
@@ -1026,7 +1026,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (S.toList (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType ret)) ++ ret_dims) ret
+    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
 
     dec =
       ValBind
@@ -1139,7 +1139,7 @@ matchPatSV (Id vn (Info t) _) sv =
     else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
-      M.fromList $ map (,i64) $ S.toList $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t
+      M.map (const i64) $ unFV $ freeInType t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
@@ -1261,7 +1261,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- applications of lifted functions, we don't properly update
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType rettype')) ret_dims
+      ret_dims' = filter (`M.member` (unFV $ freeInType rettype')) ret_dims
   (missing_dims, params'') <- sizesForAll bound_sizes params'
 
   pure

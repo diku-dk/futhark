@@ -610,7 +610,7 @@ desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
 noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . M.foldrWithKey (\k _ -> S.insert k) S.empty . unFV . freeInType
+noticeDims = mapM_ notice . M.keysSet . unFV . freeInType
   where
     notice v = void $ transformFName mempty (qualName v) i64
 

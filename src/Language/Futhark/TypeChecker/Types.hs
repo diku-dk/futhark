@@ -69,9 +69,9 @@ mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet =
         M.unionWith (&&) $
-          M.fromList $
-            zip (S.toList $ M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType ret) $
-              repeat True
+          M.map (const True) $
+            unFV $
+              freeInType ret
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.

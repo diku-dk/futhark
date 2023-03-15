@@ -68,10 +68,6 @@ existentials e =
       m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
    in execState (astMap m e) here
 
-freeSizes :: S.Set VName -> FV
-freeSizes vs =
-  FV $ M.fromList $ zip (S.toList vs) $ repeat $ Scalar $ Prim $ Signed Int64
-
 liftFunction :: VName -> [TypeParam] -> [Pat] -> StructRetType -> Exp -> LiftM Exp
 liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
@@ -87,8 +83,8 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
             sizes_in_free =
               foldMap freeInType $ M.elems $ unFV immediate_free
             sizes =
-              freeSizes $
-                M.foldrWithKey (\k _ -> S.insert k) S.empty $
+              FV $
+                M.map (const (Scalar $ Prim $ Signed Int64)) $
                   unFV $
                     sizes_in_free
                       <> foldMap freeInPat params

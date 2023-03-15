@@ -264,8 +264,7 @@ typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
     . mapM (dimNotes ctx . flip sizeFromName mempty . qualName)
-    . S.toList
-    . M.foldrWithKey (\k _ -> S.insert k) S.empty
+    . M.keys
     . unFV
     . freeInType
 
@@ -637,7 +636,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType t)
+      mapM_ (check constraints) $ typeVars t <> (M.keysSet $ unFV $ freeInType t)
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -707,7 +706,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
 
       arrayElemTypeWith usage (unliftedBcs unlift_usage) tp
-      when (any (`elem` bound) (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp)) $
+      when (any (`elem` bound) (M.keysSet $ unFV $ freeInType tp)) $
         unifyError usage mempty bcs $
           "Type variable"
             <+> prettyName vn
@@ -743,7 +742,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
               let tp' = Scalar $ Record $ required_fields <> tp_fields -- Crucially left-biased.
-                  ext = filter (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp')) bound
+                  ext = filter (`M.member` (unFV $ freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedFields onDims usage bound bcs required_fields' tp_fields
@@ -785,7 +784,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
-                  ext = filter (`S.member` (M.foldrWithKey (\k _ -> S.insert k) S.empty $ unFV $ freeInType tp')) bound
+                  ext = filter (`M.member` (unFV $ freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
