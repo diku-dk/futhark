@@ -99,9 +99,7 @@ structTypeShape shapes = fmap dim . typeShape shapes'
     shapes' =
       M.map
         ( fmap $
-            SizeExpr
-              . flip (flip IntLit (Info <$> Scalar $ Prim $ Signed Int64)) mempty
-              . fromIntegral
+            flip sizeFromInteger mempty . fromIntegral
         )
         shapes
 

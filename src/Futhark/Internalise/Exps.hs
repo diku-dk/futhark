@@ -342,7 +342,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = zip ext $ repeat $ E.SizeSubst $ E.SizeExpr $ IntLit 0 (Info <$> Scalar $ E.Prim $ E.Signed E.Int64) mempty
+      let subst = zip ext $ repeat $ E.SizeSubst $ E.sizeFromInteger 0 mempty
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do

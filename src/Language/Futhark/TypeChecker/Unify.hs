@@ -1175,11 +1175,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
+            Just d -> pure $ sizeFromName (qualName d) loc
             Nothing -> do
               d <- lift $ newDimVar loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
+              pure $ sizeFromName (qualName d) loc
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.

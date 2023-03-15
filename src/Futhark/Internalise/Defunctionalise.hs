@@ -74,7 +74,7 @@ replaceTypeSizes substs = first onDim
     onDim (SizeExpr (Var v typ loc)) =
       case M.lookup (qualLeaf v) substs of
         Just (SubstNamed v') -> SizeExpr (Var v' typ loc)
-        Just (SubstConst d) -> SizeExpr (IntLit (toInteger d) (Info <$> Scalar $ Prim $ Signed Int64) loc)
+        Just (SubstConst d) -> sizeFromInteger (toInteger d) loc
         Nothing -> SizeExpr (Var v typ loc)
     onDim d = d
 
@@ -786,11 +786,11 @@ sizesForAll bound_sizes params = do
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (AnySize (Just v)) = do
       modify $ S.insert v
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
+      pure $ sizeFromName (qualName v) mempty
     onDim (AnySize Nothing) = do
       v <- lift $ newVName "size"
       modify $ S.insert v
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
+      pure $ sizeFromName (qualName v) mempty
     onDim (SizeExpr (Var d typ loc)) = do
       unless (qualLeaf d `S.member` bound) $
         modify $

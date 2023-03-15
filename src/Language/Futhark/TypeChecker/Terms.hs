@@ -87,11 +87,11 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           modify (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
-          lift $ SizeExpr . flip (flip Var (Info <$> Scalar $ Prim $ Signed Int64)) loc . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $ flip sizeFromName loc . qualName <$> newDimVar loc Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
-          pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) mempty
+          pure $ sizeFromName (qualName v) mempty
       where
         -- The original size does not matter if the slice is fully specified.
         orig_d'
@@ -226,22 +226,22 @@ unscopeType tloc unscoped t = do
       Scalar <$> onScalar env ty
 
     onSize (SizeExpr e) =
-      SizeExpr <$> onExp e
+      onExp e
     onSize s = pure s
 
     onExp e =
       if (M.keysSet $ unFV $ freeInExp e) `S.disjoint` (M.keysSet unscoped)
-        then pure e
+        then pure $ SizeExpr e
         else do
           let e' = SizeExpr e
           prev <- gets $ M.lookup e'
           case prev of
-            Just vn -> pure $ Var (qualName vn) (Info <$> Scalar $ Prim $ Signed Int64) (srclocOf e)
+            Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
             Nothing -> do
               -- the Rigid info as to be redo...
               vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) (S.findMin $ M.keysSet unscoped)) "d"
               modify $ M.insert e' vn
-              pure $ Var (qualName vn) (Info <$> Scalar $ Prim $ Signed Int64) (srclocOf e)
+              pure $ sizeFromName (qualName vn) (srclocOf e)
 
     unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
     unAlias a = a
@@ -298,14 +298,14 @@ checkExp (ArrayLit all_es _ loc) =
   case all_es of
     [] -> do
       et <- newTypeVar loc "t"
-      t <- arrayOfM loc et (Shape [SizeExpr $ IntLit 0 (Info <$> Scalar $ Prim $ Signed Int64) mempty]) Nonunique
+      t <- arrayOfM loc et (Shape [sizeFromInteger 0 mempty]) Nonunique
       pure $ ArrayLit [] (Info t) loc
     e : es -> do
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
       et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [SizeExpr $ IntLit (genericLength all_es) (Info <$> Scalar $ Prim $ Signed Int64) mempty]) Nonunique
+      t <- arrayOfM loc et' (Shape [sizeFromInteger (genericLength all_es) mempty]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
@@ -343,7 +343,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             dimFromBound end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
-        pure (SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) mempty, Just d)
+        pure (sizeFromName (qualName d) mempty, Just d)
 
   t <- arrayOfM loc start_t (Shape [dim]) Nonunique
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
@@ -1633,7 +1633,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ SizeExpr $ Var (qualName k) (Info <$> Scalar $ Prim $ Signed Int64) mempty
+          notes <- dimNotes defloc $ sizeFromName (qualName k) mempty
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> dquotes (prettyName k)

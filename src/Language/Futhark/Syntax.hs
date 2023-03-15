@@ -94,6 +94,7 @@ module Language.Futhark.Syntax
     mkApply,
     mkApplyUT,
     sizeFromName,
+    sizeFromInteger,
     bareExp,
     bareCleanExp,
   )
@@ -266,6 +267,9 @@ instance Ord Size where
 
 sizeFromName :: QualName VName -> SrcLoc -> Size
 sizeFromName name loc = SizeExpr $ Var name (Info <$> Scalar $ Prim $ Signed Int64) loc
+
+sizeFromInteger :: Integer -> SrcLoc -> Size
+sizeFromInteger int loc = SizeExpr $ IntLit int (Info <$> Scalar $ Prim $ Signed Int64) loc
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.

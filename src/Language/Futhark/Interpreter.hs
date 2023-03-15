@@ -136,7 +136,7 @@ extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
 valueStructType :: ValueType -> StructType
-valueStructType = first $ \x -> SizeExpr (IntLit (toInteger x) (Info <$> Scalar $ Prim $ Signed Int64) mempty)
+valueStructType = first $ flip sizeFromInteger mempty . toInteger
 
 resolveTypeParams :: [VName] -> StructType -> StructType -> Env
 resolveTypeParams names = match
@@ -558,7 +558,7 @@ evalType env t@(Array _ u shape _) =
     evalDim (SizeExpr (Var qn _ loc))
       | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
           lookupVar qn env =
-          SizeExpr (IntLit (toInteger x) (Info <$> Scalar $ Prim $ Signed Int64) loc)
+          sizeFromInteger (toInteger x) loc
     evalDim d = d
 evalType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType tn env of

@@ -33,15 +33,6 @@ freeWithout (FV x) y = FV $ M.filterWithKey keep x
 ident :: IdentBase Info VName -> FV
 ident v = FV $ M.singleton (identName v) (toStruct $ unInfo (identType v))
 
-{-
-size :: VName -> FV
-size v = FV $ M.singleton v $ Scalar $ Prim $ Signed Int64
-
--- | A 'FV' with these names, considered to be sizes.
-sizes :: S.Set VName -> FV
-sizes = foldMap size
--}
-
 -- | Compute the set of free variables of an expression.
 freeInExp :: ExpBase Info VName -> FV
 freeInExp expr = case expr of

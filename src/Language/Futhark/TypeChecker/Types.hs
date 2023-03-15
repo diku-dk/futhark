@@ -234,7 +234,7 @@ renameRetType (RetType dims st)
             M.fromList $
               zip dims $
                 map
-                  (SizeSubst . (\qn -> SizeExpr $ Var qn (Info <$> Scalar $ Prim $ Signed Int64) mempty) . qualName)
+                  (SizeSubst . flip sizeFromName mempty . qualName)
                   dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
@@ -321,7 +321,7 @@ evalTypeExp (TEArray d t loc) = do
   where
     checkSizeExp (SizeExpAny dloc) = do
       dv <- newTypeName "d"
-      pure ([dv], SizeExpAny dloc, SizeExpr $ Var (qualName dv) (Info <$> Scalar $ Prim $ Signed Int64) dloc)
+      pure ([dv], SizeExpAny dloc, sizeFromName (qualName dv) dloc)
     checkSizeExp (SizeExp e dloc) = do
       (e', sz) <- checkExpForSize e
       pure ([], SizeExp e' dloc, sz)
@@ -460,7 +460,7 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          SizeSubst $ SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc
+          SizeSubst $ sizeFromName (qualName d) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -609,7 +609,7 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) ploc) ploc
+  TypeArgDim (sizeFromName (qualName v) ploc) ploc
 typeParamToArg (TypeParamType _ v ploc) =
   TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
 
@@ -755,7 +755,7 @@ substTypesRet lookupSubst ot =
                 M.fromList $
                   zip ext $
                     map
-                      (SizeSubst . \n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Signed Int64) mempty)
+                      (SizeSubst . flip sizeFromName mempty . qualName)
                       ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'

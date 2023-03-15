@@ -483,7 +483,7 @@ typeOf (StringLit vs loc) =
   Array
     mempty
     Nonunique
-    (Shape [SizeExpr $ IntLit (genericLength vs) (Info <$> Scalar $ Prim $ Signed Int64) loc])
+    (Shape [sizeFromInteger (genericLength vs) loc])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t

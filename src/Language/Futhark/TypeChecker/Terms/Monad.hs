@@ -579,7 +579,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, SizeSubst $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) loc)
+      pure (v, SizeSubst $ sizeFromName (qualName v) loc)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -742,12 +742,12 @@ extSize loc e = do
       d <- newDimVar loc (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
-        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc,
+        ( sizeFromName (qualName d) loc,
           Just d
         )
     Just d ->
       pure
-        ( SizeExpr $ Var (qualName d) (Info <$> Scalar $ Prim $ Signed Int64) loc,
+        ( sizeFromName (qualName d) loc,
           Just d
         )
 
@@ -774,7 +774,7 @@ newArrayType loc desc r = do
   dims <- replicateM r $ newDimVar loc Nonrigid "dim"
   let rowt = TypeVar () Nonunique (qualName v) []
   pure
-    ( Array () Nonunique (Shape $ map (\n -> SizeExpr $ Var (qualName n) (Info <$> Scalar $ Prim $ Signed Int64) loc) dims) rowt,
+    ( Array () Nonunique (Shape $ map (flip sizeFromName loc . qualName) dims) rowt,
       Scalar rowt
     )
 
@@ -791,7 +791,7 @@ allDimsFreshInType loc r desc t =
     onDim d = do
       v <- lift $ newDimVar loc r desc
       modify $ M.insert v d
-      pure $ SizeExpr $ Var (qualName v) (Info <$> Scalar $ Prim $ Signed Int64) loc
+      pure $ sizeFromName (qualName v) loc
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e
@@ -870,7 +870,7 @@ maybeDimFromExp :: Exp -> Maybe Size
 maybeDimFromExp (Var v typ loc) = Just $ SizeExpr $ Var v typ loc
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = SizeExpr . flip (flip IntLit (Info <$> Scalar $ Prim $ Signed Int64)) mempty . fromIntegral <$> isInt64 e
+maybeDimFromExp e = flip sizeFromInteger mempty . fromIntegral <$> isInt64 e
 
 dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
 dimFromExp rf (Attr _ e _) = dimFromExp rf e
