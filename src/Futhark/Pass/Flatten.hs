@@ -32,7 +32,7 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
-import Prelude hiding (rem)
+import Prelude hiding (div, rem)
 
 data FlattenEnv = FlattenEnv
 
@@ -112,6 +112,9 @@ type Segments = NE.NonEmpty SubExp
 
 segmentsShape :: Segments -> Shape
 segmentsShape = Shape . toList
+
+segmentsDims :: Segments -> [SubExp]
+segmentsDims = shapeDims . segmentsShape
 
 segMap :: Traversable f => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
 segMap segments f = do
@@ -194,13 +197,13 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
 
 -- | Only sensible for variables of segment-invariant type.
 elemArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
-elemArr _ env inps (Var v)
+elemArr segments env inps (Var v)
   | Just v_inp <- lookup v inps =
-      pure $ case v_inp of
-        DistInputFree ns _ -> ns
+      case v_inp of
+        DistInputFree vs _ -> irregularElems <$> mkIrregFromReg segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r -> irregularElems r
-          Regular vs -> vs
+          Irregular r -> pure $ irregularElems r
+          Regular vs -> irregularElems <$> mkIrregFromReg segments vs
 elemArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   dims <- arrayDims <$> lookupType rep
@@ -401,11 +404,22 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       transformScalarStm segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
 
-repPerSegment :: SubExp -> VName -> [VName] -> Builder GPU [VName]
-repPerSegment w segments_per_elem vs =
-  letTupExp "replicated" <=< segMap (Solo w) $ \(Solo i) -> do
-    segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-    subExpsRes <$> mapM (letSubExp "v" <=< flip eIndex [eSubExp segment]) vs
+-- Replicates inner dimension.
+repPerSegment :: Segments -> DistEnv -> DistInputs -> SubExp -> VName -> VName -> Builder GPU VName
+repPerSegment segments env inps w segments_per_elem v
+  | Just v_inp <- lookup v inps =
+      case v_inp of
+        DistInputFree v' _ -> do
+          letExp (baseString v <> "_rep_free_reg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
+            segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
+            subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
+        DistInput rt _ -> case resVar rt env of
+          Irregular r ->
+            letExp (baseString v <> "_rep_free_irreg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
+              segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
+              subExpsRes . pure <$> (letSubExp "v" =<< eIndex v [eSubExp segment])
+  | otherwise =
+      letExp (baseString v <> "_rep_free") $ BasicOp $ Replicate (Shape [w]) (Var v)
 
 transformMap ::
   Segments ->
@@ -423,8 +437,7 @@ transformMap segments env inps pat w arrs map_lam = do
   new_segment <- arraySize 0 <$> lookupType ws_elems
   let free_in_map = namesToList $ freeIn map_lam
   replicated <-
-    repPerSegment new_segment ws_elems
-      =<< mapM (elemArr segments env inps . Var) free_in_map
+    mapM (repPerSegment segments env inps new_segment ws_elems) free_in_map
   free_ps <-
     mapM (newParam "free_p" . rowType <=< lookupType) replicated
   scope <- askScope
@@ -435,6 +448,7 @@ transformMap segments env inps pat w arrs map_lam = do
           }
       distributed = distributeMap scope pat new_segment (arrs' <> replicated) map_lam'
       m = transformDistributed (NE.singleton new_segment) distributed
+  traceM $ unlines ["inner map", prettyString distributed]
   addStms =<< runReaderT (runBuilder_ m) scope
   pure (ws_flags, ws_offsets, ws)
 
