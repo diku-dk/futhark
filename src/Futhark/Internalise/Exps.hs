@@ -23,6 +23,7 @@ import Futhark.Transform.Rename as I
 import Futhark.Util (splitAt3)
 import Futhark.Util.Pretty (align, docText, pretty)
 import Language.Futhark as E hiding (TypeArg)
+import Language.Futhark.TypeChecker.Types qualified as E
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -331,15 +332,19 @@ internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
             ++ dt'
             ++ ["`."]
     ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
-internaliseAppExp desc _ e@E.Apply {} =
+internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
   case findFuncall e of
-    (FunctionHole t loc, _args) -> do
+    (FunctionHole loc, _args) -> do
       -- The function we are supposed to call doesn't exist, but we
       -- have to synthesize some fake values of the right type.  The
       -- easy way to do this is to just ignore the arguments and
       -- create a hole whose type is the type of the entire
-      -- application.
-      internaliseExp desc (E.Hole (Info (fromStruct $ snd $ E.unfoldFunType t)) loc)
+      -- application.  One caveat is that we need to replace any
+      -- existential sizes, too (with zeroes, because they don't
+      -- matter).
+      let subst = zip ext $ repeat $ E.SizeSubst $ E.ConstSize 0
+          et' = E.applySubst (`lookup` subst) et
+      internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
@@ -1439,15 +1444,15 @@ simpleCmpOp desc op x y =
 
 data Function
   = FunctionName (E.QualName VName)
-  | FunctionHole E.PatType SrcLoc
+  | FunctionHole SrcLoc
   deriving (Show)
 
 findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
 findFuncall (E.Apply f args _)
   | E.Var fname _ _ <- f =
       (FunctionName fname, map onArg $ NE.toList args)
-  | E.Hole (Info t) loc <- f =
-      (FunctionHole t loc, map onArg $ NE.toList args)
+  | E.Hole (Info _) loc <- f =
+      (FunctionHole loc, map onArg $ NE.toList args)
   where
     onArg (Info (_, argext), e) = (e, argext)
 findFuncall e =
@@ -2142,7 +2147,7 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [this_one])
           (resultBodyM [next_one])
 
-typeExpForError :: E.TypeExp VName -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
   pure [ErrorString $ prettyText qn]
 typeExpForError (E.TEUnique te _) =
@@ -2152,10 +2157,8 @@ typeExpForError (E.TEDim dims te _) =
   where
     dims' = mconcat (map onDim dims)
     onDim d = "[" <> prettyText d <> "]"
-typeExpForError (E.TEArray d te _) = do
-  d' <- dimExpForError d
-  te' <- typeExpForError te
-  pure $ ["[", d', "]"] ++ te'
+typeExpForError (E.TEArray d te _) =
+  (<>) <$> sizeExpForError d <*> typeExpForError te
 typeExpForError (E.TETuple tes _) = do
   tes' <- mapM typeExpForError tes
   pure $ ["("] ++ intercalate [", "] tes' ++ [")"]
@@ -2173,7 +2176,7 @@ typeExpForError (E.TEApply t arg _) = do
   t' <- typeExpForError t
   arg' <- case arg of
     TypeArgExpType argt -> typeExpForError argt
-    TypeArgExpDim d _ -> pure <$> dimExpForError d
+    TypeArgExpSize d -> sizeExpForError d
   pure $ t' ++ [" "] ++ arg'
 typeExpForError (E.TESum cs _) = do
   cs' <- mapM (onClause . snd) cs
@@ -2183,16 +2186,11 @@ typeExpForError (E.TESum cs _) = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
 
-dimExpForError :: E.SizeExp VName -> InternaliseM (ErrorMsgPart SubExp)
-dimExpForError (SizeExpNamed d _) = do
-  substs <- lookupSubst $ E.qualLeaf d
-  d' <- case substs of
-    Just [v] -> pure v
-    _ -> pure $ I.Var $ E.qualLeaf d
-  pure $ ErrorVal int64 d'
-dimExpForError (SizeExpConst d _) =
-  pure $ ErrorString $ prettyText d
-dimExpForError SizeExpAny = pure ""
+sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
+sizeExpForError (SizeExp e _) = do
+  e' <- internaliseExp1 "size" e
+  pure ["[", ErrorVal int64 e', "]"]
+sizeExpForError SizeExpAny {} = pure ["[]"]
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

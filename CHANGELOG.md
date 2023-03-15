@@ -5,11 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.24.0]
+## [0.25.0]
 
 ### Added
 
 ### Removed
+
+### Changed
+
+### Fixed
+
+* Accumulators (produced by AD) had defective code generation for
+  intra-group GPU kernel versions. (#1895)
+
+## [0.24.1]
+
+### Added
+
+* The manifest file now lists which tuning parameters are relevant for
+  each entry point. (#1884)
+
+* A command `tuning_params` has been added to the server protocol.
 
 ### Changed
 
@@ -23,6 +39,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Corner case optimisation for mapping over `iota` (#1874).
 
 * AD for certain combinations of `map` and indexing (#1878).
+
+* Barrier divergence in generated code in some exotic cases (#1883).
+
+* Handling of higher-order holes (#1885).
 
 ## [0.23.1]
 

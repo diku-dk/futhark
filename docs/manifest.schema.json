@@ -13,15 +13,21 @@
                 "type": "object",
                 "properties": {
                     "cfun": {"type": "string"},
+                    "tuning_params": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
                     "outputs": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {"type": "string"},
-                                "unique": {"type": "boolean"},
-                                "additionalProperties": false
-                            }
+                                "unique": {"type": "boolean"}
+                            },
+                            "additionalProperties": false
                         }
                     },
                     "inputs": {
@@ -31,9 +37,9 @@
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},
-                                "unique": {"type": "boolean"},
-                                "additionalProperties": false
-                            }
+                                "unique": {"type": "boolean"}
+                            },
+                            "additionalProperties": false
                         }
                     }
                 }

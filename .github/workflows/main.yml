@@ -14,7 +14,7 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v20
 
     - uses: cachix/cachix-action@v12
       with:
@@ -145,7 +145,7 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v20
 
     - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -266,7 +266,7 @@ jobs:
         sudo apt-get install -y python3-jsonschema
 
     - name: Install Nix
-      uses: cachix/install-nix-action@v18
+      uses: cachix/install-nix-action@v20
 
     - uses: actions/download-artifact@v3
       with:
@@ -284,27 +284,30 @@ jobs:
         nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
   test-python:
-    runs-on: hendrix
+    runs-on: ubuntu-22.04
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
+
     steps:
     - uses: actions/checkout@v3
 
-    - run: |
-        module load python/3.9.9
-        pip install numpy
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-numpy
 
-    - uses: ./.github/actions/futhark-slurm
+    - uses: actions/download-artifact@v3
       with:
-        script: |
-          futhark test tests \
-            -c \
-            --no-tuning \
-            --backend=python \
-            --exclude=no_python \
-            --exclude=compiled
-          make -C tests_lib/python -j
-        slurm-options: --cpus-per-task=2
+        name: futhark-nightly-linux-x86_64.tar.xz
+
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - run: |
+        futhark test -c --no-terminal --no-tuning --backend=python --exclude=no_python --exclude=compiled tests
+        make -C tests_lib/python -j
 
   test-oclgrind:
     runs-on: ubuntu-22.04
