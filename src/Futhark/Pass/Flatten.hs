@@ -17,7 +17,7 @@ import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Tuple.Solo
 import Debug.Trace
 import Futhark.IR.GPU
@@ -404,22 +404,43 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       transformScalarStm segments env inps [res] $
         Let (Pat [pe]) aux (BasicOp e)
 
--- Replicates inner dimension.
-repPerSegment :: Segments -> DistEnv -> DistInputs -> SubExp -> VName -> VName -> Builder GPU VName
-repPerSegment segments env inps w segments_per_elem v
-  | Just v_inp <- lookup v inps =
+-- Replicates inner dimension for inputs.
+onMapFreeVar :: Segments -> DistEnv -> DistInputs -> SubExp -> VName -> VName -> Maybe (Builder GPU (VName, VName))
+onMapFreeVar segments env inps w segments_per_elem v = do
+  v_inp <- lookup v inps
+  pure . fmap (v,) $ case v_inp of
+    DistInputFree v' _ -> do
+      letExp (baseString v <> "_rep_free_reg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
+        segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
+        subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
+    DistInput rt _ -> case resVar rt env of
+      Irregular r ->
+        letExp (baseString v <> "_rep_free_irreg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
+          segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
+          subExpsRes . pure <$> (letSubExp "v" =<< eIndex v [eSubExp segment])
+
+onMapInputArr ::
+  Segments ->
+  DistEnv ->
+  DistInputs ->
+  SubExp ->
+  VName ->
+  Builder GPU VName
+onMapInputArr segments env inps w arr =
+  case lookup arr inps of
+    Just v_inp ->
       case v_inp of
-        DistInputFree v' _ -> do
-          letExp (baseString v <> "_rep_free_reg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
-            segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-            subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
-        DistInput rt _ -> case resVar rt env of
-          Irregular r ->
-            letExp (baseString v <> "_rep_free_irreg_inp") <=< segMap (Solo w) $ \(Solo i) -> do
-              segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-              subExpsRes . pure <$> (letSubExp "v" =<< eIndex v [eSubExp segment])
-  | otherwise =
-      letExp (baseString v <> "_rep_free") $ BasicOp $ Replicate (Shape [w]) (Var v)
+        DistInputFree vs _ ->
+          letExp (baseString vs <> "_flat") . BasicOp $
+            Reshape ReshapeArbitrary (Shape [w]) vs
+        DistInput rt _ -> undefined
+    Nothing -> do
+      arr_row_t <- rowType <$> lookupType arr
+      arr_rep <-
+        letExp (baseString arr <> "_inp_rep") . BasicOp $
+          Replicate (segmentsShape segments) (Var arr)
+      letExp (baseString arr <> "_inp_rep_flat") . BasicOp $
+        Reshape ReshapeArbitrary (Shape [w] <> arrayShape arr_row_t) arr_rep
 
 transformMap ::
   Segments ->
@@ -431,17 +452,18 @@ transformMap ::
   Lambda SOACS ->
   Builder GPU (VName, VName, VName)
 transformMap segments env inps pat w arrs map_lam = do
-  arrs' <- mapM (elemArr segments env inps . Var) arrs
   ws <- elemArr segments env inps w
   (ws_flags, ws_offsets, ws_elems) <- doRepIota ws
   new_segment <- arraySize 0 <$> lookupType ws_elems
-  let free_in_map = namesToList $ freeIn map_lam
-  replicated <-
-    mapM (repPerSegment segments env inps new_segment ws_elems) free_in_map
+  arrs' <- mapM (onMapInputArr segments env inps new_segment) arrs
+  (free_replicated, replicated) <-
+    fmap unzip . sequence $
+      mapMaybe (onMapFreeVar segments env inps new_segment ws_elems) $
+        namesToList (freeIn map_lam)
   free_ps <-
     mapM (newParam "free_p" . rowType <=< lookupType) replicated
   scope <- askScope
-  let substs = M.fromList $ zip free_in_map $ map paramName free_ps
+  let substs = M.fromList $ zip free_replicated $ map paramName free_ps
       map_lam' =
         (substituteNames substs map_lam)
           { lambdaParams = lambdaParams map_lam <> free_ps
