@@ -26,7 +26,7 @@ newtype ResTag = ResTag Int
 -- | Something that is mapped.
 data DistInput
   = -- | A value bound outside the original map nest.  By necessity
-    -- regular.
+    -- regular.  The type is the parameter type.
     DistInputFree VName Type
   | -- | A value constructed inside the original map nest.  May be
     -- irregular.
