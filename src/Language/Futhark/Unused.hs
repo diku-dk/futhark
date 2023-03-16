@@ -1,4 +1,4 @@
-module Language.Futhark.Unused (findUnused2, partDefFuncs, getBody, getDecs) where
+module Language.Futhark.Unused (findUnused, partDefFuncs, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.List.NonEmpty qualified as NE
@@ -41,15 +41,16 @@ isFuncDec :: DecBase f vn -> Bool
 isFuncDec (ValDec _) = True
 isFuncDec _ = False
 
-getDecs :: ProgBase Info VName -> [DecBase Info VName]
-getDecs (Prog _ decs) = decs
+getDecs :: FileModule -> [DecBase Info VName]
+getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 
-findUnused2 :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
-findUnused2 fp fml = do
+findUnused :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
+findUnused fp fml = do
   let nfp = map (normalise . dropExtension) fp
       (af,bf) = partDefFuncs nfp fml
-      uf = S.unions $ map snd $ M.toList $ tClosure (traceShowId bf) af
+      mps = M.map S.singleton $ M.unions $ map modMap $ concatMap (getDecs . snd) fml
+      uf = S.unions $ map snd $ M.toList $ tClosure (traceShowId bf) (af `M.union` mps)
       imf = M.fromList $ map (BI.second importFuncs) $ filter (\(p,_) -> p `notElem` nfp) fml
   M.map (filter (\(vn,_) -> vn `notElem` uf)) imf
 
@@ -80,14 +81,16 @@ defFuncs :: FileModule -> [(VName,S.Set VName)]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDefNew $ filter isFuncDec decs
 
-
-
 isModDec :: DecBase f vn -> Bool
 isModDec (ModDec _) = True
 isModDec _ = False
 
-getMaps :: DecBase f vn -> [M.Map VName VName]
+modMap :: DecBase Info VName -> M.Map VName VName
+modMap x = M.unions $ getMaps x
+
+getMaps :: DecBase Info VName -> [M.Map VName VName]
 getMaps (ModDec (ModBind {modExp = me})) = getMaps' me
+getMaps _ = []
 
 getMaps' :: ModExpBase Info VName -> [M.Map VName VName]
 getMaps' (ModParens me _) = getMaps' me
