@@ -843,25 +843,43 @@ linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
 
   case dim of
-    SizeExpr (Var dim' _ _)
-      | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
-        dim_lvl > lvl ->
+    SizeExpr e ->
+      let vars = M.keys $ unFV $ freeInExp e
+       in void $ mapM (checkVar e constraints) vars
+    _ -> pure ()
+
+  modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
+  where
+    checkVar e constraints dim'
+      | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
+        dim_lvl > lvl =
           case c of
             ParamSize {} -> do
               notes <- dimNotes usage dim
               unifyError usage notes bcs $
                 "Cannot unify size variable"
-                  <+> dquotes (pretty dim')
+                  <+> dquotes (pretty e)
                   <+> "with"
                   <+> dquotes (prettyName vn)
                   <+> "(scope violation)."
                   </> "This is because"
-                  <+> dquotes (pretty dim')
+                  <+> dquotes (pretty $ qualName dim')
                   <+> "is rigidly bound in a deeper scope."
-            _ -> modifyConstraints $ M.insert (qualLeaf dim') (lvl, c)
-    _ -> pure ()
-
-  modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
+            _ -> modifyConstraints $ M.insert dim' (lvl, c)
+    checkVar e _ dim'
+      | vn == dim' = do
+          notes <- dimNotes usage dim
+          unifyError usage notes bcs $
+            "Cannot unify size variable"
+              <+> dquotes (pretty e)
+              <+> "with"
+              <+> dquotes (prettyName vn)
+              </> "This is because"
+              <+> dquotes (pretty e)
+              <+> "depend of"
+              <+> dquotes (pretty $ qualName dim')
+              <+> "."
+    checkVar _ _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.
 mustBeOneOf :: MonadUnify m => [PrimType] -> Usage -> StructType -> m ()
