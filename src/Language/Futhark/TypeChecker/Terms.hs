@@ -206,7 +206,7 @@ unscopeType tloc unscoped t = do
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
         -- to check : completeness of the filter
-        intros = S.filter (`M.notMember` (scopeVtable env)) argset
+        intros = S.filter (`M.notMember` scopeVtable env) argset
         argset =
           M.keysSet (unFV $ freeInType argT)
             <> case argName of
