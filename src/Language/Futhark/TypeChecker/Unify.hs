@@ -870,15 +870,10 @@ linkVarToDim usage bcs vn lvl dim = do
       | vn == dim' = do
           notes <- dimNotes usage dim
           unifyError usage notes bcs $
-            "Cannot unify size variable"
-              <+> dquotes (pretty e)
-              <+> "with"
+            "Occurs check: cannot instantiate"
               <+> dquotes (prettyName vn)
-              </> "This is because"
-              <+> dquotes (pretty e)
-              <+> "depend of"
-              <+> dquotes (pretty $ qualName dim')
-              <+> "."
+              <+> "with"
+              <+> dquotes (pretty e) <+> "."
     checkVar _ _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.
