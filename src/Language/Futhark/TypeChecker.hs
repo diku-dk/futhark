@@ -647,7 +647,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           "Entry point functions may not be higher-order."
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
-        `S.intersection` (M.keysSet $ unFV $ freeInType rettype')
+        `S.intersection` M.keysSet (unFV $ freeInType rettype')
         `S.difference` foldMap (M.keysSet . unFV . freeInType) param_ts,
     not $ S.null sizes_only_in_ret =
       typeError loc mempty $

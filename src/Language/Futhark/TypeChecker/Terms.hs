@@ -200,15 +200,15 @@ unscopeType tloc unscoped t = do
       retT' <- onType env retT
       newBind <- get
       let rs = newBind `M.difference` predBind
-      let rl = M.filterWithKey (const . not . (S.disjoint intros) . M.keysSet . unFV . freeInExp . unSizeExpr) rs
+      let rl = M.filterWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) rs
       modify $ flip M.difference rl
       let dims' = dims <> M.elems rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
         -- to check : completeness of the filter
-        intros = S.filter (flip M.notMember (scopeVtable env)) argset
+        intros = S.filter (`M.notMember` (scopeVtable env)) argset
         argset =
-          (M.keysSet $ unFV $ freeInType argT)
+          M.keysSet (unFV $ freeInType argT)
             <> case argName of
               Unnamed -> mempty
               Named vn -> S.singleton vn
@@ -221,7 +221,7 @@ unscopeType tloc unscoped t = do
       TypeBase Size as ->
       StateT (M.Map Size VName) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
     onType env (Array as u shape scalar) =
-      Array as u <$> traverse (onSize) shape <*> onScalar env scalar
+      Array as u <$> traverse onSize shape <*> onScalar env scalar
     onType env (Scalar ty) =
       Scalar <$> onScalar env ty
 
@@ -230,7 +230,7 @@ unscopeType tloc unscoped t = do
     onSize s = pure s
 
     onExp e =
-      if (M.keysSet $ unFV $ freeInExp e) `S.disjoint` (M.keysSet unscoped)
+      if M.keysSet (unFV $ freeInExp e) `S.disjoint` M.keysSet unscoped
         then pure $ SizeExpr e
         else do
           let e' = SizeExpr e
@@ -1030,8 +1030,7 @@ checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
   e' <- checkExp e
   let t = toStruct $ typeOf e'
   expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
-  e'' <- updateTypes e'
-  pure e''
+  updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1536,7 +1535,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ (M.keysSet $ unFV $ freeInPat p) `S.intersection` forbidden =
+      | d : _ <- S.toList $ M.keysSet (unFV $ freeInPat p) `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> dquotes (pretty p)
@@ -1616,7 +1615,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     -- Diet does not matter here.
     t = foldFunType (zip (repeat Observe) paramts) $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
-    visible = typeVars t <> (M.keysSet $ unFV $ freeInType t)
+    visible = typeVars t <> M.keysSet (unFV $ freeInType t)
 
     (produced_sizes, param_sizes) = dimUses t
 

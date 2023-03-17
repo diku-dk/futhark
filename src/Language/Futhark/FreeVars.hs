@@ -49,13 +49,13 @@ freeInExp expr = case expr of
       freeInExpField (RecordFieldExplicit _ e _) = freeInExp e
       freeInExpField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
   ArrayLit es t _ ->
-    foldMap freeInExp es <> (freeInType $ unInfo t)
+    foldMap freeInExp es <> freeInType (unInfo t)
   AppExp (Range e me incl _) _ ->
     freeInExp e <> foldMap freeInExp me <> foldMap freeInExp incl
   Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeInExp e
   AppExp (Coerce e _ _) (Info ar) ->
-    freeInExp e <> (freeInType $ appResType ar)
+    freeInExp e <> freeInType (appResType ar)
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
       <> ( (freeInPat pat <> freeInExp e2)

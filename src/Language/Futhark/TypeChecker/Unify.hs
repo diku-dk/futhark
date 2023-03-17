@@ -636,7 +636,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> (M.keysSet $ unFV $ freeInType t)
+      mapM_ (check constraints) $ typeVars t <> M.keysSet (unFV $ freeInType t)
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -845,7 +845,7 @@ linkVarToDim usage bcs vn lvl dim = do
   case dim of
     SizeExpr e ->
       let vars = M.keys $ unFV $ freeInExp e
-       in void $ mapM (checkVar e constraints) vars
+       in mapM_ (checkVar e constraints) vars
     _ -> pure ()
 
   modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
@@ -873,7 +873,8 @@ linkVarToDim usage bcs vn lvl dim = do
             "Occurs check: cannot instantiate"
               <+> dquotes (prettyName vn)
               <+> "with"
-              <+> dquotes (pretty e) <+> "."
+              <+> dquotes (pretty e)
+              <+> "."
     checkVar _ _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.

@@ -234,7 +234,7 @@ data Size
     AnySize (Maybe VName)
   deriving (Show)
 
-expSizeEq :: (ExpBase NoInfo VName) -> (ExpBase NoInfo VName) -> Bool
+expSizeEq :: ExpBase NoInfo VName -> ExpBase NoInfo VName -> Bool
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int8Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int16Value v2)) _) = v1 == toInteger v2
 expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int32Value v2)) _) = v1 == toInteger v2

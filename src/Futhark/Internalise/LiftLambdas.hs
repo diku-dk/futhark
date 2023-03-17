@@ -94,7 +94,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
         foldMap freeInType (ret : map snd free ++ map patternStructType params)
-      isSize (v, _) = v `M.member` (unFV sizes_in_types)
+      isSize (v, _) = v `M.member` unFV sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
       free_params =

@@ -325,7 +325,7 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
-  (M.keysSet $ unFV $ freeInPat param)
+  M.keysSet (unFV $ freeInPat param)
     <> S.map identName (S.filter couldBeSize $ patIdents param)
   where
     couldBeSize ident =

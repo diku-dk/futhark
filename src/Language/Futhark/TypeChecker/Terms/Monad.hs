@@ -627,8 +627,7 @@ instance MonadTypeChecker TermTypeM where
     e' <- checker e
     let t = toStruct $ typeOf e'
     expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
-    e'' <- updateTypes e'
-    pure e''
+    updateTypes e'
 
   warn loc problem = liftTypeM $ warn loc problem
   newName = liftTypeM . newName
