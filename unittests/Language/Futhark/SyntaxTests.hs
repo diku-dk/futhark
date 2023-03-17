@@ -115,8 +115,8 @@ pSize :: Parser Size
 pSize =
   brackets $
     choice
-      [ ConstSize <$> lexeme L.decimal,
-        NamedSize <$> pQualName
+      [ flip sizeFromInteger mempty <$> lexeme L.decimal,
+        flip sizeFromName mempty <$> pQualName
       ]
 
 pScalarNonFun :: Parser (ScalarTypeBase Size ())
