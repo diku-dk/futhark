@@ -135,11 +135,12 @@ entryName = ("entry_" <>) . escapeName . nameToText
 
 onEntryPoint ::
   [C.BlockItem] ->
+  [Name] ->
   Name ->
   Function op ->
   CompilerM op s (Maybe (C.Definition, (T.Text, Manifest.EntryPoint)))
-onEntryPoint _ _ (Function Nothing _ _ _) = pure Nothing
-onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
+onEntryPoint _ _ _ (Function Nothing _ _ _) = pure Nothing
+onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename results args)) outputs inputs _) = inNewFunction $ do
   let out_args = map (\p -> [C.cexp|&$id:(paramName p)|]) outputs
       in_args = map (\p -> [C.cexp|$id:(paramName p)|]) inputs
 
@@ -206,11 +207,13 @@ onEntryPoint get_consts fname (Function (Just (EntryPoint ename results args)) o
          $items:(criticalSection ops critical)
 
          return ret;
-       }|]
+       }
+       |]
 
       manifest =
         Manifest.EntryPoint
           { Manifest.entryPointCFun = entry_point_function_name,
+            Manifest.entryPointTuningParams = map nameToText relevant_params,
             -- Note that our convention about what is "input/output"
             -- and what is "results/args" is different between the
             -- manifest and ImpCode.

@@ -72,6 +72,7 @@ compileProg version prog = do
       ( GC.compileProg'
           "ispc"
           version
+          mempty
           operations
           (ISPCState mempty mempty)
           ( do

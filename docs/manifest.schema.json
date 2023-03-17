@@ -13,6 +13,12 @@
                 "type": "object",
                 "properties": {
                     "cfun": {"type": "string"},
+                    "tuning_params": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
                     "outputs": {
                         "type": "array",
                         "items": {
