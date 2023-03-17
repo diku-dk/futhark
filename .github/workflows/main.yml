@@ -345,6 +345,7 @@ jobs:
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
+          set -e
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache
@@ -368,6 +369,7 @@ jobs:
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
+          set -e
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
         slurm-options: -p gpu --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
@@ -388,6 +390,7 @@ jobs:
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
+          set -e
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
