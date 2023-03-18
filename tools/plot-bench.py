@@ -14,12 +14,11 @@ import textwrap
 import re
 import time
 import random
-import bisect
 import string
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Set, List, Tuple, NamedTuple
+from typing import Any, Dict, Optional, List, Tuple, NamedTuple
 from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
@@ -32,6 +31,7 @@ class PlotJob(NamedTuple):
     program: str
     dataset: str
     benchmark_result: Dict[str, Any]
+    plots: Dict[str, str]
 
 
 def mpe(runtimes: np.ndarray = None, **kwargs) -> str:
@@ -43,12 +43,7 @@ def mpe(runtimes: np.ndarray = None, **kwargs) -> str:
 def memory_usage(bytes: Dict[str, int]  = None, **kwargs) -> str:
     '''Computes the memory usages of devices and formats for printing.'''
     
-    gib = 1_073_741_824
-
-    def display_memory_usage(device, bytes):
-        return f'{bytes / gib:.2e}GiB@{device}'
-    
-    return ','.join([display_memory_usage(*a) for a in bytes.items()])
+    return ','.join([f'{format_bytes(bs)}@{device}' for device, bs in bytes.items()])
 
 
 def confidence_interval(runtimes: np.ndarray = None, **kwargs) -> str:
@@ -73,6 +68,25 @@ def random_string(size: int) -> str:
     return ''.join(random.choice(letters) for _ in range(size))
 
 
+def format_bytes(x: int) -> str:
+    '''Tries to find a suitable unit for input x given in bytes.'''
+    
+    units = [
+        ('TiB', 1 / (1024**4)),
+        ('GiB', 1 / (1024**3)),
+        ('MiB', 1 / (1024**2)),
+        ('KiB', 1 / 1024),
+        ('bytes', 1),
+    ]
+
+    for unit, factor in units:
+        temp = factor * x
+        if temp > 1:
+            return f'{temp:.2f}{unit}'
+
+    return f'{x * units[-1][1]:.2f}{units[-1][0]}'
+
+
 def format_time(x: int) -> str:
     '''Tries to find a suitable time unit for input x.'''
     
@@ -89,7 +103,7 @@ def format_time(x: int) -> str:
         if temp > 1:
             return f'{temp:.2f}{unit}'
 
-    return f'{x * units[0][1]:.2}{units[0][0]}'
+    return f'{x * units[-1][1]:.2f}{units[-1][0]}'
 
 
 class PlotType(ABC):
@@ -129,7 +143,7 @@ class PlotType(ABC):
             if factor * z.max() > 1:
                 return unit, factor
         
-        return units[0][0], units[0][1]
+        return units[-1][0], units[-1][1]
 
 
 class PerRun(PlotType):
@@ -245,7 +259,7 @@ class Plotter:
             transparent: bool = False) -> None:
         self.dpi = dpi
         self.plot_types = list(sorted(plot_types))
-        self.fig, self.ax = plt.subplots(1, len(plot_types), figsize=(6.4 * len(plot_types), 5.8))
+        self.fig, self.ax = plt.subplots(figsize=(6.4, 5.8))
         self.transparent = transparent
         self.backends = {
             '.png' : 'AGG',
@@ -264,37 +278,38 @@ class Plotter:
         that will be passed to the plotter function.
         '''
 
-        for dest, datapoint in data.items():
-            for i, plotter in enumerate(self.plot_types):
-                plotter.plot(self.ax[i], **datapoint.benchmark_result)
-            
-            program = datapoint.program
-            dataset = datapoint.dataset
+        for datapoint in data.values():
+            plots = datapoint.plots
+            for plotter in self.plot_types:
+                plotter.plot(self.ax, **datapoint.benchmark_result)
 
-            self.fig.suptitle(textwrap.shorten(fr'{program}: {dataset}',  50))
-            self.fig.tight_layout()
-            # For some reason a syntax error may occour but the savefig function
-            # will for some reason work afterwards.
-            for _ in range(10):
-                try:
-                    ext = pathlib.Path(dest).suffix
-                    self.fig.savefig(
-                        dest,
-                        bbox_inches='tight',
-                        dpi=self.dpi,
-                        backend=self.backends[ext],
-                        transparent=self.transparent
-                    )
-                    print(f'Done creating: {dest}')
-                    break
-                except SyntaxError:
-                    time.sleep(1)
-            else:
-                print((f'Figure "{dest}" did not get saved this is most likely an internal ' 
-                        'error. try specifying the specific program with --program.'))
-            
-            for sub_ax in self.ax:
-                sub_ax.cla()
+                program = datapoint.program
+                dataset = datapoint.dataset
+                dest = plots[plotter.name()]
+                
+
+                self.fig.suptitle(textwrap.shorten(fr'{program}: {dataset}',  50))
+                self.fig.tight_layout()
+                # For some reason a syntax error may occour but the savefig function
+                # will for some reason work afterwards.
+                for _ in range(10):
+                    try:
+                        ext = pathlib.Path(dest).suffix
+                        self.fig.savefig(
+                            dest,
+                            bbox_inches='tight',
+                            dpi=self.dpi,
+                            backend=self.backends[ext],
+                            transparent=self.transparent
+                        )
+                        print(f'Done creating: {dest}')
+                        break
+                    except SyntaxError:
+                        time.sleep(1)
+                else:
+                    print((f'Figure "{dest}" did not get saved this is most likely an internal ' 
+                            'error. try specifying the specific program with --program.'))
+                self.ax.cla()
         plt.close(self.fig)
 
 
@@ -337,9 +352,10 @@ def format_arg_list(args: Optional[str]) -> Optional[str]:
 
 
 def make_plot_jobs_and_directories(
-    programs: Set[str],
+    programs: List[str],
     data: Dict[str, Dict[str, Dict[str, Any]]],
     file_type: str,
+    plot_types: List[str],
     root: str = 'graphs') -> Tuple[Dict[str, PlotJob], Dict[str, List[str]]]:
     '''Makes dictionary with plot jobs where plot_jobs are the jobs.'''
     
@@ -360,11 +376,10 @@ def make_plot_jobs_and_directories(
             dataset_name = pathlib.Path(dataset_path).name
             dataset_name_striped = remove_characters([' ', '#', '"', '/'], dataset_path)
             raw_filename = f"{program_name}_{dataset_name_striped.replace('.in', '')}"
-            dataset_filename = textwrap.shorten(raw_filename, 100).replace(' ', '_')
-            plot_file_name = f'{dataset_filename}_{random_string(16)}.{file_type}'
+            dataset_filename = raw_filename[:100].replace(' ', '_')
             directory = os.path.join(root, program_directory, pathlib.Path(program_path).name)
             directory = '.' if directory == '' else directory
-            plot_file = os.path.join(directory, plot_file_name)
+            plot_file_name = os.path.join(directory, f'{dataset_filename}_{random_string(16)}')
             benchmark_result = dataset_dict.copy()
             benchmark_result['runtimes'] = np.array(benchmark_result.get('runtimes'))
 
@@ -373,13 +388,14 @@ def make_plot_jobs_and_directories(
             if folder_content.get(directory) is None:
                 folder_content[directory] = []
 
-            folder_content[directory].insert(0, plot_file)
+            folder_content[directory].insert(0, plot_file_name)
 
-            plot_jobs[plot_file] = PlotJob(
+            plot_jobs[plot_file_name] = PlotJob(
                 program_path,
                 program_name,
                 dataset_name,
-                benchmark_result
+                benchmark_result,
+                {plot_type: f'{plot_file_name}_{plot_type}.{file_type}' for plot_type in plot_types}
             )
 
     return plot_jobs, folder_content
@@ -448,9 +464,10 @@ def make_html(folder_content: Dict[str, List[str]], plot_jobs: Dict[str, PlotJob
         program = plot_job.program
         key = plot_jobs_keys[plot_file]
         descriptors = make_html_descriptors(plot_job)
-        plot = f'<img src=\'{plot_file}\'/>'
+        to_img = lambda plot: f'<img src=\'{plot}\'/>'
+        plots = ''.join(map(to_img, plot_job.plots.values()))
         header = rf'<h3><a href=#{key}>{program}: {dataset}</a></h3>'
-        return rf'<section id={key}>{header}{plot}{descriptors}</section>'
+        return rf'<section id={key}>{header}{plots}{descriptors}</section>'
 
     def make_section(folder: str, dataset_plot_files: List[str]) -> str:
         '''
@@ -463,12 +480,13 @@ def make_html(folder_content: Dict[str, List[str]], plot_jobs: Dict[str, PlotJob
         header = rf'<h2><a href=#{folder_key}>{pretty_folder}</a></h2>'
         return rf'<section id={folder_key}>{header}{subsections}</section>'
 
+    width = 100 // len(next(iter(plot_jobs.values())).plots)
     lis = make_list(root)
     sections = ''.join(map(lambda a: make_section(*a), sorted(folder_content.items())))
     return f'''<head>
     <style type="text/css">
         img {{
-            width: 100%
+            width: {width}%
         }}
         body {{
             font-family: sans-serif;
@@ -530,12 +548,27 @@ def main() -> None:
         raise Exception(f'The folder "{root}" must be removed before the plots can be made.')
 
     if plot_types_used is None:
-        plot_types_used = set(ALL_PLOT_TYPES.keys())
+        plot_types_used = list(sorted(ALL_PLOT_TYPES.keys()))
+    else:
+        plot_types_used = list(sorted(plot_types_used))
+        existing_plot_types = list(ALL_PLOT_TYPES.keys())
+        for plot_type in plot_types_used:
+            if plot_type not in existing_plot_types:
+                existing_plot_types = ", ".join(existing_plot_types)
+                raise Exception(f'"{plot_type}" is not a plot type try {existing_plot_types}')
 
     if programs is None:
         programs = set(data.keys())
+    else:
+        programs = set(programs)
+        keys = set(data.keys())
+        if not programs.issubset(keys):
+            diff = ', '.join(programs.difference(keys))
+            raise Exception(f'"{diff}" are not valid keys.')
 
-    plot_jobs, folder_content = make_plot_jobs_and_directories(programs, data, filetype, root=root)
+    plot_jobs, folder_content = make_plot_jobs_and_directories(
+        programs, data, filetype, plot_types_used, root=root
+    )
 
     with open(f'{filename}.html', 'w') as fp:
         fp.write(make_html(folder_content, plot_jobs, root))
