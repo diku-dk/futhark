@@ -156,8 +156,18 @@ jobs:
           dist-newstyle
         key: ${{ runner.os }}-${{ hashFiles('nix/sources.json') }}-style
 
-    - name: Style check
+    - name: Haskell style check
       run: nix-shell --pure --run "make check"
+
+    - name: Install Black
+      run: |
+        sudo apt install python3.10
+        python3.10 -m pip install black
+    
+    - name: Python 3 style check
+      run: black --check .
+        
+
 
   # Fails mysteriously right now.
   #
