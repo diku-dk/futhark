@@ -168,10 +168,10 @@ jobs:
     
     - name: Python 3 style check
       uses: psf/black@stable
-        with:
-          options: "--line-length=79 --check --verbose"
-          src: "."
-          version: "~= 22.0"
+      with:
+        options: "--line-length=79 --check --verbose"
+        src: "."
+        version: "~= 23.0"
 
 
   # Fails mysteriously right now.
