@@ -165,10 +165,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-
-    - run: pwd
     
     - name: Python 3 style check
+      run: cd ..
       uses: psf/black@stable
       with:
         options: "--line-length=79 --check --verbose"
