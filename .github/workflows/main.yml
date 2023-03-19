@@ -165,7 +165,7 @@ jobs:
         python3.10 -m pip install black
     
     - name: Python 3 style check
-      run: black --check .
+      run: black --line-length=79 --check .
         
 
 
