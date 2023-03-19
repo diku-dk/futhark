@@ -165,16 +165,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-
-    - name: Install Black
-      run: |
-        sudo apt install python3.10
-        python3.10 -m pip install black
     
     - name: Python 3 style check
-      run: |
-        find . -name *.py
-        python3.10 -m black --line-length=79 --check .
+      uses: psf/black@stable
+        with:
+          options: "--line-length=79 --check --verbose"
+          src: "."
+          version: "~= 22.0"
 
 
   # Fails mysteriously right now.
