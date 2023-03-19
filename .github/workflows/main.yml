@@ -173,7 +173,7 @@ jobs:
     
     - uses: psf/black@stable
       with:
-        options: "--include='\.pyi?$' --line-length=79 --check"
+        options: "--exclude='benchmark-performance-plot.py' --line-length=79 --check"
         src: "../futhark"
         version: "~= 23.0"
 
