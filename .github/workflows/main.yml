@@ -171,9 +171,11 @@ jobs:
         sudo apt install python3.10
         python3.10 -m pip install black
     
-    - name: Python 3 style check
-      run: |
-        black --line-length=79 --check ./
+    - uses: psf/black@stable
+      with:
+        options: "--include='\.pyi?$' --line-length=79 --check"
+        src: "../futhark"
+        version: "~= 23.0"
 
 
   # Fails mysteriously right now.
