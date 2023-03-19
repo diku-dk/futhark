@@ -170,7 +170,7 @@ jobs:
       uses: cachix/install-nix-action@v20
     
     - name: Style check
-      run: nix-shell --pure --run "pwd && black --check ."
+      run: nix-shell --pure --run "black --check ../futhark/"
 
   # Fails mysteriously right now.
   #
