@@ -165,11 +165,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-
-    - name: Install Black
-      run: |
-        sudo apt install python3.10
-        python3.10 -m pip install black
     
     - uses: psf/black@stable
       with:
