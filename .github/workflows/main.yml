@@ -165,13 +165,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    
-    - uses: psf/black@stable
-      with:
-        options: "--exclude='benchmark-performance-plot.py' --line-length=79 --check"
-        src: "../futhark"
-        version: "~= 23.0"
 
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
+    
+    - name: Style check
+      run: nix-shell --pure --run "black --check ."
 
   # Fails mysteriously right now.
   #
