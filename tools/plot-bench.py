@@ -636,7 +636,7 @@ def main() -> None:
     programs = format_arg_list(args.programs)
 
     plots_used = format_arg_list(args.plots)
-    
+
     if plots_used is None:
         PLOT_TYPES_USED = list(sorted(ALL_PLOT_TYPES.keys()))
     else:
@@ -651,7 +651,7 @@ def main() -> None:
                         f"{existing_plot_types}"
                     )
                 )
-        
+
     filetype = args.filetype
     TRANSPARENT = args.transparent
 
