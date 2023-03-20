@@ -19,18 +19,18 @@ if __name__ == "__main__":
 
     r = png.Reader(infile)
     (width, height, img, _) = r.read()
-    image_2d = np.vstack(map(np.uint32, img))
+    image_2d = np.vstack(list(map(np.uint32, img)))
     image_3d = np.reshape(image_2d, (height, width, 3))
-    array = np.empty((height, width), dtype=np.uint32)
+    array = np.empty((height, width), dtype=np.int32)
     array = array | (image_3d[:, :, 0] << 16)
     array = array | (image_3d[:, :, 1] << 8)
     array = array | (image_3d[:, :, 2])
 
     with open(outfile, "wb") as f:
         f.write(b"b")
-        f.write(np.int8(2))
-        f.write(np.int8(2))
+        f.write(np.int8(2))  # type: ignore
+        f.write(np.int8(2))  # type: ignore
         f.write(b" i32")
-        f.write(np.uint64(height))
-        f.write(np.uint64(width))
+        f.write(np.uint64(height))  # type: ignore
+        f.write(np.uint64(width))  # type: ignore
         array.tofile(f)

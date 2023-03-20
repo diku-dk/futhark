@@ -171,6 +171,9 @@ jobs:
     
     - name: Style check
       run: nix-shell --pure --run "black --check ."
+    
+    - name: Type check
+      run: nix-shell --pure --run "mypy ."
 
   # Fails mysteriously right now.
   #

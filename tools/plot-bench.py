@@ -2,7 +2,7 @@
 
 import sys
 import argparse
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import matplotlib
 import numpy as np
 import json
@@ -16,12 +16,12 @@ import string
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List, Tuple, NamedTuple
+from typing import Any, Dict, Optional, List, Tuple, NamedTuple, Set, Iterator
 from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
 
-assert sys.version_infoz >= (3, 9), "Use Python 3.9 or newer."
+assert sys.version_info >= (3, 9), "Use Python 3.9 or newer."
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
@@ -33,24 +33,36 @@ class PlotJob(NamedTuple):
     plots: Dict[str, str]
 
 
-def mpe(runtimes: np.ndarray = None, **kwargs) -> str:
+def mpe(runtimes: Optional[np.ndarray[Any, Any]] = None, **kwargs) -> str:
     """Computes the Mean percentage error and formats for printing."""
+
+    if runtimes is None:
+        raise Exception(f"runtimes has to be not None.")
+
     factor = 100 / runtimes.shape[0]
     mpe = factor * ((runtimes - runtimes.mean()) / runtimes).sum()
     return f"{mpe:.2e}%"
 
 
-def memory_usage(bytes: Dict[str, int] = None, **kwargs) -> str:
+def memory_usage(bytes: Optional[Dict[str, int]] = None, **kwargs) -> str:
     """Computes the memory usages of devices and formats for printing."""
 
-    def formatter(device, bs):
+    if bytes is None:
+        raise Exception(f"bytes has to be not None.")
+
+    def formatter(device: str, bs: int) -> str:
         return f"{format_bytes(bs)}@{device}"
 
-    return ",".join(map(lambda a: formatter(*a)), bytes.items())
+    return ", ".join(map(lambda a: formatter(*a), bytes.items()))
 
 
-def confidence_interval(runtimes: np.ndarray = None, **kwargs) -> str:
+def confidence_interval(
+    runtimes: Optional[np.ndarray[Any, Any]] = None, **kwargs
+) -> str:
     """Computes the 95% confidence interval and formats for printing."""
+
+    if runtimes is None:
+        raise Exception(f"runtimes has to be not None.")
 
     mean = runtimes.mean()
     bound = 0.95 * runtimes.std(ddof=1) / np.sqrt(runtimes.shape[0])
@@ -147,6 +159,9 @@ class PlotType(ABC):
                 return unit, factor
 
         return units[-1][0], units[-1][1]
+
+
+PLOT_TYPES_USED: List[str]
 
 
 class PerRun(PlotType):
@@ -376,12 +391,12 @@ def get_args() -> Any:
     return parser.parse_args()
 
 
-def format_arg_list(args: Optional[str]) -> Optional[str]:
+def format_arg_list(args: Optional[str]) -> Set[str]:
     """
     Takes a string of form 'a, b, c, d' and makes a list ['a', 'b', 'c', 'd']
     """
     if args is None:
-        return None
+        raise Exception("args can not be None.")
 
     return set(map(lambda arg: arg.strip(), args.split(",")))
 
@@ -396,15 +411,23 @@ def make_plot_jobs_and_directories(
     """Makes dictionary with plot jobs where plot_jobs are the jobs."""
 
     plot_jobs = dict()
-    folder_content = dict()
+    folder_content: Dict[str, List[str]] = dict()
 
-    def remove_characters(characters, text):
+    def remove_characters(characters: List[str], text: str) -> str:
         rep = {re.escape(k): "" for k in characters}
         pattern = re.compile("|".join(rep.keys()))
         return pattern.sub(lambda m: rep[re.escape(m.group(0))], text)
 
     for program_path in programs:
-        datasets = data.get(program_path).get("datasets")
+        temp = data.get(program_path)
+        if temp is None:
+            raise Exception(f"{program_path} is not valid key.")
+
+        datasets = temp.get("datasets")
+
+        if datasets is None:
+            raise Exception(f"{program_path} does not have a dataset key.")
+
         program_name = pathlib.Path(program_path).name
         program_directory = os.path.dirname(program_path)
         for dataset_path, dataset_dict in datasets.items():
@@ -510,10 +533,13 @@ def make_html(
 
         return rf"<li>{pretty_path}</li><ul>{before}{lis}</ul>"
 
-    def make_subsection(plot_file: str, plot_job: PlotJob) -> str:
+    def make_subsection(plot_file: str, plot_job: Optional[PlotJob]) -> str:
         """
         Makes a subsection with plots and statistical descriptors.
         """
+        if plot_job is None:
+            raise Exception(f"A given PlotJob was None.")
+
         dataset = plot_job.dataset
         program = plot_job.program
         key = plot_jobs_keys[plot_file]
@@ -530,8 +556,7 @@ def make_html(
         Makes a section with all the plots and descriptors for a given
         benchmark's datasets.
         """
-        get = plot_jobs.get
-        sub_data = map(lambda a: (a, get(a)), dataset_plot_files)
+        sub_data = map(lambda a: (a, plot_jobs.get(a)), dataset_plot_files)
         subsections = "".join(map(lambda a: make_subsection(*a), sub_data))
         pretty_folder = folder.removeprefix(root_prefix)
         folder_key = folder_keys[folder]
@@ -575,18 +600,24 @@ def make_html(
 def task(plot_jobs: Dict[str, PlotJob]) -> None:
     """Begins plotting, it is used"""
     global plots
+    global PLOT_TYPES_USED
+    global TRANSPARENT
+
     plot_types = [
-        plot_type()
+        plot_type()  # type: ignore
         for key, plot_type in ALL_PLOT_TYPES.items()
-        if key in plot_types_used
+        if key in PLOT_TYPES_USED
     ]
-    plotter = Plotter(plot_types, dpi=200, transparent=transparent)
+    plotter = Plotter(plot_types, dpi=200, transparent=TRANSPARENT)
     plotter.plot(plot_jobs)
 
 
+TRANSPARENT: bool
+
+
 def main() -> None:
-    global plot_types_used
-    global transparent
+    global PLOT_TYPES_USED
+    global TRANSPARENT
     plt.rcParams.update(
         {
             "ytick.color": "black",
@@ -603,9 +634,16 @@ def main() -> None:
     filename = pathlib.Path(args.filename).stem
     data = json.load(open(args.filename, "r"))
     programs = format_arg_list(args.programs)
-    plot_types_used = format_arg_list(args.plots)
+
+    if programs is None:
+        raise Exception(f"{args.programs} is not a valid program list.")
+
+    PLOT_TYPES_USED = list(format_arg_list(args.plots))
+    if PLOT_TYPES_USED is None:
+        raise Exception(f"{args.plots} is not a valid program list.")
+
     filetype = args.filetype
-    transparent = args.transparent
+    TRANSPARENT = args.transparent
 
     root = f"{filename}-plots"
 
@@ -617,14 +655,14 @@ def main() -> None:
             )
         )
 
-    if plot_types_used is None:
-        plot_types_used = list(sorted(ALL_PLOT_TYPES.keys()))
+    if PLOT_TYPES_USED is None:
+        PLOT_TYPES_USED = list(sorted(ALL_PLOT_TYPES.keys()))
     else:
-        plot_types_used = list(sorted(plot_types_used))
-        existing_plot_types = list(ALL_PLOT_TYPES.keys())
-        for plot_type in plot_types_used:
-            if plot_type not in existing_plot_types:
-                existing_plot_types = ", ".join(existing_plot_types)
+        PLOT_TYPES_USED = list(sorted(PLOT_TYPES_USED))
+        temp = list(ALL_PLOT_TYPES.keys())
+        for plot_type in PLOT_TYPES_USED:
+            if plot_type not in temp:
+                existing_plot_types = ", ".join(temp)
                 raise Exception(
                     (
                         '"{plot_type}" is not a plot type try '
@@ -642,7 +680,7 @@ def main() -> None:
             raise Exception(f'"{diff}" are not valid keys.')
 
     plot_jobs, folder_content = make_plot_jobs_and_directories(
-        programs, data, filetype, plot_types_used, root=root
+        list(programs), data, filetype, PLOT_TYPES_USED, root=root
     )
 
     with open(f"{filename}.html", "w") as fp:

@@ -91,7 +91,7 @@ if __name__ == "__main__":
     infile = sys.argv[1]
     outfile = sys.argv[2]
 
-    with open(infile, "rb") as f:
+    with open(infile, "wrb") as f:
         width, height, img = read_image(f)
 
         with open(outfile, "wb") as f:

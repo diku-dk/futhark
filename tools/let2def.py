@@ -13,8 +13,8 @@ prog = sys.argv[1]
 out = check_output(["futhark", "defs", prog]).decode("utf-8")
 
 funlocs = set()
-for line in out.split("\n"):
-    m = re.match("value [^ ]+ ([^:]+):([0-9]+):([0-9]+)", line)
+for row in out.split("\n"):
+    m = re.match("value [^ ]+ ([^:]+):([0-9]+):([0-9]+)", row)
     if m and m[1] == prog:
         funlocs.add((int(m[2]), int(m[3])))
 
