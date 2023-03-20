@@ -62,10 +62,10 @@ def reverse [n] 't (x: [n]t): [n]t = x[::-1]
 -- **Work:** O(n).
 --
 -- **Span:** O(1).
-def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys :> [n+m]t
+def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys
 
 -- | An old-fashioned way of saying `++`.
-def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys :> [n+m]t
+def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys
 
 -- | Concatenation where the result has a predetermined size.  If the
 -- provided size is wrong, the function will fail with a run-time
@@ -124,7 +124,7 @@ def copy 't (a: t): *t =
 --
 -- **Complexity:** O(1).
 def flatten [n][m] 't (xs: [n][m]t): [n*m]t =
-  intrinsics.flatten xs :> [n*m]t
+  intrinsics.flatten xs
 
 -- | Like `flatten`@term, but where the final size is known.  Fails at
 -- runtime if the provided size is wrong.
