@@ -186,18 +186,18 @@ unscopeType ::
   TermTypeM (PatType, [VName])
 unscopeType tloc unscoped t = do
   scope <- asks termScope
-  (t', m) <- runStateT (onType scope t) mempty
+  (t', m) <- runStateT (onType (M.keysSet $ scopeVtable scope) t) mempty
   pure (t' `addAliases` S.map unAlias, M.elems m)
   where
     -- using StateT (M.Map Exp VName) TermTypeM a
-    onScalar env (Record fs) =
-      Record <$> traverse (onType env) fs
-    onScalar env (Sum cs) =
-      Sum <$> (traverse . traverse) (onType env) cs
-    onScalar env (Arrow as argName d argT (RetType dims retT)) = do
-      argT' <- onType env argT
+    onScalar scope (Record fs) =
+      Record <$> traverse (onType scope) fs
+    onScalar scope (Sum cs) =
+      Sum <$> (traverse . traverse) (onType scope) cs
+    onScalar scope (Arrow as argName d argT (RetType dims retT)) = do
+      argT' <- onType scope argT
       predBind <- get
-      retT' <- onType env retT
+      retT' <- onType (scope `S.union` argset) retT
       newBind <- get
       let rs = newBind `M.difference` predBind
       let rl = M.filterWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) rs
@@ -206,7 +206,7 @@ unscopeType tloc unscoped t = do
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
         -- to check : completeness of the filter
-        intros = S.filter (`M.notMember` scopeVtable env) argset
+        intros = argset `S.difference` scope
         argset =
           M.keysSet (unFV $ freeInType argT)
             <> case argName of
@@ -217,13 +217,13 @@ unscopeType tloc unscoped t = do
     onScalar _ ty = pure ty
 
     onType ::
-      TermScope ->
+      S.Set VName ->
       TypeBase Size as ->
       StateT (M.Map Size VName) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
-    onType env (Array as u shape scalar) =
-      Array as u <$> traverse onSize shape <*> onScalar env scalar
-    onType env (Scalar ty) =
-      Scalar <$> onScalar env ty
+    onType scope (Array as u shape scalar) =
+      Array as u <$> traverse onSize shape <*> onScalar scope scalar
+    onType scope (Scalar ty) =
+      Scalar <$> onScalar scope ty
 
     onSize (SizeExpr e) =
       onExp e
