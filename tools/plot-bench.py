@@ -391,12 +391,12 @@ def get_args() -> Any:
     return parser.parse_args()
 
 
-def format_arg_list(args: Optional[str]) -> Set[str]:
+def format_arg_list(args: Optional[str]) -> Optional[Set[str]]:
     """
     Takes a string of form 'a, b, c, d' and makes a list ['a', 'b', 'c', 'd']
     """
     if args is None:
-        raise Exception("args can not be None.")
+        return None
 
     return set(map(lambda arg: arg.strip(), args.split(",")))
 
@@ -635,13 +635,23 @@ def main() -> None:
     data = json.load(open(args.filename, "r"))
     programs = format_arg_list(args.programs)
 
-    if programs is None:
-        raise Exception(f"{args.programs} is not a valid program list.")
-
-    PLOT_TYPES_USED = list(format_arg_list(args.plots))
-    if PLOT_TYPES_USED is None:
-        raise Exception(f"{args.plots} is not a valid program list.")
-
+    plots_used = format_arg_list(args.plots)
+    
+    if plots_used is None:
+        PLOT_TYPES_USED = list(sorted(ALL_PLOT_TYPES.keys()))
+    else:
+        PLOT_TYPES_USED = list(sorted(plots_used))
+        temp = list(ALL_PLOT_TYPES.keys())
+        for plot_type in PLOT_TYPES_USED:
+            if plot_type not in temp:
+                existing_plot_types = ", ".join(temp)
+                raise Exception(
+                    (
+                        '"{plot_type}" is not a plot type try '
+                        f"{existing_plot_types}"
+                    )
+                )
+        
     filetype = args.filetype
     TRANSPARENT = args.transparent
 
@@ -654,21 +664,6 @@ def main() -> None:
                 "made."
             )
         )
-
-    if PLOT_TYPES_USED is None:
-        PLOT_TYPES_USED = list(sorted(ALL_PLOT_TYPES.keys()))
-    else:
-        PLOT_TYPES_USED = list(sorted(PLOT_TYPES_USED))
-        temp = list(ALL_PLOT_TYPES.keys())
-        for plot_type in PLOT_TYPES_USED:
-            if plot_type not in temp:
-                existing_plot_types = ", ".join(temp)
-                raise Exception(
-                    (
-                        '"{plot_type}" is not a plot type try '
-                        f"{existing_plot_types}"
-                    )
-                )
 
     if programs is None:
         programs = set(data.keys())
