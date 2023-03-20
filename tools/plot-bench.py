@@ -25,6 +25,28 @@ assert sys.version_info >= (3, 9), "Use Python 3.9 or newer."
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
+CSS = """
+        img {
+            width: 25%
+        }
+        body {
+            font-family: sans-serif;
+            padding: 0px;
+            margin: 0px;
+            margin-left: auto;
+            margin-right: auto;
+            overflow-y: scroll;
+            line-height: 1.7;
+        }
+        section {
+            border: 2px solid transparent;
+        }
+        section:target {
+            border: 2px solid black;
+        }
+"""
+
+
 class PlotJob(NamedTuple):
     program_path: str
     program: str
@@ -527,34 +549,22 @@ def make_html(
     lis = make_list(root)
     sorted_content = sorted(folder_content.items())
     sections = "".join(map(lambda a: make_section(*a), sorted_content))
-    return f"""<head>
+    return f"""<!doctype html>
+    <html lang="en">
+    <head>
     <style type="text/css">
-        img {{
-            width: {width}%
-        }}
-        body {{
-            font-family: sans-serif;
-            padding: 0px;
-            margin: 0px;
-            margin-left: auto;
-            margin-right: auto;
-            overflow-y: scroll;
-            line-height: 1.7;
-        }}
-        section {{
-            border: 2px solid transparent;
-        }}
-        section:target {{
-            border: 2px solid black;
-        }}
+      {CSS}
     </style>
+    </head>
+    <body>
     <nav>
         <ul>
             {lis}
         </ul>
     </nav>
     {sections}
-</head>"""
+    </body>
+    </html>"""
 
 
 def task(plot_jobs: Dict[str, PlotJob]) -> None:
