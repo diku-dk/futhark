@@ -15,19 +15,13 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Data.Foldable
-import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Futhark.IR.GPU
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace)
-import Futhark.Pass.ExtractKernels.ToGPU
-  ( scopeForGPU,
-    soacsLambdaToGPU,
-    soacsStmToGPU,
-  )
+import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Tools
 
 builtinName :: T.Text -> Name
@@ -50,7 +44,7 @@ genScanomap desc w lam nes m = do
       op = SegBinOp Commutative lam nes mempty
   letTupExp desc $ Op $ SegOp $ SegScan lvl space [op] res_t kbody
   where
-    lvl = SegThread SegNoVirt Nothing
+    lvl = SegThread SegVirt Nothing
 
 genScan :: String -> SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genScan desc w lam nes arrs =
@@ -119,7 +113,7 @@ genScatter dest n f = do
     v_t <- subExpType v
     pure (WriteReturns mempty (Shape [m]) dest [(Slice [DimFix (Var i)], v)], v_t)
   let kbody = KernelBody () stms [res]
-  pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space [v_t] kbody
+  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [v_t] kbody
 
 genTabulate :: SubExp -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU (Exp GPU)
 genTabulate w m = do
@@ -130,7 +124,7 @@ genTabulate w m = do
     ts <- mapM subExpType ses
     pure (map (Returns ResultMaySimplify mempty) ses, ts)
   let kbody = KernelBody () stms res
-  pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space ts kbody
+  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
 
 genFlags :: SubExp -> VName -> Builder GPU VName
 genFlags m offsets = do

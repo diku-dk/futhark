@@ -125,7 +125,7 @@ segMap segments f = do
     ts <- mapM (subExpType . resSubExp) res
     pure (map mkResult res, ts)
   let kbody = KernelBody () stms res
-  pure $ Op $ SegOp $ SegMap (SegThread SegNoVirt Nothing) space ts kbody
+  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
