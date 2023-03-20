@@ -321,7 +321,7 @@ class Plotter:
                             backend=self.backends[ext],
                             transparent=self.transparent,
                         )
-                        print(f"Done creating: {dest}")
+                        print(dest)
                         break
                     except SyntaxError:
                         time.sleep(1)
@@ -688,6 +688,8 @@ def main() -> None:
 
     with Pool(16) as p:
         p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
+
+    print(f"Open {filename}.html in a browser.")
 
 
 if __name__ == "__main__":
