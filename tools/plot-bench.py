@@ -441,7 +441,7 @@ def make_plot_jobs_and_directories(
                 root, program_directory, pathlib.Path(program_path).name
             )
             directory = "." if directory == "" else directory
-            
+
             benchmark_result = dataset_dict.copy()
             np_runtimes = np.array(benchmark_result.get("runtimes"))
             benchmark_result["runtimes"] = np_runtimes
@@ -456,7 +456,7 @@ def make_plot_jobs_and_directories(
                     directory, f"{dataset_filename}_{random_string(16)}"
                 )
                 if plot_file_name not in folder_content[directory]:
-                    break 
+                    break
 
             folder_content[directory].insert(0, plot_file_name)
 
