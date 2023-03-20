@@ -16,7 +16,7 @@ import string
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List, Tuple, NamedTuple, Set, Iterator
+from typing import Any, Dict, Optional, List, Tuple, NamedTuple, Set
 from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
@@ -441,9 +441,7 @@ def make_plot_jobs_and_directories(
                 root, program_directory, pathlib.Path(program_path).name
             )
             directory = "." if directory == "" else directory
-            plot_file_name = os.path.join(
-                directory, f"{dataset_filename}_{random_string(16)}"
-            )
+            
             benchmark_result = dataset_dict.copy()
             np_runtimes = np.array(benchmark_result.get("runtimes"))
             benchmark_result["runtimes"] = np_runtimes
@@ -452,6 +450,13 @@ def make_plot_jobs_and_directories(
 
             if folder_content.get(directory) is None:
                 folder_content[directory] = []
+
+            while True:
+                plot_file_name = os.path.join(
+                    directory, f"{dataset_filename}_{random_string(16)}"
+                )
+                if plot_file_name not in folder_content[directory]:
+                    break 
 
             folder_content[directory].insert(0, plot_file_name)
 
