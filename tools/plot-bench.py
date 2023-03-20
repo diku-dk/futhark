@@ -306,7 +306,7 @@ class Plotter:
                             backend=self.backends[ext],
                             transparent=self.transparent,
                         )
-                        print(f"Done creating: {dest}")
+                        print(dest)
                         break
                     except SyntaxError:
                         time.sleep(1)
