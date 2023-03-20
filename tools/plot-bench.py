@@ -294,30 +294,15 @@ class Plotter:
                 suptitle = textwrap.shorten(rf"{program}: {dataset}", 50)
                 self.fig.suptitle(suptitle)
                 self.fig.tight_layout()
-                # For some reason a syntax error may occour but the savefig
-                # function will for some reason work afterwards.
-                for _ in range(10):
-                    try:
-                        ext = pathlib.Path(dest).suffix
-                        self.fig.savefig(
-                            dest,
-                            bbox_inches="tight",
-                            dpi=self.dpi,
-                            backend=self.backends[ext],
-                            transparent=self.transparent,
-                        )
-                        print(dest)
-                        break
-                    except SyntaxError:
-                        time.sleep(1)
-                else:
-                    print(
-                        (
-                            f'Figure "{dest}" did not get saved this is most '
-                            "likely an internal error. try specifying the "
-                            "specific program with --program."
-                        )
-                    )
+                ext = pathlib.Path(dest).suffix
+                self.fig.savefig(
+                    dest,
+                    bbox_inches="tight",
+                    dpi=self.dpi,
+                    backend=self.backends[ext],
+                    transparent=self.transparent,
+                )
+                print(dest)
                 self.ax.cla()
         plt.close(self.fig)
 
