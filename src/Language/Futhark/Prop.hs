@@ -734,8 +734,8 @@ intrinsics =
                               ( BinOp
                                   (findOp "*", mempty)
                                   sizeBinOpInfo
-                                  ((Var (qualName n) (Info i64) mempty), Info (i64, Nothing))
-                                  ((Var (qualName m) (Info i64) mempty), Info (i64, Nothing))
+                                  (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
+                                  (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
                                   mempty
                               )
                             $ Info
@@ -768,8 +768,8 @@ intrinsics =
                           ( BinOp
                               (findOp "+", mempty)
                               sizeBinOpInfo
-                              ((Var (qualName n) (Info i64) mempty), Info (i64, Nothing))
-                              ((Var (qualName m) (Info i64) mempty), Info (i64, Nothing))
+                              (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
+                              (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
                               mempty
                           )
                         $ Info
