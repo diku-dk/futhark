@@ -21,7 +21,7 @@ from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
 
-assert sys.version_infoz >= (3, 9), "Use Python 3.9 or newer."
+assert sys.version_info >= (3, 9), "Use Python 3.9 or newer."
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
@@ -46,7 +46,7 @@ def memory_usage(bytes: Dict[str, int] = None, **kwargs) -> str:
     def formatter(device, bs):
         return f"{format_bytes(bs)}@{device}"
 
-    return ",".join(map(lambda a: formatter(*a)), bytes.items())
+    return ",".join(map(lambda a: formatter(*a), bytes.items()))
 
 
 def confidence_interval(runtimes: np.ndarray = None, **kwargs) -> str:
@@ -651,6 +651,7 @@ def main() -> None:
     with Pool(16) as p:
         p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
 
+    print(f"Open {filename}.html in a browser.")
 
 if __name__ == "__main__":
     main()
