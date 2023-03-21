@@ -25,6 +25,34 @@ assert sys.version_info >= (3, 9), "Use Python 3.9 or newer."
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
+CSS = """
+h1 { font-size: 30px; }
+h2 { font-size: 22px; }
+h3 { font-size: 18px; }
+h1, h2, h3 {
+  background-color: #5f021f;
+  color: #ffffff;
+}
+h3 { width: 50%; }
+h1 a, h1 a:visited, h2 a, h2 a:visited, h3 a, h3 a:visited {
+  color: #fff9e5;
+  text-decoration: none;
+}
+img { width: 25% }
+body {
+    font-family: sans-serif;
+    padding: 0px;
+    margin: 0px;
+    margin-left: auto;
+    margin-right: auto;
+    overflow-y: scroll;
+    line-height: 1.7;
+}
+section        { border: 2px solid transparent; }
+section:target { border: 2px solid black; }
+"""
+
+
 class PlotJob(NamedTuple):
     program_path: str
     program: str
@@ -41,7 +69,7 @@ def mpe(runtimes: Optional[np.ndarray[Any, Any]] = None, **kwargs) -> str:
 
     factor = 100 / runtimes.shape[0]
     mpe = factor * ((runtimes - runtimes.mean()) / runtimes).sum()
-    return f"{mpe:.2e}%"
+    return f"{mpe:.5f}%"
 
 
 def memory_usage(bytes: Optional[Dict[str, int]] = None, **kwargs) -> str:
@@ -309,30 +337,15 @@ class Plotter:
                 suptitle = textwrap.shorten(rf"{program}: {dataset}", 50)
                 self.fig.suptitle(suptitle)
                 self.fig.tight_layout()
-                # For some reason a syntax error may occour but the savefig
-                # function will for some reason work afterwards.
-                for _ in range(10):
-                    try:
-                        ext = pathlib.Path(dest).suffix
-                        self.fig.savefig(
-                            dest,
-                            bbox_inches="tight",
-                            dpi=self.dpi,
-                            backend=self.backends[ext],
-                            transparent=self.transparent,
-                        )
-                        print(dest)
-                        break
-                    except SyntaxError:
-                        time.sleep(1)
-                else:
-                    print(
-                        (
-                            f'Figure "{dest}" did not get saved this is most '
-                            "likely an internal error. try specifying the "
-                            "specific program with --program."
-                        )
-                    )
+                ext = pathlib.Path(dest).suffix
+                self.fig.savefig(
+                    dest,
+                    bbox_inches="tight",
+                    dpi=self.dpi,
+                    backend=self.backends[ext],
+                    transparent=self.transparent,
+                )
+                print(dest)
                 self.ax.cla()
         plt.close(self.fig)
 
@@ -502,9 +515,22 @@ def make_html(
     for key in plot_jobs.keys():
         program = plot_jobs[key].program
         dataset = plot_jobs[key].dataset
-        plot_jobs_keys[key] = make_key(program + dataset, 32)
 
-    folder_keys = {folder: make_key(folder, 32) for folder in folder_content}
+        while True:
+            id_key = make_key(program + dataset, 32)
+            if id_key not in plot_jobs.values():
+                break
+
+        plot_jobs_keys[key] = id_key
+
+    folder_keys: Dict[str, str] = dict()
+    for folder in folder_content:
+        while True:
+            id_folder_key = make_key(folder, 32)
+            if id_folder_key not in folder_keys.values():
+                break
+
+        folder_keys[folder] = id_folder_key
 
     root_prefix = f"{root}/"
 
@@ -572,34 +598,25 @@ def make_html(
     lis = make_list(root)
     sorted_content = sorted(folder_content.items())
     sections = "".join(map(lambda a: make_section(*a), sorted_content))
-    return f"""<head>
+    return f"""<!doctype html>
+    <html lang="en">
+    <head>
     <style type="text/css">
-        img {{
-            width: {width}%
-        }}
-        body {{
-            font-family: sans-serif;
-            padding: 0px;
-            margin: 0px;
-            margin-left: auto;
-            margin-right: auto;
-            overflow-y: scroll;
-            line-height: 1.7;
-        }}
-        section {{
-            border: 2px solid transparent;
-        }}
-        section:target {{
-            border: 2px solid black;
-        }}
+      {CSS}
     </style>
+    </head>
+    <body>
+    <header>
+    <h1>{root}</h1>
     <nav>
         <ul>
             {lis}
         </ul>
     </nav>
+    </header>
     {sections}
-</head>"""
+    </body>
+    </html>"""
 
 
 def task(plot_jobs: Dict[str, PlotJob]) -> None:
