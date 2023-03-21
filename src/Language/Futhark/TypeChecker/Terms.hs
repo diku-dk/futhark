@@ -198,7 +198,7 @@ unscopeType tloc unscoped t = do
       argT' <- onType scope argT
       retT' <- onType (scope `S.union` argset) retT
       newBind <- get
-      let (rl,nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
+      let (rl, nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
       put nxtBind
       let dims' = dims <> M.elems rl
       pure $ Arrow as argName d argT' (RetType dims' retT')

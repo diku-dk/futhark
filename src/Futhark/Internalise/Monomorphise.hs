@@ -957,9 +957,9 @@ removeExpFromValBind valbind = do
         valBindTypeParams valbind
           <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList exp_naming)
   let args = foldMap patArg params'
-  (rety', exp_naming') <- runStateT (onRetType scope args $ unInfo $ valBindRetType valbind) exp_naming
+  (rety', _) <- runStateT (hardOnRetType (scope `S.union` args) $ unInfo $ valBindRetType valbind) exp_naming
   let scope' = scope `S.union` args
-  (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming'
+  (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming
   pure $
     valbind
       { valBindRetType = Info rety',
@@ -985,6 +985,14 @@ removeExpFromValBind valbind = do
     unSizeExpr _ = error "internal error in removeExpFromValBind"
 
     -- using StateT (M.Map Exp VName) MonoM a
+    hardOnRetType argset (RetType dims ty) = do
+      predBind <- get
+      ty' <- onType argset ty
+      newBind <- get
+      let rl = newBind `M.difference` predBind
+      let dims' = dims <> M.elems rl
+      pure $ RetType dims' ty'
+
     expFree scope (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
       let argset =
             S.fromList (mapMaybe unParamDim typeParams)
@@ -1167,13 +1175,23 @@ removeExpFromValBind valbind = do
     onExp e@(IntLit {}) = pure $ SizeExpr e
     onExp e = do
       let e' = SizeExpr e
-      prev <- gets $ M.lookup e'
-      case prev of
-        Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
+      case maybeOldSize e' of
+        Just s -> pure s
         Nothing -> do
-          vn <- lift $ newNameFromString $ "d{" ++ prettyString e ++ "}"
-          modify $ M.insert e' vn
-          pure $ sizeFromName (qualName vn) (srclocOf e)
+          prev <- gets $ M.lookup e'
+          case prev of
+            Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
+            Nothing -> do
+              vn <- lift $ newNameFromString $ "d{" ++ prettyString e ++ "}"
+              modify $ M.insert e' vn
+              pure $ sizeFromName (qualName vn) (srclocOf e)
+
+    maybeOldSize (SizeExpr e) =
+      case bareCleanExp e of
+        Var qn _ loc -> Just $ sizeFromName qn loc
+        IntLit v _ loc -> Just $ sizeFromInteger v loc
+        _ -> Nothing
+    maybeOldSize _ = error "internal error : maybeOldSize"
 
 transformDecs :: [Dec] -> MonoM ()
 transformDecs [] = pure ()
