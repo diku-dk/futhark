@@ -957,13 +957,11 @@ removeExpFromValBind valbind = do
   let typeParams' = valBindTypeParams valbind <>
                     (map (\(e,vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) $ M.toList exp_naming)
   let args = foldMap patArg params'
+  (rety', exp_naming') <- runStateT (onRetType scope args $ unInfo $ valBindRetType valbind) exp_naming
   let scope' = scope `S.union` args
-  let RetType dims ty = unInfo $ valBindRetType valbind
-  (ty', exp_naming') <- runStateT (onType scope' ty) exp_naming
-  let dims' = dims <> M.elems (exp_naming' `M.difference` exp_naming)
-  (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming
+  (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming'
   pure $ valbind {
-    valBindRetType = Info (RetType dims' ty'),
+    valBindRetType = Info rety',
     valBindTypeParams = typeParams',
     valBindParams = params',
     valBindBody = body'
