@@ -1,10 +1,10 @@
 let lv_step (growth_prey: f32)
             (predation: f32)
             (growth_pred: f32)
-            (decline_pred: f32) 
+            (decline_pred: f32)
             (prey: f32)
             (pred: f32)
-: (f32, f32) = 
+: (f32, f32) =
   let dprey = (growth_prey - predation*pred) * prey
   let dpred = (growth_pred * prey - decline_pred) * pred
   in (dprey, dpred)
@@ -16,11 +16,11 @@ let euler_method (step_size: f32)
                  (growth_prey: f32)
                  (predation: f32)
                  (growth_pred: f32)
-                 (decline_pred: f32) : [](f32,f32) = 
+                 (decline_pred: f32) : [](f32,f32) =
   let states = replicate (num_steps+1) (init_prey, init_pred)
   let (_, states) = loop (curr_state, states) =  ((init_prey,init_pred), states) for i < num_steps do
     let (curr_prey, curr_pred) = curr_state
-    let (dprey, dpred) = lv_step growth_prey predation growth_pred decline_pred curr_prey curr_pred 
+    let (dprey, dpred) = lv_step growth_prey predation growth_pred decline_pred curr_prey curr_pred
     let next_state = (curr_prey + step_size * dprey, curr_pred + step_size * dpred)
     let states[i+1] = next_state
     in (next_state, states)
@@ -32,7 +32,7 @@ let runge_kutta (step_size : f32) (num_steps : i64)
                  growth_prey: f32,
                  predation: f32,
                  growth_pred: f32,
-                 decline_pred: f32) : [](f32,f32) = 
+                 decline_pred: f32) : [](f32,f32) =
   let fn = lv_step growth_prey predation growth_pred decline_pred
   let states = replicate (num_steps) (init_prey, init_pred)
   let (_, states) = loop (curr_state, states) =  ((init_prey,init_pred), states) for i < num_steps do
@@ -60,7 +60,7 @@ entry main (step_size: f32)
          (decline_pred: f32) : [][2]f32 =
   map to_array (runge_kutta step_size num_steps (init_prey, init_pred, growth_prey, predation, growth_pred, decline_pred))
 
-entry runge_kutta_fwd (step_size : f32) 
+entry runge_kutta_fwd (step_size : f32)
                       (num_steps : i64)
                       (init_prey: f32)
                       (init_pred: f32)
