@@ -271,7 +271,7 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
               <> lts
               <> asserts'
 
-        conclusion <- join $ mkLe <$> primExpToZ3 var_table pe1 <*> primExpToZ3 var_table pe2
+        conclusion <- join $ mkLt <$> primExpToZ3 var_table pe1 <*> primExpToZ3 var_table pe2
         assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
         check
   case result of
@@ -279,49 +279,11 @@ lessThanZ3 scope asserts less_thans non_negatives pe1 pe2 = do
     _ -> pure False
 
 disjointZ3 :: M.Map VName Type -> [PrimExp VName] -> [(VName, PrimExp VName)] -> [PrimExp VName] -> Interval -> Interval -> IO Bool
-disjointZ3 scope asserts less_thans non_negatives i1@(Interval lb1 ne1 st1) i2@(Interval lb2 ne2 st2)
-  | st1 == st2 = do
-      let frees = namesToList $ freeIn less_thans <> freeIn non_negatives <> freeIn i1 <> freeIn i2 <> freeIn asserts
-      result <- evalZ3With Nothing (opt "timeout" (1000 :: Integer)) $ do
-        -- result <- evalZ3 $ do
-        maybe_var_table <- sequence <$> mapM (\x -> fmap ((,) x) <$> valToZ3 scope x) frees
-        case fmap M.fromList maybe_var_table of
-          Nothing -> pure Undef
-          Just var_table -> do
-            non_negs <- mapM (\vn -> join $ mkLe <$> mkInteger 0 <*> primExpToZ3 var_table vn) non_negatives
-            asserts' <- mapM (primExpToZ3 var_table) asserts
-            lts <- mapM (\(vn, pe) -> mkLt (var_table M.! vn) =<< primExpToZ3 var_table pe) less_thans
-            nes <-
-              sequence
-                [ join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne1),
-                  join $ mkLt <$> mkInteger 0 <*> primExpToZ3 var_table (untyped ne2)
-                ]
-            apps <- mapM toApp $ M.elems var_table
-
-            premise <-
-              mkAnd $
-                nes
-                  <> non_negs
-                  <> lts
-                  <> asserts'
-
-            conclusion <-
-              mkOr
-                =<< sequence
-                  [ mkAnd
-                      =<< sequence
-                        [ join $ mkLt <$> primExpToZ3 var_table (untyped lb1) <*> primExpToZ3 var_table (untyped lb2),
-                          join $ mkLe <$> primExpToZ3 var_table (untyped $ lb1 + ne1) <*> primExpToZ3 var_table (untyped lb2)
-                        ],
-                    mkAnd
-                      =<< sequence
-                        [ join $ mkLt <$> primExpToZ3 var_table (untyped lb2) <*> primExpToZ3 var_table (untyped lb1),
-                          join $ mkLe <$> primExpToZ3 var_table (untyped $ lb2 + ne2) <*> primExpToZ3 var_table (untyped lb1)
-                        ]
-                  ]
-            assert =<< mkForallConst [] apps =<< mkImplies premise conclusion
-            check
-      case result of
-        Sat -> pure True
-        _ -> pure False
-  | otherwise = pure False
+disjointZ3 scope asserts less_thans non_negatives _i1@(Interval lb1 ne1 _st1) _i2@(Interval lb2 ne2 _st2) =
+  lessThanOrEqual (lb1 + ne1) lb2
+    ||^ lessThanOrEqual (lb2 + ne2) lb1
+    ||^ lessThanOrEqual ne1 (0 :: TPrimExp Int64 VName)
+    ||^ lessThanOrEqual ne2 (0 :: TPrimExp Int64 VName)
+  where
+    lessThan tp1 tp2 = lessThanZ3 scope asserts less_thans non_negatives (untyped tp1) (untyped tp2)
+    lessThanOrEqual tp1 tp2 = lessThan tp1 (tp2 + 1)
