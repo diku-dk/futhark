@@ -44,8 +44,6 @@ import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-import Debug.Trace
-
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64
 
@@ -951,21 +949,24 @@ transformTypeBind (TypeBind name l tparams _ (Info (RetType dims t)) _ _) = do
 
 removeExpFromValBind :: ValBindBase Info VName -> MonoM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
-  scope <- S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-            <$> asks (M.keysSet . envPolyBindings)
+  scope <-
+    S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
+      <$> asks (M.keysSet . envPolyBindings)
   (params', exp_naming) <- runStateT (mapM (onPat scope) $ valBindParams valbind) mempty
-  let typeParams' = valBindTypeParams valbind <>
-                    (map (\(e,vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) $ M.toList exp_naming)
+  let typeParams' =
+        valBindTypeParams valbind
+          <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList exp_naming)
   let args = foldMap patArg params'
   (rety', exp_naming') <- runStateT (onRetType scope args $ unInfo $ valBindRetType valbind) exp_naming
   let scope' = scope `S.union` args
   (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming'
-  pure $ valbind {
-    valBindRetType = Info rety',
-    valBindTypeParams = typeParams',
-    valBindParams = params',
-    valBindBody = body'
-  }
+  pure $
+    valbind
+      { valBindRetType = Info rety',
+        valBindTypeParams = typeParams',
+        valBindParams = params',
+        valBindBody = body'
+      }
   where
     unParamDim (TypeParamDim vn _) = Just vn
     unParamDim _ = Nothing
@@ -976,7 +977,7 @@ removeExpFromValBind valbind = do
     patArg (Id vn _ _) = S.singleton vn
     patArg (Wildcard _ _) = mempty
     patArg (PatAscription p _ _) = patArg p
-    patArg (PatLit _ _ _) = mempty
+    patArg (PatLit {}) = mempty
     patArg (PatConstr _ _ ps _) = foldMap patArg ps
     patArg (PatAttr _ p _) = patArg p
 
@@ -984,43 +985,80 @@ removeExpFromValBind valbind = do
     unSizeExpr _ = error "internal error in removeExpFromValBind"
 
     -- using StateT (M.Map Exp VName) MonoM a
-    expFree scope (AppExp (LetFun name (typeParams,args,rettype_te,Info retT,body) body_nxt loc) (Info resT)) = do
-        let argset = S.fromList (mapMaybe unParamDim typeParams)
-                    `S.union` foldMap patArg args
-                    `S.union` foldMap (M.keysSet . unFV . freeInPat) args
-        args' <- mapM (onPat scope) args
-        newBind <- get
-        let (localBind,nxtBind) = M.partitionWithKey
-                    (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
-                    newBind
-        retT' <- onRetType scope argset retT
-        body' <- expFree (scope `S.union` argset) body
-        put nxtBind
-        AppExp <$>
-            ( LetFun name
-                (
-                    typeParams <> (map (\(e,vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) $ M.toList localBind),
-                    args',
-                    rettype_te, -- ?
-                    Info retT',
-                    body'
+    expFree scope (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
+      let argset =
+            S.fromList (mapMaybe unParamDim typeParams)
+              `S.union` foldMap patArg args
+              `S.union` foldMap (M.keysSet . unFV . freeInPat) args
+      args' <- mapM (onPat scope) args
+      newBind <- get
+      let (localBind, nxtBind) =
+            M.partitionWithKey
+              (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
+              newBind
+      retT' <- onRetType scope argset retT
+      body' <- expFree (scope `S.union` argset) body
+      put nxtBind
+      AppExp
+        <$> ( LetFun
+                name
+                ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList localBind),
+                  args',
+                  rettype_te, -- ?
+                  Info retT',
+                  body'
                 )
                 <$> expFree (S.insert name scope) body_nxt
                 <*> pure loc
             )
-            <*> (Info <$> onResType scope resT)
+        <*> (Info <$> onResType scope resT)
     expFree scope (AppExp (LetPat dims pat e1 e2 loc) (Info resT)) =
-        let scope' = scope `S.union` S.fromList (map sizeName dims) in
-        let scope'' = scope' `S.union` patArg pat in
-        AppExp <$> (LetPat dims <$> onPat scope' pat <*> expFree scope e1 <*> expFree scope'' e2 <*> pure loc) <*>
-            (Info <$> onResType scope resT)
-    expFree scope e@(AppExp (LetWith _ _ _ _ _ _) _) = error $ "todo on expFree LetWith " ++ prettyString e
-    expFree scope e@(AppExp (Match _ _ _) _) = error $ "todo on expFree Match " ++ prettyString e
+      let scope' = scope `S.union` S.fromList (map sizeName dims)
+       in let scope'' = scope' `S.union` patArg pat
+           in AppExp
+                <$> (LetPat dims <$> onPat scope' pat <*> expFree scope e1 <*> expFree scope'' e2 <*> pure loc)
+                <*> (Info <$> onResType scope resT)
+    expFree scope (AppExp (LetWith dest src slice e body loc) (Info resT)) =
+      AppExp
+        <$> ( LetWith
+                <$> onIdent dest
+                <*> onIdent src
+                <*> mapM onSlice slice
+                <*> expFree scope e
+                <*> expFree (S.insert (identName dest) scope) body
+                <*> pure loc
+            )
+        <*> (Info <$> onResType scope resT)
+      where
+        onSlice (DimFix de) =
+          DimFix <$> expFree scope de
+        onSlice (DimSlice e1 e2 e3) =
+          DimSlice
+            <$> mapM (expFree scope) e1
+            <*> mapM (expFree scope) e2
+            <*> mapM (expFree scope) e3
+        onIdent (Ident vn (Info ty) iloc) =
+          Ident vn <$> (Info <$> onType scope ty) <*> pure iloc
+    expFree scope (AppExp (Match e cs loc) (Info resT)) =
+      AppExp
+        <$> ( Match
+                <$> expFree scope e
+                <*> mapM onCase cs
+                <*> pure loc
+            )
+        <*> (Info <$> onResType scope resT)
+      where
+        onCase (CasePat pat body cloc) =
+          CasePat
+            <$> onPat scope pat
+            <*> expFree (scope `S.union` patArg pat) body
+            <*> pure cloc
     expFree scope (AppExp app (Info resT)) =
-        AppExp <$> astMap mapper app <*> (Info <$> onResType scope resT)
-        where
-            mapper = ASTMapper {
-              mapOnExp = expFree scope,
+      AppExp <$> astMap mapper app <*> (Info <$> onResType scope resT)
+      where
+        mapper =
+          ASTMapper
+            { mapOnExp = expFree scope,
               mapOnName = pure,
               mapOnStructType = onType scope,
               mapOnPatType = onType scope,
@@ -1028,18 +1066,44 @@ removeExpFromValBind valbind = do
               mapOnPatRetType = mapOnRetType
             }
     expFree scope (Lambda args body rettype_te (Info (as, retT)) loc) =
-        let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args in
-        Lambda <$> mapM (onPat scope) args
-               <*> expFree (scope `S.union` argset) body
-               <*> pure rettype_te -- ?
-               <*> ((Info . (as,)) <$> onRetType scope argset retT)
-               <*> pure loc
-    expFree scope e@(OpSectionLeft _ _ _ ( Info (_,_,_),Info (_,_) ) (Info _,_) _) = error $ "todo on expFree OpLeft " ++ prettyString e
-    expFree scope e@(OpSectionRight _ _ _ ( Info (_,_),Info (_,_,_) ) (Info _) _) = error $ "todo on expFree OpRight " ++ prettyString e
+      let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
+       in Lambda
+            <$> mapM (onPat scope) args
+            <*> expFree (scope `S.union` argset) body
+            <*> pure rettype_te -- ?
+            <*> (Info . (as,) <$> onRetType scope argset retT)
+            <*> pure loc
+    expFree scope (OpSectionLeft op (Info ty) e (Info (n1, ty1, m1), Info (n2, ty2)) (Info retT, Info ext) loc) = do
+      let args =
+            S.fromList ext
+              `S.union` case n2 of
+                Named vn -> S.singleton vn
+                Unnamed -> mempty
+      ty1' <- onType scope ty1
+      ty2' <- onType scope ty2
+      OpSectionLeft op
+        <$> (Info <$> onType scope ty)
+        <*> expFree scope e
+        <*> pure (Info (n1, ty1', m1), Info (n2, ty2'))
+        <*> ((,Info ext) . Info <$> onRetType scope args retT)
+        <*> pure loc
+    expFree scope (OpSectionRight op (Info ty) e (Info (n1, ty1), Info (n2, ty2, m2)) (Info retT) loc) = do
+      let args = case n1 of
+            Named vn -> S.singleton vn
+            Unnamed -> mempty
+      ty1' <- onType scope ty1
+      ty2' <- onType scope ty2
+      OpSectionRight op
+        <$> (Info <$> onType scope ty)
+        <*> expFree scope e
+        <*> pure (Info (n1, ty1'), Info (n2, ty2', m2))
+        <*> (Info <$> onRetType scope args retT)
+        <*> pure loc
     expFree scope e = astMap mapper e
-        where
-            mapper = ASTMapper {
-              mapOnExp = expFree scope,
+      where
+        mapper =
+          ASTMapper
+            { mapOnExp = expFree scope,
               mapOnName = pure,
               mapOnStructType = onType scope,
               mapOnPatType = onType scope,
@@ -1048,28 +1112,29 @@ removeExpFromValBind valbind = do
             }
 
     mapOnRetType _ =
-        error "mapOnRetType called in expFree: should not happen"
+      error "mapOnRetType called in expFree: should not happen"
 
     onResType scope (AppRes ty ext) =
-        AppRes <$> onType (scope `S.union` S.fromList ext) ty <*> pure ext
+      AppRes <$> onType (scope `S.union` S.fromList ext) ty <*> pure ext
 
     onPat scope =
-        astMap mapper
-        where
-            mapper = identityMapper
-                { mapOnName = pure,
-                  mapOnStructType = onType scope,
-                  mapOnPatType = onType scope
-                }
+      astMap mapper
+      where
+        mapper =
+          identityMapper
+            { mapOnName = pure,
+              mapOnStructType = onType scope,
+              mapOnPatType = onType scope
+            }
 
     onRetType scope argset (RetType dims ty) = do
-        let intros = argset `S.difference` scope
-        ty' <- onType (scope `S.union` argset) ty
-        newBind <- get
-        let (rl,nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
-        put nxtBind
-        let dims' = dims <> M.elems rl
-        pure $ RetType dims' ty'
+      let intros = argset `S.difference` scope
+      ty' <- onType (scope `S.union` argset) ty
+      newBind <- get
+      let (rl, nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
+      put nxtBind
+      let dims' = dims <> M.elems rl
+      pure $ RetType dims' ty'
 
     onScalar scope (Record fs) =
       Record <$> traverse (onType scope) fs
@@ -1098,15 +1163,15 @@ removeExpFromValBind valbind = do
       onExp e
     onSize s = pure s
 
-    onExp e@(Var _ _ _) = pure $ SizeExpr e
-    onExp e@(IntLit _ _ _) = pure $ SizeExpr e
+    onExp e@(Var {}) = pure $ SizeExpr e
+    onExp e@(IntLit {}) = pure $ SizeExpr e
     onExp e = do
       let e' = SizeExpr e
       prev <- gets $ M.lookup e'
       case prev of
         Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
         Nothing -> do
-          vn <- lift $ newNameFromString "d"
+          vn <- lift $ newNameFromString $ "d{" ++ prettyString e ++ "}"
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
