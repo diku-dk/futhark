@@ -196,12 +196,10 @@ unscopeType tloc unscoped t = do
       Sum <$> (traverse . traverse) (onType scope) cs
     onScalar scope (Arrow as argName d argT (RetType dims retT)) = do
       argT' <- onType scope argT
-      predBind <- get
       retT' <- onType (scope `S.union` argset) retT
       newBind <- get
-      let rs = newBind `M.difference` predBind
-      let rl = M.filterWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) rs
-      modify $ flip M.difference rl
+      let (rl,nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
+      put nxtBind
       let dims' = dims <> M.elems rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
