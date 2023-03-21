@@ -48,8 +48,10 @@ selfOverlap solver_input is =
 -- | Given 'SolverInput', returns 'True' if the two 'Interval' are disjoint.
 disjoint :: SolverInput -> Interval -> Interval -> Bool
 disjoint solver_input (Interval lb1 ne1 _) (Interval lb2 ne2 _) =
-  (lessThan solver_input lb1 lb2 && lessThanOrEqual solver_input (lb1 + ne1) lb2)
-    || (lessThan solver_input lb2 lb1 && lessThanOrEqual solver_input (lb2 + ne2) lb1)
+  lessThanOrEqual solver_input (lb1 + ne1) lb2
+    || lessThanOrEqual solver_input (lb2 + ne2) lb1
+    || lessThanOrEqual solver_input ne1 (0 :: TPrimExp Int64 VName)
+    || lessThanOrEqual solver_input ne2 (0 :: TPrimExp Int64 VName)
 
 -- | Given 'SolverInput', returns 'True' if the first 'PrimExp' is proven to be less
 -- than or equal to the second.
