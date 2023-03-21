@@ -26,24 +26,30 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 CSS = """
-        img {
-            width: 25%
-        }
-        body {
-            font-family: sans-serif;
-            padding: 0px;
-            margin: 0px;
-            margin-left: auto;
-            margin-right: auto;
-            overflow-y: scroll;
-            line-height: 1.7;
-        }
-        section {
-            border: 2px solid transparent;
-        }
-        section:target {
-            border: 2px solid black;
-        }
+h1 { font-size: 30px; }
+h2 { font-size: 22px; }
+h3 { font-size: 18px; }
+h1, h2, h3 {
+  background-color: #5f021f;
+  color: #ffffff;
+}
+h3 { width: 50%; }
+h1 a, h1 a:visited, h2 a, h2 a:visited, h3 a, h3 a:visited {
+  color: #fff9e5;
+  text-decoration: none;
+}
+img { width: 25% }
+body {
+    font-family: sans-serif;
+    padding: 0px;
+    margin: 0px;
+    margin-left: auto;
+    margin-right: auto;
+    overflow-y: scroll;
+    line-height: 1.7;
+}
+section        { border: 2px solid transparent; }
+section:target { border: 2px solid black; }
 """
 
 
@@ -557,11 +563,14 @@ def make_html(
     </style>
     </head>
     <body>
+    <header>
+    <h1>{root}</h1>
     <nav>
         <ul>
             {lis}
         </ul>
     </nav>
+    </header>
     {sections}
     </body>
     </html>"""
