@@ -37,7 +37,7 @@
 --   use global memory
 module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.List (foldl', genericLength, zip5)
 import Data.Map qualified as M
 import Data.Maybe

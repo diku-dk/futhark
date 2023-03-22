@@ -8,7 +8,7 @@ module Language.Futhark.TypeChecker.Terms.DoLoop
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor

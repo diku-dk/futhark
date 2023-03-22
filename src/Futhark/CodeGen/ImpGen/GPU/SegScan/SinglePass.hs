@@ -5,7 +5,7 @@
 -- with some constraints on the operator.  We use this when we can.
 module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.List (zip4)
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp

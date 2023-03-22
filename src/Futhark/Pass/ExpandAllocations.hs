@@ -3,6 +3,7 @@
 -- | Expand allocations inside of maps when possible.
 module Futhark.Pass.ExpandAllocations (expandAllocations) where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
@@ -412,7 +413,7 @@ extractStmAllocations user bound_outside bound_kernel stm = do
   pure $ Just $ stm {stmExp = e}
   where
     expMapper user' =
-      identityMapper
+      (identityMapper @GPUMem)
         { mapOnBody = const $ onBody user',
           mapOnOp = onOp user'
         }
@@ -722,7 +723,7 @@ offsetMemoryInExp (DoLoop merge form body) = do
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =
-      identityMapper
+      (identityMapper @GPUMem)
         { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody,
           mapOnBranchType = offsetMemoryInBodyReturns,
           mapOnOp = onOp

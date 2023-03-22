@@ -10,6 +10,7 @@ module Futhark.Pkg.Solve
   )
 where
 
+import Control.Monad
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Map qualified as M

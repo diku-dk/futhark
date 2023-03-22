@@ -16,7 +16,9 @@ module Futhark.Bench
 where
 
 import Control.Applicative
-import Control.Monad.Except
+import Control.Monad
+import Control.Monad.Except (ExceptT, MonadError (..), liftEither, runExceptT)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson qualified as JSON
 import Data.Aeson.Key qualified as JSON
 import Data.Aeson.KeyMap qualified as JSON

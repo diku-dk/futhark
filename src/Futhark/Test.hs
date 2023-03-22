@@ -32,7 +32,8 @@ import Control.Applicative
 import Control.Exception (catch)
 import Control.Exception.Base qualified as E
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (MonadError (..))
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Binary qualified as Bin
 import Data.ByteString qualified as SBS
 import Data.ByteString.Lazy qualified as BS

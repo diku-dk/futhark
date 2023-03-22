@@ -31,7 +31,9 @@ module Futhark.Script
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
+import Control.Monad.Except (MonadError (..))
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (bimap)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
