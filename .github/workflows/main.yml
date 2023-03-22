@@ -168,10 +168,10 @@ jobs:
 
     - name: Install Nix
       uses: cachix/install-nix-action@v20
-    
+
     - name: Style check
       run: nix-shell --pure --run "black --check ."
-    
+
     - name: Type check
       run: nix-shell --pure --run "mypy ."
 
