@@ -9,6 +9,7 @@ module Futhark.CLI.Misc
   )
 where
 
+import Control.Monad
 import Control.Monad.State
 import Data.ByteString.Lazy qualified as BS
 import Data.Function (on)

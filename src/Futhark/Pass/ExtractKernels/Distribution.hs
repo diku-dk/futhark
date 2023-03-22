@@ -38,6 +38,7 @@ module Futhark.Pass.ExtractKernels.Distribution
   )
 where
 
+import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.Trans.Maybe
 import Data.Bifunctor (second)

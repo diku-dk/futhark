@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | Representation used by the simplification engine.  It contains
 -- aliasing information and a bit of caching for various information
@@ -116,7 +117,16 @@ instance FreeIn BodyWisdom where
 instance FreeDec BodyWisdom where
   precomputed = const . fvNames . unAliases . bodyWisdomFree
 
-instance Informing rep => RepTypes (Wise rep) where
+instance
+  ( Informing rep,
+    Ord (OpC rep (Wise rep)),
+    Eq (OpC rep (Wise rep)),
+    Show (OpC rep (Wise rep)),
+    IsOp (OpC rep (Wise rep)),
+    Pretty (OpC rep (Wise rep))
+  ) =>
+  RepTypes (Wise rep)
+  where
   type LetDec (Wise rep) = (VarWisdom, LetDec rep)
   type ExpDec (Wise rep) = (ExpWisdom, ExpDec rep)
   type BodyDec (Wise rep) = (BodyWisdom, BodyDec rep)
@@ -134,14 +144,14 @@ withoutWisdom m = do
   scope <- asksScope removeScopeWisdom
   runReaderT m scope
 
-instance Informing rep => ASTRep (Wise rep) where
+instance (Informing rep, IsOp (OpC rep (Wise rep))) => ASTRep (Wise rep) where
   expTypesFromPat =
     withoutWisdom . expTypesFromPat . removePatWisdom
 
 instance Pretty VarWisdom where
   pretty _ = pretty ()
 
-instance Informing rep => PrettyRep (Wise rep) where
+instance (Informing rep, Pretty (OpC rep (Wise rep))) => PrettyRep (Wise rep) where
   ppExpDec (_, dec) = ppExpDec dec . removeExpWisdom
 
 instance AliasesOf (VarWisdom, dec) where

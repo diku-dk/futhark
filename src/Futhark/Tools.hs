@@ -15,7 +15,7 @@ module Futhark.Tools
   )
 where
 
-import Control.Monad.Identity
+import Control.Monad
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
 import Futhark.IR

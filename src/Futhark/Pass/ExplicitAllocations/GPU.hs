@@ -8,6 +8,7 @@ module Futhark.Pass.ExplicitAllocations.GPU
   )
 where
 
+import Control.Monad
 import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem

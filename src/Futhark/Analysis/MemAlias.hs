@@ -8,6 +8,7 @@ module Futhark.Analysis.MemAlias
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Function ((&))

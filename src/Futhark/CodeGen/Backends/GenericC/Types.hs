@@ -8,8 +8,9 @@ module Futhark.CodeGen.Backends.GenericC.Types
   )
 where
 
-import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad
+import Control.Monad.Reader (asks)
+import Control.Monad.State (gets, modify)
 import Data.Char (isDigit)
 import Data.Map.Strict qualified as M
 import Data.Maybe
