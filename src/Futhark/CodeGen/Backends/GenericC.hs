@@ -17,6 +17,7 @@ module Futhark.CodeGen.Backends.GenericC
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)

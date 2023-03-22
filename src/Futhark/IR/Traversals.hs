@@ -66,7 +66,7 @@ data Mapper frep trep m = Mapper
   }
 
 -- | A mapper that simply returns the tree verbatim.
-identityMapper :: Monad m => Mapper rep rep m
+identityMapper :: forall rep m. Monad m => Mapper rep rep m
 identityMapper =
   Mapper
     { mapOnSubExp = pure,
@@ -247,7 +247,7 @@ data Walker rep m = Walker
   }
 
 -- | A no-op traversal.
-identityWalker :: Monad m => Walker rep m
+identityWalker :: forall rep m. Monad m => Walker rep m
 identityWalker =
   Walker
     { walkOnSubExp = const $ pure (),

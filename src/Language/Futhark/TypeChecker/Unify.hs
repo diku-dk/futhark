@@ -30,6 +30,7 @@ module Language.Futhark.TypeChecker.Unify
   )
 where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor

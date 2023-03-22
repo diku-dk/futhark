@@ -9,7 +9,7 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 where
 
 import Control.Arrow (first)
-import Control.Monad.State
+import Control.Monad
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools

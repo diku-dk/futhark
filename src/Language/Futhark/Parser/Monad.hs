@@ -38,7 +38,8 @@ where
 
 import Control.Applicative (liftA)
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State
 import Data.Array hiding (index)
 import Data.Monoid

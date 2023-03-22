@@ -770,7 +770,7 @@ arrayOps cs = mconcat . map onStm . stmsToList . bodyStms
       tell $ arrayOps (cs <> more_cs) $ lambdaBody lam
       pure lam
     walker more_cs =
-      identityWalker
+      (identityWalker @rep)
         { walkOnBody = const $ modify . (<>) . arrayOps (cs <> more_cs),
           walkOnOp = modify . (<>) . onOp more_cs
         }
@@ -795,7 +795,7 @@ replaceArrayOps substs (Body _ stms res) =
           fromArrayOp op'
     onExp _ cs e = (cs, mapExp mapper e)
     mapper =
-      identityMapper
+      (identityMapper @rep)
         { mapOnBody = const $ pure . replaceArrayOps substs,
           mapOnOp = pure . onOp
         }

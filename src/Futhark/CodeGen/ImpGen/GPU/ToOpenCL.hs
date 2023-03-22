@@ -8,6 +8,7 @@ module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State

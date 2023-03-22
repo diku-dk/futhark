@@ -19,6 +19,7 @@
 -- kept together.
 module Futhark.Optimise.Unstream (unstreamGPU, unstreamMC) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Futhark.IR.GPU

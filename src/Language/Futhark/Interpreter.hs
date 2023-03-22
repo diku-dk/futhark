@@ -26,7 +26,7 @@ module Language.Futhark.Interpreter
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Control.Monad.Free.Church
 import Control.Monad.Identity
 import Control.Monad.Reader

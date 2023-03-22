@@ -6,6 +6,7 @@ module Futhark.Internalise.Entry
   )
 where
 
+import Control.Monad
 import Control.Monad.State
 import Data.List (find)
 import Data.Map qualified as M

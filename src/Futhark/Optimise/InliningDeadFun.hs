@@ -7,6 +7,7 @@ module Futhark.Optimise.InliningDeadFun
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Parallel.Strategies
@@ -210,7 +211,7 @@ inlineInBody fdmap = onBody
     onStm (Let pat aux e) = Let pat aux <$> mapExpM inliner e
 
     inliner =
-      identityMapper
+      (identityMapper @SOACS)
         { mapOnBody = const onBody,
           mapOnOp = onSOAC
         }

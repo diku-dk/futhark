@@ -167,6 +167,7 @@ cseInLambda lam = do
   pure lam {lambdaBody = body'}
 
 cseInStms ::
+  forall rep a.
   (Aliased rep, CSEInOp (Op rep)) =>
   Names ->
   [Stm rep] ->
@@ -190,7 +191,7 @@ cseInStms consumed (stm : stms) m =
       pure stm' {stmExp = e}
 
     cse ds =
-      identityMapper
+      (identityMapper @rep)
         { mapOnBody = const $ cseInBody ds,
           mapOnOp = cseInOp
         }

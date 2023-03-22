@@ -8,8 +8,7 @@ module Language.Futhark.TypeChecker.Modules
   )
 where
 
-import Control.Monad.Except
-import Control.Monad.Writer hiding (Sum)
+import Control.Monad
 import Data.Either
 import Data.List (intersect)
 import Data.Map.Strict qualified as M

@@ -4,6 +4,7 @@
 module Futhark.Pass.KernelBabysitting (babysitKernels) where
 
 import Control.Arrow (first)
+import Control.Monad
 import Control.Monad.State.Strict
 import Data.Foldable
 import Data.List (elemIndex, isPrefixOf, sort)
@@ -139,6 +140,7 @@ type ArrayIndexTransform m =
   m (Maybe (VName, Slice SubExp))
 
 traverseKernelBodyArrayIndexes ::
+  forall f.
   Monad f =>
   Names ->
   Names ->
@@ -157,6 +159,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
       (stmsToList kstms)
     <*> pure kres
   where
+    onLambda :: (VarianceTable, Scope GPU) -> Lambda GPU -> f (Lambda GPU)
     onLambda (variance, scope) lam =
       (\body' -> lam {lambdaBody = body'})
         <$> onBody (variance, scope') (lambdaBody lam)
@@ -188,12 +191,18 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
     onStm (variance, scope) (Let pat dec e) =
       Let pat dec <$> mapExpM (mapper (variance, scope)) e
 
+    onOp :: (VarianceTable, Scope GPU) -> Op GPU -> f (Op GPU)
     onOp ctx (OtherOp soac) =
-      OtherOp <$> mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda ctx} soac
+      OtherOp <$> mapSOACM (soacMapper ctx) soac
     onOp _ op = pure op
 
+    soacMapper ctx =
+      (identitySOACMapper @GPU)
+        { mapOnSOACLambda = onLambda ctx
+        }
+
     mapper ctx =
-      identityMapper
+      (identityMapper @GPU)
         { mapOnBody = const (onBody ctx),
           mapOnOp = onOp ctx
         }

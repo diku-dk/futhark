@@ -17,6 +17,7 @@ module Futhark.Optimise.TileLoops.Shared
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (foldl', zip4)

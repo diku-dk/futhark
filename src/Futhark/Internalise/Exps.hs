@@ -5,6 +5,7 @@
 -- program to a core Futhark program.
 module Futhark.Internalise.Exps (transformProg) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))

@@ -18,7 +18,7 @@
 --          the kernel produces one scalar result
 module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
-import Control.Monad.Reader
+import Control.Monad
 import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M

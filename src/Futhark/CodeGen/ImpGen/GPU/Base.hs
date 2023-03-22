@@ -46,7 +46,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.List (foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe

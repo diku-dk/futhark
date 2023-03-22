@@ -18,6 +18,7 @@ module Futhark.Analysis.LastUse
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Bifunctor (bimap)

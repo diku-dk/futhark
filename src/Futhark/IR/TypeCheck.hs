@@ -42,6 +42,7 @@ module Futhark.IR.TypeCheck
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies

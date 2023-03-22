@@ -3,6 +3,7 @@
 -- | Interference analysis for Futhark programs.
 module Futhark.Analysis.Interference (Graph, analyseProgGPU) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Data.Foldable (toList)
 import Data.Function ((&))

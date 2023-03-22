@@ -1,6 +1,7 @@
 -- | @futhark pkg@
 module Futhark.CLI.Pkg (main) where
 
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Control.Monad.State

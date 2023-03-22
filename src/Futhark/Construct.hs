@@ -120,6 +120,7 @@ module Futhark.Construct
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.List (foldl', sortOn, transpose)

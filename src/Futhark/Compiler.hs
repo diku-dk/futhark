@@ -18,7 +18,8 @@ module Futhark.Compiler
 where
 
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (MonadError)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (first)
 import Data.List (sortOn)
 import Data.List.NonEmpty qualified as NE

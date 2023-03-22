@@ -14,7 +14,7 @@ module Futhark.CodeGen.ImpGen.GPU.Group
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.Bifunctor
 import Data.List (partition, zip4)
 import Data.Map.Strict qualified as M

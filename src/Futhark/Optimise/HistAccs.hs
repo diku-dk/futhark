@@ -3,6 +3,7 @@
 -- | Turn certain uses of accumulators into SegHists.
 module Futhark.Optimise.HistAccs (histAccsGPU) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Map.Strict qualified as M

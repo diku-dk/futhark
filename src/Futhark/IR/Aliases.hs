@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | A representation where all patterns are annotated with aliasing
 -- information.  It also records consumption of variables in bodies.
@@ -129,7 +130,13 @@ withoutAliases m = do
   scope <- asksScope removeScopeAliases
   runReaderT m scope
 
-instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => ASTRep (Aliases rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpC rep (Aliases rep)),
+    IsOp (OpC rep (Aliases rep))
+  ) =>
+  ASTRep (Aliases rep)
+  where
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
@@ -137,7 +144,13 @@ instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => Aliased (Aliases rep
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
-instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => PrettyRep (Aliases rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpC rep (Aliases rep)),
+    Pretty (OpC rep (Aliases rep))
+  ) =>
+  PrettyRep (Aliases rep)
+  where
   ppExpDec (consumed, inner) e =
     maybeComment . catMaybes $
       [exp_dec, merge_dec, ppExpDec inner $ removeExpAliases e]

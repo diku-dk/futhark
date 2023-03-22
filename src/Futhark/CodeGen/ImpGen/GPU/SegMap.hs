@@ -6,7 +6,7 @@
 -- by having actual workgroups run a loop to imitate multiple workgroups.
 module Futhark.CodeGen.ImpGen.GPU.SegMap (compileSegMap) where
 
-import Control.Monad.Except
+import Control.Monad
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base

@@ -4,7 +4,7 @@
 -- individual kernel workgroups.
 module Futhark.Pass.ExtractKernels.Intragroup (intraGroupParallelise) where
 
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
 import Data.Map.Strict qualified as M

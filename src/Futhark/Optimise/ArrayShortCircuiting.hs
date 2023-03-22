@@ -10,6 +10,7 @@ module Futhark.Optimise.ArrayShortCircuiting
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Data.Function ((&))
 import Data.Map qualified as M

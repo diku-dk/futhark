@@ -17,6 +17,7 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   )
 where
 
+import Control.Monad
 import Control.Monad.State
 import Data.Map qualified as M
 import Data.Text qualified as T

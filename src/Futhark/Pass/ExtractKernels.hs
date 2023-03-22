@@ -153,7 +153,7 @@
 -- single kernel.
 module Futhark.Pass.ExtractKernels (extractKernels) where
 
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Data.Bifunctor (first)

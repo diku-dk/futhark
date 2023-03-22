@@ -65,6 +65,7 @@ module Futhark.Optimise.InPlaceLowering
   )
 where
 
+import Control.Monad
 import Control.Monad.RWS
 import Data.Map.Strict qualified as M
 import Data.Ord (comparing)
@@ -377,14 +378,14 @@ isOptimisable name = do
           ++ prettyString name
           ++ " not found."
 
-seenVar :: VName -> ForwardingM rep ()
+seenVar :: forall rep. VName -> ForwardingM rep ()
 seenVar name = do
   aliases <-
     asks $
       maybe mempty entryAliases
         . M.lookup name
         . topDownTable
-  tell $ mempty {bottomUpSeen = oneName name <> aliases}
+  tell $ (mempty :: BottomUp rep) {bottomUpSeen = oneName name <> aliases}
 
 tapBottomUp :: ForwardingM rep a -> ForwardingM rep (a, BottomUp rep)
 tapBottomUp m = do

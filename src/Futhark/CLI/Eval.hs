@@ -2,8 +2,9 @@ module Futhark.CLI.Eval (main) where
 
 import Control.Exception
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T

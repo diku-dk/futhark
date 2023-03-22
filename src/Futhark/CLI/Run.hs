@@ -3,8 +3,9 @@ module Futhark.CLI.Run (main) where
 
 import Control.Exception
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Free.Church
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy qualified as BS
 import Data.Map qualified as M
 import Data.Maybe

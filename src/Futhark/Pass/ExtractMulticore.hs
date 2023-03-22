@@ -5,6 +5,7 @@
 -- involve ad-hoc irregular nested parallelism.
 module Futhark.Pass.ExtractMulticore (extractMulticore) where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State

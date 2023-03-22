@@ -7,6 +7,7 @@ module Futhark.Pass.ExplicitAllocations.SegOp
   )
 where
 
+import Control.Monad
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass.ExplicitAllocations

@@ -10,7 +10,7 @@ module Language.Futhark.TypeChecker.Terms.Pat
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Control.Monad.State
 import Data.Bitraversable
 import Data.Either

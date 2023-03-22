@@ -4,7 +4,7 @@
 -- fairly inefficient two-pass algorithm, but can handle anything.
 module Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass (compileSegScan) where
 
-import Control.Monad.Except
+import Control.Monad
 import Control.Monad.State
 import Data.List (delete, find, foldl', zip4)
 import Data.Maybe

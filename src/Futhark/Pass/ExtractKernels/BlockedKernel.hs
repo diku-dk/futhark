@@ -18,7 +18,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 where
 
 import Control.Monad
-import Control.Monad.Writer
 import Futhark.Analysis.PrimExp
 import Futhark.IR
 import Futhark.IR.Aliases (AliasableRep)
