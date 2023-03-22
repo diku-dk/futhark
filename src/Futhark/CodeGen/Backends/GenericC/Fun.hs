@@ -9,7 +9,7 @@ module Futhark.CodeGen.Backends.GenericC.Fun
   )
 where
 
-import Control.Monad.Reader
+import Control.Monad
 import Futhark.CodeGen.Backends.GenericC.Code
 import Futhark.CodeGen.Backends.GenericC.Monad
 import Futhark.CodeGen.ImpCode

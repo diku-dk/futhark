@@ -6,6 +6,7 @@
 -- Redomap Construct/).
 module Futhark.Optimise.Fusion (fuseSOACs) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Graph.Inductive.Graph qualified as G

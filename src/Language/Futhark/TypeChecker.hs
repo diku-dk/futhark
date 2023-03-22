@@ -18,8 +18,8 @@ module Language.Futhark.TypeChecker
   )
 where
 
+import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor (first, second)
 import Data.Either
 import Data.Map.Strict qualified as M

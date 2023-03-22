@@ -49,6 +49,7 @@ module Futhark.IR.SOACS.SOAC
 where
 
 import Control.Category
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
@@ -371,7 +372,7 @@ data SOACMapper frep trep m = SOACMapper
   }
 
 -- | A mapper that simply returns the SOAC verbatim.
-identitySOACMapper :: Monad m => SOACMapper rep rep m
+identitySOACMapper :: forall rep m. Monad m => SOACMapper rep rep m
 identitySOACMapper =
   SOACMapper
     { mapOnSOACSubExp = pure,
