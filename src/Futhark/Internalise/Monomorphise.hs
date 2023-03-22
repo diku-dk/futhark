@@ -952,20 +952,22 @@ removeExpFromValBind valbind = do
   scope <-
     S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
       <$> asks (M.keysSet . envPolyBindings)
-  (params', exp_naming) <- runStateT (mapM (onPat scope) $ valBindParams valbind) mempty
+  (params', expNaming) <- runStateT (mapM (onPat scope) $ valBindParams valbind) mempty
   let typeParams' =
         valBindTypeParams valbind
-          <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList exp_naming)
+          <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList expNaming)
   let args = foldMap patArg params'
-  (rety', _) <- runStateT (hardOnRetType (scope `S.union` args) $ unInfo $ valBindRetType valbind) exp_naming
+  (rety', _) <- runStateT (hardOnRetType (scope `S.union` args) $ unInfo $ valBindRetType valbind) expNaming
   let scope' = scope `S.union` args
-  (body', _) <- runStateT (expFree scope' $ valBindBody valbind) exp_naming
+  (body', expNaming') <- runStateT (expFree scope' $ valBindBody valbind) expNaming
+  let newNames = expNaming' `M.difference` expNaming
+  body'' <- foldrM insertDimCalculus body' $ M.toList newNames
   pure $
     valbind
       { valBindRetType = Info rety',
         valBindTypeParams = typeParams',
         valBindParams = params',
-        valBindBody = body'
+        valBindBody = body''
       }
   where
     unParamDim (TypeParamDim vn _) = Just vn
@@ -984,6 +986,21 @@ removeExpFromValBind valbind = do
     unSizeExpr (SizeExpr e) = e
     unSizeExpr _ = error "internal error in removeExpFromValBind"
 
+    insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
+    insertDimCalculus (dim, name) body = do
+      reName <- newNameFromString $ baseString name
+      let expr = unSizeExpr dim
+       in pure $ AppExp (LetPat [] (Id name (Info $ Scalar $ Prim $ Signed Int64) (srclocOf expr)) expr body mempty) (appRes reName body)
+      where
+        appRes reName (AppExp _ (Info (AppRes ty ext))) =
+          Info $ AppRes (applySubst (subst reName) ty) (ext <> [reName])
+        appRes reName e =
+          Info $ AppRes (applySubst (subst reName) $ typeOf e) [reName]
+
+        subst reName vn
+          | True <- vn == name = Just $ SizeSubst $ sizeFromName (qualName reName) mempty
+          | otherwise = Nothing
+
     -- using StateT (M.Map Exp VName) MonoM a
     hardOnRetType argset (RetType dims ty) = do
       predBind <- get
@@ -993,6 +1010,35 @@ removeExpFromValBind valbind = do
       let dims' = dims <> M.elems rl
       pure $ RetType dims' ty'
 
+    unscoping argset body = do
+      (localDims, nxtBind) <-
+        gets $
+          M.partitionWithKey
+            (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
+      put nxtBind
+      lift $ foldrM insertDimCalculus body $ M.toList localDims
+
+    expFree scope (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
+      let dimArgs = S.fromList dims
+      (form', formArgs) <- onForm form
+      let argset = dimArgs `S.union` formArgs `S.union` patArg pat
+      pat' <- onPat (scope `S.union` dimArgs) pat -------
+      resT' <- Info <$> onResType scope resT
+      AppExp
+        <$> ( DoLoop dims {-TODO: add dims from pat'-} pat'
+                <$> expFree scope ei
+                <*> pure form'
+                <*> (expFree (scope `S.union` argset) body >>= unscoping argset)
+                <*> pure loc
+            )
+        <*> pure resT'
+      where
+        onForm (For ident e) =
+          (,S.singleton $ identName ident) <$> (For ident <$> expFree scope e)
+        onForm (ForIn fpat e) =
+          (,patArg fpat) <$> (ForIn fpat <$> expFree scope e)
+        onForm (While e) =
+          (,S.empty) <$> (While <$> expFree scope e)
     expFree scope (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
       let argset =
             S.fromList (mapMaybe unParamDim typeParams)
@@ -1005,38 +1051,51 @@ removeExpFromValBind valbind = do
               (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
               newBind
       retT' <- onRetType scope argset retT
-      body' <- expFree (scope `S.union` argset) body
+      body' <- unscoping argset =<< expFree (scope `S.union` argset) body
+      resT' <- Info <$> onResType scope resT
+      bodyNxt' <- expFree (S.insert name scope) body_nxt >>= unscoping (S.singleton name)
       put nxtBind
+      pure $
+        AppExp
+          ( LetFun
+              name
+              ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList localBind),
+                args',
+                rettype_te, -- ?
+                Info retT',
+                body'
+              )
+              bodyNxt'
+              loc
+          )
+          resT'
+    expFree scope (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
+      let dimArgs = S.fromList (map sizeName dims)
+      let letArgs = patArg pat
+      let scope' = scope `S.union` dimArgs
+      let scope'' = scope' `S.union` letArgs
+      let argset = dimArgs `S.union` letArgs
+      resT' <- Info <$> onResType scope resT
+      pat' <- onPat scope' pat
       AppExp
-        <$> ( LetFun
-                name
-                ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList localBind),
-                  args',
-                  rettype_te, -- ?
-                  Info retT',
-                  body'
-                )
-                <$> expFree (S.insert name scope) body_nxt
+        <$> ( LetPat dims {-TODO: add dims from pat'-} pat'
+                <$> expFree scope e1
+                <*> (expFree scope'' body >>= unscoping argset)
                 <*> pure loc
             )
-        <*> (Info <$> onResType scope resT)
-    expFree scope (AppExp (LetPat dims pat e1 e2 loc) (Info resT)) =
-      let scope' = scope `S.union` S.fromList (map sizeName dims)
-       in let scope'' = scope' `S.union` patArg pat
-           in AppExp
-                <$> (LetPat dims <$> onPat scope' pat <*> expFree scope e1 <*> expFree scope'' e2 <*> pure loc)
-                <*> (Info <$> onResType scope resT)
-    expFree scope (AppExp (LetWith dest src slice e body loc) (Info resT)) =
+        <*> pure resT'
+    expFree scope (AppExp (LetWith dest src slice e body loc) (Info resT)) = do
+      resT' <- Info <$> onResType scope resT
       AppExp
         <$> ( LetWith
                 <$> onIdent dest
                 <*> onIdent src
                 <*> mapM onSlice slice
                 <*> expFree scope e
-                <*> expFree (S.insert (identName dest) scope) body
+                <*> (expFree (S.insert (identName dest) scope) body >>= unscoping (S.singleton $ identName dest))
                 <*> pure loc
             )
-        <*> (Info <$> onResType scope resT)
+        <*> pure resT'
       where
         onSlice (DimFix de) =
           DimFix <$> expFree scope de
@@ -1047,22 +1106,25 @@ removeExpFromValBind valbind = do
             <*> mapM (expFree scope) e3
         onIdent (Ident vn (Info ty) iloc) =
           Ident vn <$> (Info <$> onType scope ty) <*> pure iloc
-    expFree scope (AppExp (Match e cs loc) (Info resT)) =
+    expFree scope (AppExp (Match e cs loc) (Info resT)) = do
+      resT' <- Info <$> onResType scope resT
       AppExp
         <$> ( Match
                 <$> expFree scope e
                 <*> mapM onCase cs
                 <*> pure loc
             )
-        <*> (Info <$> onResType scope resT)
+        <*> pure resT'
       where
-        onCase (CasePat pat body cloc) =
+        onCase (CasePat pat body cloc) = do
+          let args = patArg pat
           CasePat
             <$> onPat scope pat
-            <*> expFree (scope `S.union` patArg pat) body
+            <*> (expFree (scope `S.union` args) body >>= unscoping args)
             <*> pure cloc
-    expFree scope (AppExp app (Info resT)) =
-      AppExp <$> astMap mapper app <*> (Info <$> onResType scope resT)
+    expFree scope (AppExp app (Info resT)) = do
+      resT' <- Info <$> onResType scope resT
+      AppExp <$> astMap mapper app <*> pure resT'
       where
         mapper =
           ASTMapper
@@ -1077,7 +1139,7 @@ removeExpFromValBind valbind = do
       let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
        in Lambda
             <$> mapM (onPat scope) args
-            <*> expFree (scope `S.union` argset) body
+            <*> (expFree (scope `S.union` argset) body >>= unscoping argset)
             <*> pure rettype_te -- ?
             <*> (Info . (as,) <$> onRetType scope argset retT)
             <*> pure loc
