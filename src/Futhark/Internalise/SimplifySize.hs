@@ -1,7 +1,7 @@
 -- | This Simplification module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent program without
 -- arbitrary size expression.
-module Futhark.Internalise.SimplifySize (simplifyProg) where
+module Futhark.Internalise.SimplifySize (transformProg) where
 
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.State
@@ -15,28 +15,29 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-data Env = Env {
-    envNameSrc :: VNameSource,
+data Env = Env
+  { envNameSrc :: VNameSource,
     envPreviousDecs :: S.Set VName
-    }
+  }
 
-newtype SimplifyM a =
-    SimplifyM (State Env a)
-    deriving (
-        Monad,
-        Functor,
-        Applicative,
-        MonadState Env
-        )
+newtype SimplifyM a
+  = SimplifyM (State Env a)
+  deriving
+    ( Monad,
+      Functor,
+      Applicative,
+      MonadState Env
+    )
 
 runSimplifier :: VNameSource -> SimplifyM a -> (a, VNameSource)
-runSimplifier src (SimplifyM m) = (r, envNameSrc env) 
-    where (r, env) = runState m (Env src mempty)
+runSimplifier src (SimplifyM m) = (r, envNameSrc env)
+  where
+    (r, env) = runState m (Env src mempty)
 
 addBind :: VName -> SimplifyM ()
 addBind vn = do
-    Env src prev <- get
-    put $ Env src $ S.insert vn prev
+  Env src prev <- get
+  put $ Env src $ S.insert vn prev
 
 instance MonadFreshNames SimplifyM where
   getNameSource = gets envNameSrc
@@ -44,11 +45,13 @@ instance MonadFreshNames SimplifyM where
     modify $ \env -> env {envNameSrc = src}
 
 removeExpFromValBind ::
-    ValBindBase Info VName -> SimplifyM (ValBindBase Info VName)
+  ValBindBase Info VName -> SimplifyM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
   scope <-
-    S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-        <$> gets envPreviousDecs
+    gets
+      ( S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
+          . envPreviousDecs
+      )
   (params', expNaming) <- runStateT (mapM (onPat scope) $ valBindParams valbind) mempty
   let typeParams' =
         valBindTypeParams valbind
@@ -366,9 +369,9 @@ simplifyDecs (dec : _) =
       ++ "input program, but received: "
       ++ prettyString dec
 
-simplifyProg :: MonadFreshNames m => [Dec] -> m [Dec]
-simplifyProg decs = do
-    src <- getNameSource
-    let (ret, src') = runSimplifier src (simplifyDecs decs)
-    putNameSource src'
-    pure ret
+transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
+transformProg decs = do
+  src <- getNameSource
+  let (ret, src') = runSimplifier src (simplifyDecs decs)
+  putNameSource src'
+  pure ret

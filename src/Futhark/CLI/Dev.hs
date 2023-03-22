@@ -28,6 +28,7 @@ import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.SimplifySize as Simplify
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -74,11 +75,13 @@ data FutharkPipeline
     Pipeline [UntypedPass]
   | -- | Partially evaluate away the module language.
     Defunctorise
-  | -- | Defunctorise and monomorphise.
+  | -- | Defunctorise and simplify.
+    Simplify
+  | -- | Defunctorise, simplify and monomorphise.
     Monomorphise
-  | -- | Defunctorise, monomorphise, and lambda-lift.
+  | -- | Defunctorise, simplify, monomorphise, and lambda-lift.
     LiftLambdas
-  | -- | Defunctorise, monomorphise, lambda-lift, and defunctionalise.
+  | -- | Defunctorise, simplify, monomorphise, lambda-lift, and defunctionalise.
     Defunctionalise
 
 data Config = Config
@@ -540,6 +543,11 @@ commandLineOptions =
       "Partially evaluate all module constructs and print the residual program.",
     Option
       []
+      ["simplify"]
+      (NoArg $ Right $ \opts -> opts {futharkPipeline = Simplify})
+      "Simplify the size expression of the program.",
+    Option
+      []
       ["monomorphise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Monomorphise})
       "Monomorphise the program.",
@@ -732,12 +740,20 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
         Defunctorise -> do
           (_, imports, src) <- readProgram'
           liftIO $ p $ evalState (Defunctorise.transformProg imports) src
+        Simplify -> do
+          (_, imports, src) <- readProgram'
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= Simplify.transformProg
         Monomorphise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= Simplify.transformProg
                   >>= Monomorphise.transformProg
         LiftLambdas -> do
           (_, imports, src) <- readProgram'
@@ -745,6 +761,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= Simplify.transformProg
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
@@ -753,6 +770,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= Simplify.transformProg
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg

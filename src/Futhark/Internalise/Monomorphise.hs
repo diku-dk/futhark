@@ -38,7 +38,6 @@ import Data.Maybe
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
-import Futhark.Internalise.SimplifySize
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
@@ -966,6 +965,6 @@ transformDecs (dec : _) =
 -- is expected, so only value declarations and type declaration are accepted.
 transformProg :: MonadFreshNames m => [Dec] -> m [ValBind]
 transformProg decs =
-  (\decs' -> fmap (toList . fmap snd . snd) $
+  fmap (toList . fmap snd . snd) $
     modifyNameSource $ \namesrc ->
-      runMonoM namesrc $ transformDecs decs') =<< simplifyProg decs
+      runMonoM namesrc $ transformDecs decs
