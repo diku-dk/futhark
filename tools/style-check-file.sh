@@ -47,12 +47,14 @@ if grep -E -n " +$" "$file"; then
     exit=1
 fi
 
-if grep -E -n "$(printf '\t')" "$file"; then
-    echo
-    echo "${cyan}Tab characters found in $file:${NC}"
-    echo "$output"
-    exit=1
-fi
+no_tabs() {
+    if grep -E -n "$(printf '\t')" "$1"; then
+        echo
+        echo "${cyan}Tab characters found in $1:${NC}"
+        echo "$output"
+        exit=1
+    fi
+}
 
 if file "$file" | grep -q 'CRLF line terminators'; then
     echo
@@ -67,7 +69,11 @@ if ! no_trailing_blank_lines "$file"; then
 fi
 
 case "$file" in
+    *.fut)
+        no_tabs "$file"
+        ;;
     *.hs)
+        no_tabs "$file"
         if ! LC_ALL=C.UTF-8 ormolu --mode check "$file"; then
             echo
             echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
@@ -83,6 +89,7 @@ case "$file" in
         fi
         ;;
     *.py)
+        no_tabs "$file"
         output=$(mypy --no-error-summary "$file")
         if [ $? != 0 ]; then
             echo
