@@ -46,10 +46,11 @@ module Futhark.IR.SegOp
 where
 
 import Control.Category
-import Control.Monad.Identity hiding (mapM_)
-import Control.Monad.Reader hiding (mapM_)
+import Control.Monad
+import Control.Monad.Identity
+import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Control.Monad.Writer hiding (mapM_)
+import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bitraversable
 import Data.Foldable (traverse_)

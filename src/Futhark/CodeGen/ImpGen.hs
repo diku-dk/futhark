@@ -120,9 +120,9 @@ module Futhark.CodeGen.ImpGen
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer
 import Control.Parallel.Strategies
 import Data.Bifunctor (first)
 import Data.DList qualified as DL

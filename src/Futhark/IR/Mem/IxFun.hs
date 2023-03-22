@@ -41,9 +41,8 @@ module Futhark.IR.Mem.IxFun
 where
 
 import Control.Category
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.State
-import Control.Monad.Writer
 import Data.Function (on, (&))
 import Data.List (elemIndex, partition, sort, sortBy, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))

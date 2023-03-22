@@ -4,6 +4,7 @@
 -- | @futhark doc@
 module Futhark.CLI.Doc (main) where
 
+import Control.Monad
 import Control.Monad.State
 import Data.FileEmbed
 import Data.List (nubBy)
