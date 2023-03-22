@@ -543,7 +543,7 @@ commandLineOptions =
       "Partially evaluate all module constructs and print the residual program.",
     Option
       []
-      ["simplify"]
+      ["simplify-size"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Simplify})
       "Simplify the size expression of the program.",
     Option
