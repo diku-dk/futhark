@@ -66,6 +66,7 @@ module Futhark.IR.Prop.Types
   )
 where
 
+import Control.Monad
 import Control.Monad.State
 import Data.List (elemIndex, foldl')
 import Data.Map.Strict qualified as M

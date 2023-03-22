@@ -11,6 +11,7 @@ module Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
 where
 
 import Control.Exception.Base qualified as Exc
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Function ((&))

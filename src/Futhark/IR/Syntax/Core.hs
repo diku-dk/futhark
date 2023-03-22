@@ -75,6 +75,7 @@ module Futhark.IR.Syntax.Core
 where
 
 import Control.Category
+import Control.Monad
 import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor
@@ -245,6 +246,9 @@ instance Bitraversable TypeBase where
   bitraverse _ _ (Prim pt) = pure $ Prim pt
   bitraverse _ g (Acc arrs ispace ts u) = Acc arrs ispace ts <$> g u
   bitraverse _ _ (Mem s) = pure $ Mem s
+
+instance Functor (TypeBase shape) where
+  fmap = second
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault

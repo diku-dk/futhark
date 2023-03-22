@@ -2,6 +2,7 @@
 module Futhark.CLI.Literate (main) where
 
 import Codec.BMP qualified as BMP
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State hiding (State)
 import Data.Bifunctor (first, second)

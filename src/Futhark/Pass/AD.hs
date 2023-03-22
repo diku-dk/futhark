@@ -53,7 +53,7 @@ onStm mode scope (Let pat aux (Op (JVP lam args vec))) = do
 onStm mode scope (Let pat aux e) = oneStm . Let pat aux <$> mapExpM mapper e
   where
     mapper =
-      identityMapper
+      (identityMapper @SOACS)
         { mapOnBody = \bscope -> onBody mode (bscope <> scope),
           mapOnOp = mapSOACM soac_mapper
         }

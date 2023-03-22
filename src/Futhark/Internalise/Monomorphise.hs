@@ -24,10 +24,10 @@
 -- representation.
 module Futhark.Internalise.Monomorphise (transformProg) where
 
-import Control.Monad.Identity
-import Control.Monad.RWS hiding (Sum)
+import Control.Monad
+import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
 import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
+import Control.Monad.Writer (runWriterT)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable

@@ -48,7 +48,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegRed
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Data.List (genericLength, zip7)
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp

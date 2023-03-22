@@ -63,6 +63,7 @@ module Futhark.Optimise.Simplify.Engine
   )
 where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either

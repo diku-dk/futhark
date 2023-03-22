@@ -6,7 +6,8 @@ module Futhark.CodeGen.Backends.GenericC.EntryPoints
   )
 where
 
-import Control.Monad.Reader
+import Control.Monad
+import Control.Monad.Reader (asks)
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad

@@ -97,6 +97,7 @@ module Language.Futhark.Prop
   )
 where
 
+import Control.Monad
 import Control.Monad.State
 import Data.Bifoldable
 import Data.Bifunctor

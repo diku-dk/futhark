@@ -16,7 +16,7 @@ module Futhark.Pass.ExtractKernels.Interchange
   )
 where
 
-import Control.Monad.Identity
+import Control.Monad
 import Data.List (find)
 import Data.Maybe
 import Futhark.IR.SOACS
