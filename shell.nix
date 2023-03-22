@@ -29,6 +29,8 @@ pkgs.stdenv.mkDerivation {
       ghcid
       niv
       ispc
+      python3Packages.mypy
+      python3Packages.black
       python3Packages.numpy
       python3Packages.pyopencl
       python3Packages.matplotlib

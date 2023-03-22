@@ -2,7 +2,7 @@
 
 import sys
 import argparse
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import matplotlib
 import numpy as np
 import json
@@ -16,7 +16,7 @@ import string
 from matplotlib.ticker import FormatStrFormatter
 from multiprocessing import Pool
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List, Tuple, NamedTuple
+from typing import Any, Dict, Optional, List, Tuple, NamedTuple, Set
 from itertools import islice
 from PIL import ImageFile
 from collections import OrderedDict
@@ -61,24 +61,36 @@ class PlotJob(NamedTuple):
     plots: Dict[str, str]
 
 
-def mpe(runtimes: np.ndarray = None, **kwargs) -> str:
+def mpe(runtimes: Optional[np.ndarray[Any, Any]] = None, **kwargs) -> str:
     """Computes the Mean percentage error and formats for printing."""
+
+    if runtimes is None:
+        raise Exception(f"runtimes has to be not None.")
+
     factor = 100 / runtimes.shape[0]
     mpe = factor * ((runtimes - runtimes.mean()) / runtimes).sum()
-    return f"{mpe:.2e}%"
+    return f"{mpe:.5f}%"
 
 
-def memory_usage(bytes: Dict[str, int] = None, **kwargs) -> str:
+def memory_usage(bytes: Optional[Dict[str, int]] = None, **kwargs) -> str:
     """Computes the memory usages of devices and formats for printing."""
 
-    def formatter(device, bs):
+    if bytes is None:
+        raise Exception(f"bytes has to be not None.")
+
+    def formatter(device: str, bs: int) -> str:
         return f"{format_bytes(bs)}@{device}"
 
-    return ",".join(map(lambda a: formatter(*a), bytes.items()))
+    return ", ".join(map(lambda a: formatter(*a), bytes.items()))
 
 
-def confidence_interval(runtimes: np.ndarray = None, **kwargs) -> str:
+def confidence_interval(
+    runtimes: Optional[np.ndarray[Any, Any]] = None, **kwargs
+) -> str:
     """Computes the 95% confidence interval and formats for printing."""
+
+    if runtimes is None:
+        raise Exception(f"runtimes has to be not None.")
 
     mean = runtimes.mean()
     bound = 0.95 * runtimes.std(ddof=1) / np.sqrt(runtimes.shape[0])
@@ -175,6 +187,9 @@ class PlotType(ABC):
                 return unit, factor
 
         return units[-1][0], units[-1][1]
+
+
+PLOT_TYPES_USED: List[str]
 
 
 class PerRun(PlotType):
@@ -389,7 +404,7 @@ def get_args() -> Any:
     return parser.parse_args()
 
 
-def format_arg_list(args: Optional[str]) -> Optional[str]:
+def format_arg_list(args: Optional[str]) -> Optional[Set[str]]:
     """
     Takes a string of form 'a, b, c, d' and makes a list ['a', 'b', 'c', 'd']
     """
@@ -409,15 +424,23 @@ def make_plot_jobs_and_directories(
     """Makes dictionary with plot jobs where plot_jobs are the jobs."""
 
     plot_jobs = dict()
-    folder_content = dict()
+    folder_content: Dict[str, List[str]] = dict()
 
-    def remove_characters(characters, text):
+    def remove_characters(characters: List[str], text: str) -> str:
         rep = {re.escape(k): "" for k in characters}
         pattern = re.compile("|".join(rep.keys()))
         return pattern.sub(lambda m: rep[re.escape(m.group(0))], text)
 
     for program_path in programs:
-        datasets = data.get(program_path).get("datasets")
+        temp = data.get(program_path)
+        if temp is None:
+            raise Exception(f"{program_path} is not valid key.")
+
+        datasets = temp.get("datasets")
+
+        if datasets is None:
+            raise Exception(f"{program_path} does not have a dataset key.")
+
         program_name = pathlib.Path(program_path).name
         program_directory = os.path.dirname(program_path)
         for dataset_path, dataset_dict in datasets.items():
@@ -431,9 +454,7 @@ def make_plot_jobs_and_directories(
                 root, program_directory, pathlib.Path(program_path).name
             )
             directory = "." if directory == "" else directory
-            plot_file_name = os.path.join(
-                directory, f"{dataset_filename}_{random_string(16)}"
-            )
+
             benchmark_result = dataset_dict.copy()
             np_runtimes = np.array(benchmark_result.get("runtimes"))
             benchmark_result["runtimes"] = np_runtimes
@@ -442,6 +463,13 @@ def make_plot_jobs_and_directories(
 
             if folder_content.get(directory) is None:
                 folder_content[directory] = []
+
+            while True:
+                plot_file_name = os.path.join(
+                    directory, f"{dataset_filename}_{random_string(16)}"
+                )
+                if plot_file_name not in folder_content[directory]:
+                    break
 
             folder_content[directory].insert(0, plot_file_name)
 
@@ -487,9 +515,22 @@ def make_html(
     for key in plot_jobs.keys():
         program = plot_jobs[key].program
         dataset = plot_jobs[key].dataset
-        plot_jobs_keys[key] = make_key(program + dataset, 32)
 
-    folder_keys = {folder: make_key(folder, 32) for folder in folder_content}
+        while True:
+            id_key = make_key(program + dataset, 32)
+            if id_key not in plot_jobs.values():
+                break
+
+        plot_jobs_keys[key] = id_key
+
+    folder_keys: Dict[str, str] = dict()
+    for folder in folder_content:
+        while True:
+            id_folder_key = make_key(folder, 32)
+            if id_folder_key not in folder_keys.values():
+                break
+
+        folder_keys[folder] = id_folder_key
 
     root_prefix = f"{root}/"
 
@@ -523,10 +564,13 @@ def make_html(
 
         return rf"<li>{pretty_path}</li><ul>{before}{lis}</ul>"
 
-    def make_subsection(plot_file: str, plot_job: PlotJob) -> str:
+    def make_subsection(plot_file: str, plot_job: Optional[PlotJob]) -> str:
         """
         Makes a subsection with plots and statistical descriptors.
         """
+        if plot_job is None:
+            raise Exception(f"A given PlotJob was None.")
+
         dataset = plot_job.dataset
         program = plot_job.program
         key = plot_jobs_keys[plot_file]
@@ -543,8 +587,7 @@ def make_html(
         Makes a section with all the plots and descriptors for a given
         benchmark's datasets.
         """
-        get = plot_jobs.get
-        sub_data = map(lambda a: (a, get(a)), dataset_plot_files)
+        sub_data = map(lambda a: (a, plot_jobs.get(a)), dataset_plot_files)
         subsections = "".join(map(lambda a: make_subsection(*a), sub_data))
         pretty_folder = folder.removeprefix(root_prefix)
         folder_key = folder_keys[folder]
@@ -581,18 +624,24 @@ def make_html(
 def task(plot_jobs: Dict[str, PlotJob]) -> None:
     """Begins plotting, it is used"""
     global plots
+    global PLOT_TYPES_USED
+    global TRANSPARENT
+
     plot_types = [
-        plot_type()
+        plot_type()  # type: ignore
         for key, plot_type in ALL_PLOT_TYPES.items()
-        if key in plot_types_used
+        if key in PLOT_TYPES_USED
     ]
-    plotter = Plotter(plot_types, dpi=200, transparent=transparent)
+    plotter = Plotter(plot_types, dpi=200, transparent=TRANSPARENT)
     plotter.plot(plot_jobs)
 
 
+TRANSPARENT: bool
+
+
 def main() -> None:
-    global plot_types_used
-    global transparent
+    global PLOT_TYPES_USED
+    global TRANSPARENT
     plt.rcParams.update(
         {
             "ytick.color": "black",
@@ -609,9 +658,26 @@ def main() -> None:
     filename = pathlib.Path(args.filename).stem
     data = json.load(open(args.filename, "r"))
     programs = format_arg_list(args.programs)
-    plot_types_used = format_arg_list(args.plots)
+
+    plots_used = format_arg_list(args.plots)
+
+    if plots_used is None:
+        PLOT_TYPES_USED = list(sorted(ALL_PLOT_TYPES.keys()))
+    else:
+        PLOT_TYPES_USED = list(sorted(plots_used))
+        temp = list(ALL_PLOT_TYPES.keys())
+        for plot_type in PLOT_TYPES_USED:
+            if plot_type not in temp:
+                existing_plot_types = ", ".join(temp)
+                raise Exception(
+                    (
+                        '"{plot_type}" is not a plot type try '
+                        f"{existing_plot_types}"
+                    )
+                )
+
     filetype = args.filetype
-    transparent = args.transparent
+    TRANSPARENT = args.transparent
 
     root = f"{filename}-plots"
 
@@ -623,21 +689,6 @@ def main() -> None:
             )
         )
 
-    if plot_types_used is None:
-        plot_types_used = list(sorted(ALL_PLOT_TYPES.keys()))
-    else:
-        plot_types_used = list(sorted(plot_types_used))
-        existing_plot_types = list(ALL_PLOT_TYPES.keys())
-        for plot_type in plot_types_used:
-            if plot_type not in existing_plot_types:
-                existing_plot_types = ", ".join(existing_plot_types)
-                raise Exception(
-                    (
-                        '"{plot_type}" is not a plot type try '
-                        f"{existing_plot_types}"
-                    )
-                )
-
     if programs is None:
         programs = set(data.keys())
     else:
@@ -648,7 +699,7 @@ def main() -> None:
             raise Exception(f'"{diff}" are not valid keys.')
 
     plot_jobs, folder_content = make_plot_jobs_and_directories(
-        programs, data, filetype, plot_types_used, root=root
+        list(programs), data, filetype, PLOT_TYPES_USED, root=root
     )
 
     with open(f"{filename}.html", "w") as fp:
@@ -658,6 +709,7 @@ def main() -> None:
         p.map(task, chunks(plot_jobs, max(len(plot_jobs) // 32, 1)))
 
     print(f"Open {filename}.html in a browser.")
+
 
 if __name__ == "__main__":
     main()
