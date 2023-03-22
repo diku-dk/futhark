@@ -16,34 +16,28 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-data Env = Env
-  { envNameSrc :: VNameSource,
-    envPreviousDecs :: S.Set VName
-  }
-
 newtype SimplifyM a
-  = SimplifyM (State Env a)
+  = SimplifyM
+      ( ReaderT
+          (S.Set VName)
+          (State VNameSource)
+          a
+      )
   deriving
     ( Monad,
       Functor,
       Applicative,
-      MonadState Env
+      MonadReader (S.Set VName),
+      MonadState VNameSource,
+      MonadFreshNames
     )
 
-runSimplifier :: VNameSource -> SimplifyM a -> (a, VNameSource)
-runSimplifier src (SimplifyM m) = (r, envNameSrc env)
-  where
-    (r, env) = runState m (Env src mempty)
+runSimplifier :: SimplifyM a -> VNameSource -> (a, VNameSource)
+runSimplifier (SimplifyM m) =
+  runState (runReaderT m mempty)
 
-addBind :: VName -> SimplifyM ()
-addBind vn = do
-  Env src prev <- get
-  put $ Env src $ S.insert vn prev
-
-instance MonadFreshNames SimplifyM where
-  getNameSource = gets envNameSrc
-  putNameSource src =
-    modify $ \env -> env {envNameSrc = src}
+addBind :: VName -> SimplifyM a -> SimplifyM a
+addBind = local . S.insert
 
 newtype InnerSimplifyM a
   = InnerSimplifyM
@@ -387,10 +381,8 @@ removeExpFromValBind ::
   ValBindBase Info VName -> SimplifyM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
   scope <-
-    gets
-      ( S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-          . envPreviousDecs
-      )
+    asks $
+      S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
   (params', expNaming) <- runInnerSimplifier (mapM onPat $ valBindParams valbind) scope mempty
   let typeParams' =
         valBindTypeParams valbind
@@ -401,7 +393,6 @@ removeExpFromValBind valbind = do
   (body', expNaming') <- runInnerSimplifier (expFree $ valBindBody valbind) scope' expNaming
   let newNames = expNaming' `M.difference` expNaming
   body'' <- foldrM insertDimCalculus body' $ M.toList newNames
-  addBind $ valBindName valbind
   pure $
     valbind
       { valBindRetType = Info rety',
@@ -414,7 +405,7 @@ simplifyDecs :: [Dec] -> SimplifyM [Dec]
 simplifyDecs [] = pure []
 simplifyDecs (ValDec valbind : ds) = do
   valbind' <- removeExpFromValBind valbind
-  (ValDec valbind' :) <$> simplifyDecs ds
+  (ValDec valbind' :) <$> addBind (valBindName valbind) (simplifyDecs ds)
 simplifyDecs (TypeDec td : ds) =
   (TypeDec td :) <$> simplifyDecs ds
 simplifyDecs (dec : _) =
@@ -426,6 +417,6 @@ simplifyDecs (dec : _) =
 transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
 transformProg decs = do
   src <- getNameSource
-  let (ret, src') = runSimplifier src (simplifyDecs decs)
+  let (ret, src') = runSimplifier (simplifyDecs decs) src
   putNameSource src'
   pure ret
