@@ -251,6 +251,44 @@ expFree (AppExp (Match e cs loc) (Info resT)) = do
         <$> onPat pat
         <*> withArgs args (expFree body >>= unscoping args)
         <*> pure cloc
+expFree (AppExp (Coerce e expType eloc) (Info resT)) = do
+  resT' <- Info <$> onResType resT
+  AppExp
+    <$> ( Coerce
+            <$> expFree e
+            <*> f expType
+            <*> pure eloc
+        )
+    <*> pure resT'
+  where
+    f te@TEVar {} = pure te
+    f (TETuple es loc) =
+      TETuple <$> traverse f es <*> pure loc
+    f (TERecord fs loc) =
+      TERecord <$> traverse (mapM f) fs <*> pure loc
+    f (TEArray s te loc) =
+      TEArray <$> onSizeExp s <*> f te <*> pure loc
+    f (TEUnique te loc) =
+      TEUnique <$> f te <*> pure loc
+    f (TEApply te tae loc) =
+      TEApply <$> f te <*> tae' <*> pure loc
+      where
+        tae' = case tae of
+          TypeArgExpSize s -> TypeArgExpSize <$> onSizeExp s
+          TypeArgExpType t -> TypeArgExpType <$> f t
+    f (TEArrow (Just vn) tea ter loc) =
+      TEArrow (Just vn) <$> f tea <*> {-todo : add ext-} withArg vn (f ter) <*> pure loc
+    f (TEArrow Nothing tea ter loc) =
+      TEArrow Nothing <$> f tea <*> f ter <*> pure loc
+    f (TESum constrs loc) =
+      TESum <$> traverse (mapM (traverse f)) constrs <*> pure loc
+    f (TEDim vns te loc) =
+      TEDim vns <$> withArgs (S.fromList vns) (f te) <*> pure loc
+
+    onSizeExp (SizeExp se loc) =
+      SizeExp <$> (unSizeExpr <$> onExp se) <*> pure loc
+    onSizeExp (SizeExpAny loc) =
+      pure $ SizeExpAny loc
 expFree (AppExp app (Info resT)) = do
   resT' <- Info <$> onResType resT
   AppExp <$> astMap mapper app <*> pure resT'
