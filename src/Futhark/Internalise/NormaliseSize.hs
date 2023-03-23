@@ -82,6 +82,12 @@ instance MonadFreshNames InnerSimplifyM where
         const $
           StateT (((,) <$> putNameSource src <*>) . pure)
 
+askIntros :: S.Set VName -> InnerSimplifyM (S.Set VName)
+askIntros argset =
+  asks (S.filter notIntrisic argset `S.difference`)
+  where
+    notIntrisic vn = baseTag vn > maxIntrinsicTag
+
 unParamDim :: TypeParam -> Maybe VName
 unParamDim (TypeParamDim vn _) = Just vn
 unParamDim _ = Nothing
@@ -387,7 +393,7 @@ onPat =
 
 onRetType :: S.Set VName -> RetTypeBase Size as -> InnerSimplifyM (RetTypeBase Size as)
 onRetType argset (RetType dims ty) = do
-  intros <- asks (argset `S.difference`)
+  intros <- askIntros argset
   ty' <- withArgs argset $ onType ty
   newBind <- get
   let (rl, nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
