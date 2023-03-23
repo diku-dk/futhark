@@ -593,13 +593,13 @@ evalType outer_env t = do
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
 evalTermVar env qv t =
   case lookupVar qv env of
-    Just (TermPoly _ v) -> v <=< evalType env $ expandType env t
+    Just (TermPoly _ v) -> v =<< evalType env t
     Just (TermValue _ v) -> pure v
     _ -> error $ "\"" <> prettyString qv <> "\" is not bound to a value."
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
-  t' <- evalType env $ expandType env t
+  t' <- evalType env t
   case traverse dim $ typeShape t' of
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
@@ -902,7 +902,7 @@ eval env (ArrayLit (v : vs) _ _) = do
   vs' <- mapM (eval env) vs
   pure $ toArray' (valueShape v') (v' : vs')
 eval env (AppExp e (Info (AppRes t retext))) = do
-  t' <- evalType env $ expandType env $ toStruct t
+  t' <- evalType env $ toStruct t
   returned env t' retext =<< evalAppExp env t' e
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
