@@ -132,6 +132,16 @@ putExtSize v x = modify $ M.insert v x
 getSizes :: EvalM Sizes
 getSizes = get
 
+-- | Disregard any existential sizes computed during this action.
+-- This is used so that existentials computed during one iteration of
+-- a loop or a function call are not remembered the next time around.
+localExts :: EvalM a -> EvalM a
+localExts m = do
+  s <- get
+  x <- m
+  put s
+  pure x
+
 extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
@@ -567,29 +577,29 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
     matchPtoA _ _ = mempty
 expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env) cs
 
--- | Evaluate sizes in an expanded type (as with `expandType`).
-evalType :: Env -> StructType -> StructType
-evalType env = first evalDim
-  where
-    evalDim (NamedSize qn)
-      | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
-          lookupVar qn env =
-          ConstSize $ fromIntegral x
-    evalDim d = d
+-- | First expand type abbreviations, then evaluate all possible
+-- sizes.
+evalType :: Env -> StructType -> EvalM StructType
+evalType outer_env t = do
+  size_env <- extSizeEnv
+  let env = size_env <> outer_env
+      evalDim (NamedSize qn)
+        | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
+            lookupVar qn env =
+            ConstSize $ fromIntegral x
+      evalDim d = d
+  pure $ first evalDim $ expandType env t
 
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
 evalTermVar env qv t =
   case lookupVar qv env of
-    Just (TermPoly _ v) -> do
-      size_env <- extSizeEnv
-      v $ evalType (size_env <> env) $ expandType env t
+    Just (TermPoly _ v) -> v <=< evalType env $ expandType env t
     Just (TermValue _ v) -> pure v
     _ -> error $ "\"" <> prettyString qv <> "\" is not bound to a value."
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
-  size_env <- extSizeEnv
-  let t' = evalType (size_env <> env) $ expandType env t
+  t' <- evalType env $ expandType env t
   case traverse dim $ typeShape t' of
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
@@ -612,7 +622,7 @@ evalFunction env _ [] body rettype =
         env'' <- matchPat env' (Wildcard (Info $ fromStruct pt) noLoc) v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- eval env' body
+      f <- localExts $ eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalFunction env missing_sizes (p : ps) body rettype =
   pure . ValueFun $ \v -> do
@@ -820,34 +830,34 @@ evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
     inc = (`P.doAdd` Int64Value 1)
     zero = (`P.doMul` Int64Value 0)
 
+    evalBody env' = localExts $ eval env' body
+
+    forLoopEnv iv i =
+      valEnv
+        ( M.singleton
+            iv
+            ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
+              ValuePrim (SignedValue i)
+            )
+        )
+
     forLoop iv bound i v
       | i >= bound = pure v
       | otherwise = do
           env' <- withLoopParams v
-          forLoop iv bound (inc i)
-            =<< eval
-              ( valEnv
-                  ( M.singleton
-                      iv
-                      ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
-                        ValuePrim (SignedValue i)
-                      )
-                  )
-                  <> env'
-              )
-              body
+          forLoop iv bound (inc i) =<< evalBody (forLoopEnv iv i <> env')
 
     whileLoop cond v = do
       env' <- withLoopParams v
       continue <- asBool <$> eval env' cond
       if continue
-        then whileLoop cond =<< eval env' body
+        then whileLoop cond =<< evalBody env'
         else pure v
 
     forInLoop in_pat v in_v = do
       env' <- withLoopParams v
       env'' <- matchPat env' in_pat in_v
-      eval env'' body
+      evalBody env''
 evalAppExp env _ (Match e cs _) = do
   v <- eval env e
   match v (NE.toList cs)
@@ -891,10 +901,9 @@ eval env (ArrayLit (v : vs) _ _) = do
   v' <- eval env v
   vs' <- mapM (eval env) vs
   pure $ toArray' (valueShape v') (v' : vs')
-eval env (AppExp e (Info (AppRes t retext))) =
+eval env (AppExp e (Info (AppRes t retext))) = do
+  t' <- evalType env $ expandType env $ toStruct t
   returned env t' retext =<< evalAppExp env t' e
-  where
-    t' = evalType env $ expandType env $ toStruct t
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval _ (IntLit v (Info t) _) =
