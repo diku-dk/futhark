@@ -16,6 +16,8 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
+-- import Debug.Trace
+
 newtype SimplifyM a
   = SimplifyM
       ( ReaderT
@@ -133,7 +135,7 @@ insertDimCalculus (dim, name) body = do
 hardOnRetType :: RetTypeBase Size as -> InnerSimplifyM (RetTypeBase Size as)
 hardOnRetType (RetType dims ty) = do
   predBind <- get
-  ty' <- onType ty
+  ty' <- withArgs (S.fromList dims) (onType ty)
   newBind <- get
   let rl = newBind `M.difference` predBind
   let dims' = dims <> M.elems rl
@@ -150,13 +152,22 @@ unscoping argset body = do
 
 expFree :: Exp -> InnerSimplifyM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
-  let dimArgs = S.fromList dims
+  let dimArgs =
+        S.fromList dims
+          `S.union` M.keysSet (unFV $ freeInPat pat)
   (form', formArgs) <- onForm form
   let argset = dimArgs `S.union` formArgs `S.union` patArg pat
-  pat' <- withArgs dimArgs (onPat pat) -------
+  pat' <- withArgs dimArgs (onPat pat)
+  newBind <- get
+  let (localBind, nxtBind) =
+        M.partitionWithKey
+          (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
+          newBind
+  put nxtBind
+  let dims' = dims <> M.elems localBind
   resT' <- Info <$> onResType resT
   AppExp
-    <$> ( DoLoop dims {-TODO: add dims from pat'-} pat'
+    <$> ( DoLoop dims' pat'
             <$> expFree ei
             <*> pure form'
             <*> withArgs argset (expFree body >>= unscoping argset)
@@ -181,11 +192,11 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
         M.partitionWithKey
           (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
           newBind
+  put nxtBind
   retT' <- onRetType argset retT
   body' <- withArgs argset (expFree body >>= unscoping argset)
   resT' <- Info <$> onResType resT
   bodyNxt' <- withArg name (expFree body_nxt >>= unscoping (S.singleton name))
-  put nxtBind
   pure $
     AppExp
       ( LetFun
@@ -201,18 +212,29 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
       )
       resT'
 expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
-  let dimArgs = S.fromList (map sizeName dims)
+  let dimArgs =
+        S.fromList (map sizeName dims)
+          `S.union` M.keysSet (unFV $ freeInPat pat)
   let letArgs = patArg pat
-  let argset = dimArgs `S.union` letArgs
-  resT' <- Info <$> onResType resT
+  let argset =
+        dimArgs
+          `S.union` letArgs
   pat' <- withArgs dimArgs (onPat pat)
-  AppExp
-    <$> ( LetPat dims {-TODO: add dims from pat'-} pat'
-            <$> expFree e1
-            <*> withArgs argset (expFree body >>= unscoping argset)
-            <*> pure loc
-        )
-    <*> pure resT'
+  newBind <- get
+  let (localBind, nxtBind) =
+        M.partitionWithKey
+          (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
+          newBind
+  let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList localBind)
+  put nxtBind
+  resT' <- Info <$> onResType resT
+  body' <- withArgs argset (expFree body >>= unscoping argset)
+  e1' <- withArgs dimArgs (expFree e1 >>= unscoping dimArgs)
+  pure $
+    AppExp
+      ( LetPat dims' pat' e1' body' loc
+      )
+      resT'
 expFree (AppExp (LetWith dest src slice e body loc) (Info resT)) = do
   resT' <- Info <$> onResType resT
   AppExp
@@ -302,14 +324,14 @@ expFree (AppExp app (Info resT)) = do
           mapOnStructRetType = error "mapOnRetType called in expFree: should not happen",
           mapOnPatRetType = error "mapOnRetType called in expFree: should not happen"
         }
-expFree (Lambda args body rettype_te (Info (as, retT)) loc) =
+expFree (Lambda args body rettype_te (Info (as, retT)) loc) = do
   let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
-   in Lambda
-        <$> mapM onPat args
-        <*> withArgs argset (expFree body >>= unscoping argset)
-        <*> pure rettype_te -- ?
-        <*> (Info . (as,) <$> onRetType argset retT)
-        <*> pure loc
+  Lambda
+    <$> mapM onPat args
+    <*> withArgs argset (expFree body >>= unscoping argset)
+    <*> pure rettype_te -- ?
+    <*> (Info . (as,) <$> onRetType argset retT)
+    <*> pure loc
 expFree (OpSectionLeft op (Info ty) e (Info (n1, ty1, m1), Info (n2, ty2)) (Info retT, Info ext) loc) = do
   let args =
         S.fromList ext
