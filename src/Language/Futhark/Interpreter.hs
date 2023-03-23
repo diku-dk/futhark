@@ -959,7 +959,8 @@ eval env (RecordUpdate src all_fs v _ _) =
 -- convenient in the interpreter.
 eval env (Lambda ps body _ (Info (_, RetType _ rt)) _) =
   evalFunction env [] ps body rt
-eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
+eval env (OpSection qv (Info t) _) =
+  evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
@@ -1477,7 +1478,7 @@ initialCtx =
               | Just rowshape <- typeRowShape ret_t ->
                   toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
               | otherwise ->
-                  error $ "Bad pure type: " <> prettyString ret_t
+                  error $ "Bad return type: " <> prettyString ret_t
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
