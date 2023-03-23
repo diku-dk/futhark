@@ -34,6 +34,7 @@ import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import Data.Array
 import Data.Bifunctor (first, second)
+import Data.Bitraversable
 import Data.List
   ( find,
     foldl',
@@ -53,6 +54,7 @@ import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
+import Language.Futhark.FreeVars qualified as FV
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -173,9 +175,11 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (IntLit d2 _ _))
-      | d1 `elem` names =
-          i64Env $ M.singleton d1 $ fromIntegral d2
+    matchDims
+      (SizeExpr (Var (QualName _ d1) _ _))
+      (SizeExpr (Literal (SignedValue (Int64Value d2)) _))
+        | d1 `elem` names =
+            i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
 
 resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int64
@@ -560,7 +564,8 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType _ t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeExpr (Var v typ loc)) = fromMaybe (SizeExpr (Var v typ loc)) $ M.lookup (qualLeaf v) substs
+          onDim (SizeExpr (Var v typ loc)) =
+            fromMaybe (SizeExpr (Var v typ loc)) $ M.lookup (qualLeaf v) substs
           onDim d = d
        in if null ps
             then first onDim t'
@@ -569,8 +574,8 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Var qv typ loc)) _) =
       (M.singleton p $ SizeExpr (Var qv typ loc), mempty)
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Literal k loc)) _) =
-      (M.singleton p $ SizeExpr (Literal k loc), mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e) _) =
+      (M.singleton p $ SizeExpr e, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
       let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -583,12 +588,12 @@ evalType :: Env -> StructType -> EvalM StructType
 evalType outer_env t = do
   size_env <- extSizeEnv
   let env = size_env <> outer_env
-      evalDim (SizeExpr (Var qn _ loc))
-        | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
-            lookupVar qn env =
-            sizeFromInteger (toInteger x) loc
-      evalDim d = d
-  pure $ first evalDim $ expandType env t
+      evalDim (SizeExpr e)
+        | all (`M.member` envTerm env) $ M.keys $ FV.unFV $ FV.freeInExp e = do
+            x <- asInt64 <$> eval env e
+            pure $ SizeExpr $ Literal (SignedValue (Int64Value x)) mempty
+      evalDim d = pure d
+  bitraverse evalDim pure $ expandType env t
 
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
 evalTermVar env qv t =
@@ -604,7 +609,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
-    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
+    dim (SizeExpr (Literal (SignedValue (Int64Value x)) _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
@@ -1045,9 +1050,9 @@ substituteInModule substs = onModule
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
-    onDim (SizeExpr (IntLit x ty loc)) = SizeExpr (IntLit x ty loc)
-    onDim (AnySize v) = AnySize v
+    onDim (SizeExpr (Literal x loc)) = SizeExpr (Literal x loc)
     onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
+    onDim AnySize {} = error "substituteInModule onDim: AnySize"
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
