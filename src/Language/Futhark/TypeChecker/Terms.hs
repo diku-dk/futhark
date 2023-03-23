@@ -179,15 +179,15 @@ checkCoerce loc te e = do
 
   pure (te', te_t', e', ext)
 
-unscopeType ::
+unscopeTypeBase ::
   SrcLoc ->
-  M.Map VName Ident ->
-  PatType ->
-  TermTypeM (PatType, [VName])
-unscopeType tloc unscoped t = do
+  S.Set VName ->
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+unscopeTypeBase tloc unscoped t = do
   scope <- asks termScope
   (t', m) <- runStateT (onType (M.keysSet $ scopeVtable scope) t) mempty
-  pure (t' `addAliases` S.map unAlias, M.elems m)
+  pure (t', M.elems m)
   where
     -- using StateT (M.Map Exp VName) TermTypeM a
     onScalar scope (Record fs) =
@@ -228,7 +228,7 @@ unscopeType tloc unscoped t = do
     onSize s = pure s
 
     onExp e =
-      if M.keysSet (unFV $ freeInExp e) `S.disjoint` M.keysSet unscoped
+      if M.keysSet (unFV $ freeInExp e) `S.disjoint` unscoped
         then pure $ SizeExpr e
         else do
           let e' = SizeExpr e
@@ -237,11 +237,20 @@ unscopeType tloc unscoped t = do
             Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
             Nothing -> do
               -- the Rigid info as to be redo...
-              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) (S.findMin $ M.keysSet unscoped)) "d"
+              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) (S.findMin unscoped)) "d"
               modify $ M.insert e' vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
-    unAlias (AliasBound v) | v `M.member` unscoped = AliasFree v
+unscopeType ::
+  SrcLoc ->
+  S.Set VName ->
+  PatType ->
+  TermTypeM (PatType, [VName])
+unscopeType tloc unscoped t = do
+  (t', m) <- unscopeTypeBase tloc unscoped t
+  pure (t' `addAliases` S.map unAlias, m)
+  where
+    unAlias (AliasBound v) | v `S.member` unscoped = AliasFree v
     unAlias a = a
 
 checkExp :: UncheckedExp -> TermTypeM Exp
@@ -486,14 +495,11 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
         body' <- checkExp body
         (body_t, retext) <-
-          unscopeType loc (sizesMap sizes' <> patternMap pat') =<< expTypeFully body'
+          unscopeType loc (sizesMap sizes' <> M.keysSet (patternMap pat')) =<< expTypeFully body'
 
         pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
   where
-    sizesMap = foldMap onSize
-    onSize size =
-      M.singleton (sizeName size) $
-        Ident (sizeName size) (Info (Scalar $ Prim $ Signed Int64)) (srclocOf size)
+    sizesMap = foldMap (S.singleton . sizeName)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, e') closure -> do
@@ -516,9 +522,9 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
 
         -- We fake an ident here, but it's OK as it can't be a size
         -- anyway.
-        let fake_ident = Ident name' (Info $ fromStruct ftype) mempty
+        -- let fake_ident = Ident name' (Info $ fromStruct ftype) mempty
         (body_t, ext) <-
-          unscopeType loc (M.singleton name' fake_ident)
+          unscopeType loc (S.singleton name')
             =<< expTypeFully body'
 
         pure $
@@ -548,7 +554,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
       bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
         (body_t, ext) <-
-          unscopeType loc (M.singleton (identName dest') dest')
+          unscopeType loc (S.singleton (identName dest'))
             =<< expTypeFully body'
         pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
@@ -616,7 +622,7 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   e2' <- checkExp e2
   pure $ Assert e1' e2' (Info (prettyText e1)) loc
 checkExp (Lambda params body rettype_te NoInfo loc) = do
-  (params', body', body_t, rettype', info) <-
+  (params', body', body_t, rettype', Info (as, RetType dims ty)) <-
     removeSeminullOccurrences . noUnique . incLevel . bindingParams [] params $ \_ params' -> do
       rettype_checked <- traverse checkTypeExpNonrigid rettype_te
       let declared_rettype =
@@ -648,7 +654,9 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
   checkGlobalAliases params' body_t loc
   verifyFunctionParams Nothing params'
 
-  pure $ Lambda params' body' rettype' info loc
+  (ty', dims') <- unscopeTypeBase loc (S.fromList dims) ty
+
+  pure $ Lambda params' body' rettype' (Info (as, RetType dims' ty')) loc
   where
     -- Inferring the sizes of the return type of a lambda is a lot
     -- like let-generalisation.  We wish to remove any rigid sizes
@@ -780,7 +788,7 @@ checkCase ::
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
     e' <- checkExp e
-    (t, retext) <- unscopeType loc (patternMap p') =<< expTypeFully e'
+    (t, retext) <- unscopeType loc (M.keysSet $ patternMap p') =<< expTypeFully e'
     pure (CasePat p' e' loc, t, retext)
 
 -- | An unmatched pattern. Used in in the generation of
@@ -1338,7 +1346,7 @@ inferredReturnType loc params t = do
     unscopeType loc hidden_params $
       inferReturnUniqueness params t
   where
-    hidden_params = M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
+    hidden_params = M.keysSet $ M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
     hidden = hiddenParamNames params
 
 checkReturnAlias :: SrcLoc -> TypeBase () () -> [Pat] -> PatType -> TermTypeM ()
@@ -1717,8 +1725,9 @@ checkFunBody params body maybe_rettype loc = do
       (body_t', _) <-
         unscopeType
           loc
-          ( M.filterWithKey (const . (`S.member` hidden)) $
-              foldMap patternMap params
+          ( M.keysSet $
+              M.filterWithKey (const . (`S.member` hidden)) $
+                foldMap patternMap params
           )
           body_t
 
