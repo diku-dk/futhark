@@ -945,13 +945,12 @@ checkApply
 
       (argext, parsubst) <-
         case pname of
-          Named pname'
-            | (Scalar (Prim (Signed Int64))) <- tp1' -> do
-                (d, argext) <- sizeFromArg fname argexp
-                pure
-                  ( argext,
-                    (`M.lookup` M.singleton pname' (SizeSubst d))
-                  )
+          Named pname' -> do
+            (d, argext) <- sizeFromArg fname argexp
+            pure
+              ( argext,
+                (`M.lookup` M.singleton pname' (SizeSubst d))
+              )
           _ -> pure (Nothing, const Nothing)
 
       -- In case a function result is not immediately bound to a name,
