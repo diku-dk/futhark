@@ -51,7 +51,7 @@ import Futhark.Internalise.Exps qualified as Exps
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
-import Futhark.Internalise.SimplifySize as Simplify
+import Futhark.Internalise.NormaliseSize as Normalise
 import Futhark.Util.Log
 import Language.Futhark.Semantic (Imports)
 
@@ -65,8 +65,8 @@ internaliseProg ::
 internaliseProg config prog = do
   maybeLog "Defunctorising"
   prog_decs <- Defunctorise.transformProg prog
-  maybeLog "Simplifying"
-  prog_decs' <- Simplify.transformProg prog_decs
+  maybeLog "Normalising sizes"
+  prog_decs' <- Normalise.transformProg prog_decs
   maybeLog "Monomorphising"
   prog_decs'' <- Monomorphise.transformProg prog_decs'
   maybeLog "Lifting lambdas"

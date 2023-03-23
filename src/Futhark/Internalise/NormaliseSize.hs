@@ -1,7 +1,7 @@
--- | This Simplification module converts a well-typed, polymorphic,
+-- | This Normalisation module converts a well-typed, polymorphic,
 -- module-free Futhark program into an equivalent program without
 -- arbitrary size expression.
-module Futhark.Internalise.SimplifySize (transformProg) where
+module Futhark.Internalise.NormaliseSize (transformProg) where
 
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.Reader
@@ -470,7 +470,7 @@ simplifyDecs (TypeDec td : ds) =
   (TypeDec td :) <$> simplifyDecs ds
 simplifyDecs (dec : _) =
   error $
-    "The simplification module expects a module-free "
+    "The normalisation module expects a module-free "
       ++ "input program, but received: "
       ++ prettyString dec
 
