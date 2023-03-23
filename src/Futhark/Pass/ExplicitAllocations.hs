@@ -34,6 +34,7 @@ module Futhark.Pass.ExplicitAllocations
   )
 where
 
+import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State

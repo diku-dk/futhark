@@ -28,7 +28,7 @@ module Futhark.Pass.ExtractKernels.DistributeNests
 where
 
 import Control.Arrow (first)
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe

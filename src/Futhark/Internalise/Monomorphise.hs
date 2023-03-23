@@ -24,10 +24,10 @@
 -- representation.
 module Futhark.Internalise.Monomorphise (transformProg) where
 
-import Control.Monad.Identity
-import Control.Monad.RWS hiding (Sum)
+import Control.Monad
+import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
 import Control.Monad.State
-import Control.Monad.Writer hiding (Sum)
+import Control.Monad.Writer (runWriterT)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
@@ -653,9 +653,8 @@ transformPat (PatAttr attr pat loc) = do
 transformPat (Wildcard (Info t) loc) = do
   t' <- transformType t
   pure (wildcard t' loc, mempty)
-transformPat (PatAscription pat td loc) = do
-  (pat', rr) <- transformPat pat
-  pure (PatAscription pat' td loc, rr)
+transformPat (PatAscription pat _ _) =
+  transformPat pat
 transformPat (PatLit e t loc) = pure (PatLit e t loc, mempty)
 transformPat (PatConstr name t all_ps loc) = do
   (all_ps', rrs) <- mapAndUnzipM transformPat all_ps

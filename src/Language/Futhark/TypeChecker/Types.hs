@@ -22,6 +22,7 @@ module Language.Futhark.TypeChecker.Types
   )
 where
 
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State

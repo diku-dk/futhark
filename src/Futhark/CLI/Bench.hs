@@ -4,7 +4,7 @@ module Futhark.CLI.Bench (main) where
 import Control.Arrow (first)
 import Control.Exception
 import Control.Monad
-import Control.Monad.Except hiding (throwError)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString.Char8 qualified as SBS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either

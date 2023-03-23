@@ -5,7 +5,7 @@ import CMarkGFM qualified as GFM
 import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.Writer hiding (Sum)
+import Control.Monad.Writer (Writer, WriterT, runWriter, runWriterT, tell)
 import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
 import Data.Map qualified as M

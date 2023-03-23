@@ -5,6 +5,7 @@
 -- tile primitive types, to avoid excessive local memory use.
 module Futhark.Optimise.TileLoops (tileLoops) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Map.Strict qualified as M

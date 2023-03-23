@@ -26,7 +26,7 @@ module Language.Futhark.Interpreter
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
 import Control.Monad.Free.Church
 import Control.Monad.Identity
 import Control.Monad.Reader
@@ -639,9 +639,8 @@ evalFunctionBinding ::
   Exp ->
   EvalM TermBinding
 evalFunctionBinding env tparams ps ret fbody = do
-  let ret' = evalType env $ retType ret
-      arrow (xp, d, xt) yt = Scalar $ Arrow () xp d xt $ RetType [] yt
-      ftype = foldr (arrow . patternParam) ret' ps
+  let arrow (xp, d, xt) yt = Scalar $ Arrow () xp d xt $ RetType [] yt
+      ftype = foldr (arrow . patternParam) (retType ret) ps
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -649,21 +648,22 @@ evalFunctionBinding env tparams ps ret fbody = do
   -- Distinguish polymorphic and non-polymorphic bindings here.
   if null tparams
     then
-      TermValue (Just $ T.BoundV [] ftype)
-        <$> (returned env (retType ret) retext =<< evalFunction env [] ps fbody ret')
-    else pure $
-      TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
-        let tparam_names = map typeParamName tparams
-            env' = resolveTypeParams tparam_names ftype ftype' <> env
+      fmap (TermValue (Just $ T.BoundV [] ftype))
+        . returned env (retType ret) retext
+        =<< evalFunction env [] ps fbody (retType ret)
+    else pure . TermPoly (Just $ T.BoundV [] ftype) $ \ftype' -> do
+      let tparam_names = map typeParamName tparams
+          env' = resolveTypeParams tparam_names ftype ftype' <> env
 
-            -- In some cases (abstract lifted types) there may be
-            -- missing sizes that were not fixed by the type
-            -- instantiation.  These will have to be set by looking
-            -- at the actual function arguments.
-            missing_sizes =
-              filter (`M.notMember` envTerm env') $
-                map typeParamName (filter isSizeParam tparams)
-        returned env (retType ret) retext =<< evalFunction env' missing_sizes ps fbody ret'
+          -- In some cases (abstract lifted types) there may be
+          -- missing sizes that were not fixed by the type
+          -- instantiation.  These will have to be set by looking
+          -- at the actual function arguments.
+          missing_sizes =
+            filter (`M.notMember` envTerm env') $
+              map typeParamName (filter isSizeParam tparams)
+      returned env (retType ret) retext
+        =<< evalFunction env' missing_sizes ps fbody (retType ret)
 
 evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
@@ -959,7 +959,8 @@ eval env (RecordUpdate src all_fs v _ _) =
 -- convenient in the interpreter.
 eval env (Lambda ps body _ (Info (_, RetType _ rt)) _) =
   evalFunction env [] ps body rt
-eval env (OpSection qv (Info t) _) = evalTermVar env qv $ toStruct t
+eval env (OpSection qv (Info t) _) =
+  evalTermVar env qv $ toStruct t
 eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
@@ -1478,7 +1479,7 @@ initialCtx =
               | Just rowshape <- typeRowShape ret_t ->
                   toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
               | otherwise ->
-                  error $ "Bad pure type: " <> prettyString ret_t
+                  error $ "Bad return type: " <> prettyString ret_t
             _ ->
               error $
                 "Invalid arguments to map intrinsic:\n"
