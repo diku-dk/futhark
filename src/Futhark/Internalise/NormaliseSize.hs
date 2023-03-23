@@ -143,8 +143,9 @@ hardOnRetType (RetType dims ty) = do
   predBind <- get
   ty' <- withArgs (S.fromList dims) (onType ty)
   newBind <- get
-  let rl = newBind `M.difference` predBind
-  let dims' = dims <> M.elems rl
+  let rl = M.elems $ newBind `M.difference` predBind
+  intros <- askIntros $ S.fromList rl `S.union` M.keysSet (unFV $ freeInType ty')
+  let dims' = S.toList intros
   pure $ RetType dims' ty'
 
 unscoping :: S.Set VName -> Exp -> InnerSimplifyM Exp
