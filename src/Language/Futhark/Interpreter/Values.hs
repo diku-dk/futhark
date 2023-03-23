@@ -76,27 +76,21 @@ emptyShape :: ValueShape -> Bool
 emptyShape (ShapeDim d s) = d == 0 || emptyShape s
 emptyShape _ = False
 
-typeShape :: M.Map VName (Shape d) -> TypeBase d () -> Shape d
-typeShape shapes = go
-  where
-    go (Array _ _ shape et) =
-      foldr ShapeDim (go (Scalar et)) $ shapeDims shape
-    go (Scalar (Record fs)) =
-      ShapeRecord $ M.map go fs
-    go (Scalar (Sum cs)) =
-      ShapeSum $ M.map (map go) cs
-    go (Scalar (TypeVar _ _ (QualName [] v) []))
-      | Just shape <- M.lookup v shapes =
-          shape
-    go _ =
-      ShapeLeaf
+typeShape :: TypeBase d () -> Shape d
+typeShape (Array _ _ shape et) =
+  foldr ShapeDim (typeShape (Scalar et)) $ shapeDims shape
+typeShape (Scalar (Record fs)) =
+  ShapeRecord $ M.map typeShape fs
+typeShape (Scalar (Sum cs)) =
+  ShapeSum $ M.map (map typeShape) cs
+typeShape _ =
+  ShapeLeaf
 
-structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
-structTypeShape shapes = fmap dim . typeShape shapes'
+structTypeShape :: StructType -> Shape (Maybe Int64)
+structTypeShape = fmap dim . typeShape
   where
     dim (ConstSize d) = Just $ fromIntegral d
     dim _ = Nothing
-    shapes' = M.map (fmap $ ConstSize . fromIntegral) shapes
 
 -- | A fully evaluated Futhark value.
 data Value m

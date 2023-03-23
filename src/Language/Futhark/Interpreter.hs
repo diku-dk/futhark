@@ -265,18 +265,14 @@ data Module
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
-    envType :: M.Map VName T.TypeBinding,
-    -- | A mapping from type parameters to the shapes of
-    -- the value to which they were initially bound.
-    envShapes :: M.Map VName ValueShape
+    envType :: M.Map VName T.TypeBinding
   }
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty
+  mempty = Env mempty mempty
 
 instance Semigroup Env where
-  Env vm1 tm1 sm1 <> Env vm2 tm2 sm2 =
-    Env (vm1 <> vm2) (tm1 <> tm2) (sm1 <> sm2)
+  Env vm1 tm1 <> Env vm2 tm2 = Env (vm1 <> vm2) (tm1 <> tm2)
 
 -- | An error occurred during interpretation due to an error in the
 -- user program.  Actual interpreter errors will be signaled with an
@@ -291,24 +287,21 @@ valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
 valEnv m =
   Env
     { envTerm = M.map (uncurry TermValue) m,
-      envType = mempty,
-      envShapes = mempty
+      envType = mempty
     }
 
 modEnv :: M.Map VName Module -> Env
 modEnv m =
   Env
     { envTerm = M.map TermModule m,
-      envType = mempty,
-      envShapes = mempty
+      envType = mempty
     }
 
 typeEnv :: M.Map VName StructType -> Env
 typeEnv m =
   Env
     { envTerm = mempty,
-      envType = M.map tbind m,
-      envShapes = mempty
+      envType = M.map tbind m
     }
   where
     tbind = T.TypeAbbr Unlifted [] . RetType []
@@ -561,7 +554,7 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
           onDim d = d
        in if null ps
             then first onDim t'
-            else expandType (Env mempty types mempty <> env) $ first onDim t'
+            else expandType (Env mempty types <> env) $ first onDim t'
     Nothing -> t
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim (NamedSize qv) _) =
@@ -597,7 +590,7 @@ typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
   size_env <- extSizeEnv
   let t' = evalType (size_env <> env) $ expandType env t
-  case traverse dim $ typeShape mempty t' of
+  case traverse dim $ typeShape t' of
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
@@ -734,7 +727,7 @@ evalAppExp env _ (Range start maybe_second end loc) = do
         <> " is invalid."
 evalAppExp env t (Coerce e te loc) = do
   v <- eval env e
-  case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
+  case checkShape (structTypeShape t) (valueShape v) of
     Just _ -> pure v
     Nothing ->
       bad loc env . docText $
@@ -1034,8 +1027,8 @@ substituteInModule substs = onModule
       (k, v) <- M.toList m
       k' <- replace k
       pure (k', f v)
-    onModule (Module (Env terms types _)) =
-      Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
+    onModule (Module (Env terms types)) =
+      Module $ Env (replaceM onTerm terms) (replaceM onType types)
     onModule (ModuleFun f) =
       ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
     onTerm (TermValue t v) = TermValue t v
@@ -1065,14 +1058,13 @@ evalModExp _ (ModImport _ (Info f) _) = do
           ]
     Just m -> pure $ Module m
 evalModExp env (ModDecs ds _) = do
-  Env terms types _ <- foldM evalDec env ds
+  Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
   pure $
     Module $
       Env
         (terms `M.difference` envTerm env)
         (types `M.difference` envType env)
-        mempty
 evalModExp env (ModVar qv _) =
   evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
@@ -1154,11 +1146,10 @@ initialCtx =
     ( Env
         ( M.insert
             (VName (nameFromString "intrinsics") 0)
-            (TermModule (Module $ Env terms types mempty))
+            (TermModule (Module $ Env terms types))
             terms
         )
         types
-        mempty
     )
     mempty
   where
@@ -1485,7 +1476,7 @@ initialCtx =
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
       where
-        typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
+        typeRowShape = sequenceA . structTypeShape . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
