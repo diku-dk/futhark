@@ -149,12 +149,17 @@ hardOnRetType (RetType dims ty) = do
 
 unscoping :: S.Set VName -> Exp -> InnerSimplifyM Exp
 unscoping argset body = do
+  intros <- askIntros argset
   (localDims, nxtBind) <-
     gets $
       M.partitionWithKey
-        (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
+        (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
   put nxtBind
   foldrM insertDimCalculus body $ M.toList localDims
+
+scoping :: S.Set VName -> InnerSimplifyM Exp -> InnerSimplifyM Exp
+scoping argset m =
+  withArgs argset m >>= unscoping argset
 
 expFree :: Exp -> InnerSimplifyM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
@@ -176,7 +181,7 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
     <$> ( DoLoop dims' pat'
             <$> expFree ei
             <*> pure form'
-            <*> withArgs argset (expFree body >>= unscoping argset)
+            <*> scoping argset (expFree body)
             <*> pure loc
         )
     <*> pure resT'
@@ -200,9 +205,9 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
           newBind
   put nxtBind
   retT' <- onRetType argset retT
-  body' <- withArgs argset (expFree body >>= unscoping argset)
+  body' <- scoping argset (expFree body)
   resT' <- Info <$> onResType resT
-  bodyNxt' <- withArg name (expFree body_nxt >>= unscoping (S.singleton name))
+  bodyNxt' <- scoping (S.singleton name) (expFree body_nxt)
   pure $
     AppExp
       ( LetFun
@@ -234,8 +239,8 @@ expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
   let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList localBind)
   put nxtBind
   resT' <- Info <$> onResType resT
-  body' <- withArgs argset (expFree body >>= unscoping argset)
-  e1' <- withArgs dimArgs (expFree e1 >>= unscoping dimArgs)
+  body' <- scoping argset (expFree body)
+  e1' <- scoping dimArgs (expFree e1)
   pure $
     AppExp
       ( LetPat dims' pat' e1' body' loc
@@ -249,7 +254,7 @@ expFree (AppExp (LetWith dest src slice e body loc) (Info resT)) = do
             <*> onIdent src
             <*> mapM onSlice slice
             <*> expFree e
-            <*> withArg (identName dest) (expFree body >>= unscoping (S.singleton $ identName dest))
+            <*> scoping (S.singleton $ identName dest) (expFree body)
             <*> pure loc
         )
     <*> pure resT'
@@ -277,7 +282,7 @@ expFree (AppExp (Match e cs loc) (Info resT)) = do
       let args = patArg pat
       CasePat
         <$> onPat pat
-        <*> withArgs args (expFree body >>= unscoping args)
+        <*> scoping args (expFree body)
         <*> pure cloc
 expFree (AppExp (Coerce e expType eloc) (Info resT)) = do
   resT' <- Info <$> onResType resT
@@ -334,7 +339,7 @@ expFree (Lambda args body rettype_te (Info (as, retT)) loc) = do
   let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
   Lambda
     <$> mapM onPat args
-    <*> withArgs argset (expFree body >>= unscoping argset)
+    <*> scoping argset (expFree body)
     <*> pure rettype_te -- ?
     <*> (Info . (as,) <$> onRetType argset retT)
     <*> pure loc
