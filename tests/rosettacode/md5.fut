@@ -53,7 +53,7 @@ def unbytes(bs: [4]u8): u32 =
   u32.u8(bs[2]) * 0x10000u32 +
   u32.u8(bs[3]) * 0x1000000u32
 
-def unbytes_block(block: [64]u8): [16]u32 =
+def unbytes_block(block: [16*4]u8): [16]u32 =
   map unbytes (unflatten 16 4 block)
 
 -- Process 512 bits of the input.
@@ -82,10 +82,12 @@ def md5 [n] (ms: [n][16]u32): md5 =
 def main [n] (ms: [n]u8): [16]u8 =
   let padding = 64 - (n % 64)
   let n_padded = n + padding
+  let num_blocks = n_padded / 64
   let ms_padded = ms ++
                   bytes 0x80u32 ++
                   replicate (padding-12) 0x0u8 ++
                   bytes (u32.i64(n*8)) ++
                   [0u8,0u8,0u8,0u8]
-  let (a,b,c,d) = md5 (map unbytes_block (unflatten (n_padded / 64) 64 ms_padded))
+                  :> [num_blocks*(16*4)]u8
+  let (a,b,c,d) = md5 (map unbytes_block (unflatten num_blocks (16*4) ms_padded))
   in flatten (map bytes [a,b,c,d]) :> [16]u8
