@@ -582,12 +582,12 @@ expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env)
 
 -- | First expand type abbreviations, then evaluate all possible
 -- sizes.
-evalType :: Env -> StructType -> EvalM StructType
-evalType outer_env t = do
+evalType :: Env -> S.Set VName -> StructType -> EvalM StructType
+evalType outer_env outer_bound t = do
   size_env <- extSizeEnv
   let env = size_env <> outer_env
       evalDim bound _ (SizeExpr e)
-        | not $ any (`S.member` bound) $ M.keys $ FV.unFV $ FV.freeInExp e = do
+        | not $ any (`S.member` (outer_bound <> bound)) $ M.keys $ FV.unFV $ FV.freeInExp e = do
             x <- asInt64 <$> eval env e
             pure $ SizeExpr $ Literal (SignedValue (Int64Value x)) mempty
       evalDim _ _ d = pure d
@@ -596,7 +596,7 @@ evalType outer_env t = do
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
 evalTermVar env qv t =
   case lookupVar qv env of
-    Just (TermPoly _ v) -> v =<< evalType env t
+    Just (TermPoly _ v) -> v =<< evalType env mempty t
     Just (TermValue _ v) -> pure v
     _ -> do
       ss <- map (locText . srclocOf) <$> stacktrace
@@ -607,7 +607,7 @@ evalTermVar env qv t =
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
-  t' <- evalType env t
+  t' <- evalType env mempty t
   case traverse dim $ typeShape t' of
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
@@ -698,7 +698,7 @@ returned env ret retext v = do
       valueShape v
   pure v
 
-evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
+evalAppExp :: Env -> (S.Set VName, StructType) -> AppExp -> EvalM Value
 evalAppExp env _ (Range start maybe_second end loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
@@ -747,9 +747,9 @@ evalAppExp env _ (Range start maybe_second end loc) = do
                UpToExclusive x -> "..<" <> prettyText x
            )
         <> " is invalid."
-evalAppExp env t (Coerce e te loc) = do
+evalAppExp env (ext, t) (Coerce e te loc) = do
   v <- eval env e
-  t' <- evalType env t
+  t' <- evalType env ext t
   case checkShape (structTypeShape t') (valueShape v) of
     Just _ -> pure v
     Nothing ->
@@ -916,7 +916,7 @@ eval env (ArrayLit (v : vs) _ _) = do
   pure $ toArray' (valueShape v') (v' : vs')
 eval env (AppExp e (Info (AppRes t retext))) = do
   let t' = expandType env $ toStruct t
-  v <- evalAppExp env t' e
+  v <- evalAppExp env (S.fromList retext, t') e
   returned env t' retext v
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
