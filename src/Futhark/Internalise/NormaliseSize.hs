@@ -6,6 +6,7 @@ module Futhark.Internalise.NormaliseSize (transformProg) where
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor
 import Data.Foldable
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -44,7 +45,7 @@ addBind = local . S.insert
 newtype InnerSimplifyM a
   = InnerSimplifyM
       ( ReaderT
-          (S.Set VName)
+          (S.Set VName, M.Map Size VName)
           (StateT (M.Map Size VName) SimplifyM)
           a
       )
@@ -52,23 +53,9 @@ newtype InnerSimplifyM a
     ( Monad,
       Functor,
       Applicative,
-      MonadReader (S.Set VName),
+      MonadReader (S.Set VName, M.Map Size VName),
       MonadState (M.Map Size VName)
     )
-
-runInnerSimplifier ::
-  InnerSimplifyM a ->
-  S.Set VName ->
-  M.Map Size VName ->
-  SimplifyM (a, M.Map Size VName)
-runInnerSimplifier (InnerSimplifyM m) =
-  runStateT . runReaderT m
-
-withArgs :: S.Set VName -> InnerSimplifyM a -> InnerSimplifyM a
-withArgs = local . S.union
-
-withArg :: VName -> InnerSimplifyM a -> InnerSimplifyM a
-withArg = local . S.insert
 
 instance MonadFreshNames InnerSimplifyM where
   getNameSource =
@@ -82,11 +69,33 @@ instance MonadFreshNames InnerSimplifyM where
         const $
           StateT (((,) <$> putNameSource src <*>) . pure)
 
+runInnerSimplifier ::
+  InnerSimplifyM a ->
+  M.Map Size VName ->
+  S.Set VName ->
+  M.Map Size VName ->
+  SimplifyM (a, M.Map Size VName)
+runInnerSimplifier (InnerSimplifyM m) params =
+  runStateT . runReaderT m . (,params)
+
+withArgs :: S.Set VName -> InnerSimplifyM a -> InnerSimplifyM a
+withArgs = local . first . S.union
+
+withParams :: M.Map Size VName -> InnerSimplifyM a -> InnerSimplifyM a
+withParams = local . second . M.union
+
 askIntros :: S.Set VName -> InnerSimplifyM (S.Set VName)
 askIntros argset =
-  asks (S.filter notIntrisic argset `S.difference`)
+  asks $ (S.filter notIntrisic argset `S.difference`) . fst
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
+
+parametrizing :: S.Set VName -> InnerSimplifyM (M.Map Size VName)
+parametrizing argset = do
+  intros <- askIntros argset
+  (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
+  put nxtBind
+  pure params
 
 unParamDim :: TypeParam -> Maybe VName
 unParamDim (TypeParamDim vn _) = Just vn
@@ -170,19 +179,14 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   (form', formArgs) <- onForm form
   let argset = dimArgs `S.union` formArgs `S.union` patArg pat
   pat' <- withArgs dimArgs (onPat pat)
-  newBind <- get
-  let (localBind, nxtBind) =
-        M.partitionWithKey
-          (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
-          newBind
-  put nxtBind
-  let dims' = dims <> M.elems localBind
+  params <- parametrizing argset
+  let dims' = dims <> M.elems params
   resT' <- Info <$> onResType resT
   AppExp
     <$> ( DoLoop dims' pat'
             <$> expFree ei
             <*> pure form'
-            <*> scoping argset (expFree body)
+            <*> withParams params (scoping argset (expFree body))
             <*> pure loc
         )
     <*> pure resT'
@@ -199,21 +203,16 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
           `S.union` foldMap patArg args
           `S.union` foldMap (M.keysSet . unFV . freeInPat) args
   args' <- mapM onPat args
-  newBind <- get
-  let (localBind, nxtBind) =
-        M.partitionWithKey
-          (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
-          newBind
-  put nxtBind
-  retT' <- onRetType argset retT
-  body' <- scoping argset (expFree body)
-  resT' <- Info <$> onResType resT
+  params <- parametrizing argset
+  retT' <- withParams params $ onRetType argset retT
+  body' <- withParams params $ scoping argset (expFree body)
   bodyNxt' <- scoping (S.singleton name) (expFree body_nxt)
+  resT' <- Info <$> onResType resT
   pure $
     AppExp
       ( LetFun
           name
-          ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList localBind),
+          ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList params),
             args',
             rettype_te, -- ?
             Info retT',
@@ -232,16 +231,11 @@ expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
         dimArgs
           `S.union` letArgs
   pat' <- withArgs dimArgs (onPat pat)
-  newBind <- get
-  let (localBind, nxtBind) =
-        M.partitionWithKey
-          (const . not . S.disjoint argset . M.keysSet . unFV . freeInExp . unSizeExpr)
-          newBind
-  let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList localBind)
-  put nxtBind
-  resT' <- Info <$> onResType resT
-  body' <- scoping argset (expFree body)
-  e1' <- scoping dimArgs (expFree e1)
+  params <- parametrizing argset
+  let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList params)
+  resT' <- Info <$> withParams params (onResType resT)
+  body' <- withParams params $ scoping argset (expFree body)
+  e1' <- withParams params $ scoping dimArgs (expFree e1)
   pure $
     AppExp
       ( LetPat dims' pat' e1' body' loc
@@ -311,7 +305,7 @@ expFree (AppExp (Coerce e expType eloc) (Info resT)) = do
           TypeArgExpSize s -> TypeArgExpSize <$> onSizeExp s
           TypeArgExpType t -> TypeArgExpType <$> f t
     f (TEArrow (Just vn) tea ter loc) =
-      TEArrow (Just vn) <$> f tea <*> {-todo : add ext-} withArg vn (f ter) <*> pure loc
+      TEArrow (Just vn) <$> f tea <*> {-todo : add ext-} withArgs (S.singleton vn) (f ter) <*> pure loc
     f (TEArrow Nothing tea ter loc) =
       TEArrow Nothing <$> f tea <*> f ter <*> pure loc
     f (TESum constrs loc) =
@@ -399,11 +393,8 @@ onPat =
 
 onRetType :: S.Set VName -> RetTypeBase Size as -> InnerSimplifyM (RetTypeBase Size as)
 onRetType argset (RetType dims ty) = do
-  intros <- askIntros argset
   ty' <- withArgs argset $ onType ty
-  newBind <- get
-  let (rl, nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
-  put nxtBind
+  rl <- parametrizing argset
   let dims' = dims <> M.elems rl
   pure $ RetType dims' ty'
 
@@ -442,9 +433,11 @@ onExp e = do
     Just s -> pure s
     Nothing -> do
       prev <- gets $ M.lookup e'
-      case prev of
-        Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
-        Nothing -> do
+      prev_param <- asks $ M.lookup e' . snd
+      case (prev_param, prev) of
+        (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
+        (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
+        (Nothing, Nothing) -> do
           vn <- newNameFromString $ "d{" ++ prettyString e ++ "}"
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
@@ -455,14 +448,14 @@ removeExpFromValBind valbind = do
   scope <-
     asks $
       S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-  (params', expNaming) <- runInnerSimplifier (mapM onPat $ valBindParams valbind) scope mempty
+  (params', expNaming) <- runInnerSimplifier (mapM onPat $ valBindParams valbind) mempty scope mempty
   let typeParams' =
         valBindTypeParams valbind
           <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList expNaming)
   let args = foldMap patArg params'
-  (rety', _) <- runInnerSimplifier (hardOnRetType $ unInfo $ valBindRetType valbind) (scope `S.union` args) expNaming
+  (rety', _) <- runInnerSimplifier (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope `S.union` args) expNaming
   let scope' = scope `S.union` args
-  (body', expNaming') <- runInnerSimplifier (expFree $ valBindBody valbind) scope' expNaming
+  (body', expNaming') <- runInnerSimplifier (expFree $ valBindBody valbind) expNaming scope' expNaming
   let newNames = expNaming' `M.difference` expNaming
   body'' <- foldrM insertDimCalculus body' $ M.toList newNames
   pure $
