@@ -6,6 +6,7 @@ module Futhark.Internalise.NormaliseSize (transformProg) where
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Foldable
 import Data.Map.Strict qualified as M
@@ -146,16 +147,6 @@ insertDimCalculus (dim, name) body = do
     subst reName vn
       | True <- vn == name = Just $ SizeSubst $ sizeFromName (qualName reName) mempty
       | otherwise = Nothing
-
-hardOnRetType :: RetTypeBase Size as -> InnerSimplifyM (RetTypeBase Size as)
-hardOnRetType (RetType dims ty) = do
-  predBind <- get
-  ty' <- withArgs (S.fromList dims) (onType ty)
-  newBind <- get
-  let rl = M.elems $ newBind `M.difference` predBind
-  intros <- askIntros $ S.fromList rl `S.union` M.keysSet (unFV $ freeInType ty')
-  let dims' = S.toList intros
-  pure $ RetType dims' ty'
 
 unscoping :: S.Set VName -> Exp -> InnerSimplifyM Exp
 unscoping argset body = do
@@ -442,6 +433,10 @@ onExp e = do
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName)) SimplifyM) a
+
+-- Reader (scope, dimtoPush) Writer(arrow arguments if an there's an arrow)
+
 removeExpFromValBind ::
   ValBindBase Info VName -> SimplifyM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
@@ -449,22 +444,145 @@ removeExpFromValBind valbind = do
     asks $
       S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
   (params', expNaming) <- runInnerSimplifier (mapM onPat $ valBindParams valbind) mempty scope mempty
-  let typeParams' =
-        valBindTypeParams valbind
-          <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList expNaming)
+
   let args = foldMap patArg params'
-  (rety', _) <- runInnerSimplifier (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope `S.union` args) expNaming
+  let argsParams = M.elems expNaming
+  (rety', _) <- runInnerSimplifier (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
+  (rety'', funArg) <-
+    second (fromMaybe mempty)
+      <$> runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
+  let newParams = funArg `S.union` S.fromList argsParams
+      rety''' = arrowCleanRetType newParams rety''
+      typeParams' =
+        valBindTypeParams valbind
+          <> map (`TypeParamDim` mempty) (S.toList newParams)
+
   let scope' = scope `S.union` args
-  (body', expNaming') <- runInnerSimplifier (expFree $ valBindBody valbind) expNaming scope' expNaming
-  let newNames = expNaming' `M.difference` expNaming
+  (body', expNaming'') <- runInnerSimplifier (expFree $ valBindBody valbind) expNaming scope' expNaming
+  let newNames = expNaming'' `M.difference` expNaming
   body'' <- foldrM insertDimCalculus body' $ M.toList newNames
   pure $
     valbind
-      { valBindRetType = Info rety',
+      { valBindRetType = Info rety''',
         valBindTypeParams = typeParams',
         valBindParams = params',
         valBindBody = body''
       }
+  where
+    hardOnRetType (RetType dims ty) = do
+      predBind <- get
+      ty' <- withArgs (S.fromList dims) (hardOnType ty)
+      rl <- gets (`M.difference` predBind)
+      unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
+      put predBind
+      let dims' = M.elems rl <> S.toList unbounded
+      pure $ RetType dims' ty'
+    hardOnScalar (Record fs) =
+      Record <$> traverse hardOnType fs
+    hardOnScalar (Sum cs) =
+      Sum <$> (traverse . traverse) hardOnType cs
+    hardOnScalar (Arrow as argName d argT retT) =
+      Arrow as argName d <$> hardOnType argT <*> withArgs argset (hardOnRetType retT)
+      where
+        argset =
+          M.keysSet (unFV $ freeInType argT)
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+    hardOnScalar ty = pure ty
+
+    hardOnType (Array as u shape scalar) =
+      Array as u <$> mapM onSize shape <*> hardOnScalar scalar
+    hardOnType (Scalar ty) =
+      Scalar <$> hardOnScalar ty
+
+    arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
+    arrowArgRetType argset (RetType dims ty) = do
+      scope <- asks $ (argset `S.union` S.fromList dims `S.union`) . fst
+      (ty', arrArg) <- listen $ local (bimap (const scope) (<> dims)) $ arrowArgType ty
+      case arrArg of
+        Nothing {-rightmost of arrows-} -> do
+          dims' <- asks $ (dims <>) . snd
+          pure $ RetType dims' ty'
+        Just args -> do
+          canExt <- lift $ lift $ runReaderT (extBindType ty) scope
+          writer (RetType (filter (`S.member` canExt) dims) ty', Just $ args `S.difference` canExt)
+
+    arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
+    arrowArgScalar (Record fs) =
+      Record <$> traverse arrowArgType fs
+    arrowArgScalar (Sum cs) =
+      Sum <$> (traverse . traverse) arrowArgType cs
+    arrowArgScalar (Arrow as argName d argT retT) = do
+      intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
+      retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
+      tell $ Just intros
+      pure $ Arrow as argName d argT retT'
+      where
+        notIntrisic vn = baseTag vn > maxIntrinsicTag
+        argset =
+          M.keysSet (unFV $ freeInType argT)
+        fullArgset =
+          argset
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+    arrowArgScalar ty = pure ty
+
+    arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
+    arrowArgType (Array as u shape scalar) =
+      Array as u shape <$> arrowArgScalar scalar
+    arrowArgType (Scalar ty) =
+      Scalar <$> arrowArgScalar ty
+    --
+    extBindRetType :: S.Set VName -> RetTypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindRetType argset (RetType dims ty) =
+      local (argset `S.union` S.fromList dims `S.union`) $ extBindType ty
+
+    extBindScalar :: ScalarTypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindScalar (Record fs) =
+      foldM (\acc -> fmap (S.union acc) . extBindType) mempty fs
+    extBindScalar (Sum cs) =
+      foldM (\acc -> fmap (S.union acc) . foldM (\inacc -> fmap (S.union inacc) . extBindType) mempty) mempty cs
+    extBindScalar (Arrow _ argName _ argT retT) = do
+      intros <- asks (S.filter notIntrisic argset `S.difference`)
+      (`S.difference` intros) <$> extBindRetType argset retT
+      where
+        notIntrisic vn = baseTag vn > maxIntrinsicTag
+        argset =
+          M.keysSet (unFV $ freeInType argT)
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+    extBindScalar _ = pure mempty
+
+    extBindType :: TypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindType (Array _ _ shape scalar) =
+      (foldMap extBindSize shape `S.union`) <$> extBindScalar scalar
+      where
+        extBindSize (SizeExpr (Var qn _ _)) = S.singleton $ qualLeaf qn
+        extBindSize _ = mempty
+    extBindType (Scalar ty) =
+      extBindScalar ty
+    --
+    arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
+    arrowCleanRetType paramed (RetType dims ty) =
+      RetType (filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
+
+    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
+    arrowCleanScalar paramed (Record fs) =
+      Record $ M.map (arrowCleanType paramed) fs
+    arrowCleanScalar paramed (Sum cs) =
+      Sum $ (M.map . map) (arrowCleanType paramed) cs
+    arrowCleanScalar paramed (Arrow as argName d argT retT) =
+      Arrow as argName d argT (arrowCleanRetType paramed retT)
+    arrowCleanScalar _ ty = ty
+
+    arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
+    arrowCleanType paramed (Array as u shape scalar) =
+      Array as u shape $ arrowCleanScalar paramed scalar
+    arrowCleanType paramed (Scalar ty) =
+      Scalar $ arrowCleanScalar paramed ty
 
 simplifyDecs :: [Dec] -> SimplifyM [Dec]
 simplifyDecs [] = pure []
