@@ -788,9 +788,9 @@ evalAppExp
           then pure $ ValuePrim $ BoolValue True
           else eval env y
     | otherwise = do
-        op' <- eval env $ Var op op_t loc
         x' <- evalArg env x xext
         y' <- evalArg env y yext
+        op' <- eval env $ Var op op_t loc
         apply2 loc env op' x' y'
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
