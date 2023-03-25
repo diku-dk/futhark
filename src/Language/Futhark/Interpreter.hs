@@ -172,6 +172,10 @@ resolveTypeParams names = match
       | d1 : _ <- shapeDims (arrayShape poly_t),
         d2 : _ <- shapeDims (arrayShape t) =
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
+    match t1 t2
+      | Just t1' <- isAccType t1,
+        Just t2' <- isAccType t2 =
+          match t1' t2'
     match _ _ = mempty
 
     matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (IntLit d2 _ _))
@@ -560,7 +564,7 @@ expandType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = expandType env et
    in arrayOf u shape et'
-expandType env t@(Scalar (TypeVar () _ tn args)) =
+expandType env (Scalar (TypeVar () u tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
@@ -577,7 +581,10 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
        in if null ps
             then first onDim t'
             else expandType (Env mempty types <> env) $ first onDim t'
-    Nothing -> t
+    Nothing ->
+      -- This case only happens for built-in abstract types,
+      -- e.g. accumulators.
+      Scalar (TypeVar () u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e) _) =
       (M.singleton p $ SizeExpr e, mempty)
@@ -585,6 +592,8 @@ expandType env t@(Scalar (TypeVar () _ tn args)) =
       let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
     matchPtoA _ _ = mempty
+    expandArg (TypeArgDim s loc) = TypeArgDim s loc
+    expandArg (TypeArgType t loc) = TypeArgType (expandType env t) loc
 expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env) cs
 
 -- | First expand type abbreviations, then evaluate all possible
@@ -1624,10 +1633,10 @@ initialCtx =
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
-              let acc = ValueAcc (\_ x -> pure x) dest_arr
+              let acc = ValueAcc dest_shape (\_ x -> pure x) dest_arr
               acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
               case acc' of
-                ValueAcc _ dest_arr' ->
+                ValueAcc _ _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
                   error $ "scatter_stream produced: " <> show acc'
@@ -1639,10 +1648,10 @@ initialCtx =
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
-              let acc = ValueAcc (apply2 noLoc mempty op) dest_arr
+              let acc = ValueAcc dest_shape (apply2 noLoc mempty op) dest_arr
               acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
               case acc' of
-                ValueAcc _ dest_arr' ->
+                ValueAcc _ _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
                   error $ "hist_stream produced: " <> show acc'
@@ -1651,14 +1660,14 @@ initialCtx =
     def "acc_write" = Just $
       fun3 $ \acc i v ->
         case (acc, i) of
-          ( ValueAcc op acc_arr,
+          ( ValueAcc shape op acc_arr,
             ValuePrim (SignedValue (Int64Value i'))
             ) ->
               if i' >= 0 && i' < arrayLength acc_arr
                 then do
                   let x = acc_arr ! fromIntegral i'
                   res <- op x v
-                  pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
+                  pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
                 else pure acc
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)

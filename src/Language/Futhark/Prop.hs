@@ -50,6 +50,7 @@ module Language.Futhark.Prop
     foldFunType,
     foldFunTypeFromParams,
     typeVars,
+    isAccType,
 
     -- * Operations on types
     peelArray,
@@ -711,6 +712,14 @@ intrinsicAcc =
     acc_v = VName "acc" 10
     t_v = VName "t" 11
     arg = TypeArgType (Scalar (TypeVar () Nonunique (qualName t_v) [])) mempty
+
+-- | If this type corresponds to the builtin "acc" type, return the
+-- type of the underlying array.
+isAccType :: TypeBase d as -> Maybe (TypeBase d ())
+isAccType (Scalar (TypeVar _ _ (QualName [] v) [TypeArgType t _]))
+  | v == fst intrinsicAcc =
+      Just t
+isAccType _ = Nothing
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
