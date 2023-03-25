@@ -1,5 +1,6 @@
 module Futhark.Pass.Flatten.Distribute
   ( distributeMap,
+    distributeBody,
     ResMap,
     Distributed (..),
     DistStm (..),
@@ -8,7 +9,7 @@ module Futhark.Pass.Flatten.Distribute
     DistType (..),
     distInputType,
     DistResult (..),
-    ResTag,
+    ResTag (..),
   )
 where
 
@@ -142,6 +143,42 @@ freeInput avail_inputs v =
 patInput :: ResTag -> PatElem Type -> (VName, DistInput)
 patInput tag pe =
   (patElemName pe, DistInput tag $ patElemType pe)
+
+-- TODO: Split this and 'distributeMap' up in a meaningful way
+distributeBody ::
+  Scope rep ->
+  SubExp ->
+  [(VName, DistInput)] ->
+  Body SOACS ->
+  Distributed
+distributeBody outer_scope w param_inputs body =
+  let ((_, avail_inputs), stms) =
+        L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
+          stmsToList $
+            bodyStms body
+   in Distributed stms mempty
+  where
+    bound_outside = namesFromList $ M.keys outer_scope
+    paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
+    distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
+    distributeStm (ResTag tag, avail_inputs) stm =
+      let pat = stmPat stm
+          new_tags = map ResTag $ take (patSize pat) [tag ..]
+          avail_inputs' =
+            avail_inputs <> zipWith patInput new_tags (patElems pat)
+          free_in_stm = freeIn stm
+          used_free = mapMaybe (freeInput avail_inputs) $ namesToList free_in_stm
+          used_free_types =
+            mapMaybe (freeInput avail_inputs)
+              . namesToList
+              . foldMap (freeIn . distInputType . snd)
+              $ used_free
+          stm' =
+            DistStm
+              (nubOrd $ used_free_types <> used_free)
+              (zipWith DistResult new_tags $ map distType $ patTypes pat)
+              stm
+       in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
 distributeMap :: Scope rep -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> Distributed
 distributeMap outer_scope map_pat w arrs lam =

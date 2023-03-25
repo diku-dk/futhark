@@ -541,6 +541,76 @@ transformStms :: Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
 transformStms scope stms =
   fold <$> traverse (transformStm (scope <> scopeOf stms)) stms
 
+liftParam :: SubExp -> FParam SOACS -> PassM ([FParam GPU], ResRep)
+liftParam w fparam =
+  case declTypeOf fparam of
+    Prim pt -> do
+      p <-
+        newParam
+          (desc <> "_lifted")
+          (arrayOf (Prim pt) (Shape [w]) Nonunique)
+      pure ([p], Regular $ paramName p)
+    Array pt shape u -> do
+      num_elems <-
+        newParam (desc <> "_num_elems") $ Prim int64
+      offsets <-
+        newParam (desc <> "_offsets") $
+          arrayOf (Prim int64) (Shape [w]) Nonunique
+      flags <-
+        newParam (desc <> "_flags") $
+          arrayOf (Prim Bool) (Shape [Var (paramName num_elems)]) Nonunique
+      segments <-
+        newParam (desc <> "_segments") $
+          arrayOf (Prim int64) (Shape [w]) Nonunique
+      elems <-
+        newParam (desc <> "_elems") $
+          arrayOf (Prim pt) (Shape [Var (paramName num_elems)]) u
+      pure
+        ( [num_elems, offsets, flags, segments, elems],
+          Irregular $
+            IrregularRep
+              { irregularSegments = paramName segments,
+                irregularFlags = paramName flags,
+                irregularOffsets = paramName offsets,
+                irregularElems = paramName elems
+              }
+        )
+    Acc {} ->
+      error "liftParam: Acc"
+    Mem {} ->
+      error "liftParam: Mem"
+  where
+    desc = baseString (paramName fparam)
+
+liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
+liftFunDef const_scope fd = do
+  let FunDef
+        { funDefBody = body,
+          funDefParams = fparams,
+          funDefRetType = rettype
+        } = fd
+  wp <- newParam "w" $ Prim int64
+  (fparams', reps) <- unzip <$> mapM (liftParam (Var (paramName wp))) fparams
+  let inputs = do
+        (p, i) <- zip fparams [0 ..]
+        pure (paramName p, DistInput (ResTag i) (paramType p))
+  let distributed@(Distributed dstms resmap) =
+        distributeBody const_scope (Var (paramName wp)) inputs body
+  traceM $ prettyString distributed
+  let segments = NE.singleton (Var $ paramName wp)
+      env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+  stms <-
+    runReaderT (runBuilder_ $ foldM (transformDistStm segments) env dstms) $
+      (const_scope <> scopeOfFParams (concat fparams'))
+  let name = funDefName fd <> "_lifted"
+  pure $
+    fd
+      { funDefName = name,
+        funDefBody = Body () stms mempty,
+        funDefParams = wp : concat fparams',
+        funDefRetType = []
+      }
+
 transformFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 transformFunDef consts_scope fd = do
   let FunDef
@@ -560,7 +630,8 @@ transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
   consts' <- transformStms mempty $ progConsts prog
   funs' <- mapM (transformFunDef $ scopeOf (progConsts prog)) $ progFuns prog
-  pure $ prog {progConsts = consts', progFuns = flatteningBuiltins <> funs'}
+  lifted_funs <- mapM (liftFunDef $ scopeOf (progConsts prog)) $ progFuns prog
+  pure $ prog {progConsts = consts', progFuns = flatteningBuiltins <> lifted_funs <> funs'}
 
 -- | Transform a SOACS program to a GPU program, using flattening.
 flattenSOACs :: Pass SOACS GPU
