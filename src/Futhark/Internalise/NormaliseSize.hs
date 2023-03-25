@@ -91,6 +91,10 @@ askIntros argset =
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
+askScope :: InnerNormaliseM (S.Set VName)
+askScope =
+  asks fst
+
 parametrizing :: S.Set VName -> InnerNormaliseM (M.Map Size VName)
 parametrizing argset = do
   intros <- askIntros argset
@@ -124,6 +128,12 @@ maybeOldSize e =
     IntLit v _ loc -> Just $ sizeFromInteger v loc
     _ -> Nothing
 
+canCalculate :: S.Set VName -> M.Map Size VName -> M.Map Size VName
+canCalculate scope =
+  M.filterWithKey (const . (`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unSizeExpr)
+  where
+    notIntrisic vn = baseTag vn > maxIntrinsicTag
+
 insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
   reName <- newNameFromString $ baseString name
@@ -156,7 +166,8 @@ unscoping argset body = do
       M.partitionWithKey
         (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
   put nxtBind
-  foldrM insertDimCalculus body $ M.toList localDims
+  scope <- S.union argset <$> askScope
+  foldrM insertDimCalculus body $ M.toList $ canCalculate scope localDims
 
 scoping :: S.Set VName -> InnerNormaliseM Exp -> InnerNormaliseM Exp
 scoping argset m =
@@ -457,10 +468,10 @@ removeExpFromValBind valbind = do
         valBindTypeParams valbind
           <> map (`TypeParamDim` mempty) (S.toList newParams)
 
-  let scope' = scope `S.union` args
+  let scope' = scope `S.union` args `S.union` S.fromList argsParams
   (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming scope' expNaming
   let newNames = expNaming'' `M.difference` expNaming
-  body'' <- foldrM insertDimCalculus body' $ M.toList newNames
+  body'' <- foldrM insertDimCalculus body' $ M.toList $ canCalculate scope' newNames
   pure $
     valbind
       { valBindRetType = Info rety''',
