@@ -15,12 +15,12 @@ def mkVal [l2][l] (y:i32) (x:i32) (pen:i32) (inp_l:[l2][l2]i32) (ref_l:[l][l]i32
       , ( (inp_l[y - 1, x])) - pen
       )
 
-def intraBlockPar [lensq][len] (B: i64)
-                               (penalty: i32)
-                               (inputsets: [lensq]i32)
-                               (reference2: [len][len]i32)
-                               (b_y: i64) (b_x: i64)
-                               : [B][B]i32 =
+def intraBlockPar [len] (B: i64)
+                        (penalty: i32)
+                        (inputsets: [len*len]i32)
+                        (reference2: [len][len]i32)
+                        (b_y: i64) (b_x: i64)
+                        : [B][B]i32 =
   let ref_l = reference2[b_y * B + 1: b_y * B + 1 + B,
                          b_x * B + 1: b_x * B + 1 + B] :> [B][B]i32
 
@@ -47,12 +47,12 @@ def intraBlockPar [lensq][len] (B: i64)
   in  inp_l[1:B+1,1:B+1] :> [B][B]i32
 
 
-def updateBlocks [q][lensq] (B: i64)
-                            (len: i32) (blk: i64)
-                            (mk_b_y: (i32 -> i32))
-                            (mk_b_x: (i32 -> i32))
-                            (block_inp: [q][B][B]i32)
-                            (inputsets:  *[lensq]i32) =
+def updateBlocks [q] (B: i64)
+                     (len: i64) (blk: i64)
+                     (mk_b_y: (i32 -> i32))
+                     (mk_b_x: (i32 -> i32))
+                     (block_inp: [q][B][B]i32)
+                     (inputsets:  *[len*len]i32) =
   let (inds, vals) = unzip (
     tabulate (blk*B*B) (\gid ->
                  let B2 = i32.i64 (B*B)
@@ -63,7 +63,7 @@ def updateBlocks [q][lensq] (B: i64)
                  let b_y = mk_b_y bx
                  let b_x = mk_b_x bx
                  let v = #[unsafe] block_inp[bx, ty, tx]
-                 let ind = (i32.i64 B*b_y + 1 + ty) * len + (i32.i64 B*b_x + tx + 1)
+                 let ind = (i32.i64 B*b_y + 1 + ty) * i32.i64 len + (i32.i64 B*b_x + tx + 1)
                  in  (i64.i32 ind, v)))
   in  scatter inputsets inds vals
 
@@ -71,20 +71,21 @@ def updateBlocks [q][lensq] (B: i64)
 def main [lensq] (penalty : i32)
                  (inputsets : *[lensq]i32)
                  (reference : *[lensq]i32) : *[lensq]i32 =
-  let len = i32.f32 (f32.sqrt (f32.i64 lensq))
+  let len = i64.f32 (f32.sqrt (f32.i64 lensq))
   let worksize = len - 1
-  let B = i64.min (i64.i32 worksize) B0
+  let B = i64.min worksize B0
 
   -- worksize should be a multiple of B0
-  let B = assert (i64.i32 worksize % B == 0) B
+  let B = assert (worksize % B == 0) B
 
-  let block_width = trace <| worksize / i32.i64 B
-  let reference2 = unflatten (i64.i32 len) (i64.i32 len) reference
+  let block_width = trace <| worksize / B
+  let reference2 = unflatten len len (reference :> [len*len]i32)
+  let inputsets = (inputsets :> [len*len]i32)
 
   -- First anti-diagonal half of the entire input matrix
   let inputsets =
     loop inputsets for blk < block_width do
-        let blk = i64.i32 (blk + 1)
+        let blk = blk + 1
         let block_inp =
           -- Process an anti-diagonal of independent blocks
           tabulate blk (\b_x ->
@@ -96,4 +97,4 @@ def main [lensq] (penalty : i32)
         let mkBX bx = bx
         in  updateBlocks B len blk mkBY mkBX block_inp inputsets
 
-  in  inputsets
+  in  inputsets :> [lensq]i32

@@ -178,7 +178,17 @@ checkCoerce loc te e = do
 
   te_t' <- normTypeFully te_t
 
-  pure (te', te_t', e', ext)
+  -- If the type expression had any anonymous dimensions, these will
+  -- now be rigid and in 'ext'.  Replace those with the original
+  -- sizes.  This ensures that 'x :> [1][]i32' does not make the
+  -- second dimension unknown.
+  te_t'' <- matchDims (preferOrigSize ext) te_t' e_t
+
+  pure (te', te_t'', e', [])
+  where
+    preferOrigSize ext _ (SizeExpr (Var v _ _)) d
+      | qualLeaf v `elem` ext = pure d
+    preferOrigSize _ _ d _ = pure d
 
 unscopeTypeBase ::
   SrcLoc ->

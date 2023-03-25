@@ -1,5 +1,6 @@
+-- The error here could be better.
 -- ==
--- error: Dimensions.*do not match
+-- error: scope violation
 
 type square [n] 't = [n][n]t
 

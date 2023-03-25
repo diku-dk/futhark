@@ -11,7 +11,7 @@
 -- }
 def main (xs: []i64): []i64 =
   map (\(x: i64)  ->
-        let arr = #[unsafe] 0..<(2 * x)
+        let arr = #[unsafe] iota (2*x)
         let arr' = #[unsafe] unflatten 2 x arr in
             reduce (+) 0 (arr'[0]) + reduce (+) 0 (arr'[1])
      ) xs

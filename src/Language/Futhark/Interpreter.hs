@@ -46,6 +46,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Data qualified as V
 import Futhark.Util (chunk, maybeHead, splitFromEnd)
@@ -132,6 +133,16 @@ putExtSize v x = modify $ M.insert v x
 getSizes :: EvalM Sizes
 getSizes = get
 
+-- | Disregard any existential sizes computed during this action.
+-- This is used so that existentials computed during one iteration of
+-- a loop or a function call are not remembered the next time around.
+localExts :: EvalM a -> EvalM a
+localExts m = do
+  s <- get
+  x <- m
+  put s
+  pure x
+
 extSizeEnv :: EvalM Env
 extSizeEnv = i64Env <$> getSizes
 
@@ -161,6 +172,10 @@ resolveTypeParams names = match
       | d1 : _ <- shapeDims (arrayShape poly_t),
         d2 : _ <- shapeDims (arrayShape t) =
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
+    match t1 t2
+      | Just t1' <- isAccType t1,
+        Just t2' <- isAccType t2 =
+          match t1' t2'
     match _ _ = mempty
 
     matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (IntLit d2 _ _))
@@ -265,18 +280,14 @@ data Module
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
-    envType :: M.Map VName T.TypeBinding,
-    -- | A mapping from type parameters to the shapes of
-    -- the value to which they were initially bound.
-    envShapes :: M.Map VName ValueShape
+    envType :: M.Map VName T.TypeBinding
   }
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty
+  mempty = Env mempty mempty
 
 instance Semigroup Env where
-  Env vm1 tm1 sm1 <> Env vm2 tm2 sm2 =
-    Env (vm1 <> vm2) (tm1 <> tm2) (sm1 <> sm2)
+  Env vm1 tm1 <> Env vm2 tm2 = Env (vm1 <> vm2) (tm1 <> tm2)
 
 -- | An error occurred during interpretation due to an error in the
 -- user program.  Actual interpreter errors will be signaled with an
@@ -291,24 +302,21 @@ valEnv :: M.Map VName (Maybe T.BoundV, Value) -> Env
 valEnv m =
   Env
     { envTerm = M.map (uncurry TermValue) m,
-      envType = mempty,
-      envShapes = mempty
+      envType = mempty
     }
 
 modEnv :: M.Map VName Module -> Env
 modEnv m =
   Env
     { envTerm = M.map TermModule m,
-      envType = mempty,
-      envShapes = mempty
+      envType = mempty
     }
 
 typeEnv :: M.Map VName StructType -> Env
 typeEnv m =
   Env
     { envTerm = mempty,
-      envType = M.map tbind m,
-      envShapes = mempty
+      envType = M.map tbind m
     }
   where
     tbind = T.TypeAbbr Unlifted [] . RetType []
@@ -542,64 +550,96 @@ evalIndex loc env is arr = do
             <> "."
   maybe oob pure $ indexArray is arr
 
+freeVarsInExp :: Exp -> [VName]
+freeVarsInExp = M.keys . unFV . freeInExp
+
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-evalType :: Env -> StructType -> StructType
-evalType _ (Scalar (Prim pt)) = Scalar $ Prim pt
-evalType env (Scalar (Record fs)) = Scalar $ Record $ fmap (evalType env) fs
-evalType env (Scalar (Arrow () p d t1 (RetType dims t2))) =
-  Scalar $ Arrow () p d (evalType env t1) (RetType dims (evalType env t2))
-evalType env t@(Array _ u shape _) =
+expandType :: Env -> StructType -> StructType
+expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
+expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
+expandType env (Scalar (Arrow () p d t1 (RetType dims t2))) =
+  Scalar $ Arrow () p d (expandType env t1) (RetType dims (expandType env t2))
+expandType env t@(Array _ u shape _) =
   let et = stripArray (shapeRank shape) t
-      et' = evalType env et
-      shape' = fmap evalDim shape
-   in arrayOf u shape' et'
-  where
-    evalDim (SizeExpr (Var qn _ loc))
-      | Just (TermValue _ (ValuePrim (SignedValue (Int64Value x)))) <-
-          lookupVar qn env =
-          sizeFromInteger (toInteger x) loc
-    evalDim d = d
-evalType env t@(Scalar (TypeVar () _ tn args)) =
+      et' = expandType env et
+   in arrayOf u shape et'
+expandType env (Scalar (TypeVar () u tn args)) =
   case lookupType tn env of
-    Just (T.TypeAbbr _ ps (RetType _ t')) ->
+    Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeExpr (Var v typ loc)) = fromMaybe (SizeExpr (Var v typ loc)) $ M.lookup (qualLeaf v) substs
+          onDim (SizeExpr (Var v _ _))
+            | Just e <- M.lookup (qualLeaf v) substs =
+                e
+          -- The next case can occur when a type with existential size
+          -- has been hidden by a module ascription,
+          -- e.g. tests/modules/sizeparams4.fut.
+          onDim (SizeExpr e)
+            | any (`elem` ext) $ freeVarsInExp e =
+                AnySize Nothing
           onDim d = d
        in if null ps
             then first onDim t'
-            else evalType (Env mempty types mempty <> env) $ first onDim t'
-    Nothing -> t
+            else expandType (Env mempty types <> env) $ first onDim t'
+    Nothing ->
+      -- This case only happens for built-in abstract types,
+      -- e.g. accumulators.
+      Scalar (TypeVar () u tn $ map expandArg args)
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Var qv typ loc)) _) =
-      (M.singleton p $ SizeExpr (Var qv typ loc), mempty)
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr (Literal k loc)) _) =
-      (M.singleton p $ SizeExpr (Literal k loc), mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e) _) =
+      (M.singleton p $ SizeExpr e, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
-      let t'' = evalType env t'
+      let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
     matchPtoA _ _ = mempty
-evalType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (evalType env) cs
+    expandArg (TypeArgDim s loc) = TypeArgDim s loc
+    expandArg (TypeArgType t loc) = TypeArgType (expandType env t) loc
+expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env) cs
+
+-- | First expand type abbreviations, then evaluate all possible
+-- sizes.
+evalType :: Env -> StructType -> EvalM StructType
+evalType outer_env t = do
+  size_env <- extSizeEnv
+  let env = size_env <> outer_env
+      evalDim bound _ (SizeExpr e)
+        | not $ any (`S.member` bound) $ freeVarsInExp e = do
+            x <- asInteger <$> eval env e
+            pure $ SizeExpr $ IntLit x (Info (Scalar (Prim (Signed Int64)))) mempty
+      evalDim _ _ d = pure d
+  traverseDims evalDim $ expandType env t
 
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
 evalTermVar env qv t =
   case lookupVar qv env of
-    Just (TermPoly _ v) -> do
-      size_env <- extSizeEnv
-      v $ evalType (size_env <> env) t
+    Just (TermPoly _ v) -> v =<< evalType env t
     Just (TermValue _ v) -> pure v
-    _ -> error $ "\"" <> prettyString qv <> "\" is not bound to a value."
+    _ -> do
+      ss <- map (locText . srclocOf) <$> stacktrace
+      error $
+        prettyString qv
+          <> " is not bound to a value.\n"
+          <> T.unpack (prettyStacktrace 0 ss)
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
-  size_env <- extSizeEnv
-  let t' = evalType (size_env <> env) t
-  case traverse dim $ typeShape mempty t' of
+  t' <- evalType env t
+  case traverse dim $ typeShape t' of
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
     dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
     dim _ = Nothing
+
+-- Sometimes type instantiation is not quite enough - then we connect
+-- up the missing sizes here.  In particular used for eta-expanded
+-- entry points.
+linkMissingSizes :: [VName] -> Pat -> Value -> Env -> Env
+linkMissingSizes [] _ _ env = env
+linkMissingSizes missing_sizes p v env =
+  env <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
+  where
+    p_t = expandType env $ patternStructType p
 
 evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
@@ -607,29 +647,22 @@ evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-evalFunction env _ [] body rettype =
+evalFunction env missing_sizes [] body rettype =
   -- Eta-expand the rest to make any sizes visible.
   etaExpand [] env rettype
   where
-    etaExpand vs env' (Scalar (Arrow _ _ _ pt (RetType _ rt))) =
-      pure $
-        ValueFun $ \v -> do
-          env'' <- matchPat env' (Wildcard (Info $ fromStruct pt) noLoc) v
-          etaExpand (v : vs) env'' rt
+    etaExpand vs env' (Scalar (Arrow _ _ _ p_t (RetType _ rt))) = do
+      pure . ValueFun $ \v -> do
+        let p = Wildcard (Info $ fromStruct p_t) noLoc
+        env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
+        etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
-      f <- eval env' body
+      f <- localExts $ eval env' body
       foldM (apply noLoc mempty) f $ reverse vs
 evalFunction env missing_sizes (p : ps) body rettype =
-  pure $
-    ValueFun $ \v -> do
-      env' <- matchPat env p v
-      -- Fix up the last sizes, if any.
-      let p_t = evalType env $ patternStructType p
-          env''
-            | null missing_sizes = env'
-            | otherwise =
-                env' <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
-      evalFunction env'' missing_sizes ps body rettype
+  pure . ValueFun $ \v -> do
+    env' <- linkMissingSizes missing_sizes p v <$> matchPat env p v
+    evalFunction env' missing_sizes ps body rettype
 
 evalFunctionBinding ::
   Env ->
@@ -676,10 +709,9 @@ evalArg env e ext = do
 returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
-  mapM_ (uncurry putExtSize) $
-    M.toList $
-      resolveExistentials retext (evalType env $ toStruct ret) $
-        valueShape v
+  mapM_ (uncurry putExtSize) . M.toList $
+    resolveExistentials retext (expandType env $ toStruct ret) $
+      valueShape v
   pure v
 
 evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
@@ -733,7 +765,8 @@ evalAppExp env _ (Range start maybe_second end loc) = do
         <> " is invalid."
 evalAppExp env t (Coerce e te loc) = do
   v <- eval env e
-  case checkShape (structTypeShape (envShapes env) t) (valueShape v) of
+  t' <- evalType env t
+  case checkShape (structTypeShape t') (valueShape v) of
     Just _ -> pure v
     Nothing ->
       bad loc env . docText $
@@ -744,12 +777,12 @@ evalAppExp env t (Coerce e te loc) = do
           <> "` cannot match shape of type `"
           <> pretty te
           <> "` (`"
-          <> pretty t
+          <> pretty t'
           <> "`)"
 evalAppExp env _ (LetPat sizes p e body _) = do
   v <- eval env e
   env' <- matchPat env p v
-  let p_t = evalType env $ patternStructType p
+  let p_t = expandType env $ patternStructType p
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
@@ -771,9 +804,9 @@ evalAppExp
           then pure $ ValuePrim $ BoolValue True
           else eval env y
     | otherwise = do
-        op' <- eval env $ Var op op_t loc
         x' <- evalArg env x xext
         y' <- evalArg env y yext
+        op' <- eval env $ Var op op_t loc
         apply2 loc env op' x' y'
 evalAppExp env _ (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
@@ -826,34 +859,34 @@ evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
     inc = (`P.doAdd` Int64Value 1)
     zero = (`P.doMul` Int64Value 0)
 
+    evalBody env' = localExts $ eval env' body
+
+    forLoopEnv iv i =
+      valEnv
+        ( M.singleton
+            iv
+            ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
+              ValuePrim (SignedValue i)
+            )
+        )
+
     forLoop iv bound i v
       | i >= bound = pure v
       | otherwise = do
           env' <- withLoopParams v
-          forLoop iv bound (inc i)
-            =<< eval
-              ( valEnv
-                  ( M.singleton
-                      iv
-                      ( Just $ T.BoundV [] $ Scalar $ Prim $ Signed Int64,
-                        ValuePrim (SignedValue i)
-                      )
-                  )
-                  <> env'
-              )
-              body
+          forLoop iv bound (inc i) =<< evalBody (forLoopEnv iv i <> env')
 
     whileLoop cond v = do
       env' <- withLoopParams v
       continue <- asBool <$> eval env' cond
       if continue
-        then whileLoop cond =<< eval env' body
+        then whileLoop cond =<< evalBody env'
         else pure v
 
     forInLoop in_pat v in_v = do
       env' <- withLoopParams v
       env'' <- matchPat env' in_pat in_v
-      eval env'' body
+      evalBody env''
 evalAppExp env _ (Match e cs _) = do
   v <- eval env e
   match v (NE.toList cs)
@@ -897,10 +930,10 @@ eval env (ArrayLit (v : vs) _ _) = do
   v' <- eval env v
   vs' <- mapM (eval env) vs
   pure $ toArray' (valueShape v') (v' : vs')
-eval env (AppExp e (Info (AppRes t retext))) =
-  returned env t' retext =<< evalAppExp env t' e
-  where
-    t' = evalType env $ toStruct t
+eval env (AppExp e (Info (AppRes t retext))) = do
+  let t' = expandType env $ toStruct t
+  v <- evalAppExp env t' e
+  returned env t' retext v
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
 eval _ (IntLit v (Info t) _) =
@@ -1033,8 +1066,8 @@ substituteInModule substs = onModule
       (k, v) <- M.toList m
       k' <- replace k
       pure (k', f v)
-    onModule (Module (Env terms types _)) =
-      Module $ Env (replaceM onTerm terms) (replaceM onType types) mempty
+    onModule (Module (Env terms types)) =
+      Module $ Env (replaceM onTerm terms) (replaceM onType types)
     onModule (ModuleFun f) =
       ModuleFun $ \m -> onModule <$> f (substituteInModule substs m)
     onTerm (TermValue t v) = TermValue t v
@@ -1042,9 +1075,9 @@ substituteInModule substs = onModule
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
     onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
-    onDim (SizeExpr (IntLit x ty loc)) = SizeExpr (IntLit x ty loc)
-    onDim (AnySize v) = AnySize v
+    onDim (SizeExpr (IntLit x t loc)) = SizeExpr (IntLit x t loc)
     onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
+    onDim AnySize {} = error "substituteInModule onDim: AnySize"
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
@@ -1065,14 +1098,13 @@ evalModExp _ (ModImport _ (Info f) _) = do
           ]
     Just m -> pure $ Module m
 evalModExp env (ModDecs ds _) = do
-  Env terms types _ <- foldM evalDec env ds
+  Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
   pure $
     Module $
       Env
         (terms `M.difference` envTerm env)
         (types `M.difference` envType env)
-        mempty
 evalModExp env (ModVar qv _) =
   evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
@@ -1094,9 +1126,11 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
-evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = do
+evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
-  pure $ env {envTerm = M.insert v binding $ envTerm env}
+  sizes <- extSizeEnv
+  pure $
+    env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
   me' <- evalModExp env me
   case me' of
@@ -1107,7 +1141,7 @@ evalDec env (ImportDec name name' loc) =
 evalDec env (LocalDec d _) = evalDec env d
 evalDec env SigDec {} = pure env
 evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
-  let abbr = T.TypeAbbr l ps . RetType dims $ evalType env t
+  let abbr = T.TypeAbbr l ps . RetType dims $ expandType env t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
   mod <- evalModExp env $ wrapInLambda ps
@@ -1154,11 +1188,10 @@ initialCtx =
     ( Env
         ( M.insert
             (VName (nameFromString "intrinsics") 0)
-            (TermModule (Module $ Env terms types mempty))
+            (TermModule (Module $ Env terms types))
             terms
         )
         types
-        mempty
     )
     mempty
   where
@@ -1485,7 +1518,7 @@ initialCtx =
                 "Invalid arguments to map intrinsic:\n"
                   ++ unlines [prettyString t, show f, show xs]
       where
-        typeRowShape = sequenceA . structTypeShape mempty . stripArray 1
+        typeRowShape = sequenceA . structTypeShape . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs
@@ -1600,10 +1633,10 @@ initialCtx =
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
-              let acc = ValueAcc (\_ x -> pure x) dest_arr
+              let acc = ValueAcc dest_shape (\_ x -> pure x) dest_arr
               acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
               case acc' of
-                ValueAcc _ dest_arr' ->
+                ValueAcc _ _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
                   error $ "scatter_stream produced: " <> show acc'
@@ -1615,10 +1648,10 @@ initialCtx =
           ( ValueArray dest_shape dest_arr,
             ValueArray _ vs_arr
             ) -> do
-              let acc = ValueAcc (apply2 noLoc mempty op) dest_arr
+              let acc = ValueAcc dest_shape (apply2 noLoc mempty op) dest_arr
               acc' <- foldM (apply2 noLoc mempty f) acc vs_arr
               case acc' of
-                ValueAcc _ dest_arr' ->
+                ValueAcc _ _ dest_arr' ->
                   pure $ ValueArray dest_shape dest_arr'
                 _ ->
                   error $ "hist_stream produced: " <> show acc'
@@ -1627,14 +1660,14 @@ initialCtx =
     def "acc_write" = Just $
       fun3 $ \acc i v ->
         case (acc, i) of
-          ( ValueAcc op acc_arr,
+          ( ValueAcc shape op acc_arr,
             ValuePrim (SignedValue (Int64Value i'))
             ) ->
               if i' >= 0 && i' < arrayLength acc_arr
                 then do
                   let x = acc_arr ! fromIntegral i'
                   res <- op x v
-                  pure $ ValueAcc op $ acc_arr // [(fromIntegral i', res)]
+                  pure $ ValueAcc shape op $ acc_arr // [(fromIntegral i', res)]
                 else pure acc
           _ ->
             error $ "acc_write invalid arguments: " <> prettyString (show acc, show i, show v)
@@ -1846,20 +1879,24 @@ initialCtx =
 interpretExp :: Ctx -> Exp -> F ExtOp Value
 interpretExp ctx e = runEvalM (ctxImports ctx) $ eval (ctxEnv ctx) e
 
-interpretDec :: Ctx -> Dec -> F ExtOp Ctx
-interpretDec ctx d = do
-  env <- runEvalM (ctxImports ctx) $ do
-    env <- evalDec (ctxEnv ctx) d
+interpretDecs :: Ctx -> [Dec] -> F ExtOp Env
+interpretDecs ctx decs =
+  runEvalM (ctxImports ctx) $ do
+    env <- foldM evalDec (ctxEnv ctx) decs
     -- We need to extract any new existential sizes and add them as
     -- ordinary bindings to the context, or we will not be able to
     -- look up their values later.
     sizes <- extSizeEnv
     pure $ env <> sizes
+
+interpretDec :: Ctx -> Dec -> F ExtOp Ctx
+interpretDec ctx d = do
+  env <- interpretDecs ctx [d]
   pure ctx {ctxEnv = env}
 
 interpretImport :: Ctx -> (ImportName, Prog) -> F ExtOp Ctx
 interpretImport ctx (fp, prog) = do
-  env <- runEvalM (ctxImports ctx) $ foldM evalDec (ctxEnv ctx) $ progDecs prog
+  env <- interpretDecs ctx $ progDecs prog
   pure ctx {ctxImports = M.insert fp env $ ctxImports ctx}
 
 -- | Produce a context, based on the one passed in, where all of
@@ -1922,7 +1959,11 @@ interpretFunction ctx fname vs = do
 
   Right $
     runEvalM (ctxImports ctx) $ do
-      f <- evalTermVar (ctxEnv ctx) (qualName fname) ft
+      -- XXX: We are providing a dummy type here.  This is OK as long
+      -- as the function we invoke is monomorphic, which is what we
+      -- require of entry points.  This is to avoid reimplementing
+      -- type inference machinery here.
+      f <- evalTermVar (ctxEnv ctx) (qualName fname) (Scalar (Prim Bool))
       foldM (apply noLoc mempty) f vs'
   where
     updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do

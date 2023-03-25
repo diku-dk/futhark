@@ -76,32 +76,24 @@ emptyShape :: ValueShape -> Bool
 emptyShape (ShapeDim d s) = d == 0 || emptyShape s
 emptyShape _ = False
 
-typeShape :: M.Map VName (Shape d) -> TypeBase d () -> Shape d
-typeShape shapes = go
-  where
-    go (Array _ _ shape et) =
-      foldr ShapeDim (go (Scalar et)) $ shapeDims shape
-    go (Scalar (Record fs)) =
-      ShapeRecord $ M.map go fs
-    go (Scalar (Sum cs)) =
-      ShapeSum $ M.map (map go) cs
-    go (Scalar (TypeVar _ _ (QualName [] v) []))
-      | Just shape <- M.lookup v shapes =
-          shape
-    go _ =
+typeShape :: TypeBase d () -> Shape d
+typeShape (Array _ _ shape et) =
+  foldr ShapeDim (typeShape (Scalar et)) $ shapeDims shape
+typeShape (Scalar (Record fs)) =
+  ShapeRecord $ M.map typeShape fs
+typeShape (Scalar (Sum cs)) =
+  ShapeSum $ M.map (map typeShape) cs
+typeShape t
+  | Just t' <- isAccType t =
+      typeShape t'
+  | otherwise =
       ShapeLeaf
 
-structTypeShape :: M.Map VName ValueShape -> StructType -> Shape (Maybe Int64)
-structTypeShape shapes = fmap dim . typeShape shapes'
+structTypeShape :: StructType -> Shape (Maybe Int64)
+structTypeShape = fmap dim . typeShape
   where
-    dim (SizeExpr (IntLit d _ _)) = Just $ fromIntegral d
+    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
     dim _ = Nothing
-    shapes' =
-      M.map
-        ( fmap $
-            flip sizeFromInteger mempty . fromIntegral
-        )
-        shapes
 
 -- | A fully evaluated Futhark value.
 data Value m
@@ -112,8 +104,8 @@ data Value m
   | ValueFun (Value m -> m (Value m))
   | -- Stores the full shape.
     ValueSum ValueShape Name [Value m]
-  | -- The update function and the array.
-    ValueAcc (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
+  | -- The shape, the update function, and the array.
+    ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
@@ -135,7 +127,7 @@ instance Eq (Value m) where
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
-  ValueAcc _ x == ValueAcc _ y = x == y
+  ValueAcc _ _ x == ValueAcc _ _ y = x == y
   _ == _ = False
 
 prettyValueWith :: (PrimValue -> Doc a) -> Value m -> Doc a
@@ -185,6 +177,7 @@ valueText = docText . prettyValueWith pretty
 
 valueShape :: Value m -> ValueShape
 valueShape (ValueArray shape _) = shape
+valueShape (ValueAcc shape _ _) = shape
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
 valueShape _ = ShapeLeaf
