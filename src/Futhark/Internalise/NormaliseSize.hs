@@ -20,8 +20,8 @@ import Language.Futhark.TypeChecker.Types
 
 -- import Debug.Trace
 
-newtype SimplifyM a
-  = SimplifyM
+newtype NormaliseM a
+  = NormaliseM
       ( ReaderT
           (S.Set VName)
           (State VNameSource)
@@ -36,18 +36,18 @@ newtype SimplifyM a
       MonadFreshNames
     )
 
-runSimplifier :: SimplifyM a -> VNameSource -> (a, VNameSource)
-runSimplifier (SimplifyM m) =
+runNormaliser :: NormaliseM a -> VNameSource -> (a, VNameSource)
+runNormaliser (NormaliseM m) =
   runState (runReaderT m mempty)
 
-addBind :: VName -> SimplifyM a -> SimplifyM a
+addBind :: VName -> NormaliseM a -> NormaliseM a
 addBind = local . S.insert
 
-newtype InnerSimplifyM a
-  = InnerSimplifyM
+newtype InnerNormaliseM a
+  = InnerNormaliseM
       ( ReaderT
           (S.Set VName, M.Map Size VName)
-          (StateT (M.Map Size VName) SimplifyM)
+          (StateT (M.Map Size VName) NormaliseM)
           a
       )
   deriving
@@ -58,40 +58,40 @@ newtype InnerSimplifyM a
       MonadState (M.Map Size VName)
     )
 
-instance MonadFreshNames InnerSimplifyM where
+instance MonadFreshNames InnerNormaliseM where
   getNameSource =
-    InnerSimplifyM $
+    InnerNormaliseM $
       ReaderT $
         const $
           StateT (((,) <$> getNameSource <*>) . pure)
   putNameSource src =
-    InnerSimplifyM $
+    InnerNormaliseM $
       ReaderT $
         const $
           StateT (((,) <$> putNameSource src <*>) . pure)
 
-runInnerSimplifier ::
-  InnerSimplifyM a ->
+runInnerNormaliser ::
+  InnerNormaliseM a ->
   M.Map Size VName ->
   S.Set VName ->
   M.Map Size VName ->
-  SimplifyM (a, M.Map Size VName)
-runInnerSimplifier (InnerSimplifyM m) params =
+  NormaliseM (a, M.Map Size VName)
+runInnerNormaliser (InnerNormaliseM m) params =
   runStateT . runReaderT m . (,params)
 
-withArgs :: S.Set VName -> InnerSimplifyM a -> InnerSimplifyM a
+withArgs :: S.Set VName -> InnerNormaliseM a -> InnerNormaliseM a
 withArgs = local . first . S.union
 
-withParams :: M.Map Size VName -> InnerSimplifyM a -> InnerSimplifyM a
+withParams :: M.Map Size VName -> InnerNormaliseM a -> InnerNormaliseM a
 withParams = local . second . M.union
 
-askIntros :: S.Set VName -> InnerSimplifyM (S.Set VName)
+askIntros :: S.Set VName -> InnerNormaliseM (S.Set VName)
 askIntros argset =
   asks $ (S.filter notIntrisic argset `S.difference`) . fst
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
-parametrizing :: S.Set VName -> InnerSimplifyM (M.Map Size VName)
+parametrizing :: S.Set VName -> InnerNormaliseM (M.Map Size VName)
 parametrizing argset = do
   intros <- askIntros argset
   (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
@@ -148,7 +148,7 @@ insertDimCalculus (dim, name) body = do
       | True <- vn == name = Just $ SizeSubst $ sizeFromName (qualName reName) mempty
       | otherwise = Nothing
 
-unscoping :: S.Set VName -> Exp -> InnerSimplifyM Exp
+unscoping :: S.Set VName -> Exp -> InnerNormaliseM Exp
 unscoping argset body = do
   intros <- askIntros argset
   (localDims, nxtBind) <-
@@ -158,11 +158,11 @@ unscoping argset body = do
   put nxtBind
   foldrM insertDimCalculus body $ M.toList localDims
 
-scoping :: S.Set VName -> InnerSimplifyM Exp -> InnerSimplifyM Exp
+scoping :: S.Set VName -> InnerNormaliseM Exp -> InnerNormaliseM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
-expFree :: Exp -> InnerSimplifyM Exp
+expFree :: Exp -> InnerNormaliseM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let dimArgs =
         S.fromList dims
@@ -367,11 +367,11 @@ expFree e = astMap mapper e
           mapOnPatRetType = error "mapOnRetType called in expFree: should not happen"
         }
 
-onResType :: AppRes -> InnerSimplifyM AppRes
+onResType :: AppRes -> InnerNormaliseM AppRes
 onResType (AppRes ty ext) =
   AppRes <$> withArgs (S.fromList ext) (onType ty) <*> pure ext
 
-onPat :: Pat -> InnerSimplifyM Pat
+onPat :: Pat -> InnerNormaliseM Pat
 onPat =
   astMap mapper
   where
@@ -382,14 +382,14 @@ onPat =
           mapOnPatType = onType
         }
 
-onRetType :: S.Set VName -> RetTypeBase Size as -> InnerSimplifyM (RetTypeBase Size as)
+onRetType :: S.Set VName -> RetTypeBase Size as -> InnerNormaliseM (RetTypeBase Size as)
 onRetType argset (RetType dims ty) = do
   ty' <- withArgs argset $ onType ty
   rl <- parametrizing argset
   let dims' = dims <> M.elems rl
   pure $ RetType dims' ty'
 
-onScalar :: ScalarTypeBase Size as -> InnerSimplifyM (ScalarTypeBase Size as)
+onScalar :: ScalarTypeBase Size as -> InnerNormaliseM (ScalarTypeBase Size as)
 onScalar (Record fs) =
   Record <$> traverse onType fs
 onScalar (Sum cs) =
@@ -406,18 +406,18 @@ onScalar ty = pure ty
 
 onType ::
   TypeBase Size as ->
-  InnerSimplifyM (TypeBase Size as)
+  InnerNormaliseM (TypeBase Size as)
 onType (Array as u shape scalar) =
   Array as u <$> mapM onSize shape <*> onScalar scalar
 onType (Scalar ty) =
   Scalar <$> onScalar ty
 
-onSize :: Size -> InnerSimplifyM Size
+onSize :: Size -> InnerNormaliseM Size
 onSize (SizeExpr e) =
   onExp e
 onSize s = pure s
 
-onExp :: Exp -> InnerSimplifyM Size
+onExp :: Exp -> InnerNormaliseM Size
 onExp e = do
   let e' = SizeExpr e
   case maybeOldSize e of
@@ -433,21 +433,21 @@ onExp e = do
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName)) SimplifyM) a
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName)) NormaliseM) a
 
 -- Reader (scope, dimtoPush) Writer(arrow arguments if an there's an arrow)
 
 removeExpFromValBind ::
-  ValBindBase Info VName -> SimplifyM (ValBindBase Info VName)
+  ValBindBase Info VName -> NormaliseM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
   scope <-
     asks $
       S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-  (params', expNaming) <- runInnerSimplifier (mapM onPat $ valBindParams valbind) mempty scope mempty
+  (params', expNaming) <- runInnerNormaliser (mapM onPat $ valBindParams valbind) mempty scope mempty
 
   let args = foldMap patArg params'
   let argsParams = M.elems expNaming
-  (rety', _) <- runInnerSimplifier (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
+  (rety', _) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
   (rety'', funArg) <-
     second (fromMaybe mempty)
       <$> runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
@@ -458,7 +458,7 @@ removeExpFromValBind valbind = do
           <> map (`TypeParamDim` mempty) (S.toList newParams)
 
   let scope' = scope `S.union` args
-  (body', expNaming'') <- runInnerSimplifier (expFree $ valBindBody valbind) expNaming scope' expNaming
+  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming scope' expNaming
   let newNames = expNaming'' `M.difference` expNaming
   body'' <- foldrM insertDimCalculus body' $ M.toList newNames
   pure $
@@ -535,11 +535,11 @@ removeExpFromValBind valbind = do
     arrowArgType (Scalar ty) =
       Scalar <$> arrowArgScalar ty
     --
-    extBindRetType :: S.Set VName -> RetTypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindRetType :: S.Set VName -> RetTypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
     extBindRetType argset (RetType dims ty) =
       local (argset `S.union` S.fromList dims `S.union`) $ extBindType ty
 
-    extBindScalar :: ScalarTypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindScalar :: ScalarTypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
     extBindScalar (Record fs) =
       foldM (\acc -> fmap (S.union acc) . extBindType) mempty fs
     extBindScalar (Sum cs) =
@@ -556,7 +556,7 @@ removeExpFromValBind valbind = do
               Named vn -> S.singleton vn
     extBindScalar _ = pure mempty
 
-    extBindType :: TypeBase Size as -> ReaderT (S.Set VName) SimplifyM (S.Set VName)
+    extBindType :: TypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
     extBindType (Array _ _ shape scalar) =
       (foldMap extBindSize shape `S.union`) <$> extBindScalar scalar
       where
@@ -584,14 +584,14 @@ removeExpFromValBind valbind = do
     arrowCleanType paramed (Scalar ty) =
       Scalar $ arrowCleanScalar paramed ty
 
-simplifyDecs :: [Dec] -> SimplifyM [Dec]
-simplifyDecs [] = pure []
-simplifyDecs (ValDec valbind : ds) = do
+normaliseDecs :: [Dec] -> NormaliseM [Dec]
+normaliseDecs [] = pure []
+normaliseDecs (ValDec valbind : ds) = do
   valbind' <- removeExpFromValBind valbind
-  (ValDec valbind' :) <$> addBind (valBindName valbind) (simplifyDecs ds)
-simplifyDecs (TypeDec td : ds) =
-  (TypeDec td :) <$> simplifyDecs ds
-simplifyDecs (dec : _) =
+  (ValDec valbind' :) <$> addBind (valBindName valbind) (normaliseDecs ds)
+normaliseDecs (TypeDec td : ds) =
+  (TypeDec td :) <$> normaliseDecs ds
+normaliseDecs (dec : _) =
   error $
     "The normalisation module expects a module-free "
       ++ "input program, but received: "
@@ -600,6 +600,6 @@ simplifyDecs (dec : _) =
 transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
 transformProg decs = do
   src <- getNameSource
-  let (ret, src') = runSimplifier (simplifyDecs decs) src
+  let (ret, src') = runNormaliser (normaliseDecs decs) src
   putNameSource src'
   pure ret
