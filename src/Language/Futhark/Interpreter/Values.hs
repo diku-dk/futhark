@@ -89,7 +89,7 @@ typeShape _ =
 structTypeShape :: StructType -> Shape (Maybe Int64)
 structTypeShape = fmap dim . typeShape
   where
-    dim (SizeExpr (Literal (SignedValue (Int64Value d)) _)) = Just $ fromIntegral d
+    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 -- | A fully evaluated Futhark value.
