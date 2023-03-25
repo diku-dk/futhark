@@ -54,7 +54,6 @@ import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
 import Language.Futhark qualified as F
-import Language.Futhark.FreeVars qualified as FV
 import Language.Futhark.Interpreter.Values hiding (Value)
 import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
@@ -175,11 +174,9 @@ resolveTypeParams names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) (stripArray 1 t)
     match _ _ = mempty
 
-    matchDims
-      (SizeExpr (Var (QualName _ d1) _ _))
-      (SizeExpr (IntLit d2 _ _))
-        | d1 `elem` names =
-            i64Env $ M.singleton d1 $ fromIntegral d2
+    matchDims (SizeExpr (Var (QualName _ d1) _ _)) (SizeExpr (IntLit d2 _ _))
+      | d1 `elem` names =
+          i64Env $ M.singleton d1 $ fromIntegral d2
     matchDims _ _ = mempty
 
 resolveExistentials :: [VName] -> StructType -> ValueShape -> M.Map VName Int64
@@ -549,6 +546,9 @@ evalIndex loc env is arr = do
             <> "."
   maybe oob pure $ indexArray is arr
 
+freeVarsInExp :: Exp -> [VName]
+freeVarsInExp = M.keys . unFV . freeInExp
+
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
 expandType :: Env -> StructType -> StructType
@@ -562,10 +562,17 @@ expandType env t@(Array _ u shape _) =
    in arrayOf u shape et'
 expandType env t@(Scalar (TypeVar () _ tn args)) =
   case lookupType tn env of
-    Just (T.TypeAbbr _ ps (RetType _ t')) ->
+    Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeExpr (Var v typ loc)) =
-            fromMaybe (SizeExpr (Var v typ loc)) $ M.lookup (qualLeaf v) substs
+          onDim (SizeExpr (Var v _ _))
+            | Just e <- M.lookup (qualLeaf v) substs =
+                e
+          -- The next case can occur when a type with existential size
+          -- has been hidden by a module ascription,
+          -- e.g. tests/modules/sizeparams4.fut.
+          onDim (SizeExpr e)
+            | any (`elem` ext) $ freeVarsInExp e =
+                AnySize Nothing
           onDim d = d
        in if null ps
             then first onDim t'
@@ -587,7 +594,7 @@ evalType outer_env t = do
   size_env <- extSizeEnv
   let env = size_env <> outer_env
       evalDim bound _ (SizeExpr e)
-        | not $ any (`S.member` bound) $ M.keys $ FV.unFV $ FV.freeInExp e = do
+        | not $ any (`S.member` bound) $ freeVarsInExp e = do
             x <- asInteger <$> eval env e
             pure $ SizeExpr $ IntLit x (Info (Scalar (Prim (Signed Int64)))) mempty
       evalDim _ _ d = pure d
