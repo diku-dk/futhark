@@ -1648,7 +1648,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknowableSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ sizeFromName (qualName k) mempty
+          notes <- dimNotes defloc $ sizeVar (qualName k) mempty
           typeError defloc notes . withIndexLink "unknowable-param-def" $
             "Unknowable size"
               <+> dquotes (prettyName k)

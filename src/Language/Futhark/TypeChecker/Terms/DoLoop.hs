@@ -281,7 +281,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- replaced with the invariant size in the loop body.  Failure
           -- to do this can cause type annotations to still refer to
           -- new_dims.
-          let dimToInit (v, SizeSubst d) =
+          let dimToInit (v, SizeSubst (SizeExpr d)) =
                 constrain v $ Size (Just d) (mkUsage loc "size of loop parameter")
               dimToInit _ =
                 pure ()
