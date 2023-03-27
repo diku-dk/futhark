@@ -161,7 +161,7 @@ lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just Overloaded {} -> Just PrimSubst
   Just (Size (Just d) _) ->
-    Just $ SizeSubst $ applySubst (`lookupSubst` constraints) (SizeExpr d)
+    Just $ ExpSubst $ applySubst (`lookupSubst` constraints) d
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -534,7 +534,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ sizeFromName (qualName p1') mempty
+                          | v == p2' = Just $ ExpSubst $ sizeVar (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -570,7 +570,22 @@ strip :: Exp -> Maybe Exp
 strip (Parens e _) = Just e
 strip (Assert _ e _ _) = Just e
 strip (Attr _ e _) = Just e
+strip (Ascript e _ _) = Just e
 strip _ = Nothing
+
+similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
+similarSlices slice1 slice2
+  | length slice1 == length slice2 = do
+      concat <$> zipWithM match slice1 slice2
+  | otherwise = Nothing
+  where
+    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
+    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
+      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
+    match _ _ = Nothing
+    pair (Nothing, Nothing) = Just []
+    pair (Just x, Just y) = Just [(x, y)]
+    pair _ = Nothing
 
 -- If these two expressions are structurally similar at top level (in
 -- an ad-hoc way relevant for unifySizes), produce those
@@ -588,15 +603,48 @@ similar (AppExp (Apply f1 args1 _) _) (AppExp (Apply f2 args2 _) _)
 similar (AppExp (Index arr1 slice1 _) _) (AppExp (Index arr2 slice2 _) _)
   | arr1 == arr2,
     length slice1 == length slice2 =
-      concat <$> zipWithM match slice1 slice2
+      similarSlices slice1 slice2
+similar (TupLit es1 _) (TupLit es2 _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similar (RecordLit fs1 _) (RecordLit fs2 _)
+  | length fs1 == length fs2 =
+      zipWithM onFields fs1 fs2
   where
-    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
-    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
-      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
-    match _ _ = Nothing
-    pair (Nothing, Nothing) = Just []
-    pair (Just x, Just y) = Just [(x, y)]
-    pair _ = Nothing
+    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+      | n1 == n2 = Just (fe1, fe2)
+    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+      Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
+    onFields _ _ = Nothing
+similar (ArrayLit es1 _ _) (ArrayLit es2 _ _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similar (Project field1 e1 _ _) (Project field2 e2 _ _)
+  | field1 == field2 =
+      Just [(e1, e2)]
+similar (Negate e1 _) (Negate e2 _) =
+  Just [(e1, e2)]
+similar (Not e1 _) (Not e2 _) =
+  Just [(e1, e2)]
+similar (Constr n1 es1 _ _) (Constr n2 es2 _ _)
+  | length es1 == length es2,
+    n1 == n2 =
+      Just $ zip es1 es2
+similar (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
+  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
+similar (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
+  | names1 == names2 =
+      Just [(e1, e2), (e'1, e'2)]
+similar (OpSection op1 _ _) (OpSection op2 _ _)
+  | op1 == op2 = Just []
+similar (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similar (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similar (ProjectSection names1 _ _) (ProjectSection names2 _ _)
+  | names1 == names2 = Just []
+similar (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
+  similarSlices slice1 slice2
 similar _ _ = Nothing
 
 unifySizes :: MonadUnify m => Usage -> UnifySizes m

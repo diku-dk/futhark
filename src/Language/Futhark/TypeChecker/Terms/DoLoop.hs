@@ -265,9 +265,9 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               onDims _ (SizeExpr (Var v typ _)) d
                 | qualLeaf v `elem` new_dims = do
                     case M.lookup (qualLeaf v) new_dims_to_initial_dim of
-                      Just d'
+                      Just d'@(SizeExpr e')
                         | d' == d ->
-                            modify $ first $ M.insert (qualLeaf v) (SizeSubst d)
+                            modify $ first $ M.insert (qualLeaf v) (ExpSubst e')
                       _ ->
                         modify $ second (qualLeaf v :)
                     pure $ SizeExpr $ Var v typ loc
@@ -281,8 +281,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- replaced with the invariant size in the loop body.  Failure
           -- to do this can cause type annotations to still refer to
           -- new_dims.
-          let dimToInit (v, SizeSubst (SizeExpr d)) =
-                constrain v $ Size (Just d) (mkUsage loc "size of loop parameter")
+          let dimToInit (v, ExpSubst e) =
+                constrain v $ Size (Just e) (mkUsage loc "size of loop parameter")
               dimToInit _ =
                 pure ()
           mapM_ dimToInit $ M.toList init_substs
