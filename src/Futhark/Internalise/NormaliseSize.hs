@@ -444,9 +444,10 @@ onExp e = do
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName)) NormaliseM) a
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName), S.Set VName) NormaliseM) a
 
--- Reader (scope, dimtoPush) Writer(arrow arguments if an there's an arrow)
+-- Reader (scope, dimtoPush)
+-- Writer(arrow arguments if an there's an arrow, names that can be existentialy bound)
 
 removeExpFromValBind ::
   ValBindBase Info VName -> NormaliseM (ValBindBase Info VName)
@@ -459,8 +460,8 @@ removeExpFromValBind valbind = do
   let args = foldMap patArg params'
   let argsParams = M.elems expNaming
   (rety', _) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
-  (rety'', funArg) <-
-    second (fromMaybe mempty)
+  (rety'', (funArg, _)) <-
+    second (first $ fromMaybe mempty)
       <$> runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
   let newParams = funArg `S.union` S.fromList argsParams
       rety''' = arrowCleanRetType newParams rety''
@@ -469,9 +470,10 @@ removeExpFromValBind valbind = do
           <> map (`TypeParamDim` mempty) (S.toList newParams)
 
   let scope' = scope `S.union` args `S.union` S.fromList argsParams
-  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming scope' expNaming
-  let newNames = expNaming'' `M.difference` expNaming
+  (body', expNaming') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming scope' expNaming
+  let newNames = expNaming' `M.difference` expNaming
   body'' <- foldrM insertDimCalculus body' $ M.toList $ canCalculate scope' newNames
+
   pure $
     valbind
       { valBindRetType = Info rety''',
@@ -481,35 +483,28 @@ removeExpFromValBind valbind = do
       }
   where
     hardOnRetType (RetType _ ty) = do
-      predBind <- get
       ty' <- onType ty
       unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
-      put predBind
       let dims' = S.toList unbounded
       pure $ RetType dims' ty'
 
     arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
-    arrowArgRetType argset (RetType dims ty) = do
-      scope <- asks $ (argset `S.union`) . fst
-      (ty', arrArg) <- listen $ local (bimap (const scope) (<> dims)) $ arrowArgType ty
-      case arrArg of
-        Nothing {-rightmost of arrows-} -> do
-          dims' <- asks $ (dims <>) . snd
-          pure $ RetType dims' ty'
-        Just args -> do
-          canExt <- lift $ lift $ runReaderT (extBindType ty) scope
-          writer (RetType (filter (`S.member` canExt) dims) ty', Just $ args `S.difference` canExt)
+    arrowArgRetType argset (RetType dims ty) =
+      pass $ do
+        (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
+        dims' <- asks $ (dims <>) . snd
+        pure (RetType (filter (`S.member` canExt) dims') ty', first (fmap (`S.difference` canExt)))
 
     arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
     arrowArgScalar (Record fs) =
       Record <$> traverse arrowArgType fs
     arrowArgScalar (Sum cs) =
       Sum <$> (traverse . traverse) arrowArgType cs
-    arrowArgScalar (Arrow as argName d argT retT) = do
-      intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
-      retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
-      tell $ Just intros
-      pure $ Arrow as argName d argT retT'
+    arrowArgScalar (Arrow as argName d argT retT) =
+      pass $ do
+        intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
+        retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
+        pure (Arrow as argName d argT retT', const (Just intros, mempty))
       where
         notIntrisic vn = baseTag vn > maxIntrinsicTag
         argset =
@@ -523,25 +518,12 @@ removeExpFromValBind valbind = do
 
     arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
     arrowArgType (Array as u shape scalar) =
-      Array as u shape <$> arrowArgScalar scalar
+      Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar scalar
+      where
+        arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (Nothing, S.singleton $ qualLeaf qn))
+        arrowArgSize s = pure s
     arrowArgType (Scalar ty) =
       Scalar <$> arrowArgScalar ty
-    --
-    extBindScalar :: ScalarTypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
-    extBindScalar (Record fs) =
-      foldM (\acc -> fmap (S.union acc) . extBindType) mempty fs
-    extBindScalar (Sum cs) =
-      foldM (\acc -> fmap (S.union acc) . foldM (\inacc -> fmap (S.union inacc) . extBindType) mempty) mempty cs
-    extBindScalar _ = pure mempty
-
-    extBindType :: TypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
-    extBindType (Array _ _ shape scalar) =
-      (foldMap extBindSize shape `S.union`) <$> extBindScalar scalar
-      where
-        extBindSize (SizeExpr (Var qn _ _)) = S.singleton $ qualLeaf qn
-        extBindSize _ = mempty
-    extBindType (Scalar ty) =
-      extBindScalar ty
     --
     arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
     arrowCleanRetType paramed (RetType dims ty) =
