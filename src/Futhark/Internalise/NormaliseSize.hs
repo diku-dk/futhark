@@ -444,10 +444,72 @@ onExp e = do
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (Maybe (S.Set VName), S.Set VName) NormaliseM) a
+-- | arrowArg takes a type (or return type) and returns it
+-- with the existentials bound moved at the right of arrows.
+-- It also gives (through writer monad) size variables used in arrow arguments
+-- and variables that are constructively used.
+-- The returned type should be cleanned, as too many existentials are introduced.
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (S.Set VName, S.Set VName) NormaliseM) a
 
 -- Reader (scope, dimtoPush)
--- Writer(arrow arguments if an there's an arrow, names that can be existentialy bound)
+-- Writer(arrow arguments, names that can be existentialy bound)
+
+arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
+arrowArgRetType argset (RetType dims ty) =
+  pass $ do
+    (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
+    dims' <- asks $ (dims <>) . snd
+    pure (RetType (filter (`S.member` canExt) dims') ty', first (`S.difference` canExt))
+
+arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
+arrowArgScalar (Record fs) =
+  Record <$> traverse arrowArgType fs
+arrowArgScalar (Sum cs) =
+  Sum <$> (traverse . traverse) arrowArgType cs
+arrowArgScalar (Arrow as argName d argT retT) =
+  pass $ do
+    intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
+    retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
+    pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
+  where
+    notIntrisic vn = baseTag vn > maxIntrinsicTag
+    argset =
+      M.keysSet (unFV $ freeInType argT)
+    fullArgset =
+      argset
+        <> case argName of
+          Unnamed -> mempty
+          Named vn -> S.singleton vn
+arrowArgScalar ty = pure ty
+
+arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
+arrowArgType (Array as u shape scalar) =
+  Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar scalar
+  where
+    arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
+    arrowArgSize s = pure s
+arrowArgType (Scalar ty) =
+  Scalar <$> arrowArgScalar ty
+
+-- | arrowClean cleans the mess of arrowArg
+arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
+arrowCleanRetType paramed (RetType dims ty) =
+  RetType (filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
+
+arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
+arrowCleanScalar paramed (Record fs) =
+  Record $ M.map (arrowCleanType paramed) fs
+arrowCleanScalar paramed (Sum cs) =
+  Sum $ (M.map . map) (arrowCleanType paramed) cs
+arrowCleanScalar paramed (Arrow as argName d argT retT) =
+  Arrow as argName d argT (arrowCleanRetType paramed retT)
+arrowCleanScalar _ ty = ty
+
+arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
+arrowCleanType paramed (Array as u shape scalar) =
+  Array as u shape $ arrowCleanScalar paramed scalar
+arrowCleanType paramed (Scalar ty) =
+  Scalar $ arrowCleanScalar paramed ty
 
 removeExpFromValBind ::
   ValBindBase Info VName -> NormaliseM (ValBindBase Info VName)
@@ -461,8 +523,7 @@ removeExpFromValBind valbind = do
   let argsParams = M.elems expNaming
   (rety', _) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
   (rety'', (funArg, _)) <-
-    second (first $ fromMaybe mempty)
-      <$> runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
+    runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
   let newParams = funArg `S.union` S.fromList argsParams
       rety''' = arrowCleanRetType newParams rety''
       typeParams' =
@@ -487,62 +548,6 @@ removeExpFromValBind valbind = do
       unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
       let dims' = S.toList unbounded
       pure $ RetType dims' ty'
-
-    arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
-    arrowArgRetType argset (RetType dims ty) =
-      pass $ do
-        (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
-        dims' <- asks $ (dims <>) . snd
-        pure (RetType (filter (`S.member` canExt) dims') ty', first (fmap (`S.difference` canExt)))
-
-    arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
-    arrowArgScalar (Record fs) =
-      Record <$> traverse arrowArgType fs
-    arrowArgScalar (Sum cs) =
-      Sum <$> (traverse . traverse) arrowArgType cs
-    arrowArgScalar (Arrow as argName d argT retT) =
-      pass $ do
-        intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
-        retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
-        pure (Arrow as argName d argT retT', const (Just intros, mempty))
-      where
-        notIntrisic vn = baseTag vn > maxIntrinsicTag
-        argset =
-          M.keysSet (unFV $ freeInType argT)
-        fullArgset =
-          argset
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
-    arrowArgScalar ty = pure ty
-
-    arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
-    arrowArgType (Array as u shape scalar) =
-      Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar scalar
-      where
-        arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (Nothing, S.singleton $ qualLeaf qn))
-        arrowArgSize s = pure s
-    arrowArgType (Scalar ty) =
-      Scalar <$> arrowArgScalar ty
-    --
-    arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
-    arrowCleanRetType paramed (RetType dims ty) =
-      RetType (filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
-
-    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
-    arrowCleanScalar paramed (Record fs) =
-      Record $ M.map (arrowCleanType paramed) fs
-    arrowCleanScalar paramed (Sum cs) =
-      Sum $ (M.map . map) (arrowCleanType paramed) cs
-    arrowCleanScalar paramed (Arrow as argName d argT retT) =
-      Arrow as argName d argT (arrowCleanRetType paramed retT)
-    arrowCleanScalar _ ty = ty
-
-    arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
-    arrowCleanType paramed (Array as u shape scalar) =
-      Array as u shape $ arrowCleanScalar paramed scalar
-    arrowCleanType paramed (Scalar ty) =
-      Scalar $ arrowCleanScalar paramed ty
 
 normaliseDecs :: [Dec] -> NormaliseM [Dec]
 normaliseDecs [] = pure []
