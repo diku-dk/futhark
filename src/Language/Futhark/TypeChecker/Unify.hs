@@ -563,6 +563,242 @@ anyBound :: [VName] -> ExpBase Info VName -> Bool
 anyBound bound e = any (`S.member` M.keysSet (unFV $ freeInExp e)) bound
 
 unifySizes :: MonadUnify m => Usage -> UnifySizes m
+-- Literal : SizeExpr Eq for now
+-- IntLit same
+-- FloatLit same
+-- StringLit same
+-- Hole ??? Hint for their expected value ?
+-- Var matched latter
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Parens e1 _)
+  e2 =
+    unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  e1
+  (Parens e2 _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+-- QualParens ???
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (TupLit es1 _)
+  (TupLit es2 _)
+    | length es1 == length es2 =
+        mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) $ zip es1 es2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  e1@(RecordLit fs1 _)
+  e2@(RecordLit fs2 _)
+    | length fs1 == length fs2 =
+        mapM_ (uncurry unifyField) $ zip fs1 fs2
+    where
+      unifyField
+        (RecordFieldExplicit n1 fe1 _)
+        (RecordFieldExplicit n2 fe2 _)
+          | n1 == n2 = unifySizes usage bcs bound nonrigid fe1 fe2
+      unifyField
+        (RecordFieldImplicit vn1 ty1 _)
+        (RecordFieldImplicit vn2 ty2 _) =
+          unifySizes
+            usage
+            bcs
+            bound
+            nonrigid
+            (Var (qualName vn1) ty1 mempty)
+            (Var (qualName vn2) ty2 mempty)
+      unifyField _ _ = do
+        notes <- (<>) <$> dimNotes usage e2 <*> dimNotes usage e2
+        unifyError usage notes bcs $
+          "Records"
+            <+> dquotes (pretty e1)
+            <+> "and"
+            <+> dquotes (pretty e2)
+            <+> "do not match. (fields do not match)"
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (ArrayLit es1 _ _)
+  (ArrayLit es2 _ _)
+    | length es1 == length es2 =
+        mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) $ zip es1 es2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Attr _ e1 _)
+  (Attr _ e2 _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Project field1 e1 _ _)
+  (Project field2 e2 _ _)
+    | field1 == field2 =
+        unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Negate e1 _)
+  (Negate e2 _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Not e1 _)
+  (Not e2 _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Assert _ e1 _ _)
+  (Assert _ e2 _ _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Constr n1 es1 _ _)
+  (Constr n2 es2 _ _)
+    | length es1 == length es2,
+      n1 == n2 =
+        mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) $ zip es1 es2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  fe1@(Update e1 slice1 e'1 _)
+  fe2@(Update e2 slice2 e'2 _)
+    | length slice1 == length slice2 = do
+        mapM_ (uncurry unifySlice) $ zip slice1 slice2
+        unifySizes usage bcs bound nonrigid e1 e2
+        unifySizes usage bcs bound nonrigid e'1 e'2
+    where
+      unifySlice (DimFix ei1) (DimFix ei2) =
+        unifySizes usage bcs bound nonrigid ei1 ei2
+      unifySlice (DimSlice start1 end1 stride1) (DimSlice start2 end2 stride2) = do
+        unifyMaybe start1 start2
+        unifyMaybe end1 end2
+        unifyMaybe stride1 stride2
+      unifySlice _ _ = failure
+      unifyMaybe (Just j1) (Just j2) = unifySizes usage bcs bound nonrigid j1 j2
+      unifyMaybe Nothing Nothing = pure ()
+      unifyMaybe _ _ = failure
+      failure = do
+        notes <- (<>) <$> dimNotes usage fe2 <*> dimNotes usage fe2
+        unifyError usage notes bcs $
+          "Expressions"
+            <+> dquotes (pretty fe1)
+            <+> "and"
+            <+> dquotes (pretty fe2)
+            <+> "do not match. (slices do not match)"
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (RecordUpdate e1 names1 e'1 _ _)
+  (RecordUpdate e2 names2 e'2 _ _)
+    | names1 == names2 = do
+        unifySizes usage bcs bound nonrigid e1 e2
+        unifySizes usage bcs bound nonrigid e'1 e'2
+-- Lambda tbd
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (OpSection op1 t1 _)
+  (OpSection op2 t2 _) =
+    unifySizes usage bcs bound nonrigid (Var op1 t1 mempty) (Var op2 t2 mempty)
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (OpSectionLeft op1 t1 x1 _ _ _)
+  (OpSectionLeft op2 t2 x2 _ _ _) = do
+    unifySizes usage bcs bound nonrigid (Var op1 t1 mempty) (Var op2 t2 mempty)
+    unifySizes usage bcs bound nonrigid x1 x2
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (OpSectionRight op1 t1 x1 _ _ _)
+  (OpSectionRight op2 t2 x2 _ _ _) = do
+    unifySizes usage bcs bound nonrigid (Var op1 t1 mempty) (Var op2 t2 mempty)
+    unifySizes usage bcs bound nonrigid x1 x2
+unifySizes
+  _
+  _
+  _
+  _
+  (ProjectSection names1 _ _)
+  (ProjectSection names2 _ _)
+    | names1 == names2 = pure ()
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  fe1@(IndexSection slice1 _ _)
+  fe2@(IndexSection slice2 _ _)
+    | length slice1 == length slice2 =
+        mapM_ (uncurry unifySlice) $ zip slice1 slice2
+    where
+      unifySlice (DimFix ei1) (DimFix ei2) =
+        unifySizes usage bcs bound nonrigid ei1 ei2
+      unifySlice (DimSlice start1 end1 stride1) (DimSlice start2 end2 stride2) = do
+        unifyMaybe start1 start2
+        unifyMaybe end1 end2
+        unifyMaybe stride1 stride2
+      unifySlice _ _ = failure
+      unifyMaybe (Just j1) (Just j2) = unifySizes usage bcs bound nonrigid j1 j2
+      unifyMaybe Nothing Nothing = pure ()
+      unifyMaybe _ _ = failure
+      failure = do
+        notes <- (<>) <$> dimNotes usage fe2 <*> dimNotes usage fe2
+        unifyError usage notes bcs $
+          "Index Sections"
+            <+> dquotes (pretty fe1)
+            <+> "and"
+            <+> dquotes (pretty fe2)
+            <+> "do not match. (slices do not match)"
+unifySizes
+  usage
+  bcs
+  bound
+  nonrigid
+  (Ascript e1 _ _)
+  (Ascript e2 _ _) =
+    unifySizes usage bcs bound nonrigid e1 e2
+-- AppExp : to finish
 unifySizes
   usage
   bcs
