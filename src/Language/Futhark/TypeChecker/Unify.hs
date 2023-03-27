@@ -36,6 +36,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.List (foldl', intersect)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -562,19 +563,46 @@ unifyWith onDims usage = subunify False
 anyBound :: [VName] -> ExpBase Info VName -> Bool
 anyBound bound e = any (`S.member` M.keysSet (unFV $ freeInExp e)) bound
 
+-- Strip irrelevant stuff from expression.  Ideally we'd implement
+-- unification on a simpler representation that simply didn't allow
+-- us.
+strip :: Exp -> Maybe Exp
+strip (Parens e _) = Just e
+strip (Assert _ e _ _) = Just e
+strip (Attr _ e _) = Just e
+strip _ = Nothing
+
+-- If these two expressions are structurally similar at top level (in
+-- an ad-hoc way relevant for unifySizes), produce those
+-- subexpressions that must also be unified.
+similar :: Exp -> Exp -> Maybe [(Exp, Exp)]
+similar e1 e2 | e1 == e2 = Just []
+similar e1 e2 | Just e1' <- strip e1 = similar e1' e2
+similar e1 e2 | Just e2' <- strip e2 = similar e1 e2'
+similar
+  (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
+  (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
+    | op1 == op2 = Just [(x1, x2), (y1, y2)]
+similar (AppExp (Apply f1 args1 _) _) (AppExp (Apply f2 args2 _) _)
+  | f1 == f2 = Just $ zip (map snd $ NE.toList args1) (map snd $ NE.toList args2)
+similar (AppExp (Index arr1 slice1 _) _) (AppExp (Index arr2 slice2 _) _)
+  | arr1 == arr2,
+    length slice1 == length slice2 =
+      concat <$> zipWithM match slice1 slice2
+  where
+    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
+    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
+      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
+    match _ _ = Nothing
+    pair (Nothing, Nothing) = Just []
+    pair (Just x, Just y) = Just [(x, y)]
+    pair _ = Nothing
+similar _ _ = Nothing
+
 unifySizes :: MonadUnify m => Usage -> UnifySizes m
-unifySizes
-  usage
-  bcs
-  bound
-  nonrigid
-  (AppExp (BinOp (op1, _) t1 (x1, _) (y1, _) _) _)
-  (AppExp (BinOp (op2, _) t2 (x2, _) (y2, _) _) _) = do
-    unifySizes usage bcs bound nonrigid (Var op1 t1 mempty) (Var op2 t2 mempty)
-    unifySizes usage bcs bound nonrigid x1 x2
-    unifySizes usage bcs bound nonrigid y1 y2
-unifySizes _ _ _ _ d1 d2
-  | SizeExpr d1 == SizeExpr d2 = pure ()
+unifySizes usage bcs bound nonrigid e1 e2
+  | Just es <- similar e1 e2 =
+      mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) es
 unifySizes usage bcs bound nonrigid (Var v1 _ _) e2
   | Just lvl1 <- nonrigid (qualLeaf v1),
     not (anyBound bound e2) || (qualLeaf v1 `elem` bound) =
