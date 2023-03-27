@@ -88,7 +88,7 @@ expDefs e =
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
-          let name_t = foldFunType (map (undefined . patternStructType) params) ret
+          let name_t = foldFunTypeFromParams params ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map patternDefs params)
@@ -111,7 +111,7 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     vbind_t =
-      foldFunType (map (undefined . patternStructType) (valBindParams vbind)) $
+      foldFunTypeFromParams (valBindParams vbind) $
         unInfo $
           valBindRetType vbind
 
