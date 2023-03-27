@@ -480,36 +480,17 @@ removeExpFromValBind valbind = do
         valBindBody = body''
       }
   where
-    hardOnRetType (RetType dims ty) = do
+    hardOnRetType (RetType _ ty) = do
       predBind <- get
-      ty' <- withArgs (S.fromList dims) (hardOnType ty)
-      rl <- gets (`M.difference` predBind)
+      ty' <- onType ty
       unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
       put predBind
-      let dims' = M.elems rl <> S.toList unbounded
+      let dims' = S.toList unbounded
       pure $ RetType dims' ty'
-    hardOnScalar (Record fs) =
-      Record <$> traverse hardOnType fs
-    hardOnScalar (Sum cs) =
-      Sum <$> (traverse . traverse) hardOnType cs
-    hardOnScalar (Arrow as argName d argT retT) =
-      Arrow as argName d <$> hardOnType argT <*> withArgs argset (hardOnRetType retT)
-      where
-        argset =
-          M.keysSet (unFV $ freeInType argT)
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
-    hardOnScalar ty = pure ty
-
-    hardOnType (Array as u shape scalar) =
-      Array as u <$> mapM onSize shape <*> hardOnScalar scalar
-    hardOnType (Scalar ty) =
-      Scalar <$> hardOnScalar ty
 
     arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
     arrowArgRetType argset (RetType dims ty) = do
-      scope <- asks $ (argset `S.union` S.fromList dims `S.union`) . fst
+      scope <- asks $ (argset `S.union`) . fst
       (ty', arrArg) <- listen $ local (bimap (const scope) (<> dims)) $ arrowArgType ty
       case arrArg of
         Nothing {-rightmost of arrows-} -> do
@@ -546,25 +527,11 @@ removeExpFromValBind valbind = do
     arrowArgType (Scalar ty) =
       Scalar <$> arrowArgScalar ty
     --
-    extBindRetType :: S.Set VName -> RetTypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
-    extBindRetType argset (RetType dims ty) =
-      local (argset `S.union` S.fromList dims `S.union`) $ extBindType ty
-
     extBindScalar :: ScalarTypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
     extBindScalar (Record fs) =
       foldM (\acc -> fmap (S.union acc) . extBindType) mempty fs
     extBindScalar (Sum cs) =
       foldM (\acc -> fmap (S.union acc) . foldM (\inacc -> fmap (S.union inacc) . extBindType) mempty) mempty cs
-    extBindScalar (Arrow _ argName _ argT retT) = do
-      intros <- asks (S.filter notIntrisic argset `S.difference`)
-      (`S.difference` intros) <$> extBindRetType argset retT
-      where
-        notIntrisic vn = baseTag vn > maxIntrinsicTag
-        argset =
-          M.keysSet (unFV $ freeInType argT)
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
     extBindScalar _ = pure mempty
 
     extBindType :: TypeBase Size as -> ReaderT (S.Set VName) NormaliseM (S.Set VName)
