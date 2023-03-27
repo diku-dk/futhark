@@ -38,7 +38,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     isInt64,
     maybeDimFromExp,
     dimFromExp,
-    sizeFromArg,
     noSizeEscape,
 
     -- * Control flow
@@ -580,7 +579,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, SizeSubst $ sizeFromName (qualName v) loc)
+      pure (v, ExpSubst $ sizeVar (qualName v) loc)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -882,10 +881,6 @@ dimFromExp rf e
       pure (d, Nothing)
   | otherwise =
       extSize (srclocOf e) $ rf e
-
-sizeFromArg :: Maybe (QualName VName) -> Exp -> TermTypeM (Size, Maybe VName)
--- sizeFromArg fname = dimFromExp $ SourceArg (FName fname) . bareExp
-sizeFromArg _ e = pure (SizeExpr e, Nothing)
 
 -- | Any argument sizes created with 'extSize' inside the given action
 -- will be removed once the action finishes.  This is to ensure that

@@ -956,10 +956,9 @@ checkApply
       (argext, parsubst) <-
         case pname of
           Named pname' -> do
-            (d, argext) <- sizeFromArg fname argexp
             pure
-              ( argext,
-                (`M.lookup` M.singleton pname' (SizeSubst d))
+              ( Nothing,
+                (`M.lookup` M.singleton pname' (ExpSubst argexp))
               )
           _ -> pure (Nothing, const Nothing)
 

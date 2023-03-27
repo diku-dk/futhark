@@ -235,7 +235,7 @@ renameRetType (RetType dims st)
             M.fromList $
               zip dims $
                 map
-                  (SizeSubst . flip sizeFromName mempty . qualName)
+                  (ExpSubst . flip sizeVar mempty . qualName)
                   dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
@@ -245,15 +245,15 @@ renameRetType (RetType dims st)
 checkExpForSize ::
   MonadTypeChecker m =>
   ExpBase NoInfo Name ->
-  m (Exp, Size)
+  m Exp
 checkExpForSize (Var v NoInfo vloc) = do
   v' <- checkNamedSize vloc v
-  pure (Var v' int64_info vloc, SizeExpr $ Var v' int64_info vloc)
+  pure $ Var v' int64_info vloc
   where
     int64_info = Info (Scalar (Prim (Signed Int64)))
 checkExpForSize e = do
   e' <- checkSizeExpM e
-  pure (e', SizeExpr e')
+  pure e'
 
 evalTypeExp ::
   MonadTypeChecker m =>
@@ -324,8 +324,8 @@ evalTypeExp (TEArray d t loc) = do
       dv <- newTypeName "d"
       pure ([dv], SizeExpAny dloc, sizeFromName (qualName dv) dloc)
     checkSizeExp (SizeExp e dloc) = do
-      (e', sz) <- checkExpForSize e
-      pure ([], SizeExp e' dloc, sz)
+      e' <- checkExpForSize e
+      pure ([], SizeExp e' dloc, SizeExpr e')
 --
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
@@ -450,18 +450,18 @@ evalTypeExp ote@TEApply {} = do
         "Type" <+> dquotes (pretty te') <+> "is not a type constructor."
 
     checkSizeExp (SizeExp e dloc) = do
-      (e', sz) <- checkExpForSize e
+      e' <- checkExpForSize e
       pure
         ( TypeArgExpSize (SizeExp e' dloc),
           [],
-          SizeSubst sz
+          ExpSubst e'
         )
     checkSizeExp (SizeExpAny loc) = do
       d <- newTypeName "d"
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          SizeSubst $ sizeFromName (qualName d) loc
+          ExpSubst $ sizeVar (qualName d) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -618,14 +618,14 @@ typeParamToArg (TypeParamType _ v ploc) =
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst Size
+data Subst t = Subst [TypeParam] t | PrimSubst | ExpSubst Exp
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
   pretty PrimSubst = "#<primsubst>"
-  pretty (SizeSubst d) = pretty d
+  pretty (ExpSubst e) = pretty e
 
 -- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructRetType
@@ -637,7 +637,7 @@ type TypeSubs = VName -> Maybe (Subst StructRetType)
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
   fmap _ PrimSubst = PrimSubst
-  fmap _ (SizeSubst v) = SizeSubst v
+  fmap _ (ExpSubst e) = ExpSubst e
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
@@ -666,7 +666,7 @@ instance Substitutable Exp where
   applySubst f = runIdentity . mapOnExp
     where
       mapOnExp (Var (QualName _ v) _ _)
-        | Just (SizeSubst (SizeExpr e')) <- f v = pure e'
+        | Just (ExpSubst e') <- f v = pure e'
       mapOnExp e' = astMap mapper e'
 
       mapper =
@@ -680,8 +680,8 @@ instance Substitutable Exp where
           }
 
 instance Substitutable Size where
-  applySubst f (SizeExpr (Var (QualName _ v) _ _))
-    | Just (SizeSubst (AnySize vn)) <- f v = AnySize vn
+--  applySubst f (SizeExpr (Var (QualName _ v) _ _))
+--    | Just (SizeSubst (AnySize vn)) <- f v = AnySize vn
   applySubst f size = runIdentity $ astMap mapper size
     where
       mapper =
@@ -720,8 +720,8 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
-      (pv, SizeSubst d)
+    mkSubst (TypeParamDim pv _) (TypeArgDim (SizeExpr e) _) =
+      (pv, ExpSubst e)
     mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
       (pv, Subst [] $ RetType [] $ second mempty at)
     mkSubst p a =
@@ -756,7 +756,7 @@ substTypesRet lookupSubst ot =
                 M.fromList $
                   zip ext $
                     map
-                      (SizeSubst . flip sizeFromName mempty . qualName)
+                      (ExpSubst . flip sizeVar mempty . qualName)
                       ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'

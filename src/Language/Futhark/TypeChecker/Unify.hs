@@ -160,7 +160,7 @@ lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just Overloaded {} -> Just PrimSubst
   Just (Size (Just d) _) ->
-    Just $ SizeSubst $ applySubst (`lookupSubst` constraints) (SizeExpr d)
+    Just $ ExpSubst $ applySubst (`lookupSubst` constraints) d
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -533,7 +533,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ sizeFromName (qualName p1') mempty
+                          | v == p2' = Just $ ExpSubst $ sizeVar (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
