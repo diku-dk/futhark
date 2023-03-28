@@ -114,7 +114,7 @@ instance Pretty Distributed where
       stms' = stack $ map pretty stms
       onRes (rt, v) = "let" <+> pretty v <+> "=" <+> pretty rt
 
-resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
+resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat t -> Result -> ResMap
 resultMap avail_inputs stms pat res = mconcat $ map f stms
   where
     f stm =
@@ -147,16 +147,17 @@ patInput tag pe =
 -- TODO: Split this and 'distributeMap' up in a meaningful way
 distributeBody ::
   Scope rep ->
+  Pat t ->
   SubExp ->
   [(VName, DistInput)] ->
   Body SOACS ->
   Distributed
-distributeBody outer_scope w param_inputs body =
+distributeBody outer_scope result_pat w param_inputs body =
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
           stmsToList $
             bodyStms body
-   in Distributed stms mempty
+   in Distributed stms $ resultMap avail_inputs stms result_pat $ bodyResult body
   where
     bound_outside = namesFromList $ M.keys outer_scope
     paramInput p arr = (paramName p, DistInputFree arr $ paramType p)

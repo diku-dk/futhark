@@ -11,6 +11,7 @@
 -- scalar code.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
+import Control.Monad (mapAndUnzipM)
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
@@ -338,7 +339,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Copy v ->
       case lookup v inps of
@@ -582,6 +583,14 @@ liftParam w fparam =
   where
     desc = baseString (paramName fparam)
 
+-- Lifts a function return type.
+-- TODO: Handle array (and maybe other) case(s).
+liftRetType :: SubExp -> RetType SOACS -> RetType GPU
+liftRetType w rettype =
+  case rettype of
+    Prim pt -> arrayOf (Prim pt) (Shape [Free w]) Nonunique
+    _ -> undefined
+
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
   let FunDef
@@ -590,25 +599,41 @@ liftFunDef const_scope fd = do
           funDefRetType = rettype
         } = fd
   wp <- newParam "w" $ Prim int64
-  (fparams', reps) <- unzip <$> mapM (liftParam (Var (paramName wp))) fparams
+  let w = Var $ paramName wp
+  (fparams', reps) <- mapAndUnzipM (liftParam w) fparams
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
+  let rettype' = map (liftRetType w) rettype
+  -- Build a pattern of the body results.
+  -- TODO: Include a case for constants.
+  let result_pat = Pat $ map (\r -> case resSubExp r of Var v -> PatElem v ()) $ bodyResult body
   let distributed@(Distributed dstms resmap) =
-        distributeBody const_scope (Var (paramName wp)) inputs body
+        distributeBody const_scope result_pat (Var (paramName wp)) inputs body
   traceM $ prettyString distributed
   let segments = NE.singleton (Var $ paramName wp)
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  stms <-
-    runReaderT (runBuilder_ $ foldM (transformDistStm segments) env dstms) $
+  -- Build the new statements and get the modified DistEnv
+  (env', stms) <-
+    runReaderT (runBuilder $ foldM (transformDistStm segments) env dstms) $
       (const_scope <> scopeOfFParams (concat fparams'))
+  -- Get the distributed results from `env'`
+  -- TODO: Handle irregular representations and certs.
+  let mkSubExpRes _ (Regular v) = SubExpRes {resCerts = mempty, resSubExp = Var v}
+  let resultAssoc =
+        M.elems $
+          M.intersectionWith
+            (\(_, v, _) (Regular vl) -> (v, vl))
+            resmap
+            (distResMap env')
+  let Just result = mapM (\(SubExpRes cs (Var v)) -> SubExpRes cs . Var <$> lookup v resultAssoc) $ bodyResult body
   let name = funDefName fd <> "_lifted"
   pure $
     fd
       { funDefName = name,
-        funDefBody = Body () stms mempty,
+        funDefBody = Body () stms result,
         funDefParams = wp : concat fparams',
-        funDefRetType = []
+        funDefRetType = rettype'
       }
 
 transformFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
