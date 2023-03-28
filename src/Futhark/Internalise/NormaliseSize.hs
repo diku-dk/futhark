@@ -414,6 +414,11 @@ onScalar (Arrow as argName d argT retT) =
         <> case argName of
           Unnamed -> mempty
           Named vn -> S.singleton vn
+onScalar (TypeVar as uniq qn args) =
+  TypeVar as uniq qn <$> mapM onArg args
+  where
+    onArg (TypeArgDim dim loc) = TypeArgDim <$> onSize dim <*> pure loc
+    onArg (TypeArgType ty loc) = TypeArgType <$> onType ty <*> pure loc
 onScalar ty = pure ty
 
 onType ::
@@ -481,16 +486,22 @@ arrowArgScalar (Arrow as argName d argT retT) =
         <> case argName of
           Unnamed -> mempty
           Named vn -> S.singleton vn
+arrowArgScalar (TypeVar as uniq qn args) =
+  TypeVar as uniq qn <$> mapM arrowArgArg args
+  where
+    arrowArgArg (TypeArgDim dim loc) = TypeArgDim <$> arrowArgSize dim <*> pure loc
+    arrowArgArg (TypeArgType ty loc) = TypeArgType <$> arrowArgType ty <*> pure loc
 arrowArgScalar ty = pure ty
 
 arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
 arrowArgType (Array as u shape scalar) =
   Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar scalar
-  where
-    arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
-    arrowArgSize s = pure s
 arrowArgType (Scalar ty) =
   Scalar <$> arrowArgScalar ty
+
+arrowArgSize :: Size -> ArrowArgM Size
+arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
+arrowArgSize s = pure s
 
 -- | arrowClean cleans the mess of arrowArg
 arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
@@ -504,6 +515,11 @@ arrowCleanScalar paramed (Sum cs) =
   Sum $ (M.map . map) (arrowCleanType paramed) cs
 arrowCleanScalar paramed (Arrow as argName d argT retT) =
   Arrow as argName d argT (arrowCleanRetType paramed retT)
+arrowCleanScalar paramed (TypeVar as uniq qn args) =
+  TypeVar as uniq qn $ map arrowCleanArg args
+  where
+    arrowCleanArg (TypeArgDim dim loc) = TypeArgDim dim loc
+    arrowCleanArg (TypeArgType ty loc) = TypeArgType (arrowCleanType paramed ty) loc
 arrowCleanScalar _ ty = ty
 
 arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
