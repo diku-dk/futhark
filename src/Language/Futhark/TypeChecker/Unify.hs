@@ -36,7 +36,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.List (foldl', intersect)
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
