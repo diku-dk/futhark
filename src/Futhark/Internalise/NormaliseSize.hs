@@ -9,7 +9,7 @@ import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Foldable
-import Data.List(nub)
+import Data.List (nub)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -512,6 +512,13 @@ arrowCleanType paramed (Array as u shape scalar) =
 arrowCleanType paramed (Scalar ty) =
   Scalar $ arrowCleanScalar paramed ty
 
+expReplace :: M.Map Size VName -> Exp -> NormaliseM Exp
+expReplace mapping e
+  | Just vn <- M.lookup (SizeExpr e) mapping = pure $ Var (qualName vn) (Info $ typeOf e) (srclocOf e)
+expReplace mapping e = astMap mapper e
+  where
+    mapper = identityMapper {mapOnExp = expReplace mapping}
+
 removeExpFromValBind ::
   ValBindBase Info VName -> NormaliseM (ValBindBase Info VName)
 removeExpFromValBind valbind = do
@@ -522,26 +529,34 @@ removeExpFromValBind valbind = do
 
   let args = foldMap patArg params'
   let argsParams = M.elems expNaming
-  (rety', _) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
+  (rety', extNaming) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
   (rety'', (funArg, _)) <-
     runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
-  let newParams = funArg `S.union` S.fromList argsParams
+  let newParams =
+        funArg
+          `S.union` S.fromList
+            ( if null params' && isNothing (valBindEntryPoint valbind)
+                then filter (`elem` M.elems extNaming) $ retDims rety''
+                else argsParams
+            )
       rety''' = arrowCleanRetType newParams rety''
       typeParams' =
         valBindTypeParams valbind
           <> map (`TypeParamDim` mempty) (S.toList newParams)
+      expNaming' = M.filter (`S.member` newParams) extNaming
 
-  let scope' = scope `S.union` args `S.union` S.fromList argsParams
-  (body', expNaming') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming scope' expNaming
-  let newNames = expNaming' `M.difference` expNaming
+  let scope' = scope `S.union` args `S.union` newParams
+  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming' scope' expNaming'
+  let newNames = expNaming'' `M.difference` expNaming'
   body'' <- foldrM insertDimCalculus body' $ M.toList $ canCalculate scope' newNames
+  body''' <- expReplace expNaming' body''
 
   pure $
     valbind
       { valBindRetType = Info rety''',
         valBindTypeParams = typeParams',
         valBindParams = params',
-        valBindBody = body''
+        valBindBody = body'''
       }
   where
     hardOnRetType (RetType _ ty) = do
