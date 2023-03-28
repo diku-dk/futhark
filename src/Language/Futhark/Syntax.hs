@@ -93,6 +93,7 @@ module Language.Futhark.Syntax
     QualName (..),
     mkApply,
     mkApplyUT,
+    sizeVar,
     sizeFromName,
     sizeFromInteger,
     bareExp,
@@ -265,8 +266,11 @@ instance Ord Size where
   SizeExpr e1 <= SizeExpr e2 = bareCleanExp e1 <= bareCleanExp e2
   _ <= _ = False
 
+sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
+sizeVar name = Var name (Info $ Scalar $ Prim $ Signed Int64)
+
 sizeFromName :: QualName VName -> SrcLoc -> Size
-sizeFromName name loc = SizeExpr $ Var name (Info <$> Scalar $ Prim $ Signed Int64) loc
+sizeFromName name loc = SizeExpr $ sizeVar name loc
 
 sizeFromInteger :: Integer -> SrcLoc -> Size
 sizeFromInteger int loc = SizeExpr $ IntLit int (Info <$> Scalar $ Prim $ Signed Int64) loc
@@ -1550,7 +1554,7 @@ bareCleanExp (Literal v loc) = Literal v loc
 bareCleanExp (IntLit val _ loc) = IntLit val NoInfo loc
 bareCleanExp (FloatLit val _ loc) = FloatLit val NoInfo loc
 bareCleanExp (Parens e _) = bareCleanExp e --
-bareCleanExp (QualParens _ e _) = bareCleanExp e --
+bareCleanExp (QualParens qnLoc e loc) = QualParens qnLoc (bareCleanExp e) loc
 bareCleanExp (TupLit els loc) = TupLit (map bareCleanExp els) loc
 bareCleanExp (StringLit vs loc) = StringLit vs loc
 bareCleanExp (RecordLit fields loc) = RecordLit (map bareCleanField fields) loc

@@ -704,7 +704,7 @@ etaExpand e_t e = do
   ext' <- mapM newName $ retDims ret
   let extsubst =
         M.fromList . zip (retDims ret) $
-          map (SizeSubst . flip sizeFromName mempty . qualName) ext'
+          map (ExpSubst . flip sizeVar mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
       e' =
         mkApply

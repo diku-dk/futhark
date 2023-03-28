@@ -156,7 +156,7 @@ insertDimCalculus (dim, name) body = do
       Info $ AppRes (applySubst (subst reName) $ typeOf e) [reName]
 
     subst reName vn
-      | True <- vn == name = Just $ SizeSubst $ sizeFromName (qualName reName) mempty
+      | True <- vn == name = Just $ ExpSubst $ sizeVar (qualName reName) mempty
       | otherwise = Nothing
 
 unscoping :: S.Set VName -> Exp -> InnerNormaliseM Exp

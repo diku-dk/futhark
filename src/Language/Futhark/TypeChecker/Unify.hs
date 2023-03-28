@@ -129,7 +129,7 @@ data Constraint
   | ParamSize SrcLoc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
-    Size (Maybe Size) Usage
+    Size (Maybe Exp) Usage
   | -- | A size that does not unify with anything -
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
@@ -160,7 +160,7 @@ lookupSubst v constraints = case snd <$> M.lookup v constraints of
   Just (Constraint t _) -> Just $ Subst [] $ applySubst (`lookupSubst` constraints) t
   Just Overloaded {} -> Just PrimSubst
   Just (Size (Just d) _) ->
-    Just $ SizeSubst $ applySubst (`lookupSubst` constraints) d
+    Just $ ExpSubst $ applySubst (`lookupSubst` constraints) d
   _ -> Nothing
 
 -- | The source of a rigid size.
@@ -251,8 +251,8 @@ prettySource ctx loc (RigidCond t1 t2) =
 -- | Retrieve notes describing the purpose or origin of the given
 -- t'Size'.  The location is used as the *current* location, for the
 -- purpose of reporting relative locations.
-dimNotes :: (Located a, MonadUnify m) => a -> Size -> m Notes
-dimNotes ctx (SizeExpr (Var d _ _)) = do
+dimNotes :: (Located a, MonadUnify m) => a -> Exp -> m Notes
+dimNotes ctx (Var d _ _) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
     Just (_, UnknowableSize loc rsrc) ->
@@ -264,7 +264,7 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . flip sizeFromName mempty . qualName)
+    . mapM (dimNotes ctx . flip sizeVar mempty . qualName)
     . M.keys
     . unFV
     . freeInType
@@ -390,16 +390,16 @@ isNonRigid v constraints = do
   guard $ not $ rigidConstraint c
   pure lvl
 
-type UnifyDims m =
-  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Size -> Size -> m ()
+type UnifySizes m =
+  BreadCrumbs -> [VName] -> (VName -> Maybe Int) -> Exp -> Exp -> m ()
 
-flipUnifyDims :: UnifyDims m -> UnifyDims m
-flipUnifyDims onDims bcs bound nonrigid t1 t2 =
+flipUnifySizes :: UnifySizes m -> UnifySizes m
+flipUnifySizes onDims bcs bound nonrigid t1 t2 =
   onDims bcs bound nonrigid t2 t1
 
 unifyWith ::
   MonadUnify m =>
-  UnifyDims m ->
+  UnifySizes m ->
   Usage ->
   [VName] ->
   BreadCrumbs ->
@@ -427,10 +427,10 @@ unifyWith onDims usage = subunify False
               -- We may have to flip the order of future calls to
               -- onDims inside linkVarToType.
               linkDims
-                | ord' = flipUnifyDims onDims
+                | ord' = flipUnifySizes onDims
                 | otherwise = onDims
 
-          unifyTypeArg bcs' (TypeArgDim d1 _) (TypeArgDim d2 _) =
+          unifyTypeArg bcs' (TypeArgDim (SizeExpr d1) _) (TypeArgDim (SizeExpr d2) _) =
             onDims' bcs' (swap ord d1 d2)
           unifyTypeArg bcs' (TypeArgType t _) (TypeArgType arg_t _) =
             subunify ord bound bcs' t arg_t
@@ -533,7 +533,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ SizeSubst $ sizeFromName (qualName p1') mempty
+                          | v == p2' = Just $ ExpSubst $ sizeVar (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -542,8 +542,8 @@ unifyWith onDims usage = subunify False
               pname (Named x) = Just x
               pname Unnamed = Nothing
         (Array {}, Array {})
-          | Shape (t1_d : _) <- arrayShape t1',
-            Shape (t2_d : _) <- arrayShape t2',
+          | Shape (SizeExpr t1_d : _) <- arrayShape t1',
+            Shape (SizeExpr t2_d : _) <- arrayShape t2',
             Just t1'' <- peelArray 1 t1',
             Just t2'' <- peelArray 1 t2' -> do
               onDims' bcs (swap ord t1_d t2_d)
@@ -559,55 +559,37 @@ unifyWith onDims usage = subunify False
           | t1' == t2' -> pure ()
           | otherwise -> failure
 
-unifyDims :: MonadUnify m => Usage -> UnifyDims m
-unifyDims _ _ _ _ d1 d2
-  | d1 == d2 = pure ()
-unifyDims usage bcs _ nonrigid (SizeExpr (Var (QualName _ d1) _ _)) d2
-  | Just lvl1 <- nonrigid d1 =
-      linkVarToDim usage bcs d1 lvl1 d2
-unifyDims usage bcs _ nonrigid d1 (SizeExpr (Var (QualName _ d2) _ _))
-  | Just lvl2 <- nonrigid d2 =
-      linkVarToDim usage bcs d2 lvl2 d1
-unifyDims usage bcs _ _ d1 d2 = do
-  notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
+anyBound :: [VName] -> ExpBase Info VName -> Bool
+anyBound bound e = any (`S.member` M.keysSet (unFV $ freeInExp e)) bound
+
+unifySizes :: MonadUnify m => Usage -> UnifySizes m
+unifySizes usage bcs bound nonrigid e1 e2
+  | Just es <- similarExps e1 e2 =
+      mapM_ (uncurry $ unifySizes usage bcs bound nonrigid) es
+unifySizes usage bcs bound nonrigid (Var v1 _ _) e2
+  | Just lvl1 <- nonrigid (qualLeaf v1),
+    not (anyBound bound e2) || (qualLeaf v1 `elem` bound) =
+      linkVarToDim usage bcs (qualLeaf v1) lvl1 e2
+unifySizes usage bcs bound nonrigid e1 (Var v2 _ _)
+  | Just lvl2 <- nonrigid (qualLeaf v2),
+    not (anyBound bound e1) || (qualLeaf v2 `elem` bound) =
+      linkVarToDim usage bcs (qualLeaf v2) lvl2 e1
+unifySizes usage bcs _ _ e1 e2 = do
+  notes <- (<>) <$> dimNotes usage e2 <*> dimNotes usage e2
   unifyError usage notes bcs $
-    "Dimensions"
-      <+> dquotes (pretty d1)
+    "Sizes"
+      <+> dquotes (pretty e1)
       <+> "and"
-      <+> dquotes (pretty d2)
+      <+> dquotes (pretty e2)
       <+> "do not match."
 
 -- | Unifies two types.
 unify :: MonadUnify m => Usage -> StructType -> StructType -> m ()
-unify usage = unifyWith (unifyDims usage) usage mempty noBreadCrumbs
+unify usage = unifyWith (unifySizes usage) usage mempty noBreadCrumbs
 
 -- | @expect super sub@ checks that @sub@ is a subtype of @super@.
 expect :: MonadUnify m => Usage -> StructType -> StructType -> m ()
-expect usage = unifyWith onDims usage mempty noBreadCrumbs
-  where
-    onDims _ _ _ d1 d2
-      | d1 == d2 = pure ()
-    -- We identify existentially bound names by them being nonrigid
-    -- and yet bound.  It's OK to unify with those.
-    onDims bcs bound nonrigid (SizeExpr (Var (QualName _ d1) _ _)) d2
-      | Just lvl1 <- nonrigid d1,
-        not (boundParam bound d2) || (d1 `elem` bound) =
-          linkVarToDim usage bcs d1 lvl1 d2
-    onDims bcs bound nonrigid d1 (SizeExpr (Var (QualName _ d2) _ _))
-      | Just lvl2 <- nonrigid d2,
-        not (boundParam bound d1) || (d2 `elem` bound) =
-          linkVarToDim usage bcs d2 lvl2 d1
-    onDims bcs _ _ d1 d2 = do
-      notes <- (<>) <$> dimNotes usage d1 <*> dimNotes usage d2
-      unifyError usage notes bcs $
-        "Dimensions"
-          <+> dquotes (pretty d1)
-          <+> "and"
-          <+> dquotes (pretty d2)
-          <+> "do not match."
-
-    boundParam bound (SizeExpr (Var (QualName _ d) _ _)) = d `elem` bound
-    boundParam _ _ = False
+expect usage = unifyWith (unifySizes usage) usage mempty noBreadCrumbs
 
 occursCheck ::
   MonadUnify m =>
@@ -662,7 +644,7 @@ scopeCheck usage bcs vn max_lvl tp = do
 
 linkVarToType ::
   MonadUnify m =>
-  UnifyDims m ->
+  UnifySizes m ->
   Usage ->
   [VName] ->
   BreadCrumbs ->
@@ -838,25 +820,21 @@ linkVarToDim ::
   BreadCrumbs ->
   VName ->
   Level ->
-  Size ->
+  Exp ->
   m ()
-linkVarToDim usage bcs vn lvl dim = do
+linkVarToDim usage bcs vn lvl e = do
   constraints <- getConstraints
 
-  case dim of
-    SizeExpr e ->
-      let vars = M.keys $ unFV $ freeInExp e
-       in mapM_ (checkVar e constraints) vars
-    _ -> pure ()
+  mapM_ (checkVar constraints) $ M.keys $ unFV $ freeInExp e
 
-  modifyConstraints $ M.insert vn (lvl, Size (Just dim) usage)
+  modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
   where
-    checkVar e constraints dim'
+    checkVar constraints dim'
       | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
         dim_lvl > lvl =
           case c of
             ParamSize {} -> do
-              notes <- dimNotes usage dim
+              notes <- dimNotes usage e
               unifyError usage notes bcs $
                 "Cannot unify size variable"
                   <+> dquotes (pretty e)
@@ -867,16 +845,16 @@ linkVarToDim usage bcs vn lvl dim = do
                   <+> dquotes (pretty $ qualName dim')
                   <+> "is rigidly bound in a deeper scope."
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
-    checkVar e _ dim'
+    checkVar _ dim'
       | vn == dim' = do
-          notes <- dimNotes usage dim
+          notes <- dimNotes usage e
           unifyError usage notes bcs $
             "Occurs check: cannot instantiate"
               <+> dquotes (prettyName vn)
               <+> "with"
               <+> dquotes (pretty e)
               <+> "."
-    checkVar _ _ _ = pure ()
+    checkVar _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.
 mustBeOneOf :: MonadUnify m => [PrimType] -> Usage -> StructType -> m ()
@@ -1050,7 +1028,7 @@ arrayElemType usage desc =
 
 unifySharedFields ::
   MonadUnify m =>
-  UnifyDims m ->
+  UnifySizes m ->
   Usage ->
   [VName] ->
   BreadCrumbs ->
@@ -1063,7 +1041,7 @@ unifySharedFields onDims usage bound bcs fs1 fs2 =
 
 unifySharedConstructors ::
   MonadUnify m =>
-  UnifyDims m ->
+  UnifySizes m ->
   Usage ->
   [VName] ->
   BreadCrumbs ->
@@ -1123,7 +1101,7 @@ mustHaveConstr usage c t fs = do
 
 mustHaveFieldWith ::
   MonadUnify m =>
-  UnifyDims m ->
+  UnifySizes m ->
   Usage ->
   [VName] ->
   BreadCrumbs ->
@@ -1170,7 +1148,7 @@ mustHaveField ::
   Name ->
   PatType ->
   m PatType
-mustHaveField usage = mustHaveFieldWith (unifyDims usage) usage mempty noBreadCrumbs
+mustHaveField usage = mustHaveFieldWith (unifySizes usage) usage mempty noBreadCrumbs
 
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>

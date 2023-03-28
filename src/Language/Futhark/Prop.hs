@@ -28,6 +28,7 @@ module Language.Futhark.Prop
     valBindTypeScheme,
     valBindBound,
     funType,
+    similarExps,
 
     -- * Queries on patterns and params
     patIdents,
@@ -95,6 +96,27 @@ module Language.Futhark.Prop
     UncheckedSpec,
     UncheckedProg,
     UncheckedCase,
+    -- | Type-checked syntactical constructs
+    Ident,
+    DimIndex,
+    Slice,
+    AppExp,
+    Exp,
+    Pat,
+    ModExp,
+    ModParam,
+    SigExp,
+    ModBind,
+    SigBind,
+    ValBind,
+    Dec,
+    Spec,
+    Prog,
+    TypeBind,
+    StructTypeArg,
+    ScalarType,
+    TypeParam,
+    Case,
   )
 where
 
@@ -106,6 +128,7 @@ import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), posFile)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -1441,6 +1464,151 @@ progHoles = foldMap holesInDec . progDecs
       modify ((locOf loc, toStruct t) :)
       pure e
     onExp e = astMap (identityMapper {mapOnExp = onExp}) e
+
+-- Strip irrelevant stuff from expression.  Ideally we'd implement
+-- unification on a simpler representation that simply didn't allow
+-- us.
+strip :: Exp -> Maybe Exp
+strip (Parens e _) = Just e
+strip (Assert _ e _ _) = Just e
+strip (Attr _ e _) = Just e
+strip (Ascript e _ _) = Just e
+strip _ = Nothing
+
+similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
+similarSlices slice1 slice2
+  | length slice1 == length slice2 = do
+      concat <$> zipWithM match slice1 slice2
+  | otherwise = Nothing
+  where
+    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
+    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
+      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
+    match _ _ = Nothing
+    pair (Nothing, Nothing) = Just []
+    pair (Just x, Just y) = Just [(x, y)]
+    pair _ = Nothing
+
+-- | If these two expressions are structurally similar at top level as
+-- sizes, produce their subexpressions (which are not necessarily
+-- similar, but you can check for that!).  This is the machinery
+-- underlying expresssion unification.
+similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
+similarExps e1 e2 | e1 == e2 = Just []
+similarExps e1 e2 | Just e1' <- strip e1 = similarExps e1' e2
+similarExps e1 e2 | Just e2' <- strip e2 = similarExps e1 e2'
+similarExps
+  (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
+  (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
+    | op1 == op2 = Just [(x1, x2), (y1, y2)]
+similarExps (AppExp (Apply f1 args1 _) _) (AppExp (Apply f2 args2 _) _)
+  | f1 == f2 = Just $ zip (map snd $ NE.toList args1) (map snd $ NE.toList args2)
+similarExps (AppExp (Index arr1 slice1 _) _) (AppExp (Index arr2 slice2 _) _)
+  | arr1 == arr2,
+    length slice1 == length slice2 =
+      similarSlices slice1 slice2
+similarExps (TupLit es1 _) (TupLit es2 _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (RecordLit fs1 _) (RecordLit fs2 _)
+  | length fs1 == length fs2 =
+      zipWithM onFields fs1 fs2
+  where
+    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+      | n1 == n2 = Just (fe1, fe2)
+    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+      Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
+    onFields _ _ = Nothing
+similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (Project field1 e1 _ _) (Project field2 e2 _ _)
+  | field1 == field2 =
+      Just [(e1, e2)]
+similarExps (Negate e1 _) (Negate e2 _) =
+  Just [(e1, e2)]
+similarExps (Not e1 _) (Not e2 _) =
+  Just [(e1, e2)]
+similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
+  | length es1 == length es2,
+    n1 == n2 =
+      Just $ zip es1 es2
+similarExps (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
+  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
+similarExps (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
+  | names1 == names2 =
+      Just [(e1, e2), (e'1, e'2)]
+similarExps (OpSection op1 _ _) (OpSection op2 _ _)
+  | op1 == op2 = Just []
+similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
+  | names1 == names2 = Just []
+similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
+  similarSlices slice1 slice2
+similarExps _ _ = Nothing
+
+-- | An identifier with type- and aliasing information.
+type Ident = IdentBase Info VName
+
+-- | An index with type information.
+type DimIndex = DimIndexBase Info VName
+
+-- | A slice with type information.
+type Slice = SliceBase Info VName
+
+-- | An expression with type information.
+type Exp = ExpBase Info VName
+
+-- | An application expression with type information.
+type AppExp = AppExpBase Info VName
+
+-- | A pattern with type information.
+type Pat = PatBase Info VName
+
+-- | An constant declaration with type information.
+type ValBind = ValBindBase Info VName
+
+-- | A type binding with type information.
+type TypeBind = TypeBindBase Info VName
+
+-- | A type-checked module binding.
+type ModBind = ModBindBase Info VName
+
+-- | A type-checked module type binding.
+type SigBind = SigBindBase Info VName
+
+-- | A type-checked module expression.
+type ModExp = ModExpBase Info VName
+
+-- | A type-checked module parameter.
+type ModParam = ModParamBase Info VName
+
+-- | A type-checked module type expression.
+type SigExp = SigExpBase Info VName
+
+-- | A type-checked declaration.
+type Dec = DecBase Info VName
+
+-- | A type-checked specification.
+type Spec = SpecBase Info VName
+
+-- | An Futhark program with type information.
+type Prog = ProgBase Info VName
+
+-- | A known type arg with shape annotations.
+type StructTypeArg = TypeArg Size
+
+-- | A type-checked type parameter.
+type TypeParam = TypeParamBase VName
+
+-- | A known scalar type with no shape annotations.
+type ScalarType = ScalarTypeBase ()
+
+-- | A type-checked case (of a match expression).
+type Case = CaseBase Info VName
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (Shape Name) ()
