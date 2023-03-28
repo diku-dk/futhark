@@ -9,6 +9,7 @@ import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Foldable
+import Data.List(nub)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -494,7 +495,7 @@ arrowArgType (Scalar ty) =
 -- | arrowClean cleans the mess of arrowArg
 arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
 arrowCleanRetType paramed (RetType dims ty) =
-  RetType (filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
+  RetType (nub $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
 
 arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
 arrowCleanScalar paramed (Record fs) =
