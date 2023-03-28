@@ -1,7 +1,7 @@
 -- What about size parameters that are only known in complex expressions?
 -- ==
 -- input { [1,2] [3,4] }
--- output { [1,2,3,4] }
+-- output { [3,4,1,2] }
 
 type eq[n][m] = [n][m]()
 def coerce [n][m]'t (_: eq[n][m]) (a: [n]t) = a :> [m]t
