@@ -724,7 +724,8 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
   (_, t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
-  case (ftype, rt) of
+  (rt', retext') <- unscopeUnknowable loc rt
+  case (ftype, rt') of
     (Scalar (Arrow _ m1 _ _ _), Scalar (Arrow _ m2 _ t2 rettype)) ->
       pure $
         OpSectionLeft
@@ -732,7 +733,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
           (Info ftype)
           (argExp e_arg)
           (Info (m1, toStruct t1, argext), Info (m2, toStruct t2))
-          (Info rettype, Info retext)
+          (Info rettype, Info (retext <> retext'))
           loc
     _ ->
       typeError loc mempty $
@@ -742,20 +743,24 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e_arg <- checkArg e
   case ftype of
     Scalar (Arrow as1 m1 d1 t1 (RetType [] (Scalar (Arrow as2 m2 d2 t2 (RetType dims2 ret))))) -> do
-      (_, t2', ret', argext, _) <-
+      (_, t2', arrow', argext, _) <-
         checkApply
           loc
           (Just op', 1)
-          (Scalar $ Arrow as2 m2 d2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 d1 t1 $ RetType [] ret)
+          (Scalar $ Arrow as2 m2 d2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 d1 t1 $ RetType dims2 ret)
           e_arg
-      pure $
-        OpSectionRight
-          op'
-          (Info ftype)
-          (argExp e_arg)
-          (Info (m1, toStruct t1), Info (m2, toStruct t2', argext))
-          (Info $ RetType dims2 $ addAliases ret (<> aliases ret'))
-          loc
+      (arrow'', _) <- unscopeUnknowable loc arrow'
+      case arrow'' of
+        Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
+          pure $
+            OpSectionRight
+              op'
+              (Info ftype)
+              (argExp e_arg)
+              (Info (m1, toStruct t1'), Info (m2, toStruct t2', argext))
+              (Info $ RetType dims2' $ addAliases ret' (<> aliases arrow''))
+              loc
+        _ -> undefined
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
