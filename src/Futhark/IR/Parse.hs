@@ -47,7 +47,7 @@ pStringLiteral =
 pName :: Parser Name
 pName =
   lexeme . fmap nameFromString $
-    (:) <$> satisfy leading <*> fmap (foldr (<>) []) (many $ choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)])
+    (:) <$> satisfy leading <*> fmap concat (many $ choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)])
   where
     leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^.#" :: String)
     exprBox :: Parser [Char] = (\str -> "<{" <> str <> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
@@ -58,7 +58,7 @@ pVName = lexeme $ do
     choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)]
       `manyTill_` try pTag
       <?> "variable name"
-  pure $ VName (nameFromString $ foldr (<>) [] s) tag
+  pure $ VName (nameFromString $ concat s) tag
   where
     pTag =
       "_" *> L.decimal <* notFollowedBy (satisfy constituent)
