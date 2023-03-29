@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Crashing bug in LSP caused by stray `undefined` (#1907).
 
+* Missing check for anonymous sizes in type abbreviations (#1903).
+
 ## [0.24.1]
 
 ### Added
