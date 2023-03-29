@@ -443,7 +443,7 @@ onExp e = do
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ "d{" ++ prettyString e ++ "}"
+          vn <- newNameFromString $ "d<{" ++ prettyString e ++ "}>"
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 

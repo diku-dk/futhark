@@ -12,7 +12,7 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (zipWith4)
+import Data.List (singleton, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as S
@@ -47,20 +47,22 @@ pStringLiteral =
 pName :: Parser Name
 pName =
   lexeme . fmap nameFromString $
-    (:) <$> satisfy leading <*> many (satisfy constituent)
+    (:) <$> satisfy leading <*> fmap (foldr (<>) []) (many $ choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)])
   where
     leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^.#" :: String)
+    exprBox :: Parser [Char] = (\str -> "<{" <> str <> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent
+    choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)]
       `manyTill_` try pTag
       <?> "variable name"
-  pure $ VName (nameFromString s) tag
+  pure $ VName (nameFromString $ foldr (<>) [] s) tag
   where
     pTag =
       "_" *> L.decimal <* notFollowedBy (satisfy constituent)
+    exprBox :: Parser [Char] = (\str -> "<{" <> str <> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
 pBool :: Parser Bool
 pBool = choice [keyword "true" $> True, keyword "false" $> False]
