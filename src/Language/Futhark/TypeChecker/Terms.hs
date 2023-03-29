@@ -190,12 +190,12 @@ checkCoerce loc te e = do
       | qualLeaf v `elem` ext = pure d
     preferOrigSize _ _ d _ = pure d
 
-unscopeTypeBase ::
+sizeFree ::
   SrcLoc ->
-  S.Set VName ->
+  (Exp -> Maybe VName) ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-unscopeTypeBase tloc unscoped t = do
+sizeFree tloc expKiller t = do
   scope <- asks termScope
   (t', m) <- runStateT (onType (M.keysSet $ scopeVtable scope) t) mempty
   pure (t', M.elems m)
@@ -221,9 +221,10 @@ unscopeTypeBase tloc unscoped t = do
             <> case argName of
               Unnamed -> mempty
               Named vn -> S.singleton vn
-        unSizeExpr (SizeExpr e) = e
-        unSizeExpr _ = error "internal error in unscopeType"
     onScalar _ ty = pure ty
+
+    unSizeExpr (SizeExpr e) = e
+    unSizeExpr _ = error "internal error in unscopeType"
 
     onType ::
       S.Set VName ->
@@ -238,19 +239,41 @@ unscopeTypeBase tloc unscoped t = do
       onExp e
     onSize s = pure s
 
-    onExp e =
-      if M.keysSet (unFV $ freeInExp e) `S.disjoint` unscoped
-        then pure $ SizeExpr e
-        else do
-          let e' = SizeExpr e
-          prev <- gets $ M.lookup e'
-          case prev of
-            Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
-            Nothing -> do
-              -- the Rigid info as to be redo...
-              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) (S.findMin unscoped)) "d"
-              modify $ M.insert e' vn
+    onExp e = do
+      let e' = SizeExpr e
+      prev <- gets $ M.lookup e'
+      case prev of
+        Just vn -> pure $ sizeFromName (qualName vn) (srclocOf e)
+        Nothing -> do
+          case expKiller e of
+            Nothing -> pure $ SizeExpr e
+            Just cause -> do
+              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) cause) "d"
+              modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
+
+unscopeUnknowable ::
+  SrcLoc ->
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+unscopeUnknowable tloc t = do
+  constraints <- getConstraints
+  sizeFree tloc (expKiller constraints) t
+  where
+    expKiller _ Var {} = Nothing
+    expKiller constraints e =
+      S.lookupMin $ S.filter (isUnknown constraints) $ M.keysSet $ unFV $ freeInExp e
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
+
+unscopeTypeBase ::
+  SrcLoc ->
+  S.Set VName ->
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+unscopeTypeBase tloc unscoped =
+  sizeFree tloc (S.lookupMin . S.intersection unscoped . M.keysSet . unFV . freeInExp)
 
 unscopeType ::
   SrcLoc ->
@@ -384,6 +407,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   -- existential sizes, because it must by necessity be a function.
   (_, p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
   (_, p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
+  (rt'', retext') <- unscopeUnknowable loc rt'
 
   pure $
     AppExp
@@ -394,7 +418,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
           (argExp e2_arg, Info (toStruct p2_t, p2_ext))
           loc
       )
-      (Info (AppRes rt' retext))
+      (Info (AppRes rt'' (retext <> retext')))
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
@@ -481,7 +505,8 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
           Var v _ _ -> Just v
           _ -> Nothing
   ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
-  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
+  (rt', exts') <- unscopeUnknowable loc rt
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt' (exts <> exts')
   where
     onArg fname (i, all_exts, t) arg' = do
       (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'

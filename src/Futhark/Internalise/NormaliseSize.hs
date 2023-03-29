@@ -137,7 +137,7 @@ canCalculate scope =
 
 insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
-  reName <- newNameFromString $ baseString name
+  reName <- newName name
   let expr = unSizeExpr dim
   pure $
     AppExp
@@ -178,7 +178,6 @@ expFree :: Exp -> InnerNormaliseM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let dimArgs =
         S.fromList dims
-          `S.union` M.keysSet (unFV $ freeInPat pat)
   (form', formArgs) <- onForm form
   let argset = dimArgs `S.union` formArgs `S.union` patArg pat
   pat' <- withArgs dimArgs (onPat pat)
@@ -197,14 +196,13 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
     onForm (For ident e) =
       (,S.singleton $ identName ident) <$> (For ident <$> expFree e)
     onForm (ForIn fpat e) =
-      (,patArg fpat) <$> (ForIn fpat <$> expFree e)
+      (,patArg fpat) <$> (ForIn <$> onPat fpat <*> expFree e)
     onForm (While e) =
       (,S.empty) <$> (While <$> expFree e)
 expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
   let argset =
         S.fromList (mapMaybe unParamDim typeParams)
           `S.union` foldMap patArg args
-          `S.union` foldMap (M.keysSet . unFV . freeInPat) args
   args' <- mapM onPat args
   params <- parametrizing argset
   retT' <- withParams params $ onRetType argset retT
@@ -228,7 +226,6 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
 expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
   let dimArgs =
         S.fromList (map sizeName dims)
-          `S.union` M.keysSet (unFV $ freeInPat pat)
   let letArgs = patArg pat
   let argset =
         dimArgs
