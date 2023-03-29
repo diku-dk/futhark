@@ -1,3 +1,6 @@
+-- ==
+-- error: anonymous-nonconstructive
+
 module m2 : {
   type^ t
   val x : bool -> t
