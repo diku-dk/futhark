@@ -305,7 +305,7 @@ parseTypeName s
   | otherwise = Nothing
   where
     prims = [minBound .. maxBound]
-    primtexts = map V.valueTypeText $ map (V.ValueType []) prims
+    primtexts = map (V.valueTypeText . V.ValueType []) prims
     m = zip primtexts prims
 
 coerceValue :: TypeName -> V.Value -> Maybe V.Value
