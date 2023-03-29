@@ -339,7 +339,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-            ~*~ primExpFromSubExp (IntType it) s'
+              ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Copy v ->
       case lookup v inps of
@@ -589,7 +589,21 @@ liftRetType :: SubExp -> RetType SOACS -> RetType GPU
 liftRetType w rettype =
   case rettype of
     Prim pt -> arrayOf (Prim pt) (Shape [Free w]) Nonunique
-    _ -> undefined
+    Array pt shape u -> undefined
+    Acc {} -> error "liftRetType: Acc"
+    Mem {} -> error "liftRetType: Mem"
+
+liftResult :: [(VName, ResRep)] -> SubExpRes -> Result
+liftResult resultAssoc res =
+  case resSubExp res of
+    Var v ->
+      case fromMaybe bad $ lookup v resultAssoc of
+        Regular v' -> pure $ SubExpRes mempty $ Var v'
+        Irregular (IrregularRep {irregularSegments = segs, irregularFlags = flags, irregularOffsets = offsets, irregularElems = elems}) ->
+          map (SubExpRes mempty . Var) [segs, flags, offsets, elems]
+    Constant _ -> error "liftResult: Constant"
+  where
+    bad = error "liftResult: Bad lookup"
 
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
@@ -619,14 +633,13 @@ liftFunDef const_scope fd = do
       (const_scope <> scopeOfFParams (concat fparams'))
   -- Get the distributed results from `env'`
   -- TODO: Handle irregular representations and certs.
-  let mkSubExpRes _ (Regular v) = SubExpRes {resCerts = mempty, resSubExp = Var v}
   let resultAssoc =
         M.elems $
           M.intersectionWith
-            (\(_, v, _) (Regular vl) -> (v, vl))
+            (\(_, v, _) rep -> (v, rep))
             resmap
             (distResMap env')
-  let Just result = mapM (\(SubExpRes cs (Var v)) -> SubExpRes cs . Var <$> lookup v resultAssoc) $ bodyResult body
+  let result = concatMap (liftResult resultAssoc) $ bodyResult body
   let name = funDefName fd <> "_lifted"
   pure $
     fd
