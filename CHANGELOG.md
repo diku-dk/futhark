@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `futhark literate` (and FutharkScript in general) is now able to do
+  a bit of type-coercion of constants.
+
 ### Removed
 
 ### Changed
