@@ -107,17 +107,6 @@ unParamDim :: TypeParam -> Maybe VName
 unParamDim (TypeParamDim vn _) = Just vn
 unParamDim _ = Nothing
 
-patArg :: Pat -> S.Set VName
-patArg (TuplePat ps _) = foldMap patArg ps
-patArg (RecordPat fs _) = foldMap (patArg . snd) fs
-patArg (PatParens p _) = patArg p
-patArg (Id vn _ _) = S.singleton vn
-patArg (Wildcard _ _) = mempty
-patArg (PatAscription p _ _) = patArg p
-patArg (PatLit {}) = mempty
-patArg (PatConstr _ _ ps _) = foldMap patArg ps
-patArg (PatAttr _ p _) = patArg p
-
 unSizeExpr :: Size -> Exp
 unSizeExpr (SizeExpr e) = e
 unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
@@ -134,6 +123,34 @@ canCalculate scope =
   M.filterWithKey (const . (`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unSizeExpr)
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
+
+catchImplicitDims' :: Ident -> InnerNormaliseM Exp -> InnerNormaliseM Exp
+catchImplicitDims' (Ident vn (Info ty) loc) m = do
+  implicit <- askIntros (M.keysSet $ unFV $ freeInType ty)
+  if S.null implicit
+    then m
+    else do
+      -- reName maybe ?
+      body' <- scoping implicit m
+      pure $
+        AppExp
+          ( LetPat
+              (map (`SizeBinder` mempty) $ S.toList implicit)
+              (Wildcard (Info ty) loc)
+              (Var (qualName vn) (Info ty) loc)
+              body'
+              mempty
+          )
+          (appRes body')
+  where
+    appRes (AppExp _ resInfo) =
+      resInfo
+    appRes e =
+      Info $ AppRes (typeOf e) []
+
+catchImplicitDims :: Pat -> InnerNormaliseM Exp -> InnerNormaliseM Exp
+catchImplicitDims pat m =
+  S.foldr catchImplicitDims' m (patIdents pat)
 
 insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
@@ -179,7 +196,7 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let dimArgs =
         S.fromList dims
   (form', formArgs) <- onForm form
-  let argset = dimArgs `S.union` formArgs `S.union` patArg pat
+  let argset = dimArgs `S.union` formArgs `S.union` patNames pat
   pat' <- withArgs dimArgs (onPat pat)
   params <- parametrizing argset
   let dims' = dims <> M.elems params
@@ -196,13 +213,13 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
     onForm (For ident e) =
       (,S.singleton $ identName ident) <$> (For ident <$> expFree e)
     onForm (ForIn fpat e) =
-      (,patArg fpat) <$> (ForIn <$> onPat fpat <*> expFree e)
+      (,patNames fpat) <$> (ForIn <$> onPat fpat <*> expFree e)
     onForm (While e) =
       (,S.empty) <$> (While <$> expFree e)
 expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
   let argset =
         S.fromList (mapMaybe unParamDim typeParams)
-          `S.union` foldMap patArg args
+          `S.union` foldMap patNames args
   args' <- mapM onPat args
   params <- parametrizing argset
   retT' <- withParams params $ onRetType argset retT
@@ -226,16 +243,16 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
 expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
   let dimArgs =
         S.fromList (map sizeName dims)
-  let letArgs = patArg pat
+  let letArgs = patNames pat
   let argset =
         dimArgs
           `S.union` letArgs
   pat' <- withArgs dimArgs (onPat pat)
-  params <- parametrizing argset
+  params <- parametrizing dimArgs
   let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList params)
   resT' <- Info <$> withParams params (onResType resT)
-  body' <- withParams params $ scoping argset (expFree body)
-  e1' <- withParams params $ scoping dimArgs (expFree e1)
+  body' <- withParams params $ scoping argset $ catchImplicitDims pat (expFree body)
+  e1' <- expFree e1
   pure $
     AppExp
       ( LetPat dims' pat' e1' body' loc
@@ -274,7 +291,7 @@ expFree (AppExp (Match e cs loc) (Info resT)) = do
     <*> pure resT'
   where
     onCase (CasePat pat body cloc) = do
-      let args = patArg pat
+      let args = patNames pat
       CasePat
         <$> onPat pat
         <*> scoping args (expFree body)
@@ -331,7 +348,7 @@ expFree (AppExp app (Info resT)) = do
           mapOnPatRetType = error "mapOnRetType called in expFree: should not happen"
         }
 expFree (Lambda args body rettype_te (Info (as, retT)) loc) = do
-  let argset = foldMap patArg args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
+  let argset = foldMap patNames args `S.union` foldMap (M.keysSet . unFV . freeInPat) args
   Lambda
     <$> mapM onPat args
     <*> scoping argset (expFree body)
@@ -540,7 +557,7 @@ removeExpFromValBind valbind = do
       S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
   (params', expNaming) <- runInnerNormaliser (mapM onPat $ valBindParams valbind) mempty scope mempty
 
-  let args = foldMap patArg params'
+  let args = foldMap patNames params'
   let argsParams = M.elems expNaming
   (rety', extNaming) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
   (rety'', (funArg, _)) <-
