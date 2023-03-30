@@ -19,7 +19,7 @@ programs.  To speed up this process, we describe here some of the
 various quirks and unexpected limitations imposed by Futhark. We also
 recommended reading some of the `example programs`_ along with this
 guide.  The guide does *not* cover all Futhark features worth knowing,
-so do also skim :ref:`language-reference`.
+so do also skim :ref:`language-reference` and the :ref:`glossary`.
 
 .. _`example programs`: https://futhark-lang.org/examples.html
 
