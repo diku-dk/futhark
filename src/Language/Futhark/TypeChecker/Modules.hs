@@ -10,7 +10,6 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List (intersect)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
@@ -536,15 +535,17 @@ matchMTys orig_mty orig_mty_sig =
       -- if we have a value of an abstract type 't [n]', then there is
       -- an array of size 'n' somewhere inside.
       when (M.member spec_name abs_subst_to_type) $
-        case S.toList (mustBeExplicitInType (retType t)) `intersect` map typeParamName ps of
+        case filter
+          (`S.notMember` fst (determineSizeWitnesses (retType t)))
+          (map typeParamName $ filter isSizeParam ps) of
           [] -> pure ()
           d : _ ->
             Left . TypeError loc mempty $
               "Type"
                 </> indent 2 (ppTypeAbbr [] (QualName quals name) (l, ps, t))
                 </> textwrap "cannot be made abstract because size parameter"
-                </> dquotes (prettyName d)
-                </> textwrap "is not used as an array size in the definition."
+                </> indent 2 (prettyName d)
+                </> textwrap "is not used constructively as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
           nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
