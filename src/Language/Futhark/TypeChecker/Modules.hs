@@ -105,6 +105,10 @@ newNamesForMTy orig_mty = do
         substitute v =
           fromMaybe v $ M.lookup v substs
 
+        -- For applySubst and friends.
+        subst v =
+          ExpSubst . flip sizeVar mempty . qualName <$> M.lookup v substs
+
         substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
            in M.fromList $
@@ -150,20 +154,18 @@ newNamesForMTy orig_mty = do
         substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
           Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInShape (Shape ds) =
-          Shape $ map substituteInDim ds
-        substituteInDim (SizeExpr (Var (QualName qs v) typ loc)) =
-          SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc
-        substituteInDim d = d
+        substituteInShape (Shape ds) = Shape $ map substituteInDim ds
+        substituteInDim (SizeExpr e) = SizeExpr $ applySubst subst e
+        substituteInDim AnySize {} = error "substituteInDim: AnySize"
 
         substituteInTypeArg (TypeArgDim (SizeExpr (Var (QualName qs v) typ _)) loc) =
           TypeArgDim (SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc) loc
         substituteInTypeArg (TypeArgDim (SizeExpr (IntLit x ty _)) loc) =
           TypeArgDim (SizeExpr $ IntLit x ty loc) loc
-        substituteInTypeArg (TypeArgDim (SizeExpr _) _) =
-          error "Arbitrary Expression not supported yet"
-        substituteInTypeArg (TypeArgDim (AnySize v) loc) =
-          TypeArgDim (AnySize v) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr e) loc) =
+          TypeArgDim (SizeExpr (applySubst subst e)) loc
+        substituteInTypeArg (TypeArgDim AnySize {} _) =
+          error "substituteInTYpeArg: AnySize"
         substituteInTypeArg (TypeArgType t loc) =
           TypeArgType (substituteInType t) loc
 
