@@ -673,14 +673,22 @@ dimMapping ::
   TypeBase Size a ->
   TypeBase Size a ->
   DimInst
-dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
+dimMapping t1 t2 = execState (matchDims onDims t1 t2) mempty
   where
-    f bound d1 (SizeExpr (Var d2 _ _))
-      | qualLeaf d2 `elem` bound = pure d1
-    f _ (SizeExpr (Var d1 typ loc)) d2 = do
-      modify $ M.insert (qualLeaf d1) d2
-      pure $ SizeExpr $ Var d1 typ loc
-    f _ d _ = pure d
+    onDims bound (SizeExpr e1) (SizeExpr e2) = do
+      onExps bound e1 e2
+      pure $ SizeExpr e1
+    onDims _ d _ = pure d
+
+    onExps bound (Var v _ _) e
+      | not $ any (`elem` bound) $ freeVarsInExp e =
+          modify $ M.insert (qualLeaf v) $ SizeExpr e
+    onExps bound e1 e2
+      | Just es <- similarExps e1 e2 =
+          mapM_ (uncurry $ onExps bound) es
+    onExps _ _ _ = pure mempty
+
+    freeVarsInExp = M.keys . unFV . freeInExp
 
 inferSizeArgs :: [TypeParam] -> StructType -> StructType -> [Exp]
 inferSizeArgs tparams bind_t t =
