@@ -1245,6 +1245,8 @@ cautious in assuming that some size may change during the loop.
 Adding type annotations to the loop parameter can be used to resolve
 this.
 
+.. _size-coercion:
+
 Size coercion
 ~~~~~~~~~~~~~
 
