@@ -527,15 +527,23 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
           (toStruct t)
       _ -> pure ()
 
+    constraints <- getConstraints
     incLevel . bindingSizes sizes $ \sizes' ->
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
-        body' <- checkExp body
-        (body_t, retext) <-
-          unscopeType loc (sizesMap sizes' <> M.keysSet (patternMap pat')) =<< expTypeFully body'
+        let implicitSizes = filter (isUnknown constraints) $ M.keys $ unFV $ freeInPat pat'
+            implicitIdents = map (\vn -> Ident vn (Info $ Scalar $ Prim $ Signed Int64) mempty) implicitSizes
+        binding False implicitIdents $ do
+          mapM_ observe implicitIdents
+          body' <- checkExp body
+          (body_t, retext) <-
+            unscopeType loc (sizesMap sizes' <> patNames pat' <> S.fromList implicitSizes) =<< expTypeFully body'
 
-        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
+          pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
   where
     sizesMap = foldMap (S.singleton . sizeName)
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, e') closure -> do
