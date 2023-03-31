@@ -286,7 +286,7 @@ expFree (AppExp (Match e cs loc) (Info resT)) = do
   resT' <- Info <$> onResType resT
   implicitDims <- askIntros (M.keysSet $ unFV $ freeInType $ typeOf e)
   e' <- expFree e
-  cs' <- mapM onCase cs
+  cs' <- mapM (onCase implicitDims) cs
   if S.null implicitDims
     then pure $ AppExp (Match e' cs' loc) resT'
     else do
@@ -305,11 +305,11 @@ expFree (AppExp (Match e cs loc) (Info resT)) = do
           )
           resT'
   where
-    onCase (CasePat pat body cloc) = do
+    onCase implicitDims (CasePat pat body cloc) = do
       let args = patNames pat
       CasePat
         <$> onPat pat
-        <*> scoping args (expFree body)
+        <*> scoping (args <> implicitDims) (expFree body)
         <*> pure cloc
 expFree (AppExp (Coerce e expType eloc) (Info resT)) = do
   resT' <- Info <$> onResType resT
