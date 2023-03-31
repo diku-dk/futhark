@@ -756,8 +756,8 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
     let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
-        bind_t' = substTypesAny (`M.lookup` substs') bind_t
-        (shape_params_explicit, shape_params_implicit) =
+    bind_t' <- transformTypeSizes $ substTypesAny (`M.lookup` substs') bind_t
+    let (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
