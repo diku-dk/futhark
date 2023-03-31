@@ -244,19 +244,24 @@ transformFName loc fname t
           size_args
 
 -- This carries out record replacements in the alias information of a type.
-transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+--
+-- It also transforms any size expressions.
+transformType :: PatType -> MonoM PatType
 transformType t = do
   rrs <- asks envRecordReplacements
   let replace (AliasBound v)
         | Just d <- M.lookup v rrs =
             S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
+      onDim (SizeExpr e) = SizeExpr <$> transformExp e
+      onDim (AnySize v) = pure $ AnySize v
+  t' <- bitraverse onDim pure t
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
   pure $
     if any ((`M.member` rrs) . aliasVar) $ aliases t
-      then second (mconcat . map replace . S.toList) t
-      else t
+      then second (mconcat . map replace . S.toList) t'
+      else t'
 
 sizesForPat :: MonadFreshNames m => Pat -> m ([VName], Pat)
 sizesForPat pat = do
@@ -636,7 +641,9 @@ transformPat (Id v (Info (Scalar (Record fs))) loc) = do
         loc,
       M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts
     )
-transformPat (Id v t loc) = pure (Id v t loc, mempty)
+transformPat (Id v t loc) = do
+  t' <- traverse transformType t
+  pure (Id v t' loc, mempty)
 transformPat (TuplePat pats loc) = do
   (pats', rrs) <- mapAndUnzipM transformPat pats
   pure (TuplePat pats' loc, mconcat rrs)
