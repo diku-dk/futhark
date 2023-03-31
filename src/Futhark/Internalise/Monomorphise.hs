@@ -243,6 +243,12 @@ transformFName loc fname t
           )
           size_args
 
+transformTypeSizes :: TypeBase Size as -> MonoM (TypeBase Size as)
+transformTypeSizes = bitraverse onDim pure
+  where
+    onDim (SizeExpr e) = SizeExpr <$> transformExp e
+    onDim (AnySize v) = pure $ AnySize v
+
 -- This carries out record replacements in the alias information of a type.
 --
 -- It also transforms any size expressions.
@@ -253,9 +259,7 @@ transformType t = do
         | Just d <- M.lookup v rrs =
             S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
-      onDim (SizeExpr e) = SizeExpr <$> transformExp e
-      onDim (AnySize v) = pure $ AnySize v
-  t' <- bitraverse onDim pure t
+  t' <- transformTypeSizes t
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
   pure $
@@ -330,12 +334,13 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
     For ident e2 -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
     While e2 -> While <$> transformExp e2
-  e3' <- transformExp e3
+  (pat', rr) <- transformPat pat
+  e3' <- withRecordReplacements rr $ transformExp e3
   -- Maybe monomorphisation introduced new arrays to the loop, and
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
-  (pat_sizes, pat') <- sizesForPat pat
-  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
+  (pat_sizes, pat'') <- sizesForPat pat'
+  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat'' e1' form' e3' loc) (Info res)
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
   fname' <- transformFName loc fname $ toStruct t
   e1' <- transformExp e1
@@ -731,6 +736,9 @@ noNamedParams = f
       Sum $ fmap (map f) cs
     f' t = t
 
+transformRetType :: StructRetType -> MonoM StructRetType
+transformRetType (RetType ext t) = RetType ext <$> transformTypeSizes t
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -744,8 +752,8 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
     let bind_t = funType params rettype
     (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
-        rettype' = applySubst (`M.lookup` substs') rettype
-        substPatType =
+    rettype' <- transformRetType $ applySubst (`M.lookup` substs') rettype
+    let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
