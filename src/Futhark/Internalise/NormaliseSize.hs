@@ -284,13 +284,26 @@ expFree (AppExp (LetWith dest src slice e body loc) (Info resT)) = do
       Ident vn <$> (Info <$> onType ty) <*> pure iloc
 expFree (AppExp (Match e cs loc) (Info resT)) = do
   resT' <- Info <$> onResType resT
-  AppExp
-    <$> ( Match
-            <$> expFree e
-            <*> mapM onCase cs
-            <*> pure loc
-        )
-    <*> pure resT'
+  implicitDims <- askIntros (M.keysSet $ unFV $ freeInType $ typeOf e)
+  e' <- expFree e
+  cs' <- mapM onCase cs
+  if S.null implicitDims
+    then pure $ AppExp (Match e' cs' loc) resT'
+    else do
+      tmpVar <- newNameFromString "matched_variable"
+      pure $
+        AppExp
+          ( LetPat
+              (map (`SizeBinder` mempty) $ S.toList implicitDims)
+              (Id tmpVar (Info $ typeOf e') mempty)
+              e'
+              ( AppExp
+                  (Match (Var (qualName tmpVar) (Info $ typeOf e') mempty) cs' loc)
+                  resT'
+              )
+              mempty
+          )
+          resT'
   where
     onCase (CasePat pat body cloc) = do
       let args = patNames pat

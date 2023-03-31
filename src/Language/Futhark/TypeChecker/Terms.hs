@@ -836,9 +836,18 @@ checkCase ::
   TermTypeM (CaseBase Info VName, PatType, [VName])
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
-    e' <- checkExp e
-    (t, retext) <- unscopeType loc (M.keysSet $ patternMap p') =<< expTypeFully e'
-    pure (CasePat p' e' loc, t, retext)
+    constraints <- getConstraints
+    let implicitSizes = filter (isUnknown constraints) $ M.keys $ unFV $ freeInPat p'
+        implicitIdents = map (\vn -> Ident vn (Info $ Scalar $ Prim $ Signed Int64) mempty) implicitSizes
+    binding False implicitIdents $ do
+      mapM_ observe implicitIdents
+      e' <- checkExp e
+      (t, retext) <- unscopeType loc (patNames p' <> S.fromList implicitSizes) =<< expTypeFully e'
+      pure (CasePat p' e' loc, t, retext)
+  where
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
