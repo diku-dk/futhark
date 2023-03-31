@@ -249,6 +249,39 @@ transformTypeSizes = bitraverse onDim pure
     onDim (SizeExpr e) = SizeExpr <$> transformExp e
     onDim (AnySize v) = pure $ AnySize v
 
+transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
+transformTypeExp te@TEVar {} = pure te
+transformTypeExp (TETuple tes loc) =
+  TETuple <$> mapM transformTypeExp tes <*> pure loc
+transformTypeExp (TERecord fs loc) =
+  TERecord <$> mapM (traverse transformTypeExp) fs <*> pure loc
+transformTypeExp (TEArray size te loc) =
+  TEArray <$> transformSizeExp size <*> transformTypeExp te <*> pure loc
+  where
+    transformSizeExp (SizeExp e loc') =
+      SizeExp <$> transformExp e <*> pure loc'
+    transformSizeExp (SizeExpAny loc') =
+      pure $ SizeExpAny loc'
+transformTypeExp (TEUnique te loc) =
+  TEUnique <$> transformTypeExp te <*> pure loc
+transformTypeExp (TEApply te args loc) =
+  TEApply <$> transformTypeExp te <*> transformTypeArg args <*> pure loc
+  where
+    transformTypeArg (TypeArgExpSize size) =
+      TypeArgExpSize <$> transformSizeExp size
+    transformTypeArg (TypeArgExpType arg) =
+      TypeArgExpType <$> transformTypeExp arg
+    transformSizeExp (SizeExp e loc') =
+      SizeExp <$> transformExp e <*> pure loc'
+    transformSizeExp (SizeExpAny loc') =
+      pure $ SizeExpAny loc'
+transformTypeExp (TEArrow aname ta tr loc) =
+  TEArrow aname <$> transformTypeExp ta <*> transformTypeExp tr <*> pure loc
+transformTypeExp (TESum cs loc) =
+  TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
+transformTypeExp (TEDim dims te loc) =
+  TEDim dims <$> transformTypeExp te <*> pure loc
+
 -- This carries out record replacements in the alias information of a type.
 --
 -- It also transforms any size expressions.
@@ -288,9 +321,9 @@ transformAppExp (Range e1 me incl loc) res = do
   e1' <- transformExp e1
   me' <- mapM transformExp me
   incl' <- mapM transformExp incl
-  pure $ AppExp (Range e1' me' incl' loc) (Info res)
+  AppExp (Range e1' me' incl' loc) . Info <$> transformAppRes res
 transformAppExp (Coerce e tp loc) res =
-  AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
+  AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> traverse transformAppRes (Info res)
 transformAppExp (LetPat sizes pat e1 e2 loc) res = do
   (pat', rr) <- transformPat pat
   AppExp
@@ -299,7 +332,7 @@ transformAppExp (LetPat sizes pat e1 e2 loc) res = do
             <*> withRecordReplacements rr (transformExp e2)
             <*> pure loc
         )
-    <*> pure (Info res)
+    <*> traverse transformAppRes (Info res)
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
       -- Retrieve the lifted monomorphic function bindings that are produced,
@@ -318,14 +351,14 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
       body' <- transformExp body
       AppExp
         <$> (LetFun fname (tparams, params, retdecl, Info ret, body') <$> transformExp e <*> pure loc)
-        <*> pure (Info res)
+        <*> traverse transformAppRes (Info res)
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
 transformAppExp (Apply fe args _) res =
   mkApply
     <$> transformExp fe
     <*> mapM onArg (NE.toList args)
-    <*> pure res
+    <*> transformAppRes res
   where
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
@@ -340,13 +373,14 @@ transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
-  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat'' e1' form' e3' loc) (Info res)
+  AppExp (DoLoop (sparams ++ pat_sizes) pat'' e1' form' e3' loc) . Info <$> transformAppRes res
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
-  fname' <- transformFName loc fname $ toStruct t
+  fname' <- transformFName loc fname =<< transformTypeSizes (toStruct t)
   e1' <- transformExp e1
   e2' <- transformExp e2
+  ret' <- transformType ret
   if orderZero (typeOf e1') && orderZero (typeOf e2')
-    then pure $ applyOp fname' e1' e2'
+    then pure $ applyOp fname' e1' e2' ret'
     else do
       -- We have to flip the arguments to the function, because
       -- operator application is left-to-right, while function
@@ -366,18 +400,18 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
               x_param
               e1'
               ( AppExp
-                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e) loc)
-                  (Info $ AppRes ret mempty)
+                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e ret') loc)
+                  (Info $ AppRes ret' mempty)
               )
               mempty
           )
-          (Info (AppRes ret mempty))
+          (Info (AppRes ret' mempty))
   where
-    applyOp fname' x y =
+    applyOp fname' x y ret' =
       mkApply
-        (mkApply fname' [(Observe, snd (unInfo d1), x)] (AppRes ret mempty))
+        (mkApply fname' [(Observe, snd (unInfo d1), x)] (AppRes ret' mempty))
         [(Observe, snd (unInfo d2), y)]
-        (AppRes ret ext)
+        (AppRes ret' ext)
 
     makeVarParam arg = do
       let argtype = typeOf arg
@@ -390,15 +424,15 @@ transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-  pure $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
+  AppExp (LetWith id1 id2 idxs' e1' body' loc) . Info <$> transformAppRes res
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
-    <*> pure (Info res)
+    <*> traverse transformAppRes (Info res)
 transformAppExp (Match e cs loc) res =
   AppExp
     <$> (Match <$> transformExp e <*> mapM transformCase cs <*> pure loc)
-    <*> pure (Info res)
+    <*> traverse transformAppRes (Info res)
 
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -451,7 +485,7 @@ transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
   e0' <- transformExp e0
-  pure $ Lambda params e0' decl tp loc
+  Lambda params e0' decl <$> traverse (traverse transformRetType) tp <*> pure loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
@@ -486,16 +520,17 @@ transformExp (IndexSection idxs (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   desugarIndexSection idxs' t loc
 transformExp (Project n e tp loc) = do
+  tp' <- traverse transformType tp
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
     _ -> pure Nothing
   case maybe_fs of
     Just m
       | Just (v, _) <- M.lookup n m ->
-          pure $ Var (qualName v) tp loc
+          pure $ Var (qualName v) tp' loc
     _ -> do
       e' <- transformExp e
-      pure $ Project n e' tp loc
+      pure $ Project n e' tp' loc
 transformExp (Update e1 idxs e2 loc) =
   Update
     <$> transformExp e1
@@ -507,12 +542,12 @@ transformExp (RecordUpdate e1 fs e2 t loc) =
     <$> transformExp e1
     <*> pure fs
     <*> transformExp e2
-    <*> pure t
+    <*> traverse transformType t
     <*> pure loc
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
-  Constr name <$> mapM transformExp all_es <*> pure t <*> pure loc
+  Constr name <$> mapM transformExp all_es <*> traverse transformType t <*> pure loc
 transformExp (Attr info e loc) =
   Attr info <$> transformExp e <*> pure loc
 
@@ -620,9 +655,9 @@ desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
 noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . M.keysSet . unFV . freeInType
+noticeDims = mapM_ notice . M.toList . unFV . freeInType
   where
-    notice v = void $ transformFName mempty (qualName v) i64
+    notice (v, ty) = void $ transformFName mempty (qualName v) ty
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.

@@ -65,10 +65,10 @@ internaliseProg ::
 internaliseProg config prog = do
   maybeLog "Defunctorising"
   prog_decs <- Defunctorise.transformProg prog
-  maybeLog "Normalising sizes"
-  prog_decs' <- Normalise.transformProg prog_decs
   maybeLog "Monomorphising"
-  prog_decs'' <- Monomorphise.transformProg prog_decs'
+  prog_decs' <- Monomorphise.transformProg prog_decs
+  maybeLog "Normalising sizes"
+  prog_decs'' <- Normalise.transformProg prog_decs'
   maybeLog "Lifting lambdas"
   prog_decs''' <- LiftLambdas.transformProg prog_decs''
   maybeLog "Defunctionalising"

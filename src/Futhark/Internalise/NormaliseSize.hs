@@ -597,19 +597,10 @@ removeExpFromValBind valbind = do
       let dims' = S.toList unbounded
       pure $ RetType dims' ty'
 
-normaliseDecs :: [Dec] -> NormaliseM [Dec]
-normaliseDecs [] = pure []
-normaliseDecs (ValDec valbind : ds) = do
-  valbind' <- removeExpFromValBind valbind
-  (ValDec valbind' :) <$> addBind (valBindName valbind) (normaliseDecs ds)
-normaliseDecs (TypeDec td : ds) =
-  (TypeDec td :) <$> normaliseDecs ds
-normaliseDecs (dec : _) =
-  error $
-    "The normalisation module expects a module-free "
-      ++ "input program, but received: "
-      ++ prettyString dec
+normaliseValBind :: ValBind -> NormaliseM [ValBind] -> NormaliseM [ValBind]
+normaliseValBind valbind m =
+  (:) <$> removeExpFromValBind valbind <*> addBind (valBindName valbind) m
 
-transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
-transformProg decs =
-  modifyNameSource $ runNormaliser (normaliseDecs decs)
+transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg binds =
+  modifyNameSource $ runNormaliser (foldr normaliseValBind (pure []) binds)
