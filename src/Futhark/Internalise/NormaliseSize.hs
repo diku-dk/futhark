@@ -124,33 +124,33 @@ canCalculate scope =
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
-catchImplicitDims' :: Ident -> InnerNormaliseM Exp -> InnerNormaliseM Exp
-catchImplicitDims' (Ident vn (Info ty) loc) m = do
-  implicit <- askIntros (M.keysSet $ unFV $ freeInType ty)
-  if S.null implicit
-    then m
-    else do
-      -- reName maybe ?
-      body' <- scoping implicit m
-      pure $
-        AppExp
-          ( LetPat
-              (map (`SizeBinder` mempty) $ S.toList implicit)
-              (Wildcard (Info ty) loc)
-              (Var (qualName vn) (Info ty) loc)
-              body'
-              mempty
-          )
-          (appRes body')
-  where
-    appRes (AppExp _ resInfo) =
-      resInfo
-    appRes e =
-      Info $ AppRes (typeOf e) []
-
-catchImplicitDims :: Pat -> InnerNormaliseM Exp -> InnerNormaliseM Exp
-catchImplicitDims pat m =
-  S.foldr catchImplicitDims' m (patIdents pat)
+-- catchImplicitDims' :: Ident -> InnerNormaliseM Exp -> InnerNormaliseM Exp
+-- catchImplicitDims' (Ident vn (Info ty) loc) m = do
+--  implicit <- askIntros (M.keysSet $ unFV $ freeInType ty)
+--  if S.null implicit
+--    then m
+--    else do
+--      -- reName maybe ?
+--      body' <- scoping implicit m
+--      pure $
+--        AppExp
+--          ( LetPat
+--              (map (`SizeBinder` mempty) $ S.toList implicit)
+--              (Wildcard (Info ty) loc)
+--              (Var (qualName vn) (Info ty) loc)
+--              body'
+--              mempty
+--          )
+--          (appRes body')
+--  where
+--    appRes (AppExp _ resInfo) =
+--      resInfo
+--    appRes e =
+--      Info $ AppRes (typeOf e) []
+--
+-- catchImplicitDims :: Pat -> InnerNormaliseM Exp -> InnerNormaliseM Exp
+-- catchImplicitDims pat m =
+--  S.foldr catchImplicitDims' m (patIdents pat)
 
 insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
@@ -243,15 +243,17 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
 expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
   let dimArgs =
         S.fromList (map sizeName dims)
+  implicitDims <- withArgs dimArgs $ askIntros (M.keysSet $ unFV $ freeInPat pat)
+  let dimArgs' = dimArgs <> implicitDims
   let letArgs = patNames pat
   let argset =
-        dimArgs
+        dimArgs'
           `S.union` letArgs
-  pat' <- withArgs dimArgs (onPat pat)
-  params <- parametrizing dimArgs
-  let dims' = dims <> map (\(e, vn) -> SizeBinder vn (srclocOf $ unSizeExpr e)) (M.toList params)
+  pat' <- withArgs dimArgs' (onPat pat)
+  params <- parametrizing dimArgs'
+  let dims' = dims <> map (`SizeBinder` mempty) (M.elems params <> S.toList implicitDims)
   resT' <- Info <$> withParams params (onResType resT)
-  body' <- withParams params $ scoping argset $ catchImplicitDims pat (expFree body)
+  body' <- withParams params $ scoping argset (expFree body)
   e1' <- expFree e1
   pure $
     AppExp
@@ -609,8 +611,5 @@ normaliseDecs (dec : _) =
       ++ prettyString dec
 
 transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
-transformProg decs = do
-  src <- getNameSource
-  let (ret, src') = runNormaliser (normaliseDecs decs) src
-  putNameSource src'
-  pure ret
+transformProg decs =
+  modifyNameSource $ runNormaliser (normaliseDecs decs)
