@@ -460,8 +460,7 @@ transformExp (RecordLit fs loc) =
           loc
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
-transformExp (AppExp e res) = do
-  noticeDims $ appResType $ unInfo res
+transformExp (AppExp e res) =
   transformAppExp e =<< transformAppRes (unInfo res)
 transformExp (Var fname (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement $ qualLeaf fname
@@ -654,11 +653,6 @@ desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
     t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
-noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . M.toList . unFV . freeInType
-  where
-    notice (v, ty) = void $ transformFName mempty (qualName v) ty
-
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.
 unfoldLetFuns :: [ValBind] -> Exp -> Exp
@@ -785,20 +779,19 @@ monomorphiseBinding ::
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
   replaceRecordReplacements rr $ do
     let bind_t = funType params rettype
-    (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
+    (substs, t_shape_params) <-
+      typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
-    rettype' <- transformRetType $ applySubst (`M.lookup` substs') rettype
+    rettype' <- applySubst (`M.lookup` substs') <$> transformRetType rettype
     let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
-    bind_t' <- transformTypeSizes $ substTypesAny (`M.lookup` substs') bind_t
+    bind_t' <- substTypesAny (`M.lookup` substs') <$> transformTypeSizes bind_t
     let (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
     (params'', rrs) <- mapAndUnzipM transformPat params'
-
-    mapM_ noticeDims $ retType rettype : map patternStructType params''
 
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
@@ -1001,7 +994,6 @@ transformValBind valbind = do
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name l tparams _ (Info (RetType dims t)) _ _) = do
   subs <- asks $ M.map substFromAbbr . envTypeBindings
-  noticeDims t
   let tbinding = TypeAbbr l tparams $ RetType dims $ applySubst (`M.lookup` subs) t
   pure mempty {envTypeBindings = M.singleton name tbinding}
 
