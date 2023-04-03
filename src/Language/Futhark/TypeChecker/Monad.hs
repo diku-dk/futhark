@@ -288,7 +288,7 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkSizeExpM :: UncheckedExp -> m Exp
+  checkExpForSize :: UncheckedExp -> m Exp
 
   typeError :: Located loc => loc -> Notes -> Doc () -> m a
 
@@ -371,7 +371,7 @@ instance MonadTypeChecker TypeM where
                       qualifyTypeVars outer_env mempty qs t'
                   )
 
-  checkSizeExpM e = do
+  checkExpForSize e = do
     checker <- asks contextCheckExp
     checker e
 

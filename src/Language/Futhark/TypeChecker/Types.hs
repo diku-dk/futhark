@@ -242,13 +242,6 @@ renameRetType (RetType dims st)
   | otherwise =
       pure $ RetType dims st
 
-checkExpForSize ::
-  MonadTypeChecker m =>
-  ExpBase NoInfo Name ->
-  m Exp
-checkExpForSize e =
-  checkSizeExpM e
-
 evalTypeExp ::
   MonadTypeChecker m =>
   TypeExp NoInfo Name ->

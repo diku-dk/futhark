@@ -622,7 +622,7 @@ localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
-  checkSizeExpM e = do
+  checkExpForSize e = do
     checker <- asks termChecker
     e' <- checker e
     let t = toStruct $ typeOf e'
