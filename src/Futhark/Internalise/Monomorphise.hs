@@ -482,8 +482,10 @@ transformExp (Negate e loc) =
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
-  e0' <- transformExp e0
-  Lambda params e0' decl <$> traverse (traverse transformRetType) tp <*> pure loc
+  (params', rr) <- second mconcat . unzip <$> mapM transformPat params
+  e0' <- withRecordReplacements rr $ transformExp e0
+  tp' <- withRecordReplacements rr $ traverse (traverse transformRetType) tp
+  pure $ Lambda params' e0' decl tp' loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
