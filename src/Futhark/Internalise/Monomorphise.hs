@@ -420,10 +420,19 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
           Id x (Info $ fromStruct argtype) mempty
         )
 transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
+  id1' <- transformIdent id1
+  id2' <- transformIdent id2
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
+<<<<<<< HEAD
   pure $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
+=======
+  AppExp (LetWith id1' id2' idxs' e1' body' loc) . Info <$> transformAppRes res
+  where
+    transformIdent (Ident v t vloc) =
+      Ident v <$> traverse transformType t <*> pure vloc
+>>>>>>> 1f5d2377d (Eliminate remaining BinOps, I hope.)
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
@@ -482,10 +491,13 @@ transformExp (Negate e loc) =
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
-  (params', rr) <- second mconcat . unzip <$> mapM transformPat params
-  e0' <- withRecordReplacements rr $ transformExp e0
-  tp' <- withRecordReplacements rr $ traverse (traverse transformRetType) tp
-  pure $ Lambda params' e0' decl tp' loc
+  (params', rrs) <- mapAndUnzipM transformPat params
+  withRecordReplacements (mconcat rrs) $
+    Lambda params'
+      <$> transformExp e0
+      <*> pure decl
+      <*> traverse (traverse transformRetType) tp
+      <*> pure loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
@@ -640,16 +652,16 @@ desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " 
 desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "index_i"
-  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2 []))
+  t1' <- fromStruct <$> transformTypeSizes t1
+  t2' <- transformType t2
+  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2' []))
   pure $
     Lambda
       [Id p (Info (fromStruct t1')) mempty]
       body
       Nothing
-      (Info (mempty, RetType dims $ toStruct t2))
+      (Info (mempty, RetType dims $ toStruct t2'))
       loc
-  where
-    t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
