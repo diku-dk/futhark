@@ -20,6 +20,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
+import Data.Text qualified as T
 import Data.Word
 import Futhark.Util
 import Futhark.Util.Pretty
@@ -319,8 +320,18 @@ prettyInst t =
 prettyAttr :: Pretty a => a -> Doc ann
 prettyAttr attr = "#[" <> pretty attr <> "]"
 
+operatorName :: Name -> Bool
+operatorName = (`elem` opchars) . T.head . nameToText
+  where
+    opchars :: String
+    opchars = "+-*/%=!><|&^."
+
 prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
-prettyExp _ (Var name t _) = pretty name <> prettyInst t
+prettyExp _ (Var name t _)
+  -- The first case occurs only for programs that have been normalised
+  -- by the compiler.
+  | operatorName (toName (qualLeaf name)) = parens $ pretty name <> prettyInst t
+  | otherwise = pretty name <> prettyInst t
 prettyExp _ (Hole t _) = "???" <> prettyInst t
 prettyExp _ (Parens e _) = align $ parens $ pretty e
 prettyExp _ (QualParens (v, _) e _) = pretty v <> "." <> align (parens $ pretty e)

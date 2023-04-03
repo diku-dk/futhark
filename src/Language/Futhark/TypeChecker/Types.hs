@@ -46,8 +46,8 @@ mustBeExplicitAux t =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
     onDim _ PosImmediate (SizeExpr (Var d _ _)) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (SizeExpr (Var d _ _)) =
-      modify $ M.insertWith (&&) (qualLeaf d) True
+    onDim _ _ (SizeExpr e) =
+      modify $ M.unionWith (&&) (M.map (const True) (unFV $ freeInExp e))
     onDim _ _ _ =
       pure ()
 

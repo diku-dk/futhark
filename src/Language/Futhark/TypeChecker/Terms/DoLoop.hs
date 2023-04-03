@@ -13,6 +13,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -262,15 +263,16 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- new_dims in the pattern is unique and distinct.
           let onDims _ x y
                 | x == y = pure x
-              onDims _ (SizeExpr (Var v typ _)) d
-                | qualLeaf v `elem` new_dims = do
-                    case M.lookup (qualLeaf v) new_dims_to_initial_dim of
-                      Just d'@(SizeExpr e')
-                        | d' == d ->
-                            modify $ first $ M.insert (qualLeaf v) (ExpSubst e')
-                      _ ->
-                        modify $ second (qualLeaf v :)
-                    pure $ SizeExpr $ Var v typ loc
+              onDims _ x@(SizeExpr e) d
+                | vs <- L.filter (`elem` new_dims) $ M.keys . unFV $ freeInExp e = do
+                    forM_ vs $ \v -> do
+                      case M.lookup v new_dims_to_initial_dim of
+                        Just d'@(SizeExpr e')
+                          | d' == d ->
+                              modify $ first $ M.insert v (ExpSubst e')
+                        _ ->
+                          modify $ second (v :)
+                    pure x
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t

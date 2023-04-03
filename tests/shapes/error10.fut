@@ -1,5 +1,5 @@
 -- ==
--- error: Causality check
+-- error: Cannot apply "==" to "b\[0\]"
 
 def main (b: bool) (xs: []i32) =
   let a = [] : [][]i32

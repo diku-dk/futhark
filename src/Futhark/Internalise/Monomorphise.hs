@@ -243,20 +243,62 @@ transformFName loc fname t
           )
           size_args
 
+transformTypeSizes :: TypeBase Size as -> MonoM (TypeBase Size as)
+transformTypeSizes = bitraverse onDim pure
+  where
+    onDim (SizeExpr e) = SizeExpr <$> transformExp e
+    onDim (AnySize v) = pure $ AnySize v
+
+transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
+transformTypeExp te@TEVar {} = pure te
+transformTypeExp (TETuple tes loc) =
+  TETuple <$> mapM transformTypeExp tes <*> pure loc
+transformTypeExp (TERecord fs loc) =
+  TERecord <$> mapM (traverse transformTypeExp) fs <*> pure loc
+transformTypeExp (TEArray size te loc) =
+  TEArray <$> transformSizeExp size <*> transformTypeExp te <*> pure loc
+  where
+    transformSizeExp (SizeExp e loc') =
+      SizeExp <$> transformExp e <*> pure loc'
+    transformSizeExp (SizeExpAny loc') =
+      pure $ SizeExpAny loc'
+transformTypeExp (TEUnique te loc) =
+  TEUnique <$> transformTypeExp te <*> pure loc
+transformTypeExp (TEApply te args loc) =
+  TEApply <$> transformTypeExp te <*> transformTypeArg args <*> pure loc
+  where
+    transformTypeArg (TypeArgExpSize size) =
+      TypeArgExpSize <$> transformSizeExp size
+    transformTypeArg (TypeArgExpType arg) =
+      TypeArgExpType <$> transformTypeExp arg
+    transformSizeExp (SizeExp e loc') =
+      SizeExp <$> transformExp e <*> pure loc'
+    transformSizeExp (SizeExpAny loc') =
+      pure $ SizeExpAny loc'
+transformTypeExp (TEArrow aname ta tr loc) =
+  TEArrow aname <$> transformTypeExp ta <*> transformTypeExp tr <*> pure loc
+transformTypeExp (TESum cs loc) =
+  TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
+transformTypeExp (TEDim dims te loc) =
+  TEDim dims <$> transformTypeExp te <*> pure loc
+
 -- This carries out record replacements in the alias information of a type.
-transformType :: TypeBase dim Aliasing -> MonoM (TypeBase dim Aliasing)
+--
+-- It also transforms any size expressions.
+transformType :: PatType -> MonoM PatType
 transformType t = do
   rrs <- asks envRecordReplacements
   let replace (AliasBound v)
         | Just d <- M.lookup v rrs =
             S.fromList $ map (AliasBound . fst) $ M.elems d
       replace x = S.singleton x
+  t' <- transformTypeSizes t
   -- As an attempt at an optimisation, only transform the aliases if
   -- they refer to a variable we have record-replaced.
   pure $
     if any ((`M.member` rrs) . aliasVar) $ aliases t
-      then second (mconcat . map replace . S.toList) t
-      else t
+      then second (mconcat . map replace . S.toList) t'
+      else t'
 
 sizesForPat :: MonadFreshNames m => Pat -> m ([VName], Pat)
 sizesForPat pat = do
@@ -281,7 +323,7 @@ transformAppExp (Range e1 me incl loc) res = do
   incl' <- mapM transformExp incl
   pure $ AppExp (Range e1' me' incl' loc) (Info res)
 transformAppExp (Coerce e tp loc) res =
-  AppExp <$> (Coerce <$> transformExp e <*> pure tp <*> pure loc) <*> pure (Info res)
+  AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> pure (Info res)
 transformAppExp (LetPat sizes pat e1 e2 loc) res = do
   (pat', rr) <- transformPat pat
   AppExp
@@ -321,18 +363,19 @@ transformAppExp (Apply fe args _) res =
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   e1' <- transformExp e1
+  (pat', rr) <- transformPat pat
   form' <- case form of
     For ident e2 -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
-    While e2 -> While <$> transformExp e2
-  e3' <- transformExp e3
+    While e2 -> While <$> withRecordReplacements rr (transformExp e2)
+  e3' <- withRecordReplacements rr $ transformExp e3
   -- Maybe monomorphisation introduced new arrays to the loop, and
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
-  (pat_sizes, pat') <- sizesForPat pat
-  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat' e1' form' e3' loc) (Info res)
+  (pat_sizes, pat'') <- sizesForPat pat'
+  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat'' e1' form' e3' loc) (Info res)
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
-  fname' <- transformFName loc fname $ toStruct t
+  fname' <- transformFName loc fname =<< transformTypeSizes (toStruct t)
   e1' <- transformExp e1
   e2' <- transformExp e2
   if orderZero (typeOf e1') && orderZero (typeOf e2')
@@ -377,10 +420,15 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
           Id x (Info $ fromStruct argtype) mempty
         )
 transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
+  id1' <- transformIdent id1
+  id2' <- transformIdent id2
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-  pure $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
+  pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res)
+  where
+    transformIdent (Ident v t vloc) =
+      Ident v <$> traverse transformType t <*> pure vloc
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
@@ -416,8 +464,7 @@ transformExp (RecordLit fs loc) =
           loc
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
-transformExp (AppExp e res) = do
-  noticeDims $ appResType $ unInfo res
+transformExp (AppExp e res) =
   transformAppExp e =<< transformAppRes (unInfo res)
 transformExp (Var fname (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement $ qualLeaf fname
@@ -440,16 +487,20 @@ transformExp (Negate e loc) =
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
-  e0' <- transformExp e0
-  pure $ Lambda params e0' decl tp loc
+  (params', rrs) <- mapAndUnzipM transformPat params
+  withRecordReplacements (mconcat rrs) $
+    Lambda params'
+      <$> transformExp e0
+      <*> pure decl
+      <*> traverse (traverse transformRetType) tp
+      <*> pure loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
   let (Info (xp, xtype, xargext), Info (yp, ytype)) = arg
-  fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
   desugarBinOpSection
-    fname'
+    fname
     (Just e')
     Nothing
     t
@@ -459,10 +510,9 @@ transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc
     loc
 transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
   let (Info (xp, xtype), Info (yp, ytype, yargext)) = arg
-  fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
   desugarBinOpSection
-    fname'
+    fname
     Nothing
     (Just e')
     t
@@ -476,16 +526,17 @@ transformExp (IndexSection idxs (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   desugarIndexSection idxs' t loc
 transformExp (Project n e tp loc) = do
+  tp' <- traverse transformType tp
   maybe_fs <- case e of
     Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
     _ -> pure Nothing
   case maybe_fs of
     Just m
       | Just (v, _) <- M.lookup n m ->
-          pure $ Var (qualName v) tp loc
+          pure $ Var (qualName v) tp' loc
     _ -> do
       e' <- transformExp e
-      pure $ Project n e' tp loc
+      pure $ Project n e' tp' loc
 transformExp (Update e1 idxs e2 loc) =
   Update
     <$> transformExp e1
@@ -497,12 +548,12 @@ transformExp (RecordUpdate e1 fs e2 t loc) =
     <$> transformExp e1
     <*> pure fs
     <*> transformExp e2
-    <*> pure t
+    <*> traverse transformType t
     <*> pure loc
 transformExp (Assert e1 e2 desc loc) =
   Assert <$> transformExp e1 <*> transformExp e2 <*> pure desc <*> pure loc
 transformExp (Constr name all_es t loc) =
-  Constr name <$> mapM transformExp all_es <*> pure t <*> pure loc
+  Constr name <$> mapM transformExp all_es <*> traverse transformType t <*> pure loc
 transformExp (Attr info e loc) =
   Attr info <$> transformExp e <*> pure loc
 
@@ -520,7 +571,7 @@ transformDimIndex (DimSlice me1 me2 me3) =
 
 -- Transform an operator section into a lambda.
 desugarBinOpSection ::
-  Exp ->
+  QualName VName ->
   Maybe Exp ->
   Maybe Exp ->
   PatType ->
@@ -529,21 +580,21 @@ desugarBinOpSection ::
   (PatRetType, [VName]) ->
   SrcLoc ->
   MonoM Exp
-desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
-  (v1, wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
-  (v2, wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
+desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
+  op <- transformFName loc fname <=< transformTypeSizes $ toStruct t
+  (v1, wrap_left, e1, p1) <- makeVarParam e_left . fromStruct =<< transformTypeSizes xtype
+  (v2, wrap_right, e2, p2) <- makeVarParam e_right . fromStruct =<< transformTypeSizes ytype
   let apply_left =
         mkApply
           op
           [(Observe, xext, e1)]
           (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
-      rettype' =
-        let onDim (SizeExpr (Var d typ _))
-              | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
-              | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
-            onDim d = d
-         in first onDim rettype
-      body =
+      onDim (SizeExpr (Var d typ _))
+        | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
+        | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
+      onDim d = d
+  rettype' <- first onDim <$> transformTypeSizes rettype
+  let body =
         mkApply apply_left [(Observe, yext, e2)] (AppRes rettype' retext)
       rettype'' = toStruct rettype'
   pure $
@@ -597,22 +648,17 @@ desugarProjectSection _ t _ = error $ "desugarOpSection: not a function type: " 
 desugarIndexSection :: [DimIndex] -> PatType -> SrcLoc -> MonoM Exp
 desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
   p <- newVName "index_i"
-  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2 []))
+  t1' <- fromStruct <$> transformTypeSizes t1
+  t2' <- transformType t2
+  let body = AppExp (Index (Var (qualName p) (Info t1') loc) idxs loc) (Info (AppRes t2' []))
   pure $
     Lambda
       [Id p (Info (fromStruct t1')) mempty]
       body
       Nothing
-      (Info (mempty, RetType dims $ toStruct t2))
+      (Info (mempty, RetType dims $ toStruct t2'))
       loc
-  where
-    t1' = fromStruct t1
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
-
-noticeDims :: TypeBase Size as -> MonoM ()
-noticeDims = mapM_ notice . M.keysSet . unFV . freeInType
-  where
-    notice v = void $ transformFName mempty (qualName v) i64
 
 -- Convert a collection of 'ValBind's to a nested sequence of let-bound,
 -- monomorphic functions with the given expression at the bottom.
@@ -636,7 +682,9 @@ transformPat (Id v (Info (Scalar (Record fs))) loc) = do
         loc,
       M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks fs_ts
     )
-transformPat (Id v t loc) = pure (Id v t loc, mempty)
+transformPat (Id v t loc) = do
+  t' <- traverse transformType t
+  pure (Id v t' loc, mempty)
 transformPat (TuplePat pats loc) = do
   (pats', rrs) <- mapAndUnzipM transformPat pats
   pure (TuplePat pats' loc, mconcat rrs)
@@ -673,14 +721,22 @@ dimMapping ::
   TypeBase Size a ->
   TypeBase Size a ->
   DimInst
-dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
+dimMapping t1 t2 = execState (matchDims onDims t1 t2) mempty
   where
-    f bound d1 (SizeExpr (Var d2 _ _))
-      | qualLeaf d2 `elem` bound = pure d1
-    f _ (SizeExpr (Var d1 typ loc)) d2 = do
-      modify $ M.insert (qualLeaf d1) d2
-      pure $ SizeExpr $ Var d1 typ loc
-    f _ d _ = pure d
+    onDims bound (SizeExpr e1) (SizeExpr e2) = do
+      onExps bound e1 e2
+      pure $ SizeExpr e1
+    onDims _ d _ = pure d
+
+    onExps bound (Var v _ _) e
+      | not $ any (`elem` bound) $ freeVarsInExp e =
+          modify $ M.insert (qualLeaf v) $ SizeExpr e
+    onExps bound e1 e2
+      | Just es <- similarExps e1 e2 =
+          mapM_ (uncurry $ onExps bound) es
+    onExps _ _ _ = pure mempty
+
+    freeVarsInExp = M.keys . unFV . freeInExp
 
 inferSizeArgs :: [TypeParam] -> StructType -> StructType -> [Exp]
 inferSizeArgs tparams bind_t t =
@@ -688,10 +744,11 @@ inferSizeArgs tparams bind_t t =
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just (SizeExpr (Var d _ _)) ->
-          Just $ Var d (Info i64) mempty
+        -- do we really need to make a Literal from the IntLit ?
         Just (SizeExpr (IntLit x _ _)) ->
           Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
+        Just (SizeExpr e) ->
+          Just e
         _ ->
           Just $ Literal (SignedValue $ Int64Value 0) mempty
 
@@ -715,6 +772,9 @@ noNamedParams = f
       Sum $ fmap (map f) cs
     f' t = t
 
+transformRetType :: StructRetType -> MonoM StructRetType
+transformRetType (RetType ext t) = RetType ext <$> transformTypeSizes t
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -726,20 +786,19 @@ monomorphiseBinding ::
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
   replaceRecordReplacements rr $ do
     let bind_t = funType params rettype
-    (substs, t_shape_params) <- typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
+    (substs, t_shape_params) <-
+      typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
-        rettype' = applySubst (`M.lookup` substs') rettype
-        substPatType =
+    rettype' <- applySubst (`M.lookup` substs') <$> transformRetType rettype
+    let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
-        bind_t' = substTypesAny (`M.lookup` substs') bind_t
-        (shape_params_explicit, shape_params_implicit) =
+    bind_t' <- substTypesAny (`M.lookup` substs') <$> transformTypeSizes bind_t
+    let (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
 
     (params'', rrs) <- mapAndUnzipM transformPat params'
-
-    mapM_ noticeDims $ retType rettype : map patternStructType params''
 
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
@@ -942,7 +1001,6 @@ transformValBind valbind = do
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name l tparams _ (Info (RetType dims t)) _ _) = do
   subs <- asks $ M.map substFromAbbr . envTypeBindings
-  noticeDims t
   let tbinding = TypeAbbr l tparams $ RetType dims $ applySubst (`M.lookup` subs) t
   pure mempty {envTypeBindings = M.singleton name tbinding}
 

@@ -505,6 +505,27 @@ as simple as adding a *witness array* of type ``[n]()``:
 
 Such an array will take up no space at runtime.
 
+.. _anonymous-nonconstructive:
+
+"Type abbreviation contains an anonymous size not used constructively as an array size."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs for type abbreviations that use anonymous sizes,
+such as the following:
+
+.. code-block:: futhark
+
+   type^ t = []bool -> bool
+
+Such an abbreviation is actually shorthand for
+
+.. code-block:: futhark
+
+   type^ t = ?[n].[n]bool -> bool
+
+which is erroneous, but with workarounds, as explained in
+:ref:`unused-existential`.
+
 .. _unify-param-existential:
 
 "Parameter *x* used as size would go out of scope."
