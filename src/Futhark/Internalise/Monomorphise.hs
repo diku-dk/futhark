@@ -425,14 +425,10 @@ transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- transformExp body
-<<<<<<< HEAD
-  pure $ AppExp (LetWith id1 id2 idxs' e1' body' loc) (Info res)
-=======
-  AppExp (LetWith id1' id2' idxs' e1' body' loc) . Info <$> transformAppRes res
+  pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res)
   where
     transformIdent (Ident v t vloc) =
       Ident v <$> traverse transformType t <*> pure vloc
->>>>>>> 1f5d2377d (Eliminate remaining BinOps, I hope.)
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
