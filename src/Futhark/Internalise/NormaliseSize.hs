@@ -566,11 +566,7 @@ removeExpFromValBind valbind = do
     runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
   let newParams =
         funArg
-          `S.union` S.fromList
-            ( if null params' && isNothing (valBindEntryPoint valbind)
-                then filter (`elem` M.elems extNaming) $ retDims rety''
-                else argsParams
-            )
+          `S.union` S.fromList argsParams
       rety''' = arrowCleanRetType newParams rety''
       typeParams' =
         valBindTypeParams valbind
