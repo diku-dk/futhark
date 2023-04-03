@@ -363,11 +363,11 @@ transformAppExp (Apply fe args _) res =
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
   e1' <- transformExp e1
+  (pat', rr) <- transformPat pat
   form' <- case form of
     For ident e2 -> For ident <$> transformExp e2
     ForIn pat2 e2 -> ForIn pat2 <$> transformExp e2
-    While e2 -> While <$> transformExp e2
-  (pat', rr) <- transformPat pat
+    While e2 -> While <$> withRecordReplacements rr (transformExp e2)
   e3' <- withRecordReplacements rr $ transformExp e3
   -- Maybe monomorphisation introduced new arrays to the loop, and
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
