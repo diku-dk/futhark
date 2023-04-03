@@ -706,15 +706,6 @@ instance MonadTypeChecker TermTypeM where
           maybe (toStruct argtype) (Scalar . Prim) rt
         )
 
-  checkNamedSize loc v = do
-    (v', t) <- lookupVar loc v
-    onFailure (CheckingRequired [Scalar $ Prim $ Signed Int64] (toStruct t)) $
-      unify (mkUsage loc "use as array size") (toStruct t) $
-        Scalar $
-          Prim $
-            Signed Int64
-    pure v'
-
   typeError loc notes s = do
     checking <- asks termChecking
     case checking of

@@ -288,18 +288,6 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkNamedSize :: SrcLoc -> QualName Name -> m (QualName VName)
-  checkNamedSize loc v = do
-    (v', t) <- lookupVar loc v
-    case t of
-      Scalar (Prim (Signed Int64)) -> pure v'
-      _ ->
-        typeError loc mempty $
-          "Sizes must have type i64, but"
-            <+> dquotes (pretty v)
-            <+> "has type:"
-            </> pretty t
-
   checkSizeExpM :: UncheckedExp -> m Exp
 
   typeError :: Located loc => loc -> Notes -> Doc () -> m a

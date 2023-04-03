@@ -246,11 +246,6 @@ checkExpForSize ::
   MonadTypeChecker m =>
   ExpBase NoInfo Name ->
   m Exp
-checkExpForSize (Var v NoInfo vloc) = do
-  v' <- checkNamedSize vloc v
-  pure $ Var v' int64_info vloc
-  where
-    int64_info = Info (Scalar (Prim (Signed Int64)))
 checkExpForSize e =
   checkSizeExpM e
 
