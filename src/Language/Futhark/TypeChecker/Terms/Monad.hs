@@ -854,6 +854,7 @@ isInt64 :: Exp -> Maybe Int64
 isInt64 (Literal (SignedValue (Int64Value k')) _) = Just $ fromIntegral k'
 isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
+isInt64 (Parens x _) = isInt64 x
 isInt64 _ = Nothing
 
 maybeDimFromExp :: Exp -> Maybe Size

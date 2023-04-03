@@ -28,12 +28,12 @@ def last [n] 't (x: [n]t) = x[n-1]
 -- | Everything but the first element of the array.
 --
 -- **Complexity:** O(1).
-def tail [n] 't (x: [n]t): [n-1]t = x[1:] :> [n-1]t
+def tail [n] 't (x: [n]t): [n-1]t = x[1:]
 
 -- | Everything but the last element of the array.
 --
 -- **Complexity:** O(1).
-def init [n] 't (x: [n]t): [n-1]t = x[0:n-1] :> [n-1]t
+def init [n] 't (x: [n]t): [n-1]t = x[0:n-1]
 
 -- | Take some number of elements from the head of the array.
 --
@@ -43,7 +43,7 @@ def take [n] 't (i: i64) (x: [n]t): [i]t = x[0:i]
 -- | Remove some number of elements from the head of the array.
 --
 -- **Complexity:** O(1).
-def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:] :> [n-i]t
+def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 
 -- | Split an array at a given position.
 --

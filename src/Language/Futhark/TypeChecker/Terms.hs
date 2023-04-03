@@ -102,20 +102,61 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     adjustDims (DimFix {} : idxes') (_ : dims) =
       adjustDims idxes' dims
     -- Pat match some known slices to be non-existential.
-    adjustDims (DimSlice i j stride : idxes') (_ : dims)
+    adjustDims (DimSlice i j stride : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just 0) . isInt64) i,
-        Just j' <- maybeDimFromExp =<< j,
         maybe True ((== Just 1) . isInt64) stride =
-          (j' :) <$> adjustDims idxes' dims
+          let j' = maybe d SizeExpr j
+           in (j' :) <$> adjustDims idxes' dims
+    adjustDims (DimSlice i j stride : idxes') (d : dims)
+      | refine_sizes,
+        Just i' <- i, -- if i ~ 0, previous case
+        maybe True ((== Just 1) . isInt64) stride =
+          let j' = fromMaybe (unSizeExpr d) j
+           in (sizeMinus j' i' :) <$> adjustDims idxes' dims
+    -- stride == -1
     adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
       | refine_sizes,
-        maybe True (maybe False ((== 1) . abs) . isInt64) stride =
+        maybe True ((== Just (-1)) . isInt64) stride =
           (d :) <$> adjustDims idxes' dims
+    -- existential
     adjustDims (DimSlice i j stride : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
     adjustDims _ dims =
       pure dims
+
+    sizeMinus j i =
+      SizeExpr
+        $ AppExp
+          ( BinOp
+              (findOp "-", mempty)
+              sizeBinOpInfo
+              (j, Info (i64, Nothing))
+              (i, Info (i64, Nothing))
+              mempty
+          )
+        $ Info
+        $ AppRes i64 []
+    findOp op = qualName $ head $ filter ((op ==) . baseString) $ M.keys intrinsics
+    i64 = Scalar $ Prim $ Signed Int64
+    sizeBinOpInfo =
+      Info <$> Scalar
+        $ Arrow
+          mempty
+          Unnamed
+          Observe
+          i64
+        $ RetType []
+        $ Scalar
+        $ Arrow
+          mempty
+          Unnamed
+          Observe
+          i64
+        $ RetType [] i64
+    unSizeExpr (SizeExpr e) = e
+    unSizeExpr AnySize {} = undefined
+
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
