@@ -489,10 +489,9 @@ transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
   let (Info (xp, xtype, xargext), Info (yp, ytype)) = arg
-  fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
   desugarBinOpSection
-    fname'
+    fname
     (Just e')
     Nothing
     t
@@ -502,10 +501,9 @@ transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc
     loc
 transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
   let (Info (xp, xtype), Info (yp, ytype, yargext)) = arg
-  fname' <- transformFName loc fname $ toStruct t
   e' <- transformExp e
   desugarBinOpSection
-    fname'
+    fname
     Nothing
     (Just e')
     t
@@ -564,7 +562,7 @@ transformDimIndex (DimSlice me1 me2 me3) =
 
 -- Transform an operator section into a lambda.
 desugarBinOpSection ::
-  Exp ->
+  QualName VName ->
   Maybe Exp ->
   Maybe Exp ->
   PatType ->
@@ -573,21 +571,21 @@ desugarBinOpSection ::
   (PatRetType, [VName]) ->
   SrcLoc ->
   MonoM Exp
-desugarBinOpSection op e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
-  (v1, wrap_left, e1, p1) <- makeVarParam e_left $ fromStruct xtype
-  (v2, wrap_right, e2, p2) <- makeVarParam e_right $ fromStruct ytype
+desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
+  op <- transformFName loc fname <=< transformTypeSizes $ toStruct t
+  (v1, wrap_left, e1, p1) <- makeVarParam e_left . fromStruct =<< transformTypeSizes xtype
+  (v2, wrap_right, e2, p2) <- makeVarParam e_right . fromStruct =<< transformTypeSizes ytype
   let apply_left =
         mkApply
           op
           [(Observe, xext, e1)]
           (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
-      rettype' =
-        let onDim (SizeExpr (Var d typ _))
-              | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
-              | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
-            onDim d = d
-         in first onDim rettype
-      body =
+      onDim (SizeExpr (Var d typ _))
+        | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
+        | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
+      onDim d = d
+  rettype' <- first onDim <$> transformTypeSizes rettype
+  let body =
         mkApply apply_left [(Observe, yext, e2)] (AppRes rettype' retext)
       rettype'' = toStruct rettype'
   pure $
