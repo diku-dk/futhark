@@ -19,8 +19,6 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- import Debug.Trace
-
 newtype NormaliseM a
   = NormaliseM
       ( ReaderT
@@ -60,25 +58,16 @@ newtype InnerNormaliseM a
     )
 
 instance MonadFreshNames InnerNormaliseM where
-  getNameSource =
-    InnerNormaliseM $
-      ReaderT $
-        const $
-          StateT (((,) <$> getNameSource <*>) . pure)
-  putNameSource src =
-    InnerNormaliseM $
-      ReaderT $
-        const $
-          StateT (((,) <$> putNameSource src <*>) . pure)
+  getNameSource = InnerNormaliseM $ lift $ lift getNameSource
+  putNameSource = InnerNormaliseM . lift . lift . putNameSource
 
 runInnerNormaliser ::
   InnerNormaliseM a ->
-  M.Map Size VName ->
   S.Set VName ->
   M.Map Size VName ->
   NormaliseM (a, M.Map Size VName)
-runInnerNormaliser (InnerNormaliseM m) params =
-  runStateT . runReaderT m . (,params)
+runInnerNormaliser (InnerNormaliseM m) initialScope params =
+  runReaderT m (initialScope, params) `runStateT` mempty
 
 withArgs :: S.Set VName -> InnerNormaliseM a -> InnerNormaliseM a
 withArgs = local . first . S.union
@@ -124,34 +113,6 @@ canCalculate scope =
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
--- catchImplicitDims' :: Ident -> InnerNormaliseM Exp -> InnerNormaliseM Exp
--- catchImplicitDims' (Ident vn (Info ty) loc) m = do
---  implicit <- askIntros (M.keysSet $ unFV $ freeInType ty)
---  if S.null implicit
---    then m
---    else do
---      -- reName maybe ?
---      body' <- scoping implicit m
---      pure $
---        AppExp
---          ( LetPat
---              (map (`SizeBinder` mempty) $ S.toList implicit)
---              (Wildcard (Info ty) loc)
---              (Var (qualName vn) (Info ty) loc)
---              body'
---              mempty
---          )
---          (appRes body')
---  where
---    appRes (AppExp _ resInfo) =
---      resInfo
---    appRes e =
---      Info $ AppRes (typeOf e) []
---
--- catchImplicitDims :: Pat -> InnerNormaliseM Exp -> InnerNormaliseM Exp
--- catchImplicitDims pat m =
---  S.foldr catchImplicitDims' m (patIdents pat)
-
 insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
   reName <- newName name
@@ -178,12 +139,7 @@ insertDimCalculus (dim, name) body = do
 
 unscoping :: S.Set VName -> Exp -> InnerNormaliseM Exp
 unscoping argset body = do
-  intros <- askIntros argset
-  (localDims, nxtBind) <-
-    gets $
-      M.partitionWithKey
-        (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
-  put nxtBind
+  localDims <- parametrizing argset
   scope <- S.union argset <$> askScope
   foldrM insertDimCalculus body $ M.toList $ canCalculate scope localDims
 
@@ -193,8 +149,7 @@ scoping argset m =
 
 expFree :: Exp -> InnerNormaliseM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
-  let dimArgs =
-        S.fromList dims
+  let dimArgs = S.fromList dims
   (form', formArgs) <- onForm form
   let argset = dimArgs `S.union` formArgs `S.union` patNames pat
   pat' <- withArgs dimArgs (onPat pat)
@@ -216,21 +171,21 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
       (,patNames fpat) <$> (ForIn <$> onPat fpat <*> expFree e)
     onForm (While e) =
       (,S.empty) <$> (While <$> expFree e)
-expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) body_nxt loc) (Info resT)) = do
+expFree (AppExp (LetFun name (typeParams, args, rettype_te, retT, body) body_nxt loc) resT) = do
   let argset =
         S.fromList (mapMaybe unParamDim typeParams)
           `S.union` foldMap patNames args
   args' <- mapM onPat args
   params <- parametrizing argset
-  retT' <- withParams params $ onRetType argset retT
+  retT' <- withParams params $ onRetType argset $ unInfo retT
   body' <- withParams params $ scoping argset (expFree body)
   bodyNxt' <- scoping (S.singleton name) (expFree body_nxt)
-  resT' <- Info <$> onResType resT
+  resT' <- Info <$> onResType (unInfo resT)
   pure $
     AppExp
       ( LetFun
           name
-          ( typeParams <> map (\(e, vn) -> TypeParamDim vn (srclocOf $ unSizeExpr e)) (M.toList params),
+          ( typeParams <> map (`TypeParamDim` mempty) (M.elems params),
             args',
             rettype_te, -- ?
             Info retT',
@@ -241,25 +196,18 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, Info retT, body) bod
       )
       resT'
 expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
-  let dimArgs =
-        S.fromList (map sizeName dims)
+  let dimArgs = S.fromList (map sizeName dims)
   implicitDims <- withArgs dimArgs $ askIntros (M.keysSet $ unFV $ freeInPat pat)
   let dimArgs' = dimArgs <> implicitDims
-  let letArgs = patNames pat
-  let argset =
-        dimArgs'
-          `S.union` letArgs
+      letArgs = patNames pat
+      argset = dimArgs' `S.union` letArgs
   pat' <- withArgs dimArgs' (onPat pat)
   params <- parametrizing dimArgs'
   let dims' = dims <> map (`SizeBinder` mempty) (M.elems params <> S.toList implicitDims)
   resT' <- Info <$> withParams params (onResType resT)
   body' <- withParams params $ scoping argset (expFree body)
   e1' <- expFree e1
-  pure $
-    AppExp
-      ( LetPat dims' pat' e1' body' loc
-      )
-      resT'
+  pure $ AppExp (LetPat dims' pat' e1' body' loc) resT'
 expFree (AppExp (LetWith dest src slice e body loc) (Info resT)) = do
   resT' <- Info <$> onResType resT
   AppExp
@@ -370,32 +318,8 @@ expFree (Lambda args body rettype_te (Info (as, retT)) loc) = do
     <*> pure rettype_te -- ?
     <*> (Info . (as,) <$> onRetType argset retT)
     <*> pure loc
-expFree (OpSectionLeft op (Info ty) e (Info (n1, ty1, m1), Info (n2, ty2)) (Info retT, Info ext) loc) = do
-  let args =
-        S.fromList ext
-          `S.union` case n2 of
-            Named vn -> S.singleton vn
-            Unnamed -> mempty
-  ty1' <- onType ty1
-  ty2' <- onType ty2
-  OpSectionLeft op
-    <$> (Info <$> onType ty)
-    <*> expFree e
-    <*> pure (Info (n1, ty1', m1), Info (n2, ty2'))
-    <*> ((,Info ext) . Info <$> onRetType args retT)
-    <*> pure loc
-expFree (OpSectionRight op (Info ty) e (Info (n1, ty1), Info (n2, ty2, m2)) (Info retT) loc) = do
-  let args = case n1 of
-        Named vn -> S.singleton vn
-        Unnamed -> mempty
-  ty1' <- onType ty1
-  ty2' <- onType ty2
-  OpSectionRight op
-    <$> (Info <$> onType ty)
-    <*> expFree e
-    <*> pure (Info (n1, ty1'), Info (n2, ty2', m2))
-    <*> (Info <$> onRetType args retT)
-    <*> pure loc
+expFree e@(OpSectionLeft {}) = error $ "Unexpected section: " ++ prettyString e
+expFree e@(OpSectionRight {}) = error $ "Unexpected section: " ++ prettyString e
 expFree e = astMap mapper e
   where
     mapper =
@@ -508,8 +432,7 @@ arrowArgScalar (Arrow as argName d argT retT) =
     pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
-    argset =
-      M.keysSet (unFV $ freeInType argT)
+    argset = M.keysSet (unFV $ freeInType argT)
     fullArgset =
       argset
         <> case argName of
@@ -570,16 +493,14 @@ removeExpFromValBind valbind = do
   scope <-
     asks $
       S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-  (params', expNaming) <- runInnerNormaliser (mapM onPat $ valBindParams valbind) mempty scope mempty
+  (params', expNaming) <- runInnerNormaliser (mapM onPat $ valBindParams valbind) scope mempty
 
   let args = foldMap patNames params'
-  let argsParams = M.elems expNaming
-  (rety', extNaming) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) expNaming (scope <> args) expNaming
+      argsParams = M.elems expNaming
+  (rety', extNaming) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) (scope <> args) expNaming
   (rety'', (funArg, _)) <-
     runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
-  let newParams =
-        funArg
-          `S.union` S.fromList argsParams
+  let newParams = funArg `S.union` S.fromList argsParams
       rety''' = arrowCleanRetType newParams rety''
       typeParams' =
         valBindTypeParams valbind
@@ -587,7 +508,7 @@ removeExpFromValBind valbind = do
       expNaming' = M.filter (`S.member` newParams) extNaming
 
   let scope' = scope `S.union` args `S.union` newParams
-  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) expNaming' scope' expNaming'
+  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) scope' expNaming'
   let newNames = expNaming'' `M.difference` expNaming'
   body'' <- foldrM insertDimCalculus body' $ M.toList $ canCalculate scope' newNames
   body''' <- expReplace expNaming' body''
