@@ -16,6 +16,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
+import Data.List (mapAccumL)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -339,7 +340,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Copy v ->
       case lookup v inps of
@@ -585,11 +586,16 @@ liftParam w fparam =
 
 -- Lifts a function return type.
 -- TODO: Handle array (and maybe other) case(s).
-liftRetType :: SubExp -> RetType SOACS -> RetType GPU
-liftRetType w rettype =
+liftRetType :: SubExp -> Int -> RetType SOACS -> [RetType GPU]
+liftRetType w i rettype =
   case rettype of
-    Prim pt -> arrayOf (Prim pt) (Shape [Free w]) Nonunique
-    Array pt shape u -> undefined
+    Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
+    Array pt shape u ->
+      let offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+          flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
+          segments = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+          elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
+       in undefined
     Acc {} -> error "liftRetType: Acc"
     Mem {} -> error "liftRetType: Mem"
 
@@ -618,7 +624,7 @@ liftFunDef const_scope fd = do
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' = map (liftRetType w) rettype
+  let rettype' = concat $ snd $ mapAccumL (\i r -> let lrt = liftRetType w i r in (i + length lrt, lrt)) 0 rettype
   -- Build a pattern of the body results.
   -- TODO: Include a case for constants.
   let result_pat = Pat $ map (\r -> case resSubExp r of Var v -> PatElem v ()) $ bodyResult body
