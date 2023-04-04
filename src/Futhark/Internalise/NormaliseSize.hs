@@ -1,6 +1,10 @@
--- | This Normalisation module converts a well-typed, polymorphic,
+-- | This Normalisation module converts a well-typed, monomorphised,
 -- module-free Futhark program into an equivalent program without
 -- arbitrary size expression.
+-- This is done by replacing all complex size expresssions by an equivalent
+-- of the old style NamedSize e.g. size just described as a variable.
+-- This variables are then calculated in let-bindings or as a size parameter,
+-- depending on the context.
 module Futhark.Internalise.NormaliseSize (transformProg) where
 
 import Control.Monad.RWS hiding (Sum)
@@ -19,6 +23,8 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
+-- | Global Normalisation monad
+-- It's only used to keep track of declared bindings and to hold the names source
 newtype NormaliseM a
   = NormaliseM
       ( ReaderT
@@ -42,6 +48,10 @@ runNormaliser (NormaliseM m) =
 addBind :: VName -> NormaliseM a -> NormaliseM a
 addBind = local . S.insert
 
+-- | Main Normalisation monad
+-- Used all the long of a unique ValBind,
+-- it keeps track of expressions that are being parametrized and variables in the scope
+-- and remembers expressions being replaced to replace identical expressions with the same variable
 newtype InnerNormaliseM a
   = InnerNormaliseM
       ( ReaderT
@@ -75,6 +85,8 @@ withArgs = local . first . S.union
 withParams :: M.Map Size VName -> InnerNormaliseM a -> InnerNormaliseM a
 withParams = local . second . M.union
 
+-- | Asks the introduced variables in a set of argument,
+-- that is arguments not currently in scope.
 askIntros :: S.Set VName -> InnerNormaliseM (S.Set VName)
 askIntros argset =
   asks $ (S.filter notIntrisic argset `S.difference`) . fst
@@ -85,6 +97,9 @@ askScope :: InnerNormaliseM (S.Set VName)
 askScope =
   asks fst
 
+-- | Gets and removes expressions that could not be calculated when
+-- the arguments set will be unscoped.
+-- This should be called without argset in scope, for good detection of intros.
 parametrizing :: S.Set VName -> InnerNormaliseM (M.Map Size VName)
 parametrizing argset = do
   intros <- askIntros argset
@@ -100,6 +115,7 @@ unSizeExpr :: Size -> Exp
 unSizeExpr (SizeExpr e) = e
 unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
 
+-- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
 maybeOldSize :: Exp -> Maybe Size
 maybeOldSize e =
   case bareCleanExp e of
@@ -147,6 +163,7 @@ scoping :: S.Set VName -> InnerNormaliseM Exp -> InnerNormaliseM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
+-- Normalise types in an expression
 expFree :: Exp -> InnerNormaliseM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let dimArgs = S.fromList dims
@@ -332,6 +349,7 @@ expFree e = astMap mapper e
           mapOnPatRetType = error "mapOnRetType called in expFree: should not happen"
         }
 
+-- Normalise a Type, ResType, RetType or types in a pattern
 onResType :: AppRes -> InnerNormaliseM AppRes
 onResType (AppRes ty ext) =
   AppRes <$> withArgs (S.fromList ext) (onType ty) <*> pure ext
@@ -387,6 +405,8 @@ onSize (SizeExpr e) =
   onExp e
 onSize s = pure s
 
+-- | Creates a new expression replacement if needed, this always return old style sizes.
+-- (e.g. single variable or constant)
 onExp :: Exp -> InnerNormaliseM Size
 onExp e = do
   let e' = SizeExpr e
@@ -403,16 +423,16 @@ onExp e = do
           modify $ M.insert e' vn
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
+-- | Monad for arrowArg
+-- Reader (scope, dimtoPush)
+-- Writer (arrow arguments, names that can be existentialy bound)
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (S.Set VName, S.Set VName) NormaliseM) a
+
 -- | arrowArg takes a type (or return type) and returns it
 -- with the existentials bound moved at the right of arrows.
 -- It also gives (through writer monad) size variables used in arrow arguments
 -- and variables that are constructively used.
 -- The returned type should be cleanned, as too many existentials are introduced.
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (S.Set VName, S.Set VName) NormaliseM) a
-
--- Reader (scope, dimtoPush)
--- Writer(arrow arguments, names that can be existentialy bound)
-
 arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
 arrowArgRetType argset (RetType dims ty) =
   pass $ do
@@ -480,6 +500,8 @@ arrowCleanType paramed (Array as u shape scalar) =
 arrowCleanType paramed (Scalar ty) =
   Scalar $ arrowCleanScalar paramed ty
 
+-- Replace some expressions by a parameter.
+-- (probably not needed anymore, but may be much more used to reduced number of calculation of sizes)
 expReplace :: M.Map Size VName -> Exp -> NormaliseM Exp
 expReplace mapping e
   | Just vn <- M.lookup (SizeExpr e) mapping = pure $ Var (qualName vn) (Info $ typeOf e) (srclocOf e)
@@ -487,8 +509,8 @@ expReplace mapping e = astMap mapper e
   where
     mapper = identityMapper {mapOnExp = expReplace mapping}
 
-removeExpFromValBind ::
-  ValBindBase Info VName -> NormaliseM (ValBindBase Info VName)
+-- Normalise a ValBind
+removeExpFromValBind :: ValBind -> NormaliseM ValBind
 removeExpFromValBind valbind = do
   scope <-
     asks $
@@ -532,5 +554,5 @@ normaliseValBind valbind m =
   (:) <$> removeExpFromValBind valbind <*> addBind (valBindName valbind) m
 
 transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
-transformProg binds =
-  modifyNameSource $ runNormaliser (foldr normaliseValBind (pure []) binds)
+transformProg =
+  modifyNameSource . runNormaliser . foldr normaliseValBind (pure [])
