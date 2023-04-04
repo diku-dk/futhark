@@ -624,7 +624,7 @@ localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 instance MonadTypeChecker TermTypeM where
   checkExpForSize e = do
     checker <- asks termChecker
-    e' <- checker e
+    e' <- noUnique $ checker e
     let t = toStruct $ typeOf e'
     expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
     updateTypes e'

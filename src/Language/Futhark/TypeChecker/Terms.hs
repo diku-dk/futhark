@@ -1129,7 +1129,7 @@ checkOneExp e = fmap fst . runTermTypeM checkExp $ do
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: UncheckedExp -> TypeM Exp
 checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
-  e' <- checkExp e
+  e' <- noUnique $ checkExp e
   let t = toStruct $ typeOf e'
   expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
