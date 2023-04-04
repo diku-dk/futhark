@@ -235,35 +235,15 @@ data Size
     AnySize (Maybe VName)
   deriving (Show)
 
-expSizeEq :: ExpBase NoInfo VName -> ExpBase NoInfo VName -> Bool
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int8Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int16Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int32Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (SignedValue (Int64Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int8Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int16Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int32Value v2)) _) = v1 == toInteger v2
-expSizeEq (IntLit v1 _ _) (Literal (UnsignedValue (Int64Value v2)) _) = v1 == toInteger v2
-expSizeEq (Literal (SignedValue (Int8Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int16Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int32Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (SignedValue (Int64Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (UnsignedValue (Int8Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (UnsignedValue (Int16Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (UnsignedValue (Int32Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq (Literal (UnsignedValue (Int64Value v1)) _) (IntLit v2 _ _) = toInteger v1 == v2
-expSizeEq e1 e2 = e1 == e2
-
--- Workaround to not break the compiler.
--- Somewhere these are used but types in Expr are not well managed currently
 instance Eq Size where
   AnySize m1 == AnySize m2 = m1 == m2
-  SizeExpr e1 == SizeExpr e2 = expSizeEq (bareCleanExp e1) (bareCleanExp e2)
+  SizeExpr e1 == SizeExpr e2 = bareCleanExp e1 == bareCleanExp e2
   _ == _ = False
 
 instance Ord Size where
   AnySize m1 <= AnySize m2 = m1 <= m2
   SizeExpr e1 <= SizeExpr e2 = bareCleanExp e1 <= bareCleanExp e2
+  AnySize {} <= SizeExpr {} = True
   _ <= _ = False
 
 sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
