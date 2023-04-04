@@ -520,8 +520,9 @@ transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
     (yp, ytype, yargext)
     (rettype, [])
     loc
-transformExp (ProjectSection fields (Info t) loc) =
-  desugarProjectSection fields t loc
+transformExp (ProjectSection fields (Info t) loc) = do
+  t' <- transformType t
+  desugarProjectSection fields t' loc
 transformExp (IndexSection idxs (Info t) loc) = do
   idxs' <- mapM transformDimIndex idxs
   desugarIndexSection idxs' t loc
