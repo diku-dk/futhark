@@ -49,7 +49,7 @@ def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 --
 -- **Complexity:** O(1).
 def split [n] 't (i: i64) (xs: [n]t): ([i]t, [n-i]t) =
-  (xs[0:i], xs[i:] :> [n-i]t)
+  (xs[0:i], xs[i:])
 
 -- | Return the elements of the array in reverse order.
 --
