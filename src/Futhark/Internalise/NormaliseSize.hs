@@ -7,6 +7,7 @@
 -- depending on the context.
 module Futhark.Internalise.NormaliseSize (transformProg) where
 
+import Control.Monad.Identity
 import Control.Monad.RWS hiding (Sum)
 import Control.Monad.Reader
 import Control.Monad.State
@@ -18,45 +19,21 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
+import Futhark.Util (mapAccumLM)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- | Global Normalisation monad
--- It's only used to keep track of declared bindings and to hold the names source
-newtype NormaliseM a
-  = NormaliseM
-      ( ReaderT
-          (S.Set VName)
-          (State VNameSource)
-          a
-      )
-  deriving
-    ( Monad,
-      Functor,
-      Applicative,
-      MonadReader (S.Set VName),
-      MonadState VNameSource,
-      MonadFreshNames
-    )
-
-runNormaliser :: NormaliseM a -> VNameSource -> (a, VNameSource)
-runNormaliser (NormaliseM m) =
-  runState (runReaderT m mempty)
-
-addBind :: VName -> NormaliseM a -> NormaliseM a
-addBind = local . S.insert
-
 -- | Main Normalisation monad
 -- Used all the long of a unique ValBind,
 -- it keeps track of expressions that are being parametrized and variables in the scope
 -- and remembers expressions being replaced to replace identical expressions with the same variable
-newtype InnerNormaliseM a
-  = InnerNormaliseM
+newtype NormaliseM a
+  = NormaliseM
       ( ReaderT
           (S.Set VName, M.Map Size VName)
-          (StateT (M.Map Size VName) NormaliseM)
+          (StateT (M.Map Size VName) (State VNameSource))
           a
       )
   deriving
@@ -67,40 +44,42 @@ newtype InnerNormaliseM a
       MonadState (M.Map Size VName)
     )
 
-instance MonadFreshNames InnerNormaliseM where
-  getNameSource = InnerNormaliseM $ lift $ lift getNameSource
-  putNameSource = InnerNormaliseM . lift . lift . putNameSource
+instance MonadFreshNames NormaliseM where
+  getNameSource = NormaliseM $ lift $ lift getNameSource
+  putNameSource = NormaliseM . lift . lift . putNameSource
 
-runInnerNormaliser ::
-  InnerNormaliseM a ->
+runNormaliseM ::
+  MonadFreshNames m =>
+  NormaliseM a ->
   S.Set VName ->
   M.Map Size VName ->
-  NormaliseM (a, M.Map Size VName)
-runInnerNormaliser (InnerNormaliseM m) initialScope params =
-  runReaderT m (initialScope, params) `runStateT` mempty
+  m (a, M.Map Size VName)
+runNormaliseM (NormaliseM m) initialScope params =
+  modifyNameSource $ \src ->
+    runState (runReaderT m (initialScope, params) `runStateT` mempty) src
 
-withArgs :: S.Set VName -> InnerNormaliseM a -> InnerNormaliseM a
+withArgs :: S.Set VName -> NormaliseM a -> NormaliseM a
 withArgs = local . first . S.union
 
-withParams :: M.Map Size VName -> InnerNormaliseM a -> InnerNormaliseM a
+withParams :: M.Map Size VName -> NormaliseM a -> NormaliseM a
 withParams = local . second . M.union
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
-askIntros :: S.Set VName -> InnerNormaliseM (S.Set VName)
+askIntros :: S.Set VName -> NormaliseM (S.Set VName)
 askIntros argset =
   asks $ (S.filter notIntrisic argset `S.difference`) . fst
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
-askScope :: InnerNormaliseM (S.Set VName)
+askScope :: NormaliseM (S.Set VName)
 askScope =
   asks fst
 
 -- | Gets and removes expressions that could not be calculated when
 -- the arguments set will be unscoped.
 -- This should be called without argset in scope, for good detection of intros.
-parametrizing :: S.Set VName -> InnerNormaliseM (M.Map Size VName)
+parametrizing :: S.Set VName -> NormaliseM (M.Map Size VName)
 parametrizing argset = do
   intros <- askIntros argset
   (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
@@ -154,18 +133,18 @@ insertDimCalculus (dim, name) body = do
       | True <- vn == name = Just $ ExpSubst $ sizeVar (qualName reName) mempty
       | otherwise = Nothing
 
-unscoping :: S.Set VName -> Exp -> InnerNormaliseM Exp
+unscoping :: S.Set VName -> Exp -> NormaliseM Exp
 unscoping argset body = do
   localDims <- parametrizing argset
   scope <- S.union argset <$> askScope
   foldrM insertDimCalculus body $ M.toList $ canCalculate scope localDims
 
-scoping :: S.Set VName -> InnerNormaliseM Exp -> InnerNormaliseM Exp
+scoping :: S.Set VName -> NormaliseM Exp -> NormaliseM Exp
 scoping argset m =
   withArgs argset m >>= unscoping argset
 
 -- Normalise types in an expression
-expFree :: Exp -> InnerNormaliseM Exp
+expFree :: Exp -> NormaliseM Exp
 expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let dimArgs = S.fromList dims
   (form', formArgs) <- onForm form
@@ -351,11 +330,11 @@ expFree e = astMap mapper e
         }
 
 -- Normalise a Type, ResType, RetType or types in a pattern
-onResType :: AppRes -> InnerNormaliseM AppRes
+onResType :: AppRes -> NormaliseM AppRes
 onResType (AppRes ty ext) =
   AppRes <$> withArgs (S.fromList ext) (onType ty) <*> pure ext
 
-onPat :: Pat -> InnerNormaliseM Pat
+onPat :: Pat -> NormaliseM Pat
 onPat =
   astMap mapper
   where
@@ -366,14 +345,14 @@ onPat =
           mapOnPatType = onType
         }
 
-onRetType :: S.Set VName -> RetTypeBase Size as -> InnerNormaliseM (RetTypeBase Size as)
+onRetType :: S.Set VName -> RetTypeBase Size as -> NormaliseM (RetTypeBase Size as)
 onRetType argset (RetType dims ty) = do
   ty' <- withArgs argset $ onType ty
   rl <- parametrizing argset
   let dims' = dims <> M.elems rl
   pure $ RetType dims' ty'
 
-onScalar :: ScalarTypeBase Size as -> InnerNormaliseM (ScalarTypeBase Size as)
+onScalar :: ScalarTypeBase Size as -> NormaliseM (ScalarTypeBase Size as)
 onScalar (Record fs) =
   Record <$> traverse onType fs
 onScalar (Sum cs) =
@@ -395,20 +374,20 @@ onScalar ty = pure ty
 
 onType ::
   TypeBase Size as ->
-  InnerNormaliseM (TypeBase Size as)
+  NormaliseM (TypeBase Size as)
 onType (Array as u shape scalar) =
   Array as u <$> mapM onSize shape <*> onScalar scalar
 onType (Scalar ty) =
   Scalar <$> onScalar ty
 
-onSize :: Size -> InnerNormaliseM Size
+onSize :: Size -> NormaliseM Size
 onSize (SizeExpr e) =
   onExp e
 onSize s = pure s
 
 -- | Creates a new expression replacement if needed, this always return old style sizes.
 -- (e.g. single variable or constant)
-onExp :: Exp -> InnerNormaliseM Size
+onExp :: Exp -> NormaliseM Size
 onExp e = do
   let e' = SizeExpr e
   case maybeOldSize e of
@@ -427,19 +406,21 @@ onExp e = do
 -- | Monad for arrowArg
 -- Reader (scope, dimtoPush)
 -- Writer (arrow arguments, names that can be existentialy bound)
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (WriterT (S.Set VName, S.Set VName) NormaliseM) a
+type ArrowArgM a = ReaderT (S.Set VName, [VName]) (Writer (S.Set VName, S.Set VName)) a
 
 -- | arrowArg takes a type (or return type) and returns it
 -- with the existentials bound moved at the right of arrows.
 -- It also gives (through writer monad) size variables used in arrow arguments
 -- and variables that are constructively used.
 -- The returned type should be cleanned, as too many existentials are introduced.
-arrowArgRetType :: S.Set VName -> RetTypeBase Size as -> ArrowArgM (RetTypeBase Size as)
-arrowArgRetType argset (RetType dims ty) =
-  pass $ do
-    (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
-    dims' <- asks $ (dims <>) . snd
-    pure (RetType (filter (`S.member` canExt) dims') ty', first (`S.difference` canExt))
+arrowArgRetType ::
+  S.Set VName ->
+  RetTypeBase Size as ->
+  ArrowArgM (RetTypeBase Size as)
+arrowArgRetType argset (RetType dims ty) = pass $ do
+  (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
+  dims' <- asks $ (dims <>) . snd
+  pure (RetType (filter (`S.member` canExt) dims') ty', first (`S.difference` canExt))
 
 arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
 arrowArgScalar (Record fs) =
@@ -503,46 +484,53 @@ arrowCleanType paramed (Scalar ty) =
 
 -- Replace some expressions by a parameter.
 -- (probably not needed anymore, but may be much more used to reduced number of calculation of sizes)
-expReplace :: M.Map Size VName -> Exp -> NormaliseM Exp
+expReplace :: M.Map Size VName -> Exp -> Exp
 expReplace mapping e
-  | Just vn <- M.lookup (SizeExpr e) mapping = pure $ Var (qualName vn) (Info $ typeOf e) (srclocOf e)
-expReplace mapping e = astMap mapper e
+  | Just vn <- M.lookup (SizeExpr e) mapping =
+      Var (qualName vn) (Info $ typeOf e) (srclocOf e)
+expReplace mapping e = runIdentity $ astMap mapper e
   where
-    mapper = identityMapper {mapOnExp = expReplace mapping}
+    mapper = identityMapper {mapOnExp = pure . expReplace mapping}
 
 -- Normalise a ValBind
-removeExpFromValBind :: ValBind -> NormaliseM ValBind
-removeExpFromValBind valbind = do
-  scope <-
-    asks $
-      S.union (S.fromList $ mapMaybe unParamDim $ valBindTypeParams valbind)
-  (params', expNaming) <- runInnerNormaliser (mapM onPat $ valBindParams valbind) scope mempty
+normaliseValBind :: MonadFreshNames m => S.Set VName -> ValBind -> m (S.Set VName, ValBind)
+normaliseValBind prev_scope valbind = do
+  let scope =
+        prev_scope
+          <> S.fromList (mapMaybe unParamDim $ valBindTypeParams valbind)
+  (params', exp_naming) <-
+    runNormaliseM (mapM onPat $ valBindParams valbind) scope mempty
 
   let args = foldMap patNames params'
-      argsParams = M.elems expNaming
-  (rety', extNaming) <- runInnerNormaliser (hardOnRetType $ unInfo $ valBindRetType valbind) (scope <> args) expNaming
-  (rety'', (funArg, _)) <-
-    runWriterT (runReaderT (arrowArgRetType args rety') (scope, mempty))
-  let newParams = funArg `S.union` S.fromList argsParams
-      rety''' = arrowCleanRetType newParams rety''
+      args_params = M.elems exp_naming
+  (rety', extNaming) <-
+    runNormaliseM (hardOnRetType $ unInfo $ valBindRetType valbind) (scope <> args) exp_naming
+  let (rety'', (funArg, _)) =
+        runWriter (runReaderT (arrowArgRetType args rety') (scope, mempty))
+      new_params = funArg `S.union` S.fromList args_params
+      rety''' = arrowCleanRetType new_params rety''
       typeParams' =
         valBindTypeParams valbind
-          <> map (`TypeParamDim` mempty) (S.toList newParams)
-      expNaming' = M.filter (`S.member` newParams) extNaming
+          <> map (`TypeParamDim` mempty) (S.toList new_params)
+      exp_naming' = M.filter (`S.member` new_params) extNaming
 
-  let scope' = scope `S.union` args `S.union` newParams
-  (body', expNaming'') <- runInnerNormaliser (expFree $ valBindBody valbind) scope' expNaming'
-  let newNames = expNaming'' `M.difference` expNaming'
-  body'' <- foldrM insertDimCalculus body' $ M.toList $ canCalculate scope' newNames
-  body''' <- expReplace expNaming' body''
+  let scope' = scope `S.union` args `S.union` new_params
+  (body', exp_naming'') <-
+    runNormaliseM (expFree $ valBindBody valbind) scope' exp_naming'
+  let new_names = exp_naming'' `M.difference` exp_naming'
+  body'' <-
+    expReplace exp_naming'
+      <$> foldrM insertDimCalculus body' (M.toList $ canCalculate scope' new_names)
 
-  pure $
-    valbind
-      { valBindRetType = Info rety''',
-        valBindTypeParams = typeParams',
-        valBindParams = params',
-        valBindBody = body'''
-      }
+  pure
+    ( S.insert (valBindName valbind) prev_scope,
+      valbind
+        { valBindRetType = Info rety''',
+          valBindTypeParams = typeParams',
+          valBindParams = params',
+          valBindBody = body''
+        }
+    )
   where
     hardOnRetType (RetType _ ty) = do
       ty' <- onType ty
@@ -550,10 +538,5 @@ removeExpFromValBind valbind = do
       let dims' = S.toList unbounded
       pure $ RetType dims' ty'
 
-normaliseValBind :: ValBind -> NormaliseM [ValBind] -> NormaliseM [ValBind]
-normaliseValBind valbind m =
-  (:) <$> removeExpFromValBind valbind <*> addBind (valBindName valbind) m
-
 transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
-transformProg =
-  modifyNameSource . runNormaliser . foldr normaliseValBind (pure [])
+transformProg = fmap snd . mapAccumLM normaliseValBind mempty
