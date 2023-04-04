@@ -1042,11 +1042,21 @@ checkApply
 
       (argext, parsubst) <-
         case pname of
-          Named pname' -> do
-            pure
-              ( Nothing,
-                (`M.lookup` M.singleton pname' (ExpSubst argexp))
-              )
+          Named pname'
+            | M.member pname' (unFV $ freeInType tp2') ->
+                if isJust $ anyConsumption dflow
+                  then do
+                    warn (srclocOf argexp) "This consuming argument is used in the return type, so it is being replaced by an existential."
+                    d <- newDimVar (srclocOf argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                    pure
+                      ( Just d,
+                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
+                      )
+                  else
+                    pure
+                      ( Nothing,
+                        (`M.lookup` M.singleton pname' (ExpSubst argexp))
+                      )
           _ -> pure (Nothing, const Nothing)
 
       -- In case a function result is not immediately bound to a name,
