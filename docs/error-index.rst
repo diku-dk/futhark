@@ -943,3 +943,35 @@ ordinary parameter:
 .. code-block:: futhark
 
    entry f (n: i64) : [0][n]i32 = []
+
+.. _nonconstructive-entry:
+
+"Entry point size parameter [n] only used non-constructively."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs for programs such as the following::
+
+.. code-block:: futhark
+
+   entry main [x] (A: [x+1]i32) = ...
+
+The size parameter ``[x]`` is only used in an size expression ``x+1``,
+rather than directly as an array size.  This is allowed for ordinary
+functions, but not for entry points.  The reason is that entry points
+are not subject to ordinary type inference, as they are called from
+the external world, meaning that the value of the size parameter
+``[x]`` will have to be determined from the size of the array ``A``.
+This is in principle not a problem for simple sizes like ``x+1``, as
+it is obvious that ``x == length A - 1``, but in the general case it
+would require computing function inverses that might not exist.  For
+this reason, entry points require that all size parameters are used
+:term:`constructively<constructive use>`.
+
+As a workaround, you can rewrite the entry point as follows:
+
+.. code-block:: futhark
+
+   entry main [n] (A: [n]i32) =
+     let x = n-1
+     let A = A :> [x+1]i32
+     ...
