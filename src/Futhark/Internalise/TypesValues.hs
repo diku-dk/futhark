@@ -129,7 +129,7 @@ internaliseDim exts d =
     E.AnySize _ -> Ext <$> newId
     E.SizeExpr (E.IntLit n _ _) -> pure $ Free $ intConst I.Int64 n
     E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
-    E.SizeExpr _ -> error "Arbitrary Expression not supported yet"
+    E.SizeExpr e -> error $ "Unexpected size expression: " ++ prettyString e
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = I.Ext x

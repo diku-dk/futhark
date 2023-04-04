@@ -75,13 +75,13 @@ data FutharkPipeline
     Pipeline [UntypedPass]
   | -- | Partially evaluate away the module language.
     Defunctorise
-  | -- | Defunctorise, monomorphise.
+  | -- | Defunctorise and monomorphise.
     Monomorphise
   | -- | Defunctorise, monomorphise and normalise sizes.
     Normalise
-  | -- | Defunctorise, normalise sizes, monomorphise, and lambda-lift.
+  | -- | Defunctorise, monomorphise, normalise sizes and lambda-lift.
     LiftLambdas
-  | -- | Defunctorise, simplify, monomorphise, lambda-lift, and defunctionalise.
+  | -- | Defunctorise, monomorphise, normalise sizes, lambda-lift, and defunctionalise.
     Defunctionalise
 
 data Config = Config

@@ -156,7 +156,6 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         $ RetType [] i64
     unSizeExpr (SizeExpr e) = e
     unSizeExpr AnySize {} = undefined
-
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
