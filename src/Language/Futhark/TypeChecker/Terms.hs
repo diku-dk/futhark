@@ -62,7 +62,7 @@ unifyBranches loc e1 e2 = do
 
 sliceShape ::
   Maybe (SrcLoc, Rigidity) ->
-  Slice ->
+  [(DimIndex, Maybe Occurrence)] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 sliceShape r slice t@(Array als u (Shape orig_dims) et) =
@@ -99,32 +99,39 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
-    adjustDims (DimFix {} : idxes') (_ : dims) =
+    warnIfConsuming mOcc d i j stride size =
+      case mOcc of
+        Just occ -> do
+          lift $ warn (location occ) "This consumption is used in the slice return type, so it is being replaced by an existential."
+          (:) <$> sliceSize d i j stride
+        Nothing -> pure (size :)
+
+    adjustDims ((DimFix {}, _) : idxes') (_ : dims) =
       adjustDims idxes' dims
     -- Pat match some known slices to be non-existential.
-    adjustDims (DimSlice i j stride : idxes') (d : dims)
+    adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just 0) . isInt64) i,
         maybe True ((== Just 1) . isInt64) stride =
           let j' = maybe d SizeExpr j
-           in (j' :) <$> adjustDims idxes' dims
-    adjustDims (DimSlice i j stride : idxes') (d : dims)
+           in warnIfConsuming mOcc d i j stride j' <*> adjustDims idxes' dims
+    adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
         maybe True ((== Just 1) . isInt64) stride =
           let j' = fromMaybe (unSizeExpr d) j
-           in (sizeMinus j' i' :) <$> adjustDims idxes' dims
+           in warnIfConsuming mOcc d i j stride (sizeMinus j' i') <*> adjustDims idxes' dims
     -- stride == -1
-    adjustDims (DimSlice Nothing Nothing stride : idxes') (d : dims)
+    adjustDims ((DimSlice Nothing Nothing stride, _) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
           (d :) <$> adjustDims idxes' dims
-    adjustDims (DimSlice (Just i) (Just j) stride : idxes') (_ : dims)
+    adjustDims ((DimSlice (Just i) (Just j) stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
-          (sizeMinus i j :) <$> adjustDims idxes' dims
+          warnIfConsuming mOcc d (Just i) (Just j) stride (sizeMinus i j) <*> adjustDims idxes' dims
     -- existential
-    adjustDims (DimSlice i j stride : idxes') (d : dims) =
+    adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
     adjustDims _ dims =
       pure dims
@@ -644,7 +651,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
         (body_t, ext) <-
           unscopeType loc (S.singleton (identName dest'))
             =<< expTypeFully body'
-        pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
+        pure $ AppExp (LetWith dest' src' (map fst slice') ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (srclocOf src) "src" $ sliceDims slice'
@@ -659,7 +666,7 @@ checkExp (Update src slice ve loc) = do
       unless (S.null $ src_als `S.intersection` aliases ve_t) $ badLetWithValue src ve loc
 
       consume loc src_als
-      pure $ Update src' slice' ve' loc
+      pure $ Update src' (map fst slice') ve' loc
 
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
@@ -704,7 +711,7 @@ checkExp (AppExp (Index e slice loc) _) = do
   -- will certainly not be aliased.
   t'' <- noAliasesIfOverloaded t'
 
-  pure $ AppExp (Index e' slice' loc) (Info $ AppRes t'' retext)
+  pure $ AppExp (Index e' (map fst slice') loc) (Info $ AppRes t'' retext)
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
@@ -827,7 +834,7 @@ checkExp (IndexSection slice NoInfo loc) = do
   (t, _) <- newArrayType loc "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ fromStruct t'
-  pure $ IndexSection slice' (Info ft) loc
+  pure $ IndexSection (map fst slice') (Info ft) loc
 checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
     checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc
@@ -926,13 +933,15 @@ checkIdent (Ident name _ loc) = do
   (QualName _ name', vt) <- lookupVar loc (qualName name)
   pure $ Ident name' (Info vt) loc
 
-checkSlice :: UncheckedSlice -> TermTypeM Slice
+checkSlice :: UncheckedSlice -> TermTypeM [(DimIndex, Maybe Occurrence)]
 checkSlice = mapM checkDimIndex
   where
-    checkDimIndex (DimFix i) =
-      DimFix <$> (require "use as index" anySignedType =<< checkExp i)
-    checkDimIndex (DimSlice i j s) =
-      DimSlice <$> check i <*> check j <*> check s
+    checkDimIndex (DimFix i) = do
+      (i', dflow) <- tapOccurrences (require "use as index" anySignedType =<< checkExp i)
+      pure (DimFix i', anyConsumption dflow)
+    checkDimIndex (DimSlice i j s) = do
+      (sl, dflow) <- tapOccurrences $ DimSlice <$> check i <*> check j <*> check s
+      pure (sl, anyConsumption dflow)
 
     check =
       maybe (pure Nothing) $
@@ -940,7 +949,7 @@ checkSlice = mapM checkDimIndex
 
 -- The number of dimensions affected by this slice (so the minimum
 -- rank of the array we are slicing).
-sliceDims :: Slice -> Int
+sliceDims :: [(DimIndex, Maybe Occurrence)] -> Int
 sliceDims = length
 
 type Arg = (Exp, PatType, Occurrences, SrcLoc)
