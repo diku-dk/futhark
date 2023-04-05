@@ -426,9 +426,8 @@ onExp e =
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
 -- | Monad for arrowArg
--- Reader (scope, dimtoPush)
 -- Writer (arrow arguments, names that can be existentialy bound)
-type ArrowArgM a = ReaderT (S.Set VName, [VName]) (Writer (S.Set VName, S.Set VName)) a
+type ArrowArgM a = Writer (S.Set VName, S.Set VName) a
 
 -- | arrowArg takes a type (or return type) and returns it
 -- with the existentials bound moved at the right of arrows.
@@ -436,23 +435,27 @@ type ArrowArgM a = ReaderT (S.Set VName, [VName]) (Writer (S.Set VName, S.Set VN
 -- and variables that are constructively used.
 -- The returned type should be cleanned, as too many existentials are introduced.
 arrowArgRetType ::
+  (S.Set VName, [VName]) ->
   S.Set VName ->
   RetTypeBase Size as ->
   ArrowArgM (RetTypeBase Size as)
-arrowArgRetType argset (RetType dims ty) = pass $ do
-  (ty', (_, canExt)) <- listen $ local (bimap (argset `S.union`) (<> dims)) $ arrowArgType ty
-  dims' <- asks $ (dims <>) . snd
+arrowArgRetType (scope, dimsToPush) argset (RetType dims ty) = pass $ do
+  let dims' = dims <> dimsToPush
+  (ty', (_, canExt)) <- listen $ arrowArgType (argset `S.union` scope, dims') ty
   pure (RetType (filter (`S.member` canExt) dims') ty', first (`S.difference` canExt))
 
-arrowArgScalar :: ScalarTypeBase Size as -> ArrowArgM (ScalarTypeBase Size as)
-arrowArgScalar (Record fs) =
-  Record <$> traverse arrowArgType fs
-arrowArgScalar (Sum cs) =
-  Sum <$> (traverse . traverse) arrowArgType cs
-arrowArgScalar (Arrow as argName d argT retT) =
+arrowArgScalar ::
+  (S.Set VName, [VName]) ->
+  ScalarTypeBase Size as ->
+  ArrowArgM (ScalarTypeBase Size as)
+arrowArgScalar env (Record fs) =
+  Record <$> traverse (arrowArgType env) fs
+arrowArgScalar env (Sum cs) =
+  Sum <$> (traverse . traverse) (arrowArgType env) cs
+arrowArgScalar (scope, dimsToPush) (Arrow as argName d argT retT) =
   pass $ do
-    intros <- asks $ (S.filter notIntrisic argset `S.difference`) . fst
-    retT' <- local (second $ filter (`S.notMember` intros)) $ arrowArgRetType fullArgset retT
+    let intros = S.filter notIntrisic argset `S.difference` scope
+    retT' <- arrowArgRetType (scope, filter (`S.notMember` intros) dimsToPush) fullArgset retT
     pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
@@ -462,18 +465,21 @@ arrowArgScalar (Arrow as argName d argT retT) =
         <> case argName of
           Unnamed -> mempty
           Named vn -> S.singleton vn
-arrowArgScalar (TypeVar as uniq qn args) =
+arrowArgScalar env (TypeVar as uniq qn args) =
   TypeVar as uniq qn <$> mapM arrowArgArg args
   where
     arrowArgArg (TypeArgDim dim loc) = TypeArgDim <$> arrowArgSize dim <*> pure loc
-    arrowArgArg (TypeArgType ty loc) = TypeArgType <$> arrowArgType ty <*> pure loc
-arrowArgScalar ty = pure ty
+    arrowArgArg (TypeArgType ty loc) = TypeArgType <$> arrowArgType env ty <*> pure loc
+arrowArgScalar _ ty = pure ty
 
-arrowArgType :: TypeBase Size as -> ArrowArgM (TypeBase Size as)
-arrowArgType (Array as u shape scalar) =
-  Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar scalar
-arrowArgType (Scalar ty) =
-  Scalar <$> arrowArgScalar ty
+arrowArgType ::
+  (S.Set VName, [VName]) ->
+  TypeBase Size as ->
+  ArrowArgM (TypeBase Size as)
+arrowArgType env (Array as u shape scalar) =
+  Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
+arrowArgType env (Scalar ty) =
+  Scalar <$> arrowArgScalar env ty
 
 arrowArgSize :: Size -> ArrowArgM Size
 arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
@@ -528,7 +534,7 @@ normaliseValBind prev_scope valbind = do
   (rety', extNaming) <-
     runNormaliseM (hardOnRetType $ unInfo $ valBindRetType valbind) (scope <> args) exp_naming
   let (rety'', (funArg, _)) =
-        runWriter (runReaderT (arrowArgRetType args rety') (scope, mempty))
+        runWriter (arrowArgRetType (scope, mempty) args rety')
       new_params = funArg `S.union` S.fromList args_params
       rety''' = arrowCleanRetType new_params rety''
       typeParams' =
