@@ -31,7 +31,6 @@ module Futhark.Util.Pretty
     commastack,
     commasep,
     semistack,
-    semisep,
     stack,
     parensIf,
     ppTuple',
@@ -168,17 +167,13 @@ shorten a
 commastack :: [Doc a] -> Doc a
 commastack = align . vsep . punctuate comma
 
--- | Like 'semisep', but a newline after every semicolon.
+-- | Separate with semicolons and newlines.
 semistack :: [Doc a] -> Doc a
 semistack = align . vsep . punctuate semi
 
 -- | Separate with commas.
 commasep :: [Doc a] -> Doc a
 commasep = hsep . punctuate comma
-
--- | Separate with semicolons.
-semisep :: [Doc a] -> Doc a
-semisep = hsep . punctuate semi
 
 -- | Separate with linebreaks.
 stack :: [Doc a] -> Doc a
