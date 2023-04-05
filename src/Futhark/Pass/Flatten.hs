@@ -16,7 +16,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
 import Data.Foldable
-import Data.List (mapAccumL)
+import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -585,20 +585,6 @@ liftParam w fparam =
     desc = baseString (paramName fparam)
 
 -- Lifts a function return type.
--- TODO: Handle array (and maybe other) case(s).
-liftRetType :: SubExp -> Int -> RetType SOACS -> [RetType GPU]
-liftRetType w i rettype =
-  case rettype of
-    Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
-    Array pt shape u ->
-      let offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-          flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
-          segments = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-          elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
-       in undefined
-    Acc {} -> error "liftRetType: Acc"
-    Mem {} -> error "liftRetType: Mem"
-
 liftResult :: [(VName, ResRep)] -> SubExpRes -> Result
 liftResult resultAssoc res =
   case resSubExp res of
@@ -608,8 +594,23 @@ liftResult resultAssoc res =
         Irregular (IrregularRep {irregularSegments = segs, irregularFlags = flags, irregularOffsets = offsets, irregularElems = elems}) ->
           map (SubExpRes mempty . Var) [segs, flags, offsets, elems]
     Constant _ -> error "liftResult: Constant"
+  where bad = error "liftResult: Bad lookup"
+
+-- Returns an accumulator as well as the lifted return type(s).
+liftRetType :: SubExp -> Int -> RetType SOACS -> (Int, [RetType GPU])
+liftRetType w i rettype = (i + length lifted, lifted)
   where
-    bad = error "liftResult: Bad lookup"
+    lifted =
+      case rettype of
+        Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
+        Array pt _ u ->
+          let segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+              flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
+              offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+              elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
+           in [segs, flags, offsets, elems]
+        Acc {} -> error "liftRetType: Acc"
+        Mem {} -> error "liftRetType: Mem"
 
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
@@ -624,7 +625,7 @@ liftFunDef const_scope fd = do
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' = concat $ snd $ mapAccumL (\i r -> let lrt = liftRetType w i r in (i + length lrt, lrt)) 0 rettype
+  let rettype' = concat $ snd $ L.mapAccumL (liftRetType w) 0 rettype
   -- Build a pattern of the body results.
   -- TODO: Include a case for constants.
   let result_pat = Pat $ map (\r -> case resSubExp r of Var v -> PatElem v ()) $ bodyResult body
