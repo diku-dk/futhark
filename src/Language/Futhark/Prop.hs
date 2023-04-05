@@ -28,6 +28,7 @@ module Language.Futhark.Prop
     valBindTypeScheme,
     valBindBound,
     funType,
+    strip,
     similarExps,
 
     -- * Queries on patterns and params
