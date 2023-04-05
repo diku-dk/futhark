@@ -25,6 +25,29 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
+-- | Box for Exp that allows better comparison than straight forward structural equality
+newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
+  deriving (Show)
+
+instance Pretty ReplacedExp where
+  pretty (ReplacedExp e) = pretty e
+
+instance Eq ReplacedExp where
+  ReplacedExp e1 == ReplacedExp e2
+    | Just es <- similarExps e1 e2 =
+        all (uncurry (==) . bimap ReplacedExp ReplacedExp) es
+  _ == _ = False
+
+instance Ord ReplacedExp where
+  compare (ReplacedExp e1) (ReplacedExp e2)
+    | Just es <- similarExps e1 e2 =
+        foldMap (uncurry compare . bimap ReplacedExp ReplacedExp) es
+  compare (ReplacedExp e1) e2
+    | Just e1' <- strip e1 = compare (ReplacedExp e1') e2
+  compare e1 (ReplacedExp e2)
+    | Just e2' <- strip e2 = compare e1 (ReplacedExp e2')
+  compare (ReplacedExp e1) (ReplacedExp e2) = compare e1 e2
+
 -- | Main Normalisation monad
 -- Used all the long of a unique ValBind,
 -- it keeps track of expressions that are being parametrized and variables in the scope
@@ -32,16 +55,16 @@ import Language.Futhark.TypeChecker.Types
 newtype NormaliseM a
   = NormaliseM
       ( ReaderT
-          (S.Set VName, M.Map Size VName)
-          (StateT (M.Map Size VName) (State VNameSource))
+          (S.Set VName, M.Map ReplacedExp VName)
+          (StateT (M.Map ReplacedExp VName) (State VNameSource))
           a
       )
   deriving
     ( Monad,
       Functor,
       Applicative,
-      MonadReader (S.Set VName, M.Map Size VName),
-      MonadState (M.Map Size VName)
+      MonadReader (S.Set VName, M.Map ReplacedExp VName),
+      MonadState (M.Map ReplacedExp VName)
     )
 
 instance MonadFreshNames NormaliseM where
@@ -52,8 +75,8 @@ runNormaliseM ::
   MonadFreshNames m =>
   NormaliseM a ->
   S.Set VName ->
-  M.Map Size VName ->
-  m (a, M.Map Size VName)
+  M.Map ReplacedExp VName ->
+  m (a, M.Map ReplacedExp VName)
 runNormaliseM (NormaliseM m) initialScope params =
   modifyNameSource $ \src ->
     runState (runReaderT m (initialScope, params) `runStateT` mempty) src
@@ -61,7 +84,7 @@ runNormaliseM (NormaliseM m) initialScope params =
 withArgs :: S.Set VName -> NormaliseM a -> NormaliseM a
 withArgs = local . first . S.union
 
-withParams :: M.Map Size VName -> NormaliseM a -> NormaliseM a
+withParams :: M.Map ReplacedExp VName -> NormaliseM a -> NormaliseM a
 withParams = local . second . M.union
 
 -- | Asks the introduced variables in a set of argument,
@@ -79,10 +102,10 @@ askScope =
 -- | Gets and removes expressions that could not be calculated when
 -- the arguments set will be unscoped.
 -- This should be called without argset in scope, for good detection of intros.
-parametrizing :: S.Set VName -> NormaliseM (M.Map Size VName)
+parametrizing :: S.Set VName -> NormaliseM (M.Map ReplacedExp VName)
 parametrizing argset = do
   intros <- askIntros argset
-  (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr)
+  (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unReplaced)
   put nxtBind
   pure params
 
@@ -96,23 +119,22 @@ unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
 
 -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
 maybeOldSize :: Exp -> Maybe Size
-maybeOldSize (Parens e _) = maybeOldSize e
-maybeOldSize (Attr _ e _) = maybeOldSize e
-maybeOldSize (Assert _ e _ _) = maybeOldSize e
+maybeOldSize e
+  | Just e' <- strip e = maybeOldSize e'
 maybeOldSize (Var qn _ loc) = Just $ sizeFromName qn loc
 maybeOldSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
 maybeOldSize _ = Nothing
 
-canCalculate :: S.Set VName -> M.Map Size VName -> M.Map Size VName
+canCalculate :: S.Set VName -> M.Map ReplacedExp VName -> M.Map ReplacedExp VName
 canCalculate scope =
-  M.filterWithKey (const . (`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unSizeExpr)
+  M.filterWithKey (const . (`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced)
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
-insertDimCalculus :: MonadFreshNames m => (Size, VName) -> Exp -> m Exp
+insertDimCalculus :: MonadFreshNames m => (ReplacedExp, VName) -> Exp -> m Exp
 insertDimCalculus (dim, name) body = do
   reName <- newName name
-  let expr = unSizeExpr dim
+  let expr = unReplaced dim
   pure $
     AppExp
       ( LetPat
@@ -388,11 +410,11 @@ onSize s = pure s
 -- | Creates a new expression replacement if needed, this always return old style sizes.
 -- (e.g. single variable or constant)
 onExp :: Exp -> NormaliseM Size
-onExp e = do
-  let e' = SizeExpr e
+onExp e =
   case maybeOldSize e of
     Just s -> pure s
     Nothing -> do
+      let e' = ReplacedExp e
       prev <- gets $ M.lookup e'
       prev_param <- asks $ M.lookup e' . snd
       case (prev_param, prev) of
@@ -484,9 +506,9 @@ arrowCleanType paramed (Scalar ty) =
 
 -- Replace some expressions by a parameter.
 -- (probably not needed anymore, but may be much more used to reduced number of calculation of sizes)
-expReplace :: M.Map Size VName -> Exp -> Exp
+expReplace :: M.Map ReplacedExp VName -> Exp -> Exp
 expReplace mapping e
-  | Just vn <- M.lookup (SizeExpr e) mapping =
+  | Just vn <- M.lookup (ReplacedExp e) mapping =
       Var (qualName vn) (Info $ typeOf e) (srclocOf e)
 expReplace mapping e = runIdentity $ astMap mapper e
   where
