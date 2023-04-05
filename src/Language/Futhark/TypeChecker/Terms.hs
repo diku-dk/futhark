@@ -119,6 +119,10 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
           (d :) <$> adjustDims idxes' dims
+    adjustDims (DimSlice (Just i) (Just j) stride : idxes') (_ : dims)
+      | refine_sizes,
+        maybe True ((== Just (-1)) . isInt64) stride =
+          (sizeMinus i j :) <$> adjustDims idxes' dims
     -- existential
     adjustDims (DimSlice i j stride : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
