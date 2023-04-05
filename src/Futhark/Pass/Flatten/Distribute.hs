@@ -114,7 +114,7 @@ instance Pretty Distributed where
       stms' = stack $ map pretty stms
       onRes (rt, v) = "let" <+> pretty v <+> "=" <+> pretty rt
 
-resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat t -> Result -> ResMap
+resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
 resultMap avail_inputs stms pat res = mconcat $ map f stms
   where
     f stm =
@@ -144,23 +144,20 @@ patInput :: ResTag -> PatElem Type -> (VName, DistInput)
 patInput tag pe =
   (patElemName pe, DistInput tag $ patElemType pe)
 
--- TODO: Split this and 'distributeMap' up in a meaningful way
 distributeBody ::
   Scope rep ->
-  Pat t ->
   SubExp ->
-  [(VName, DistInput)] ->
+  DistInputs ->
   Body SOACS ->
-  Distributed
-distributeBody outer_scope result_pat w param_inputs body =
+  (DistInputs, [DistStm])
+distributeBody outer_scope w param_inputs body =
   let ((_, avail_inputs), stms) =
         L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
           stmsToList $
             bodyStms body
-   in Distributed stms $ resultMap avail_inputs stms result_pat $ bodyResult body
+   in (avail_inputs, stms)
   where
     bound_outside = namesFromList $ M.keys outer_scope
-    paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
     distributeStm (ResTag tag, avail_inputs) stm =
       let pat = stmPat stm
@@ -185,31 +182,7 @@ distributeMap :: Scope rep -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> D
 distributeMap outer_scope map_pat w arrs lam =
   let param_inputs =
         zipWith paramInput (lambdaParams lam) arrs
-      ((_, avail_inputs), stms) =
-        L.mapAccumL distributeStm (ResTag 0, param_inputs) $
-          stmsToList $
-            bodyStms $
-              lambdaBody lam
+      (avail_inputs, stms) = distributeBody outer_scope w param_inputs $ lambdaBody lam
    in Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam
   where
-    bound_outside = namesFromList $ M.keys outer_scope
     paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
-    distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
-    distributeStm (ResTag tag, avail_inputs) stm =
-      let pat = stmPat stm
-          new_tags = map ResTag $ take (patSize pat) [tag ..]
-          avail_inputs' =
-            avail_inputs <> zipWith patInput new_tags (patElems pat)
-          free_in_stm = freeIn stm
-          used_free = mapMaybe (freeInput avail_inputs) $ namesToList free_in_stm
-          used_free_types =
-            mapMaybe (freeInput avail_inputs)
-              . namesToList
-              . foldMap (freeIn . distInputType . snd)
-              $ used_free
-          stm' =
-            DistStm
-              (nubOrd $ used_free_types <> used_free)
-              (zipWith DistResult new_tags $ map distType $ patTypes pat)
-              stm
-       in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
