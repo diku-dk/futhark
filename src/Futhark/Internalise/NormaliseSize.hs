@@ -117,11 +117,12 @@ unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
 
 -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
 maybeOldSize :: Exp -> Maybe Size
-maybeOldSize e =
-  case bareCleanExp e of
-    Var qn _ loc -> Just $ sizeFromName qn loc
-    IntLit v _ loc -> Just $ sizeFromInteger v loc
-    _ -> Nothing
+maybeOldSize (Parens e _) = maybeOldSize e
+maybeOldSize (Attr _ e _) = maybeOldSize e
+maybeOldSize (Assert _ e _ _) = maybeOldSize e
+maybeOldSize (Var qn _ loc) = Just $ sizeFromName qn loc
+maybeOldSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
+maybeOldSize _ = Nothing
 
 canCalculate :: S.Set VName -> M.Map Size VName -> M.Map Size VName
 canCalculate scope =
