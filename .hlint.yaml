@@ -11,3 +11,4 @@
 - error: {lhs: not (x `nameIn` y), rhs: x `notNameIn` y}
 - error: {lhs: not (any (`nameIn` x) y), rhs: all (`notNameIn` x) y}
 - error: {lhs: Data.Text.pack (show x), rhs: Futhark.Util.showText x}
+- error: {lhs: Data.List.nub, rhs: Futhark.Util.nubOrd}
