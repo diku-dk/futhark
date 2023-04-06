@@ -421,7 +421,7 @@ encodeChar c = encodeAsUnicodeCharar c
 encodeAsUnicodeCharar :: Char -> EncodedString
 encodeAsUnicodeCharar c =
   'z'
-    : if isDigit (head hex_str)
+    : if maybe False isDigit $ maybeHead hex_str
       then hex_str
       else '0' : hex_str
   where
