@@ -651,14 +651,23 @@ liftFunDef const_scope fd = do
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' = concat $ snd $ L.mapAccumL (liftRetType w) 0 rettype
   let (inputs', dstms) =
         distributeBody const_scope (Var (paramName wp)) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+  -- Filter out existential quantifiers from the original return types and results
+  let (filteredRettypes, filteredResult) =
+        unzip $
+          map (\(_, a, b) -> (a, b)) $
+            filter (\(i, _, _) -> i `notElem` extIdxs) $
+              zip3 [0 ..] rettype (bodyResult body)
+        where
+          extIdxs = L.nub [i | Array _ (Shape shape) _ <- rettype, Ext i <- shape]
+  -- Lift the return types
+  let rettype' = concat $ snd $ L.mapAccumL (liftRetType w) 0 filteredRettypes
   -- Lift the body of the function and get the results
   (result, stms) <-
     runReaderT
-      (runBuilder $ liftBody w inputs' env dstms $ bodyResult body)
+      (runBuilder $ liftBody w inputs' env dstms filteredResult)
       (const_scope <> scopeOfFParams (concat fparams'))
   let name = funDefName fd <> "_lifted"
   pure $
