@@ -586,7 +586,8 @@ liftParam w fparam =
     desc = baseString (paramName fparam)
 
 -- Lifts a function return type.
--- Returns an accumulator as well as the lifted return type(s).
+-- Returns an accumulator for the existential index
+-- as well as the lifted return type(s).
 liftRetType :: SubExp -> Int -> RetType SOACS -> (Int, [RetType GPU])
 liftRetType w i rettype = (i + length lifted, lifted)
   where
@@ -594,11 +595,12 @@ liftRetType w i rettype = (i + length lifted, lifted)
       case rettype of
         Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
         Array pt _ u ->
-          let segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+          let num_elems = Prim int64
+              segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
               flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
               offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
               elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
-           in [segs, flags, offsets, elems]
+           in [num_elems, segs, flags, offsets, elems]
         Acc {} -> error "liftRetType: Acc"
         Mem {} -> error "liftRetType: Mem"
 
@@ -609,6 +611,7 @@ liftResult :: SubExp -> M.Map VName ResRep -> SubExpRes -> Builder GPU Result
 liftResult w resAssoc res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = case resSubExp res of
+      c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
       Var v ->
         case fromMaybe bad $ M.lookup v resAssoc of
           Regular v' -> pure [v']
@@ -619,10 +622,21 @@ liftResult w resAssoc res = map (SubExpRes mempty . Var) <$> vs
                   irregularOffsets = offsets,
                   irregularElems = elems
                 }
-              ) ->
-              pure [segs, flags, offsets, elems]
-      c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
+              ) -> do
+              t <- lookupType elems
+              num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+              pure [num_elems, segs, flags, offsets, elems]
     bad = error "liftResult: Bad lookup"
+
+liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
+liftBody w inputs env dstms result = do
+  let segments = NE.singleton w
+  env' <- foldM (transformDistStm segments) env dstms
+  -- Associated original variable names with resreps.
+  -- Not sure what to do in cases of 'DistInputFree', essentially ignoring them for now.
+  let resAssoc = M.compose (distResMap env') $ M.fromList [(v, rt) | (v, DistInput rt _) <- inputs]
+  result' <- mapM (liftResult w resAssoc) result
+  pure $ concat result'
 
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
@@ -640,30 +654,17 @@ liftFunDef const_scope fd = do
   let rettype' = concat $ snd $ L.mapAccumL (liftRetType w) 0 rettype
   let (inputs', dstms) =
         distributeBody const_scope (Var (paramName wp)) inputs body
-  let segments = NE.singleton (Var $ paramName wp)
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-  -- Build the new statements and get the modified DistEnv
-  (env', stms) <-
+  -- Lift the body of the function and get the results
+  (result, stms) <-
     runReaderT
-      (runBuilder $ foldM (transformDistStm segments) env dstms)
+      (runBuilder $ liftBody w inputs' env dstms $ bodyResult body)
       (const_scope <> scopeOfFParams (concat fparams'))
-  -- Associated original variable names with resreps.
-  -- Not sure what to do in cases of 'DistInputFree', ignoring them for now with 'mapMaybe'.
-  let resAssoc = M.compose (distResMap env') $
-        M.fromList $
-          flip mapMaybe inputs' $
-            \(v, di) -> do
-              DistInput rt _ <- Just di
-              pure (v, rt)
-  -- Get the associated results and replicate constants
-  (results, resStms) <-
-    runReaderT (runBuilder $ mapM (liftResult w resAssoc) $ bodyResult body) (mempty :: Scope SOACS)
-  let result = concat results
   let name = funDefName fd <> "_lifted"
   pure $
     fd
       { funDefName = name,
-        funDefBody = Body () (stms >< resStms) result,
+        funDefBody = Body () stms result,
         funDefParams = wp : concat fparams',
         funDefRetType = rettype'
       }
