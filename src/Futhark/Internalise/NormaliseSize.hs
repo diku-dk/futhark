@@ -118,12 +118,12 @@ unSizeExpr (SizeExpr e) = e
 unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
 
 -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
-maybeOldSize :: Exp -> Maybe Size
-maybeOldSize e
-  | Just e' <- strip e = maybeOldSize e'
-maybeOldSize (Var qn _ loc) = Just $ sizeFromName qn loc
-maybeOldSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
-maybeOldSize _ = Nothing
+maybeNormalisedSize :: Exp -> Maybe Size
+maybeNormalisedSize e
+  | Just e' <- strip e = maybeNormalisedSize e'
+maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
+maybeNormalisedSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
+maybeNormalisedSize _ = Nothing
 
 canCalculate :: S.Set VName -> M.Map ReplacedExp VName -> M.Map ReplacedExp VName
 canCalculate scope =
@@ -407,11 +407,11 @@ onSize (SizeExpr e) =
   onExp e
 onSize s = pure s
 
--- | Creates a new expression replacement if needed, this always return old style sizes.
+-- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
 onExp :: Exp -> NormaliseM Size
 onExp e =
-  case maybeOldSize e of
+  case maybeNormalisedSize e of
     Just s -> pure s
     Nothing -> do
       let e' = ReplacedExp e
