@@ -664,8 +664,8 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
         withIndexLink
           "size-polymorphic-entry"
           "Entry point functions must not be size-polymorphic in their return type."
-  | nonconstructive <- mustBeExplicitInBinding $ foldFunTypeFromParams params rettype,
-    Just p <- L.find (flip S.member nonconstructive . typeParamName) tparams =
+  | (constructive, _) <- foldMap determineSizeWitnesses param_ts,
+    Just p <- L.find (flip S.notMember constructive . typeParamName) tparams =
       typeError p mempty . withIndexLink "nonconstructive-entry" $
         "Entry point size parameter "
           <> pretty p
