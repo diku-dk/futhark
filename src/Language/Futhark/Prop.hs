@@ -6,6 +6,7 @@ module Language.Futhark.Prop
   ( -- * Various
     Intrinsic (..),
     intrinsics,
+    intrinsicVar,
     isBuiltin,
     isBuiltinLoc,
     maxIntrinsicTag,
@@ -744,6 +745,14 @@ isAccType (Scalar (TypeVar _ _ (QualName [] v) [TypeArgType t _]))
   | v == fst intrinsicAcc =
       Just t
 isAccType _ = Nothing
+
+-- | Find the 'VName' corresponding to a builtin.  Crashes if that
+-- name cannot be found.
+intrinsicVar :: Name -> VName
+intrinsicVar v =
+  fromMaybe bad $ find ((v ==) . baseName) $ M.keys intrinsics
+  where
+    bad = error $ "findBuiltin: " <> nameToString v
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic

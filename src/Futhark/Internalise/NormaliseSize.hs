@@ -535,8 +535,8 @@ entryAssert m body =
     bool = Scalar $ Prim Bool
     int64 = Scalar $ Prim $ Signed Int64
     opt = foldFunType [(Observe, bool), (Observe, bool)] $ RetType [] bool
-    andop = Var (qualName (VName "&&" 0)) (Info opt) mempty
-    eqop = Var (qualName (VName "==" 0)) (Info opt) mempty
+    andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
+    eqop = Var (qualName (intrinsicVar "==")) (Info opt) mempty
     logAnd x y =
       mkApply andop [(Observe, Nothing, x), (Observe, Nothing, y)] $
         AppRes bool []
