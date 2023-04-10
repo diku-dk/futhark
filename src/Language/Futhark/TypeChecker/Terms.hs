@@ -102,7 +102,10 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     warnIfConsuming mOcc d i j stride size =
       case mOcc of
         Just occ -> do
-          lift $ warn (location occ) "This consumption is used in the slice return type, so it is being replaced by an existential."
+          lift . warn (location occ) $
+            withIndexLink
+              "size-expression-consume"
+              "Size expression with consumption is replaced by unknown size."
           (:) <$> sliceSize d i j stride
         Nothing -> pure (size :)
 
@@ -1059,7 +1062,10 @@ checkApply
             | M.member pname' (unFV $ freeInType tp2') ->
                 if isJust $ anyConsumption dflow
                   then do
-                    warn (srclocOf argexp) "This consuming argument is used in the return type, so it is being replaced by an existential."
+                    warn (srclocOf argexp) $
+                      withIndexLink
+                        "size-expression-consume"
+                        "Size expression with consumption is replaced by unknown size."
                     d <- newDimVar (srclocOf argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
