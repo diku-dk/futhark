@@ -20,7 +20,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, pretty, putDoc, putDocLn, unAnnotate, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -288,7 +288,7 @@ onExp e = do
             Left err -> liftIO $ print err
             Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
       | otherwise -> liftIO $ do
-          T.putStrLn $ "Inferred type of expression: " <> prettyText (typeOf e')
+          putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e'))
           T.putStrLn $
             "The following types are ambiguous: "
               <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
@@ -382,7 +382,7 @@ loadCommand file = do
 genTypeCommand ::
   (String -> T.Text -> Either SyntaxError a) ->
   (Imports -> VNameSource -> T.Env -> a -> (Warnings, Either T.TypeError b)) ->
-  (b -> String) ->
+  (b -> Doc AnsiStyle) ->
   Command
 genTypeCommand f g h e = do
   prompt <- getPrompt
@@ -392,17 +392,17 @@ genTypeCommand f g h e = do
       (imports, src, tenv, _) <- getIt
       case snd $ g imports src tenv e' of
         Left err -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
-        Right x -> liftIO $ putStrLn $ h x
+        Right x -> liftIO $ putDocLn $ h x
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  prettyString e
-    <> concatMap ((" " <>) . prettyString) ps
+  oneLine (pretty e)
+    <> foldMap ((" " <>) . pretty) ps
     <> " : "
-    <> prettyString (typeOf e)
+    <> oneLine (pretty (typeOf e))
 
 mtypeCommand :: Command
-mtypeCommand = genTypeCommand parseModExp T.checkModExp $ prettyString . fst
+mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
 unbreakCommand :: Command
 unbreakCommand _ = do
