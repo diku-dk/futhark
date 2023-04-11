@@ -14,7 +14,7 @@ import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Foldable
-import Data.List (partition, (\\))
+import Data.List (partition)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -555,15 +555,14 @@ normaliseValBind prev_scope valbind = do
       typeParams' =
         valBindTypeParams valbind
           <> map (`TypeParamDim` mempty) (S.toList new_params)
-      exp_naming' = filter ((`S.member` new_params) . snd) extNaming
+      exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
   let scope' = scope `S.union` args `S.union` new_params
   (body', exp_naming'') <-
     runNormaliseM (expFree $ valBindBody valbind) scope' exp_naming'
-  let new_names = exp_naming'' \\ exp_naming'
   body'' <-
     expReplace exp_naming'
-      <$> foldrM insertDimCalculus body' (canCalculate scope' new_names)
+      <$> foldrM insertDimCalculus body' (canCalculate scope' exp_naming'')
 
   pure
     ( S.insert (valBindName valbind) prev_scope,
@@ -571,7 +570,10 @@ normaliseValBind prev_scope valbind = do
         { valBindRetType = Info rety''',
           valBindTypeParams = typeParams',
           valBindParams = params',
-          valBindBody = entryAssert exp_naming body''
+          valBindBody =
+            if isJust (valBindEntryPoint valbind)
+              then entryAssert exp_naming body''
+              else body''
         }
     )
   where
