@@ -35,8 +35,9 @@ printUnused files = do
       -- putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ findUnused files imp
       putStrLn "did some stuff"
       -- print $ partDefFuncs files imp
-      let u2 = concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
-      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) u2
+      -- let u2 = concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
+      let un = fu files imp
+      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList un
 
 
 data CheckConfig = CheckConfig Bool
