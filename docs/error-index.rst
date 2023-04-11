@@ -267,6 +267,26 @@ not any free variables.  Use ``copy`` to fix this:
 
   def f () = copy x
 
+.. _size-expression-consume:
+
+"Size expression with consumption is replaced by unknown size."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To illustrate this error, consider the following program
+
+.. code-block:: futhark
+
+   def consume (xs: *[]i64): i64 = xs[0]
+
+   def main (xs: *[]i64) =
+     let a = iota (consume xs)
+     in ...
+
+Intuitively, the type of ``a`` should be ``[consume ys]i32``, but this
+puts a consumption of the array ``ys`` into a size expression, which
+is invalid.  Therefore, the type checker invents an :term:`unknown
+size` variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
+
 .. _inaccessible-size:
 
 "Parameter *x* refers to size *y* which will not be accessible to the caller

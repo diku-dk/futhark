@@ -89,6 +89,14 @@ documentation and in compiler output.
      A mapping from names to definitions of types, values, or nested
      modules.  See :ref:`module-system`.
 
+   Size expression
+
+     An expression that occurs as the size of an array or size
+     argument.  For example, in the type ``[x+2]i32``, ``x+2`` is a
+     size expression.  Size expressions can occur syntactically in
+     source code, or due to parameter substitution when applying a
+     function.
+
    Uniqueness types
 
      A somewhat misleading term that describes Futhark's system of
