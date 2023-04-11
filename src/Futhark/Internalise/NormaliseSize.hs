@@ -14,12 +14,12 @@ import Control.Monad.State
 import Control.Monad.Writer hiding (Sum)
 import Data.Bifunctor
 import Data.Foldable
-import Data.List (nub)
+import Data.List (partition, (\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -38,16 +38,6 @@ instance Eq ReplacedExp where
         all (uncurry (==) . bimap ReplacedExp ReplacedExp) es
   _ == _ = False
 
-instance Ord ReplacedExp where
-  compare (ReplacedExp e1) (ReplacedExp e2)
-    | Just es <- similarExps e1 e2 =
-        foldMap (uncurry compare . bimap ReplacedExp ReplacedExp) es
-  compare (ReplacedExp e1) e2
-    | Just e1' <- strip e1 = compare (ReplacedExp e1') e2
-  compare e1 (ReplacedExp e2)
-    | Just e2' <- strip e2 = compare e1 (ReplacedExp e2')
-  compare (ReplacedExp e1) (ReplacedExp e2) = compare e1 e2
-
 -- | Main Normalisation monad
 -- Used all the long of a unique ValBind,
 -- it keeps track of expressions that are being parametrized and variables in the scope
@@ -55,16 +45,16 @@ instance Ord ReplacedExp where
 newtype NormaliseM a
   = NormaliseM
       ( ReaderT
-          (S.Set VName, M.Map ReplacedExp VName)
-          (StateT (M.Map ReplacedExp VName) (State VNameSource))
+          (S.Set VName, [(ReplacedExp, VName)])
+          (StateT [(ReplacedExp, VName)] (State VNameSource))
           a
       )
   deriving
     ( Monad,
       Functor,
       Applicative,
-      MonadReader (S.Set VName, M.Map ReplacedExp VName),
-      MonadState (M.Map ReplacedExp VName)
+      MonadReader (S.Set VName, [(ReplacedExp, VName)]),
+      MonadState [(ReplacedExp, VName)]
     )
 
 instance MonadFreshNames NormaliseM where
@@ -75,8 +65,8 @@ runNormaliseM ::
   MonadFreshNames m =>
   NormaliseM a ->
   S.Set VName ->
-  M.Map ReplacedExp VName ->
-  m (a, M.Map ReplacedExp VName)
+  [(ReplacedExp, VName)] ->
+  m (a, [(ReplacedExp, VName)])
 runNormaliseM (NormaliseM m) initialScope params =
   modifyNameSource $ \src ->
     runState (runReaderT m (initialScope, params) `runStateT` mempty) src
@@ -84,8 +74,8 @@ runNormaliseM (NormaliseM m) initialScope params =
 withArgs :: S.Set VName -> NormaliseM a -> NormaliseM a
 withArgs = local . first . S.union
 
-withParams :: M.Map ReplacedExp VName -> NormaliseM a -> NormaliseM a
-withParams = local . second . M.union
+withParams :: [(ReplacedExp, VName)] -> NormaliseM a -> NormaliseM a
+withParams = local . second . (<>)
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -102,10 +92,10 @@ askScope =
 -- | Gets and removes expressions that could not be calculated when
 -- the arguments set will be unscoped.
 -- This should be called without argset in scope, for good detection of intros.
-parametrizing :: S.Set VName -> NormaliseM (M.Map ReplacedExp VName)
+parametrizing :: S.Set VName -> NormaliseM [(ReplacedExp, VName)]
 parametrizing argset = do
   intros <- askIntros argset
-  (params, nxtBind) <- gets $ M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unReplaced)
+  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . M.keysSet . unFV . freeInExp . unReplaced . fst)
   put nxtBind
   pure params
 
@@ -125,9 +115,9 @@ maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
 maybeNormalisedSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
 maybeNormalisedSize _ = Nothing
 
-canCalculate :: S.Set VName -> M.Map ReplacedExp VName -> M.Map ReplacedExp VName
+canCalculate :: S.Set VName -> [(ReplacedExp, VName)] -> [(ReplacedExp, VName)]
 canCalculate scope =
-  M.filterWithKey (const . (`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced)
+  filter ((`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst)
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
@@ -159,7 +149,7 @@ unscoping :: S.Set VName -> Exp -> NormaliseM Exp
 unscoping argset body = do
   localDims <- parametrizing argset
   scope <- S.union argset <$> askScope
-  foldrM insertDimCalculus body $ M.toList $ canCalculate scope localDims
+  foldrM insertDimCalculus body $ canCalculate scope localDims
 
 scoping :: S.Set VName -> NormaliseM Exp -> NormaliseM Exp
 scoping argset m =
@@ -173,7 +163,7 @@ expFree (AppExp (DoLoop dims pat ei form body loc) (Info resT)) = do
   let argset = dimArgs `S.union` formArgs `S.union` patNames pat
   pat' <- withArgs dimArgs (onPat pat)
   params <- parametrizing argset
-  let dims' = dims <> M.elems params
+  let dims' = dims <> map snd params
   resT' <- Info <$> onResType resT
   AppExp
     <$> ( DoLoop dims' pat'
@@ -204,7 +194,7 @@ expFree (AppExp (LetFun name (typeParams, args, rettype_te, retT, body) body_nxt
     AppExp
       ( LetFun
           name
-          ( typeParams <> map (`TypeParamDim` mempty) (M.elems params),
+          ( typeParams <> map ((`TypeParamDim` mempty) . snd) params,
             args',
             rettype_te, -- ?
             Info retT',
@@ -222,7 +212,7 @@ expFree (AppExp (LetPat dims pat e1 body loc) (Info resT)) = do
       argset = dimArgs' `S.union` letArgs
   pat' <- withArgs dimArgs' (onPat pat)
   params <- parametrizing dimArgs'
-  let dims' = dims <> map (`SizeBinder` mempty) (M.elems params <> S.toList implicitDims)
+  let dims' = dims <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
   resT' <- Info <$> withParams params (onResType resT)
   body' <- withParams params $ scoping argset (expFree body)
   e1' <- expFree e1
@@ -371,7 +361,7 @@ onRetType :: S.Set VName -> RetTypeBase Size as -> NormaliseM (RetTypeBase Size 
 onRetType argset (RetType dims ty) = do
   ty' <- withArgs argset $ onType ty
   rl <- parametrizing argset
-  let dims' = dims <> M.elems rl
+  let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
 onScalar :: ScalarTypeBase Size as -> NormaliseM (ScalarTypeBase Size as)
@@ -415,14 +405,14 @@ onExp e =
     Just s -> pure s
     Nothing -> do
       let e' = ReplacedExp e
-      prev <- gets $ M.lookup e'
-      prev_param <- asks $ M.lookup e' . snd
+      prev <- gets $ lookup e'
+      prev_param <- asks $ lookup e' . snd
       case (prev_param, prev) of
         (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
           vn <- newNameFromString $ "d<{" ++ prettyString e ++ "}>"
-          modify $ M.insert e' vn
+          modify ((e', vn) :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
 -- | Monad for arrowArg
@@ -488,7 +478,7 @@ arrowArgSize s = pure s
 -- | arrowClean cleans the mess of arrowArg
 arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
 arrowCleanRetType paramed (RetType dims ty) =
-  RetType (nub $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
+  RetType (nubOrd $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
 
 arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
 arrowCleanScalar paramed (Record fs) =
@@ -512,9 +502,9 @@ arrowCleanType paramed (Scalar ty) =
 
 -- Replace some expressions by a parameter.
 -- (probably not needed anymore, but may be much more used to reduced number of calculation of sizes)
-expReplace :: M.Map ReplacedExp VName -> Exp -> Exp
+expReplace :: [(ReplacedExp, VName)] -> Exp -> Exp
 expReplace mapping e
-  | Just vn <- M.lookup (ReplacedExp e) mapping =
+  | Just vn <- lookup (ReplacedExp e) mapping =
       Var (qualName vn) (Info $ typeOf e) (srclocOf e)
 expReplace mapping e = runIdentity $ astMap mapper e
   where
@@ -525,11 +515,10 @@ expReplace mapping e = runIdentity $ astMap mapper e
 -- represent.  This is injected into entry points, where we cannot
 -- otherwise trust the input.  XXX: the error message generated from
 -- this is not great; we should rework it eventually.
-entryAssert :: M.Map ReplacedExp VName -> Exp -> Exp
-entryAssert m body =
-  case M.toList m of
-    [] -> body
-    x : xs -> Assert (foldl logAnd (cmpExp x) $ map cmpExp xs) body errmsg (srclocOf body)
+entryAssert :: [(ReplacedExp, VName)] -> Exp -> Exp
+entryAssert [] body = body
+entryAssert (x : xs) body =
+  Assert (foldl logAnd (cmpExp x) $ map cmpExp xs) body errmsg (srclocOf body)
   where
     errmsg = Info "entry point arguments have invalid sizes."
     bool = Scalar $ Prim Bool
@@ -537,11 +526,11 @@ entryAssert m body =
     opt = foldFunType [(Observe, bool), (Observe, bool)] $ RetType [] bool
     andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
     eqop = Var (qualName (intrinsicVar "==")) (Info opt) mempty
-    logAnd x y =
-      mkApply andop [(Observe, Nothing, x), (Observe, Nothing, y)] $
+    logAnd x' y =
+      mkApply andop [(Observe, Nothing, x'), (Observe, Nothing, y)] $
         AppRes bool []
-    cmpExp (ReplacedExp x, y) =
-      mkApply eqop [(Observe, Nothing, x), (Observe, Nothing, y')] $
+    cmpExp (ReplacedExp x', y) =
+      mkApply eqop [(Observe, Nothing, x'), (Observe, Nothing, y')] $
         AppRes bool []
       where
         y' = Var (qualName y) (Info int64) mempty
@@ -556,7 +545,7 @@ normaliseValBind prev_scope valbind = do
     runNormaliseM (mapM onPat $ valBindParams valbind) scope mempty
 
   let args = foldMap patNames params'
-      args_params = M.elems exp_naming
+      args_params = map snd exp_naming
   (rety', extNaming) <-
     runNormaliseM (hardOnRetType $ unInfo $ valBindRetType valbind) (scope <> args) exp_naming
   let (rety'', (funArg, _)) =
@@ -566,15 +555,15 @@ normaliseValBind prev_scope valbind = do
       typeParams' =
         valBindTypeParams valbind
           <> map (`TypeParamDim` mempty) (S.toList new_params)
-      exp_naming' = M.filter (`S.member` new_params) extNaming
+      exp_naming' = filter ((`S.member` new_params) . snd) extNaming
 
   let scope' = scope `S.union` args `S.union` new_params
   (body', exp_naming'') <-
     runNormaliseM (expFree $ valBindBody valbind) scope' exp_naming'
-  let new_names = exp_naming'' `M.difference` exp_naming'
+  let new_names = exp_naming'' \\ exp_naming'
   body'' <-
     expReplace exp_naming'
-      <$> foldrM insertDimCalculus body' (M.toList $ canCalculate scope' new_names)
+      <$> foldrM insertDimCalculus body' (canCalculate scope' new_names)
 
   pure
     ( S.insert (valBindName valbind) prev_scope,
