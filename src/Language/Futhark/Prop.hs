@@ -1180,7 +1180,9 @@ intrinsics =
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
     findOp op =
-      qualName $ fst $ head $ filter ((op ==) . baseString . fst) primOp
+      qualName $ maybe bad fst $ find ((op ==) . baseString . fst) primOp
+      where
+        bad = error $ "Intrinsics making, findOp: \"" <> op <> "\""
 
     [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
@@ -1203,21 +1205,7 @@ intrinsics =
 
     i64 = Scalar $ Prim $ Signed Int64
 
-    sizeBinOpInfo =
-      Info <$> Scalar
-        $ Arrow
-          mempty
-          Unnamed
-          Observe
-          i64
-        $ RetType []
-        $ Scalar
-        $ Arrow
-          mempty
-          Unnamed
-          Observe
-          i64
-        $ RetType [] i64
+    sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
 
     tuple_arr x y s =
       Array

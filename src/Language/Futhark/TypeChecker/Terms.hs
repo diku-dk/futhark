@@ -140,7 +140,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
       SizeExpr
         $ AppExp
           ( BinOp
-              (findOp "-", mempty)
+              (qualName (intrinsicVar "-"), mempty)
               sizeBinOpInfo
               (j, Info (i64, Nothing))
               (i, Info (i64, Nothing))
@@ -148,23 +148,8 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           )
         $ Info
         $ AppRes i64 []
-    findOp op = qualName $ head $ filter ((op ==) . baseString) $ M.keys intrinsics
     i64 = Scalar $ Prim $ Signed Int64
-    sizeBinOpInfo =
-      Info <$> Scalar
-        $ Arrow
-          mempty
-          Unnamed
-          Observe
-          i64
-        $ RetType []
-        $ Scalar
-        $ Arrow
-          mempty
-          Unnamed
-          Observe
-          i64
-        $ RetType [] i64
+    sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
     unSizeExpr (SizeExpr e) = e
     unSizeExpr AnySize {} = undefined
 sliceShape _ _ t = pure (t, [])
