@@ -118,12 +118,12 @@ unSizeExpr (SizeExpr e) = e
 unSizeExpr s = error $ "unSizeExpr " ++ prettyString s
 
 -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
-maybeOldSize :: Exp -> Maybe Size
-maybeOldSize e
-  | Just e' <- strip e = maybeOldSize e'
-maybeOldSize (Var qn _ loc) = Just $ sizeFromName qn loc
-maybeOldSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
-maybeOldSize _ = Nothing
+maybeNormalisedSize :: Exp -> Maybe Size
+maybeNormalisedSize e
+  | Just e' <- strip e = maybeNormalisedSize e'
+maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
+maybeNormalisedSize (IntLit v _ loc) = Just $ sizeFromInteger v loc
+maybeNormalisedSize _ = Nothing
 
 canCalculate :: S.Set VName -> M.Map ReplacedExp VName -> M.Map ReplacedExp VName
 canCalculate scope =
@@ -407,11 +407,11 @@ onSize (SizeExpr e) =
   onExp e
 onSize s = pure s
 
--- | Creates a new expression replacement if needed, this always return old style sizes.
+-- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
 onExp :: Exp -> NormaliseM Size
 onExp e =
-  case maybeOldSize e of
+  case maybeNormalisedSize e of
     Just s -> pure s
     Nothing -> do
       let e' = ReplacedExp e
@@ -520,6 +520,32 @@ expReplace mapping e = runIdentity $ astMap mapper e
   where
     mapper = identityMapper {mapOnExp = pure . expReplace mapping}
 
+-- Construct an Assert expression that checks that the names (values)
+-- in the mapping have the same value as the expression they
+-- represent.  This is injected into entry points, where we cannot
+-- otherwise trust the input.  XXX: the error message generated from
+-- this is not great; we should rework it eventually.
+entryAssert :: M.Map ReplacedExp VName -> Exp -> Exp
+entryAssert m body =
+  case M.toList m of
+    [] -> body
+    x : xs -> Assert (foldl logAnd (cmpExp x) $ map cmpExp xs) body errmsg (srclocOf body)
+  where
+    errmsg = Info "entry point arguments have invalid sizes."
+    bool = Scalar $ Prim Bool
+    int64 = Scalar $ Prim $ Signed Int64
+    opt = foldFunType [(Observe, bool), (Observe, bool)] $ RetType [] bool
+    andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
+    eqop = Var (qualName (intrinsicVar "==")) (Info opt) mempty
+    logAnd x y =
+      mkApply andop [(Observe, Nothing, x), (Observe, Nothing, y)] $
+        AppRes bool []
+    cmpExp (ReplacedExp x, y) =
+      mkApply eqop [(Observe, Nothing, x), (Observe, Nothing, y')] $
+        AppRes bool []
+      where
+        y' = Var (qualName y) (Info int64) mempty
+
 -- Normalise a ValBind
 normaliseValBind :: MonadFreshNames m => S.Set VName -> ValBind -> m (S.Set VName, ValBind)
 normaliseValBind prev_scope valbind = do
@@ -556,7 +582,7 @@ normaliseValBind prev_scope valbind = do
         { valBindRetType = Info rety''',
           valBindTypeParams = typeParams',
           valBindParams = params',
-          valBindBody = body''
+          valBindBody = entryAssert exp_naming body''
         }
     )
   where
