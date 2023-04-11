@@ -11,7 +11,6 @@
 -- scalar code.
 module Futhark.Pass.Flatten (flattenSOACs) where
 
-import Control.Monad (mapAndUnzipM)
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (bimap, first, second)
@@ -20,7 +19,6 @@ import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Sequence ((><))
 import Data.Tuple.Solo
 import Debug.Trace
 import Futhark.IR.GPU
@@ -34,6 +32,7 @@ import Futhark.Pass.Flatten.Distribute
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
+import Futhark.Util (mapEither)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
@@ -110,6 +109,14 @@ segsAndElems env (DistInput rt _ : vs) =
       second (v' :) $ segsAndElems env vs
     Irregular (IrregularRep segments flags offsets elems) ->
       bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
+
+-- Mapping from original variable names to their distributed resreps
+inputReps :: DistInputs -> DistEnv -> M.Map VName ResRep
+inputReps inputs env = M.compose (distResMap env) (M.fromList inputs') <> M.fromList frees
+  where
+    (inputs', frees) = flip mapEither inputs $ \(v, di) -> case di of
+      DistInput rt _ -> Left (v, rt)
+      DistInputFree v' _ -> Right (v, Regular v')
 
 type Segments = NE.NonEmpty SubExp
 
@@ -507,6 +514,27 @@ transformDistStm segments env (DistStm inps res stm) = do
       | Just map_lam <- isMapSOAC form -> do
           (ws_flags, ws_offsets, ws) <- transformMap segments env inps pat w arrs map_lam
           pure $ insertIrregulars ws ws_flags ws_offsets (zip (map distResTag res) $ patNames pat) env
+    Let _ _ (Apply name args rettype s) -> do
+      let [w] = NE.toList segments
+      let name' = liftFunName name
+      let rettype' = liftRetType w rettype
+      args' <- ((w, Observe) :) . concat <$> mapM (liftArg segments inps env) args
+      result <- letTupExp (nameToString name' <> "_res") $ Apply name' args' rettype' s
+      -- Go through the pattern and construct the reps.
+      -- If an array is encountered alone, it is a regular array.
+      -- If a scalar type (specifically i64) is encountered, it is an existensial size
+      -- and the next four arrays are irregular reps.
+      -- This is very fragile and will blow up if function lifting is ever changed.
+      let reps = flip L.unfoldr (zip result rettype') $ \ret -> do
+            ((v, t) : ret') <- pure ret
+            pure $ case t of
+              Array {} -> (Regular v, ret')
+              Prim (IntType Int64) ->
+                let mkRep ~[segs, flags, offsets, elems] = Irregular $ IrregularRep segs flags offsets elems
+                 in first (mkRep . map fst) $ splitAt 4 ret'
+              _ -> error $ "Illegal return type: " ++ prettyString t
+
+      pure $ insertReps (zip (map distResTag res) reps) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
 distResCerts :: DistEnv -> [DistInput] -> Certs
@@ -553,7 +581,7 @@ liftParam w fparam =
           (desc <> "_lifted")
           (arrayOf (Prim pt) (Shape [w]) Nonunique)
       pure ([p], Regular $ paramName p)
-    Array pt shape u -> do
+    Array pt _ u -> do
       num_elems <-
         newParam (desc <> "_num_elems") $ Prim int64
       offsets <-
@@ -585,35 +613,57 @@ liftParam w fparam =
   where
     desc = baseString (paramName fparam)
 
--- Lifts a function return type.
--- Returns an accumulator for the existential index
--- as well as the lifted return type(s).
-liftRetType :: SubExp -> Int -> RetType SOACS -> (Int, [RetType GPU])
-liftRetType w i rettype = (i + length lifted, lifted)
+liftArg :: Segments -> DistInputs -> DistEnv -> (SubExp, Diet) -> Builder GPU [(SubExp, Diet)]
+liftArg segments inps env (e, d) = case e of
+  c@(Constant _) -> do
+    v <- letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
+    pure [(Var v, d)]
+  Var v -> case fromMaybe bad $ M.lookup v $ inputReps inps env of
+    Regular v' -> pure [(Var v', d)]
+    Irregular
+      ( IrregularRep
+          { irregularSegments = segs,
+            irregularFlags = flags,
+            irregularOffsets = offsets,
+            irregularElems = elems
+          }
+        ) -> do
+        t <- lookupType elems
+        num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+        -- Only apply the original diet to the 'elems' array
+        let diets = replicate 4 Observe ++ [d]
+        pure $ zipWith (curry (first Var)) [num_elems, segs, flags, offsets, elems] diets
   where
-    lifted =
-      case rettype of
-        Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
-        Array pt _ u ->
-          let num_elems = Prim int64
-              segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-              flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
-              offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-              elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
-           in [num_elems, segs, flags, offsets, elems]
-        Acc {} -> error "liftRetType: Acc"
-        Mem {} -> error "liftRetType: Mem"
+    bad = error "liftArg: Bad lookup"
+
+-- Lifts a functions return type such that it matches the lifted functions return type.
+liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
+liftRetType w = concat . snd . L.mapAccumL liftType 0
+  where
+    liftType i rettype =
+      let lifted = case rettype of
+            Prim pt -> pure $ arrayOf (Prim pt) (Shape [Free w]) Nonunique
+            Array pt _ u ->
+              let num_elems = Prim int64
+                  segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+                  flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
+                  offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
+                  elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
+               in [num_elems, segs, flags, offsets, elems]
+            Acc {} -> error "liftRetType: Acc"
+            Mem {} -> error "liftRetType: Mem"
+       in (i + length lifted, lifted)
 
 -- Lift a result of a function.
 -- If the original result subexp is a variable, lookup the 'ResRep'.
 -- If it's a constant, replicate it 'w' times.
-liftResult :: SubExp -> M.Map VName ResRep -> SubExpRes -> Builder GPU Result
-liftResult w resAssoc res = map (SubExpRes mempty . Var) <$> vs
+liftResult :: SubExp -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
+liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = case resSubExp res of
       c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
       Var v ->
-        case fromMaybe bad $ M.lookup v resAssoc of
+        case fromMaybe bad $ M.lookup v $ inputReps inps env of
           Regular v' -> pure [v']
           Irregular
             ( IrregularRep
@@ -632,11 +682,11 @@ liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GP
 liftBody w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm segments) env dstms
-  -- Associated original variable names with resreps.
-  -- Not sure what to do in cases of 'DistInputFree', essentially ignoring them for now.
-  let resAssoc = M.compose (distResMap env') $ M.fromList [(v, rt) | (v, DistInput rt _) <- inputs]
-  result' <- mapM (liftResult w resAssoc) result
+  result' <- mapM (liftResult w inputs env') result
   pure $ concat result'
+
+liftFunName :: Name -> Name
+liftFunName name = name <> "_lifted"
 
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
@@ -651,7 +701,7 @@ liftFunDef const_scope fd = do
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' = concat $ snd $ L.mapAccumL (liftRetType w) 0 rettype
+  let rettype' = liftRetType w rettype
   let (inputs', dstms) =
         distributeBody const_scope (Var (paramName wp)) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
@@ -660,7 +710,7 @@ liftFunDef const_scope fd = do
     runReaderT
       (runBuilder $ liftBody w inputs' env dstms $ bodyResult body)
       (const_scope <> scopeOfFParams (concat fparams'))
-  let name = funDefName fd <> "_lifted"
+  let name = liftFunName $ funDefName fd
   pure $
     fd
       { funDefName = name,
