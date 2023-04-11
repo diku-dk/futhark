@@ -73,19 +73,36 @@ type RecordReplacements = M.Map VName RecordReplacement
 
 type RecordReplacement = M.Map Name (VName, PatType)
 
+-- | Box for Exp that allows better comparison than straight forward structural equality
+newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
+  deriving (Show)
+
+instance Pretty ReplacedExp where
+  pretty (ReplacedExp e) = pretty e
+
+instance Eq ReplacedExp where
+  ReplacedExp e1 == ReplacedExp e2
+    | Just es <- similarExps e1 e2 =
+        all (uncurry (==) . bimap ReplacedExp ReplacedExp) es
+  _ == _ = False
+
+type ExpReplacements = [(ReplacedExp, VName)]
+
 -- Monomorphization environment mapping names of polymorphic functions
 -- to a representation of their corresponding function bindings.
 data Env = Env
   { envPolyBindings :: M.Map VName PolyBinding,
     envTypeBindings :: M.Map VName TypeBinding,
-    envRecordReplacements :: RecordReplacements
+    envRecordReplacements :: RecordReplacements,
+    envScope :: S.Set VName,
+    envParametrized :: ExpReplacements
   }
 
 instance Semigroup Env where
-  Env tb1 pb1 rr1 <> Env tb2 pb2 rr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2)
+  Env tb1 pb1 rr1 sc1 pr1 <> Env tb2 pb2 rr2 sc2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2) (sc1 <> sc2) (pr1 <> pr2)
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty
+  mempty = Env mempty mempty mempty mempty mempty
 
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)
@@ -107,7 +124,7 @@ newtype MonoM a
       ( RWST
           Env
           (Seq.Seq (VName, ValBind))
-          VNameSource
+          (ExpReplacements, VNameSource)
           (State Lifts)
           a
       )
@@ -117,13 +134,17 @@ newtype MonoM a
       Monad,
       MonadReader Env,
       MonadWriter (Seq.Seq (VName, ValBind)),
-      MonadFreshNames
+      MonadState (ExpReplacements, VNameSource)
     )
+
+instance MonadFreshNames MonoM where
+  getNameSource = gets snd
+  putNameSource = modify . second . const
 
 runMonoM :: VNameSource -> MonoM a -> ((a, Seq.Seq (VName, ValBind)), VNameSource)
 runMonoM src (MonoM m) = ((a, defs), src')
   where
-    (a, src', defs) = evalState (runRWST m mempty src) mempty
+    (a, (_, src'), defs) = evalState (runRWST m mempty (mempty, src)) mempty
 
 lookupFun :: VName -> MonoM (Maybe PolyBinding)
 lookupFun vn = do
