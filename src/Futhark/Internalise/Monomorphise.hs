@@ -415,14 +415,15 @@ transformTypeSizes typ =
         onArg (TypeArgType ty loc) = TypeArgType <$> transformTypeSizes ty <*> pure loc
     transformScalarSizes ty = pure ty
 
-    transformRetTypeSizes argset (RetType dims ty) = do
-      ty' <- withArgs argset $ transformTypeSizes ty
-      rl <- parametrizing argset
-      let dims' = dims <> map snd rl
-      pure $ RetType dims' ty'
-
     onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
     onDim (AnySize v) = pure $ AnySize v
+
+transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
+transformRetTypeSizes argset (RetType dims ty) = do
+  ty' <- withArgs argset $ transformTypeSizes ty
+  rl <- parametrizing argset
+  let dims' = dims <> map snd rl
+  pure $ RetType dims' ty'
 
 transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
 transformTypeExp te@TEVar {} = pure te
@@ -714,10 +715,14 @@ transformExp (Negate e loc) =
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
+  let patArgs = foldMap patNames params
+  dimArgs <- withArgs patArgs $ askIntros (foldMap (M.keysSet . unFV . freeInPat) params)
+  let argset = dimArgs `S.union` dimArgs
   (params', rrs) <- mapAndUnzipM transformPat params
+  paramed <- parametrizing argset
   withRecordReplacements (mconcat rrs) $
     Lambda params'
-      <$> transformExp e0
+      <$> withParams paramed (scoping argset $ transformExp e0)
       <*> pure decl
       <*> traverse (traverse transformRetType) tp
       <*> pure loc
@@ -809,26 +814,27 @@ desugarBinOpSection ::
   SrcLoc ->
   MonoM Exp
 desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
-  op <- transformFName loc fname <=< transformTypeSizes $ toStruct t
+  t' <- transformTypeSizes t
+  op <- transformFName loc fname $ toStruct t'
   (v1, wrap_left, e1, p1) <- makeVarParam e_left . fromStruct =<< transformTypeSizes xtype
   (v2, wrap_right, e2, p2) <- makeVarParam e_right . fromStruct =<< transformTypeSizes ytype
   let apply_left =
         mkApply
           op
           [(Observe, xext, e1)]
-          (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t)) [])
+          (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t')) [])
       onDim (SizeExpr (Var d typ _))
         | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
         | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
       onDim d = d
-  rettype' <- first onDim <$> transformTypeSizes rettype
-  let body =
-        mkApply apply_left [(Observe, yext, e2)] (AppRes rettype' retext)
+      rettype' = first onDim rettype
       rettype'' = toStruct rettype'
+  body <- scoping (S.fromList [v1, v2]) $ mkApply apply_left [(Observe, yext, e2)] <$> transformAppRes (AppRes rettype' retext)
+  rettype''' <- transformRetTypeSizes (S.fromList [v1, v2]) $ RetType dims rettype''
   pure $
     wrap_left $
       wrap_right $
-        Lambda (p1 ++ p2) body Nothing (Info (mempty, RetType dims rettype'')) loc
+        Lambda (p1 ++ p2) body Nothing (Info (mempty, rettype''')) loc
   where
     patAndVar argtype = do
       x <- newNameFromString "x"
