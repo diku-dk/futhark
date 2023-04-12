@@ -25,6 +25,7 @@
 module Futhark.Internalise.Monomorphise (transformProg) where
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
 import Control.Monad.State
 import Control.Monad.Writer (runWriterT)
@@ -88,6 +89,45 @@ instance Eq ReplacedExp where
 
 type ExpReplacements = [(ReplacedExp, VName)]
 
+canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
+canCalculate scope =
+  filter ((`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst)
+  where
+    notIntrisic vn = baseTag vn > maxIntrinsicTag
+
+-- Replace some expressions by a parameter.
+expReplace :: ExpReplacements -> Exp -> Exp
+expReplace mapping e
+  | Just vn <- lookup (ReplacedExp e) mapping =
+      Var (qualName vn) (Info $ typeOf e) (srclocOf e)
+expReplace mapping e = runIdentity $ astMap mapper e
+  where
+    mapper = identityMapper {mapOnExp = pure . expReplace mapping}
+
+-- Construct an Assert expression that checks that the names (values)
+-- in the mapping have the same value as the expression they
+-- represent.  This is injected into entry points, where we cannot
+-- otherwise trust the input.  XXX: the error message generated from
+-- this is not great; we should rework it eventually.
+entryAssert :: ExpReplacements -> Exp -> Exp
+entryAssert [] body = body
+entryAssert (x : xs) body =
+  Assert (foldl logAnd (cmpExp x) $ map cmpExp xs) body errmsg (srclocOf body)
+  where
+    errmsg = Info "entry point arguments have invalid sizes."
+    bool = Scalar $ Prim Bool
+    opt = foldFunType [(Observe, bool), (Observe, bool)] $ RetType [] bool
+    andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
+    eqop = Var (qualName (intrinsicVar "==")) (Info opt) mempty
+    logAnd x' y =
+      mkApply andop [(Observe, Nothing, x'), (Observe, Nothing, y)] $
+        AppRes bool []
+    cmpExp (ReplacedExp x', y) =
+      mkApply eqop [(Observe, Nothing, x'), (Observe, Nothing, y')] $
+        AppRes bool []
+      where
+        y' = Var (qualName y) (Info i64) mempty
+
 -- Monomorphization environment mapping names of polymorphic functions
 -- to a representation of their corresponding function bindings.
 data Env = Env
@@ -118,6 +158,12 @@ withRecordReplacements rr = localEnv mempty {envRecordReplacements = rr}
 replaceRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
 replaceRecordReplacements rr = local $ \env -> env {envRecordReplacements = rr}
 
+withArgs :: S.Set VName -> MonoM a -> MonoM a
+withArgs args = localEnv $ mempty {envScope = args}
+
+withParams :: ExpReplacements -> MonoM a -> MonoM a
+withParams params = localEnv $ mempty {envParametrized = params}
+
 -- The monomorphization monad.
 newtype MonoM a
   = MonoM
@@ -133,13 +179,16 @@ newtype MonoM a
       Applicative,
       Monad,
       MonadReader Env,
-      MonadWriter (Seq.Seq (VName, ValBind)),
-      MonadState (ExpReplacements, VNameSource)
+      MonadWriter (Seq.Seq (VName, ValBind))
     )
 
 instance MonadFreshNames MonoM where
-  getNameSource = gets snd
-  putNameSource = modify . second . const
+  getNameSource = MonoM $ gets snd
+  putNameSource = MonoM . modify . second . const
+
+instance MonadState ExpReplacements MonoM where
+  get = MonoM $ gets fst
+  put = MonoM . modify . first . const
 
 runMonoM :: VNameSource -> MonoM a -> ((a, Seq.Seq (VName, ValBind)), VNameSource)
 runMonoM src (MonoM m) = ((a, defs), src')
@@ -155,6 +204,58 @@ lookupFun vn = do
 
 lookupRecordReplacement :: VName -> MonoM (Maybe RecordReplacement)
 lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
+
+-- | Asks the introduced variables in a set of argument,
+-- that is arguments not currently in scope.
+askIntros :: S.Set VName -> MonoM (S.Set VName)
+askIntros argset =
+  asks $ (S.filter notIntrisic argset `S.difference`) . envScope
+  where
+    notIntrisic vn = baseTag vn > maxIntrinsicTag
+
+-- | Gets and removes expressions that could not be calculated when
+-- the arguments set will be unscoped.
+-- This should be called without argset in scope, for good detection of intros.
+parametrizing :: S.Set VName -> MonoM ExpReplacements
+parametrizing argset = do
+  intros <- askIntros argset
+  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . M.keysSet . unFV . freeInExp . unReplaced . fst)
+  put nxtBind
+  pure params
+
+insertDimCalculus :: MonadFreshNames m => (ReplacedExp, VName) -> Exp -> m Exp
+insertDimCalculus (dim, name) body = do
+  reName <- newName name
+  let expr = unReplaced dim
+  pure $
+    AppExp
+      ( LetPat
+          []
+          (Id name (Info i64) (srclocOf expr))
+          expr
+          body
+          mempty
+      )
+      (appRes reName body)
+  where
+    appRes reName (AppExp _ (Info (AppRes ty ext))) =
+      Info $ AppRes (applySubst (subst reName) ty) (reName : ext)
+    appRes reName e =
+      Info $ AppRes (applySubst (subst reName) $ typeOf e) [reName]
+
+    subst reName vn
+      | vn == name = Just $ ExpSubst $ sizeVar (qualName reName) mempty
+      | otherwise = Nothing
+
+unscoping :: S.Set VName -> Exp -> MonoM Exp
+unscoping argset body = do
+  localDims <- parametrizing argset
+  scope <- asks $ S.union argset . envScope
+  foldrM insertDimCalculus body $ canCalculate scope localDims
+
+scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
+scoping argset m =
+  withArgs argset m >>= unscoping argset
 
 -- Given instantiated type of function, produce size arguments.
 type InferSizeArgs = StructType -> [Exp]
@@ -215,6 +316,31 @@ addLifted fname il liftf =
 
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
 lookupLifted fname t = lookup (fname, t) <$> getLifts
+
+-- | Creates a new expression replacement if needed, this always produces normalised sizes.
+-- (e.g. single variable or constant)
+replaceExp :: Exp -> MonoM Exp
+replaceExp e =
+  case maybeNormalisedSize e of
+    Just e' -> pure e'
+    Nothing -> do
+      let e' = ReplacedExp e
+      prev <- gets $ lookup e'
+      prev_param <- asks $ lookup e' . envParametrized
+      case (prev_param, prev) of
+        (Just vn, _) -> pure $ sizeVar (qualName vn) (srclocOf e)
+        (Nothing, Just vn) -> pure $ sizeVar (qualName vn) (srclocOf e)
+        (Nothing, Nothing) -> do
+          vn <- newNameFromString $ "d<{" ++ prettyString e ++ "}>"
+          modify ((e', vn) :)
+          pure $ sizeVar (qualName vn) (srclocOf e)
+  where
+    -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
+    maybeNormalisedSize e'
+      | Just e'' <- strip e' = maybeNormalisedSize e''
+    maybeNormalisedSize (Var qn _ loc) = Just $ sizeVar qn loc
+    maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
+    maybeNormalisedSize _ = Nothing
 
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname t
