@@ -391,9 +391,37 @@ transformFName loc fname t
           size_args
 
 transformTypeSizes :: TypeBase Size as -> MonoM (TypeBase Size as)
-transformTypeSizes = bitraverse onDim pure
+transformTypeSizes typ =
+  case typ of
+    Scalar scalar -> Scalar <$> transformScalarSizes scalar
+    Array as u shape scalar -> Array as u <$> mapM onDim shape <*> transformScalarSizes scalar
   where
-    onDim (SizeExpr e) = SizeExpr <$> transformExp e
+    transformScalarSizes (Record fs) =
+      Record <$> traverse transformTypeSizes fs
+    transformScalarSizes (Sum cs) =
+      Sum <$> (traverse . traverse) transformTypeSizes cs
+    transformScalarSizes (Arrow as argName d argT retT) =
+      Arrow as argName d <$> transformTypeSizes argT <*> transformRetTypeSizes argset retT
+      where
+        argset =
+          M.keysSet (unFV $ freeInType argT)
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+    transformScalarSizes (TypeVar as uniq qn args) =
+      TypeVar as uniq qn <$> mapM onArg args
+      where
+        onArg (TypeArgDim dim loc) = TypeArgDim <$> onDim dim <*> pure loc
+        onArg (TypeArgType ty loc) = TypeArgType <$> transformTypeSizes ty <*> pure loc
+    transformScalarSizes ty = pure ty
+
+    transformRetTypeSizes argset (RetType dims ty) = do
+      ty' <- withArgs argset $ transformTypeSizes ty
+      rl <- parametrizing argset
+      let dims' = dims <> map snd rl
+      pure $ RetType dims' ty'
+
+    onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
     onDim (AnySize v) = pure $ AnySize v
 
 transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
@@ -457,7 +485,7 @@ sizesForPat pat = do
       v <- lift $ newVName "size"
       modify (v :)
       pure $ sizeFromName (qualName v) mempty
-    onDim d = pure d
+    onDim d = pure d -- replace ?
 
 transformAppRes :: AppRes -> MonoM AppRes
 transformAppRes (AppRes t ext) =
