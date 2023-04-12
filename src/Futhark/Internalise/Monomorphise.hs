@@ -494,7 +494,7 @@ sizesForPat pat = do
       v <- lift $ newVName "size"
       modify (v :)
       pure $ sizeFromName (qualName v) mempty
-    onDim d = pure d -- replace ?
+    onDim d = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
 transformAppRes (AppRes t ext) =
@@ -508,12 +508,20 @@ transformAppExp (Range e1 me incl loc) res = do
   pure $ AppExp (Range e1' me' incl' loc) (Info res)
 transformAppExp (Coerce e tp loc) res =
   AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> pure (Info res)
-transformAppExp (LetPat sizes pat e1 e2 loc) res = do
-  (pat', rr) <- transformPat pat
+transformAppExp (LetPat sizes pat e body loc) res = do
+  let dimArgs = S.fromList (map sizeName sizes)
+  implicitDims <- withArgs dimArgs $ askIntros (M.keysSet $ unFV $ freeInPat pat)
+  let dimArgs' = dimArgs <> implicitDims
+      letArgs = patNames pat
+      argset = dimArgs' `S.union` letArgs
+  (pat', rr) <- withArgs dimArgs' $ transformPat pat
+  params <- parametrizing dimArgs'
+  let sizes' = sizes <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
+  body' <- withRecordReplacements rr $ withParams params $ scoping argset $ transformExp body
   AppExp
-    <$> ( LetPat sizes pat'
-            <$> transformExp e1
-            <*> withRecordReplacements rr (transformExp e2)
+    <$> ( LetPat sizes' pat'
+            <$> transformExp e
+            <*> pure body'
             <*> pure loc
         )
     <*> pure (Info res)
@@ -525,7 +533,7 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
       rr <- asks envRecordReplacements
       let funbind = PolyBinding rr (fname, tparams, params, ret, body, mempty, loc)
       pass $ do
-        (e', bs) <- listen $ extendEnv fname funbind $ transformExp e
+        (e', bs) <- listen $ extendEnv fname funbind $ scoping (S.singleton fname) $ transformExp e
         -- Do not remember this one for next time we monomorphise this
         -- function.
         modifyLifts $ filter ((/= fname) . fst . fst)
@@ -534,7 +542,10 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
   | otherwise = do
       body' <- transformExp body
       AppExp
-        <$> (LetFun fname (tparams, params, retdecl, Info ret, body') <$> transformExp e <*> pure loc)
+        <$> ( LetFun fname (tparams, params, retdecl, Info ret, body')
+                <$> scoping (S.singleton fname) (transformExp e)
+                <*> pure loc
+            )
         <*> pure (Info res)
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
@@ -545,21 +556,34 @@ transformAppExp (Apply fe args _) res =
     <*> pure res
   where
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
-transformAppExp (DoLoop sparams pat e1 form e3 loc) res = do
+transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   e1' <- transformExp e1
-  (pat', rr) <- transformPat pat
-  (form', rr') <- case form of
-    For ident e2 -> (,mempty) . For ident <$> transformExp e2
+
+  let dimArgs = S.fromList sparams
+  (pat', rr) <- withArgs dimArgs $ transformPat pat
+  params <- parametrizing dimArgs
+  let sparams' = sparams <> map snd params
+      mergeArgs = dimArgs `S.union` patNames pat
+
+  (form', rr', formArgs) <- case form of
+    For ident e2 -> (,mempty,S.singleton $ identName ident) . For ident <$> transformExp e2
     ForIn pat2 e2 -> do
       (pat2', rr') <- transformPat pat2
-      (,rr') . ForIn pat2' <$> transformExp e2
-    While e2 -> (,mempty) . While <$> withRecordReplacements rr (transformExp e2)
-  e3' <- withRecordReplacements (rr <> rr') $ transformExp e3
+      (,rr',patNames pat2) . ForIn pat2' <$> transformExp e2
+    While e2 ->
+      fmap ((,mempty,mempty) . While) $
+        withRecordReplacements rr $
+          withParams params $
+            scoping mergeArgs $
+              transformExp e2
+  let argset = mergeArgs `S.union` formArgs
+
+  body' <- withRecordReplacements (rr <> rr') $ withParams params $ scoping argset $ transformExp body
   -- Maybe monomorphisation introduced new arrays to the loop, and
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
-  pure $ AppExp (DoLoop (sparams ++ pat_sizes) pat'' e1' form' e3' loc) (Info res)
+  pure $ AppExp (DoLoop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res)
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
   fname' <- transformFName loc fname =<< transformTypeSizes (toStruct t)
   e1' <- transformExp e1
@@ -610,7 +634,7 @@ transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
   id2' <- transformIdent id2
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
-  body' <- transformExp body
+  body' <- scoping (S.singleton $ identName id1') $ transformExp body
   pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res)
   where
     transformIdent (Ident v t vloc) =
@@ -619,10 +643,27 @@ transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
     <*> pure (Info res)
-transformAppExp (Match e cs loc) res =
-  AppExp
-    <$> (Match <$> transformExp e <*> mapM transformCase cs <*> pure loc)
-    <*> pure (Info res)
+transformAppExp (Match e cs loc) res = do
+  implicitDims <- askIntros (M.keysSet $ unFV $ freeInType $ typeOf e)
+  e' <- transformExp e
+  cs' <- mapM (transformCase implicitDims) cs
+  if S.null implicitDims
+    then pure $ AppExp (Match e' cs' loc) (Info res)
+    else do
+      tmpVar <- newNameFromString "matched_variable"
+      pure $
+        AppExp
+          ( LetPat
+              (map (`SizeBinder` mempty) $ S.toList implicitDims)
+              (Id tmpVar (Info $ typeOf e') mempty)
+              e'
+              ( AppExp
+                  (Match (Var (qualName tmpVar) (Info $ typeOf e') mempty) cs' loc)
+                  (Info res)
+              )
+              mempty
+          )
+          (Info res)
 
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -744,10 +785,10 @@ transformExp (Constr name all_es t loc) =
 transformExp (Attr info e loc) =
   Attr info <$> transformExp e <*> pure loc
 
-transformCase :: Case -> MonoM Case
-transformCase (CasePat p e loc) = do
+transformCase :: S.Set VName -> Case -> MonoM Case
+transformCase implicitDims (CasePat p e loc) = do
   (p', rr) <- transformPat p
-  CasePat p' <$> withRecordReplacements rr (transformExp e) <*> pure loc
+  CasePat p' <$> withRecordReplacements rr (scoping (patNames p `S.union` implicitDims) $ transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
