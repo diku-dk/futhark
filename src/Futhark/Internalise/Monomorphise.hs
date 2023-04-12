@@ -450,8 +450,17 @@ transformTypeExp (TEApply te args loc) =
       SizeExp <$> (replaceExp =<< transformExp e) <*> pure loc'
     transformSizeExp (SizeExpAny loc') =
       pure $ SizeExpAny loc'
-transformTypeExp (TEArrow aname ta tr loc) =
-  TEArrow aname <$> transformTypeExp ta <*> transformTypeExp tr <*> pure loc
+transformTypeExp (TEArrow aname ta tr loc) = do
+  tr' <- case aname of
+    Just vn -> do
+      let argset = S.singleton vn
+      ret <- withArgs argset $ transformTypeExp tr
+      dims <- parametrizing argset
+      if null dims
+        then pure ret
+        else pure $ TEDim (map snd dims) ret mempty
+    Nothing -> transformTypeExp tr
+  TEArrow aname <$> transformTypeExp ta <*> pure tr' <*> pure loc
 transformTypeExp (TESum cs loc) =
   TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
 transformTypeExp (TEDim dims te loc) =
