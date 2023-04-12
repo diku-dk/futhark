@@ -45,6 +45,9 @@ import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
+
+import Debug.Trace
+
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64
 
@@ -88,6 +91,12 @@ instance Eq ReplacedExp where
   _ == _ = False
 
 type ExpReplacements = [(ReplacedExp, VName)]
+
+prettyExpRepl repl =
+  foldr onBind "[" repl ++ "]"
+  where
+    onBind (rexp, vn) acc =
+      acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
 
 canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope =
@@ -258,7 +267,7 @@ scoping argset m =
   withArgs argset m >>= unscoping argset
 
 -- Given instantiated type of function, produce size arguments.
-type InferSizeArgs = StructType -> [Exp]
+type InferSizeArgs = StructType -> ExpReplacements -> [Exp]
 
 data MonoSize
   = -- | The integer encodes an equivalence class, so we can keep
@@ -350,10 +359,11 @@ transformFName loc fname t
       let mono_t = monoType t'
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
       maybe_funbind <- lookupFun $ qualLeaf fname
+      exp_repl <- get
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          pure $ applySizeArgs fname' t' $ infer t'
+          pure $ applySizeArgs fname' t' $ infer t' exp_repl
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname
         -- A polymorphic function.
@@ -361,7 +371,7 @@ transformFName loc fname t
           (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
           tell $ Seq.singleton (qualLeaf fname, funbind')
           addLifted (qualLeaf fname) mono_t (fname', infer)
-          pure $ applySizeArgs fname' t' $ infer t'
+          pure $ applySizeArgs fname' t' $ infer t' exp_repl
   where
     var fname' = Var fname' (Info (fromStruct t)) loc
 
@@ -954,17 +964,29 @@ dimMapping ::
   Monoid a =>
   TypeBase Size a ->
   TypeBase Size a ->
+  ExpReplacements ->
+  ExpReplacements ->
   DimInst
-dimMapping t1 t2 = execState (matchDims onDims t1 t2) mempty
+dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
   where
+    revMap = map (\(k,v) -> (v,k))
+    named1 = revMap r1
+    named2 = revMap r2
+
     onDims bound (SizeExpr e1) (SizeExpr e2) = do
       onExps bound e1 e2
       pure $ SizeExpr e1
     onDims _ d _ = pure d
 
-    onExps bound (Var v _ _) e
-      | not $ any (`elem` bound) $ freeVarsInExp e =
-          modify $ M.insert (qualLeaf v) $ SizeExpr e
+    onExps bound (Var v _ _) e = do
+      if not $ any (`elem` bound) $ freeVarsInExp e
+        then modify $ M.insert (qualLeaf v) $ SizeExpr e
+        else pure ()
+      case lookup (qualLeaf v) named1 of
+        Just rexp -> onExps bound (unReplaced rexp) e
+        Nothing -> pure ()
+    onExps bound e (Var v _ _)
+      | Just rexp <- lookup (qualLeaf v) named2 = onExps bound e (unReplaced rexp)
     onExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ onExps bound) es
@@ -972,19 +994,28 @@ dimMapping t1 t2 = execState (matchDims onDims t1 t2) mempty
 
     freeVarsInExp = M.keys . unFV . freeInExp
 
-inferSizeArgs :: [TypeParam] -> StructType -> StructType -> [Exp]
-inferSizeArgs tparams bind_t t =
-  mapMaybe (tparamArg (dimMapping bind_t t)) tparams
+inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> ExpReplacements -> [Exp]
+inferSizeArgs tparams bind_t bind_r t r = do
+  let dinst = dimMapping bind_t t bind_r r
+  -- | keeping it for now, just in case
+  -- trace ("bind_t: " ++ prettyString bind_t ++
+  --        "\nbind_r: " ++ prettyExpRepl bind_r ++
+  --        "\nt: " ++ prettyString t ++
+  --        "\nr: " ++ prettyExpRepl r ++
+  --        "\ndinst: " ++ M.foldrWithKey
+  --           (\vn si acc -> acc ++ "(" ++ prettyString (qualName vn) ++ " -> " ++ prettyString si ++ "), ") "[" dinst ++ "]" ++
+  --        "\n") $
+  map (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
         -- do we really need to make a Literal from the IntLit ?
         Just (SizeExpr (IntLit x _ _)) ->
-          Just $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
+          Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         Just (SizeExpr e) ->
-          Just e
+          e -- need to be replaced, which require MonoM
         _ ->
-          Just $ Literal (SignedValue $ Int64Value 0) mempty
+          Literal (SignedValue $ Int64Value 0) mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -1019,18 +1050,22 @@ monomorphiseBinding ::
   MonoM (VName, InferSizeArgs, ValBind)
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
   replaceRecordReplacements rr $ do
+    let argset = S.fromList (map typeParamName shape_params) `S.union` foldMap patNames params
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
-    rettype' <- applySubst (`M.lookup` substs') <$> transformRetType rettype
+    rettype' <- applySubst (`M.lookup` substs') <$> withArgs argset (transformRetType rettype)
     let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
-    bind_t' <- substTypesAny (`M.lookup` substs') <$> transformTypeSizes bind_t
+        bind_t' = substTypesAny (`M.lookup` substs') bind_t
+    bind_t'' <- withArgs argset $ transformTypeSizes bind_t'
     let (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
             shape_params ++ t_shape_params
+
+    bind_r <- get
 
     (params'', rrs) <- mapAndUnzipM transformPat params'
 
@@ -1044,7 +1079,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
 
     pure
       ( name',
-        inferSizeArgs shape_params_explicit bind_t',
+        inferSizeArgs shape_params_explicit bind_t'' bind_r,
         if entry
           then
             toValBinding
