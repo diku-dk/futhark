@@ -434,7 +434,7 @@ transformTypeExp (TEArray size te loc) =
   TEArray <$> transformSizeExp size <*> transformTypeExp te <*> pure loc
   where
     transformSizeExp (SizeExp e loc') =
-      SizeExp <$> transformExp e <*> pure loc'
+      SizeExp <$> (replaceExp =<< transformExp e) <*> pure loc'
     transformSizeExp (SizeExpAny loc') =
       pure $ SizeExpAny loc'
 transformTypeExp (TEUnique te loc) =
@@ -447,7 +447,7 @@ transformTypeExp (TEApply te args loc) =
     transformTypeArg (TypeArgExpType arg) =
       TypeArgExpType <$> transformTypeExp arg
     transformSizeExp (SizeExp e loc') =
-      SizeExp <$> transformExp e <*> pure loc'
+      SizeExp <$> (replaceExp =<< transformExp e) <*> pure loc'
     transformSizeExp (SizeExpAny loc') =
       pure $ SizeExpAny loc'
 transformTypeExp (TEArrow aname ta tr loc) =
