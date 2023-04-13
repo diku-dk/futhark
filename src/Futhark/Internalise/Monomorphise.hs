@@ -98,9 +98,10 @@ type ExpReplacements = [(ReplacedExp, VName)]
 --     onBind (rexp, vn) acc =
 --       acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
 
-canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
-canCalculate scope =
-  filter ((`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst)
+canCalculate :: S.Set VName -> ExpReplacements -> MonoM ExpReplacements
+canCalculate scope mapping = do
+  scope' <- S.union scope . S.fromList . map (fst . snd) <$> getLifts
+  pure $ filter ((`S.isSubsetOf` scope') . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst) mapping
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
@@ -268,7 +269,7 @@ unscoping :: S.Set VName -> Exp -> MonoM Exp
 unscoping argset body = do
   localDims <- parametrizing argset
   scope <- asks $ S.union argset . envScope
-  foldrM insertDimCalculus body $ canCalculate scope localDims
+  foldrM insertDimCalculus body =<< canCalculate scope localDims
 
 scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
@@ -1180,7 +1181,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         bind_r = exp_naming' -- ?
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-    body''' <- expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate (scope <> args) =<< get)
+    body''' <- expReplace exp_naming' <$> (foldrM insertDimCalculus body'' =<< canCalculate (scope <> args) =<< get)
 
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
