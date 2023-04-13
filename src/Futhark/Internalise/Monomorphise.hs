@@ -1152,8 +1152,9 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
-    let substs' = M.map (Subst []) substs
-    let substPatType =
+    let shape_names = S.fromList $ map typeParamName $ shape_params ++ t_shape_params
+        substs' = M.map (Subst []) substs
+        substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
     (params'', rrs) <- withArgs shape_names $ mapAndUnzipM transformPat params'
@@ -1208,7 +1209,6 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
       )
   where
     shape_params = filter (not . isTypeParam) tparams
-    shape_names = S.fromList (map typeParamName shape_params)
 
     updateExpTypes substs = astMap (mapper substs)
 
