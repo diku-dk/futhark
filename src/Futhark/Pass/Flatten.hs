@@ -18,7 +18,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import Data.Tuple.Solo
 import Debug.Trace
 import Futhark.IR.GPU
@@ -738,7 +738,10 @@ transformProg :: Prog SOACS -> PassM (Prog GPU)
 transformProg prog = do
   consts' <- transformStms mempty $ progConsts prog
   funs' <- mapM (transformFunDef $ scopeOf (progConsts prog)) $ progFuns prog
-  lifted_funs <- mapM (liftFunDef $ scopeOf (progConsts prog)) $ progFuns prog
+  lifted_funs <-
+    mapM (liftFunDef $ scopeOf (progConsts prog)) $
+      filter (isNothing . funDefEntryPoint) $
+        progFuns prog
   pure $ prog {progConsts = consts', progFuns = flatteningBuiltins <> lifted_funs <> funs'}
 
 -- | Transform a SOACS program to a GPU program, using flattening.
