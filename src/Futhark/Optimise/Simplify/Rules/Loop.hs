@@ -95,22 +95,22 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
     ([], _, _, _) ->
       -- Nothing is invariant.
       Skip
-    (invariant, explpat', merge', res') -> Simplify $ do
+    (invariant, explpat', merge', res') -> Simplify . auxing aux $ do
       -- We have moved something invariant out of the loop.
       let loopbody' = loopbody {bodyResult = res'}
           explpat'' = map fst explpat'
-      forM_ invariant $ \(v1, v2) ->
-        letBindNames [identName v1] $ BasicOp $ SubExp v2
-      auxing aux $ letBind (Pat explpat'') $ DoLoop merge' form loopbody'
+      forM_ invariant $ \(v1, (v2, cs)) ->
+        certifying cs $ letBindNames [identName v1] $ BasicOp $ SubExp v2
+      letBind (Pat explpat'') $ DoLoop merge' form loopbody'
   where
     res = bodyResult loopbody
 
     namesOfMergeParams = namesFromList $ map (paramName . fst) merge
 
-    removeFromResult (mergeParam, mergeInit) explpat' =
+    removeFromResult cs (mergeParam, mergeInit) explpat' =
       case partition ((== paramName mergeParam) . snd) explpat' of
         ([(patelem, _)], rest) ->
-          (Just (patElemIdent patelem, mergeInit), rest)
+          (Just (patElemIdent patelem, (mergeInit, cs)), rest)
         (_, _) ->
           (Nothing, explpat')
 
@@ -119,10 +119,16 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (invariant, explpat', merge', resExps)
         | isInvariant,
           -- Also do not remove the condition in a while-loop.
-          paramName mergeParam `notNameIn` freeIn form =
+          paramName mergeParam `notNameIn` freeIn form,
+          -- Certificates must be available.
+          all (`ST.elem` vtable) $ unCerts $ resCerts resExp =
             let (stm, explpat'') =
-                  removeFromResult (mergeParam, mergeInit) explpat'
-             in ( maybe id (:) stm $ (paramIdent mergeParam, mergeInit) : invariant,
+                  removeFromResult
+                    (resCerts resExp)
+                    (mergeParam, mergeInit)
+                    explpat'
+             in ( maybe id (:) stm $
+                    (paramIdent mergeParam, (mergeInit, resCerts resExp)) : invariant,
                   explpat'',
                   merge',
                   resExps
