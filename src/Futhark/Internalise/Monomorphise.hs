@@ -740,7 +740,7 @@ transformExp (Not e loc) =
 transformExp (Lambda params e0 decl tp loc) = do
   let patArgs = foldMap patNames params
   dimArgs <- withArgs patArgs $ askIntros (foldMap (M.keysSet . unFV . freeInPat) params)
-  let argset = dimArgs `S.union` dimArgs
+  let argset = dimArgs `S.union` patArgs
   (params', rrs) <- mapAndUnzipM transformPat params
   paramed <- parametrizing argset
   withRecordReplacements (mconcat rrs) $
