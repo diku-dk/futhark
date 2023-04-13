@@ -28,7 +28,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWST, asks, runRWST)
 import Control.Monad.State
-import Control.Monad.Writer (runWriterT)
+import Control.Monad.Writer (Writer, runWriter, runWriterT)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
@@ -39,14 +39,14 @@ import Data.Maybe
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
+import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-
-import Debug.Trace
+-- import Debug.Trace
 
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64
@@ -92,11 +92,11 @@ instance Eq ReplacedExp where
 
 type ExpReplacements = [(ReplacedExp, VName)]
 
-prettyExpRepl repl =
-  foldr onBind "[" repl ++ "]"
-  where
-    onBind (rexp, vn) acc =
-      acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
+-- prettyExpRepl repl =
+--   foldr onBind "[" repl ++ "]"
+--   where
+--     onBind (rexp, vn) acc =
+--       acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
 
 canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope =
@@ -166,6 +166,14 @@ withRecordReplacements rr = localEnv mempty {envRecordReplacements = rr}
 
 replaceRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
 replaceRecordReplacements rr = local $ \env -> env {envRecordReplacements = rr}
+
+isolateNormalisation :: MonoM a -> MonoM a
+isolateNormalisation m = do
+  prevRepl <- get
+  put mempty
+  ret <- local (\env -> env {envScope = M.keysSet (envPolyBindings env), envParametrized = mempty}) m
+  put prevRepl
+  pure ret
 
 withArgs :: S.Set VName -> MonoM a -> MonoM a
 withArgs args = localEnv $ mempty {envScope = args}
@@ -969,7 +977,7 @@ dimMapping ::
   DimInst
 dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
   where
-    revMap = map (\(k,v) -> (v,k))
+    revMap = map (\(k, v) -> (v, k))
     named1 = revMap r1
     named2 = revMap r2
 
@@ -979,9 +987,10 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
     onDims _ d _ = pure d
 
     onExps bound (Var v _ _) e = do
-      if not $ any (`elem` bound) $ freeVarsInExp e
-        then modify $ M.insert (qualLeaf v) $ SizeExpr e
-        else pure ()
+      unless (any (`elem` bound) $ freeVarsInExp e) $
+        modify $
+          M.insert (qualLeaf v) $
+            SizeExpr e
       case lookup (qualLeaf v) named1 of
         Just rexp -> onExps bound (unReplaced rexp) e
         Nothing -> pure ()
@@ -997,7 +1006,7 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> ExpReplacements -> [Exp]
 inferSizeArgs tparams bind_t bind_r t r = do
   let dinst = dimMapping bind_t t bind_r r
-  -- | keeping it for now, just in case
+  -- \| keeping it for now, just in case
   -- trace ("bind_t: " ++ prettyString bind_t ++
   --        "\nbind_r: " ++ prettyExpRepl bind_r ++
   --        "\nt: " ++ prettyString t ++
@@ -1040,6 +1049,96 @@ noNamedParams = f
 transformRetType :: StructRetType -> MonoM StructRetType
 transformRetType (RetType ext t) = RetType ext <$> transformTypeSizes t
 
+-- | arrowArg takes a return type and returns it
+-- with the existentials bound moved at the right of arrows.
+-- It also gives the new set of parameters to consider.
+arrowArg ::
+  S.Set VName -> -- scope
+  S.Set VName -> -- set of argument
+  [VName] -> -- size parameters
+  RetTypeBase Size as ->
+  (RetTypeBase Size as, S.Set VName)
+arrowArg scope argset args_params rety =
+  let (rety', (funArgs, _)) = runWriter (arrowArgRetType (scope, mempty) argset rety)
+      new_params = funArgs `S.union` S.fromList args_params
+   in (arrowCleanRetType new_params rety', new_params)
+  where
+    -- \| takes a type (or return type) and returns it
+    -- with the existentials bound moved at the right of arrows.
+    -- It also gives (through writer monad) size variables used in arrow arguments
+    -- and variables that are constructively used.
+    -- The returned type should be cleanned, as too many existentials are introduced.
+    arrowArgRetType ::
+      (S.Set VName, [VName]) ->
+      S.Set VName ->
+      RetTypeBase Size as' ->
+      Writer (S.Set VName, S.Set VName) (RetTypeBase Size as')
+    arrowArgRetType (scope', dimsToPush) argset' (RetType dims ty) = pass $ do
+      let dims' = dims <> dimsToPush
+      (ty', (_, canExt)) <- listen $ arrowArgType (argset' `S.union` scope', dims') ty
+      pure (RetType (filter (`S.member` canExt) dims') ty', first (`S.difference` canExt))
+
+    arrowArgScalar env (Record fs) =
+      Record <$> traverse (arrowArgType env) fs
+    arrowArgScalar env (Sum cs) =
+      Sum <$> (traverse . traverse) (arrowArgType env) cs
+    arrowArgScalar (scope', dimsToPush) (Arrow as argName d argT retT) =
+      pass $ do
+        let intros = S.filter notIntrisic argset' `S.difference` scope'
+        retT' <- arrowArgRetType (scope', filter (`S.notMember` intros) dimsToPush) fullArgset retT
+        pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
+      where
+        notIntrisic vn = baseTag vn > maxIntrinsicTag
+        argset' = M.keysSet (unFV $ freeInType argT)
+        fullArgset =
+          argset'
+            <> case argName of
+              Unnamed -> mempty
+              Named vn -> S.singleton vn
+    arrowArgScalar env (TypeVar as uniq qn args) =
+      TypeVar as uniq qn <$> mapM arrowArgArg args
+      where
+        arrowArgArg (TypeArgDim dim loc) = TypeArgDim <$> arrowArgSize dim <*> pure loc
+        arrowArgArg (TypeArgType ty loc) = TypeArgType <$> arrowArgType env ty <*> pure loc
+    arrowArgScalar _ ty = pure ty
+
+    arrowArgType ::
+      (S.Set VName, [VName]) ->
+      TypeBase Size as' ->
+      Writer (S.Set VName, S.Set VName) (TypeBase Size as')
+    arrowArgType env (Array as u shape scalar) =
+      Array as u <$> traverse arrowArgSize shape <*> arrowArgScalar env scalar
+    arrowArgType env (Scalar ty) =
+      Scalar <$> arrowArgScalar env ty
+
+    arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
+    arrowArgSize s = pure s
+
+    -- \| arrowClean cleans the mess in the type
+    arrowCleanRetType :: S.Set VName -> RetTypeBase Size as -> RetTypeBase Size as
+    arrowCleanRetType paramed (RetType dims ty) =
+      RetType (nubOrd $ filter (`S.notMember` paramed) dims) (arrowCleanType (paramed `S.union` S.fromList dims) ty)
+
+    arrowCleanScalar :: S.Set VName -> ScalarTypeBase Size as -> ScalarTypeBase Size as
+    arrowCleanScalar paramed (Record fs) =
+      Record $ M.map (arrowCleanType paramed) fs
+    arrowCleanScalar paramed (Sum cs) =
+      Sum $ (M.map . map) (arrowCleanType paramed) cs
+    arrowCleanScalar paramed (Arrow as argName d argT retT) =
+      Arrow as argName d argT (arrowCleanRetType paramed retT)
+    arrowCleanScalar paramed (TypeVar as uniq qn args) =
+      TypeVar as uniq qn $ map arrowCleanArg args
+      where
+        arrowCleanArg (TypeArgDim dim loc) = TypeArgDim dim loc
+        arrowCleanArg (TypeArgType ty loc) = TypeArgType (arrowCleanType paramed ty) loc
+    arrowCleanScalar _ ty = ty
+
+    arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as
+    arrowCleanType paramed (Array as u shape scalar) =
+      Array as u shape $ arrowCleanScalar paramed scalar
+    arrowCleanType paramed (Scalar ty) =
+      Scalar $ arrowCleanScalar paramed ty
+
 -- Monomorphise a polymorphic function at the types given in the instance
 -- list. Monomorphises the body of the function as well. Returns the fresh name
 -- of the generated monomorphic function and its 'ValBind' representation.
@@ -1049,28 +1148,39 @@ monomorphiseBinding ::
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
 monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
-  replaceRecordReplacements rr $ do
-    let argset = S.fromList (map typeParamName shape_params) `S.union` foldMap patNames params
+  replaceRecordReplacements rr $ isolateNormalisation $ do
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
     let substs' = M.map (Subst []) substs
-    rettype' <- applySubst (`M.lookup` substs') <$> withArgs argset (transformRetType rettype)
     let substPatType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
+    (params'', rrs) <- withArgs shape_names $ mapAndUnzipM transformPat params'
+    exp_naming <- get
+    put mempty
+
+    let args = foldMap patNames params
+        arg_params = map snd exp_naming
+
+    rettype' <- withParams exp_naming (withArgs (args <> shape_names) $ hardTransformRetType rettype)
+    extNaming <- get
+    put mempty
+    scope <- asks (S.union shape_names . envScope)
+    let (rettype'', new_params) = arrowArg scope args arg_params rettype'
+        rettype''' = applySubst (`M.lookup` substs') rettype''
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
-    bind_t'' <- withArgs argset $ transformTypeSizes bind_t'
-    let (shape_params_explicit, shape_params_implicit) =
+        (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
-            shape_params ++ t_shape_params
+            shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
+        exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
-    bind_r <- get
-
-    (params'', rrs) <- mapAndUnzipM transformPat params'
-
+        bind_t'' = funType params'' rettype''' -- ?
+        bind_r = exp_naming' -- ?
     body' <- updateExpTypes (`M.lookup` substs') body
-    body'' <- withRecordReplacements (mconcat rrs) $ transformExp body'
+    body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+    body''' <- expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate (scope <> args) =<< get)
+
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
       if null tparams && not entry && not seen_before
@@ -1086,20 +1196,27 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
               name'
               (shape_params_explicit ++ shape_params_implicit)
               params''
-              rettype'
-              body''
+              rettype'''
+              (entryAssert exp_naming body''')
           else
             toValBinding
               name'
               shape_params_implicit
               (map shapeParam shape_params_explicit ++ params'')
-              rettype'
-              body''
+              rettype'''
+              body'''
       )
   where
     shape_params = filter (not . isTypeParam) tparams
+    shape_names = S.fromList (map typeParamName shape_params)
 
     updateExpTypes substs = astMap (mapper substs)
+
+    hardTransformRetType (RetType _ ty) = do
+      ty' <- transformTypeSizes ty
+      unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
+      let dims' = S.toList unbounded
+      pure $ RetType dims' ty'
 
     mapper substs =
       ASTMapper

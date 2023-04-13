@@ -584,4 +584,4 @@ normaliseValBind prev_scope valbind = do
       pure $ RetType dims' ty'
 
 transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
-transformProg = fmap snd . mapAccumLM normaliseValBind mempty
+transformProg = pure -- fmap snd . mapAccumLM normaliseValBind mempty
