@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Defunctionalisation crashed on projection of holes.
 
+* Loop optimisation would sometimes remove holes.
+
 ## [0.24.1]
 
 ### Added
