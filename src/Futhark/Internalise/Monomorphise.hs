@@ -256,7 +256,10 @@ insertDimCalculus (dim, name) body = do
           []
           (Id name (Info i64) (srclocOf expr))
           expr
-          body
+          -- doing it in a random order can be unfortunate for
+          -- cases where we have `(sum xs)` and `(sum xs) + 1`
+          -- Latter work
+          (expReplace [(dim, name)] body)
           mempty
       )
       (appRes reName body)
