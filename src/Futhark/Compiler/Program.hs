@@ -31,7 +31,7 @@ import Control.Concurrent.MVar
     readMVar,
   )
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.State (execStateT, gets, modify)
 import Data.Bifunctor (first)
 import Data.List (intercalate, sort)

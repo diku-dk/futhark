@@ -15,6 +15,7 @@ module Futhark.Analysis.Metrics
   )
 where
 
+import Control.Monad
 import Control.Monad.Writer
 import Data.List (tails)
 import Data.Map.Strict qualified as M

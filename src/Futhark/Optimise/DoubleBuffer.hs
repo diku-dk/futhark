@@ -71,6 +71,7 @@
 -- per iteration (and an initial one, elided above).
 module Futhark.Optimise.DoubleBuffer (doubleBufferGPU, doubleBufferMC) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
@@ -170,7 +171,7 @@ optimiseStm (Let pat aux e) = do
   oneStm . Let pat aux <$> mapExpM (optimise onOp) e
   where
     optimise onOp =
-      identityMapper
+      (identityMapper @rep)
         { mapOnBody = \_ x ->
             optimiseBody x :: DoubleBufferM rep (Body rep),
           mapOnOp = onOp

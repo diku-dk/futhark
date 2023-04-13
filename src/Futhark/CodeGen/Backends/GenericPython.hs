@@ -41,7 +41,7 @@ module Futhark.CodeGen.Backends.GenericPython
   )
 where
 
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.RWS
 import Data.Char (isAlpha, isAlphaNum)
 import Data.Map qualified as M

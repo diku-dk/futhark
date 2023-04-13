@@ -38,9 +38,11 @@ where
 
 import Control.Applicative (liftA)
 import Control.Monad
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State
 import Data.Array hiding (index)
+import Data.List.NonEmpty qualified as NE
 import Data.Monoid
 import Data.Text qualified as T
 import Futhark.Util.Loc
@@ -127,11 +129,11 @@ getNoLines (GetLine f) = getNoLines $ f Nothing
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l - 1) l
 
-applyExp :: [UncheckedExp] -> ParserMonad UncheckedExp
-applyExp all_es@((Constr n [] _ loc1) : es) =
-  pure $ Constr n es NoInfo (srcspan loc1 (last all_es))
+applyExp :: NE.NonEmpty UncheckedExp -> ParserMonad UncheckedExp
+applyExp all_es@((Constr n [] _ loc1) NE.:| es) =
+  pure $ Constr n es NoInfo (srcspan loc1 (NE.last all_es))
 applyExp es =
-  foldM op (head es) (tail es)
+  foldM op (NE.head es) (NE.tail es)
   where
     op (AppExp (Index e is floc) _) (ArrayLit xs _ xloc) =
       parseErrorAt (srcspan floc xloc) . Just . docText $

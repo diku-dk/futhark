@@ -332,7 +332,8 @@ see :c:func:`futhark_restore_opaque_foo`).
 
    * If ``*p`` is ``NULL``, the function will allocate sufficient
      storage with ``malloc()``, serialise the value, and write the
-     address of the byte representation to ``*p``.
+     address of the byte representation to ``*p``.  The caller gains
+     ownership of this allocation and is responsible for freeing it.
 
    * Otherwise, the serialised representation of the value will be
      stored at ``*p``, which *must* have room for at least ``*n``
@@ -380,7 +381,7 @@ types.
 .. c:function:: int futhark_new_opaque_t(struct futhark_context *ctx, struct futhark_opaque_t **out, const struct futhark_opaque_t2 *bar, const struct futhark_opaque_t1 *foo);
 
    Construct a record in ``*out`` which has the given values for the
-   ``bar`` and ``foo`` fields.  The parameter ordering constitutes the
+   ``bar`` and ``foo`` fields.  The parameters are the
    fields in alphabetic order.  Tuple fields are named ``vX`` where
    ``X`` is an integer.  The resulting record *aliases* the values
    provided for ``bar`` and ``foo``, but has its own lifetime, and all
@@ -416,8 +417,8 @@ Results in the following C function:
    sure to call :c:func:`futhark_context_sync` before using the value
    of ``out0``.
 
-Errors are indicated by a nonzero return value.  On error, nothing is
-written to the *out*-parameters.
+Errors are indicated by a nonzero return value.  On error, the
+*out*-parameters are not touched.
 
 The precise semantics of the return value depends on the backend.  For
 the sequential C backend, errors will always be available when the
@@ -618,6 +619,10 @@ the manifest contains:
 
   * A list of all *outputs*, including their type (as a name) and
     *whether they are unique*.
+
+  * A list of all *tuning parameters* that can influence the execution
+    of this entry point.  These are not necessarily unique to the
+    entry point.
 
 * A mapping from the name of each non-scalar type to:
 

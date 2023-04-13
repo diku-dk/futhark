@@ -15,13 +15,13 @@ module Futhark.CodeGen.Backends.GenericWASM
   )
 where
 
-import Data.List (intercalate, nub)
+import Data.List (intercalate)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.SimpleRep (opaqueName)
 import Futhark.CodeGen.ImpCode.Sequential qualified as Imp
 import Futhark.CodeGen.RTS.JavaScript
-import Futhark.Util (showText)
+import Futhark.Util (nubOrd, showText)
 import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
@@ -69,7 +69,7 @@ emccExportNames jses =
   where
     arrays = filter isArray typs
     opaques = filter isOpaque typs
-    typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) jses
+    typs = nubOrd $ concatMap (\jse -> parameters jse ++ ret jse) jses
     gfn typ str = "_futhark_" ++ typ ++ "_" ++ baseType str ++ "_" ++ show (dim str) ++ "d"
 
 javascriptWrapper :: [JSEntryPoint] -> T.Text
@@ -101,7 +101,7 @@ classFutharkContext entryPoints =
     ]
   where
     arrays = filter isArray typs
-    typs = nub $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
+    typs = nubOrd $ concatMap (\jse -> parameters jse ++ ret jse) entryPoints
 
 constructor :: [JSEntryPoint] -> T.Text
 constructor jses =

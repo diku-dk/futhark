@@ -4,7 +4,7 @@ module Futhark.CLI.Bench (main) where
 import Control.Arrow (first)
 import Control.Exception
 import Control.Monad
-import Control.Monad.Except hiding (throwError)
+import Control.Monad.IO.Class (liftIO)
 import Data.ByteString.Char8 qualified as SBS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
@@ -404,11 +404,12 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       g <- create
       resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
       let bootstrapCI =
-            ( estPoint boot - confIntLDX (estError boot),
-              estPoint boot + confIntUDX (estError boot)
-            )
-            where
-              boot = head $ bootstrapBCA cl95 vec_runtimes resampled
+            case bootstrapBCA cl95 vec_runtimes resampled of
+              boot : _ ->
+                ( estPoint boot - confIntLDX (estError boot),
+                  estPoint boot + confIntUDX (estError boot)
+                )
+              _ -> (0, 0)
 
       reportResult runtimes bootstrapCI
       -- We throw away the 'errout' because it is almost always

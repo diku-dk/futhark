@@ -49,6 +49,7 @@ module Futhark.IR.SOACS.SOAC
 where
 
 import Control.Category
+import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
@@ -371,7 +372,7 @@ data SOACMapper frep trep m = SOACMapper
   }
 
 -- | A mapper that simply returns the SOAC verbatim.
-identitySOACMapper :: Monad m => SOACMapper rep rep m
+identitySOACMapper :: forall rep m. Monad m => SOACMapper rep rep m
 identitySOACMapper =
   SOACMapper
     { mapOnSOACSubExp = pure,
@@ -670,12 +671,14 @@ typeCheckSOAC (Stream size arrexps accexps lam) = do
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- TC.checkSOACArrayArgs size arrexps
-  let chunk = head $ lambdaParams lam
+  chunk <- case lambdaParams lam of
+    chunk : _ -> pure chunk
+    [] -> TC.bad $ TC.TypeError "Stream lambda without parameters."
   let asArg t = (t, mempty)
       inttp = Prim int64
       lamarrs' = map (`setOuterSize` Var (paramName chunk)) arrargs
-  let acc_len = length accexps
-  let lamrtp = take acc_len $ lambdaReturnType lam
+      acc_len = length accexps
+      lamrtp = take acc_len $ lambdaReturnType lam
   unless (map TC.argType accargs == lamrtp) $
     TC.bad . TC.TypeError $
       "Stream with inconsistent accumulator type in lambda."

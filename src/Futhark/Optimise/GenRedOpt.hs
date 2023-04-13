@@ -16,6 +16,7 @@
 --     map-reduce, as to potentially enable tiling oportunities.
 module Futhark.Optimise.GenRedOpt (optimiseGenRed) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List qualified as L

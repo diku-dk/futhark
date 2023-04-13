@@ -30,6 +30,7 @@ module Language.Futhark.TypeChecker.Unify
   )
 where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
@@ -925,7 +926,7 @@ equalityType ::
 equalityType usage t = do
   unless (orderZero t) $
     unifyError usage mempty noBreadCrumbs $
-      "Type " <+> dquotes (pretty t) <+> "does not support equality (is higher-order)."
+      "Type " <+> dquotes (pretty t) <+> "does not support equality (may contain function)."
   mapM_ mustBeEquality $ typeVars t
   where
     mustBeEquality vn = do

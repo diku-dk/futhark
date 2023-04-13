@@ -11,7 +11,8 @@ module Futhark.Internalise.Bindings
   )
 where
 
-import Control.Monad.Reader hiding (mapM)
+import Control.Monad
+import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Map.Strict qualified as M
 import Data.Maybe

@@ -31,7 +31,9 @@ module Futhark.Script
   )
 where
 
-import Control.Monad.Except
+import Control.Monad
+import Control.Monad.Except (MonadError (..))
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (bimap)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
@@ -43,6 +45,7 @@ import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
+import Data.Vector.Storable qualified as SVec
 import Data.Void
 import Data.Word (Word8)
 import Futhark.Data.Parser qualified as V
@@ -291,6 +294,50 @@ valueToExp (V.ValueRecord fs) =
 valueToExp (V.ValueTuple fs) =
   Tuple $ map valueToExp fs
 
+-- Decompose a type name into a rank and an element type.
+parseTypeName :: TypeName -> Maybe (Int, V.PrimType)
+parseTypeName s
+  | Just pt <- lookup s m =
+      Just (0, pt)
+  | "[]" `T.isPrefixOf` s = do
+      (d, pt) <- parseTypeName (T.drop 2 s)
+      pure (d + 1, pt)
+  | otherwise = Nothing
+  where
+    prims = [minBound .. maxBound]
+    primtexts = map (V.valueTypeText . V.ValueType []) prims
+    m = zip primtexts prims
+
+coerceValue :: TypeName -> V.Value -> Maybe V.Value
+coerceValue t v = do
+  (_, pt) <- parseTypeName t
+  case v of
+    V.I8Value shape vs ->
+      coerceInts pt shape $ map toInteger $ SVec.toList vs
+    V.I16Value shape vs ->
+      coerceInts pt shape $ map toInteger $ SVec.toList vs
+    V.I32Value shape vs ->
+      coerceInts pt shape $ map toInteger $ SVec.toList vs
+    V.I64Value shape vs ->
+      coerceInts pt shape $ map toInteger $ SVec.toList vs
+    _ ->
+      Nothing
+  where
+    coerceInts V.I8 shape =
+      Just . V.I8Value shape . SVec.fromList . map fromInteger
+    coerceInts V.I16 shape =
+      Just . V.I16Value shape . SVec.fromList . map fromInteger
+    coerceInts V.I32 shape =
+      Just . V.I32Value shape . SVec.fromList . map fromInteger
+    coerceInts V.I64 shape =
+      Just . V.I64Value shape . SVec.fromList . map fromInteger
+    coerceInts V.F32 shape =
+      Just . V.F32Value shape . SVec.fromList . map fromInteger
+    coerceInts V.F64 shape =
+      Just . V.F64Value shape . SVec.fromList . map fromInteger
+    coerceInts _ _ =
+      const Nothing
+
 -- | How to evaluate a builtin function.
 type EvalBuiltin m = T.Text -> [V.CompoundValue] -> m V.CompoundValue
 
@@ -391,6 +438,8 @@ evalExp builtin sserver top_level_e = do
       -- FutharkScript tuples/records to Futhark-level tuples/records,
       -- as well as maps between different names for the same
       -- tuple/record.
+      --
+      -- We also implicitly convert the types of constants.
       interValToVar :: m VarName -> TypeName -> ExpValue -> m VarName
       interValToVar _ t (V.ValueAtom v)
         | STValue t == scriptValueType v = scriptValueToVar v
@@ -407,6 +456,9 @@ evalExp builtin sserver top_level_e = do
           Just vt_fs <- isRecord vt types,
           vt_fs == t_fs =
             mkRecord t =<< mapM (getField v) vt_fs
+      interValToVar _ t (V.ValueAtom (SValue _ (VVal v)))
+        | Just v' <- coerceValue t v =
+            scriptValueToVar $ SValue t $ VVal v'
       interValToVar bad _ _ = bad
 
       valToInterVal :: V.CompoundValue -> ExpValue
