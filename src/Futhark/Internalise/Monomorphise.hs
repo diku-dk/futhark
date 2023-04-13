@@ -98,10 +98,9 @@ type ExpReplacements = [(ReplacedExp, VName)]
 --     onBind (rexp, vn) acc =
 --       acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
 
-canCalculate :: S.Set VName -> ExpReplacements -> MonoM ExpReplacements
+canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope mapping = do
-  scope' <- S.union scope . S.fromList . map (fst . snd) <$> getLifts
-  pure $ filter ((`S.isSubsetOf` scope') . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst) mapping
+  filter ((`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst) mapping
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
@@ -172,7 +171,7 @@ isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
   prevRepl <- get
   put mempty
-  ret <- local (\env -> env {envScope = M.keysSet (envPolyBindings env), envParametrized = mempty}) m
+  ret <- local (\env -> env {envScope = mempty, envParametrized = mempty}) m
   put prevRepl
   pure ret
 
@@ -223,11 +222,16 @@ lookupFun vn = do
 lookupRecordReplacement :: VName -> MonoM (Maybe RecordReplacement)
 lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
+askScope :: MonoM (S.Set VName)
+askScope = do
+  scope <- asks envScope
+  S.union scope . S.fromList . map (fst . snd) <$> getLifts
+
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
 askIntros :: S.Set VName -> MonoM (S.Set VName)
 askIntros argset =
-  asks $ (S.filter notIntrisic argset `S.difference`) . envScope
+  (S.filter notIntrisic argset `S.difference`) <$> askScope
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
@@ -268,8 +272,8 @@ insertDimCalculus (dim, name) body = do
 unscoping :: S.Set VName -> Exp -> MonoM Exp
 unscoping argset body = do
   localDims <- parametrizing argset
-  scope <- asks $ S.union argset . envScope
-  foldrM insertDimCalculus body =<< canCalculate scope localDims
+  scope <- S.union argset <$> askScope
+  foldrM insertDimCalculus body $ canCalculate scope localDims
 
 scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
@@ -1148,8 +1152,16 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t =
-  replaceRecordReplacements rr $ isolateNormalisation $ do
+monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
+  letFun <- asks $ S.member name . envScope
+  let paramGetClean argset =
+        if letFun
+          then parametrizing argset
+          else do
+            ret <- get
+            put mempty
+            pure ret
+  replaceRecordReplacements rr $ (if letFun then id else isolateNormalisation) $ do
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
@@ -1159,16 +1171,14 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substPatType) params
     (params'', rrs) <- withArgs shape_names $ mapAndUnzipM transformPat params'
-    exp_naming <- get
-    put mempty
+    exp_naming <- paramGetClean shape_names
 
     let args = foldMap patNames params
         arg_params = map snd exp_naming
 
     rettype' <- withParams exp_naming (withArgs (args <> shape_names) $ hardTransformRetType rettype)
-    extNaming <- get
-    put mempty
-    scope <- asks (S.union shape_names . envScope)
+    extNaming <- paramGetClean (args <> shape_names)
+    scope <- S.union shape_names <$> askScope
     let (rettype'', new_params) = arrowArg scope args arg_params rettype'
         rettype''' = applySubst (`M.lookup` substs') rettype''
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1181,7 +1191,10 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         bind_r = exp_naming' -- ?
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-    body''' <- expReplace exp_naming' <$> (foldrM insertDimCalculus body'' =<< canCalculate (scope <> args) =<< get)
+    body''' <-
+      if letFun
+        then unscoping (shape_names <> args) body''
+        else expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate (scope <> args) =<< get)
 
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
