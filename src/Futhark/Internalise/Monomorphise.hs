@@ -46,8 +46,6 @@ import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
--- import Debug.Trace
-
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64
 
@@ -91,12 +89,6 @@ instance Eq ReplacedExp where
   _ == _ = False
 
 type ExpReplacements = [(ReplacedExp, VName)]
-
--- prettyExpRepl repl =
---   foldr onBind "[" repl ++ "]"
---   where
---     onBind (rexp, vn) acc =
---       acc ++ "(" ++ prettyString (unReplaced rexp) ++ " -> " ++ prettyString (qualName vn) ++ "), "
 
 canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope mapping = do
@@ -1010,14 +1002,6 @@ inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> M
 inferSizeArgs tparams bind_t bind_r t = do
   r <- get
   let dinst = dimMapping bind_t t bind_r r
-  -- \| keeping it for now, just in case
-  -- trace ("bind_t: " ++ prettyString bind_t ++
-  --        "\nbind_r: " ++ prettyExpRepl bind_r ++
-  --        "\nt: " ++ prettyString t ++
-  --        "\nr: " ++ prettyExpRepl r ++
-  --        "\ndinst: " ++ M.foldrWithKey
-  --           (\vn si acc -> acc ++ "(" ++ prettyString (qualName vn) ++ " -> " ++ prettyString si ++ "), ") "[" dinst ++ "]" ++
-  --        "\n") $
   mapM (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
