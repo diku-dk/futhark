@@ -1191,10 +1191,11 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         bind_r = exp_naming' -- ?
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+    scope' <- S.union (shape_names <> args) <$> askScope
     body''' <-
       if letFun
         then unscoping (shape_names <> args) body''
-        else expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate (scope <> args) =<< get)
+        else expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate scope' =<< get)
 
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
