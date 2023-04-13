@@ -225,7 +225,8 @@ lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 askScope :: MonoM (S.Set VName)
 askScope = do
   scope <- asks envScope
-  S.union scope . S.fromList . map (fst . snd) <$> getLifts
+  scope' <- asks $ S.union scope . M.keysSet . envPolyBindings
+  S.union scope' . S.fromList . map (fst . snd) <$> getLifts
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -532,6 +533,7 @@ transformAppExp (Range e1 me incl loc) res = do
 transformAppExp (Coerce e tp loc) res =
   AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> pure (Info res)
 transformAppExp (LetPat sizes pat e body loc) res = do
+  e' <- transformExp e
   let dimArgs = S.fromList (map sizeName sizes)
   implicitDims <- withArgs dimArgs $ askIntros (M.keysSet $ unFV $ freeInPat pat)
   let dimArgs' = dimArgs <> implicitDims
@@ -541,13 +543,7 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   params <- parametrizing dimArgs'
   let sizes' = sizes <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
   body' <- withRecordReplacements rr $ withParams params $ scoping argset $ transformExp body
-  AppExp
-    <$> ( LetPat sizes' pat'
-            <$> transformExp e
-            <*> pure body'
-            <*> pure loc
-        )
-    <*> pure (Info res)
+  pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res)
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
       -- Retrieve the lifted monomorphic function bindings that are produced,
