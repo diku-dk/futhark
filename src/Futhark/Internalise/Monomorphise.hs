@@ -280,7 +280,7 @@ scoping argset m =
   withArgs argset m >>= unscoping argset
 
 -- Given instantiated type of function, produce size arguments.
-type InferSizeArgs = StructType -> ExpReplacements -> [Exp]
+type InferSizeArgs = StructType -> MonoM [Exp]
 
 data MonoSize
   = -- | The integer encodes an equivalence class, so we can keep
@@ -372,11 +372,10 @@ transformFName loc fname t
       let mono_t = monoType t'
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
       maybe_funbind <- lookupFun $ qualLeaf fname
-      exp_repl <- get
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          pure $ applySizeArgs fname' t' $ infer t' exp_repl
+          applySizeArgs fname' t' <$> infer t'
         -- An intrinsic function.
         (Nothing, Nothing) -> pure $ var fname
         -- A polymorphic function.
@@ -384,7 +383,7 @@ transformFName loc fname t
           (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
           tell $ Seq.singleton (qualLeaf fname, funbind')
           addLifted (qualLeaf fname) mono_t (fname', infer)
-          pure $ applySizeArgs fname' t' $ infer t' exp_repl
+          applySizeArgs fname' t' <$> infer t'
   where
     var fname' = Var fname' (Info (fromStruct t)) loc
 
@@ -1008,8 +1007,9 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
     freeVarsInExp = M.keys . unFV . freeInExp
 
-inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> ExpReplacements -> [Exp]
-inferSizeArgs tparams bind_t bind_r t r = do
+inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
+inferSizeArgs tparams bind_t bind_r t = do
+  r <- get
   let dinst = dimMapping bind_t t bind_r r
   -- \| keeping it for now, just in case
   -- trace ("bind_t: " ++ prettyString bind_t ++
@@ -1019,17 +1019,17 @@ inferSizeArgs tparams bind_t bind_r t r = do
   --        "\ndinst: " ++ M.foldrWithKey
   --           (\vn si acc -> acc ++ "(" ++ prettyString (qualName vn) ++ " -> " ++ prettyString si ++ "), ") "[" dinst ++ "]" ++
   --        "\n") $
-  map (tparamArg dinst) tparams
+  mapM (tparamArg dinst) tparams
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
         -- do we really need to make a Literal from the IntLit ?
         Just (SizeExpr (IntLit x _ _)) ->
-          Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
+          pure $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         Just (SizeExpr e) ->
-          e -- need to be replaced, which require MonoM
+          replaceExp e
         _ ->
-          Literal (SignedValue $ Int64Value 0) mempty
+          pure $ Literal (SignedValue $ Int64Value 0) mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
