@@ -1188,7 +1188,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
         bind_t'' = funType params'' rettype''' -- ?
-        bind_r = exp_naming' -- ?
+        bind_r = exp_naming <> extNaming -- ?
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
     scope' <- S.union (shape_names <> args) <$> askScope
