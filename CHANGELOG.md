@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Loop optimisation would sometimes remove holes.
 
+* A potential barrier divergence for certain GPU kernels that fail
+  bounds checking.
+
 ## [0.24.1]
 
 ### Added
