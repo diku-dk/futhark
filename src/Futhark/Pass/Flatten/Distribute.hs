@@ -143,7 +143,7 @@ patInput :: ResTag -> PatElem Type -> (VName, DistInput)
 patInput tag pe =
   (patElemName pe, DistInput tag $ patElemType pe)
 
-distributeMap :: Scope rep -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> Distributed
+distributeMap :: Scope rep -> Pat Type -> SubExp -> [DistInput] -> Lambda SOACS -> Distributed
 distributeMap outer_scope map_pat w arrs lam =
   let param_inputs =
         zipWith paramInput (lambdaParams lam) arrs
@@ -155,7 +155,7 @@ distributeMap outer_scope map_pat w arrs lam =
    in Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam
   where
     bound_outside = namesFromList $ M.keys outer_scope
-    paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
+    paramInput p arr = (paramName p, arr)
     distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
     distributeStm (ResTag tag, avail_inputs) stm =
       let pat = stmPat stm
