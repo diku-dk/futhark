@@ -344,16 +344,18 @@ simplifyUpdateReshape _ _ _ = Nothing
 copyScratchToScratch :: SimpleRule rep
 copyScratchToScratch defOf seType (Copy src) = do
   t <- seType $ Var src
-  if isActuallyScratch src
-    then Just (Scratch (elemType t) (arrayDims t), mempty)
-    else Nothing
+  cs <- isActuallyScratch src
+  pure (Scratch (elemType t) (arrayDims t), cs)
   where
     isActuallyScratch v =
-      case asBasicOp . fst =<< defOf v of
-        Just Scratch {} -> True
-        Just (Rearrange _ v') -> isActuallyScratch v'
-        Just (Reshape _ _ v') -> isActuallyScratch v'
-        _ -> False
+      case defOf v of
+        Just (BasicOp Scratch {}, cs) ->
+          Just cs
+        Just (BasicOp (Rearrange _ v'), cs) ->
+          (cs <>) <$> isActuallyScratch v'
+        Just (BasicOp (Reshape _ _ v'), cs) ->
+          (cs <>) <$> isActuallyScratch v'
+        _ -> Nothing
 copyScratchToScratch _ _ _ =
   Nothing
 
