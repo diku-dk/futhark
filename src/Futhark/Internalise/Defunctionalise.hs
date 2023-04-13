@@ -572,6 +572,7 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
       Just sv -> pure (Project vn e0' (Info $ typeFromSV sv) loc, sv)
       Nothing -> error "Invalid record projection."
     Dynamic _ -> pure (Project vn e0' tp loc, Dynamic tp')
+    HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
   e1' <- defuncExp' e1
