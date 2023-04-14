@@ -207,6 +207,14 @@ documentation and in compiler output.
      An instance of :term:`nested data parallelism` that is not
      :term:`irregular`.  Fully supports by any :term:`GPU backend`.
 
+   Size expression
+
+     An expression that occurs as the size of an array or size
+     argument.  For example, in the type ``[x+2]i32``, ``x+2`` is a
+     size expression.  Size expressions can occur syntactically in
+     source code, or due to parameter substitution when applying a
+     function.
+
    Size types
    Size-dependent types
 
