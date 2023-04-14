@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# type: ignore
 #
 # Futhark documentation build configuration file, created by
 # sphinx-quickstart on Tue Mar 24 14:21:12 2015.
