@@ -25,9 +25,9 @@ But called with arguments of types:
 f32
 ```
 
+
 The lack of a final newline here is intentional
 
 ```futhark
 let x = true
 ```
-
