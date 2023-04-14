@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A potential infinite loop when looking up aliases (#1915).
 
+* `futhark literate`: less extraneous whitespace.
+
 ## [0.24.1]
 
 ### Added
