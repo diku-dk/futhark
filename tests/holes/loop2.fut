@@ -2,7 +2,7 @@
 -- propagate them needlessly.
 -- ==
 -- input { 0i32 } output { 0i32 }
--- input { 1i32 } error: Reached hole
+-- input { 1i32 } error: hole
 
 def holey (x: i32) : i32 = ???
 
