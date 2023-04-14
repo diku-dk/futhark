@@ -238,38 +238,67 @@ parametrizing argset = do
   put nxtBind
   pure params
 
-insertDimCalculus :: MonadFreshNames m => (ReplacedExp, VName) -> Exp -> m Exp
-insertDimCalculus (dim, name) body = do
-  reName <- newName name
-  let expr = unReplaced dim
-  pure $
-    AppExp
-      ( LetPat
-          []
-          (Id name (Info i64) (srclocOf expr))
-          expr
-          -- doing it in a random order can be unfortunate for
-          -- cases where we have `(sum xs)` and `(sum xs) + 1`
-          -- Latter work
-          (expReplace [(dim, name)] body)
-          mempty
-      )
-      (appRes reName body)
+calculateDims :: Exp -> ExpReplacements -> MonoM Exp
+calculateDims body repl =
+  foldCalc top_repl $ expReplace top_repl body
   where
-    appRes reName (AppExp _ (Info (AppRes ty ext))) =
-      Info $ AppRes (applySubst (subst reName) ty) (reName : ext)
-    appRes reName e =
-      Info $ AppRes (applySubst (subst reName) $ typeOf e) [reName]
+    ---- topological sorting
+    exp_idxs = zip (map fst repl) [0 ..]
+    -- list of sub-expressions of e
+    subExps =
+      (`execState` mempty) . mapOnExp
+      where
+        mapOnExp e = do
+          modify (ReplacedExp e :)
+          astMap mapper e
+        mapper = identityMapper {mapOnExp}
+    -- @a `depends_of` (b,i)@ returns @Just i@
+    -- iff b appear in a as an expression
+    depends_of a (b, i) =
+      if b `elem` subExps (unReplaced a)
+        then Just i
+        else Nothing
+    -- graph of dependencies, represented with adjacency list
+    depends_graph =
+      map (\(e, _) -> mapMaybe (depends_of e) exp_idxs) exp_idxs
 
-    subst reName vn
-      | vn == name = Just $ ExpSubst $ sizeVar (qualName reName) mempty
-      | otherwise = Nothing
+    sorting i = do
+      done <- gets $ (!! i) . snd
+      unless done $ do
+        modify $ second (\status -> map (\j -> i == j || status !! j) [0 .. length status])
+        mapM_ sorting $ depends_graph !! i
+        modify $ first (repl !! i :)
+    top_repl =
+      fst $ execState (mapM_ (sorting . snd) exp_idxs) (mempty, map (const False) exp_idxs)
+
+    ---- Calculus insertion
+    foldCalc [] body' = pure body'
+    foldCalc ((dim, vn) : repls) body' = do
+      reName <- newName vn
+      let expr = expReplace repls $ unReplaced dim
+          subst vn' =
+            if vn' == vn
+              then Just $ ExpSubst $ sizeVar (qualName reName) mempty
+              else Nothing
+          appRes = case body' of
+            (AppExp _ (Info (AppRes ty ext))) -> Info $ AppRes (applySubst subst ty) (reName : ext)
+            e -> Info $ AppRes (applySubst subst $ typeOf e) [reName]
+      foldCalc repls $
+        AppExp
+          ( LetPat
+              []
+              (Id vn (Info i64) (srclocOf expr))
+              expr
+              body'
+              mempty
+          )
+          appRes
 
 unscoping :: S.Set VName -> Exp -> MonoM Exp
 unscoping argset body = do
   localDims <- parametrizing argset
   scope <- S.union argset <$> askScope
-  foldrM insertDimCalculus body $ canCalculate scope localDims
+  calculateDims body $ canCalculate scope localDims
 
 scoping :: S.Set VName -> MonoM Exp -> MonoM Exp
 scoping argset m =
@@ -1178,7 +1207,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
     body''' <-
       if letFun
         then unscoping (shape_names <> args) body''
-        else expReplace exp_naming' <$> (foldrM insertDimCalculus body'' . canCalculate scope' =<< get)
+        else expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
 
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
