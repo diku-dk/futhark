@@ -496,6 +496,7 @@ compileOp (ParLoop s' body free) = do
                                  typename int64_t end,
                                  int subtask_id,
                                  int tid) {
+                       (void)subtask_id;
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;
