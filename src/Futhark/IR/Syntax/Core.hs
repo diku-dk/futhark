@@ -308,7 +308,7 @@ newtype Certs = Certs {unCerts :: [VName]}
   deriving (Eq, Ord, Show)
 
 instance Semigroup Certs where
-  Certs x <> Certs y = Certs (x <> y)
+  Certs x <> Certs y = Certs (x <> filter (`notElem` x) y)
 
 instance Monoid Certs where
   mempty = Certs mempty
