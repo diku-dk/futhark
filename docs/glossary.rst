@@ -141,8 +141,8 @@ documentation and in compiler output.
 
      An instance of :term:`nested data parallelism`, where the
      :term:`parallel width` of inner parallelism is :term:`variant` to
-     the outer parallelism.  For example, the expression following
-     expression exhibits irregular nested data parallelism::
+     the outer parallelism.  For example, the following expression
+     exhibits irregular nested data parallelism::
 
        map (\n -> reduce (+) 0 (iota n)) ns
 
