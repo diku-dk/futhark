@@ -6,6 +6,8 @@ module Futhark.CodeGen.Backends.GenericC.Code
     compileExp,
     compileExpToName,
     compileCode,
+    compileDest,
+    compileArg,
     errorMsgString,
     linearCode,
   )
@@ -158,9 +160,35 @@ compileRead src (Count iexp) _ ScalarSpace {} _ = do
   iexp' <- compileExp $ untyped iexp
   pure [C.cexp|$id:src[$exp:iexp']|]
 
+memNeedsWrapping :: VName -> CompilerM op s Bool
+memNeedsWrapping v = do
+  refcount <- fatMemory DefaultSpace
+  cached <- isJust <$> cacheMem v
+  pure $ refcount && cached
+
+-- | Compile an argument to a function applicaiton.
 compileArg :: Arg -> CompilerM op s C.Exp
-compileArg (MemArg m) = pure [C.cexp|$exp:m|]
+compileArg (MemArg m) = do
+  -- Function might expect fat memory, so if this is a lexical/cached
+  -- raw pointer, we have to wrap it in a struct.
+  wrap <- memNeedsWrapping m
+  if wrap
+    then pure [C.cexp|($ty:(fatMemType DefaultSpace)) {.references = NULL, .mem = $exp:m}|]
+    else pure [C.cexp|$exp:m|]
 compileArg (ExpArg e) = compileExp e
+
+-- | Prepare a destination for function application.
+compileDest :: VName -> CompilerM op s (VName, [C.Stm])
+compileDest v = do
+  -- Function result be fat memory, so if target is a raw pointer, we
+  -- have to wrap it in a struct and unwrap it afterwards.
+  wrap <- memNeedsWrapping v
+  if wrap
+    then do
+      v' <- newVName $ baseString v <> "_struct"
+      item [C.citem|$ty:(fatMemType DefaultSpace) $id:v' = {.references = NULL, .mem = $exp:v};|]
+      pure (v', [C.cstms|$id:v = $id:v'.mem;|])
+    else pure (v, mempty)
 
 compileCode :: Code op -> CompilerM op s ()
 compileCode (Op op) =
@@ -358,9 +386,11 @@ compileCode (Call [dest] fname args)
   | isBuiltInFunction fname = do
       args' <- mapM compileArg args
       stm [C.cstm|$id:dest = $id:(funName fname)($args:args');|]
-compileCode (Call dests fname args) =
+compileCode (Call dests fname args) = do
+  (dests', unpack_dest) <- mapAndUnzipM compileDest dests
   join $
     asks (opsCall . envOperations)
-      <*> pure dests
+      <*> pure dests'
       <*> pure fname
       <*> mapM compileArg args
+  stms $ mconcat unpack_dest
