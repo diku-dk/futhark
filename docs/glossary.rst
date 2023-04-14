@@ -140,7 +140,7 @@ documentation and in compiler output.
    Irregular nested data parallelism
 
      An instance of :term:`nested data parallelism`, where the
-     :term:`parallel width` of inner parallelism is term:`variant` to
+     :term:`parallel width` of inner parallelism is :term:`variant` to
      the outer parallelism.  For example, the expression following
      expression exhibits irregular nested data parallelism::
 
