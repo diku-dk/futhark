@@ -780,20 +780,16 @@ arrayOps cs = mconcat . map onStm . stmsToList . bodyStms
 replaceArrayOps ::
   forall rep.
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
-  M.Map (Pat (LetDec rep), ArrayOp) ArrayOp ->
+  M.Map (Pat (LetDec rep)) ArrayOp ->
   Body rep ->
   Body rep
 replaceArrayOps substs (Body _ stms res) =
   mkBody (fmap onStm stms) res
   where
     onStm (Let pat aux e) =
-      let (cs', e') = onExp pat (stmAuxCerts aux) e
+      let (cs', e') =
+            maybe (mempty, mapExp mapper e) fromArrayOp $ M.lookup pat substs
        in certify cs' $ mkLet' (patIdents pat) aux e'
-    onExp pat cs e
-      | Just op <- isArrayOp cs e,
-        Just op' <- M.lookup (pat, op) substs =
-          fromArrayOp op'
-    onExp _ cs e = (cs, mapExp mapper e)
     mapper =
       (identityMapper @rep)
         { mapOnBody = const $ pure . replaceArrayOps substs,
@@ -887,7 +883,7 @@ simplifyMapIota vtable screma_pat aux op
         Just
           ( arr'',
             arr_elem_param,
-            ( (pat, ArrayIndexing cs arr slice),
+            ( pat,
               ArrayIndexing cs (paramName arr_elem_param) (Slice (drop (length js + 1) (unSlice slice)))
             )
           )
@@ -913,10 +909,8 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
                 lambdaBody = replaceArrayOps (M.fromList replacements) $ lambdaBody map_lam
               }
 
-      auxing aux $
-        letBind screma_pat $
-          Op $
-            Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
+      auxing aux . letBind screma_pat . Op $
+        Screma w (arrs <> more_arrs) (ScremaForm scan reduce map_lam')
   where
     -- It is not safe to move the transform if the root array is being
     -- consumed by the Screma.  This is a bit too conservative - it's
@@ -979,7 +973,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
             Just
               ( arr_transformed,
                 Param mempty arr_transformed_row (rowType arr_transformed_t),
-                ((pat, op), ArrayVar mempty arr_transformed_row)
+                (pat, ArrayVar mempty arr_transformed_row)
               )
     mapOverArr _ = pure Nothing
 moveTransformToInput _ _ _ _ =
