@@ -388,7 +388,7 @@ checkExp (ArrayLit all_es _ loc) =
       t <- arrayOfM loc et' (Shape [sizeFromInteger (genericLength all_es) mempty]) Nonunique
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
-  start' <- require "use in range expression" anySignedType =<< checkExp start
+  (start', startOcc) <- tapOccurrences $ require "use in range expression" anySignedType =<< checkExp start
   start_t <- toStruct <$> expTypeFully start'
   maybe_step' <- case maybe_step of
     Nothing -> pure Nothing
@@ -401,7 +401,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
       Just <$> (unifies "use in range expression" start_t =<< checkExp step)
 
   let unifyRange e = unifies "use in range expression" start_t =<< checkExp e
-  end' <- traverse unifyRange end
+  (end', endOcc) <- tapOccurrences $ traverse unifyRange end
 
   end_t <- case end' of
     DownToExclusive e -> expType e
@@ -409,18 +409,30 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
     UpToExclusive e -> expType e
 
   -- Special case some ranges to give them a known size.
-  let dimFromBound = dimFromExp (SourceBound . bareExp)
+  let warnIfConsuming size =
+        case anyConsumption (startOcc <> endOcc) of
+          Just occ -> do
+            warn (location occ) $
+              withIndexLink
+                "size-expression-consume"
+                "Size expression with consumption is replaced by unknown size."
+            d <- newDimVar loc (Rigid RigidRange) "range_dim"
+            pure (sizeFromName (qualName d) mempty, Just d)
+          Nothing -> pure (size, Nothing)
   (dim, retext) <-
     case (isInt64 start', isInt64 <$> maybe_step', end') of
       (Just 0, Just (Just 1), UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            dimFromBound end''
+            warnIfConsuming $ SizeExpr end''
       (Just 0, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            dimFromBound end''
+            warnIfConsuming $ SizeExpr end''
+      (_, Nothing, UpToExclusive end'')
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+            warnIfConsuming $ sizeMinus end'' start'
       (Just 1, Just (Just 2), ToInclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            dimFromBound end''
+            warnIfConsuming $ SizeExpr end''
       _ -> do
         d <- newDimVar loc (Rigid RigidRange) "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
@@ -429,6 +441,21 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
   let res = AppRes (t `setAliases` mempty) (maybeToList retext)
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
+  where
+    sizeMinus j i =
+      SizeExpr
+        $ AppExp
+          ( BinOp
+              (qualName (intrinsicVar "-"), mempty)
+              sizeBinOpInfo
+              (j, Info (i64, Nothing))
+              (i, Info (i64, Nothing))
+              mempty
+          )
+        $ Info
+        $ AppRes i64 []
+    i64 = Scalar $ Prim $ Signed Int64
+    sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
 checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
   pure $ Ascript e' te' loc
