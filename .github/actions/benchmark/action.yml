@@ -33,7 +33,7 @@ runs:
             --exclude no_${{inputs.system}} \
             --json futhark-${{inputs.backend}}-${{inputs.system}}-$GITHUB_SHA.json \
             --ignore-files /lib/ ${{inputs.futhark-options}}
-        slurm-options: ${{inputs.slurm-options}}
+        slurm-options: --time=0-02:00:00 ${{inputs.slurm-options}}
 
     - uses: actions/upload-artifact@v1
       with:

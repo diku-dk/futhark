@@ -36,5 +36,5 @@ runs:
         printf '#!/bin/bash
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
-        srun --time=0-08:00:00 ${{inputs.slurm-options}} temp.sh
+        srun ${{inputs.slurm-options}} temp.sh
         rm temp.sh
