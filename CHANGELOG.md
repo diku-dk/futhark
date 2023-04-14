@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Missing check for anonymous sizes in type abbreviations (#1903).
 
+* Defunctionalisation crashed on projection of holes.
+
+* Loop optimisation would sometimes remove holes.
+
+* A potential barrier divergence for certain GPU kernels that fail
+  bounds checking.
+
+* A potential infinite loop when looking up aliases (#1915).
+
 ## [0.24.1]
 
 ### Added

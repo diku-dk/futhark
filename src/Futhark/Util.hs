@@ -13,8 +13,6 @@ module Futhark.Util
     maxinum,
     chunk,
     chunks,
-    pairs,
-    unpairs,
     dropAt,
     takeLast,
     dropLast,
@@ -132,18 +130,6 @@ chunks [] _ = []
 chunks (n : ns) xs =
   let (bef, aft) = splitAt n xs
    in bef : chunks ns aft
-
--- | @pairs l@ chunks the list into pairs of consecutive elements,
--- ignoring any excess element.  Example: @pairs [a,b,c,d] ==
--- [(a,b),(c,d)]@.
-pairs :: [a] -> [(a, a)]
-pairs (a : b : l) = (a, b) : pairs l
-pairs _ = []
-
--- | The opposite of 'pairs': @unpairs [(a,b),(c,d)] = [a,b,c,d]@.
-unpairs :: [(a, a)] -> [a]
-unpairs [] = []
-unpairs ((a, b) : l) = a : b : unpairs l
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
@@ -435,7 +421,7 @@ encodeChar c = encodeAsUnicodeCharar c
 encodeAsUnicodeCharar :: Char -> EncodedString
 encodeAsUnicodeCharar c =
   'z'
-    : if isDigit (head hex_str)
+    : if maybe False isDigit $ maybeHead hex_str
       then hex_str
       else '0' : hex_str
   where

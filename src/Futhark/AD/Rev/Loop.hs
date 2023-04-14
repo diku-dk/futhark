@@ -4,7 +4,7 @@ module Futhark.AD.Rev.Loop (diffLoop, stripmineStms) where
 
 import Control.Monad
 import Data.Foldable (toList)
-import Data.List (nub, (\\))
+import Data.List ((\\))
 import Data.Map qualified as M
 import Data.Maybe
 import Futhark.AD.Rev.Monad
@@ -16,7 +16,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (traverseFold)
+import Futhark.Util (nubOrd, traverseFold)
 
 -- | A convenience function to bring the components of a for-loop into
 -- scope and throw an error if the passed 'Exp' is not a for-loop.
@@ -353,7 +353,7 @@ revLoop diffStms pat loop =
                   loopFree =
                     (namesToList (freeIn loop') \\ loop_var_arrays') \\ mapMaybe getVName loop_vals',
                   loopVars = loop_var_arrays',
-                  loopVals = nub $ mapMaybe getVName loop_vals'
+                  loopVals = nubOrd $ mapMaybe getVName loop_vals'
                 }
 
         renameLoopTape $ M.fromList $ zip (map paramName loop_params) (map paramName loop_params')
