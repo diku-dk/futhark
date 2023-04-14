@@ -1,4 +1,3 @@
-
 ```futhark
 def moving_point (x: i64, y: i64) : ([][]u32, (i64, i64)) =
   let canvas = replicate 128 (replicate 128 0) with [y, x] = 0x00FFFFFF
@@ -11,6 +10,4 @@ fps: 1
 format: gif
 ```
 
-
 ![](video-img/f1a78d77be28ef1a5de76f71fe3a4b91-video.gif)
-

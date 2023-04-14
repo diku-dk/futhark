@@ -1,4 +1,3 @@
-
 ```futhark
 entry f (x: i32, (y: i32, z: i32)) = x + y + z
 ```
@@ -11,7 +10,6 @@ entry f (x: i32, (y: i32, z: i32)) = x + y + z
 6i32
 ```
 
-
 ```futhark
 entry g {x: i32, y: (i32,i32)} = x - y.0 + y.1
 ```
@@ -23,4 +21,3 @@ entry g {x: i32, y: (i32,i32)} = x - y.0 + y.1
 ```
 5i32
 ```
-

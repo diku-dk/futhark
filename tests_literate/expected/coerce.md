@@ -1,4 +1,3 @@
-
 ```futhark
 def f = i64.sum
 
@@ -21,4 +20,3 @@ def g = f64.sum
 ```
 6.0f64
 ```
-

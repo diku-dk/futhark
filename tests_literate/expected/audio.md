@@ -1,4 +1,3 @@
-
 ```futhark
 def output_hz = 44100i64
 def standard_pitch = 440.0f32
@@ -64,7 +63,6 @@ sampling_frequency: 44100
 codec: ogg
 ```
 
-
 ![](audio-img/4f72a37a9b3cf4b8a68ce450f0f696d5-output.ogg)
 
 
@@ -74,9 +72,7 @@ sampling_frequency: 44100
 codec: ogg
 ```
 
-
 ![](audio-img/53655790dd8b1739a749c772c9f6bc13-output.ogg)
-
 
 ```futhark
 entry stereo =
@@ -89,9 +85,7 @@ entry stereo =
 > :audio stereo
 ```
 
-
 ![](audio-img/9e12f26cca7539fa04a923f7b652d2e8-output.wav)
-
 
 ```futhark
 entry surround =
@@ -103,7 +97,6 @@ entry surround =
 ```
 > :audio surround
 ```
-
 
 ![](audio-img/7e0c96822c449db1dd5712a2b809ff40-output.wav)
 
@@ -125,4 +118,3 @@ entry surround =
 [[-0.9921875f64, -0.984375f64, -0.9765625f64],
 [-0.96875f64, -0.9609375f64, -0.953125f64]]
 ```
-

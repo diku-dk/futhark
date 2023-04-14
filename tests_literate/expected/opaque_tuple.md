@@ -14,6 +14,4 @@ fps: 1
 format: gif
 ```
 
-
 ![](opaque_tuple-img/da140d8304219232f384b6a2d5ea4be9-video.gif)
-

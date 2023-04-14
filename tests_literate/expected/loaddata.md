@@ -6,7 +6,6 @@
 [1i32, 2i32, 3i32]
 ```
 
-
 ```futhark
 let add_scalar (y: i32) = map (+y)
 ```
@@ -18,4 +17,3 @@ let add_scalar (y: i32) = map (+y)
 ```
 [11i32, 12i32, 13i32]
 ```
-
