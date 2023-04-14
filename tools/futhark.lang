@@ -2,7 +2,7 @@
 <!--
 
  Author: Svip <svip@flagland.org>
- 
+
  This library is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
  the Free Software Foundation; either version 2 of the License, or
@@ -24,7 +24,7 @@
     <property name="globs">*.fut</property>
     <property name="line-comment-start">--</property>
   </metadata>
-  
+
   <styles>
     <style id="comment"        _name="Comment"               map-to="def:comment" />
 <!--    <style id="error" _name="Error" map-to="def:error"/>-->
@@ -42,7 +42,7 @@
 <!--    <style id="octal" _name="Octal number" map-to="def:base-n-integer"/>-->
     <style id="hexadecimal"    _name="Hexadecimal number"    map-to="def:decimal"/>
   </styles>
-  
+
   <definitions>
 
     <context id="line-comment" style-ref="comment" end-at-line-end="true" extend-parent="false" class="comment" class-disabled="no-spell-check">
@@ -70,12 +70,12 @@
       <keyword>while</keyword>
       <keyword>do</keyword>
       <keyword>in</keyword>
-      
+
       <keyword>local</keyword>
       <keyword>type</keyword>
       <keyword>val</keyword>
       <keyword>module</keyword>
-      
+
       <keyword>open</keyword>
       <keyword>import</keyword>
     </context>
@@ -94,7 +94,7 @@
       <keyword>stream_red</keyword>
       <keyword>stream_red_per</keyword>
       <keyword>stream_seq</keyword>
-      
+
       <keyword>iota</keyword>
     </context>
 
@@ -157,7 +157,7 @@
       <start>"</start>
       <end>"</end>
     </context>
-    
+
     <context id="futhark" class="no-spell-check">
       <include>
         <context ref="line-comment" />
