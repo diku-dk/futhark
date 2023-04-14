@@ -20,6 +20,10 @@
 --
 -- * Rewrite BinOp nodes to Apply nodes.
 --
+-- * Replace all size expressions by constants or variables,
+--   complex expressions replaced by variables are calculated in
+--   let binding or replaced by size parameters if in argument.
+--
 -- Note that these changes are unfortunately not visible in the AST
 -- representation.
 module Futhark.Internalise.Monomorphise (transformProg) where
