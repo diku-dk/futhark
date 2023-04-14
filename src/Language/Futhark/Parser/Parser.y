@@ -581,11 +581,11 @@ Exp2 :: { UncheckedExp }
 
      | ApplyList {% applyExp $1 }
 
-ApplyList :: { [UncheckedExp] }
-          : ApplyList Atom %prec juxtprec
-            { $1 ++ [$2] }
+ApplyList :: { NE.NonEmpty UncheckedExp }
+          : Atom ApplyList %prec juxtprec
+            { NE.cons $1 $2 }
           | Atom %prec juxtprec
-            { [$1] }
+            { NE.singleton $1 }
 
 Atom :: { UncheckedExp }
 Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }
