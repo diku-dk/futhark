@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Certain cases of noninlined functions in `multicore` backend.
+
 ## [0.24.2]
 
 ### Added

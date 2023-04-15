@@ -9,6 +9,11 @@ documentation and in compiler output.
 .. glossary::
    :sorted:
 
+   Abstract type
+
+     A type whose definition has been hidden through a :term:`module
+     ascription`.
+
    Aliases
 
      The *aliases* of a variable is a set of those other variables
@@ -91,6 +96,22 @@ documentation and in compiler output.
      Futhark. `See also Wikipedia
      <https://en.wikipedia.org/wiki/Data_parallelism>`_.
 
+   Defunctionalisation
+
+     A program transformation always performed by the Futhark compiler,
+     that replaces function values with non-function values.  The goal
+     is to avoid having indirect calls through function pointers at
+     run-time.  To permit zero-overhead defunctionalisation, the
+     Futhark type rules impose restrictions on :term:`lifted types
+     <lifted type>`.
+
+   Defunctorisation
+
+     A program transformation always performed by the Futhark
+     compiler, that compiles away modules using an approach similar to
+     :term:`defunctionalisation`.  This makes using e.g. a
+     :term:`parametric module` completely free at run-time.
+
    Elaboration
 
      The process conducted out by the type checker, where it infers
@@ -118,12 +139,23 @@ documentation and in compiler output.
      more restrictions than some other backends, particularly with
      respect to :term:`irregular nested data parallelism`.
 
+   Higher-ranked type
+
+     A type that does not describe :term:`values <value>`.  Can be
+     seen as a partially applied :term:`type constructor`.  Not
+     directly supported by Futhark, but a similar effect can be
+     achieved through the :ref:`module-system`.
+
    In-place updates
 
      A somewhat misleading term for the syntactic forms ``x with [i] =
      v`` and ``let x[i] = v``.  These are not semantic in-place
      updates, but can be operationally understood as thus.  See
      :ref:`in-place-updates`.
+
+   Invariant
+
+     Not :term:`variant`.
 
    Irregular
 
@@ -140,9 +172,9 @@ documentation and in compiler output.
    Irregular nested data parallelism
 
      An instance of :term:`nested data parallelism`, where the
-     :term:`parallel width` of inner parallelism is term:`variant` to
-     the outer parallelism.  For example, the expression following
-     expression exhibits irregular nested data parallelism::
+     :term:`parallel width` of inner parallelism is :term:`variant` to
+     the outer parallelism.  For example, the following expression
+     exhibits irregular nested data parallelism::
 
        map (\n -> reduce (+) 0 (iota n)) ns
 
@@ -177,15 +209,63 @@ documentation and in compiler output.
      A function from :term:`modules<module>` to modules.  The most
      powerful form of abstraction provided by Futhark.
 
+   Polymorphic
+
+     Usually means a :term:`polymorphic function`, but sometimes a
+     :term:`parametric modules <parametric module>`.  Should not be
+     used to describe a :term:`type constructor <type constructor>`.
+
+   Polymorphism
+
+     The concept of being :term:`polymorphic`.
+
+   Polymorphic function
+
+     A function with :term:`type parameters <type parameter>`, such
+     that the function can be applied to arguments of various types.
+     Compiled using :term:`monomorphisation`.
+
    Lifted type
 
-     A type that may contain functions.  These have various
-     restrictions on their use.  See :ref:`hofs`.
+     A type that may contain functions, including function types
+     themselves.  These have various restrictions on their use in
+     order to support :term:`defunctionalisation`.  See :ref:`hofs`.
 
    Module
 
      A mapping from names to definitions of types, values, or nested
      modules.  See :ref:`module-system`.
+
+   Module ascription
+
+     A feature of the module system through which the contents of a
+     module can be hidden.  Written as ``m : mt`` where ``m`` is a
+     :term:`module expression` and ``mt`` is a :term:`module type
+     expression`.  See :ref:`module-system`.
+
+   Module expression
+
+     An expression that is evaluated at compile time, through
+     :term:`defunctorisation` to a :term:`module`.  Most commonly just
+     the name of a module.
+
+   Module type
+
+     A description of the interface of a :term:`module`.  Most commonly
+     used to hide contents in a :term:`module ascription` or to
+     require implementation of an interface in a :term:`parametric
+     module`.
+
+   Module type expression
+
+     An expression that is evaluated during type-checking to a
+     :term:`module type`.
+
+   Monomorphisation
+
+     A program transformation that instantiates a copy of each
+     :term:`polymorphic` functions for each type it is used with.
+     Performed by the Futhark compiler.
 
    Nested data parallelism
 
@@ -202,10 +282,19 @@ documentation and in compiler output.
      fully exploit the parallelism of the program, although
      :term:`nested data parallelism` muddles the picture.
 
+   Recursion
+
+     A function that calls itself.  Currently not supported in
+     Futhark.
+
    Regular nested data parallelism
 
      An instance of :term:`nested data parallelism` that is not
      :term:`irregular`.  Fully supports by any :term:`GPU backend`.
+
+   Size
+
+     The symbolic size of an array dimension or :term:`abstract type`.
 
    Size types
    Size-dependent types
@@ -219,6 +308,21 @@ documentation and in compiler output.
      array elements, as that might potentially result in an
      :term:`irregular array`.  See :ref:`typeabbrevs`.
 
+   Size argument
+
+     An argument to a :term:`type constructor` in a :term:`type
+     expression` of the form ``[n]`` or ``[]``.  The latter is called
+     an :term:`anonymous size`.  Must match a corresponding
+     :term:`size parameter`.
+
+   Size parameter
+
+     A parameter of a :term:`polymorphic function` or :term:`type
+     constructor` that ranges over :term:`sizes <size>`.  These are
+     written as `[n]` for some `n`, after which `n` is in scope as a
+     term of type ``i64`` within the rest of the definition.  Do not
+     confuse them with :term:`type parameters <type parameter>`.
+
    SOAC
    Second Order Array Combinator
 
@@ -226,6 +330,48 @@ documentation and in compiler output.
      Futhark: functions such as ``map``, ``reduce``, ``scan``, and so
      on.  They are *second order* because they accept a functional
      argument, and so permit :term:`nested data parallelism`.
+
+   Type
+
+     A classification of values.  ``i32`` and ``[10]i32`` are examples
+     of types.
+
+   Type abbreviation
+
+     A shorthand for a longer type, e.g. ``type t = [100]i32``.  Can
+     accept :term:`type parameters <type parameter>` and :term:`size
+     parameters <type parameter>`.  The definition is visible to
+     users, unless hidden with a :term:`module ascription`.  See
+     :ref:`typeabbrevs`.
+
+   Type argument
+
+     An argument to a :term:`type constructor` that is itself a
+     :term:`type`.  Must match a corresponding :term:`type parameter`.
+
+   Type constructor
+
+     A :term:`type abbreviation` or :term:`abstract type` that has at
+     least one :term:`type parameter` or :term:`size parameter`.
+     Futhark does not support :term:`higher-ranked types
+     <higher-ranked type>`, so when referencing a type constructor in
+     a :term:`type expression`, you must provide corresponding
+     :term:`type arguments <type argument>` and :term:`size arguments
+     <size argument>` in an appopriate order.
+
+   Type expression
+
+     A syntactic construct that is evaluated to a :term:`type` in the
+     type checker, but may contain uses of :term:`type abbreviations
+     <type abbreviation>` and :term:`anonymous sizes <anonymous size>`.
+
+   Type parameter
+
+     A parameter of a :term:`polymorphic function` or :term:`type
+     constructor` that ranges over types.  These are written as `'t`
+     for some `t`, after which `t` is in scope as a type within the
+     rest of the definition.  Do not confuse them with :term:`size
+     parameters <size parameter>`.
 
    Uniqueness types
 
@@ -240,3 +386,19 @@ documentation and in compiler output.
 
      A size produced by invoking a function whose result type contains
      an existentially quantified size, such as ``filter``.
+
+   Value
+
+     An object such as the integer ``123`` or the array ``[1,2,3]``.
+     Expressions variables are bound to values and all valid
+     expressions have a :term:`type` describing the form of values
+     they can return.
+
+   Variant
+
+     When some value ``v`` computed inside a loop takes a different
+     value for each iteration inside the loop, we say that ``v`` is
+     *variant* to the loop (and otherwise :term:`invariant`).  Often
+     used to talk about :term:`irregularity <irregular>`.  When
+     something is nested inside multiple loops, it may be variant to
+     just one of them.

@@ -495,8 +495,9 @@ $entry_point_decls
               $ M.keys params
       earlyDecl
         [C.cedecl|static void set_tuning_params(struct futhark_context* ctx) {
-                $stms:set_tuning_params
-              }|]
+                    (void)ctx;
+                    $stms:set_tuning_params
+                  }|]
 
       mapM_ earlyDecl $ concat memfuns
       type_funs <- generateAPITypes arr_space types
@@ -540,10 +541,10 @@ generateTuningParams params = do
       num_params = length params
   earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
-  earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits };|]
-  earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits };|]
-  earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits };|]
-  earlyDecl [C.cedecl|static typename int64_t tuning_param_defaults[] = { $inits:size_default_inits };|]
+  earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
+  earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
+  earlyDecl [C.cedecl|static const char *tuning_param_classes[] = { $inits:size_class_inits, NULL };|]
+  earlyDecl [C.cedecl|static typename int64_t tuning_param_defaults[] = { $inits:size_default_inits, 0 };|]
 
 generateCommonLibFuns :: [C.BlockItem] -> CompilerM op s ()
 generateCommonLibFuns memreport = do
