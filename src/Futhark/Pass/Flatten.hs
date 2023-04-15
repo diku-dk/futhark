@@ -259,6 +259,48 @@ getIrregRep segments env inps v =
           Replicate (segmentsShape segments) (Var v)
       mkIrregFromReg segments v'
 
+-- Do 'map2 replicate ns A', where 'A' is an irregular array (and so
+-- is the result, obviously).
+replicateIrreg ::
+  Segments ->
+  DistEnv ->
+  VName ->
+  String ->
+  IrregularRep ->
+  Builder GPU IrregularRep
+replicateIrreg segments env ns desc rep = do
+  -- This does not change the number of segments - it simply makes
+  -- each of them larger.
+  num_segments <- arraySize 0 <$> lookupType ns
+
+  (ns_flags, ns_offsets, ns_elems) <- doRepIota ns
+
+  w <- arraySize 0 <$> lookupType ns_elems
+
+  elems <- letExp (desc <> "_elems") <=< segMap (Solo w) $ \(Solo i) -> do
+    segment <- letSubExp "segment" =<< eIndex ns_elems [eSubExp i]
+    v <- letSubExp "v" =<< eIndex (irregularElems rep) [eSubExp segment]
+    pure $ subExpsRes [v]
+
+  rep_segments <- letExp (desc <> "_segments") <=< segMap (Solo num_segments) $
+    \(Solo i) -> do
+      segment_old <-
+        letSubExp "segment_old" =<< eIndex (irregularSegments rep) [eSubExp i]
+      n <-
+        letSubExp "n" =<< eIndex ns [eSubExp i]
+      segment_new <-
+        letSubExp "segment_new" . BasicOp $
+          BinOp (Mul Int64 OverflowUndef) segment_old n
+      pure $ subExpsRes [segment_new]
+
+  pure $
+    IrregularRep
+      { irregularSegments = rep_segments,
+        irregularFlags = ns_flags,
+        irregularOffsets = ns_offsets,
+        irregularElems = elems
+      }
+
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
@@ -339,6 +381,11 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~+~ sExt it (untyped (pe64 v'))
               ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
+    Replicate (Shape [n]) (Var v) -> do
+      ns <- elemArr segments env inps n
+      rep <- getIrregRep segments env inps v
+      rep' <- replicateIrreg segments env ns (baseString v) rep
+      pure $ insertRep (distResTag res) (Irregular rep') env
     Copy v ->
       case lookup v inps of
         Just (DistInputFree v' _) -> do
