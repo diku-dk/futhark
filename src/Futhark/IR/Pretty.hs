@@ -170,19 +170,10 @@ instance PrettyRep rep => Pretty (Stm rep) where
     align . hang 2 $
       "let"
         <+> align (pretty pat)
-        <+> case (linebreak, stmannot) of
-          (True, []) -> equals </> pretty e
-          (False, []) -> equals <+> pretty e
-          (_, ann) -> equals </> (stack ann </> pretty e)
+        <+> case stmannot of
+          [] -> equals </> pretty e
+          _ -> equals </> (stack stmannot </> pretty e)
     where
-      linebreak = case e of
-        BasicOp BinOp {} -> False
-        BasicOp CmpOp {} -> False
-        BasicOp ConvOp {} -> False
-        BasicOp UnOp {} -> False
-        BasicOp SubExp {} -> False
-        _ -> True
-
       stmannot =
         concat
           [ maybeToList (ppExpDec (stmAuxDec aux) e),
