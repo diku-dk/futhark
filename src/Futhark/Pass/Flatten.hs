@@ -154,9 +154,18 @@ readInputs segments env is = mapM_ onInput
           letBindNames [v] =<< eIndex arr (map eSubExp is)
         Irregular (IrregularRep _ _ offsets elems) -> do
           offset <- letSubExp "offset" =<< eIndex offsets (map eSubExp is)
-          num_elems <- letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
-          let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-          letBindNames [v] $ BasicOp $ Index elems slice
+          case arrayDims t of
+            [num_elems] -> do
+              let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
+              letBindNames [v] $ BasicOp $ Index elems slice
+            _ -> do
+              num_elems <-
+                letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+              let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
+              v_flat <-
+                letExp (baseString v <> "_float") $ BasicOp $ Index elems slice
+              letBindNames [v] . BasicOp $
+                Reshape ReshapeArbitrary (arrayShape t) v_flat
 
 transformScalarStms ::
   Segments ->
@@ -269,35 +278,56 @@ replicateIrreg ::
   IrregularRep ->
   Builder GPU IrregularRep
 replicateIrreg segments env ns desc rep = do
-  -- This does not change the number of segments - it simply makes
-  -- each of them larger.
+  -- Replication does not change the number of segments - it simply
+  -- makes each of them larger.
+
   num_segments <- arraySize 0 <$> lookupType ns
 
-  (ns_flags, ns_offsets, ns_elems) <- doRepIota ns
-
-  w <- arraySize 0 <$> lookupType ns_elems
-
-  elems <- letExp (desc <> "_elems") <=< segMap (Solo w) $ \(Solo i) -> do
-    segment <- letSubExp "segment" =<< eIndex ns_elems [eSubExp i]
-    v <- letSubExp "v" =<< eIndex (irregularElems rep) [eSubExp segment]
-    pure $ subExpsRes [v]
-
-  rep_segments <- letExp (desc <> "_segments") <=< segMap (Solo num_segments) $
+  -- ns multipled with existing segment sizes.
+  ns_full <- letExp (baseString ns <> "_full") <=< segMap (Solo num_segments) $
     \(Solo i) -> do
-      segment_old <-
-        letSubExp "segment_old" =<< eIndex (irregularSegments rep) [eSubExp i]
       n <-
         letSubExp "n" =<< eIndex ns [eSubExp i]
-      segment_new <-
-        letSubExp "segment_new" . BasicOp $
-          BinOp (Mul Int64 OverflowUndef) segment_old n
-      pure $ subExpsRes [segment_new]
+      old_segment <-
+        letSubExp "old_segment" =<< eIndex (irregularSegments rep) [eSubExp i]
+      full_segment <-
+        letSubExp "new_segment" =<< toExp (pe64 n * pe64 old_segment)
+      pure $ subExpsRes [full_segment]
+
+  (ns_full_flags, ns_full_offsets, ns_full_elems) <- doRepIota ns_full
+  (_, _, flat_to_segs) <- doSegIota ns_full
+
+  w <- arraySize 0 <$> lookupType ns_full_elems
+
+  elems <- letExp (desc <> "_elems") <=< segMap (Solo w) $ \(Solo i) -> do
+    -- Which segment we are in.
+    segment_i <-
+      letSubExp "segment_i" =<< eIndex ns_full_elems [eSubExp i]
+    -- How much this segment is replicated.
+    n <-
+      letSubExp "n_to_rep" =<< eIndex ns [eSubExp segment_i]
+    -- Size of original segment.
+    old_segment <-
+      letSubExp "old_segment" =<< eIndex (irregularSegments rep) [eSubExp i]
+    -- Index of value inside *new* segment.
+    j_new <-
+      letSubExp "j_new" =<< eIndex flat_to_segs [eSubExp i]
+    -- Index of value inside *old* segment.
+    j_old <-
+      letSubExp "j_old" =<< toExp (pe64 j_new `rem` pe64 old_segment)
+    -- Offset of values in original segment.
+    offset <-
+      letSubExp "offset" =<< eIndex (irregularOffsets rep) [eSubExp segment_i]
+    v <-
+      letSubExp "v"
+        =<< eIndex (irregularElems rep) [toExp $ pe64 offset + pe64 j_old]
+    pure $ subExpsRes [v]
 
   pure $
     IrregularRep
-      { irregularSegments = rep_segments,
-        irregularFlags = ns_flags,
-        irregularOffsets = ns_offsets,
+      { irregularSegments = ns_full_elems,
+        irregularFlags = ns_full_flags,
+        irregularOffsets = ns_full_offsets,
         irregularElems = elems
       }
 
@@ -470,13 +500,7 @@ onMapFreeVar segments env inps w segments_per_elem v = do
           subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
     DistInput rt t -> case resVar rt env of
       Irregular r ->
-        -- FIXME: completely bogus; we need to invent a new IrregRep here.
-        fmap (`DistInputFree` t) . letExp (baseString v <> "_rep_free_irreg_inp")
-          <=< segMap (Solo w)
-          $ \(Solo i) -> do
-            segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
-            readInputs segments env [segment] [(v, v_inp)]
-            subExpsRes . pure <$> (letSubExp "v" =<< eIndex v [eSubExp segment])
+        undefined
       Regular vs ->
         fmap (`DistInputFree` t) . letExp (baseString v <> "_rep_free_reg_inp")
           <=< segMap (Solo w)
