@@ -510,7 +510,7 @@ defuncExp (AppExp (Coerce e0 tydecl loc) res)
   | otherwise = defuncExp e0
 defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
-  let env = matchPatSV pat sv1
+  let env = alwaysMatchPatSV pat sv1
       pat' = updatePat pat sv1
   (e2', sv2) <- localEnv env $ defuncExp e2
   -- To maintain any sizes going out of scope, we need to compute the
@@ -547,7 +547,7 @@ defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
 defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
   (e1', sv1) <- defuncExp e1
-  let env1 = matchPatSV pat sv1
+  let env1 = alwaysMatchPatSV pat sv1
   (form', env2) <- case form of
     For v e2 -> do
       e2' <- defuncExp' e2
@@ -655,7 +655,10 @@ defuncExp (Constr name _ (Info t) loc) =
       ++ locStr loc
 defuncExp (AppExp (Match e cs loc) res) = do
   (e', sv) <- defuncExp e
-  csPairs <- mapM (defuncCase sv) cs
+  let bad = error $ "No case matches StaticVal\n" <> show sv
+  csPairs <-
+    fromMaybe bad . NE.nonEmpty . catMaybes
+      <$> mapM (defuncCase sv) (NE.toList cs)
   let cs' = fmap fst csPairs
       sv' = snd $ NE.head csPairs
   pure (AppExp (Match e' cs' loc) res, sv')
@@ -667,12 +670,15 @@ defuncExp (Attr info e loc) = do
 defuncExp' :: Exp -> DefM Exp
 defuncExp' = fmap fst . defuncExp
 
-defuncCase :: StaticVal -> Case -> DefM (Case, StaticVal)
+defuncCase :: StaticVal -> Case -> DefM (Maybe (Case, StaticVal))
 defuncCase sv (CasePat p e loc) = do
   let p' = updatePat p sv
-      env = matchPatSV p sv
-  (e', sv') <- localEnv env $ defuncExp e
-  pure (CasePat p' e' loc, sv')
+  case matchPatSV p sv of
+    Just env -> do
+      (e', sv') <- localEnv env $ defuncExp e
+      pure $ Just (CasePat p' e' loc, sv')
+    Nothing ->
+      pure Nothing
 
 -- | Defunctionalize the function argument to a SOAC by eta-expanding if
 -- necessary and then defunctionalizing the body of the introduced lambda.
@@ -862,7 +868,7 @@ defuncApplyArg ::
   DefM (Exp, StaticVal)
 defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d, argext), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
-  let env' = matchPatSV pat arg_sv
+  let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
   (lam_e', sv) <-
     localNewEnv (env' <> closure_env) $
@@ -929,8 +935,12 @@ defuncApplyArg _ (f', DynamicFun _ sv) (((d, argext), arg), argtypes) = do
       apply_e = mkApply f' [(d, argext, arg')] callret
   pure (apply_e, sv)
 --
-defuncApplyArg _ (_, sv) _ =
-  error $ "defuncApplyArg: cannot apply StaticVal\n" <> show sv
+defuncApplyArg fname_s (_, sv) _ =
+  error $
+    "defuncApplyArg: cannot apply StaticVal\n"
+      <> show sv
+      <> "\nFunction name: "
+      <> prettyString fname_s
 
 updateReturn :: AppRes -> Exp -> Exp
 updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
@@ -1119,43 +1129,46 @@ dynamicFunType (DynamicFun _ sv) (p : ps) =
    in (second fromStruct p : ps', ret)
 dynamicFunType sv _ = ([], typeFromSV sv)
 
--- | Match a pattern with its static value. Returns an environment with
--- the identifier components of the pattern mapped to the corresponding
--- subcomponents of the static value.
-matchPatSV :: PatBase Info VName -> StaticVal -> Env
+-- | Match a pattern with its static value. Returns an environment
+-- with the identifier components of the pattern mapped to the
+-- corresponding subcomponents of the static value.  If this function
+-- returns 'Nothing', then it corresponds to an unmatchable case.
+-- These should only occur for 'Match' expressions.
+matchPatSV :: Pat -> StaticVal -> Maybe Env
 matchPatSV (TuplePat ps _) (RecordSV ls) =
-  mconcat $ zipWith (\p (_, sv) -> matchPatSV p sv) ps ls
+  mconcat <$> zipWithM (\p (_, sv) -> matchPatSV p sv) ps ls
 matchPatSV (RecordPat ps _) (RecordSV ls)
   | ps' <- sortOn fst ps,
     ls' <- sortOn fst ls,
     map fst ps' == map fst ls' =
-      mconcat $ zipWith (\(_, p) (_, sv) -> matchPatSV p sv) ps' ls'
+      mconcat <$> zipWithM (\(_, p) (_, sv) -> matchPatSV p sv) ps' ls'
 matchPatSV (PatParens pat _) sv = matchPatSV pat sv
 matchPatSV (PatAttr _ pat _) sv = matchPatSV pat sv
 matchPatSV (Id vn (Info t) _) sv =
   -- When matching a pattern with a zero-order STaticVal, the type of
   -- the pattern wins out.  This is important when matching a
   -- nonunique pattern with a unique value.
-  if orderZeroSV sv
-    then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
-    else dim_env <> M.singleton vn (Binding Nothing sv)
+  pure $
+    if orderZeroSV sv
+      then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
+      else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
       M.map (const i64) $ unFV $ freeInType t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
-matchPatSV (Wildcard _ _) _ = mempty
+matchPatSV (Wildcard _ _) _ = pure mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
-matchPatSV PatLit {} _ = mempty
+matchPatSV PatLit {} _ = pure mempty
 matchPatSV (PatConstr c1 _ ps _) (SumSV c2 ls fs)
   | c1 == c2 =
-      mconcat $ zipWith matchPatSV ps ls
-  | Just ts <- lookup c1 fs =
-      mconcat $ zipWith matchPatSV ps $ map svFromType ts
+      mconcat <$> zipWithM matchPatSV ps ls
+  | Just _ <- lookup c1 fs =
+      Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | Just ts <- M.lookup c1 fs =
-      mconcat $ zipWith matchPatSV ps $ map svFromType ts
+      mconcat <$> zipWithM matchPatSV ps (map svFromType ts)
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
@@ -1167,9 +1180,15 @@ matchPatSV pat sv =
       ++ "\n with static value\n"
       ++ show sv
 
+alwaysMatchPatSV :: Pat -> StaticVal -> Env
+alwaysMatchPatSV pat sv = fromMaybe bad $ matchPatSV pat sv
+  where
+    bad = error $ unlines [prettyString pat, "cannot match StaticVal", show sv]
+
 orderZeroSV :: StaticVal -> Bool
 orderZeroSV Dynamic {} = True
 orderZeroSV (RecordSV fields) = all (orderZeroSV . snd) fields
+orderZeroSV (SumSV _ cs _) = all orderZeroSV cs
 orderZeroSV _ = False
 
 -- | Given a pattern and the static value for the defunctionalized argument,
@@ -1220,8 +1239,9 @@ updatePat pat sv =
       ++ "\nto reflect the static value\n"
       ++ show sv
 
--- | Convert a record (or tuple) type to a record static value. This is used for
--- "unwrapping" tuples and records that are nested in 'Dynamic' static values.
+-- | Convert a record (or tuple) type to a record static value. This
+-- is used for "unwrapping" tuples and records that are nested in
+-- 'Dynamic' static values.
 svFromType :: PatType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
