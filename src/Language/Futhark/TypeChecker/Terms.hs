@@ -630,9 +630,6 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
                 }
         body' <- localScope bindF $ checkExp body
 
-        -- We fake an ident here, but it's OK as it can't be a size
-        -- anyway.
-        -- let fake_ident = Ident name' (Info $ fromStruct ftype) mempty
         (body_t, ext) <-
           unscopeType loc (S.singleton name')
             =<< expTypeFully body'
