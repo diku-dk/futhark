@@ -94,6 +94,7 @@ module Language.Futhark.Syntax
     mkApply,
     mkApplyUT,
     sizeVar,
+    sizeInteger,
     sizeFromName,
     sizeFromInteger,
   )
@@ -233,14 +234,21 @@ data Size
     AnySize (Maybe VName)
   deriving (Show, Eq, Ord)
 
+-- | Create a 'Var' expression of type @i64@.
 sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
 sizeVar name = Var name (Info $ Scalar $ Prim $ Signed Int64)
 
+-- | Create an 'IntLit' expression of type @i64@.
+sizeInteger :: Integer -> SrcLoc -> ExpBase Info VName
+sizeInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
+
+-- | Create a 'Size' with 'sizeVar'.
 sizeFromName :: QualName VName -> SrcLoc -> Size
 sizeFromName name loc = SizeExpr $ sizeVar name loc
 
+-- | Create a 'Size' with 'sizeInt'.
 sizeFromInteger :: Integer -> SrcLoc -> Size
-sizeFromInteger int loc = SizeExpr $ IntLit int (Info <$> Scalar $ Prim $ Signed Int64) loc
+sizeFromInteger x loc = SizeExpr $ sizeInteger x loc
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
