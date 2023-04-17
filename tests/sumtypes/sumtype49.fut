@@ -1,6 +1,6 @@
 -- Based on #1917
 -- ==
--- input {} output { 2 3 }
+-- input {} output { 3 2 }
 
 type^ t = #foo (i32 -> i32) | #bar (f32 -> i32)
 
