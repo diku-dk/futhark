@@ -739,12 +739,8 @@ substTypesRet lookupSubst ot =
         else do
           let start = maximum $ map baseTag seen_ext
               ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              extsubsts =
-                M.fromList $
-                  zip ext $
-                    map
-                      (ExpSubst . flip sizeVar mempty . qualName)
-                      ext'
+              mkSubst = ExpSubst . flip sizeVar mempty . qualName
+              extsubsts = M.fromList $ zip ext $ map mkSubst ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
