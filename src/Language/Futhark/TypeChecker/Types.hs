@@ -231,12 +231,8 @@ renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let m =
-            M.fromList $
-              zip dims $
-                map
-                  (ExpSubst . flip sizeVar mempty . qualName)
-                  dims'
+      let mkSubst = ExpSubst . flip sizeVar mempty . qualName
+          m = M.fromList . zip dims $ map mkSubst dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
   | otherwise =
