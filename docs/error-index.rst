@@ -995,3 +995,9 @@ As a workaround, you can rewrite the entry point as follows:
      let x = n-1
      let A = A :> [x+1]i32
      ...
+
+Or by passing the ``x`` explicitly:
+
+.. code-block:: futhark
+
+   entry main (x: i64) (A: [x+1]i32) = ...
