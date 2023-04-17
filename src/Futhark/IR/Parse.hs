@@ -47,22 +47,20 @@ pStringLiteral =
 pName :: Parser Name
 pName =
   lexeme . fmap nameFromString $
-    (:) <$> satisfy leading <*> fmap concat (many $ choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)])
+    (:) <$> satisfy leading <*> many (satisfy constituent)
   where
     leading c = isAlpha c || c `elem` ("_+-*/%=!<>|&^.#" :: String)
-    exprBox :: Parser [Char] = (\str -> "<{" <> str <> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    choice [exprBox, singleton <$> (satisfy constituent :: Parser Char)]
+    choice [exprBox, singleton <$> satisfy constituent]
       `manyTill_` try pTag
       <?> "variable name"
   pure $ VName (nameFromString $ concat s) tag
   where
-    pTag =
-      "_" *> L.decimal <* notFollowedBy (satisfy constituent)
-    exprBox :: Parser [Char] = (\str -> "<{" <> str <> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
+    pTag = "_" *> L.decimal <* notFollowedBy (satisfy constituent)
+    exprBox = ("<{" <>) . (<> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
 pBool :: Parser Bool
 pBool = choice [keyword "true" $> True, keyword "false" $> False]
