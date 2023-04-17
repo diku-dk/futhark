@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Certain cases of noninlined functions in `multicore` backend.
 
+* Defunctionalisation of `match` where the constructors carry
+  functions.
+
 ## [0.24.2]
 
 ### Added
