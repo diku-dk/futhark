@@ -1220,8 +1220,9 @@ updatePat pat sv =
       ++ "\nto reflect the static value\n"
       ++ show sv
 
--- | Convert a record (or tuple) type to a record static value. This is used for
--- "unwrapping" tuples and records that are nested in 'Dynamic' static values.
+-- | Convert a record (or tuple) type to a record static value. This
+-- is used for "unwrapping" tuples and records that are nested in
+-- 'Dynamic' static values.
 svFromType :: PatType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
