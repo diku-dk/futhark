@@ -667,8 +667,6 @@ instance Substitutable Exp where
           }
 
 instance Substitutable Size where
-  --  applySubst f (SizeExpr (Var (QualName _ v) _ _))
-  --    | Just (SizeSubst (AnySize vn)) <- f v = AnySize vn
   applySubst f size = runIdentity $ astMap mapper size
     where
       mapper =
