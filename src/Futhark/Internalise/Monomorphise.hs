@@ -388,7 +388,7 @@ replaceExp e =
   where
     -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
     maybeNormalisedSize e'
-      | Just e'' <- strip e' = maybeNormalisedSize e''
+      | Just e'' <- stripExp e' = maybeNormalisedSize e''
     maybeNormalisedSize (Var qn _ loc) = Just $ sizeVar qn loc
     maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
     maybeNormalisedSize _ = Nothing

@@ -29,7 +29,7 @@ module Language.Futhark.Prop
     valBindTypeScheme,
     valBindBound,
     funType,
-    strip,
+    stripExp,
     similarExps,
 
     -- * Queries on patterns and params
@@ -1463,15 +1463,18 @@ progHoles = foldMap holesInDec . progDecs
       pure e
     onExp e = astMap (identityMapper {mapOnExp = onExp}) e
 
--- Strip irrelevant stuff from expression.  Ideally we'd implement
--- unification on a simpler representation that simply didn't allow
--- us.
-strip :: Exp -> Maybe Exp
-strip (Parens e _) = Just e
-strip (Assert _ e _ _) = Just e
-strip (Attr _ e _) = Just e
-strip (Ascript e _ _) = Just e
-strip _ = Nothing
+-- | Strip semantically irrelevant stuff from the top level of
+-- expression.  This is used to provide a slightly fuzzy notion of
+-- expression equality.
+--
+-- Ideally we'd implement unification on a simpler representation that
+-- simply didn't allow us.
+stripExp :: Exp -> Maybe Exp
+stripExp (Parens e _) = stripExp e `mplus` Just e
+stripExp (Assert _ e _ _) = stripExp e `mplus` Just e
+stripExp (Attr _ e _) = stripExp e `mplus` Just e
+stripExp (Ascript e _ _) = stripExp e `mplus` Just e
+stripExp _ = Nothing
 
 similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
 similarSlices slice1 slice2
@@ -1493,8 +1496,8 @@ similarSlices slice1 slice2
 -- underlying expresssion unification.
 similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
 similarExps e1 e2 | e1 == e2 = Just []
-similarExps e1 e2 | Just e1' <- strip e1 = similarExps e1' e2
-similarExps e1 e2 | Just e2' <- strip e2 = similarExps e1 e2'
+similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
+similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
 similarExps
   (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
   (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
