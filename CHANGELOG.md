@@ -9,12 +9,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark literate` (and FutharkScript in general) is now able to do
-  a bit of type-coercion of constants.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Certain cases of noninlined functions in `multicore` backend.
+
+## [0.24.2]
+
+### Added
+
+* `futhark literate` (and FutharkScript in general) is now able to do
+  a bit of type-coercion of constants.
 
 ### Fixed
 
@@ -36,6 +44,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   bounds checking.
 
 * A potential infinite loop when looking up aliases (#1915).
+
+* `futhark literate`: less extraneous whitespace.
 
 ## [0.24.1]
 
