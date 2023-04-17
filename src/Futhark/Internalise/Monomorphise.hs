@@ -248,13 +248,16 @@ calculateDims body repl =
   where
     ---- topological sorting
     exp_idxs = zip (map fst repl) [0 ..]
-    -- list of sub-expressions of e
-    subExps =
-      (`execState` mempty) . mapOnExp
+    -- list of strict sub-expressions of e
+    subExps e
+      | Just e' <- stripExp e = subExps e'
+      | otherwise = astMap mapper e `execState` mempty
       where
-        mapOnExp e = do
-          modify (ReplacedExp e :)
-          astMap mapper e
+        mapOnExp e'
+          | Just e'' <- stripExp e' = mapOnExp e''
+          | otherwise = do
+              modify (ReplacedExp e' :)
+              astMap mapper e'
         mapper = identityMapper {mapOnExp}
     -- @a `depends_of` (b,i)@ returns @Just i@
     -- iff b appear in a as an expression
@@ -269,9 +272,8 @@ calculateDims body repl =
     sorting i = do
       done <- gets $ (!! i) . snd
       unless done $ do
-        modify $ second (\status -> map (\j -> i == j || status !! j) [0 .. length status])
         mapM_ sorting $ depends_graph !! i
-        modify $ first (repl !! i :)
+        modify $ bimap (repl !! i :) (\status -> map (\j -> i == j || status !! j) [0 .. length status])
     top_repl =
       fst $ execState (mapM_ (sorting . snd) exp_idxs) (mempty, map (const False) exp_idxs)
 
