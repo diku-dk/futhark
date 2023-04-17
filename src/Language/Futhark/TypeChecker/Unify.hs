@@ -24,7 +24,6 @@ module Language.Futhark.TypeChecker.Unify
     normTypeFully,
     instantiateEmptyArrayDims,
     unify,
-    expect,
     unifyMostCommon,
     doUnification,
   )

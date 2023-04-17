@@ -1033,7 +1033,7 @@ checkApply
   (Scalar (Arrow as pname d1 tp1 tp2))
   (argexp, argtype, dflow, argloc) =
     onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
-      expect (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
+      unify (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
 
       -- Perform substitutions of instantiated variables in the types.
       tp1' <- normTypeFully tp1
@@ -1172,7 +1172,7 @@ checkSizeExp :: UncheckedExp -> TypeM Exp
 checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
   e' <- noUnique $ checkExp e
   let t = toStruct $ typeOf e'
-  expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
@@ -1870,8 +1870,7 @@ checkFunBody params body maybe_rettype loc = do
 
       let usage = mkUsage (srclocOf body) "return type annotation"
       onFailure (CheckingReturn rettype (toStruct body_t')) $
-        expect usage rettype $
-          toStruct body_t'
+        unify usage rettype (toStruct body_t')
     Nothing -> pure ()
 
   pure body'

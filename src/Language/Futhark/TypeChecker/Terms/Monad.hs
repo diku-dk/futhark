@@ -626,7 +626,7 @@ instance MonadTypeChecker TermTypeM where
     checker <- asks termChecker
     e' <- noUnique $ checker e
     let t = toStruct $ typeOf e'
-    expect (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+    unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
     updateTypes e'
 
   warn loc problem = liftTypeM $ warn loc problem
