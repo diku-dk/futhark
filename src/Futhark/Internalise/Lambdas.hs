@@ -5,6 +5,7 @@ module Futhark.Internalise.Lambdas
   )
 where
 
+import Data.Maybe (listToMaybe)
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Monad
@@ -77,5 +78,6 @@ internalisePartitionLambda internaliseLambda k lam args = do
 
     lambdaWithIncrement :: I.Body SOACS -> InternaliseM (I.Body SOACS)
     lambdaWithIncrement lam_body = runBodyBuilder $ do
-      eq_class <- resSubExp . head <$> bodyBind lam_body
+      eq_class <-
+        maybe (intConst Int64 0) resSubExp . listToMaybe <$> bodyBind lam_body
       resultBody <$> mkResult eq_class 0

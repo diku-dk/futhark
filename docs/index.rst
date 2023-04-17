@@ -39,6 +39,7 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    c-porting-guide.rst
    versus-other-languages.rst
    binary-data-format.rst
+   glossary.rst
 
 .. toctree::
    :caption: Manual Pages

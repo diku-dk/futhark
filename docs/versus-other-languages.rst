@@ -19,7 +19,7 @@ programs.  To speed up this process, we describe here some of the
 various quirks and unexpected limitations imposed by Futhark. We also
 recommended reading some of the `example programs`_ along with this
 guide.  The guide does *not* cover all Futhark features worth knowing,
-so do also skim :ref:`language-reference`.
+so do also skim :ref:`language-reference` and the :ref:`glossary`.
 
 .. _`example programs`: https://futhark-lang.org/examples.html
 
@@ -43,7 +43,7 @@ by enclosing it in backticks, as in Haskell.
 
 Identifiers are case-sensitive, and there is no restriction on the
 case of the first letter (unlike Haskell and OCaml, but like Standard
-ML).
+ML and Flix).
 
 User-defined operators are possible, but the fixity of the operator
 depends on its name.  Specifically, the fixity of a user-defined
@@ -52,14 +52,14 @@ the longest prefix of *op*.  For example, ``<<=`` would have the
 same fixity as ``<<``, and ``=<<`` the same as ``=``.  This rule is the
 same as the rule found in OCaml and F#.
 
-Top-level functions and values are defined with ``def``.  Local
-variables are bound with ``let``.
+Top-level functions and values are defined with ``def`` as in Flix.
+Local variables are bound with ``let``.
 
 Evaluation
 ----------
 
-Futhark is a completely pure language, with no cheating through monads
-or anything of the sort.
+Futhark is a completely pure language, with no cheating through
+monads, effect systems, or anything of the sort.
 
 Evaluation is *eager* or *call-by-value*, like most non-Haskell
 languages.  However, there is no defined evaluation order.
@@ -72,15 +72,15 @@ Futhark program.
 
 The evaluation semantics are entirely sequential, with parallelism
 being solely an operational detail.  Hence, race conditions are
-impossible. The Futhark compiler does not automatically go
-looking for parallelism.  Only certain special constructs and built-in
-library functions (in particular ``map``, ``reduce``, ``scan``, and
-``filter``) may be executed in parallel.
+impossible. The Futhark compiler does not automatically go looking for
+parallelism.  Only certain special constructs and built-in library
+functions (such as ``map``, ``reduce``, ``scan``, and ``filter``) may
+be executed in parallel.
 
-Currying and partial application work as usual (although functions
-are not fully first class; see `Types`_).  Some Futhark language
-constructs look like functions, but are not.  This means they cannot
-be partially applied.  These ``assert``.
+Currying and partial application work as usual (although functions are
+not fully first class; see `Types`_).  Although the ``assert``
+construct looks like a function, it is not, and it cannot be partially
+applied.
 
 Lambda terms are written as ``\x -> x + 2``, as in Haskell.
 
@@ -109,9 +109,10 @@ name and the brace.  Indexing of multi-dimensional arrays is written
 ``a[i,j]``.  Arrays are 0-indexed.
 
 All types can be combined in tuples as usual, as well as in
-*structurally typed records*, as in Standard ML.  Non-recursive sum
-types are supported, and are also structurally typed.  Abstract types
-are possible via the module system; see :ref:`module-system`.
+*structurally typed records*, as in Standard ML and Flix.
+Non-recursive sum types are supported, and are also structurally
+typed.  Abstract types are possible via the module system; see
+:ref:`module-system`.
 
 If a variable ``foo`` is a record of type ``{a: i32, b: bool}``, then
 we access field ``a`` with dot notation: ``foo.a``.  Tuples are a

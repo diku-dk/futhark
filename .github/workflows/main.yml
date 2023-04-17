@@ -138,7 +138,7 @@ jobs:
         path: futhark-nightly-windows-x86_64.zip
 
 
-  test-style:
+  haskell-test-style:
     runs-on: ubuntu-22.04
 
     steps:
@@ -158,6 +158,22 @@ jobs:
 
     - name: Style check
       run: nix-shell --pure --run "make check"
+
+
+  python-test-style:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
+
+    - name: Style check
+      run: nix-shell --pure --run "black --check ."
+
+    - name: Type check
+      run: nix-shell --pure --run "mypy ."
 
   # Fails mysteriously right now.
   #
@@ -351,7 +367,7 @@ jobs:
             --cache-extension=cache
           source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-pyopencl:
     runs-on: hendrix
@@ -372,7 +388,7 @@ jobs:
           set -e
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
     runs-on: hendrix
@@ -394,7 +410,7 @@ jobs:
           futhark test tests --no-terminal --backend=cuda
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-wasm:
     runs-on: ubuntu-22.04

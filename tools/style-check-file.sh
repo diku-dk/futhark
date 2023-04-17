@@ -4,7 +4,7 @@
 # file.  If a style violation is found, this script will exit with a
 # nonzero exit code.  Checks performed:
 #
-#   0) hlint (with some rules ignored).
+#   0) if Haskell: hlint (with some rules ignored).
 #
 #   1) Trailing whitespace.
 #
@@ -13,6 +13,8 @@
 #   3) Tabs, anywhere.
 #
 #   4) DOS line endings (CRLF).
+#
+#   5) If Python: black and mypy.
 #
 # This script can be called on directories (in which case it applies
 # to every file inside), or on files.
@@ -26,10 +28,6 @@ if [ "$#" -ne 1 ]; then
 fi
 
 exit=0
-
-hlintable() {
-    (echo "$1" | grep -E -q ".l?hs$")
-}
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
@@ -49,27 +47,19 @@ if grep -E -n " +$" "$file"; then
     exit=1
 fi
 
-if grep -E -n "$(printf '\t')" "$file"; then
-    echo
-    echo "${cyan}Tab characters found in $file:${NC}"
-    echo "$output"
-    exit=1
-fi
+no_tabs() {
+    if grep -E -n "$(printf '\t')" "$1"; then
+        echo
+        echo "${cyan}Tab characters found in $1:${NC}"
+        echo "$output"
+        exit=1
+    fi
+}
 
 if file "$file" | grep -q 'CRLF line terminators'; then
     echo
     echo "${cyan}CRLF line terminators in $file.${NC}"
     exit=1
-fi
-
-if hlintable "$file"; then
-    output=$(hlint_check "$file")
-    if [ $? = 1 ]; then
-        echo
-        echo "${cyan}Hlint issues in $file:${NC}"
-        echo "$output"
-        exit=1
-    fi
 fi
 
 if ! no_trailing_blank_lines "$file"; then
@@ -78,13 +68,43 @@ if ! no_trailing_blank_lines "$file"; then
     exit=1
 fi
 
-if hlintable "$file"; then
-    if ! LC_ALL=C.UTF-8 ormolu --mode check "$file"; then
-        echo
-        echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
-        echo "$output"
-        exit=1
-    fi
-fi
+case "$file" in
+    *.fut)
+        no_tabs "$file"
+        ;;
+    *.hs)
+        no_tabs "$file"
+        if ! LC_ALL=C.UTF-8 ormolu --mode check "$file"; then
+            echo
+            echo "${cyan}$file:${NC} is not formatted correctly with Ormolu"
+            echo "$output"
+            exit=1
+        fi
+        output=$(hlint_check "$file")
+        if [ $? = 1 ]; then
+            echo
+            echo "${cyan}$file:${NC} hlint issues"
+            echo "$output"
+            exit=1
+        fi
+        ;;
+    *.py)
+        no_tabs "$file"
+        output=$(mypy --no-error-summary "$file")
+        if [ $? != 0 ]; then
+            echo
+            echo "${cyan}$file:${NC} Mypy is upset"
+            echo "$output"
+            exit=1
+        fi
+        output=$(black --check --diff --quiet "$file")
+        if [ $? != 0 ]; then
+            echo
+            echo "${cyan}$file:${NC} is not formatted correctly with Black"
+            echo "$output"
+            exit=1
+        fi
+        ;;
+esac
 
 exit $exit

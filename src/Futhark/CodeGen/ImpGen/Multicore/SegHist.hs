@@ -5,6 +5,7 @@ where
 
 import Control.Monad
 import Data.List (zip4)
+import Data.Maybe (listToMaybe)
 import Futhark.CodeGen.ImpCode.Multicore qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
@@ -58,7 +59,7 @@ nonsegmentedHist pat space histops kbody num_histos = do
   let ns = map snd $ unSegSpace space
       ns_64 = map pe64 ns
       num_histos' = tvExp num_histos
-      hist_width = histSize $ head histops
+      hist_width = maybe 0 histSize $ listToMaybe histops
       use_subhistogram = sExt64 num_histos' * hist_width .<=. product ns_64
 
   histops' <- renameHistOpLambda histops

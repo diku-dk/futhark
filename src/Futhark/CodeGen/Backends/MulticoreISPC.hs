@@ -630,11 +630,11 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode (Call dests fname args) =
-  defCallIspc dests fname =<< mapM compileArg args
+compileCode (Call dests fname args) = do
+  (dests', unpack_dest) <- mapAndUnzipM GC.compileDest dests
+  defCallIspc dests' fname =<< mapM GC.compileArg args
+  GC.stms $ mconcat unpack_dest
   where
-    compileArg (MemArg m) = pure [C.cexp|$exp:m|]
-    compileArg (ExpArg e) = compileExp e
     defCallIspc dests' fname' args' = do
       let out_args = [[C.cexp|&$id:d|] | d <- dests']
           args''
