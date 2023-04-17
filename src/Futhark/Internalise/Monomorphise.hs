@@ -1039,9 +1039,6 @@ inferSizeArgs tparams bind_t bind_r t = do
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        -- do we really need to make a Literal from the IntLit ?
-        Just (SizeExpr (IntLit x _ _)) ->
-          pure $ Literal (SignedValue $ Int64Value $ fromIntegral x) mempty
         Just (SizeExpr e) ->
           replaceExp e
         _ ->
