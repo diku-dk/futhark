@@ -302,7 +302,13 @@ documentation and in compiler output.
      argument.  For example, in the type ``[x+2]i32``, ``x+2`` is a
      size expression.  Size expressions can occur syntactically in
      source code, or due to parameter substitution when applying a
-     function.
+     :term:`size-dependent function`.
+
+   Size-dependent function
+
+     A function where the size of the result depends on the values of
+     the parameters.  The function ``iota`` is perhaps the simplest
+     example.
 
    Size types
    Size-dependent types
