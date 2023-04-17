@@ -68,11 +68,7 @@ determineSizeWitnesses t =
 mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
-      alsoRet =
-        M.unionWith (&&) $
-          M.map (const True) $
-            unFV $
-              freeInType ret
+      alsoRet = M.unionWith (&&) $ M.map (const True) $ unFV $ freeInType ret
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
