@@ -175,6 +175,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
     where
       ppField (name, t) = pretty (nameToString name) <> colon <+> pretty t
   pretty (TEVar name _) = pretty name
+  pretty (TEParens te _) = parens $ pretty te
   pretty (TEApply t arg _) = pretty t <+> pretty arg
   pretty (TEArrow (Just v) t1 t2 _) = parens v' <+> "->" <+> pretty t2
     where

@@ -641,6 +641,7 @@ typeExpHtml e = case e of
         t' <- typeExpHtml t
         pure $ toHtml (nameToString name) <> ": " <> t'
   TEVar name _ -> qualNameHtml name
+  TEParens te _ -> parens <$> typeExpHtml te
   TEApply t arg _ -> do
     t' <- typeExpHtml t
     arg' <- typeArgExpHtml arg

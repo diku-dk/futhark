@@ -421,11 +421,13 @@ deriving instance Ord (SizeExp NoInfo VName)
 
 deriving instance Ord (SizeExp Info VName)
 
--- | An unstructured type with type variables and possibly shape
--- declarations - this is what the user types in the source program.
--- These are used to construct 'TypeBase's in the type checker.
+-- | An unstructured syntactic type with type variables and possibly
+-- shape declarations - this is what the user types in the source
+-- program.  These are used to construct 'TypeBase's in the type
+-- checker.
 data TypeExp f vn
   = TEVar (QualName vn) SrcLoc
+  | TEParens (TypeExp f vn) SrcLoc
   | TETuple [TypeExp f vn] SrcLoc
   | TERecord [(Name, TypeExp f vn)] SrcLoc
   | TEArray (SizeExp f vn) (TypeExp f vn) SrcLoc
@@ -452,6 +454,7 @@ instance Located (TypeExp f vn) where
   locOf (TETuple _ loc) = locOf loc
   locOf (TERecord _ loc) = locOf loc
   locOf (TEVar _ loc) = locOf loc
+  locOf (TEParens _ loc) = locOf loc
   locOf (TEUnique _ loc) = locOf loc
   locOf (TEApply _ _ loc) = locOf loc
   locOf (TEArrow _ _ _ loc) = locOf loc
