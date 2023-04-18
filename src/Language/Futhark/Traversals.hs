@@ -449,6 +449,7 @@ bareSizeExp (SizeExpAny loc) = SizeExpAny loc
 
 bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
 bareTypeExp (TEVar qn loc) = TEVar qn loc
+bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
 bareTypeExp (TETuple tys loc) = TETuple (map bareTypeExp tys) loc
 bareTypeExp (TERecord fs loc) = TERecord (map (second bareTypeExp) fs) loc
 bareTypeExp (TEArray size ty loc) = TEArray (bareSizeExp size) (bareTypeExp ty) loc
