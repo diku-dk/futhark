@@ -16,6 +16,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable
 import Data.Either
 import Data.List (find, foldl', genericLength, partition)
 import Data.List.NonEmpty qualified as NE
@@ -163,21 +164,36 @@ checkCoerce ::
   SrcLoc ->
   UncheckedTypeExp ->
   UncheckedExp ->
-  TermTypeM (TypeExp Info VName, StructType, Exp, [VName])
+  TermTypeM (TypeExp Info VName, StructType, Exp)
 checkCoerce loc te e = do
-  (te', te_t, ext) <- checkTypeExpRigid te RigidCoerce
+  (te', te_t, ext) <- checkTypeExpNonrigid te
   e' <- checkExp e
   e_t <- toStruct <$> expTypeFully e'
 
-  (e_t_nonrigid, _) <-
-    allDimsFreshInType loc Nonrigid "coerce_d" e_t
+  te_t_nonrigid <- makeNonExtFresh ext te_t
 
   onFailure (CheckingAscription te_t e_t) $
-    unify (mkUsage loc "type ascription") te_t e_t_nonrigid
+    unify (mkUsage loc "size coercion") e_t te_t_nonrigid
 
-  te_t' <- normTypeFully te_t
-
-  pure (te', te_t', e', ext)
+  -- If the type expression had any anonymous dimensions, these will
+  -- now be in 'ext'.  Those we keep nonrigid and unify with e_t.
+  -- This ensures that 'x :> [1][]i32' does not make the second
+  -- dimension unknown.  Use of matchDims is sensible because the
+  -- structure of e_t' will be fully known due to the unification, and
+  -- te_t because type expressions are complete.
+  pure (te', te_t, e')
+  where
+    makeNonExtFresh ext = bitraverse onDim pure
+      where
+        onDim d@(NamedSize v)
+          | qualLeaf v `elem` ext = pure d
+        onDim _ = do
+          v <- newTypeName "coerce"
+          constrain v . Size Nothing $
+            mkUsage
+              loc
+              "a size coercion where the underlying expression size cannot be determined"
+          pure $ NamedSize $ qualName v
 
 unscopeType ::
   SrcLoc ->
@@ -313,10 +329,10 @@ checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
   pure $ Ascript e' te' loc
 checkExp (AppExp (Coerce e te loc) _) = do
-  (te', te_t, e', ext) <- checkCoerce loc te e
+  (te', te_t, e') <- checkCoerce loc te e
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t $ fromStruct te_t
-  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' ext)
+  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' [])
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1
