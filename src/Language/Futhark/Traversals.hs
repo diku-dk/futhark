@@ -242,6 +242,8 @@ instance ASTMappable (LoopFormBase Info VName) where
 instance ASTMappable (TypeExp Info VName) where
   astMap tv (TEVar qn loc) =
     TEVar <$> astMap tv qn <*> pure loc
+  astMap tv (TEParens te loc) =
+    TEParens <$> astMap tv te <*> pure loc
   astMap tv (TETuple ts loc) =
     TETuple <$> traverse (astMap tv) ts <*> pure loc
   astMap tv (TERecord ts loc) =
