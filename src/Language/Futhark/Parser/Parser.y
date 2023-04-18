@@ -488,13 +488,12 @@ TypeExpApply :: { UncheckedTypeExp }
                 { $1 }
 
 TypeExpAtom :: { UncheckedTypeExp }
-             : '(' TypeExp ')'                { $2 }
+             : '(' TypeExp ')'                { TEParens $2 (srcspan $1 $>) }
              | '(' ')'                        { TETuple [] (srcspan $1 $>) }
              | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) (srcspan $1 $>) }
              | '{' '}'                        { TERecord [] (srcspan $1 $>) }
              | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
-             | SizeExp TypeExpTerm
-               { TEArray $1 $2 (srcspan $1 $>) }
+             | SizeExp TypeExpTerm            { TEArray $1 $2 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (srclocOf (snd $1)) }
 
 Constr :: { (Name, Loc) }
