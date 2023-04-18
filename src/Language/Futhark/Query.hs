@@ -212,6 +212,8 @@ atPosInTypeExp te pos =
     TEVar qn loc -> do
       guard $ loc `contains` pos
       Just $ RawAtName qn $ locOf loc
+    TEParens te' _ ->
+      atPosInTypeExp te' pos
     TETuple es _ ->
       msum $ map (`atPosInTypeExp` pos) es
     TERecord fields _ ->
