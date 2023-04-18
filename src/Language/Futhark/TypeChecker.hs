@@ -665,7 +665,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           "size-polymorphic-entry"
           "Entry point functions must not be size-polymorphic in their return type."
   | p : _ <- filter nastyParameter params =
-      warn loc $
+      warn p $
         "Entry point parameter\n"
           </> indent 2 (pretty p)
           </> "\nwill have an opaque type, so the entry point will likely not be callable."
