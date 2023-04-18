@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   tightening the rules a little bit, so some coercions involving
   anonymous sizes may now be rejected.  Add expected sizes as needed.
 
+* Defunctionalisation somtimes forgot about sizes bound at top level
+  (#1920).
+
 ## [0.24.2]
 
 ### Added

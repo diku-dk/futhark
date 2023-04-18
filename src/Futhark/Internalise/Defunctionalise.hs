@@ -345,7 +345,9 @@ instStaticVal ::
   StaticVal ->
   m StaticVal
 instStaticVal globals dims t sv_t sv = do
-  fresh_substs <- mkSubsts $ S.toList $ S.fromList dims <> sizesToRename sv
+  fresh_substs <-
+    mkSubsts . filter (`S.notMember` globals) . S.toList $
+      S.fromList dims <> sizesToRename sv
 
   let dims' = map (onName fresh_substs) dims
       isDim k _ = k `elem` dims'
