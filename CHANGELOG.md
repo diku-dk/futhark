@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Defunctionalisation of `match` where the constructors carry
   functions.
 
+* Shape coercions involving sum types (#1918).  This required
+  tightening the rules a little bit, so some coercions involving
+  anonymous sizes may now be rejected.  Add expected sizes as needed.
+
 ## [0.24.2]
 
 ### Added
