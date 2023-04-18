@@ -49,6 +49,7 @@ import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
+import Language.Futhark.TypeChecker.Unify
 
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64

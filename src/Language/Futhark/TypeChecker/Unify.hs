@@ -26,6 +26,8 @@ module Language.Futhark.TypeChecker.Unify
     unify,
     unifyMostCommon,
     doUnification,
+    stripExp,
+    similarExps,
   )
 where
 
@@ -35,6 +37,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.List (foldl', intersect)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -43,6 +46,135 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Types
+
+-- | Strip semantically irrelevant stuff from the top level of
+-- expression.  This is used to provide a slightly fuzzy notion of
+-- expression equality.
+--
+-- Ideally we'd implement unification on a simpler representation that
+-- simply didn't allow us.
+stripExp :: Exp -> Maybe Exp
+stripExp (Parens e _) = stripExp e `mplus` Just e
+stripExp (Assert _ e _ _) = stripExp e `mplus` Just e
+stripExp (Attr _ e _) = stripExp e `mplus` Just e
+stripExp (Ascript e _ _) = stripExp e `mplus` Just e
+stripExp _ = Nothing
+
+similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
+similarSlices slice1 slice2
+  | length slice1 == length slice2 = do
+      concat <$> zipWithM match slice1 slice2
+  | otherwise = Nothing
+  where
+    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
+    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
+      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
+    match _ _ = Nothing
+    pair (Nothing, Nothing) = Just []
+    pair (Just x, Just y) = Just [(x, y)]
+    pair _ = Nothing
+
+-- | If these two expressions are structurally similar at top level as
+-- sizes, produce their subexpressions (which are not necessarily
+-- similar, but you can check for that!).  This is the machinery
+-- underlying expresssion unification.
+similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
+similarExps e1 e2 | e1 == e2 = Just []
+similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
+similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
+similarExps
+  (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
+  (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
+    | op1 == op2 = Just [(x1, x2), (y1, y2)]
+similarExps (AppExp (Apply f1 args1 _) _) (AppExp (Apply f2 args2 _) _)
+  | f1 == f2 = Just $ zip (map snd $ NE.toList args1) (map snd $ NE.toList args2)
+similarExps (AppExp (Index arr1 slice1 _) _) (AppExp (Index arr2 slice2 _) _)
+  | arr1 == arr2,
+    length slice1 == length slice2 =
+      similarSlices slice1 slice2
+similarExps (TupLit es1 _) (TupLit es2 _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (RecordLit fs1 _) (RecordLit fs2 _)
+  | length fs1 == length fs2 =
+      zipWithM onFields fs1 fs2
+  where
+    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+      | n1 == n2 = Just (fe1, fe2)
+    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+      Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
+    onFields _ _ = Nothing
+similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (Project field1 e1 _ _) (Project field2 e2 _ _)
+  | field1 == field2 =
+      Just [(e1, e2)]
+similarExps (Negate e1 _) (Negate e2 _) =
+  Just [(e1, e2)]
+similarExps (Not e1 _) (Not e2 _) =
+  Just [(e1, e2)]
+similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
+  | length es1 == length es2,
+    n1 == n2 =
+      Just $ zip es1 es2
+similarExps (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
+  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
+similarExps (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
+  | names1 == names2 =
+      Just [(e1, e2), (e'1, e'2)]
+similarExps (OpSection op1 _ _) (OpSection op2 _ _)
+  | op1 == op2 = Just []
+similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
+  | names1 == names2 = Just []
+similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
+  similarSlices slice1 slice2
+similarExps (AppExp (LetPat sizeBind1 pat1 ex1 e1 _) _) (AppExp (LetPat sizeBind2 pat2 ex2 e2 _) _)
+  | Just alphMap <- m_alphMap =
+      similarExps ex1 ex2 <> similarExps e1 (applySubst (fmap ExpSubst . (`M.lookup` alphMap)) e2)
+  where
+    m_alphMapBind =
+      if length sizeBind1 == length sizeBind2
+        then Just $ M.fromList $ zipWith (\a b -> (sizeName a, sizeVar (qualName $ sizeName b) mempty)) sizeBind1 sizeBind2
+        else Nothing
+
+    m_alphMapPat (TuplePat pats1 _) (TuplePat pats2 _)
+      | length pats1 == length pats2 =
+          foldM (fmap . M.union) mempty $ zipWith m_alphMapPat pats1 pats2
+    m_alphMapPat (RecordPat pats1 _) (RecordPat pats2 _)
+      | map fst pats1 == map fst pats2 =
+          foldM (fmap . M.union) mempty $ zipWith (\(_, a) (_, b) -> m_alphMapPat a b) pats1 pats2
+    m_alphMapPat (PatParens pat1' _) pat2' =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat pat1' (PatParens pat2' _) =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat (Id vn1 ty _) (Id vn2 _ _) =
+      Just $ M.singleton vn1 (Var (qualName vn2) ty mempty)
+    m_alphMapPat Wildcard {} Wildcard {} =
+      Just mempty
+    m_alphMapPat (PatAscription pat1' _ _) pat2' =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat pat1' (PatAscription pat2' _ _) =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat (PatLit lit1 _ _) (PatLit lit2 _ _)
+      | lit1 == lit2 = Just mempty
+    m_alphMapPat (PatConstr c1 _ pats1 _) (PatConstr c2 _ pats2 _)
+      | c1 == c2 -- same constructor so same number of arguments
+        =
+          foldM (fmap . M.union) mempty $ zipWith m_alphMapPat pats1 pats2
+    m_alphMapPat (PatAttr _ pat1' _) pat2' =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat pat1' (PatAttr _ pat2' _) =
+      m_alphMapPat pat1' pat2'
+    m_alphMapPat _ _ =
+      Nothing
+
+    m_alphMap = M.union <$> m_alphMapBind <*> m_alphMapPat pat1 pat2
+similarExps _ _ = Nothing
 
 -- | A piece of information that describes what process the type
 -- checker currently performing.  This is used to give better error

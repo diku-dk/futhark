@@ -61,6 +61,7 @@ import Language.Futhark.Interpreter.Values qualified
 import Language.Futhark.Primitive (floatValue, intValue)
 import Language.Futhark.Primitive qualified as P
 import Language.Futhark.Semantic qualified as T
+import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (break, mod)
 
 data StackFrame = StackFrame
