@@ -18,7 +18,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Certain cases of noninlined functions in `multicore` backend.
 
 * Defunctionalisation of `match` where the constructors carry
-  functions.
+  functions (#1917).
+
+* Shape coercions involving sum types (#1918).  This required
+  tightening the rules a little bit, so some coercions involving
+  anonymous sizes may now be rejected.  Add expected sizes as needed.
+
+* Defunctionalisation somtimes forgot about sizes bound at top level
+  (#1920).
 
 ## [0.24.2]
 

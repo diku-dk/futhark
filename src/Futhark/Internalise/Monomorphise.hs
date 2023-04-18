@@ -480,6 +480,8 @@ transformRetTypeSizes argset (RetType dims ty) = do
 
 transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
 transformTypeExp te@TEVar {} = pure te
+transformTypeExp (TEParens te loc) =
+  TEParens <$> transformTypeExp te <*> pure loc
 transformTypeExp (TETuple tes loc) =
   TETuple <$> mapM transformTypeExp tes <*> pure loc
 transformTypeExp (TERecord fs loc) =

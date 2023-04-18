@@ -671,7 +671,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           <> pretty p
           <> " only used non-constructively."
   | p : _ <- filter nastyParameter params =
-      warn loc $
+      warn p $
         "Entry point parameter\n"
           </> indent 2 (pretty p)
           </> "\nwill have an opaque type, so the entry point will likely not be callable."

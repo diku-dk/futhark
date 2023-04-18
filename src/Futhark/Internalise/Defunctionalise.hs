@@ -169,6 +169,8 @@ replaceStaticValSizes globals orig_substs sv =
       TESum (map (fmap $ map $ onTypeExp substs) ts) loc
     onTypeExp substs (TEDim dims t loc) =
       TEDim dims (onTypeExp substs t) loc
+    onTypeExp substs (TEParens te loc) =
+      TEParens (onTypeExp substs te) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
 
@@ -343,7 +345,9 @@ instStaticVal ::
   StaticVal ->
   m StaticVal
 instStaticVal globals dims t sv_t sv = do
-  fresh_substs <- mkSubsts $ S.toList $ S.fromList dims <> sizesToRename sv
+  fresh_substs <-
+    mkSubsts . filter (`S.notMember` globals) . S.toList $
+      S.fromList dims <> sizesToRename sv
 
   let dims' = map (onName fresh_substs) dims
       isDim k _ = k `elem` dims'
@@ -494,8 +498,7 @@ defuncExp e@(Var qn (Info t) loc) = do
     HoleSV _ hole_loc ->
       pure (Hole (Info t) hole_loc, sv)
     _ ->
-      let tp = typeFromSV sv
-       in pure (Var qn (Info tp) loc, sv)
+      pure (Var qn (Info (typeFromSV sv)) loc, sv)
 defuncExp (Hole (Info t) loc) =
   pure (Hole (Info t) loc, HoleSV t loc)
 defuncExp (Ascript e0 tydecl loc)
@@ -1145,11 +1148,11 @@ matchPatSV (RecordPat ps _) (RecordSV ls)
 matchPatSV (PatParens pat _) sv = matchPatSV pat sv
 matchPatSV (PatAttr _ pat _) sv = matchPatSV pat sv
 matchPatSV (Id vn (Info t) _) sv =
-  -- When matching a pattern with a zero-order STaticVal, the type of
-  -- the pattern wins out.  This is important when matching a
-  -- nonunique pattern with a unique value.
+  -- When matching a zero-order pattern with a StaticVal, the type of
+  -- the pattern wins out.  This is important for propagating sizes
+  -- (but probably reveals a flaw in our bookkeeping).
   pure $
-    if orderZeroSV sv
+    if orderZero t
       then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
       else dim_env <> M.singleton vn (Binding Nothing sv)
   where
@@ -1168,7 +1171,10 @@ matchPatSV (PatConstr c1 _ ps _) (SumSV c2 ls fs)
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | Just ts <- M.lookup c1 fs =
-      mconcat <$> zipWithM matchPatSV ps (map svFromType ts)
+      -- A higher-order pattern can only match an appropriate SumSV.
+      if all orderZero ts
+        then mconcat <$> zipWithM matchPatSV ps (map svFromType ts)
+        else Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
@@ -1184,12 +1190,6 @@ alwaysMatchPatSV :: Pat -> StaticVal -> Env
 alwaysMatchPatSV pat sv = fromMaybe bad $ matchPatSV pat sv
   where
     bad = error $ unlines [prettyString pat, "cannot match StaticVal", show sv]
-
-orderZeroSV :: StaticVal -> Bool
-orderZeroSV Dynamic {} = True
-orderZeroSV (RecordSV fields) = all (orderZeroSV . snd) fields
-orderZeroSV (SumSV _ cs _) = all orderZeroSV cs
-orderZeroSV _ = False
 
 -- | Given a pattern and the static value for the defunctionalized argument,
 -- update the pattern to reflect the changes in the types.

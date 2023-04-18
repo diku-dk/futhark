@@ -175,6 +175,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
     where
       ppField (name, t) = pretty (nameToString name) <> colon <+> pretty t
   pretty (TEVar name _) = pretty name
+  pretty (TEParens te _) = parens $ pretty te
   pretty (TEApply t arg _) = pretty t <+> pretty arg
   pretty (TEArrow (Just v) t1 t2 _) = parens v' <+> "->" <+> pretty t2
     where
@@ -386,8 +387,9 @@ prettyExp _ (ProjectSection fields _ _) =
     p name = "." <> pretty name
 prettyExp _ (IndexSection idxs _ _) =
   parens $ "." <> brackets (commasep (map pretty idxs))
-prettyExp _ (Constr n cs t _) =
-  "#" <> pretty n <+> sep (map pretty cs) <> prettyInst t
+prettyExp p (Constr n cs t _) =
+  parensIf (p >= 10) $
+    "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
 prettyExp _ (Attr attr e _) =
   prettyAttr attr </> prettyExp (-1) e
 prettyExp i (AppExp e _) = prettyAppExp i e
