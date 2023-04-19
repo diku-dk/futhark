@@ -22,6 +22,7 @@ module Language.Futhark.TypeChecker.Unify
     equalityType,
     normPatType,
     normTypeFully,
+    getAreSame,
     instantiateEmptyArrayDims,
     unify,
     expect,
@@ -40,6 +41,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -327,6 +329,21 @@ normTypeFully t = do
   constraints <- getConstraints
   pure $ applySubst (`lookupSubst` constraints) t
 
+-- | Retrieve an oracle that can be used to decide whether two are in
+-- the same equivalence class (i.e. have been unified).  This is an
+-- exotic operation.
+getAreSame :: MonadUnify m => m (VName -> VName -> Bool)
+getAreSame = check <$> getConstraints
+  where
+    check constraints x y =
+      case (M.lookup x constraints, M.lookup y constraints) of
+        (Just (_, Size (Just (NamedSize x')) _), _) ->
+          check constraints (qualLeaf x') y
+        (_, Just (_, Size (Just (NamedSize y')) _)) ->
+          check constraints x (qualLeaf y')
+        _ ->
+          x == y
+
 -- | Replace any top-level type variable with its substitution.
 normType :: MonadUnify m => StructType -> m StructType
 normType t@(Scalar (TypeVar _ _ (QualName [] v) [])) = do
@@ -561,6 +578,14 @@ unifyWith onDims usage = subunify False
 unifyDims :: MonadUnify m => Usage -> UnifyDims m
 unifyDims _ _ _ _ d1 d2
   | d1 == d2 = pure ()
+unifyDims usage bcs _ nonrigid d1 d2
+  | NamedSize (QualName _ v1) <- d1,
+    NamedSize (QualName _ v2) <- d2,
+    Just lvl1 <- nonrigid v1,
+    Just lvl2 <- nonrigid v2 =
+      if lvl1 <= lvl2
+        then linkVarToDim usage bcs v2 lvl2 d1
+        else linkVarToDim usage bcs v1 lvl1 d2
 unifyDims usage bcs _ nonrigid (NamedSize (QualName _ d1)) d2
   | Just lvl1 <- nonrigid d1 =
       linkVarToDim usage bcs d1 lvl1 d2
@@ -588,6 +613,16 @@ expect usage = unifyWith onDims usage mempty noBreadCrumbs
       | d1 == d2 = pure ()
     -- We identify existentially bound names by them being nonrigid
     -- and yet bound.  It's OK to unify with those.
+    onDims bcs bound nonrigid d1 d2
+      | NamedSize (QualName _ v1) <- d1,
+        NamedSize (QualName _ v2) <- d2,
+        Just lvl1 <- nonrigid v1,
+        Just lvl2 <- nonrigid v2,
+        not (boundParam bound d2) || (v1 `elem` bound),
+        not (boundParam bound d1) || (v2 `elem` bound) =
+          if lvl1 <= lvl2
+            then linkVarToDim usage bcs v2 lvl2 d1
+            else linkVarToDim usage bcs v1 lvl1 d2
     onDims bcs bound nonrigid (NamedSize (QualName _ d1)) d2
       | Just lvl1 <- nonrigid d1,
         not (boundParam bound d2) || (d1 `elem` bound) =
@@ -841,11 +876,11 @@ linkVarToDim ::
   m ()
 linkVarToDim usage bcs vn lvl dim = do
   constraints <- getConstraints
-
   case dim of
     NamedSize dim'
       | Just (dim_lvl, c) <- qualLeaf dim' `M.lookup` constraints,
-        dim_lvl > lvl ->
+        dim_lvl > lvl -> do
+          traceM $ unlines ["link", show (vn, lvl), show (dim, dim_lvl)]
           case c of
             ParamSize {} -> do
               notes <- dimNotes usage dim
