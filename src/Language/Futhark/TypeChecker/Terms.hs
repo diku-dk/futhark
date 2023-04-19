@@ -213,7 +213,7 @@ checkCoerce loc te e = do
   te_t_nonrigid <- makeNonExtFresh ext te_t
 
   onFailure (CheckingAscription te_t e_t) $
-    unify (mkUsage loc "size coercion") e_t te_t_nonrigid
+    unify (mkUsage loc "size coercion") te_t_nonrigid e_t
 
   -- If the type expression had any anonymous dimensions, these will
   -- now be in 'ext'.  Those we keep nonrigid and unify with e_t.
