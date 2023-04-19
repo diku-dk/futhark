@@ -240,10 +240,10 @@ sizeFree ::
   (Exp -> Maybe VName) ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-sizeFree tloc expKiller t = do
+sizeFree tloc expKiller orig_t = do
   scope <- asks termScope
-  (t', m) <- runStateT (onType (M.keysSet $ scopeVtable scope) t) mempty
-  pure (t', M.elems m)
+  (orig_t', m) <- runStateT (onType (M.keysSet $ scopeVtable scope) orig_t) mempty
+  pure (orig_t', M.elems m)
   where
     -- using StateT (M.Map Exp VName) TermTypeM a
     onScalar scope (Record fs) =
@@ -266,7 +266,14 @@ sizeFree tloc expKiller t = do
             <> case argName of
               Unnamed -> mempty
               Named vn -> S.singleton vn
-    onScalar _ ty = pure ty
+    onScalar scope (TypeVar as u v args) =
+      TypeVar as u v <$> mapM onTypeArg args
+      where
+        onTypeArg (TypeArgDim d loc) =
+          TypeArgDim <$> onSize d <*> pure loc
+        onTypeArg (TypeArgType ty loc) =
+          TypeArgType <$> onType scope ty <*> pure loc
+    onScalar _ (Prim pt) = pure $ Prim pt
 
     unSizeExpr (SizeExpr e) = e
     unSizeExpr AnySize {} = error "unSizeExpr: AnySize"
