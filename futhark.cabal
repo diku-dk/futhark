@@ -274,6 +274,15 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.SoP.AlgEnv
+      Futhark.SoP.AlgEnvProc
+      Futhark.SoP.EquivEnvProc
+      Futhark.SoP.FourierMotzkin
+      Futhark.SoP.PrimExp
+      Futhark.SoP.RangeEnvProc
+      Futhark.SoP.SoP
+      Futhark.SoP.ToFromSoP
+      Futhark.SoP.Util
       Futhark.FreshNames
       Futhark.IR
       Futhark.IR.Aliases
@@ -515,6 +524,7 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , multiset
 
 executable futhark
   import: common
