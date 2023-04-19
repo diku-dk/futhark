@@ -27,21 +27,39 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
+-- | Retrieve an oracle that can be used to decide whether two are in
+-- the same equivalence class (i.e. have been unified).  This is an
+-- exotic operation.
+getAreSame :: MonadUnify m => m (VName -> VName -> Bool)
+getAreSame = check <$> getConstraints
+  where
+    check constraints x y =
+      case (M.lookup x constraints, M.lookup y constraints) of
+        (Just (_, Size (Just (Var x' _ _)) _), _) ->
+          check constraints (qualLeaf x') y
+        (_, Just (_, Size (Just (Var y' _ _)) _)) ->
+          check constraints x (qualLeaf y')
+        _ ->
+          x == y
+
 -- | Replace specified sizes with distinct fresh size variables.
 someDimsFreshInType ::
   SrcLoc ->
   Rigidity ->
   Name ->
-  S.Set VName ->
+  [VName] ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als)
-someDimsFreshInType loc r desc sizes = bitraverse onDim pure
+someDimsFreshInType loc r desc fresh t = do
+  areSameSize <- getAreSame
+  let freshen v = any (areSameSize v) fresh
+  bitraverse (onDim freshen) pure t
   where
-    onDim (SizeExpr (Var d typ _))
-      | qualLeaf d `S.member` sizes = do
+    onDim freshen (SizeExpr (Var d _ _))
+      | freshen $ qualLeaf d = do
           v <- newDimVar loc r desc
-          pure $ SizeExpr $ Var (qualName v) typ loc
-    onDim d = pure d
+          pure $ sizeFromName (qualName v) loc
+    onDim _ d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
 -- specified ridigity.  Returns the new fresh size variables.
@@ -49,22 +67,24 @@ freshDimsInType ::
   SrcLoc ->
   Rigidity ->
   Name ->
-  S.Set VName ->
+  [VName] ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als, [VName])
-freshDimsInType loc r desc sizes t =
-  second M.elems <$> runStateT (bitraverse onDim pure t) mempty
+freshDimsInType loc r desc fresh t = do
+  areSameSize <- getAreSame
+  let freshen v = any (areSameSize v) fresh
+  second M.elems <$> runStateT (bitraverse (onDim freshen) pure t) mempty
   where
-    onDim (SizeExpr (Var d typ _))
-      | qualLeaf d `S.member` sizes = do
+    onDim freshen (SizeExpr (Var d _ _))
+      | freshen $ qualLeaf d = do
           prev_subst <- gets $ M.lookup $ qualLeaf d
           case prev_subst of
-            Just d' -> pure $ SizeExpr $ Var (qualName d') typ loc
+            Just d' -> pure $ sizeFromName (qualName d') loc
             Nothing -> do
               v <- lift $ newDimVar loc r desc
               modify $ M.insert (qualLeaf d) v
-              pure $ SizeExpr $ Var (qualName v) typ loc
-    onDim d = pure d
+              pure $ sizeFromName (qualName v) loc
+    onDim _ d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
 uniquePat :: Names -> Pat -> Pat
@@ -167,15 +187,11 @@ data ArgSource = Initial | BodyResult
 wellTypedLoopArg :: ArgSource -> [VName] -> Pat -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
   (merge_t, _) <-
-    freshDimsInType (srclocOf arg) Nonrigid "loop" (S.fromList sparams) $
-      toStruct $
-        patternType pat
+    freshDimsInType (srclocOf arg) Nonrigid "loop" sparams $
+      toStruct (patternType pat)
   arg_t <- toStruct <$> expTypeFully arg
   onFailure (checking merge_t arg_t) $
-    unify
-      (mkUsage (srclocOf arg) desc)
-      merge_t
-      arg_t
+    unify (mkUsage (srclocOf arg) desc) merge_t arg_t
   where
     (checking, desc) =
       case src of
@@ -204,6 +220,7 @@ checkDoLoop ::
   TermTypeM (CheckedLoop, AppRes)
 checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
+    known_before <- M.keysSet <$> getConstraints
     zeroOrderType
       (mkUsage (srclocOf mergeexp) "use as loop variable")
       "type used as loop variable"
@@ -237,17 +254,18 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     -- We don't want the loop parameters to alias their initial
     -- values, so we blank them here.  We will actually check them
     -- properly later.
-    (merge_t, new_dims_to_initial_dim) <-
+    (merge_t, new_dims_map) <-
       -- dim handling (1)
-      allDimsFreshInType loc Nonrigid "loop" . flip setAliases mempty
+      allDimsFreshInType loc Nonrigid "loop_d" . flip setAliases mempty
         =<< expTypeFully mergeexp'
-    let new_dims = M.keys new_dims_to_initial_dim
+    let new_dims_to_initial_dim = M.toList new_dims_map
+        new_dims = map fst new_dims_to_initial_dim
 
     -- dim handling (2)
     let checkLoopReturnSize mergepat' loopbody' = do
           loopbody_t <- expTypeFully loopbody'
           pat_t <-
-            someDimsFreshInType loc Nonrigid "loop" (S.fromList new_dims)
+            someDimsFreshInType loc Nonrigid "loop" new_dims
               =<< normTypeFully (patternType mergepat')
 
           -- We are ignoring the dimensions here, because any mismatches
@@ -261,21 +279,26 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           -- Figure out which of the 'new_dims' dimensions are variant.
           -- This works because we know that each dimension from
           -- new_dims in the pattern is unique and distinct.
+          areSameSize <- getAreSame
           let onDims _ x y
                 | x == y = pure x
-              onDims _ x@(SizeExpr e) d
-                | vs <- L.filter (`elem` new_dims) $ M.keys . unFV $ freeInExp e = do
-                    forM_ vs $ \v -> do
-                      case M.lookup v new_dims_to_initial_dim of
-                        Just d'@(SizeExpr e')
-                          | d' == d ->
-                              modify $ first $ M.insert v (ExpSubst e')
-                        _ ->
-                          modify $ second (v :)
-                    pure x
+              onDims _ x@(SizeExpr e) d = do
+                let vs = L.filter (`elem` new_dims) $ M.keys . unFV $ freeInExp e
+                forM_ vs $ \v -> do
+                  case L.find (areSameSize v . fst) new_dims_to_initial_dim of
+                    Just (v', d'@(SizeExpr e')) ->
+                      if d' == d
+                        then modify $ first $ M.insert v' $ ExpSubst e'
+                        else
+                          unless (v `S.member` known_before) $
+                            modify (second (v :))
+                    _ ->
+                      pure ()
+                pure x
               onDims _ x _ = pure x
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t
+
           let (init_substs, sparams) =
                 execState (matchDims onDims merge_t' loopbody_t') mempty
 
@@ -321,7 +344,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           bound_t <- expTypeFully uboundexp'
           bindingIdent i bound_t $ \i' ->
             noUnique . bindingPat [] mergepat (Ascribed merge_t) $
-              \mergepat' -> tapOccurrences $ do
+              \mergepat' -> tapOccurrences $ incLevel $ do
                 loopbody' <- noSizeEscape $ checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                 pure
@@ -339,7 +362,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
               | Just t' <- peelArray 1 t ->
                   bindingPat [] xpat (Ascribed t') $ \xpat' ->
                     noUnique . bindingPat [] mergepat (Ascribed merge_t) $
-                      \mergepat' -> tapOccurrences $ do
+                      \mergepat' -> tapOccurrences $ incLevel $ do
                         loopbody' <- noSizeEscape $ checkExp loopbody
                         (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                         pure
@@ -355,6 +378,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
         While cond ->
           noUnique . bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
             tapOccurrences
+              . incLevel
               . sequentially
                 ( checkExp cond
                     >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
@@ -392,7 +416,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     wellTypedLoopArg Initial sparams mergepat'' mergeexp'
 
     (loopt, retext) <-
-      freshDimsInType loc (Rigid RigidLoop) "loop" (S.fromList sparams) $
+      freshDimsInType loc (Rigid RigidLoop) "loop" sparams $
         loopReturnType mergepat'' merge_t'
     -- We set all of the uniqueness to be unique.  This is intentional,
     -- and matches what happens for function calls.  Those arrays that
