@@ -269,7 +269,7 @@ sizeFree tloc expKiller t = do
     onScalar _ ty = pure ty
 
     unSizeExpr (SizeExpr e) = e
-    unSizeExpr _ = error "internal error in unscopeType"
+    unSizeExpr AnySize {} = error "unSizeExpr: AnySize"
 
     onType ::
       S.Set VName ->
