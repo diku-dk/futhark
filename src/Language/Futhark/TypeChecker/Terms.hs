@@ -253,9 +253,9 @@ sizeFree tloc expKiller t = do
     onScalar scope (Arrow as argName d argT (RetType dims retT)) = do
       argT' <- onType scope argT
       retT' <- onType (scope `S.union` argset) retT
-      newBind <- get
-      let (rl, nxtBind) = M.partitionWithKey (const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr) newBind
-      put nxtBind
+      rl <-
+        state . M.partitionWithKey $
+          const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr
       let dims' = dims <> M.elems rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
