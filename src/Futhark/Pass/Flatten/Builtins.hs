@@ -10,6 +10,7 @@ module Futhark.Pass.Flatten.Builtins
     doSegIota,
     doPrefixSum,
     doRepIota,
+    doPartition2,
   )
 where
 
@@ -27,10 +28,11 @@ import Futhark.Tools
 builtinName :: T.Text -> Name
 builtinName = nameFromText . ("builtin#" <>)
 
-segIotaName, repIotaName, prefixSumName :: Name
+segIotaName, repIotaName, prefixSumName, partition2Name :: Name
 segIotaName = builtinName "segiota"
 repIotaName = builtinName "repiota"
 prefixSumName = builtinName "prefixsum"
+partition2Name = builtinName "partition2"
 
 genScanomap :: String -> SubExp -> Lambda GPU -> [SubExp] -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
 genScanomap desc w lam nes m = do
@@ -209,6 +211,36 @@ genRepIota ks = do
     zero = intConst Int64 0
     negone = intConst Int64 (-1)
 
+genPartition2 :: VName -> VName -> Builder GPU (VName, VName)
+genPartition2 n cs = do
+  let n' = Var n
+  -- Calculate array of true flags (tfs) and false flags (ffs) via map
+  gtid <- newVName "gtid"
+  space <- mkSegSpace [(gtid, n')]
+  (flagRes, flagStms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+    let [zero, one] = map (toExp . constant) [0 :: Int64, 1 :: Int64]
+    tf <- letSubExp "tf" =<< eIf (eIndex cs [toExp gtid]) (eBody [one]) (eBody [zero])
+    ff <- letSubExp "ff" =<< eIf (eIndex cs [toExp gtid]) (eBody [zero]) (eBody [one])
+    pure $ map (Returns ResultMaySimplify mempty) [tf, ff]
+  let kbody = KernelBody () flagStms flagRes
+  let t = Prim int64
+  ~[tfs, ffs] <- letTupExp "tfs_ffs" $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [t, t] kbody
+  -- Get result indices via scatter
+  isT <- genPrefixSum "isT" tfs
+  isF <- genPrefixSum "isF" ffs
+  num_ts <- letExp "num_ts" =<< eLast isT
+  scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [n']
+  res <- letExp "scatter_res" <=< genScatter scratch n' $ \gtid' -> do
+    let idx = [toExp gtid']
+    let c = eIndex cs idx
+    let minus1 e = eBinOp (Sub Int64 OverflowUndef) e (toExp $ constant (1 :: Int64))
+    let iT = minus1 $ eIndex isT idx
+    let iF = minus1 $ eBinOp (Add Int64 OverflowUndef) (eIndex isF idx) (toExp num_ts)
+    ind <- letExp "ind" =<< eIf c (eBody [iT]) (eBody [iF])
+    i <- letSubExp "i" =<< toExp gtid'
+    pure (ind, i)
+  pure (res, num_ts)
+
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
 
@@ -278,12 +310,33 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefBody = body
       }
 
+partition2Builtin :: FunDef GPU
+partition2Builtin = buildingBuiltin $ do
+  np <- newParam "n" $ Prim int64
+  csp <- newParam "cs" $ Array Bool (Shape [Var (paramName np)]) Nonunique
+  body <-
+    localScope (scopeOfFParams [np, csp]) . buildBody_ $ do
+      (res, i) <- genPartition2 (paramName np) (paramName csp)
+      pure $ varsRes [res, i]
+  pure
+    FunDef
+      { funDefEntryPoint = Nothing,
+        funDefAttrs = mempty,
+        funDefName = partition2Name,
+        funDefRetType =
+          [ Array int64 (Shape [Free $ Var $ paramName np]) Unique,
+            Prim int64
+          ],
+        funDefParams = [np, csp],
+        funDefBody = body
+      }
+
 -- | Builtin functions used in flattening.  Must be prepended to a
 -- program that is transformed by flattening.  The intention is to
 -- avoid the code explosion that would result if we inserted
 -- primitives everywhere.
 flatteningBuiltins :: [FunDef GPU]
-flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin]
+flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin, partition2Builtin]
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
 doSegIota :: VName -> Builder GPU (VName, VName, VName)
@@ -344,3 +397,24 @@ doPrefixSum ns = do
       [(n, Observe), (Var ns, Observe)]
       [toDecl (staticShapes1 ns_t) Unique]
       (Safe, mempty, mempty)
+
+doPartition2 :: VName -> Builder GPU (VName, VName)
+doPartition2 cs = do
+  cs_t <- lookupType cs
+  let n = arraySize 0 cs_t
+  res <- newVName "partition2_res"
+  i <- newVName "partition2_index"
+  let args = [(n, Prim int64), (Var cs, cs_t)]
+      restype =
+        fromMaybe (error "doPartition2: bad application") $
+          applyRetType
+            (funDefRetType partition2Builtin)
+            (funDefParams partition2Builtin)
+            args
+  letBindNames [res, i] $
+    Apply
+      (funDefName partition2Builtin)
+      [(n, Observe), (Var cs, Observe)]
+      restype
+      (Safe, mempty, mempty)
+  pure (res, i)
