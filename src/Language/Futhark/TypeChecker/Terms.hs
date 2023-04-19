@@ -269,10 +269,8 @@ sizeFree tloc expKiller orig_t = do
     onScalar scope (TypeVar as u v args) =
       TypeVar as u v <$> mapM onTypeArg args
       where
-        onTypeArg (TypeArgDim d loc) =
-          TypeArgDim <$> onSize d <*> pure loc
-        onTypeArg (TypeArgType ty loc) =
-          TypeArgType <$> onType scope ty <*> pure loc
+        onTypeArg (TypeArgDim d) = TypeArgDim <$> onSize d
+        onTypeArg (TypeArgType ty) = TypeArgType <$> onType scope ty
     onScalar _ (Prim pt) = pure $ Prim pt
 
     unSizeExpr (SizeExpr e) = e
@@ -1009,7 +1007,7 @@ boundInsideType (Array _ _ _ t) = boundInsideType (Scalar t)
 boundInsideType (Scalar Prim {}) = mempty
 boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
   where
-    f (TypeArgType t _) = boundInsideType t
+    f (TypeArgType t) = boundInsideType t
     f TypeArgDim {} = mempty
 boundInsideType (Scalar (Record fs)) = foldMap boundInsideType fs
 boundInsideType (Scalar (Sum cs)) = foldMap (foldMap boundInsideType) cs
@@ -1599,9 +1597,9 @@ sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesP
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
     onParam t = M.keysSet $ unFV $ freeInType t
-    onTypeArg (TypeArgDim (SizeExpr (Var d _ _)) _) = S.singleton $ qualLeaf d
-    onTypeArg (TypeArgDim _ _) = mempty
-    onTypeArg (TypeArgType t _) = onParam t
+    onTypeArg (TypeArgDim (SizeExpr (Var d _ _))) = S.singleton $ qualLeaf d
+    onTypeArg (TypeArgDim _) = mempty
+    onTypeArg (TypeArgType t) = onParam t
 sizeNamesPos _ = mempty
 
 checkGlobalAliases :: [Pat] -> PatType -> SrcLoc -> TermTypeM ()
@@ -1735,8 +1733,8 @@ injectExt ext ret = RetType ext_here $ deeper ret
       Scalar $ TypeVar as u tn $ map deeperArg targs
     deeper t@Array {} = t
 
-    deeperArg (TypeArgType t loc) = TypeArgType (deeper t) loc
-    deeperArg (TypeArgDim d loc) = TypeArgDim d loc
+    deeperArg (TypeArgType t) = TypeArgType $ deeper t
+    deeperArg (TypeArgDim d) = TypeArgDim d
 
 -- | Find all type variables in the given type that are covered by the
 -- constraints, and produce type parameters that close over them.

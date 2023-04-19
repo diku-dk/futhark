@@ -161,8 +161,8 @@ instance Pretty (Shape dim) => Pretty (TypeBase dim as) where
   pretty = prettyType 0
 
 prettyTypeArg :: Pretty (Shape dim) => Int -> TypeArg dim -> Doc a
-prettyTypeArg _ (TypeArgDim d _) = pretty $ Shape [d]
-prettyTypeArg p (TypeArgType t _) = prettyType p t
+prettyTypeArg _ (TypeArgDim d) = pretty $ Shape [d]
+prettyTypeArg p (TypeArgType t) = prettyType p t
 
 instance Pretty (TypeArg Size) where
   pretty = prettyTypeArg 0

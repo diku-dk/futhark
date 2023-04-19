@@ -332,10 +332,10 @@ traverseTypeArg ::
   (dim1 -> f dim2) ->
   TypeArg dim1 ->
   f (TypeArg dim2)
-traverseTypeArg _ g (TypeArgDim d loc) =
-  TypeArgDim <$> g d <*> pure loc
-traverseTypeArg f g (TypeArgType t loc) =
-  TypeArgType <$> traverseType f g pure t <*> pure loc
+traverseTypeArg _ g (TypeArgDim d) =
+  TypeArgDim <$> g d
+traverseTypeArg f g (TypeArgType t) =
+  TypeArgType <$> traverseType f g pure t
 
 instance ASTMappable StructType where
   astMap tv = traverseType (astMap tv) (astMap tv) pure

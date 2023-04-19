@@ -211,10 +211,10 @@ traverseDims f = go mempty PosImmediate
               Named p' -> S.insert p' bound
               Unnamed -> bound
 
-    onTypeArg bound b (TypeArgDim d loc) =
-      TypeArgDim <$> f bound b d <*> pure loc
-    onTypeArg bound b (TypeArgType t loc) =
-      TypeArgType <$> go bound b t <*> pure loc
+    onTypeArg bound b (TypeArgDim d) =
+      TypeArgDim <$> f bound b d
+    onTypeArg bound b (TypeArgType t) =
+      TypeArgType <$> go bound b t
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -373,8 +373,7 @@ combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arr
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
   Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
   where
-    f (TypeArgType t1 loc) (TypeArgType t2 _) =
-      TypeArgType (combineTypeShapes t1 t2) loc
+    f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
     f targ _ = targ
 combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
   arrayOfWithAliases
@@ -436,8 +435,8 @@ matchDims onDims = matchDims' mempty
         _ -> pure t1
 
     matchTypeArg _ ta@TypeArgType {} _ = pure ta
-    matchTypeArg bound (TypeArgDim x loc) (TypeArgDim y _) =
-      TypeArgDim <$> onDims bound x y <*> pure loc
+    matchTypeArg bound (TypeArgDim x) (TypeArgDim y) =
+      TypeArgDim <$> onDims bound x y
     matchTypeArg _ a _ = pure a
 
     onShapes bound shape1 shape2 =
@@ -610,7 +609,7 @@ typeVars t =
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
-    typeArgFree (TypeArgType ta _) = typeVars ta
+    typeArgFree (TypeArgType ta) = typeVars ta
     typeArgFree TypeArgDim {} = mempty
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
@@ -736,12 +735,12 @@ intrinsicAcc =
   where
     acc_v = VName "acc" 10
     t_v = VName "t" 11
-    arg = TypeArgType (Scalar (TypeVar () Nonunique (qualName t_v) [])) mempty
+    arg = TypeArgType $ Scalar (TypeVar () Nonunique (qualName t_v) [])
 
 -- | If this type corresponds to the builtin "acc" type, return the
 -- type of the underlying array.
 isAccType :: TypeBase d as -> Maybe (TypeBase d ())
-isAccType (Scalar (TypeVar _ _ (QualName [] v) [TypeArgType t _]))
+isAccType (Scalar (TypeVar _ _ (QualName [] v) [TypeArgType t]))
   | v == fst intrinsicAcc =
       Just t
 isAccType _ = Nothing
@@ -1222,7 +1221,7 @@ intrinsics =
     uarray_ka = Array () Unique (Shape [sizeFromName (qualName k) mempty]) t_a
 
     accType t =
-      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]
+      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t]
 
     namify i (x, y) = (VName (nameFromString x) i, y)
 

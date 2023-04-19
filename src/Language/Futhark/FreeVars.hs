@@ -149,8 +149,8 @@ freeInType t =
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
   where
-    typeArgDims (TypeArgDim d _) = onSize d
-    typeArgDims (TypeArgType at _) = freeInType at
+    typeArgDims (TypeArgDim d) = onSize d
+    typeArgDims (TypeArgType at) = freeInType at
 
     notV Unnamed = const True
     notV (Named v) = (/= v)

@@ -429,9 +429,9 @@ unifyWith onDims usage = subunify False
                 | ord' = flipUnifySizes onDims
                 | otherwise = onDims
 
-          unifyTypeArg bcs' (TypeArgDim (SizeExpr d1) _) (TypeArgDim (SizeExpr d2) _) =
+          unifyTypeArg bcs' (TypeArgDim (SizeExpr d1)) (TypeArgDim (SizeExpr d2)) =
             onDims' bcs' (swap ord d1 d2)
-          unifyTypeArg bcs' (TypeArgType t _) (TypeArgType arg_t _) =
+          unifyTypeArg bcs' (TypeArgType t) (TypeArgType arg_t) =
             subunify ord bound bcs' t arg_t
           unifyTypeArg bcs' _ _ =
             unifyError

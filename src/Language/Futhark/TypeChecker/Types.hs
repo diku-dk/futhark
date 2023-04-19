@@ -179,10 +179,10 @@ unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
       Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
   where
-    unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
-      pure $ TypeArgDim d1 loc
-    unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
-      TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
+    unifyTypeArgs (TypeArgDim d1) (TypeArgDim _d2) =
+      pure $ TypeArgDim d1
+    unifyTypeArgs (TypeArgType t1) (TypeArgType t2) =
+      TypeArgType <$> unifyTypesU uf t1 t2
     unifyTypeArgs _ _ =
       Nothing
 unifyScalarTypes uf (Record ts1) (Record ts2)
@@ -594,9 +594,9 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (sizeFromName (qualName v) ploc) ploc
-typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
+  TypeArgDim $ sizeFromName (qualName v) ploc
+typeParamToArg (TypeParamType _ v _) =
+  TypeArgType $ Scalar $ TypeVar () Nonunique (qualName v) []
 
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
@@ -702,9 +702,9 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim (SizeExpr e) _) =
+    mkSubst (TypeParamDim pv _) (TypeArgDim (SizeExpr e)) =
       (pv, ExpSubst e)
-    mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
+    mkSubst (TypeParamType _ pv _) (TypeArgType at) =
       (pv, Subst [] $ RetType [] $ second mempty at)
     mkSubst p a =
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
@@ -781,12 +781,12 @@ substTypesRet lookupSubst ot =
         _ ->
           pure $ RetType (new_ext <> dims) t'
 
-    subsTypeArg (TypeArgType t loc) = do
+    subsTypeArg (TypeArgType t) = do
       let RetType dims t' = substTypesRet lookupSubst' t
       modify (dims ++)
-      pure $ TypeArgType t' loc
-    subsTypeArg (TypeArgDim v loc) =
-      pure $ TypeArgDim (applySubst lookupSubst' v) loc
+      pure $ TypeArgType t'
+    subsTypeArg (TypeArgDim v) =
+      pure $ TypeArgDim $ applySubst lookupSubst' v
 
     lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst
 

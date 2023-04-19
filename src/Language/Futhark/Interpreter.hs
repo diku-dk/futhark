@@ -617,14 +617,14 @@ expandType env (Scalar (TypeVar () u tn args)) =
       -- e.g. accumulators.
       Scalar (TypeVar () u tn $ map expandArg args)
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e) _) =
+    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e)) =
       (M.singleton p $ SizeExpr e, mempty)
-    matchPtoA (TypeParamType l p _) (TypeArgType t' _) =
+    matchPtoA (TypeParamType l p _) (TypeArgType t') =
       let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
     matchPtoA _ _ = mempty
-    expandArg (TypeArgDim s loc) = TypeArgDim s loc
-    expandArg (TypeArgType t loc) = TypeArgType (expandType env t) loc
+    expandArg (TypeArgDim s) = TypeArgDim s
+    expandArg (TypeArgType t) = TypeArgType $ expandType env t
 expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env) cs
 
 evalWithExts :: Env -> EvalM Eval

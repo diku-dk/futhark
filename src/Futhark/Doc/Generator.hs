@@ -541,8 +541,8 @@ prettyShape (Shape ds) =
   mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg Size -> DocM Html
-typeArgHtml (TypeArgDim d _) = dimDeclHtml d
-typeArgHtml (TypeArgType t _) = typeHtml t
+typeArgHtml (TypeArgDim d) = dimDeclHtml d
+typeArgHtml (TypeArgType t) = typeHtml t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty

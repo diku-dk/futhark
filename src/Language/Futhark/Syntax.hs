@@ -374,13 +374,13 @@ instance Bifoldable TypeBase where
 
 -- | An argument passed to a type constructor.
 data TypeArg dim
-  = TypeArgDim dim SrcLoc
-  | TypeArgType (TypeBase dim ()) SrcLoc
+  = TypeArgDim dim
+  | TypeArgType (TypeBase dim ())
   deriving (Eq, Ord, Show)
 
 instance Traversable TypeArg where
-  traverse f (TypeArgDim v loc) = TypeArgDim <$> f v <*> pure loc
-  traverse f (TypeArgType t loc) = TypeArgType <$> bitraverse f pure t <*> pure loc
+  traverse f (TypeArgDim v) = TypeArgDim <$> f v
+  traverse f (TypeArgType t) = TypeArgType <$> bitraverse f pure t
 
 instance Functor TypeArg where
   fmap = fmapDefault

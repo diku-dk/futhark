@@ -268,9 +268,9 @@ arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
-    f (TypeArgDim (SizeExpr (Var d _ _)) _) = S.singleton $ qualLeaf d
+    f (TypeArgDim (SizeExpr (Var d _ _))) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
-    f (TypeArgType t _) = arraySizes t
+    f (TypeArgType t) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
 arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)

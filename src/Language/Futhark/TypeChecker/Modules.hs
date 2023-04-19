@@ -158,16 +158,16 @@ newNamesForMTy orig_mty = do
         substituteInDim (SizeExpr e) = SizeExpr $ applySubst subst e
         substituteInDim AnySize {} = error "substituteInDim: AnySize"
 
-        substituteInTypeArg (TypeArgDim (SizeExpr (Var (QualName qs v) typ _)) loc) =
-          TypeArgDim (SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc) loc
-        substituteInTypeArg (TypeArgDim (SizeExpr (IntLit x ty _)) loc) =
-          TypeArgDim (SizeExpr $ IntLit x ty loc) loc
-        substituteInTypeArg (TypeArgDim (SizeExpr e) loc) =
-          TypeArgDim (SizeExpr (applySubst subst e)) loc
-        substituteInTypeArg (TypeArgDim AnySize {} _) =
-          error "substituteInTYpeArg: AnySize"
-        substituteInTypeArg (TypeArgType t loc) =
-          TypeArgType (substituteInType t) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr (Var (QualName qs v) typ loc))) =
+          TypeArgDim $ SizeExpr $ Var (QualName (map substitute qs) $ substitute v) typ loc
+        substituteInTypeArg (TypeArgDim (SizeExpr (IntLit x ty loc))) =
+          TypeArgDim $ SizeExpr $ IntLit x ty loc
+        substituteInTypeArg (TypeArgDim (SizeExpr e)) =
+          TypeArgDim $ SizeExpr (applySubst subst e)
+        substituteInTypeArg (TypeArgDim AnySize {}) =
+          error "substituteInTypeArg: AnySize"
+        substituteInTypeArg (TypeArgType t) =
+          TypeArgType $ substituteInType t
 
 mtyTypeAbbrs :: MTy -> M.Map VName TypeBinding
 mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod

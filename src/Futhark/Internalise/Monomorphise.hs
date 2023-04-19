@@ -464,8 +464,8 @@ transformTypeSizes typ =
     transformScalarSizes (TypeVar as uniq qn args) =
       TypeVar as uniq qn <$> mapM onArg args
       where
-        onArg (TypeArgDim dim loc) = TypeArgDim <$> onDim dim <*> pure loc
-        onArg (TypeArgType ty loc) = TypeArgType <$> transformTypeSizes ty <*> pure loc
+        onArg (TypeArgDim dim) = TypeArgDim <$> onDim dim
+        onArg (TypeArgType ty) = TypeArgType <$> transformTypeSizes ty
     transformScalarSizes ty = pure ty
 
     onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
@@ -1120,8 +1120,8 @@ arrowArg scope argset args_params rety =
     arrowArgScalar env (TypeVar as uniq qn args) =
       TypeVar as uniq qn <$> mapM arrowArgArg args
       where
-        arrowArgArg (TypeArgDim dim loc) = TypeArgDim <$> arrowArgSize dim <*> pure loc
-        arrowArgArg (TypeArgType ty loc) = TypeArgType <$> arrowArgType env ty <*> pure loc
+        arrowArgArg (TypeArgDim dim) = TypeArgDim <$> arrowArgSize dim
+        arrowArgArg (TypeArgType ty) = TypeArgType <$> arrowArgType env ty
     arrowArgScalar _ ty = pure ty
 
     arrowArgType ::
@@ -1151,8 +1151,8 @@ arrowArg scope argset args_params rety =
     arrowCleanScalar paramed (TypeVar as uniq qn args) =
       TypeVar as uniq qn $ map arrowCleanArg args
       where
-        arrowCleanArg (TypeArgDim dim loc) = TypeArgDim dim loc
-        arrowCleanArg (TypeArgType ty loc) = TypeArgType (arrowCleanType paramed ty) loc
+        arrowCleanArg (TypeArgDim dim) = TypeArgDim dim
+        arrowCleanArg (TypeArgType ty) = TypeArgType $ arrowCleanType paramed ty
     arrowCleanScalar _ ty = ty
 
     arrowCleanType :: S.Set VName -> TypeBase Size as -> TypeBase Size as

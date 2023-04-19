@@ -153,7 +153,7 @@ internaliseTypeM exts orig_t =
       | null ets -> pure [I.Prim I.Unit]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
-    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
+    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
