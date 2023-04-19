@@ -280,9 +280,8 @@ sizeFree tloc expKiller t = do
     onType scope (Scalar ty) =
       Scalar <$> onScalar scope ty
 
-    onSize (SizeExpr e) =
-      onExp e
-    onSize s = pure s
+    onSize (SizeExpr e) = onExp e
+    onSize AnySize {} = error "onSize: AnySize"
 
     onExp e = do
       let e' = SizeExpr e
