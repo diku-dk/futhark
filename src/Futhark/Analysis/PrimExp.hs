@@ -66,6 +66,7 @@ module Futhark.Analysis.PrimExp
     (~+~),
     (~-~),
     (~==~),
+    oneIshExp,
   )
 where
 
