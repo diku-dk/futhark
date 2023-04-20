@@ -275,11 +275,11 @@ library
       Futhark.Doc.Generator
       Futhark.Error
       Futhark.SoP.AlgEnv
-      Futhark.SoP.AlgEnvProc
-      Futhark.SoP.EquivEnvProc
+      Futhark.SoP.Refine
+      Futhark.SoP.RefineEquivs
       Futhark.SoP.FourierMotzkin
       Futhark.SoP.PrimExp
-      Futhark.SoP.RangeEnvProc
+      Futhark.SoP.RefineRanges
       Futhark.SoP.SoP
       Futhark.SoP.ToFromSoP
       Futhark.SoP.Util
@@ -550,6 +550,10 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
+      Futhark.SoP.RefineTests
+      Futhark.SoP.FourierMotzkinTests
+      Futhark.SoP.Parse
+      Futhark.SoP.SoPTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests

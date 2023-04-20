@@ -2,7 +2,7 @@
 --   algebraic environment, which is in principle
 --   constructed during program traversal, and used
 --   to solve symbolically algebraic inequations.
-module Futhark.SoP.AlgEnvProc
+module Futhark.SoP.Refine
   ( refineAlgEnv,
   )
 where
@@ -10,9 +10,9 @@ where
 import Data.Set (Set)
 import Futhark.Analysis.PrimExp
 import Futhark.SoP.AlgEnv
-import Futhark.SoP.EquivEnvProc
 import Futhark.SoP.PrimExp
-import Futhark.SoP.RangeEnvProc
+import Futhark.SoP.RefineEquivs
+import Futhark.SoP.RefineRanges
 import Futhark.SoP.ToFromSoP
 import Futhark.Util.Pretty
 
