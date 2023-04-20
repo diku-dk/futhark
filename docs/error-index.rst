@@ -405,7 +405,7 @@ into a separate ``let``-binding preceding the problematic expressions.
 
 This error occurs when you define a function that can never be
 applied, as it requires an input of a specific size, and that size is
-not known.  Somewhat contrived example:
+an :term:`unknown size`.  Somewhat contrived example:
 
 .. code-block:: futhark
 
@@ -492,8 +492,8 @@ use of either pipelining or composition.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs for type expressions that bind an existential size
-that it does not :term:`constructively use`, such as the following
-examples:
+for which there is no :term:`constructive use`, such as in the
+following examples:
 
 .. code-block:: futhark
 

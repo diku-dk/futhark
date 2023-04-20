@@ -401,7 +401,9 @@ documentation and in compiler output.
    Unknown size
 
      A size produced by invoking a function whose result type contains
-     an existentially quantified size, such as ``filter``.
+     an existentially quantified size, such as ``filter``, or because
+     the original :term:`size expression` involves variables that have
+     gone out of scope.
 
    Value
 
