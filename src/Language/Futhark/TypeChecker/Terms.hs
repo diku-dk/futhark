@@ -17,7 +17,9 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor
 import Data.Bitraversable
+import Data.Char (isAscii)
 import Data.Either
 import Data.List (find, foldl', genericLength, partition)
 import Data.List.NonEmpty qualified as NE
@@ -91,7 +93,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         Just (loc, Nonrigid) ->
           lift $
             flip sizeFromName loc . qualName
-              <$> newDimVar (mkUsage loc "size of slice") Nonrigid "slice_dim"
+              <$> newFlexibleDim (mkUsage loc "size of slice") "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
@@ -299,7 +301,7 @@ sizeFree tloc expKiller orig_t = do
           case expKiller e of
             Nothing -> pure $ SizeExpr e
             Just cause -> do
-              vn <- lift $ newDimVar (mkUsage' tloc) (Rigid $ RigidOutOfScope (srclocOf e) cause) "d"
+              vn <- lift $ newRigidDim tloc (RigidOutOfScope (srclocOf e) cause) "d"
               modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
@@ -428,7 +430,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
               withIndexLink
                 "size-expression-consume"
                 "Size expression with consumption is replaced by unknown size."
-            d <- newDimVar (mkUsage' loc) (Rigid RigidRange) "range_dim"
+            d <- newRigidDim loc RigidRange "range_dim"
             pure (sizeFromName (qualName d) mempty, Just d)
           Nothing -> pure (size, Nothing)
   (dim, retext) <-
@@ -446,7 +448,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         | Scalar (Prim (Signed Int64)) <- end_t ->
             warnIfConsuming $ SizeExpr end''
       _ -> do
-        d <- newDimVar (mkUsage' loc) (Rigid RigidRange) "range_dim"
+        d <- newRigidDim loc RigidRange "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
 
   t <- arrayOfM loc start_t (Shape [dim]) Nonunique
@@ -995,8 +997,18 @@ instantiateDimsInReturnType ::
   Maybe (QualName VName) ->
   RetTypeBase Size als ->
   TermTypeM (TypeBase Size als, [VName])
-instantiateDimsInReturnType tloc fname =
-  instantiateEmptyArrayDims (mkUsage' tloc) $ Rigid $ RigidRet fname
+instantiateDimsInReturnType loc fname (RetType dims t) = do
+  dims' <- mapM new dims
+  pure (first (onDim $ zip dims dims') t, dims')
+  where
+    new =
+      newRigidDim loc (RigidRet fname)
+        . nameFromString
+        . takeWhile isAscii
+        . baseString
+    onDim dims' (SizeExpr (Var d _ _)) =
+      sizeFromName (maybe d qualName (lookup (qualLeaf d) dims')) loc
+    onDim _ d = d
 
 -- Some information about the function/operator we are trying to
 -- apply, and how many arguments it has previously accepted.  Used for
@@ -1087,7 +1099,7 @@ checkApply
                       withIndexLink
                         "size-expression-consume"
                         "Size expression with consumption is replaced by unknown size."
-                    d <- newDimVar (mkUsage' argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                    d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
                         (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))

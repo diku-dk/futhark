@@ -729,7 +729,7 @@ extSize loc e = do
               RigidBound $ prettyTextOneLine e'
             SourceSlice d i j s ->
               RigidSlice d $ prettyTextOneLine $ DimSlice i j s
-      d <- newDimVar (mkUsage' loc) (Rigid rsrc) "n"
+      d <- newRigidDim loc rsrc "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
         ( sizeFromName (qualName d) loc,

@@ -22,7 +22,6 @@ module Language.Futhark.TypeChecker.Unify
     equalityType,
     normPatType,
     normTypeFully,
-    instantiateEmptyArrayDims,
     unify,
     unifyMostCommon,
     doUnification,
@@ -32,8 +31,6 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
-import Data.Bifunctor
-import Data.Char (isAscii)
 import Data.List (foldl', intersect)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -301,6 +298,10 @@ class Monad m => MonadUnify m where
 
   newTypeVar :: Monoid als => SrcLoc -> Name -> m (TypeBase dim als)
   newDimVar :: Usage -> Rigidity -> Name -> m VName
+  newRigidDim :: Located a => a -> RigidSource -> Name -> m VName
+  newRigidDim loc = newDimVar (mkUsage' loc) . Rigid
+  newFlexibleDim :: Usage -> Name -> m VName
+  newFlexibleDim usage = newDimVar usage Nonrigid
 
   curLevel :: m Level
 
@@ -359,23 +360,6 @@ unsharedConstructorsMsg cs1 cs2 =
     missing =
       filter (`notElem` M.keys cs1) (M.keys cs2)
         ++ filter (`notElem` M.keys cs2) (M.keys cs1)
-
--- | Instantiate existential context in return type.
-instantiateEmptyArrayDims ::
-  MonadUnify m =>
-  Usage ->
-  Rigidity ->
-  RetTypeBase Size als ->
-  m (TypeBase Size als, [VName])
-instantiateEmptyArrayDims usage r (RetType dims t) = do
-  dims' <- mapM new dims
-  pure (first (onDim $ zip dims dims') t, dims')
-  where
-    new = newDimVar usage r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (SizeExpr (Var d _ _)) =
-      sizeFromName (maybe d qualName (lookup (qualLeaf d) dims')) $
-        srclocOf usage
-    onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
 -- parameter, which we cannot substitute?
@@ -1152,15 +1136,15 @@ mustHaveField usage = mustHaveFieldWith (unifySizes usage) usage mempty noBreadC
 
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>
-  Usage ->
+  SrcLoc ->
   TypeBase Size as ->
   TypeBase Size as ->
   m (TypeBase Size as, [VName])
-newDimOnMismatch usage t1 t2 = do
+newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)
   where
-    r = Rigid $ RigidCond (toStruct t1) (toStruct t2)
+    r = RigidCond (toStruct t1) (toStruct t2)
     onDims _ d1 d2
       | d1 == d2 = pure d1
       | otherwise = do
@@ -1168,11 +1152,11 @@ newDimOnMismatch usage t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ sizeFromName (qualName d) (srclocOf usage)
+            Just d -> pure $ sizeFromName (qualName d) loc
             Nothing -> do
-              d <- lift $ newDimVar usage r "differ"
+              d <- lift $ newRigidDim loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ sizeFromName (qualName d) (srclocOf usage)
+              pure $ sizeFromName (qualName d) loc
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -1189,7 +1173,7 @@ unifyMostCommon usage t1 t2 = do
   unifyWith allOK usage mempty noBreadCrumbs (toStruct t1) (toStruct t2)
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
-  newDimOnMismatch usage t1' t2'
+  newDimOnMismatch (srclocOf usage) t1' t2'
 
 -- Simple MonadUnify implementation.
 

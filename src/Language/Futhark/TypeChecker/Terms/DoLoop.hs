@@ -44,21 +44,20 @@ getAreSame = check <$> getConstraints
 
 -- | Replace specified sizes with distinct fresh size variables.
 someDimsFreshInType ::
-  Usage ->
-  Rigidity ->
+  SrcLoc ->
   Name ->
   [VName] ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als)
-someDimsFreshInType usage r desc fresh t = do
+someDimsFreshInType loc desc fresh t = do
   areSameSize <- getAreSame
   let freshen v = any (areSameSize v) fresh
   bitraverse (onDim freshen) pure t
   where
     onDim freshen (SizeExpr (Var d _ _))
       | freshen $ qualLeaf d = do
-          v <- newDimVar usage r desc
-          pure $ sizeFromName (qualName v) $ srclocOf usage
+          v <- newFlexibleDim (mkUsage' loc) desc
+          pure $ sizeFromName (qualName v) loc
     onDim _ d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
@@ -265,7 +264,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     let checkLoopReturnSize mergepat' loopbody' = do
           loopbody_t <- expTypeFully loopbody'
           pat_t <-
-            someDimsFreshInType (mkUsage' loc) Nonrigid "loop" new_dims
+            someDimsFreshInType loc "loop" new_dims
               =<< normTypeFully (patternType mergepat')
 
           -- We are ignoring the dimensions here, because any mismatches
