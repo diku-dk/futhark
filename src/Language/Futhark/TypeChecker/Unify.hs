@@ -96,13 +96,13 @@ data Usage = Usage (Maybe T.Text) SrcLoc
   deriving (Show)
 
 -- | Construct a 'Usage' from a location and a description.
-mkUsage :: SrcLoc -> T.Text -> Usage
-mkUsage = flip (Usage . Just)
+mkUsage :: Located a => a -> T.Text -> Usage
+mkUsage = flip (Usage . Just) . srclocOf
 
 -- | Construct a 'Usage' that has just a location, but no particular
 -- description.
-mkUsage' :: SrcLoc -> Usage
-mkUsage' = Usage Nothing
+mkUsage' :: Located a => a -> Usage
+mkUsage' = Usage Nothing . srclocOf
 
 instance Pretty Usage where
   pretty (Usage Nothing loc) = "use at " <> textwrap (locText loc)
@@ -300,7 +300,7 @@ class Monad m => MonadUnify m where
     putConstraints $ f x
 
   newTypeVar :: Monoid als => SrcLoc -> Name -> m (TypeBase dim als)
-  newDimVar :: SrcLoc -> Rigidity -> Name -> m VName
+  newDimVar :: Usage -> Rigidity -> Name -> m VName
 
   curLevel :: m Level
 
@@ -363,17 +363,18 @@ unsharedConstructorsMsg cs1 cs2 =
 -- | Instantiate existential context in return type.
 instantiateEmptyArrayDims ::
   MonadUnify m =>
-  SrcLoc ->
+  Usage ->
   Rigidity ->
   RetTypeBase Size als ->
   m (TypeBase Size als, [VName])
-instantiateEmptyArrayDims tloc r (RetType dims t) = do
+instantiateEmptyArrayDims usage r (RetType dims t) = do
   dims' <- mapM new dims
   pure (first (onDim $ zip dims dims') t, dims')
   where
-    new = newDimVar tloc r . nameFromString . takeWhile isAscii . baseString
-    onDim dims' (SizeExpr (Var d typ loc)) =
-      SizeExpr $ Var (maybe d qualName (lookup (qualLeaf d) dims')) typ loc
+    new = newDimVar usage r . nameFromString . takeWhile isAscii . baseString
+    onDim dims' (SizeExpr (Var d _ _)) =
+      sizeFromName (maybe d qualName (lookup (qualLeaf d) dims')) $
+        srclocOf usage
     onDim _ d = d
 
 -- | Is the given type variable the name of an abstract type or type
@@ -1151,11 +1152,11 @@ mustHaveField usage = mustHaveFieldWith (unifySizes usage) usage mempty noBreadC
 
 newDimOnMismatch ::
   (Monoid as, MonadUnify m) =>
-  SrcLoc ->
+  Usage ->
   TypeBase Size as ->
   TypeBase Size as ->
   m (TypeBase Size as, [VName])
-newDimOnMismatch loc t1 t2 = do
+newDimOnMismatch usage t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)
   where
@@ -1167,11 +1168,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ sizeFromName (qualName d) loc
+            Just d -> pure $ sizeFromName (qualName d) (srclocOf usage)
             Nothing -> do
-              d <- lift $ newDimVar loc r "differ"
+              d <- lift $ newDimVar usage r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ sizeFromName (qualName d) loc
+              pure $ sizeFromName (qualName d) (srclocOf usage)
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -1188,7 +1189,7 @@ unifyMostCommon usage t1 t2 = do
   unifyWith allOK usage mempty noBreadCrumbs (toStruct t1) (toStruct t2)
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
-  newDimOnMismatch (srclocOf usage) t1' t2'
+  newDimOnMismatch usage t1' t2'
 
 -- Simple MonadUnify implementation.
 
@@ -1218,11 +1219,15 @@ instance MonadUnify UnifyM where
     modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
     pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
 
-  newDimVar loc rigidity name = do
+  newDimVar usage rigidity name = do
     dim <- newVar name
     case rigidity of
-      Rigid src -> modifyConstraints $ M.insert dim (0, UnknowableSize loc src)
-      Nonrigid -> modifyConstraints $ M.insert dim (0, Size Nothing $ Usage Nothing loc)
+      Rigid src ->
+        modifyConstraints $
+          M.insert dim (0, UnknowableSize (srclocOf usage) src)
+      Nonrigid ->
+        modifyConstraints $
+          M.insert dim (0, Size Nothing usage)
     pure dim
 
   curLevel = pure 0

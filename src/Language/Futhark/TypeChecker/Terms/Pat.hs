@@ -40,7 +40,7 @@ nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
           case prev of
             Nothing -> do
               v' <- lift $ newID $ baseName v
-              lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
+              lift $ constrain v' $ Size Nothing $ mkUsage size "ambiguous size of bound expression"
               modify ((v, v') :)
               pure $ SizeExpr $ Var (qualName v') typ loc
             Just v' ->

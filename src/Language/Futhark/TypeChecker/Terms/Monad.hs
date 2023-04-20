@@ -93,12 +93,12 @@ import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify hiding (Usage)
+import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
 --- Uniqueness
 
-data Usage
+data VarUse
   = Consumed SrcLoc
   | Observed SrcLoc
   deriving (Eq, Ord, Show)
@@ -138,7 +138,7 @@ seminullOccurrence occ = S.null (observed occ) && maybe True S.null (consumed oc
 
 type Occurrences = [Occurrence]
 
-type UsageMap = M.Map VName [Usage]
+type UsageMap = M.Map VName [VarUse]
 
 usageMap :: Occurrences -> UsageMap
 usageMap = foldl comb M.empty
@@ -148,7 +148,7 @@ usageMap = foldl comb M.empty
        in S.foldl' (ins $ Consumed loc) m' $ fromMaybe mempty cons
     ins v m k = M.insertWith (++) k [v] m
 
-combineOccurrences :: VName -> Usage -> Usage -> TermTypeM Usage
+combineOccurrences :: VName -> VarUse -> VarUse -> TermTypeM VarUse
 combineOccurrences _ (Observed loc) (Observed _) = pure $ Observed loc
 combineOccurrences name (Consumed wloc) (Observed rloc) =
   useAfterConsume name rloc wloc
@@ -504,11 +504,11 @@ instance MonadUnify TermTypeM where
 
   curLevel = asks termLevel
 
-  newDimVar loc rigidity name = do
+  newDimVar usage rigidity name = do
     dim <- newTypeName name
     case rigidity of
-      Rigid rsrc -> constrain dim $ UnknowableSize loc rsrc
-      Nonrigid -> constrain dim $ Size Nothing $ mkUsage' loc
+      Rigid rsrc -> constrain dim $ UnknowableSize (srclocOf usage) rsrc
+      Nonrigid -> constrain dim $ Size Nothing usage
     pure dim
 
   unifyError loc notes bcs doc = do
@@ -729,7 +729,7 @@ extSize loc e = do
               RigidBound $ prettyTextOneLine e'
             SourceSlice d i j s ->
               RigidSlice d $ prettyTextOneLine $ DimSlice i j s
-      d <- newDimVar loc (Rigid rsrc) "n"
+      d <- newDimVar (mkUsage' loc) (Rigid rsrc) "n"
       modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
       pure
         ( sizeFromName (qualName d) loc,
@@ -757,31 +757,32 @@ expType = normPatType . typeOf
 expTypeFully :: Exp -> TermTypeM PatType
 expTypeFully = normTypeFully . typeOf
 
-newArrayType :: SrcLoc -> Name -> Int -> TermTypeM (StructType, StructType)
-newArrayType loc desc r = do
+newArrayType :: Usage -> Name -> Int -> TermTypeM (StructType, StructType)
+newArrayType usage desc r = do
   v <- newTypeName desc
-  constrain v $ NoConstraint Unlifted $ mkUsage' loc
-  dims <- replicateM r $ newDimVar loc Nonrigid "dim"
+  constrain v $ NoConstraint Unlifted usage
+  dims <- replicateM r $ newDimVar usage Nonrigid "dim"
   let rowt = TypeVar () Nonunique (qualName v) []
+      mkSize = flip sizeFromName (srclocOf usage) . qualName
   pure
-    ( Array () Nonunique (Shape $ map (flip sizeFromName loc . qualName) dims) rowt,
+    ( Array () Nonunique (Shape $ map mkSize dims) rowt,
       Scalar rowt
     )
 
 -- | Replace *all* dimensions with distinct fresh size variables.
 allDimsFreshInType ::
-  SrcLoc ->
+  Usage ->
   Rigidity ->
   Name ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als, M.Map VName Size)
-allDimsFreshInType loc r desc t =
+allDimsFreshInType usage r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
     onDim d = do
-      v <- lift $ newDimVar loc r desc
+      v <- lift $ newDimVar usage r desc
       modify $ M.insert v d
-      pure $ sizeFromName (qualName v) loc
+      pure $ sizeFromName (qualName v) $ srclocOf usage
 
 -- | Replace all type variables with their concrete types.
 updateTypes :: ASTMappable e => e -> TermTypeM e

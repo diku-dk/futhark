@@ -44,33 +44,33 @@ getAreSame = check <$> getConstraints
 
 -- | Replace specified sizes with distinct fresh size variables.
 someDimsFreshInType ::
-  SrcLoc ->
+  Usage ->
   Rigidity ->
   Name ->
   [VName] ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als)
-someDimsFreshInType loc r desc fresh t = do
+someDimsFreshInType usage r desc fresh t = do
   areSameSize <- getAreSame
   let freshen v = any (areSameSize v) fresh
   bitraverse (onDim freshen) pure t
   where
     onDim freshen (SizeExpr (Var d _ _))
       | freshen $ qualLeaf d = do
-          v <- newDimVar loc r desc
-          pure $ sizeFromName (qualName v) loc
+          v <- newDimVar usage r desc
+          pure $ sizeFromName (qualName v) $ srclocOf usage
     onDim _ d = pure d
 
 -- | Replace the specified sizes with fresh size variables of the
 -- specified ridigity.  Returns the new fresh size variables.
 freshDimsInType ::
-  SrcLoc ->
+  Usage ->
   Rigidity ->
   Name ->
   [VName] ->
   TypeBase Size als ->
   TermTypeM (TypeBase Size als, [VName])
-freshDimsInType loc r desc fresh t = do
+freshDimsInType usage r desc fresh t = do
   areSameSize <- getAreSame
   second (map snd) <$> runStateT (bitraverse (onDim areSameSize) pure t) mempty
   where
@@ -78,11 +78,11 @@ freshDimsInType loc r desc fresh t = do
       | any (areSameSize d) fresh = do
           prev_subst <- gets $ L.find (areSameSize d . fst)
           case prev_subst of
-            Just (_, d') -> pure $ sizeFromName (qualName d') loc
+            Just (_, d') -> pure $ sizeFromName (qualName d') $ srclocOf usage
             Nothing -> do
-              v <- lift $ newDimVar loc r desc
+              v <- lift $ newDimVar usage r desc
               modify ((d, v) :)
-              pure $ sizeFromName (qualName v) loc
+              pure $ sizeFromName (qualName v) $ srclocOf usage
     onDim _ d = pure d
 
 -- | Mark bindings of names in "consumed" as Unique.
@@ -186,11 +186,11 @@ data ArgSource = Initial | BodyResult
 wellTypedLoopArg :: ArgSource -> [VName] -> Pat -> Exp -> TermTypeM ()
 wellTypedLoopArg src sparams pat arg = do
   (merge_t, _) <-
-    freshDimsInType (srclocOf arg) Nonrigid "loop" sparams $
+    freshDimsInType (mkUsage arg desc) Nonrigid "loop" sparams $
       toStruct (patternType pat)
   arg_t <- toStruct <$> expTypeFully arg
   onFailure (checking merge_t arg_t) $
-    unify (mkUsage (srclocOf arg) desc) merge_t arg_t
+    unify (mkUsage arg desc) merge_t arg_t
   where
     (checking, desc) =
       case src of
@@ -221,7 +221,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
   sequentially (checkExp mergeexp) $ \mergeexp' _ -> do
     known_before <- M.keysSet <$> getConstraints
     zeroOrderType
-      (mkUsage (srclocOf mergeexp) "use as loop variable")
+      (mkUsage mergeexp "use as loop variable")
       "type used as loop variable"
       . toStruct
       =<< expTypeFully mergeexp'
@@ -255,7 +255,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     -- properly later.
     (merge_t, new_dims_map) <-
       -- dim handling (1)
-      allDimsFreshInType loc Nonrigid "loop_d" . flip setAliases mempty
+      allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
+        . flip setAliases mempty
         =<< expTypeFully mergeexp'
     let new_dims_to_initial_dim = M.toList new_dims_map
         new_dims = map fst new_dims_to_initial_dim
@@ -264,14 +265,14 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     let checkLoopReturnSize mergepat' loopbody' = do
           loopbody_t <- expTypeFully loopbody'
           pat_t <-
-            someDimsFreshInType loc Nonrigid "loop" new_dims
+            someDimsFreshInType (mkUsage' loc) Nonrigid "loop" new_dims
               =<< normTypeFully (patternType mergepat')
 
           -- We are ignoring the dimensions here, because any mismatches
           -- should be turned into fresh size variables.
           onFailure (CheckingLoopBody (toStruct pat_t) (toStruct loopbody_t)) $
             unify
-              (mkUsage (srclocOf loopbody) "matching loop body to loop pattern")
+              (mkUsage loopbody "matching loop body to loop pattern")
               (toStruct pat_t)
               (toStruct loopbody_t)
 
@@ -353,7 +354,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                     loopbody'
                   )
         ForIn xpat e -> do
-          (arr_t, _) <- newArrayType (srclocOf e) "e" 1
+          (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
           e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e
           t <- expTypeFully e'
           case t of
@@ -395,7 +396,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     mergepat'' <- do
       loopbody_t <- expTypeFully loopbody'
       convergePat loc mergepat' (allConsumed bodyflow) loopbody_t $
-        mkUsage (srclocOf loopbody') "being (part of) the result of the loop body"
+        mkUsage loopbody' "being (part of) the result of the loop body"
 
     merge_t' <- expTypeFully mergeexp'
     let consumeMerge (Id _ (Info pt) ploc) mt
@@ -415,8 +416,12 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
     wellTypedLoopArg Initial sparams mergepat'' mergeexp'
 
     (loopt, retext) <-
-      freshDimsInType loc (Rigid RigidLoop) "loop" sparams $
-        loopReturnType mergepat'' merge_t'
+      freshDimsInType
+        (mkUsage loc "inference of loop result type")
+        (Rigid RigidLoop)
+        "loop"
+        sparams
+        $ loopReturnType mergepat'' merge_t'
     -- We set all of the uniqueness to be unique.  This is intentional,
     -- and matches what happens for function calls.  Those arrays that
     -- really *cannot* be consumed will alias something unconsumable,

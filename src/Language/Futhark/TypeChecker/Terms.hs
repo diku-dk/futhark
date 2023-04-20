@@ -89,7 +89,9 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           modify (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
-          lift $ flip sizeFromName loc . qualName <$> newDimVar loc Nonrigid "slice_dim"
+          lift $
+            flip sizeFromName loc . qualName
+              <$> newDimVar (mkUsage loc "size of slice") Nonrigid "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
           modify (v :)
@@ -297,7 +299,7 @@ sizeFree tloc expKiller orig_t = do
           case expKiller e of
             Nothing -> pure $ SizeExpr e
             Just cause -> do
-              vn <- lift $ newDimVar tloc (Rigid $ RigidOutOfScope (srclocOf e) cause) "d"
+              vn <- lift $ newDimVar (mkUsage' tloc) (Rigid $ RigidOutOfScope (srclocOf e) cause) "d"
               modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
@@ -426,7 +428,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
               withIndexLink
                 "size-expression-consume"
                 "Size expression with consumption is replaced by unknown size."
-            d <- newDimVar loc (Rigid RigidRange) "range_dim"
+            d <- newDimVar (mkUsage' loc) (Rigid RigidRange) "range_dim"
             pure (sizeFromName (qualName d) mempty, Just d)
           Nothing -> pure (size, Nothing)
   (dim, retext) <-
@@ -444,7 +446,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         | Scalar (Prim (Signed Int64)) <- end_t ->
             warnIfConsuming $ SizeExpr end''
       _ -> do
-        d <- newDimVar loc (Rigid RigidRange) "range_dim"
+        d <- newDimVar (mkUsage' loc) (Rigid RigidRange) "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
 
   t <- arrayOfM loc start_t (Shape [dim]) Nonunique
@@ -519,7 +521,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) =
       let bool = Scalar $ Prim Bool
       e1_t <- toStruct <$> expType e1'
       onFailure (CheckingRequired [bool] e1_t) $
-        unify (mkUsage (srclocOf e1') "use as 'if' condition") bool e1_t
+        unify (mkUsage e1' "use as 'if' condition") bool e1_t
       pure e1'
 checkExp (Parens e loc) =
   Parens <$> checkExp e <*> pure loc
@@ -655,7 +657,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
             (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) =
   sequentially ((,) <$> checkIdent src <*> checkSlice slice) $ \(src', slice') _ -> do
-    (t, _) <- newArrayType (srclocOf src) "src" $ sliceDims slice'
+    (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
     unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
     -- Need the fully normalised type here to get the proper aliasing information.
@@ -676,7 +678,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
         pure $ AppExp (LetWith dest' src' (map fst slice') ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
-  (t, _) <- newArrayType (srclocOf src) "src" $ sliceDims slice'
+  (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
   sequentially (checkExp ve >>= unifies "type of target array" elemt) $ \ve' _ ->
@@ -704,7 +706,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
   where
     usage = mkUsage loc "record update"
     updateField [] ve_t src_t = do
-      (src_t', _) <- allDimsFreshInType loc Nonrigid "any" src_t
+      (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
       onFailure (CheckingRecordUpdate fields (toStruct src_t') (toStruct ve_t)) $
         unify usage (toStruct src_t') (toStruct ve_t)
       -- Important that we return ve_t so that we get the right aliases.
@@ -722,7 +724,7 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
 --
 checkExp (AppExp (Index e slice loc) _) = do
   slice' <- checkSlice slice
-  (t, _) <- newArrayType loc "e" $ sliceDims slice'
+  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
   e' <- unifies "being indexed at" t =<< checkExp e
   -- XXX, the RigidSlice here will be overridden in sliceShape with a proper value.
   (t', retext) <-
@@ -853,7 +855,7 @@ checkExp (ProjectSection fields NoInfo loc) = do
   pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
-  (t, _) <- newArrayType loc "e" $ sliceDims slice'
+  (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ fromStruct t'
   pure $ IndexSection (map fst slice') (Info ft) loc
@@ -994,7 +996,7 @@ instantiateDimsInReturnType ::
   RetTypeBase Size als ->
   TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType tloc fname =
-  instantiateEmptyArrayDims tloc $ Rigid $ RigidRet fname
+  instantiateEmptyArrayDims (mkUsage' tloc) $ Rigid $ RigidRet fname
 
 -- Some information about the function/operator we are trying to
 -- apply, and how many arguments it has previously accepted.  Used for
@@ -1085,7 +1087,7 @@ checkApply
                       withIndexLink
                         "size-expression-consume"
                         "Size expression with consumption is replaced by unknown size."
-                    d <- newDimVar (srclocOf argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                    d <- newDimVar (mkUsage' argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
                         (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
@@ -1179,7 +1181,7 @@ checkSizeExp :: UncheckedExp -> TypeM Exp
 checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
   e' <- noUnique $ checkExp e
   let t = toStruct $ typeOf e'
-  unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
@@ -1875,7 +1877,7 @@ checkFunBody params body maybe_rettype loc = do
           )
           body_t
 
-      let usage = mkUsage (srclocOf body) "return type annotation"
+      let usage = mkUsage body "return type annotation"
       onFailure (CheckingReturn rettype (toStruct body_t')) $
         unify usage rettype (toStruct body_t')
     Nothing -> pure ()
