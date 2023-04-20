@@ -73,11 +73,13 @@ documentation and in compiler output.
 
        * ``[n]bool``
        * ``([n]bool, bool -> [n]bool)``
+       * ``([n]bool, [n+1]bool)``
 
      The following do not:
 
        * ``[n+1]bool``
        * ``bool -> [n]bool``
+       * ``[n]bool -> bool``
 
    Consumption
 
