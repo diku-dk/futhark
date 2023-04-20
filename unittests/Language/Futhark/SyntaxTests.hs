@@ -132,8 +132,8 @@ pScalarNonFun =
     pTypeVar = TypeVar () <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pSize <*> pure mempty,
-          TypeArgType <$> pTypeArgType <*> pure mempty
+        [ TypeArgDim <$> pSize,
+          TypeArgType <$> pTypeArgType
         ]
     pTypeArgType =
       choice
