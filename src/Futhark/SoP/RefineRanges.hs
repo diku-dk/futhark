@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
 -- | Functionality for processing the range environment
-module Futhark.SoP.RangeEnvProc
+module Futhark.SoP.RefineRanges
   ( addIneqZeroPEs,
   )
 where

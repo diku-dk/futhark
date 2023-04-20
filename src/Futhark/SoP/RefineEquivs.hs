@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
--- | Functionality for processing the equivalence environment
-module Futhark.SoP.EquivEnvProc
+-- | Functionality for refining the equivalence environment
+module Futhark.SoP.RefineEquivs
   ( addEqZeroPEs,
   )
 where
