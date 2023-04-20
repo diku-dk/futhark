@@ -491,8 +491,9 @@ use of either pipelining or composition.
 "Existential size *n* not used as array size"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This error occurs for type expressions that use explicit existential
-quantification in an incorrect way, such as the following examples:
+This error occurs for type expressions that bind an existential size
+that it does not :term:`constructively use`, such as the following
+examples:
 
 .. code-block:: futhark
 
@@ -501,12 +502,12 @@ quantification in an incorrect way, such as the following examples:
   ?[n].bool -> [n]bool
 
 When we use existential quantification, we are required to use the
-size within its scope, *and* it must not exclusively be used to the
-right of function arrow.
+size constructively within its scope, *in particular* it must not be
+exclusively as the parameter or return type of a function.
 
 To understand the motivation behind this rule, consider that when we
-use an existential quantifier we are saying that there is *some size*,
-it just cannot be known statically, but must be read from some value
+use an existential quantifier we are saying that there is *some size*.
+The size is not known statically, but must be read from some value
 (i.e. array) at runtime.  In the first example above, the existential
 size ``n`` is not used at all, so the actual value cannot be
 determined at runtime.  In the second example, while an array
