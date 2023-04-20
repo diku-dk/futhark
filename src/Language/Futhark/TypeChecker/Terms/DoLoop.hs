@@ -72,17 +72,16 @@ freshDimsInType ::
   TermTypeM (TypeBase Size als, [VName])
 freshDimsInType loc r desc fresh t = do
   areSameSize <- getAreSame
-  let freshen v = any (areSameSize v) fresh
-  second M.elems <$> runStateT (bitraverse (onDim freshen) pure t) mempty
+  second (map snd) <$> runStateT (bitraverse (onDim areSameSize) pure t) mempty
   where
-    onDim freshen (SizeExpr (Var d _ _))
-      | freshen $ qualLeaf d = do
-          prev_subst <- gets $ M.lookup $ qualLeaf d
+    onDim areSameSize (SizeExpr (Var (QualName _ d) _ _))
+      | any (areSameSize d) fresh = do
+          prev_subst <- gets $ L.find (areSameSize d . fst)
           case prev_subst of
-            Just d' -> pure $ sizeFromName (qualName d') loc
+            Just (_, d') -> pure $ sizeFromName (qualName d') loc
             Nothing -> do
               v <- lift $ newDimVar loc r desc
-              modify $ M.insert (qualLeaf d) v
+              modify ((d, v) :)
               pure $ sizeFromName (qualName v) loc
     onDim _ d = pure d
 
@@ -283,12 +282,12 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           let onDims _ x y
                 | x == y = pure x
               onDims _ x@(SizeExpr e) d = do
-                let vs = L.filter (`elem` new_dims) $ M.keys . unFV $ freeInExp e
+                let vs = M.keys . unFV $ freeInExp e
                 forM_ vs $ \v -> do
                   case L.find (areSameSize v . fst) new_dims_to_initial_dim of
-                    Just (v', d'@(SizeExpr e')) ->
+                    Just (_, d'@(SizeExpr e')) ->
                       if d' == d
-                        then modify $ first $ M.insert v' $ ExpSubst e'
+                        then modify $ first $ M.insert v $ ExpSubst e'
                         else
                           unless (v `S.member` known_before) $
                             modify (second (v :))
