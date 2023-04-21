@@ -544,7 +544,7 @@ unifyWith onDims usage = subunify False
           | otherwise -> failure
 
 anyBound :: [VName] -> ExpBase Info VName -> Bool
-anyBound bound e = any (`S.member` M.keysSet (unFV $ freeInExp e)) bound
+anyBound bound e = any (`S.member` fvVars (freeInExp e)) bound
 
 unifySizes :: MonadUnify m => Usage -> UnifySizes m
 unifySizes usage bcs bound nonrigid e1 e2
@@ -603,7 +603,7 @@ scopeCheck usage bcs vn max_lvl tp = do
   checkType constraints tp
   where
     checkType constraints t =
-      mapM_ (check constraints) $ typeVars t <> M.keysSet (unFV $ freeInType t)
+      mapM_ (check constraints) $ typeVars t <> fvVars (freeInType t)
 
     check constraints v
       | Just (lvl, c) <- M.lookup v constraints,
@@ -673,7 +673,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
 
       arrayElemTypeWith usage (unliftedBcs unlift_usage) tp
-      when (any (`elem` bound) (M.keysSet $ unFV $ freeInType tp)) $
+      when (any (`elem` bound) (fvVars (freeInType tp))) $
         unifyError usage mempty bcs $
           "Type variable"
             <+> prettyName vn

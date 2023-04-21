@@ -259,14 +259,14 @@ sizeFree tloc expKiller orig_t = do
       retT' <- onType (scope `S.union` argset) retT
       rl <-
         state . M.partitionWithKey $
-          const . not . S.disjoint intros . M.keysSet . unFV . freeInExp . unSizeExpr
+          const . not . S.disjoint intros . fvVars . freeInExp . unSizeExpr
       let dims' = dims <> M.elems rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
       where
         -- to check : completeness of the filter
         intros = argset `S.difference` scope
         argset =
-          M.keysSet (unFV $ freeInType argT)
+          fvVars (freeInType argT)
             <> case argName of
               Unnamed -> mempty
               Named vn -> S.singleton vn
@@ -315,7 +315,7 @@ unscopeUnknowable tloc t = do
   where
     expKiller _ Var {} = Nothing
     expKiller constraints e =
-      S.lookupMin $ S.filter (isUnknown constraints) $ M.keysSet $ unFV $ freeInExp e
+      S.lookupMin $ S.filter (isUnknown constraints) $ fvVars $ freeInExp e
     isUnknown constraints vn
       | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
     isUnknown _ _ = False
@@ -326,12 +326,7 @@ unscopeTypeBase ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 unscopeTypeBase tloc unscoped =
-  sizeFree tloc $
-    S.lookupMin
-      . S.intersection unscoped
-      . M.keysSet
-      . unFV
-      . freeInExp
+  sizeFree tloc $ S.lookupMin . S.intersection unscoped . fvVars . freeInExp
 
 unscopeStructType ::
   SrcLoc ->
@@ -813,7 +808,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
             | name `S.member` hidden_sizes = S.singleton name
           onDim _ = mempty
 
-      pure $ RetType (S.toList $ foldMap onDim $ M.keysSet $ unFV $ freeInType ret) ret
+      pure $ RetType (S.toList $ foldMap onDim $ fvVars $ freeInType ret) ret
 checkExp (OpSection op _ loc) = do
   (op', ftype) <- lookupVar loc op
   pure $ OpSection op' (Info ftype) loc
@@ -1622,7 +1617,7 @@ sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesP
     onParam (Scalar Arrow {}) = mempty
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
-    onParam t = M.keysSet $ unFV $ freeInType t
+    onParam t = fvVars $ freeInType t
     onTypeArg (TypeArgDim (SizeExpr (Var d _ _))) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _) = mempty
     onTypeArg (TypeArgType t) = onParam t
@@ -1711,7 +1706,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ M.keysSet (unFV $ freeInPat p) `S.intersection` forbidden =
+      | d : _ <- S.toList $ fvVars (freeInPat p) `S.intersection` forbidden =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> dquotes (pretty p)
@@ -1791,7 +1786,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     -- Diet does not matter here.
     t = foldFunType (zip (repeat Observe) paramts) $ RetType [] ret
     to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
-    visible = typeVars t <> M.keysSet (unFV $ freeInType t)
+    visible = typeVars t <> fvVars (freeInType t)
 
     (produced_sizes, param_sizes) = dimUses t
 

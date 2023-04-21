@@ -826,7 +826,7 @@ termCheckTypeExp te = do
 
   -- Observe the sizes so we do not get any warnings about them not
   -- being used.
-  mapM_ observeDim $ M.keysSet $ unFV $ freeInType st
+  mapM_ observeDim $ fvVars $ freeInType st
   pure (te', svars, RetType dims st)
   where
     observeDim v =

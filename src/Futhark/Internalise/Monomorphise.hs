@@ -79,7 +79,10 @@ type RecordReplacements = M.Map VName RecordReplacement
 
 type RecordReplacement = M.Map Name (VName, PatType)
 
--- | Box for Exp that allows better comparison than straight forward structural equality
+-- | To deduplicate size expressions, we want a looser notation of
+-- equality than the strict syntactical equality provided by the Eq
+-- instance on Exp.  This newtype wrapper provides such a looser
+-- notion of equality.
 newtype ReplacedExp = ReplacedExp {unReplaced :: Exp}
   deriving (Show)
 
@@ -96,7 +99,15 @@ type ExpReplacements = [(ReplacedExp, VName)]
 
 canCalculate :: S.Set VName -> ExpReplacements -> ExpReplacements
 canCalculate scope mapping = do
-  filter ((`S.isSubsetOf` scope) . S.filter notIntrisic . M.keysSet . unFV . freeInExp . unReplaced . fst) mapping
+  filter
+    ( (`S.isSubsetOf` scope)
+        . S.filter notIntrisic
+        . fvVars
+        . freeInExp
+        . unReplaced
+        . fst
+    )
+    mapping
   where
     notIntrisic vn = baseTag vn > maxIntrinsicTag
 
@@ -238,7 +249,7 @@ askIntros argset =
 parametrizing :: S.Set VName -> MonoM ExpReplacements
 parametrizing argset = do
   intros <- askIntros argset
-  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . M.keysSet . unFV . freeInExp . unReplaced . fst)
+  (params, nxtBind) <- gets $ partition (not . S.disjoint intros . fvVars . freeInExp . unReplaced . fst)
   put nxtBind
   pure params
 
@@ -457,7 +468,7 @@ transformTypeSizes typ =
       Arrow as argName d <$> transformTypeSizes argT <*> transformRetTypeSizes argset retT
       where
         argset =
-          M.keysSet (unFV $ freeInType argT)
+          fvVars (freeInType argT)
             <> case argName of
               Unnamed -> mempty
               Named vn -> S.singleton vn
@@ -567,7 +578,7 @@ transformAppExp (Coerce e tp loc) res =
 transformAppExp (LetPat sizes pat e body loc) res = do
   e' <- transformExp e
   let dimArgs = S.fromList (map sizeName sizes)
-  implicitDims <- withArgs dimArgs $ askIntros (M.keysSet $ unFV $ freeInPat pat)
+  implicitDims <- withArgs dimArgs $ askIntros $ fvVars $ freeInPat pat
   let dimArgs' = dimArgs <> implicitDims
       letArgs = patNames pat
       argset = dimArgs' `S.union` letArgs
@@ -695,7 +706,7 @@ transformAppExp (Index e0 idxs loc) res =
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
     <*> pure (Info res)
 transformAppExp (Match e cs loc) res = do
-  implicitDims <- askIntros (M.keysSet $ unFV $ freeInType $ typeOf e)
+  implicitDims <- askIntros $ fvVars $ freeInType $ typeOf e
   e' <- transformExp e
   cs' <- mapM (transformCase implicitDims) cs
   if S.null implicitDims
@@ -766,7 +777,7 @@ transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
   let patArgs = foldMap patNames params
-  dimArgs <- withArgs patArgs $ askIntros (foldMap (M.keysSet . unFV . freeInPat) params)
+  dimArgs <- withArgs patArgs $ askIntros (foldMap (fvVars . freeInPat) params)
   let argset = dimArgs `S.union` patArgs
   (params', rrs) <- mapAndUnzipM transformPat params
   paramed <- parametrizing argset
@@ -1111,7 +1122,7 @@ arrowArg scope argset args_params rety =
         pure (Arrow as argName d argT retT', bimap (intros `S.union`) (const mempty))
       where
         notIntrisic vn = baseTag vn > maxIntrinsicTag
-        argset' = M.keysSet (unFV $ freeInType argT)
+        argset' = fvVars $ freeInType argT
         fullArgset =
           argset'
             <> case argName of
@@ -1246,7 +1257,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
 
     hardTransformRetType (RetType _ ty) = do
       ty' <- transformTypeSizes ty
-      unbounded <- askIntros $ M.keysSet (unFV $ freeInType ty')
+      unbounded <- askIntros $ fvVars $ freeInType ty'
       let dims' = S.toList unbounded
       pure $ RetType dims' ty'
 

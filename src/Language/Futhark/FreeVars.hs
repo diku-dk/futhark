@@ -6,6 +6,7 @@ module Language.Futhark.FreeVars
     freeInType,
     freeWithout,
     FV (..),
+    fvVars,
   )
 where
 
@@ -17,6 +18,10 @@ import Language.Futhark.Syntax
 -- | A set of names where we also track their type.
 newtype FV = FV {unFV :: M.Map VName StructType}
   deriving (Show)
+
+-- | The set of names in an 'FV'.
+fvVars :: FV -> S.Set VName
+fvVars = M.keysSet . unFV
 
 instance Semigroup FV where
   FV x <> FV y = FV $ M.unionWith max x y
