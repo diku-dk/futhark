@@ -326,14 +326,26 @@ unscopeTypeBase ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 unscopeTypeBase tloc unscoped =
-  sizeFree tloc (S.lookupMin . S.intersection unscoped . M.keysSet . unFV . freeInExp)
+  sizeFree tloc $
+    S.lookupMin
+      . S.intersection unscoped
+      . M.keysSet
+      . unFV
+      . freeInExp
 
-unscopeType ::
+unscopeStructType ::
+  SrcLoc ->
+  S.Set VName ->
+  StructType ->
+  TermTypeM (StructType, [VName])
+unscopeStructType = unscopeTypeBase
+
+unscopePatType ::
   SrcLoc ->
   S.Set VName ->
   PatType ->
   TermTypeM (PatType, [VName])
-unscopeType tloc unscoped t = do
+unscopePatType tloc unscoped t = do
   (t', m) <- unscopeTypeBase tloc unscoped t
   pure (t' `addAliases` S.map unAlias, m)
   where
@@ -616,7 +628,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
           mapM_ observe implicitIdents
           body' <- checkExp body
           (body_t, retext) <-
-            unscopeType loc (sizesMap sizes' <> patNames pat' <> S.fromList implicitSizes) =<< expTypeFully body'
+            unscopePatType loc (sizesMap sizes' <> patNames pat' <> S.fromList implicitSizes) =<< expTypeFully body'
 
           pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
   where
@@ -645,7 +657,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
         body' <- localScope bindF $ checkExp body
 
         (body_t, ext) <-
-          unscopeType loc (S.singleton name')
+          unscopePatType loc (S.singleton name')
             =<< expTypeFully body'
 
         pure $
@@ -675,7 +687,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
       bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
         body' <- consuming src' $ checkExp body
         (body_t, ext) <-
-          unscopeType loc (S.singleton (identName dest'))
+          unscopePatType loc (S.singleton (identName dest'))
             =<< expTypeFully body'
         pure $ AppExp (LetWith dest' src' (map fst slice') ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
@@ -775,7 +787,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
   checkGlobalAliases params' body_t loc
   verifyFunctionParams Nothing params'
 
-  (ty', dims') <- unscopeTypeBase loc (S.fromList dims) ty
+  (ty', dims') <- unscopeStructType loc (S.fromList dims) ty
 
   pure $ Lambda params' body' rettype' (Info (as, RetType dims' ty')) loc
   where
@@ -919,7 +931,7 @@ checkCase mt (CasePat p e loc) =
     binding False implicitIdents $ do
       mapM_ observe implicitIdents
       e' <- checkExp e
-      (t, retext) <- unscopeType loc (patNames p' <> S.fromList implicitSizes) =<< expTypeFully e'
+      (t, retext) <- unscopePatType loc (patNames p' <> S.fromList implicitSizes) =<< expTypeFully e'
       pure (CasePat p' e' loc, t, retext)
   where
     isUnknown constraints vn
@@ -1501,7 +1513,7 @@ inferredReturnType loc params t = do
   -- These we must turn into fresh type variables, which will be
   -- existential in the return type.
   fmap (toStruct . fst) $
-    unscopeType loc hidden_params $
+    unscopePatType loc hidden_params $
       inferReturnUniqueness params t
   where
     hidden_params = M.keysSet $ M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
@@ -1881,7 +1893,7 @@ checkFunBody params body maybe_rettype loc = do
       -- names into existential sizes instead.
       let hidden = hiddenParamNames params
       (body_t', _) <-
-        unscopeType
+        unscopePatType
           loc
           ( M.keysSet $
               M.filterWithKey (const . (`S.member` hidden)) $
