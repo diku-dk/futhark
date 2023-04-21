@@ -506,7 +506,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
               withIndexLink
                 "size-expression-bind"
                 "Size expression with binding is replaced by unknown size."
-            d <- newDimVar loc (Rigid RigidRange) "range_dim"
+            d <- newRigidDim loc RigidRange "range_dim"
             pure (sizeFromName (qualName d) mempty, Just d)
           (_, False) ->
             pure (size, Nothing)
@@ -1186,7 +1186,7 @@ checkApply
                       withIndexLink
                         "size-expression-bind"
                         "Size expression with binding is replaced by unknown size."
-                    d <- newDimVar (srclocOf argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                    d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
                         (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
