@@ -40,6 +40,61 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
+hasBinding :: Exp -> Bool
+hasBinding Literal {} = False
+hasBinding IntLit {} = False
+hasBinding FloatLit {} = False
+hasBinding StringLit {} = False
+hasBinding Hole {} = False
+hasBinding Var {} = False
+hasBinding (Parens e _) = hasBinding e
+hasBinding (QualParens _ e _) = hasBinding e
+hasBinding (TupLit es _) = any hasBinding es
+hasBinding (RecordLit fs _) = any f fs
+  where
+    f (RecordFieldExplicit _ e _) = hasBinding e
+    f RecordFieldImplicit {} = False
+hasBinding (ArrayLit es _ _) = any hasBinding es
+hasBinding (Attr _ e _) = hasBinding e
+hasBinding (Project _ e _ _) = hasBinding e
+hasBinding (Negate e _) = hasBinding e
+hasBinding (Not e _) = hasBinding e
+hasBinding (Assert _ e _ _) = hasBinding e
+hasBinding (Constr _ es _ _) = any hasBinding es
+hasBinding (Update e1 slice e2 _) = hasBinding e1 || hasBinding e2 || any f slice
+  where
+    f (DimFix e) = hasBinding e
+    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
+hasBinding (RecordUpdate e1 _ e2 _ _) = hasBinding e1 || hasBinding e2
+hasBinding Lambda {} = True
+hasBinding OpSection {} = False
+hasBinding (OpSectionLeft _ _ e _ _ _) = hasBinding e
+hasBinding (OpSectionRight _ _ e _ _ _) = hasBinding e
+hasBinding ProjectSection {} = False
+hasBinding (IndexSection slice _ _) = any f slice
+  where
+    f (DimFix e) = hasBinding e
+    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
+hasBinding (Ascript e _ _) = hasBinding e
+hasBinding (AppExp (Apply f es _) _) = hasBinding f || any (hasBinding . snd) es
+hasBinding (AppExp (Coerce e _ _) _) = hasBinding e
+hasBinding (AppExp (Range ei es ef _) _) = hasBinding ei || maybe False hasBinding es || f ef
+  where
+    f (DownToExclusive e) = hasBinding e
+    f (ToInclusive e) = hasBinding e
+    f (UpToExclusive e) = hasBinding e
+hasBinding (AppExp LetPat {} _) = True
+hasBinding (AppExp LetFun {} _) = True
+hasBinding (AppExp (If ec et ef _) _) = hasBinding ec || hasBinding et || hasBinding ef
+hasBinding (AppExp DoLoop {} _) = True
+hasBinding (AppExp (BinOp _ _ (el, _) (er, _) _) _) = hasBinding el || hasBinding er
+hasBinding (AppExp LetWith {} _) = True
+hasBinding (AppExp (Index e slice _) _) = hasBinding e || any f slice
+  where
+    f (DimFix e') = hasBinding e'
+    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
+hasBinding (AppExp Match {} _) = True
+
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
   where
@@ -104,15 +159,22 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
-    warnIfConsuming mOcc d i j stride size =
-      case mOcc of
-        Just occ -> do
+    warnIfConsumingOrBinding mOcc binds d i j stride size =
+      case (mOcc, binds) of
+        (Just occ, _) -> do
           lift . warn (location occ) $
             withIndexLink
               "size-expression-consume"
               "Size expression with consumption is replaced by unknown size."
           (:) <$> sliceSize d i j stride
-        Nothing -> pure (size :)
+        (_, True) -> do
+          lift . warn (srclocOf size) $
+            withIndexLink
+              "size-expression-bind"
+              "Size expression with binding is replaced by unknown size."
+          (:) <$> sliceSize d i j stride
+        (_, False) ->
+          pure (size :)
 
     adjustDims ((DimFix {}, _) : idxes') (_ : dims) =
       adjustDims idxes' dims
@@ -122,13 +184,13 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         maybe True ((== Just 0) . isInt64) i,
         maybe True ((== Just 1) . isInt64) stride =
           let j' = maybe d SizeExpr j
-           in warnIfConsuming mOcc d i j stride j' <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j' <*> adjustDims idxes' dims
     adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
         maybe True ((== Just 1) . isInt64) stride =
           let j' = fromMaybe (unSizeExpr d) j
-           in warnIfConsuming mOcc d i j stride (sizeMinus j' i') <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i') <*> adjustDims idxes' dims
     -- stride == -1
     adjustDims ((DimSlice Nothing Nothing stride, _) : idxes') (d : dims)
       | refine_sizes,
@@ -137,7 +199,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     adjustDims ((DimSlice (Just i) (Just j) stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
-          warnIfConsuming mOcc d (Just i) (Just j) stride (sizeMinus i j) <*> adjustDims idxes' dims
+          warnIfConsumingOrBinding mOcc (hasBinding i || hasBinding j) d (Just i) (Just j) stride (sizeMinus i j) <*> adjustDims idxes' dims
     -- existential
     adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
@@ -430,30 +492,38 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
     UpToExclusive e -> expType e
 
   -- Special case some ranges to give them a known size.
-  let warnIfConsuming size =
-        case anyConsumption (startOcc <> endOcc) of
-          Just occ -> do
+  let warnIfConsumingOrBinding binds size =
+        case (anyConsumption (startOcc <> endOcc), binds) of
+          (Just occ, _) -> do
             warn (location occ) $
               withIndexLink
                 "size-expression-consume"
                 "Size expression with consumption is replaced by unknown size."
             d <- newRigidDim loc RigidRange "range_dim"
             pure (sizeFromName (qualName d) mempty, Just d)
-          Nothing -> pure (size, Nothing)
+          (_, True) -> do
+            warn (srclocOf size) $
+              withIndexLink
+                "size-expression-bind"
+                "Size expression with binding is replaced by unknown size."
+            d <- newDimVar loc (Rigid RigidRange) "range_dim"
+            pure (sizeFromName (qualName d) mempty, Just d)
+          (_, False) ->
+            pure (size, Nothing)
   (dim, retext) <-
     case (isInt64 start', isInt64 <$> maybe_step', end') of
       (Just 0, Just (Just 1), UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsuming $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
       (Just 0, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsuming $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
       (_, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsuming $ sizeMinus end'' start'
+            warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinus end'' start'
       (Just 1, Just (Just 2), ToInclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsuming $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
       _ -> do
         d <- newRigidDim loc RigidRange "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
@@ -1100,8 +1170,8 @@ checkApply
         case pname of
           Named pname'
             | M.member pname' (unFV $ freeInType tp2') ->
-                if isJust $ anyConsumption dflow
-                  then do
+                case (isJust (anyConsumption dflow), hasBinding argexp) of
+                  (True, _) -> do
                     warn (srclocOf argexp) $
                       withIndexLink
                         "size-expression-consume"
@@ -1111,7 +1181,17 @@ checkApply
                       ( Just d,
                         (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
                       )
-                  else
+                  (_, True) -> do
+                    warn (srclocOf argexp) $
+                      withIndexLink
+                        "size-expression-bind"
+                        "Size expression with binding is replaced by unknown size."
+                    d <- newDimVar (srclocOf argexp) (Rigid $ RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                    pure
+                      ( Just d,
+                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
+                      )
+                  (False, False) ->
                     pure
                       ( Nothing,
                         (`M.lookup` M.singleton pname' (ExpSubst argexp))
@@ -1200,6 +1280,9 @@ checkSizeExp :: UncheckedExp -> TypeM Exp
 checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
   e' <- noUnique $ checkExp e
   let t = toStruct $ typeOf e'
+  when (hasBinding e') $
+    typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
+      "Size expression with binding is forbidden."
   unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
   updateTypes e'
 
