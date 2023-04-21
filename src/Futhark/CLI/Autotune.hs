@@ -471,6 +471,9 @@ runAutotuner opts prog = do
 
   T.putStrLn $ "Result of autotuning:\n" <> tuning
 
+supportedBackends :: [String]
+supportedBackends = ["opencl", "cuda"]
+
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =
   [ Option
@@ -480,12 +483,9 @@ commandLineOptions =
           ( \n ->
               case reads n of
                 [(n', "")] | n' >= 0 ->
-                  Right $ \config ->
-                    config
-                      { optMinRuns = n'
-                      }
+                  Right $ \config -> config {optMinRuns = n'}
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a non-negative integer."
+                  Left $ optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "RUNS"
       )
@@ -494,10 +494,14 @@ commandLineOptions =
       []
       ["backend"]
       ( ReqArg
-          (\backend -> Right $ \config -> config {optBackend = backend})
+          ( \backend ->
+              if backend `elem` supportedBackends
+                then Right $ \config -> config {optBackend = backend}
+                else Left $ optionsError $ "autotuning is only supported for these backends: " <> unwords supportedBackends
+          )
           "BACKEND"
       )
-      "The compiler used (defaults to 'opencl').",
+      "The backend used (defaults to 'opencl').",
     Option
       []
       ["futhark"]
@@ -534,7 +538,7 @@ commandLineOptions =
                 [(n', "")] ->
                   Right $ \config -> config {optTimeout = n'}
                 _ ->
-                  Left $ error $ "'" ++ n ++ "' is not a non-negative integer."
+                  Left $ optionsError $ "'" ++ n ++ "' is not a non-negative integer."
           )
           "SECONDS"
       )
