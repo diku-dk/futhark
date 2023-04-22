@@ -367,6 +367,28 @@ sizeFree tloc expKiller orig_t = do
               modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
+-- Used to remove unknowable sizes from function body types before we
+-- perform let-generalisation.  This is because if a function is
+-- inferred to return something of type '[x+y]t' where 'x' or 'y' are
+-- unknowable, we want to turn that into '[z]t', where ''z' is a fresh
+-- unknowable, which is then by let-generalisation turned into
+-- '?[z].[z]t'.
+unscopeUnknowable ::
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as)
+unscopeUnknowable t = do
+  constraints <- getConstraints
+  -- These sizes will be immediately turned into existentials, so we
+  -- do not need to care about their location.
+  fst <$> sizeFree mempty (expKiller constraints) t
+  where
+    expKiller _ Var {} = Nothing
+    expKiller constraints e =
+      S.lookupMin $ S.filter (isUnknown constraints) $ fvVars $ freeInExp e
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
+
 unscopeTypeBase ::
   SrcLoc ->
   S.Set VName ->
@@ -668,23 +690,15 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
           (toStruct t)
       _ -> pure ()
 
-    constraints <- getConstraints
     incLevel . bindingSizes sizes $ \sizes' ->
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
-        let implicitSizes = filter (isUnknown constraints) $ M.keys $ unFV $ freeInPat pat'
-            implicitIdents = map (\vn -> Ident vn (Info $ Scalar $ Prim $ Signed Int64) mempty) implicitSizes
-        binding False implicitIdents $ do
-          mapM_ observe implicitIdents
-          body' <- checkExp body
-          (body_t, retext) <-
-            unscopePatType loc (sizesMap sizes' <> patNames pat' <> S.fromList implicitSizes) =<< expTypeFully body'
+        body' <- checkExp body
+        (body_t, retext) <-
+          unscopePatType loc (sizesMap sizes' <> patNames pat') =<< expTypeFully body'
 
-          pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
+        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
   where
     sizesMap = foldMap (S.singleton . sizeName)
-    isUnknown constraints vn
-      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
-    isUnknown _ _ = False
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, e') closure -> do
@@ -972,18 +986,9 @@ checkCase ::
   TermTypeM (CaseBase Info VName, PatType, [VName])
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
-    constraints <- getConstraints
-    let implicitSizes = filter (isUnknown constraints) $ M.keys $ unFV $ freeInPat p'
-        implicitIdents = map (\vn -> Ident vn (Info $ Scalar $ Prim $ Signed Int64) mempty) implicitSizes
-    binding False implicitIdents $ do
-      mapM_ observe implicitIdents
-      e' <- checkExp e
-      (t, retext) <- unscopePatType loc (patNames p' <> S.fromList implicitSizes) =<< expTypeFully e'
-      pure (CasePat p' e' loc, t, retext)
-  where
-    isUnknown constraints vn
-      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
-    isUnknown _ _ = False
+    e' <- checkExp e
+    (t, retext) <- unscopePatType loc (patNames p') =<< expTypeFully e'
+    pure (CasePat p' e' loc, t, retext)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
@@ -1320,6 +1325,11 @@ causalityCheck binding_body = do
       onExp known e@(AppExp (LetPat _ _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         pure e
+      onExp known e@(AppExp (Match scrutinee cs _) (Info res)) = do
+        new_known <- lift $ execStateT (onExp known scrutinee) mempty
+        void $ recurse (new_known <> known) cs
+        modify ((new_known <> S.fromList (appResExt res)) <>)
+        pure e
       onExp known e@(AppExp (Apply f args _) (Info res)) = do
         seqArgs known $ reverse $ NE.toList args
         pure e
@@ -1374,7 +1384,7 @@ causalityCheck binding_body = do
       Left . TypeError loc mempty . withIndexLink "causality-check" $
         "Causality check: size"
           </> dquotes (prettyName d)
-          </> "needed for type of"
+          <+> "needed for type of"
           <+> what <> colon
           </> indent 2 (pretty t)
           </> "But"
@@ -1667,7 +1677,8 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     verifyFunctionParams (Just fname) params''
 
     (tparams'', params''', rettype') <-
-      letGeneralise fname loc tparams' params'' rettype
+      letGeneralise fname loc tparams' params''
+        =<< unscopeUnknowable rettype
 
     checkGlobalAliases params'' body_t loc
 
