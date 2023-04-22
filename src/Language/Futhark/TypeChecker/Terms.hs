@@ -367,21 +367,6 @@ sizeFree tloc expKiller orig_t = do
               modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
-unscopeUnknowable ::
-  SrcLoc ->
-  TypeBase Size as ->
-  TermTypeM (TypeBase Size as, [VName])
-unscopeUnknowable tloc t = do
-  constraints <- getConstraints
-  sizeFree tloc (expKiller constraints) t
-  where
-    expKiller _ Var {} = Nothing
-    expKiller constraints e =
-      S.lookupMin $ S.filter (isUnknown constraints) $ fvVars $ freeInExp e
-    isUnknown constraints vn
-      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
-    isUnknown _ _ = False
-
 unscopeTypeBase ::
   SrcLoc ->
   S.Set VName ->
@@ -564,7 +549,6 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   -- existential sizes, because it must by necessity be a function.
   (_, p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
   (_, p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
-  (rt'', retext') <- unscopeUnknowable loc rt'
 
   pure $
     AppExp
@@ -575,7 +559,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
           (argExp e2_arg, Info (toStruct p2_t, p2_ext))
           loc
       )
-      (Info (AppRes rt'' (retext <> retext')))
+      (Info (AppRes rt' retext))
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   t <- expType e'
@@ -662,8 +646,8 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
           Var v _ _ -> Just v
           _ -> Nothing
   ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
-  (rt', exts') <- unscopeUnknowable loc rt
-  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt' (exts <> exts')
+
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
     onArg fname (i, all_exts, t) arg' = do
       (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
@@ -886,8 +870,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
   e_arg <- checkArg e
   (_, t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
-  (rt', retext') <- unscopeUnknowable loc rt
-  case (ftype, rt') of
+  case (ftype, rt) of
     (Scalar (Arrow _ m1 _ _ _), Scalar (Arrow _ m2 _ t2 rettype)) ->
       pure $
         OpSectionLeft
@@ -895,7 +878,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
           (Info ftype)
           (argExp e_arg)
           (Info (m1, toStruct t1, argext), Info (m2, toStruct t2))
-          (Info rettype, Info (retext <> retext'))
+          (Info rettype, Info retext)
           loc
     _ ->
       typeError loc mempty $
@@ -911,8 +894,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
           (Just op', 1)
           (Scalar $ Arrow as2 m2 d2 t2 $ RetType [] $ Scalar $ Arrow as1 m1 d1 t1 $ RetType dims2 ret)
           e_arg
-      (arrow'', _) <- unscopeUnknowable loc arrow'
-      case arrow'' of
+      case arrow' of
         Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
           pure $
             OpSectionRight
@@ -920,7 +902,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
               (Info ftype)
               (argExp e_arg)
               (Info (m1, toStruct t1'), Info (m2, toStruct t2', argext))
-              (Info $ RetType dims2' $ addAliases ret' (<> aliases arrow''))
+              (Info $ RetType dims2' $ addAliases ret' (<> aliases arrow'))
               loc
         _ -> undefined
     _ ->
