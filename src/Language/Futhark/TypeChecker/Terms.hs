@@ -690,15 +690,20 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
           (toStruct t)
       _ -> pure ()
 
+    constraints <- getConstraints
     incLevel . bindingSizes sizes $ \sizes' ->
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
+        let implicitSizes = S.filter (isUnknown constraints) $ fvVars $ freeInPat pat'
         body' <- checkExp body
         (body_t, retext) <-
-          unscopePatType loc (sizesMap sizes' <> patNames pat') =<< expTypeFully body'
+          unscopePatType loc (sizesMap sizes' <> patNames pat' <> implicitSizes) =<< expTypeFully body'
 
         pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
   where
     sizesMap = foldMap (S.singleton . sizeName)
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, e') closure -> do
@@ -986,9 +991,15 @@ checkCase ::
   TermTypeM (CaseBase Info VName, PatType, [VName])
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
+    constraints <- getConstraints
+    let implicitSizes = S.filter (isUnknown constraints) $ fvVars $ freeInPat p'
     e' <- checkExp e
-    (t, retext) <- unscopePatType loc (patNames p') =<< expTypeFully e'
+    (t, retext) <- unscopePatType loc (patNames p' <> implicitSizes) =<< expTypeFully e'
     pure (CasePat p' e' loc, t, retext)
+  where
+    isUnknown constraints vn
+      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+    isUnknown _ _ = False
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
