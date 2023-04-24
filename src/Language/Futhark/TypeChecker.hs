@@ -51,7 +51,7 @@ checkProg ::
   UncheckedProg ->
   (Warnings, Either TypeError (FileModule, VNameSource))
 checkProg files src name prog =
-  runTypeM initialEnv files' name src $ checkProgM prog
+  runTypeM initialEnv files' name src checkSizeExp $ checkProgM prog
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -67,7 +67,7 @@ checkExp ::
   UncheckedExp ->
   (Warnings, Either TypeError ([TypeParam], Exp))
 checkExp files src env e =
-  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src $ checkOneExp e
+  second (fmap fst) $ runTypeM env files' (mkInitialImport "") src checkSizeExp $ checkOneExp e
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -84,7 +84,7 @@ checkDec ::
   (Warnings, Either TypeError (Env, Dec, VNameSource))
 checkDec files src env name d =
   second (fmap massage) $
-    runTypeM env files' name src $ do
+    runTypeM env files' name src checkSizeExp $ do
       (_, env', d') <- checkOneDec d
       pure (env' <> env, d')
   where
@@ -103,7 +103,7 @@ checkModExp ::
   ModExpBase NoInfo Name ->
   (Warnings, Either TypeError (MTy, ModExpBase Info VName))
 checkModExp files src env me =
-  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $ do
+  second (fmap fst) . runTypeM env files' (mkInitialImport "") src checkSizeExp $ do
     (_abs, mty, me') <- checkOneModExp me
     pure (mty, me')
   where
@@ -564,7 +564,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
 
     let elab_t = RetType (svars ++ dims) t
 
-    let used_dims = freeInType t
+    let used_dims = fvVars $ freeInType t
     case filter ((`S.notMember` used_dims) . typeParamName) $
       filter isSizeParam tps' of
       [] -> pure ()
@@ -611,7 +611,7 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     -- Since the entry point type is not a RetType but just a plain
     -- StructType, we have to remove any existentially bound sizes.
-    extToAny (NamedSize v) | qualLeaf v `elem` ret = AnySize Nothing
+    extToAny (SizeExpr (Var v _ _)) | qualLeaf v `elem` ret = AnySize Nothing
     extToAny d = d
 
     patternEntry (PatParens p _) =
@@ -657,13 +657,19 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
           "Entry point functions may not be higher-order."
   | sizes_only_in_ret <-
       S.fromList (map typeParamName tparams)
-        `S.intersection` freeInType rettype'
-        `S.difference` foldMap freeInType param_ts,
+        `S.intersection` fvVars (freeInType rettype')
+        `S.difference` foldMap (fvVars . freeInType) param_ts,
     not $ S.null sizes_only_in_ret =
       typeError loc mempty $
         withIndexLink
           "size-polymorphic-entry"
           "Entry point functions must not be size-polymorphic in their return type."
+  | (constructive, _) <- foldMap determineSizeWitnesses param_ts,
+    Just p <- L.find (flip S.notMember constructive . typeParamName) tparams =
+      typeError p mempty . withIndexLink "nonconstructive-entry" $
+        "Entry point size parameter "
+          <> pretty p
+          <> " only used non-constructively."
   | p : _ <- filter nastyParameter params =
       warn p $
         "Entry point parameter\n"

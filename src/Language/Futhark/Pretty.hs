@@ -20,6 +20,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
 import Data.Ord
+import Data.Text qualified as T
 import Data.Word
 import Futhark.Util
 import Futhark.Util.Pretty
@@ -83,8 +84,7 @@ instance Pretty PrimValue where
 instance Pretty Size where
   pretty (AnySize Nothing) = mempty
   pretty (AnySize (Just v)) = "?" <> prettyName v
-  pretty (NamedSize v) = pretty v
-  pretty (ConstSize n) = pretty n
+  pretty (SizeExpr e) = pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
   pretty SizeExpAny {} = brackets mempty
@@ -161,8 +161,8 @@ instance Pretty (Shape dim) => Pretty (TypeBase dim as) where
   pretty = prettyType 0
 
 prettyTypeArg :: Pretty (Shape dim) => Int -> TypeArg dim -> Doc a
-prettyTypeArg _ (TypeArgDim d _) = pretty $ Shape [d]
-prettyTypeArg p (TypeArgType t _) = prettyType p t
+prettyTypeArg _ (TypeArgDim d) = pretty $ Shape [d]
+prettyTypeArg p (TypeArgType t) = prettyType p t
 
 instance Pretty (TypeArg Size) where
   pretty = prettyTypeArg 0
@@ -321,8 +321,18 @@ prettyInst t =
 prettyAttr :: Pretty a => a -> Doc ann
 prettyAttr attr = "#[" <> pretty attr <> "]"
 
+operatorName :: Name -> Bool
+operatorName = (`elem` opchars) . T.head . nameToText
+  where
+    opchars :: String
+    opchars = "+-*/%=!><|&^."
+
 prettyExp :: (Eq vn, IsName vn, Annot f) => Int -> ExpBase f vn -> Doc a
-prettyExp _ (Var name t _) = pretty name <> prettyInst t
+prettyExp _ (Var name t _)
+  -- The first case occurs only for programs that have been normalised
+  -- by the compiler.
+  | operatorName (toName (qualLeaf name)) = parens $ pretty name <> prettyInst t
+  | otherwise = pretty name <> prettyInst t
 prettyExp _ (Hole t _) = "???" <> prettyInst t
 prettyExp _ (Parens e _) = align $ parens $ pretty e
 prettyExp _ (QualParens (v, _) e _) = pretty v <> "." <> align (parens $ pretty e)

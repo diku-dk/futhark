@@ -2,5 +2,5 @@
 -- ==
 -- error: unknown length of range
 
-def main (n: i64) : [n]i32 =
-  1..<n+1
+def main (n: i64) : [n]i64 =
+  1..2..<n+1
