@@ -162,7 +162,8 @@ data Context = Context
     contextImportName :: ImportName,
     -- | Currently type-checking at the top level?  If false, we are
     -- inside a module.
-    contextAtTopLevel :: Bool
+    contextAtTopLevel :: Bool,
+    contextCheckExp :: UncheckedExp -> TypeM Exp
   }
 
 data TypeState = TypeState
@@ -205,10 +206,11 @@ runTypeM ::
   ImportTable ->
   ImportName ->
   VNameSource ->
+  (UncheckedExp -> TypeM Exp) ->
   TypeM a ->
   (Warnings, Either TypeError (a, VNameSource))
-runTypeM env imports fpath src (TypeM m) = do
-  let ctx = Context env imports fpath True
+runTypeM env imports fpath src checker (TypeM m) = do
+  let ctx = Context env imports fpath True checker
       s = TypeState src mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
@@ -286,17 +288,7 @@ class Monad m => MonadTypeChecker m where
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
   lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
 
-  checkNamedSize :: SrcLoc -> QualName Name -> m (QualName VName)
-  checkNamedSize loc v = do
-    (v', t) <- lookupVar loc v
-    case t of
-      Scalar (Prim (Signed Int64)) -> pure v'
-      _ ->
-        typeError loc mempty $
-          "Sizes must have type i64, but"
-            <+> dquotes (pretty v)
-            <+> "has type:"
-            </> pretty t
+  checkExpForSize :: UncheckedExp -> m Exp
 
   typeError :: Located loc => loc -> Notes -> Doc () -> m a
 
@@ -379,6 +371,10 @@ instance MonadTypeChecker TypeM where
                       qualifyTypeVars outer_env mempty qs t'
                   )
 
+  checkExpForSize e = do
+    checker <- asks contextCheckExp
+    checker e
+
   typeError loc notes s = throwError $ TypeError (locOf loc) notes s
 
 -- | Extract from a type a first-order type.
@@ -440,12 +436,12 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
           Named p' -> S.insert p' except
           Unnamed -> except
 
-    onTypeArg except (TypeArgDim d loc) =
-      TypeArgDim (onDim except d) loc
-    onTypeArg except (TypeArgType t loc) =
-      TypeArgType (onType except t) loc
+    onTypeArg except (TypeArgDim d) =
+      TypeArgDim $ onDim except d
+    onTypeArg except (TypeArgType t) =
+      TypeArgType $ onType except t
 
-    onDim except (NamedSize qn) = NamedSize $ qual except qn
+    onDim except (SizeExpr (Var qn typ loc)) = SizeExpr $ Var (qual except qn) typ loc
     onDim _ d = d
 
     qual except (QualName orig_qs name)

@@ -1,5 +1,5 @@
 -- ==
--- error: Dimensions.*do not match
+-- error: Sizes.*do not match
 
 type square [n] 't = [n][n]t
 

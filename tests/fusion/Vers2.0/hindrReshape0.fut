@@ -6,7 +6,7 @@
 --   [1, 2, 3, 4, 5, 6, 7, 8, 9]
 --   [[2, 4, 6], [8, 10, 12], [14, 16, 18]]
 -- }
-def main (orig: [9]i32): ([]i32,[][]i32) =
+def main (orig: [3*3]i32): ([]i32,[][]i32) =
   let a = map (+1) orig
   let b = unflatten 3 3 a
   let c = map  (\(row: []i32) ->

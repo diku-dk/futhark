@@ -1,6 +1,6 @@
 -- A function 'a -> a' must be size-preserving.
 -- ==
--- error: do not match
+-- error: Occurs check
 
 def ap 'a (f: a -> a) (x: a) =
   f x

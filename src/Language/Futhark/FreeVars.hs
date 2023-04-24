@@ -6,6 +6,7 @@ module Language.Futhark.FreeVars
     freeInType,
     freeWithout,
     FV (..),
+    fvVars,
   )
 where
 
@@ -17,6 +18,10 @@ import Language.Futhark.Syntax
 -- | A set of names where we also track their type.
 newtype FV = FV {unFV :: M.Map VName StructType}
   deriving (Show)
+
+-- | The set of names in an 'FV'.
+fvVars :: FV -> S.Set VName
+fvVars = M.keysSet . unFV
 
 instance Semigroup FV where
   FV x <> FV y = FV $ M.unionWith max x y
@@ -32,13 +37,6 @@ freeWithout (FV x) y = FV $ M.filterWithKey keep x
 
 ident :: IdentBase Info VName -> FV
 ident v = FV $ M.singleton (identName v) (toStruct $ unInfo (identType v))
-
-size :: VName -> FV
-size v = FV $ M.singleton v $ Scalar $ Prim $ Signed Int64
-
--- | A 'FV' with these names, considered to be sizes.
-sizes :: S.Set VName -> FV
-sizes = foldMap size
 
 -- | Compute the set of free variables of an expression.
 freeInExp :: ExpBase Info VName -> FV
@@ -56,20 +54,20 @@ freeInExp expr = case expr of
       freeInExpField (RecordFieldExplicit _ e _) = freeInExp e
       freeInExpField (RecordFieldImplicit vn t _) = ident $ Ident vn t mempty
   ArrayLit es t _ ->
-    foldMap freeInExp es <> sizes (freeInType $ unInfo t)
+    foldMap freeInExp es <> freeInType (unInfo t)
   AppExp (Range e me incl _) _ ->
     freeInExp e <> foldMap freeInExp me <> foldMap freeInExp incl
   Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeInExp e
   AppExp (Coerce e _ _) (Info ar) ->
-    freeInExp e <> sizes (freeInType (appResType ar))
+    freeInExp e <> freeInType (appResType ar)
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
-      <> ( (sizes (freeInPat pat) <> freeInExp e2)
+      <> ( (freeInPat pat <> freeInExp e2)
              `freeWithout` (patNames pat <> S.fromList (map sizeName let_sizes))
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
-    ( (freeInExp e1 <> sizes (foldMap freeInPat pats))
+    ( (freeInExp e1 <> foldMap freeInPat pats)
         `freeWithout` ( foldMap patNames pats
                           <> S.fromList (map typeParamName tparams)
                       )
@@ -80,7 +78,7 @@ freeInExp expr = case expr of
   Negate e _ -> freeInExp e
   Not e _ -> freeInExp e
   Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
-    (sizes (foldMap freeInPat pats) <> freeInExp e0 <> sizes (freeInType t))
+    (foldMap freeInPat pats <> freeInExp e0 <> freeInType t)
       `freeWithout` (foldMap patNames pats <> S.fromList dims)
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeInExp e
@@ -116,7 +114,7 @@ freeInExp expr = case expr of
   AppExp (Match e cs _) _ -> freeInExp e <> foldMap caseFV cs
     where
       caseFV (CasePat p eCase _) =
-        (sizes (freeInPat p) <> freeInExp eCase)
+        (freeInPat p <> freeInExp eCase)
           `freeWithout` patNames p
 
 freeInDimIndex :: DimIndexBase Info VName -> FV
@@ -125,7 +123,7 @@ freeInDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeInExp) [me1, me2, me3]
 
 -- | Free variables in pattern (including types of the bound identifiers).
-freeInPat :: PatBase Info VName -> S.Set VName
+freeInPat :: PatBase Info VName -> FV
 freeInPat (TuplePat ps _) = foldMap freeInPat ps
 freeInPat (RecordPat fs _) = foldMap (freeInPat . snd) fs
 freeInPat (PatParens p _) = freeInPat p
@@ -137,7 +135,7 @@ freeInPat (PatConstr _ _ ps _) = foldMap freeInPat ps
 freeInPat (PatAttr _ p _) = freeInPat p
 
 -- | Free variables in the type (meaning those that are used in size expression).
-freeInType :: TypeBase Size as -> S.Set VName
+freeInType :: TypeBase Size as -> FV
 freeInType t =
   case t of
     Array _ _ s a ->
@@ -149,15 +147,18 @@ freeInType t =
     Scalar (Sum cs) ->
       foldMap (foldMap freeInType) cs
     Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
-      S.filter (notV v) $ S.filter (`notElem` dims) $ freeInType t1 <> freeInType t2
+      FV $
+        M.filterWithKey (\k _ -> notV v k && notElem k dims) $
+          unFV $
+            freeInType t1 <> freeInType t2
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
   where
-    typeArgDims (TypeArgDim d _) = onSize d
-    typeArgDims (TypeArgType at _) = freeInType at
+    typeArgDims (TypeArgDim d) = onSize d
+    typeArgDims (TypeArgType at) = freeInType at
 
     notV Unnamed = const True
     notV (Named v) = (/= v)
 
-    onSize (NamedSize qn) = S.singleton $ qualLeaf qn
+    onSize (SizeExpr e) = freeInExp e
     onSize _ = mempty

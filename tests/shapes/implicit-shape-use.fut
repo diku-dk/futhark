@@ -52,11 +52,10 @@ def brownianBridgeDates [num_dates]
             in  bbrow
 
 def brownianBridge [num_dates]
-               (num_und: i64,
-                bb_inds: [3][num_dates]i32,
-                bb_data: [3][num_dates]f64,
-                 gaussian_arr: []f64
-            ) =
+               (num_und: i64)
+               (bb_inds: [3][num_dates]i32)
+               (bb_data: [3][num_dates]f64)
+               (gaussian_arr: []f64) =
     let gauss2d  = unflatten num_dates num_und gaussian_arr
     let gauss2dT = transpose gauss2d in
       transpose (
@@ -65,11 +64,9 @@ def brownianBridge [num_dates]
 
 def main [num_dates] (num_und: i64)
                      (bb_inds: [3][num_dates]i32)
-                     (arr_usz: []f64): [][]f64 =
-  let n = num_dates*num_und
-  let arr    = arr_usz :> [n]f64
+                     (arr: [num_dates*num_und]f64): [][]f64 =
   let bb_data= map (\(row: []i32)  ->
                         map f64.i32 row
                   ) (bb_inds )
-  let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
+  let bb_mat = brownianBridge num_und bb_inds bb_data arr
   in  bb_mat

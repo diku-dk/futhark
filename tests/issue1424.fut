@@ -55,7 +55,7 @@ def getDiagonalCellContribution [nelx][nely][nelz] (l :u8) (x :[nelx][nely][nelz
   let coarseValues =
     loop vx = fineValuesX for i < (i64.u8 l) do
       let ii = (i64.u8 l) - i - 1
-      let xx = vx |> unflatten (8**(ii)) 8 |> map restrictCell
+      let xx = (vx :> [(8**ii)*8][24]f64) |> unflatten (8**(ii)) 8 |> map restrictCell
       in xx
   let coarseX = flatten_to 24 coarseValues
   in coarseX

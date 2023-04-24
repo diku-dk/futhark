@@ -42,7 +42,7 @@ def solveAB [m][n] (A:[m][m]f32) (B:[m][n]f32) : [m][n]f32 =
     in AB[0:m, m:(m+n)] :> [m][n]f32
 
 def solveAb [m] (A:[m][m]f32) (b:[m]f32) =
-  unflatten m 1 b |> solveAB A |> flatten_to m
+  unflatten m 1 (b :> [m*1]f32) |> solveAB A |> flatten_to m
 
 def main u_bs (points':[]v3) (forces:[](v3,v3)) =
     let C (x,y,z) =

@@ -26,7 +26,7 @@ def reshape_int (l: i64) (x: []i64): []i64 =
   let (v1, _) = split (l) (extend) in
   v1
 entry main (n: i64) (m: i64): []i64 =
-  let t_v1 = unflatten n m (reshape_int ((n * (m * 1))) ((map (\(x: i64): i64 ->
+  let t_v1 = unflatten n m (reshape_int ((n * m)) ((map (\(x: i64): i64 ->
                                                                                                                       (x + 1)) (iota (12))))) in
   let t_v2 = transpose (t_v1) in
   let t_v3 = take_arrint (2) (t_v2) in

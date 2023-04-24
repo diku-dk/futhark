@@ -41,13 +41,13 @@ mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
   execState (traverseDims onDim t) mempty
   where
-    onDim bound _ (NamedSize d)
+    onDim bound _ (SizeExpr (Var d _ _))
       | qualLeaf d `S.member` bound =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (NamedSize d) =
+    onDim _ PosImmediate (SizeExpr (Var d _ _)) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (NamedSize d) =
-      modify $ M.insertWith (&&) (qualLeaf d) True
+    onDim _ _ (SizeExpr e) =
+      modify $ M.unionWith (&&) (M.map (const True) (unFV $ freeInExp e))
     onDim _ _ _ =
       pure ()
 
@@ -68,11 +68,7 @@ determineSizeWitnesses t =
 mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
-      alsoRet =
-        M.unionWith (&&) $
-          M.fromList $
-            zip (S.toList $ freeInType ret) $
-              repeat True
+      alsoRet = M.unionWith (&&) $ M.map (const True) $ unFV $ freeInType ret
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
@@ -183,10 +179,10 @@ unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
       Just $ TypeVar (als1 <> als2) u3 tv1 targs3
   | otherwise = Nothing
   where
-    unifyTypeArgs (TypeArgDim d1 loc) (TypeArgDim _d2 _) =
-      pure $ TypeArgDim d1 loc
-    unifyTypeArgs (TypeArgType t1 loc) (TypeArgType t2 _) =
-      TypeArgType <$> unifyTypesU uf t1 t2 <*> pure loc
+    unifyTypeArgs (TypeArgDim d1) (TypeArgDim _d2) =
+      pure $ TypeArgDim d1
+    unifyTypeArgs (TypeArgType t1) (TypeArgType t2) =
+      TypeArgType <$> unifyTypesU uf t1 t2
     unifyTypeArgs _ _ =
       Nothing
 unifyScalarTypes uf (Record ts1) (Record ts2)
@@ -231,32 +227,12 @@ renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let m = M.fromList $ zip dims $ map (SizeSubst . NamedSize . qualName) dims'
+      let mkSubst = ExpSubst . flip sizeVar mempty . qualName
+          m = M.fromList . zip dims $ map mkSubst dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
   | otherwise =
       pure $ RetType dims st
-
-checkExpForSize ::
-  MonadTypeChecker m =>
-  ExpBase NoInfo Name ->
-  m (Exp, Size)
-checkExpForSize (IntLit x NoInfo loc) =
-  pure (IntLit x int64_info loc, ConstSize $ fromInteger x)
-  where
-    int64_info = Info (Scalar (Prim (Signed Int64)))
-checkExpForSize (Literal (SignedValue (Int64Value x)) loc) =
-  pure (Literal (SignedValue (Int64Value x)) loc, ConstSize x)
-checkExpForSize (Var v NoInfo vloc) = do
-  v' <- checkNamedSize vloc v
-  pure (Var v' int64_info vloc, NamedSize v')
-  where
-    int64_info = Info (Scalar (Prim (Signed Int64)))
-checkExpForSize e =
-  typeError
-    (locOf e)
-    mempty
-    "Only variables and i64 literals are allowed in size expressions."
 
 evalTypeExp ::
   MonadTypeChecker m =>
@@ -329,10 +305,10 @@ evalTypeExp (TEArray d t loc) = do
   where
     checkSizeExp (SizeExpAny dloc) = do
       dv <- newTypeName "d"
-      pure ([dv], SizeExpAny dloc, NamedSize $ qualName dv)
+      pure ([dv], SizeExpAny dloc, sizeFromName (qualName dv) dloc)
     checkSizeExp (SizeExp e dloc) = do
-      (e', sz) <- checkExpForSize e
-      pure ([], SizeExp e' dloc, sz)
+      e' <- checkExpForSize e
+      pure ([], SizeExp e' dloc, SizeExpr e')
 --
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
@@ -457,18 +433,18 @@ evalTypeExp ote@TEApply {} = do
         "Type" <+> dquotes (pretty te') <+> "is not a type constructor."
 
     checkSizeExp (SizeExp e dloc) = do
-      (e', sz) <- checkExpForSize e
+      e' <- checkExpForSize e
       pure
         ( TypeArgExpSize (SizeExp e' dloc),
           [],
-          SizeSubst sz
+          ExpSubst e'
         )
     checkSizeExp (SizeExpAny loc) = do
       d <- newTypeName "d"
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          SizeSubst $ NamedSize $ qualName d
+          ExpSubst $ sizeVar (qualName d) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -618,22 +594,22 @@ checkTypeParams ps m =
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
-  TypeArgDim (NamedSize $ qualName v) ploc
-typeParamToArg (TypeParamType _ v ploc) =
-  TypeArgType (Scalar $ TypeVar () Nonunique (qualName v) []) ploc
+  TypeArgDim $ sizeFromName (qualName v) ploc
+typeParamToArg (TypeParamType _ v _) =
+  TypeArgType $ Scalar $ TypeVar () Nonunique (qualName v) []
 
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
 -- type!).  The latter is used to remove aliases from types that are
 -- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | SizeSubst Size
+data Subst t = Subst [TypeParam] t | PrimSubst | ExpSubst Exp
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
   pretty PrimSubst = "#<primsubst>"
-  pretty (SizeSubst d) = pretty d
+  pretty (ExpSubst e) = pretty e
 
 -- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructRetType
@@ -645,7 +621,7 @@ type TypeSubs = VName -> Maybe (Subst StructRetType)
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
   fmap _ PrimSubst = PrimSubst
-  fmap _ (SizeSubst v) = SizeSubst v
+  fmap _ (ExpSubst e) = ExpSubst e
 
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
@@ -670,10 +646,35 @@ instance Substitutable (TypeBase Size ()) where
 instance Substitutable (TypeBase Size Aliasing) where
   applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
 
+instance Substitutable Exp where
+  applySubst f = runIdentity . mapOnExp
+    where
+      mapOnExp (Var (QualName _ v) _ _)
+        | Just (ExpSubst e') <- f v = pure e'
+      mapOnExp e' = astMap mapper e'
+
+      mapper =
+        ASTMapper
+          { mapOnExp,
+            mapOnName = pure,
+            mapOnStructType = pure . applySubst f,
+            mapOnPatType = pure . applySubst f,
+            mapOnStructRetType = pure . applySubst f,
+            mapOnPatRetType = pure . applySubst f
+          }
+
 instance Substitutable Size where
-  applySubst f (NamedSize (QualName _ v))
-    | Just (SizeSubst d) <- f v = d
-  applySubst _ d = d
+  applySubst f size = runIdentity $ astMap mapper size
+    where
+      mapper =
+        ASTMapper
+          { mapOnExp = pure . applySubst f,
+            mapOnName = pure,
+            mapOnStructType = pure . applySubst f,
+            mapOnPatType = pure . applySubst f,
+            mapOnStructRetType = pure . applySubst f,
+            mapOnPatRetType = pure . applySubst f
+          }
 
 instance Substitutable d => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
@@ -683,7 +684,7 @@ instance Substitutable Pat where
     where
       mapper =
         ASTMapper
-          { mapOnExp = pure,
+          { mapOnExp = pure . applySubst f,
             mapOnName = pure,
             mapOnStructType = pure . applySubst f,
             mapOnPatType = pure . applySubst f,
@@ -701,9 +702,9 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim d _) =
-      (pv, SizeSubst d)
-    mkSubst (TypeParamType _ pv _) (TypeArgType at _) =
+    mkSubst (TypeParamDim pv _) (TypeArgDim (SizeExpr e)) =
+      (pv, ExpSubst e)
+    mkSubst (TypeParamType _ pv _) (TypeArgType at) =
       (pv, Subst [] $ RetType [] $ second mempty at)
     mkSubst p a =
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
@@ -733,7 +734,8 @@ substTypesRet lookupSubst ot =
         else do
           let start = maximum $ map baseTag seen_ext
               ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              extsubsts = M.fromList $ zip ext $ map (SizeSubst . NamedSize . qualName) ext'
+              mkSubst = ExpSubst . flip sizeVar mempty . qualName
+              extsubsts = M.fromList $ zip ext $ map mkSubst ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
 
@@ -779,12 +781,12 @@ substTypesRet lookupSubst ot =
         _ ->
           pure $ RetType (new_ext <> dims) t'
 
-    subsTypeArg (TypeArgType t loc) = do
+    subsTypeArg (TypeArgType t) = do
       let RetType dims t' = substTypesRet lookupSubst' t
       modify (dims ++)
-      pure $ TypeArgType t' loc
-    subsTypeArg (TypeArgDim v loc) =
-      pure $ TypeArgDim (applySubst lookupSubst' v) loc
+      pure $ TypeArgType t'
+    subsTypeArg (TypeArgDim v) =
+      pure $ TypeArgDim $ applySubst lookupSubst' v
 
     lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst
 
@@ -803,7 +805,7 @@ substTypesAny lookupSubst ot =
       -- AnySize.  This should _never_ happen during type-checking, but
       -- may happen as we substitute types during monomorphisation and
       -- defunctorisation later on. See Note [AnySize]
-      let toAny (NamedSize v)
+      let toAny (SizeExpr (Var v _ _))
             | qualLeaf v `elem` dims = AnySize Nothing
           toAny d = d
        in first toAny ot'

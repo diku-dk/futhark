@@ -11,6 +11,7 @@ import Language.Futhark.Semantic
 import Language.Futhark.SyntaxTests ()
 import Language.Futhark.TypeChecker (initialEnv)
 import Language.Futhark.TypeChecker.Monad
+import Language.Futhark.TypeChecker.Terms
 import Language.Futhark.TypeChecker.Types
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -31,7 +32,7 @@ evalTest te expected =
         assertFailure $ "Expected error, got: " <> show actual_t
   where
     extract (_, svars, t, _) = (svars, t)
-    run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource
+    run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource checkSizeExp
     -- We hack up an environment with some predefined type
     -- abbreviations for testing.  This is all prettyString sensitive to the
     -- specific unique names, so we have to be careful!

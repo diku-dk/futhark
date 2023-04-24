@@ -83,13 +83,16 @@ typeShape (Scalar (Record fs)) =
   ShapeRecord $ M.map typeShape fs
 typeShape (Scalar (Sum cs)) =
   ShapeSum $ M.map (map typeShape) cs
-typeShape _ =
-  ShapeLeaf
+typeShape t
+  | Just t' <- isAccType t =
+      typeShape t'
+  | otherwise =
+      ShapeLeaf
 
 structTypeShape :: StructType -> Shape (Maybe Int64)
 structTypeShape = fmap dim . typeShape
   where
-    dim (ConstSize d) = Just $ fromIntegral d
+    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
     dim _ = Nothing
 
 -- | A fully evaluated Futhark value.
@@ -101,8 +104,8 @@ data Value m
   | ValueFun (Value m -> m (Value m))
   | -- Stores the full shape.
     ValueSum ValueShape Name [Value m]
-  | -- The update function and the array.
-    ValueAcc (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
+  | -- The shape, the update function, and the array.
+    ValueAcc ValueShape (Value m -> Value m -> m (Value m)) !(Array Int (Value m))
 
 instance Show (Value m) where
   show (ValuePrim v) = "ValuePrim " <> show v <> ""
@@ -124,7 +127,7 @@ instance Eq (Value m) where
   ValueArray _ x == ValueArray _ y = x == y
   ValueRecord x == ValueRecord y = x == y
   ValueSum _ n1 vs1 == ValueSum _ n2 vs2 = n1 == n2 && vs1 == vs2
-  ValueAcc _ x == ValueAcc _ y = x == y
+  ValueAcc _ _ x == ValueAcc _ _ y = x == y
   _ == _ = False
 
 prettyValueWith :: (PrimValue -> Doc a) -> Value m -> Doc a
@@ -174,6 +177,7 @@ valueText = docText . prettyValueWith pretty
 
 valueShape :: Value m -> ValueShape
 valueShape (ValueArray shape _) = shape
+valueShape (ValueAcc shape _ _) = shape
 valueShape (ValueRecord fs) = ShapeRecord $ M.map valueShape fs
 valueShape (ValueSum shape _ _) = shape
 valueShape _ = ShapeLeaf

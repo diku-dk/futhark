@@ -10,7 +10,6 @@ where
 
 import Control.Monad
 import Data.Either
-import Data.List (intersect)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
@@ -106,6 +105,10 @@ newNamesForMTy orig_mty = do
         substitute v =
           fromMaybe v $ M.lookup v substs
 
+        -- For applySubst and friends.
+        subst v =
+          ExpSubst . flip sizeVar mempty . qualName <$> M.lookup v substs
+
         substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
            in M.fromList $
@@ -151,20 +154,16 @@ newNamesForMTy orig_mty = do
         substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
           Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInShape (Shape ds) =
-          Shape $ map substituteInDim ds
-        substituteInDim (NamedSize (QualName qs v)) =
-          NamedSize $ QualName (map substitute qs) $ substitute v
-        substituteInDim d = d
+        substituteInShape (Shape ds) = Shape $ map substituteInDim ds
+        substituteInDim (SizeExpr e) = SizeExpr $ applySubst subst e
+        substituteInDim AnySize {} = error "substituteInDim: AnySize"
 
-        substituteInTypeArg (TypeArgDim (NamedSize (QualName qs v)) loc) =
-          TypeArgDim (NamedSize $ QualName (map substitute qs) $ substitute v) loc
-        substituteInTypeArg (TypeArgDim (ConstSize x) loc) =
-          TypeArgDim (ConstSize x) loc
-        substituteInTypeArg (TypeArgDim (AnySize v) loc) =
-          TypeArgDim (AnySize v) loc
-        substituteInTypeArg (TypeArgType t loc) =
-          TypeArgType (substituteInType t) loc
+        substituteInTypeArg (TypeArgDim (SizeExpr e)) =
+          TypeArgDim $ SizeExpr (applySubst subst e)
+        substituteInTypeArg (TypeArgDim AnySize {}) =
+          error "substituteInTypeArg: AnySize"
+        substituteInTypeArg (TypeArgType t) =
+          TypeArgType $ substituteInType t
 
 mtyTypeAbbrs :: MTy -> M.Map VName TypeBinding
 mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod
@@ -389,7 +388,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (SizeSubst . NamedSize) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (ExpSubst . flip sizeVar mempty) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -534,15 +533,17 @@ matchMTys orig_mty orig_mty_sig =
       -- if we have a value of an abstract type 't [n]', then there is
       -- an array of size 'n' somewhere inside.
       when (M.member spec_name abs_subst_to_type) $
-        case S.toList (mustBeExplicitInType (retType t)) `intersect` map typeParamName ps of
+        case filter
+          (`S.notMember` fst (determineSizeWitnesses (retType t)))
+          (map typeParamName $ filter isSizeParam ps) of
           [] -> pure ()
           d : _ ->
             Left . TypeError loc mempty $
               "Type"
                 </> indent 2 (ppTypeAbbr [] (QualName quals name) (l, ps, t))
                 </> textwrap "cannot be made abstract because size parameter"
-                </> dquotes (prettyName d)
-                </> textwrap "is not used as an array size in the definition."
+                </> indent 2 (prettyName d)
+                </> textwrap "is not used constructively as an array size in the definition."
 
       let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
           nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
@@ -615,7 +616,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ SizeSubst $ NamedSize $ qualName v
+        _ -> Just $ ExpSubst $ sizeVar (qualName v) mempty
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'

@@ -1,5 +1,5 @@
 -- ==
--- error: Dimensions .* do not match
+-- error: Sizes .* do not match
 
 type^ t = ?[n].([n]bool, bool -> [n]bool)
 

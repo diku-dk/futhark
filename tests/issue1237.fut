@@ -14,24 +14,22 @@ def mkVal [l2][l] (B: i64) (y:i32) (x:i32) (pen:i32) (inp_l:[l2]i32) (ref_l:[l][
       , ( (inp_l[fInd B (y-1) x])) - pen
       )
 
-def intraBlockPar [lensq][len] (B: i64)
-                               (penalty: i32)
-                               (inputsets: [lensq]i32)
-                               (reference2: [len][len]i32)
-                               (b_y: i64) (b_x: i64)
-                               : [B][B]i32 =
+def intraBlockPar [len] (B: i64)
+                        (penalty: i32)
+                        (inputsets: [len*len]i32)
+                        (reference2: [len][len]i32)
+                        (b_y: i64) (b_x: i64)
+                        : [B][B]i32 =
   let ref_l = reference2[b_y * B + 1: b_y * B + 1 + B,
                          b_x * B + 1: b_x * B + 1 + B] :> [B][B]i32
 
   let inputsets' = unflatten len len inputsets
 
-  let B1 = B+1
-
-  let inp_l' = (copy inputsets'[b_y * B : b_y * B + B + 1, b_x * B : b_x * B + B + 1]) :> *[B1][B1]i32
+  let inp_l' = (copy inputsets'[b_y * B : b_y * B + B + 1, b_x * B : b_x * B + B + 1]) :> *[B+1][B+1]i32
 
   -- inp_l is the working memory
-  let inp_l = replicate (B1*B1) 0i32
-              |> unflatten B1 B1
+  let inp_l = replicate ((B+1)*(B+1)) 0i32
+              |> unflatten (B+1) (B+1)
 
   -- Initialize inp_l with the already processed the column to the left of this
   -- block
@@ -85,18 +83,20 @@ def updateBlocks [q][lensq] (B: i64)
 def main [lensq] (penalty : i32)
                  (inputsets : *[lensq]i32)
                  (reference : *[lensq]i32) : *[lensq]i32 =
-  let len = i32.f32 (f32.sqrt (f32.i64 lensq))
+  let len = i64.f32 (f32.sqrt (f32.i64 lensq))
+  let inputsets = inputsets :> [len*len]i32
+  let reference = reference :> [len*len]i32
   let worksize = len - 1
-  let B = i64.min (i64.i32 worksize) B0
+  let B = i64.min worksize B0
 
-  let B = assert (i64.i32 worksize % B == 0) B
+  let B = assert (worksize % B == 0) B
 
-  let block_width = trace <| worksize / i32.i64 B
-  let reference2 = unflatten (i64.i32 len) (i64.i32 len) reference
+  let block_width = trace <| worksize / B
+  let reference2 = unflatten len len reference
 
   let inputsets =
     loop inputsets for blk < block_width do
-        let blk = i64.i32 (blk + 1)
+        let blk = blk + 1
         let block_inp =
           tabulate blk (\b_x ->
                 let b_y = blk-1-b_x
@@ -105,6 +105,6 @@ def main [lensq] (penalty : i32)
 
         let mkBY bx = i32.i64 (blk - 1) - bx
         let mkBX bx = bx
-        in  updateBlocks B len blk mkBY mkBX block_inp inputsets
+        in  updateBlocks B (i32.i64 len) blk mkBY mkBX block_inp inputsets
 
-  in  inputsets
+  in  inputsets :> [lensq]i32
