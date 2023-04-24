@@ -76,7 +76,7 @@ data FutharkPipeline
     Defunctorise
   | -- | Defunctorise and monomorphise.
     Monomorphise
-  | -- | Defunctorise, monomorphise, and lambda-lift.
+  | -- | Defunctorise, monomorphise and lambda-lift.
     LiftLambdas
   | -- | Defunctorise, monomorphise, lambda-lift, and defunctionalise.
     Defunctionalise

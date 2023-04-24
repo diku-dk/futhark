@@ -1,5 +1,4 @@
 -- ==
--- error: artificial size
 
 def segmented_scan [n] 't (op: t -> t -> t) (ne: t)
                           (flags: [n]bool) (as: [n]t): [n]t =

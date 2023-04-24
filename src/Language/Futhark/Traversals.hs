@@ -26,6 +26,7 @@ module Language.Futhark.Traversals
   )
 where
 
+import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as S
 import Language.Futhark.Syntax
@@ -270,8 +271,7 @@ instance ASTMappable (SizeExp Info VName) where
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
 instance ASTMappable Size where
-  astMap tv (NamedSize vn) = NamedSize <$> astMap tv vn
-  astMap _ (ConstSize k) = pure $ ConstSize k
+  astMap tv (SizeExpr expr) = SizeExpr <$> mapOnExp tv expr
   astMap tv (AnySize vn) = AnySize <$> traverse (mapOnName tv) vn
 
 instance ASTMappable (TypeParamBase VName) where
@@ -332,10 +332,10 @@ traverseTypeArg ::
   (dim1 -> f dim2) ->
   TypeArg dim1 ->
   f (TypeArg dim2)
-traverseTypeArg _ g (TypeArgDim d loc) =
-  TypeArgDim <$> g d <*> pure loc
-traverseTypeArg f g (TypeArgType t loc) =
-  TypeArgType <$> traverseType f g pure t <*> pure loc
+traverseTypeArg _ g (TypeArgDim d) =
+  TypeArgDim <$> g d
+traverseTypeArg f g (TypeArgType t) =
+  TypeArgType <$> traverseType f g pure t
 
 instance ASTMappable StructType where
   astMap tv = traverseType (astMap tv) (astMap tv) pure
@@ -443,8 +443,26 @@ bareLoopForm (While e) = While (bareExp e)
 bareCase :: CaseBase Info VName -> CaseBase NoInfo VName
 bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 
+bareSizeExp :: SizeExp Info VName -> SizeExp NoInfo VName
+bareSizeExp (SizeExp e loc) = SizeExp (bareExp e) loc
+bareSizeExp (SizeExpAny loc) = SizeExpAny loc
+
 bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
-bareTypeExp = undefined
+bareTypeExp (TEVar qn loc) = TEVar qn loc
+bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
+bareTypeExp (TETuple tys loc) = TETuple (map bareTypeExp tys) loc
+bareTypeExp (TERecord fs loc) = TERecord (map (second bareTypeExp) fs) loc
+bareTypeExp (TEArray size ty loc) = TEArray (bareSizeExp size) (bareTypeExp ty) loc
+bareTypeExp (TEUnique ty loc) = TEUnique (bareTypeExp ty) loc
+bareTypeExp (TEApply ty ta loc) = TEApply (bareTypeExp ty) (bareTypeArgExp ta) loc
+  where
+    bareTypeArgExp (TypeArgExpSize size) =
+      TypeArgExpSize $ bareSizeExp size
+    bareTypeArgExp (TypeArgExpType tya) =
+      TypeArgExpType $ bareTypeExp tya
+bareTypeExp (TEArrow arg tya tyr loc) = TEArrow arg (bareTypeExp tya) (bareTypeExp tyr) loc
+bareTypeExp (TESum cs loc) = TESum (map (second $ map bareTypeExp) cs) loc
+bareTypeExp (TEDim names ty loc) = TEDim names (bareTypeExp ty) loc
 
 -- | Remove all annotations from an expression, but retain the
 -- name/scope information.
