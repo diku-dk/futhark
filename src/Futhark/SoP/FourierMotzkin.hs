@@ -35,7 +35,7 @@ where
 
 import Control.Monad.State
 import Data.Set qualified as S
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
 

@@ -4,10 +4,11 @@
 -- | The Algebraic Environment, which is in principle
 --   maintained during program traversal, is used to
 --   solve symbolically algebraic inequations.
-module Futhark.SoP.AlgEnv
-  ( RangeEnv,
+module Futhark.SoP.Monad
+  ( Nameable (..),
+    mkNameM,
+    RangeEnv,
     EquivEnv,
-    Nameable (..),
     UntransEnv (..),
     AlgEnv (..),
     type (>=),
@@ -19,8 +20,6 @@ module Futhark.SoP.AlgEnv
     lookupRange,
     addRange,
     AlgM,
-    newNameM,
-    initSource,
     lookupSoP,
     runAlgM,
     runAlgM_,
@@ -34,58 +33,33 @@ import Data.Map.Strict qualified as M
 import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
+import Futhark.FreshNames
+import Futhark.MonadFreshNames
 import Futhark.SoP.SoP
 import Futhark.Util.Pretty
 import GHC.TypeLits (Natural)
+import Language.Futhark.Syntax hiding (Range)
 
 --------------------------------------------------------------------------------
--- Fresh variables
+-- Names; probably will remove in the end.
 --------------------------------------------------------------------------------
-
--- | Fresh variable name source.
-newtype FreshSource = FreshSource Int
-
-instance Show FreshSource where
-  show (FreshSource x) = show x
-
--- | Increment a 'FreshSource'.
-nextSource :: FreshSource -> FreshSource
-nextSource (FreshSource x) = FreshSource $ x + 1
-
--- | The initial source.
-initSource :: FreshSource
-initSource = FreshSource 0
-
--- | Monads which provide a fresh source.
-class Monad m => FreshSourceM m where
-  getFreshSource :: m FreshSource
-  putFreshSource :: FreshSource -> m ()
-
-instance FreshSourceM (State FreshSource) where
-  getFreshSource = get
-  putFreshSource = put
-
-instance {-# OVERLAPS #-} FreshSourceM m => FreshSourceM (StateT s m) where
-  getFreshSource = lift getFreshSource
-  putFreshSource = lift . putFreshSource
 
 -- | Types which can use a fresh source to generate
 --   unique names.
-class Show a => Nameable a where
-  newName :: FreshSource -> a
+class Nameable u where
+  mkName :: VNameSource -> (u, VNameSource)
 
 instance Nameable String where
-  newName = ("x" <>) . show
+  mkName (VNameSource i) = ("x" <> show i, VNameSource $ i + 1)
 
--- | Monads which can generate fresh names.
-class (Nameable a, Monad m) => NameableM a m where
-  newNameM :: m a
+instance Nameable VName where
+  mkName (VNameSource i) = (VName "x" i, VNameSource $ i + 1)
 
-instance (Nameable a, FreshSourceM m) => NameableM a m where
-  newNameM = do
-    s <- getFreshSource
-    putFreshSource $ nextSource s
-    pure $ newName s
+instance Nameable Name where
+  mkName = mkName
+
+mkNameM :: (Nameable u, MonadFreshNames m) => m u
+mkNameM = modifyNameSource mkName
 
 --------------------------------------------------------------------------------
 -- Environment
@@ -143,11 +117,21 @@ instance Ord u => Monoid (AlgEnv u) where
 
 -- | The algebraic monad; consists of a an algebraic
 --   environment along with a fresh variable source.
-type AlgM u = StateT (AlgEnv u) (State FreshSource)
+newtype AlgM u a = AlgM (StateT (AlgEnv u) (State VNameSource) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState (AlgEnv u)
+    )
+
+instance MonadFreshNames (AlgM u) where
+  getNameSource = AlgM $ lift get
+  putNameSource = AlgM . lift . put
 
 runAlgM :: AlgEnv u -> AlgM u a -> a
-runAlgM env m =
-  flip evalState initSource $
+runAlgM env (AlgM m) =
+  flip evalState blankNameSource $
     evalStateT m env
 
 runAlgM_ :: Ord u => AlgM u a -> a
@@ -176,7 +160,7 @@ lookupUntransPE pe = do
   inv_map <- gets (inv . untrans)
   case inv_map M.!? pe of
     Nothing -> do
-      x <- newNameM
+      x <- mkNameM
       insertUntrans x pe
       pure x
     Just x -> pure x

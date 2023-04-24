@@ -274,7 +274,7 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
-      Futhark.SoP.AlgEnv
+      Futhark.SoP.Monad
       Futhark.SoP.Refine
       Futhark.SoP.RefineEquivs
       Futhark.SoP.FourierMotzkin

@@ -15,7 +15,7 @@ import Control.Monad.State
 import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.PrimExp
 import Futhark.SoP.SoP
 
