@@ -975,7 +975,7 @@ intrinsics =
                     (Observe, Scalar t_a `arr` Scalar (Prim $ Signed Int64)),
                     (Observe, array_a $ shape [n])
                   ]
-                  ( RetType [m] . Scalar $
+                  ( RetType [k] . Scalar $
                       tupleRecord
                         [ uarray_a $ shape [k],
                           Array () Unique (shape [n]) (Prim $ Signed Int64)
