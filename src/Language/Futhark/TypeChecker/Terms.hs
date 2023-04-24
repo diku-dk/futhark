@@ -416,6 +416,37 @@ unscopePatType tloc unscoped t = do
     unAlias (AliasBound v) | v `S.member` unscoped = AliasFree v
     unAlias a = a
 
+reboundI64 ::
+  ASTMappable (TypeBase Size as) =>
+  SrcLoc ->
+  S.Set VName ->
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+reboundI64 tloc unscoped =
+  fmap (fmap M.elems) . (`runStateT` mempty) . astMap mapper
+  where
+    mapper =
+      ASTMapper
+        { mapOnExp,
+          mapOnName = pure,
+          mapOnStructType = astMap mapper,
+          mapOnPatType = astMap mapper,
+          mapOnStructRetType = astMap mapper,
+          mapOnPatRetType = astMap mapper
+        }
+
+    mapOnExp :: Exp -> StateT (M.Map VName VName) TermTypeM Exp
+    mapOnExp (Var (QualName _ vn) _ loc)
+      | vn `S.member` unscoped = do
+          prev <- gets $ M.lookup vn
+          case prev of
+            Just vn' -> pure $ sizeVar (qualName vn') loc
+            Nothing -> do
+              vn' <- lift $ newRigidDim tloc (RigidOutOfScope loc vn) "d"
+              modify $ M.insert vn vn'
+              pure $ sizeVar (qualName vn') loc
+    mapOnExp e = astMap mapper e
+
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
@@ -693,11 +724,15 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
     incLevel . bindingSizes sizes $ \sizes' ->
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
         body' <- checkExp body
+        let (i64, noni64) = S.partition i64Ident $ patIdents pat'
         (body_t, retext) <-
-          unscopePatType loc (sizesMap sizes' <> patNames pat') =<< expTypeFully body'
+          reboundI64 loc (sizesMap sizes' <> S.map identName i64) =<< expTypeFully body'
+        (body_t', retext') <- unscopePatType loc (S.map identName noni64) body_t
 
-        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
+        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t' (retext <> retext'))
   where
+    i64Ident (Ident _ ty _) =
+      ty == Info (Scalar $ Prim $ Signed Int64)
     sizesMap = foldMap (S.singleton . sizeName)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
@@ -987,8 +1022,14 @@ checkCase ::
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
     e' <- checkExp e
-    (t, retext) <- unscopePatType loc (patNames p') =<< expTypeFully e'
-    pure (CasePat p' e' loc, t, retext)
+    let (i64, noni64) = S.partition i64Ident $ patIdents p'
+    (t, retext) <-
+      reboundI64 loc (S.map identName i64) =<< expTypeFully e'
+    (t', retext') <- unscopePatType loc (S.map identName noni64) t
+    pure (CasePat p' e' loc, t', retext <> retext')
+  where
+    i64Ident (Ident _ ty _) =
+      ty == Info (Scalar $ Prim $ Signed Int64)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
