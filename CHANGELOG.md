@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.24.3]
+
+### Fixed
+
 * Certain cases of noninlined functions in `multicore` backend.
 
 * Defunctionalisation of `match` where the constructors carry

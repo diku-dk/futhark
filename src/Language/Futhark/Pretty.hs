@@ -392,7 +392,14 @@ prettyExp p (Constr n cs t _) =
     "#" <> pretty n <+> sep (map (prettyExp 10) cs) <> prettyInst t
 prettyExp _ (Attr attr e _) =
   prettyAttr attr </> prettyExp (-1) e
-prettyExp i (AppExp e _) = prettyAppExp i e
+prettyExp i (AppExp e res)
+  | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 2,
+    Just res' <- unAnnot res,
+    not $ null $ appResExt res' =
+      "#"
+        <> brackets (commasep $ map prettyName $ appResExt res')
+        </> parens (prettyAppExp i e)
+  | otherwise = prettyAppExp i e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ExpBase f vn) where
   pretty = prettyExp (-1)
