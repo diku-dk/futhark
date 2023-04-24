@@ -14,7 +14,7 @@ where
 import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 
 -- | Is this 'PrimType' not integral?
 notIntType :: PrimType -> Bool

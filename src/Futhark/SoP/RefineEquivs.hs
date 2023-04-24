@@ -15,7 +15,7 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.PrimExp
 import Futhark.SoP.SoP
@@ -23,7 +23,7 @@ import Futhark.SoP.ToFromSoP
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
-addEqZeroPEs :: (Ord u, Nameable u) => Set (PrimExp u == 0) -> AlgM u (Set (SoP u >= 0))
+addEqZeroPEs :: (Show u, Ord u, Nameable u) => Set (PrimExp u == 0) -> AlgM u (Set (SoP u >= 0))
 addEqZeroPEs pes = do
   -- Substitute already known equivalences in the equality set.
   equivs_pes <- gets (fromSoP . equivs)
@@ -101,7 +101,7 @@ mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
 --
 --   2: TODO: try to give common factors and get simpler.
 refineEquivCand ::
-  (Ord u, Nameable u) => EquivCand u -> AlgM u (Set (SoP u >= 0), EquivCand u)
+  (Show u, Ord u, Nameable u) => EquivCand u -> AlgM u (Set (SoP u >= 0), EquivCand u)
 refineEquivCand cand@(EquivCand sym sop) = do
   mpe <- lookupUntransSym sym
   case mpe of
@@ -116,7 +116,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
               case msop of
                 Just {} -> pure (mempty, cand)
                 Nothing -> do
-                  q <- newNameM
+                  q <- mkNameM
                   let div_pe = divInsteadOfMod pe
                       q_sop = sym2SoP q
                       new_cand = EquivCand sym1 $ sop .+. q_sop .*. sop2
@@ -134,7 +134,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
 --     creation/refinement of the mapping.
 --   * @cands@: set of equivalence candidates.
 addEquiv2CandSet ::
-  (Ord u, Nameable u) =>
+  (Show u, Ord u, Nameable u) =>
   PrimExp u == 0 ->
   AlgM u (Set (SoP u >= 0), Set (EquivCand u))
 addEquiv2CandSet pe = do

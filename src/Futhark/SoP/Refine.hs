@@ -9,7 +9,7 @@ where
 
 import Data.Set (Set)
 import Futhark.Analysis.PrimExp
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.PrimExp
 import Futhark.SoP.RefineEquivs
 import Futhark.SoP.RefineRanges
@@ -17,7 +17,7 @@ import Futhark.SoP.ToFromSoP
 import Futhark.Util.Pretty
 
 refineAlgEnv ::
-  (Ord u, Nameable u, Pretty u) =>
+  (Show u, Ord u, Nameable u, Pretty u) =>
   Set (PrimExp u) ->
   AlgM u ()
 refineAlgEnv candidates = do

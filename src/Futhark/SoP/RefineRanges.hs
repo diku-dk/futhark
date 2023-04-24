@@ -13,7 +13,7 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.SoP
 import Futhark.SoP.ToFromSoP
@@ -22,7 +22,7 @@ import Futhark.Util.Pretty
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeroPEs :: (Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> AlgM u ()
+addIneqZeroPEs :: (Show u, Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> AlgM u ()
 addIneqZeroPEs pes = do
   -- Substitute equivalence env.
   pes' <- gets ((flip S.map pes . substituteInPrimExp . fmap fromSoP) . equivs)
@@ -138,7 +138,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: (Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> AlgM u ()
+addRangeCands :: (Show u, Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> AlgM u ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do

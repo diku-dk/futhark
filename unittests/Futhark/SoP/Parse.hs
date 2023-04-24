@@ -20,7 +20,7 @@ import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Parse
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.ToFromSoP
 import Language.Futhark.Primitive.Parse

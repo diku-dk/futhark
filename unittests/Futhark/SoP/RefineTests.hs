@@ -1,7 +1,7 @@
 module Futhark.SoP.RefineTests (tests) where
 
 import Data.Set qualified as S
-import Futhark.SoP.AlgEnv
+import Futhark.SoP.Monad
 import Futhark.SoP.Refine
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Parse
