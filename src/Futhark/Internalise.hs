@@ -42,6 +42,7 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.Compiler.Config
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
@@ -52,6 +53,7 @@ import Futhark.Internalise.FullNormalise qualified as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.SoP as SoP
 import Futhark.Util.Log
 import Language.Futhark.Semantic (Imports)
 

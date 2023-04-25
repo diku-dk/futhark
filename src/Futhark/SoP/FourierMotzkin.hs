@@ -127,13 +127,13 @@ x $>$ y = fmSolveGTh0 $ x .-. y
 x $>=$ y = fmSolveGEq0 $ x .-. y
 
 fmSolveLTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveLTh0_ rs = runSoPM mempty {ranges = rs} . fmSolveLTh0
+fmSolveLTh0_ rs = evalSoPM mempty {ranges = rs} . fmSolveLTh0
 
 fmSolveGTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveGTh0_ rs = runSoPM mempty {ranges = rs} . fmSolveGTh0
+fmSolveGTh0_ rs = evalSoPM mempty {ranges = rs} . fmSolveGTh0
 
 fmSolveGEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveGEq0_ rs = runSoPM mempty {ranges = rs} . fmSolveGEq0
+fmSolveGEq0_ rs = evalSoPM mempty {ranges = rs} . fmSolveGEq0
 
 fmSolveLEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveLEq0_ rs = runSoPM mempty {ranges = rs} . fmSolveLEq0
+fmSolveLEq0_ rs = evalSoPM mempty {ranges = rs} . fmSolveLEq0
