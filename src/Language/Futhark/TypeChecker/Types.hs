@@ -117,15 +117,13 @@ maskAliases ::
 maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 
--- | The two types are assumed to be structurally equal, but not
--- necessarily regarding sizes.  Combines aliases.
+-- | The two types are assumed to be approximately structurally equal,
+-- but not necessarily regarding sizes.  Combines aliases.
 addAliasesFromType :: PatType -> PatType -> PatType
-addAliasesFromType (Array als1 u1 et1 shape1) (Array als2 _ _ _) =
-  Array (als1 <> als2) u1 et1 shape1
-addAliasesFromType
-  (Scalar (TypeVar als1 u1 tv1 targs1))
-  (Scalar (TypeVar als2 _ _ _)) =
-    Scalar $ TypeVar (als1 <> als2) u1 tv1 targs1
+addAliasesFromType (Array als1 u1 et1 shape1) t2 =
+  Array (als1 <> aliases t2) u1 et1 shape1
+addAliasesFromType (Scalar (TypeVar als1 u1 tv1 targs1)) t2 =
+  Scalar $ TypeVar (als1 <> aliases t2) u1 tv1 targs1
 addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
   | length ts1 == length ts2,
     sort (M.keys ts1) == sort (M.keys ts2) =
