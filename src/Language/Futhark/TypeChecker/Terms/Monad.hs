@@ -327,7 +327,7 @@ instance Pretty Checking where
   pretty (CheckingPat pat NoneInferred) =
     "Invalid pattern" <+> dquotes (pretty pat) <> "."
   pretty (CheckingPat pat (Ascribed t)) =
-    "Pat"
+    "Pattern"
       <+> dquotes (pretty pat)
       <+> "cannot match value of type"
       </> indent 2 (pretty t)
