@@ -84,7 +84,7 @@ fmSolveLEq0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
 fmSolveLEq0 sop
   | Just v <- justConstant sop = pure (v <= 0)
   | not (null syms) = do
-      rs <- gets ranges
+      rs <- getRanges
       -- step 1: find `i`
       let i =
             snd $
