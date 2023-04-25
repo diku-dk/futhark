@@ -25,7 +25,7 @@ import Futhark.Util.Pretty
 addIneqZeroPEs :: (Show u, Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> SoPM u ()
 addIneqZeroPEs pes = do
   -- Substitute equivalence env.
-  pes' <- gets ((flip S.map pes . substituteInPrimExp . fmap fromSoP) . equivs)
+  pes' <- (flip S.map pes . substituteInPrimExp . fmap fromSoP) <$> getEquivs
 
   ineq_cands <-
     mconcat
@@ -145,7 +145,7 @@ addRangeCands :: (Show u, Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> S
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do
-  rs <- gets ranges
+  rs <- getRanges
   let cands = S.toList cand_set
       -- 1. Compute the transitive closure of the 'SoP' of
       --    each candidate through the range environment.

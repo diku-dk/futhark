@@ -26,7 +26,7 @@ import Futhark.SoP.ToFromSoP
 addEqZeroPEs :: (Show u, Ord u, Nameable u) => Set (PrimExp u == 0) -> SoPM u (Set (SoP u >= 0))
 addEqZeroPEs pes = do
   -- Substitute already known equivalences in the equality set.
-  equivs_pes <- gets (fromSoP . equivs)
+  equivs_pes <- fromSoP <$> getEquivs
   let pes' = S.map (substituteInPrimExp equivs_pes) pes
   -- Make equivalence candidates along with any extra constraints.
   (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <-
@@ -148,8 +148,8 @@ addLegalCands :: (Ord u, Nameable u) => Set (EquivCand u) -> SoPM u ()
 addLegalCands cand_set
   | S.null cand_set = pure ()
 addLegalCands cand_set = do
-  rs <- gets ranges
-  eqs <- gets equivs
+  rs <- getRanges
+  eqs <- getEquivs
   let -- Chose the candidate @sym -> sop@ whose @sop@ has
       -- the smallest number of symbols in the environment.
       env_syms = M.keysSet eqs <> M.keysSet rs
@@ -161,7 +161,7 @@ addLegalCands cand_set = do
     else do
       -- Apply substitution to equivalence and range envs
       -- and add the new binding to the equivalence env.
-      modify $ \env ->
+      modifyEnv $ \env ->
         env
           { equivs =
               M.insert (equivCandSym cand) (equivCandSoP cand) $
