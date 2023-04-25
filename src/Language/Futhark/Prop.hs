@@ -977,8 +977,8 @@ intrinsics =
                   ]
                   ( RetType [k] . Scalar $
                       tupleRecord
-                        [ uarray_a $ shape [k],
-                          Array () Unique (shape [n]) (Prim $ Signed Int64)
+                        [ uarray_a $ shape [n],
+                          Array () Unique (shape [k]) (Prim $ Signed Int64)
                         ]
                   )
               ),
