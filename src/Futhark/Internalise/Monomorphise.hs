@@ -604,7 +604,7 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
-      body' <- withArgs (foldMap patNames params) $ transformExp body
+      body' <- scoping (foldMap patNames params) $ transformExp body
       AppExp
         <$> ( LetFun fname (tparams, params, retdecl, Info ret, body')
                 <$> scoping (S.singleton fname) (transformExp e)
