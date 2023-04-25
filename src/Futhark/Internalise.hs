@@ -42,6 +42,7 @@
 module Futhark.Internalise (internaliseProg) where
 
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.Compiler.Config
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
@@ -51,6 +52,7 @@ import Futhark.Internalise.Exps qualified as Exps
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.SoP as SoP
 import Futhark.Util.Log
 import Language.Futhark.Semantic (Imports)
 
@@ -70,8 +72,11 @@ internaliseProg config prog = do
   prog_decs'' <- LiftLambdas.transformProg prog_decs'
   maybeLog "Defunctionalising"
   prog_decs''' <- Defunctionalise.transformProg prog_decs''
+  maybeLog "SoPing"
+  (prog_decs'''', alg_env) <- SoP.transformProg prog_decs'''
+  traceM $ show alg_env
   maybeLog "Converting to core IR"
-  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs'''
+  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs''''
   where
     verbose = fst (futharkVerbose config) > NotVerbose
     maybeLog s

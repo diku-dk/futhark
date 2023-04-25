@@ -28,6 +28,10 @@ module Futhark.SoP.Monad
     runSoPMT_,
     runSoPM,
     runSoPM_,
+    evalSoPMT,
+    evalSoPMT_,
+    evalSoPM,
+    evalSoPM_,
     MonadSoP (..),
   )
 where
@@ -119,17 +123,29 @@ instance MonadState s m => MonadState s (SoPMT u m) where
 
 type SoPM u = SoPMT u (State VNameSource)
 
-runSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m a
-runSoPMT env (SoPMT sm) = evalStateT sm env
+runSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m (a, AlgEnv u)
+runSoPMT env (SoPMT sm) = runStateT sm env
 
-runSoPMT_ :: (Ord u, MonadFreshNames m) => SoPMT u m a -> m a
+runSoPMT_ :: (Ord u, MonadFreshNames m) => SoPMT u m a -> m (a, AlgEnv u)
 runSoPMT_ = runSoPMT mempty
 
-runSoPM :: Ord u => AlgEnv u -> SoPM u a -> a
+runSoPM :: Ord u => AlgEnv u -> SoPM u a -> (a, AlgEnv u)
 runSoPM env = flip evalState mempty . runSoPMT env
 
-runSoPM_ :: Ord u => SoPM u a -> a
+runSoPM_ :: Ord u => SoPM u a -> (a, AlgEnv u)
 runSoPM_ = runSoPM mempty
+
+evalSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m a
+evalSoPMT env m = fst <$> runSoPMT env m
+
+evalSoPMT_ :: (Ord u, MonadFreshNames m) => SoPMT u m a -> m a
+evalSoPMT_ = evalSoPMT mempty
+
+evalSoPM :: Ord u => AlgEnv u -> SoPM u a -> a
+evalSoPM env = fst . runSoPM env
+
+evalSoPM_ :: Ord u => SoPM u a -> a
+evalSoPM_ = evalSoPM mempty
 
 instance
   ( Ord u,
@@ -219,6 +235,7 @@ data UntransEnv u = Unknowns
   { dir :: Map u (PrimExp u),
     inv :: Map (PrimExp u) u
   }
+  deriving (Eq, Show, Ord)
 
 instance Ord u => Semigroup (UntransEnv u) where
   Unknowns d1 i1 <> Unknowns d2 i2 = Unknowns (d1 <> d2) (i1 <> i2)
@@ -245,6 +262,7 @@ data AlgEnv u = AlgEnv
     -- | Binds symbols to ranges (in sum-of-product form).
     ranges :: RangeEnv u
   }
+  deriving (Ord, Show, Eq)
 
 instance Ord u => Semigroup (AlgEnv u) where
   AlgEnv u1 s1 r1 <> AlgEnv u2 s2 r2 =

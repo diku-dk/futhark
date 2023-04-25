@@ -114,7 +114,7 @@ runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
           runState
-            (runReaderT (runSoPMT mempty (runBuilderT m mempty)) newEnv)
+            (runReaderT (evalSoPMT mempty (runBuilderT m mempty)) newEnv)
             (newState src)
      in ( (stateTypes s, consts, reverse $ stateFuns s),
           stateNameSource s
