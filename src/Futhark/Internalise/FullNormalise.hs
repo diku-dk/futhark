@@ -11,7 +11,7 @@ import Language.Futhark.Traversals
 data Binding
   = PatBind Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
-  | WithBind -- tbd
+  | WithBind Ident Ident Slice Exp
 
 -- state is the list of bindings, first to eval last
 newtype OrderingM a = OrderingM (State ([Binding], VNameSource) a)
@@ -90,7 +90,13 @@ getOrdering (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
   el' <- getOrdering el
   er' <- getOrdering er
   nameExp (AppExp (BinOp op opT (el', elT) (er', erT) loc) resT)
-getOrdering (AppExp (LetWith {}) _) = undefined
+getOrdering (AppExp (LetWith ident1 ident2 slice e body _) _) = do
+  e' <- getOrdering e
+  slice' <- astMap mapper slice
+  modify (WithBind ident1 ident2 slice' e' :)
+  getOrdering body
+  where
+    mapper = identityMapper {mapOnExp = getOrdering}
 -- Index
 getOrdering (AppExp (Match expr cs loc) resT) = do
   expr' <- getOrdering expr
@@ -131,7 +137,8 @@ transformBody e = do
         appRes
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
-    f b WithBind = b -- tbd
+    f body (WithBind ident1 ident2 slice e') =
+      AppExp (LetWith ident1 ident2 slice e' body mempty) appRes
 
 transformDec :: MonadFreshNames m => Dec -> m Dec
 transformDec (ValDec valbind) = do
