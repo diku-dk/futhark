@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Arbitrary expressions of type `i64` are now allowed as sizes.  Work
+  by Lubin Bailley.
+
 ### Removed
 
 ### Changed
+
+* The prelude functions `flatten` and `unflatten` (and their
+  multidimensional variants) have more restrictive types.
 
 ### Fixed
 
