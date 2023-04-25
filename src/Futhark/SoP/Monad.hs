@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | The Algebraic Environment, which is in principle
 --   maintained during program traversal, is used to
@@ -13,16 +14,16 @@ module Futhark.SoP.Monad
     AlgEnv (..),
     type (>=),
     type (==),
-    insertUntrans,
+    addUntrans,
     transClosInRanges,
     lookupUntransPE,
     lookupUntransSym,
     lookupRange,
     addRange,
-    AlgM,
+    SoPM,
     lookupSoP,
-    runAlgM,
-    runAlgM_,
+    runSoPM,
+    runSoPM_,
     substituteWithEnv,
   )
 where
@@ -60,6 +61,107 @@ instance Nameable Name where
 
 mkNameM :: (Nameable u, MonadFreshNames m) => m u
 mkNameM = modifyNameSource mkName
+
+--------------------------------------------------------------------------------
+-- Monad
+--------------------------------------------------------------------------------
+
+class
+  ( Ord u,
+    Nameable u,
+    MonadFreshNames m
+  ) =>
+  MonadSoP u m
+  where
+  lookupSoP :: u -> m (Maybe (SoP u))
+  lookupUntransPE :: PrimExp u -> m u
+  lookupUntransSym :: u -> m (Maybe (PrimExp u))
+  lookupRange :: u -> m (Range u)
+  addUntrans :: u -> PrimExp u -> m ()
+  addRange :: u -> Range u -> m ()
+
+-- | The algebraic monad; consists of a an algebraic
+--   environment along with a fresh variable source.
+newtype SoPMT u m a = SoPMT (StateT (AlgEnv u) m a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState (AlgEnv u)
+    )
+
+instance MonadTrans (SoPMT u) where
+  lift = SoPMT . lift
+
+instance MonadFreshNames m => MonadFreshNames (SoPMT u m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+type SoPM u = SoPMT u (State VNameSource)
+
+runSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m a
+runSoPMT env (SoPMT sm) = evalStateT sm env
+
+runSoPM :: Ord u => AlgEnv u -> SoPM u a -> a
+runSoPM env = flip evalState mempty . runSoPMT env
+
+runSoPM_ :: Ord u => SoPM u a -> a
+runSoPM_ = runSoPM mempty
+
+instance
+  ( Ord u,
+    Nameable u,
+    MonadFreshNames m,
+    MonadState (AlgEnv u) m
+  ) =>
+  MonadSoP u m
+  where
+  -- \| Insert a symbol equal to an untranslatable 'PrimExp'.
+  addUntrans sym pe =
+    modify $ \env ->
+      env
+        { untrans =
+            (untrans env)
+              { dir = M.insert sym pe (dir (untrans env)),
+                inv = M.insert pe sym (inv (untrans env))
+              }
+        }
+
+  -- \| Look-up the sum-of-products representation of a symbol.
+  lookupSoP x = gets ((M.!? x) . equivs)
+
+  -- \| Look-up the symbol for a 'PrimExp'. If no symbol is bound
+  --    to the expression, bind a new one.
+  lookupUntransPE pe = do
+    inv_map <- gets (inv . untrans)
+    case inv_map M.!? pe of
+      Nothing -> do
+        x <- mkNameM
+        addUntrans x pe
+        pure x
+      Just x -> pure x
+
+  -- \| Look-up the untranslatable 'PrimExp' bound to the given symbol.
+  lookupUntransSym sym = gets ((M.!? sym) . dir . untrans)
+
+  -- \| Look-up the range of a symbol. If no such range exists,
+  --    return the empty range (and add it to the environment).
+  lookupRange sym = do
+    mr <- gets ((M.!? sym) . ranges)
+    case mr of
+      Nothing -> do
+        let r = Range mempty 1 mempty
+        addRange sym r
+        pure r
+      Just r
+        | rangeMult r <= 0 -> error "Non-positive constant encountered in range."
+        | otherwise -> pure r
+
+  -- \| Add range information for a symbol; augments the existing
+  --   range.
+  addRange sym r =
+    modify $ \env ->
+      env {ranges = M.insertWith (<>) sym r (ranges env)}
 
 --------------------------------------------------------------------------------
 -- Environment
@@ -115,81 +217,6 @@ instance Ord u => Semigroup (AlgEnv u) where
 instance Ord u => Monoid (AlgEnv u) where
   mempty = AlgEnv mempty mempty mempty
 
--- | The algebraic monad; consists of a an algebraic
---   environment along with a fresh variable source.
-newtype AlgM u a = AlgM (StateT (AlgEnv u) (State VNameSource) a)
-  deriving
-    ( Functor,
-      Applicative,
-      Monad,
-      MonadState (AlgEnv u)
-    )
-
-instance MonadFreshNames (AlgM u) where
-  getNameSource = AlgM $ lift get
-  putNameSource = AlgM . lift . put
-
-runAlgM :: AlgEnv u -> AlgM u a -> a
-runAlgM env (AlgM m) =
-  flip evalState blankNameSource $
-    evalStateT m env
-
-runAlgM_ :: Ord u => AlgM u a -> a
-runAlgM_ = runAlgM mempty
-
--- | Insert a symbol equal to an untranslatable 'PrimExp'.
-insertUntrans :: Ord u => u -> PrimExp u -> AlgM u ()
-insertUntrans sym pe =
-  modify $ \env ->
-    env
-      { untrans =
-          (untrans env)
-            { dir = M.insert sym pe (dir (untrans env)),
-              inv = M.insert pe sym (inv (untrans env))
-            }
-      }
-
--- | Look-up the sum-of-products representation of a symbol.
-lookupSoP :: Ord u => u -> AlgM u (Maybe (SoP u))
-lookupSoP x = gets ((M.!? x) . equivs)
-
--- | Look-up the symbol for a 'PrimExp'. If no symbol is bound
---   to the expression, bind a new one.
-lookupUntransPE :: (Nameable u, Ord u) => PrimExp u -> AlgM u u
-lookupUntransPE pe = do
-  inv_map <- gets (inv . untrans)
-  case inv_map M.!? pe of
-    Nothing -> do
-      x <- mkNameM
-      insertUntrans x pe
-      pure x
-    Just x -> pure x
-
--- | Look-up the untranslatable 'PrimExp' bound to the given symbol.
-lookupUntransSym :: Ord u => u -> AlgM u (Maybe (PrimExp u))
-lookupUntransSym sym = gets ((M.!? sym) . dir . untrans)
-
--- | Look-up the range of a symbol. If no such range exists,
---   return the empty range (and add it to the environment).
-lookupRange :: Ord u => u -> AlgM u (Range u)
-lookupRange sym = do
-  mr <- gets ((M.!? sym) . ranges)
-  case mr of
-    Nothing -> do
-      let r = Range mempty 1 mempty
-      addRange sym r
-      pure r
-    Just r
-      | rangeMult r <= 0 -> error "Non-positive constant encountered in range."
-      | otherwise -> pure r
-
--- | Add range information for a symbol; augments the existing
---   range.
-addRange :: Ord u => u -> Range u -> AlgM u ()
-addRange sym r =
-  modify $ \env ->
-    env {ranges = M.insertWith (<>) sym r (ranges env)}
-
 transClosInRanges :: (Ord u) => RangeEnv u -> Set u -> Set u
 transClosInRanges rs syms =
   transClosHelper rs syms S.empty syms
@@ -207,5 +234,5 @@ transClosInRanges rs syms =
                   active'' = S.union new_syms active'
                in transClosHelper rs' clos_syms' seen' active''
 
-substituteWithEnv :: Substitute u (SoP u) a => a -> AlgM u a
+substituteWithEnv :: Substitute u (SoP u) a => a -> SoPM u a
 substituteWithEnv a = gets (flip substitute a . equivs)

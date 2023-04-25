@@ -13,8 +13,8 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.SoP.Monad
 import Futhark.SoP.FourierMotzkin
+import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.ToFromSoP
 import Futhark.SoP.Util
@@ -22,7 +22,7 @@ import Futhark.Util.Pretty
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeroPEs :: (Show u, Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> AlgM u ()
+addIneqZeroPEs :: (Show u, Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> SoPM u ()
 addIneqZeroPEs pes = do
   -- Substitute equivalence env.
   pes' <- gets ((flip S.map pes . substituteInPrimExp . fmap fromSoP) . equivs)
@@ -88,7 +88,10 @@ mkRangeCands sop = M.foldrWithKey mkRangeCand mempty $ getTerms sop
 --   Returns a set of new range canditates: if @j < 0@ (@j >= 0@)
 --   these are @lbs' <= -j_z * sop@ (@j_z * sop <= ubs'@) where @lbs'@
 --   (@ubs'@) are the refined bounds from the previous step.
-refineRangeInEnv :: (Ord u, Show u) => RangeCand u -> AlgM u (Set (RangeCand u))
+refineRangeInEnv ::
+  (Nameable u, Ord u, Show u) =>
+  RangeCand u ->
+  SoPM u (Set (RangeCand u))
 refineRangeInEnv (RangeCand j sym sop) = do
   Range lbs k ubs <- lookupRange sym
   let z = lcm k j
@@ -115,11 +118,11 @@ refineRangeInEnv (RangeCand j sym sop) = do
   where
     mergeBound ::
       (Ord u) =>
-      (SoP u -> AlgM u Bool) ->
-      (SoP u -> AlgM u Bool) ->
+      (SoP u -> SoPM u Bool) ->
+      (SoP u -> SoPM u Bool) ->
       Set (SoP u) ->
       SoP u ->
-      AlgM u (Set (SoP u))
+      SoPM u (Set (SoP u))
     mergeBound reject remove bs sop' =
       ifM
         (anyM reject bs)
@@ -138,7 +141,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: (Show u, Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> AlgM u ()
+addRangeCands :: (Show u, Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> SoPM u ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do

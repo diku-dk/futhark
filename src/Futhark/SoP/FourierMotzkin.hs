@@ -50,19 +50,19 @@ import Futhark.SoP.Util
 -- | Solves the inequation `sop < 0` by reducing it to
 --   `sop + 1 <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveLTh0 :: (Ord u, Show u) => SoP u -> AlgM u Bool
+fmSolveLTh0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
 fmSolveLTh0 = fmSolveLEq0 . (.+. int2SoP 1)
 
 -- | Solves the inequation `sop > 0` by reducing it to
 --   `(-1)*sop < 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGTh0 :: (Ord u, Show u) => SoP u -> AlgM u Bool
+fmSolveGTh0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
 fmSolveGTh0 = fmSolveLTh0 . negSoP
 
 -- | Solves the inequation `sop >= 0` by reducing it to
 --   `(-1)*sop <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGEq0 :: (Ord u, Show u) => SoP u -> AlgM u Bool
+fmSolveGEq0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
 fmSolveGEq0 = fmSolveLEq0 . negSoP
 
 -- | Assuming `sop` an expression in sum-of-products (SoP) form,
@@ -80,7 +80,7 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (i)   `True`  if the inequality is found to always holds;
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
-fmSolveLEq0 :: (Ord u, Show u) => SoP u -> AlgM u Bool
+fmSolveLEq0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
 fmSolveLEq0 sop
   | Just v <- justConstant sop = pure (v <= 0)
   | not (null syms) = do
@@ -114,26 +114,26 @@ fmSolveLEq0 sop
   where
     syms = S.toList $ free sop
 
-($<$) :: (Ord u, Show u) => SoP u -> SoP u -> AlgM u Bool
+($<$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
 x $<$ y = fmSolveLTh0 $ x .-. y
 
-($<=$) :: (Ord u, Show u) => SoP u -> SoP u -> AlgM u Bool
+($<=$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
 x $<=$ y = fmSolveLEq0 $ x .-. y
 
-($>$) :: (Ord u, Show u) => SoP u -> SoP u -> AlgM u Bool
+($>$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
 x $>$ y = fmSolveGTh0 $ x .-. y
 
-($>=$) :: (Ord u, Show u) => SoP u -> SoP u -> AlgM u Bool
+($>=$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
 x $>=$ y = fmSolveGEq0 $ x .-. y
 
-fmSolveLTh0_ :: (Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveLTh0_ rs = runAlgM mempty {ranges = rs} . fmSolveLTh0
+fmSolveLTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveLTh0_ rs = runSoPM mempty {ranges = rs} . fmSolveLTh0
 
-fmSolveGTh0_ :: (Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveGTh0_ rs = runAlgM mempty {ranges = rs} . fmSolveGTh0
+fmSolveGTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveGTh0_ rs = runSoPM mempty {ranges = rs} . fmSolveGTh0
 
-fmSolveGEq0_ :: (Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveGEq0_ rs = runAlgM mempty {ranges = rs} . fmSolveGEq0
+fmSolveGEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveGEq0_ rs = runSoPM mempty {ranges = rs} . fmSolveGEq0
 
-fmSolveLEq0_ :: (Ord u, Show u) => RangeEnv u -> SoP u -> Bool
-fmSolveLEq0_ rs = runAlgM mempty {ranges = rs} . fmSolveLEq0
+fmSolveLEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveLEq0_ rs = runSoPM mempty {ranges = rs} . fmSolveLEq0

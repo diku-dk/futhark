@@ -152,5 +152,5 @@ parsePrimExp s =
     Left bundle -> error $ show bundle
     Right pe -> pe
 
-parsePrimExpToSoP :: String -> AlgM String (Integer, SoP String)
+parsePrimExpToSoP :: String -> SoPM String (Integer, SoP String)
 parsePrimExpToSoP = toNumSoP . parsePrimExp

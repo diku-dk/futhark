@@ -35,7 +35,7 @@ test_nw =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True,
+                 in runSoPM_ resM @?= True,
             testCase
               "Example 2"
               $ let less_thans =
@@ -48,7 +48,7 @@ test_nw =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True,
+                 in runSoPM_ resM @?= True,
             testCase
               "Example 3 (test the limits of the range of Example 1)"
               $ let less_thans =
@@ -58,7 +58,7 @@ test_nw =
                     non_negatives = ["n_13434", "i_13617", "gtid_14374"]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     maximalTrue =
-                      runAlgM_ $ do
+                      runSoPM_ $ do
                         refineAlgEnv pes
                         fmSolveGEq0 . snd
                           =<< toNumSoPCmp
@@ -66,7 +66,7 @@ test_nw =
                             )
 
                     minimalFalse =
-                      runAlgM_ $ do
+                      runSoPM_ $ do
                         refineAlgEnv pes
                         fmSolveGEq0 . snd
                           =<< toNumSoPCmp
@@ -130,7 +130,7 @@ test_lud =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True,
+                 in runSoPM_ resM @?= True,
             testCase
               "Example 2"
               $ let less_thans =
@@ -176,7 +176,7 @@ test_lud =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True,
+                 in runSoPM_ resM @?= True,
             testCase
               "Example 3"
               $ let less_thans =
@@ -224,7 +224,7 @@ test_lud =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True,
+                 in runSoPM_ resM @?= True,
             testCase
               "Example 4"
               $ let less_thans =
@@ -278,5 +278,5 @@ test_lud =
                     resM = do
                       refineAlgEnv pes
                       fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runAlgM_ resM @?= True
+                 in runSoPM_ resM @?= True
           ]
