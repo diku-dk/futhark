@@ -572,9 +572,10 @@ transformAppExp (Range e1 me incl loc) res = do
   e1' <- transformExp e1
   me' <- mapM transformExp me
   incl' <- mapM transformExp incl
-  pure $ AppExp (Range e1' me' incl' loc) (Info res)
+  res' <- transformAppRes res
+  pure $ AppExp (Range e1' me' incl' loc) (Info res')
 transformAppExp (Coerce e tp loc) res =
-  AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> pure (Info res)
+  AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> (Info <$> transformAppRes res)
 transformAppExp (LetPat sizes pat e body loc) res = do
   e' <- transformExp e
   let dimArgs = S.fromList (map sizeName sizes)
@@ -585,8 +586,9 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   (pat', rr) <- withArgs dimArgs' $ transformPat pat
   params <- parametrizing dimArgs'
   let sizes' = sizes <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
+  res' <- transformAppRes res
   body' <- withRecordReplacements rr $ withParams params $ scoping argset $ transformExp body
-  pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res)
+  pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res')
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
       -- Retrieve the lifted monomorphic function bindings that are produced,
@@ -602,20 +604,20 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
-      body' <- transformExp body
+      body' <- withArgs (foldMap patNames params) $ transformExp body
       AppExp
         <$> ( LetFun fname (tparams, params, retdecl, Info ret, body')
                 <$> scoping (S.singleton fname) (transformExp e)
                 <*> pure loc
             )
-        <*> pure (Info res)
+        <*> (Info <$> transformAppRes res)
 transformAppExp (If e1 e2 e3 loc) res =
-  AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> pure (Info res)
+  AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
 transformAppExp (Apply fe args _) res =
   mkApply
     <$> transformExp fe
     <*> mapM onArg (NE.toList args)
-    <*> pure res
+    <*> transformAppRes res
   where
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
 transformAppExp (DoLoop sparams pat e1 form body loc) res = do
@@ -645,13 +647,15 @@ transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
-  pure $ AppExp (DoLoop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res)
-transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ext) = do
+  res' <- transformAppRes res
+  pure $ AppExp (DoLoop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
+transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
+  (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname =<< transformTypeSizes (toStruct t)
   e1' <- transformExp e1
   e2' <- transformExp e2
   if orderZero (typeOf e1') && orderZero (typeOf e2')
-    then pure $ applyOp fname' e1' e2'
+    then pure $ applyOp ret ext fname' e1' e2'
     else do
       -- We have to flip the arguments to the function, because
       -- operator application is left-to-right, while function
@@ -671,14 +675,14 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) (AppRes ret ex
               x_param
               e1'
               ( AppExp
-                  (LetPat [] y_param e2' (applyOp fname' x_param_e y_param_e) loc)
+                  (LetPat [] y_param e2' (applyOp ret ext fname' x_param_e y_param_e) loc)
                   (Info $ AppRes ret mempty)
               )
               mempty
           )
           (Info (AppRes ret mempty))
   where
-    applyOp fname' x y =
+    applyOp ret ext fname' x y =
       mkApply
         (mkApply fname' [(Observe, snd (unInfo d1), x)] (AppRes ret mempty))
         [(Observe, snd (unInfo d2), y)]
@@ -697,20 +701,22 @@ transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
   idxs' <- mapM transformDimIndex idxs
   e1' <- transformExp e1
   body' <- scoping (S.singleton $ identName id1') $ transformExp body
-  pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res)
+  res' <- transformAppRes res
+  pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res')
   where
     transformIdent (Ident v t vloc) =
       Ident v <$> traverse transformType t <*> pure vloc
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
-    <*> pure (Info res)
+    <*> (Info <$> transformAppRes res)
 transformAppExp (Match e cs loc) res = do
   implicitDims <- askIntros $ fvVars $ freeInType $ typeOf e
   e' <- transformExp e
   cs' <- mapM (transformCase implicitDims) cs
+  res' <- transformAppRes res
   if S.null implicitDims
-    then pure $ AppExp (Match e' cs' loc) (Info res)
+    then pure $ AppExp (Match e' cs' loc) (Info res')
     else do
       tmpVar <- newNameFromString "matched_variable"
       pure $
@@ -725,7 +731,7 @@ transformAppExp (Match e cs loc) res = do
               )
               mempty
           )
-          (Info res)
+          (Info res')
 
 -- Monomorphization of expressions.
 transformExp :: Exp -> MonoM Exp
@@ -754,7 +760,7 @@ transformExp (RecordLit fs loc) =
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
 transformExp (AppExp e res) =
-  transformAppExp e =<< transformAppRes (unInfo res)
+  transformAppExp e (unInfo res) -- =<< transformAppRes (unInfo res)
 transformExp (Var fname (Info t) loc) = do
   maybe_fs <- lookupRecordReplacement $ qualLeaf fname
   case maybe_fs of
