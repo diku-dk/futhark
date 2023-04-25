@@ -41,101 +41,93 @@ runOrdering (OrderingM m) =
 
 nameExp :: Exp -> OrderingM Exp
 nameExp e = do
-  name <- newNameFromString $ "e<{" ++ prettyString e ++ "}>"
+  name <- newNameFromString $ "tmp" --"e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
   modify (PatBind pat e :)
   pure $ Var (qualName name) (Info ty) loc
 
-getOrdering :: Exp -> OrderingM Exp
-getOrdering = getOrderingAttrs mempty
-
-getOrderingAttrs :: [AttrInfo VName] -> Exp -> OrderingM Exp
-getOrderingAttrs attrs e@(Var {}) =
-  pure $ attributing attrs e
-getOrderingAttrs attrs (Attr attr e _) = do
-  e' <- getOrderingAttrs (attr : attrs) e
-  case e' of
-    Var {} -> pure e'
-    _ -> pure $ attributing (attr : attrs) e'
-getOrderingAttrs attrs (Assert ass e txt loc) = do
-  ass' <- getOrdering ass
+getOrdering :: [AttrInfo VName] -> Exp -> OrderingM Exp
+getOrdering attrs (Attr attr e _) =
+  getOrdering (attr : attrs) e
+getOrdering attrs (Assert ass e txt loc) = do
+  ass' <- getOrdering attrs ass
   modify
     ( PatBind
         (Wildcard (Info $ Scalar $ Prim $ Signed Int64) mempty)
         (Assert ass' (Literal (SignedValue $ Int64Value 0) mempty) txt loc)
         :
     )
-  getOrderingAttrs attrs e
+  getOrdering attrs e
 -- getOrdering (Update eb slice eu loc) ?
 -- getOrdering (RecordUpdate eb ns eu ty loc) ?
-getOrderingAttrs _ (Lambda params body mte ret loc) = do
-  body' <- transformBody body
-  pure (Lambda params body' mte ret loc)
+getOrdering attrs (Lambda params body mte ret loc) = do
+  body' <- transformBody attrs body
+  pure $ attributing attrs (Lambda params body' mte ret loc)
 -- getOrdering (OpSectionLeft, Right) ?
-getOrderingAttrs attrs (AppExp (Apply f args loc) resT) = do
+getOrdering attrs (AppExp (Apply f args loc) resT) = do
   args' <- NE.reverse <$> mapM onArg (NE.reverse args)
-  f' <- getOrdering f
+  f' <- getOrdering attrs f
   nameExp $ attributing attrs (AppExp (Apply f' args' loc) resT)
   where
-    onArg (d, e) = (d,) <$> getOrdering e
+    onArg (d, e) = (d,) <$> getOrdering attrs e
 -- Coerce
-getOrderingAttrs attrs (AppExp (LetPat _ pat expr body _) _) = do
-  expr' <- getOrdering expr
+getOrdering attrs (AppExp (LetPat _ pat expr body _) _) = do
+  expr' <- getOrdering attrs expr
   modify (PatBind pat expr' :)
-  getOrderingAttrs attrs body
-getOrderingAttrs attrs (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
-  body' <- transformBody body
+  getOrdering attrs body
+getOrdering attrs (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
+  body' <- transformBody attrs body
   modify (FunBind vn (tparams, params, mrettype, rettype, body') :)
-  getOrderingAttrs attrs e
-getOrderingAttrs attrs (AppExp (If cond et ef loc) resT) = do
-  cond' <- getOrdering cond
-  et' <- transformBody et
-  ef' <- transformBody ef
+  getOrdering attrs e
+getOrdering attrs (AppExp (If cond et ef loc) resT) = do
+  cond' <- getOrdering attrs cond
+  et' <- transformBody attrs et
+  ef' <- transformBody attrs ef
   nameExp $ attributing attrs (AppExp (If cond' et' ef' loc) resT)
-getOrderingAttrs attrs (AppExp (DoLoop sizes pat einit form body loc) resT) = do
-  einit' <- getOrdering einit
+getOrdering attrs (AppExp (DoLoop sizes pat einit form body loc) resT) = do
+  einit' <- getOrdering attrs einit
   form' <- case form of
-    For ident e -> For ident <$> getOrdering e
-    ForIn fpat e -> ForIn fpat <$> getOrdering e
-    While e -> While <$> transformBody e
-  body' <- transformBody body
+    For ident e -> For ident <$> getOrdering attrs e
+    ForIn fpat e -> ForIn fpat <$> getOrdering attrs e
+    While e -> While <$> transformBody attrs e
+  body' <- transformBody attrs body
   nameExp $ attributing attrs (AppExp (DoLoop sizes pat einit' form' body' loc) resT)
-getOrderingAttrs attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
-  el' <- getOrdering el
-  er' <- getOrdering er
+getOrdering attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
+  el' <- getOrdering attrs el
+  er' <- getOrdering attrs er
   nameExp $ attributing attrs (AppExp (BinOp op opT (el', elT) (er', erT) loc) resT)
-getOrderingAttrs attrs (AppExp (LetWith ident1 ident2 slice e body _) _) = do
-  e' <- getOrdering e
+getOrdering attrs (AppExp (LetWith ident1 ident2 slice e body _) _) = do
+  e' <- getOrdering attrs e
   slice' <- astMap mapper slice
   modify (WithBind ident1 ident2 slice' e' :)
-  getOrderingAttrs attrs body
+  getOrdering attrs body
   where
-    mapper = identityMapper {mapOnExp = getOrdering}
+    mapper = identityMapper {mapOnExp = getOrdering attrs}
 -- Index
-getOrderingAttrs attrs (AppExp (Match expr cs loc) resT) = do
-  expr' <- getOrdering expr
+getOrdering attrs (AppExp (Match expr cs loc) resT) = do
+  expr' <- getOrdering attrs expr
   cs' <- mapM f cs
   nameExp $ attributing attrs (AppExp (Match expr' cs' loc) resT)
   where
     f (CasePat pat body cloc) = do
-      body' <- transformBody body
+      body' <- transformBody attrs body
       pure (CasePat pat body' cloc)
-getOrderingAttrs attrs (AppExp app resT) = do
+getOrdering attrs (AppExp app resT) = do
   app' <- astMap mapper app
   nameExp $ attributing attrs (AppExp app' resT)
   where
     -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering}
-getOrderingAttrs _ e = astMap mapper e
+    mapper = identityMapper {mapOnExp = getOrdering attrs}
+getOrdering attrs e = attributing attrs <$> astMap mapper e
   where
     -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering}
+    mapper = identityMapper {mapOnExp = getOrdering attrs}
 
-transformBody :: MonadFreshNames m => Exp -> m Exp
-transformBody e = do
-  (e', pre_eval) <- runOrdering (getOrdering e)
+transformBody :: MonadFreshNames m => [AttrInfo VName] -> Exp -> m Exp
+transformBody attrs e = do
+  (e', pre_eval) <- runOrdering (getOrdering attrs e)
   pure $ foldl f e' pre_eval
   where
     appRes = case e of
@@ -158,7 +150,7 @@ transformBody e = do
 
 transformDec :: MonadFreshNames m => Dec -> m Dec
 transformDec (ValDec valbind) = do
-  body' <- transformBody $ valBindBody valbind
+  body' <- transformBody mempty $ valBindBody valbind
   pure $ ValDec (valbind {valBindBody = body'})
 transformDec d = pure d
 
