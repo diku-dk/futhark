@@ -384,10 +384,11 @@ unscopeUnknowable t = do
   where
     expKiller _ Var {} = Nothing
     expKiller constraints e =
-      S.lookupMin $ S.filter (isUnknown constraints) $ fvVars $ freeInExp e
+      S.lookupMin $ S.filter (isUnknown constraints) $ (`S.difference` witnesses) $ fvVars $ freeInExp e
     isUnknown constraints vn
       | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
     isUnknown _ _ = False
+    (witnesses, _) = determineSizeWitnesses $ toStruct t
 
 unscopeTypeBase ::
   SrcLoc ->
