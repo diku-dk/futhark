@@ -19,7 +19,7 @@ import Futhark.Util.Pretty
 refineAlgEnv ::
   (Show u, Ord u, Nameable u, Pretty u) =>
   Set (PrimExp u) ->
-  AlgM u ()
+  SoPM u ()
 refineAlgEnv candidates = do
   -- Split candidates into equality and inequality sets.
   let (eqZs, ineqZs) = processPEs candidates

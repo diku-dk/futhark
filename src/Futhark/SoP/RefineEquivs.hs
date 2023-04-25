@@ -15,15 +15,15 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.SoP.Monad
 import Futhark.SoP.FourierMotzkin
+import Futhark.SoP.Monad
 import Futhark.SoP.PrimExp
 import Futhark.SoP.SoP
 import Futhark.SoP.ToFromSoP
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
-addEqZeroPEs :: (Show u, Ord u, Nameable u) => Set (PrimExp u == 0) -> AlgM u (Set (SoP u >= 0))
+addEqZeroPEs :: (Show u, Ord u, Nameable u) => Set (PrimExp u == 0) -> SoPM u (Set (SoP u >= 0))
 addEqZeroPEs pes = do
   -- Substitute already known equivalences in the equality set.
   equivs_pes <- gets (fromSoP . equivs)
@@ -63,7 +63,7 @@ instance Ord u => Substitute u (SoP u) (EquivCand u) where
 --   ToDo: try to give common factor first, e.g.,
 --         nx - nbq - n = 0 => n*(x-bq-1) = 0 => x = bq+1,
 --         if we can prove that n != 0
-mkEquivCands :: Ord u => SoP u -> AlgM u (Set (EquivCand u))
+mkEquivCands :: (Nameable u, Ord u) => SoP u -> SoPM u (Set (EquivCand u))
 mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
   where
     mkEquivCand (Term term) v mcands
@@ -101,7 +101,7 @@ mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
 --
 --   2: TODO: try to give common factors and get simpler.
 refineEquivCand ::
-  (Show u, Ord u, Nameable u) => EquivCand u -> AlgM u (Set (SoP u >= 0), EquivCand u)
+  (Show u, Ord u, Nameable u) => EquivCand u -> SoPM u (Set (SoP u >= 0), EquivCand u)
 refineEquivCand cand@(EquivCand sym sop) = do
   mpe <- lookupUntransSym sym
   case mpe of
@@ -122,7 +122,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
                       new_cand = EquivCand sym1 $ sop .+. q_sop .*. sop2
                       new_ineq = sop2 .-. (sop .+. int2SoP 1)
                       pe_ineq = S.fromList [new_ineq, sop]
-                  insertUntrans q div_pe
+                  addUntrans q div_pe
                   pure (pe_ineq, new_cand)
             _ -> pure (mempty, cand)
     _ -> pure (mempty, cand)
@@ -136,7 +136,7 @@ refineEquivCand cand@(EquivCand sym sop) = do
 addEquiv2CandSet ::
   (Show u, Ord u, Nameable u) =>
   PrimExp u == 0 ->
-  AlgM u (Set (SoP u >= 0), Set (EquivCand u))
+  SoPM u (Set (SoP u >= 0), Set (EquivCand u))
 addEquiv2CandSet pe = do
   (_, sop) <- toNumSoP pe
   cands <- mkEquivCands sop
@@ -144,7 +144,7 @@ addEquiv2CandSet pe = do
   pure (mconcat ineqss, S.fromList cands')
 
 -- | Add legal equivalence candidates to the environment.
-addLegalCands :: (Ord u, Nameable u) => Set (EquivCand u) -> AlgM u ()
+addLegalCands :: (Ord u, Nameable u) => Set (EquivCand u) -> SoPM u ()
 addLegalCands cand_set
   | S.null cand_set = pure ()
 addLegalCands cand_set = do
