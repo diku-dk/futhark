@@ -582,7 +582,6 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- If an array is encountered alone, it is a regular array.
       -- If a scalar type (specifically i64) is encountered, it is an existensial size
       -- and the next four arrays are irregular reps.
-      -- This is very fragile and will blow up if function lifting is ever changed.
       let reps = flip L.unfoldr (zip result rettype') $ \ret -> do
             ((v, t) : ret') <- pure ret
             pure $ case t of
@@ -642,20 +641,20 @@ liftParam w fparam =
     Array pt _ u -> do
       num_elems <-
         newParam (desc <> "_num_elems") $ Prim int64
-      offsets <-
-        newParam (desc <> "_offsets") $
+      segments <-
+        newParam (desc <> "_segments") $
           arrayOf (Prim int64) (Shape [w]) Nonunique
       flags <-
         newParam (desc <> "_flags") $
           arrayOf (Prim Bool) (Shape [Var (paramName num_elems)]) Nonunique
-      segments <-
-        newParam (desc <> "_segments") $
+      offsets <-
+        newParam (desc <> "_offsets") $
           arrayOf (Prim int64) (Shape [w]) Nonunique
       elems <-
         newParam (desc <> "_elems") $
           arrayOf (Prim pt) (Shape [Var (paramName num_elems)]) u
       pure
-        ( [num_elems, offsets, flags, segments, elems],
+        ( [num_elems, segments, flags, offsets, elems],
           Irregular $
             IrregularRep
               { irregularSegments = paramName segments,
