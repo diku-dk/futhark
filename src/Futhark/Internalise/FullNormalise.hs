@@ -3,6 +3,8 @@ module Futhark.Internalise.FullNormalise (transformProg) where
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
+import Data.Traversable
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -14,9 +16,17 @@ attributing attrs e =
     f attr e' =
       Attr attr e' mempty
 
+asserting :: [(Exp, Info T.Text, SrcLoc)] -> Exp -> Exp
+asserting asss e =
+  foldr f e asss
+  where
+    f (ass, txt, loc) e' =
+      Assert ass e' txt loc
+
 -- something to bind
 data Binding
-  = PatBind Pat Exp
+  = Ass Exp (Info T.Text) SrcLoc
+  | PatBind Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
   | WithBind Ident Ident Slice Exp
 
@@ -41,7 +51,7 @@ runOrdering (OrderingM m) =
 
 nameExp :: Exp -> OrderingM Exp
 nameExp e = do
-  name <- newNameFromString $ "tmp" --"e<{" ++ prettyString e ++ "}>"
+  name <- newNameFromString "tmp" -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
@@ -53,12 +63,7 @@ getOrdering attrs (Attr attr e _) =
   getOrdering (attr : attrs) e
 getOrdering attrs (Assert ass e txt loc) = do
   ass' <- getOrdering attrs ass
-  modify
-    ( PatBind
-        (Wildcard (Info $ Scalar $ Prim $ Signed Int64) mempty)
-        (Assert ass' (Literal (SignedValue $ Int64Value 0) mempty) txt loc)
-        :
-    )
+  modify (Ass ass' txt loc :)
   getOrdering attrs e
 -- getOrdering (Update eb slice eu loc) ?
 -- getOrdering (RecordUpdate eb ns eu ty loc) ?
@@ -128,11 +133,17 @@ getOrdering attrs e = attributing attrs <$> astMap mapper e
 transformBody :: MonadFreshNames m => [AttrInfo VName] -> Exp -> m Exp
 transformBody attrs e = do
   (e', pre_eval) <- runOrdering (getOrdering attrs e)
-  pure $ foldl f e' pre_eval
+  let (last_ass, pre_eval') = mapAccumR accum [] pre_eval
+  pure $ foldl f (asserting last_ass e') pre_eval'
   where
     appRes = case e of
       (AppExp _ r) -> r
       _ -> Info $ AppRes (typeOf e) []
+
+    accum acc b@(Ass ass txt loc) = ((ass, txt, loc) : acc, b)
+    accum acc (PatBind p expr) = ([], PatBind p (asserting acc expr))
+    accum acc b = (acc, b) -- todo
+    f body Ass {} = body
     f body (PatBind p expr) =
       AppExp
         ( LetPat
