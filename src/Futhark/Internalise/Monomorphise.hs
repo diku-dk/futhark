@@ -151,14 +151,15 @@ data Env = Env
     envTypeBindings :: M.Map VName TypeBinding,
     envRecordReplacements :: RecordReplacements,
     envScope :: S.Set VName,
+    envGlobalScope :: S.Set VName,
     envParametrized :: ExpReplacements
   }
 
 instance Semigroup Env where
-  Env tb1 pb1 rr1 sc1 pr1 <> Env tb2 pb2 rr2 sc2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2) (sc1 <> sc2) (pr1 <> pr2)
+  Env tb1 pb1 rr1 sc1 gs1 pr1 <> Env tb2 pb2 rr2 sc2 gs2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty mempty
+  mempty = Env mempty mempty mempty mempty mempty mempty
 
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)
@@ -232,8 +233,9 @@ lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 askScope :: MonoM (S.Set VName)
 askScope = do
   scope <- asks envScope
-  scope' <- asks $ S.union scope . M.keysSet . envPolyBindings
-  S.union scope' . S.fromList . map (fst . snd) <$> getLifts
+  scope' <- asks $ S.union scope . envGlobalScope
+  scope'' <- asks $ S.union scope' . M.keysSet . envPolyBindings
+  S.union scope'' . S.fromList . map (fst . snd) <$> getLifts
 
 -- | Asks the introduced variables in a set of argument,
 -- that is arguments not currently in scope.
@@ -1212,7 +1214,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
 
     rettype' <- withParams exp_naming (withArgs (args <> shape_names) $ hardTransformRetType rettype)
     extNaming <- paramGetClean (args <> shape_names)
-    scope <- S.union shape_names <$> askScope
+    scope <- S.union shape_names <$> askScope'
     let (rettype'', new_params) = arrowArg scope args arg_params rettype'
         rettype''' = applySubst (`M.lookup` substs') rettype''
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1225,7 +1227,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         bind_r = exp_naming <> extNaming
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
-    scope' <- S.union (shape_names <> args) <$> askScope
+    scope' <- S.union (shape_names <> args) <$> askScope'
     body''' <-
       if letFun
         then unscoping (shape_names <> args) body''
@@ -1257,15 +1259,17 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
               body'''
       )
   where
+    askScope' = S.filter (`notElem` retDims rettype) <$> askScope
+
     shape_params = filter (not . isTypeParam) tparams
 
     updateExpTypes substs = astMap (mapper substs)
 
-    hardTransformRetType (RetType _ ty) = do
+    hardTransformRetType (RetType dims ty) = do
       ty' <- transformTypeSizes ty
       unbounded <- askIntros $ fvVars $ freeInType ty'
       let dims' = S.toList unbounded
-      pure $ RetType dims' ty'
+      pure $ RetType (dims' <> dims) ty'
 
     mapper substs =
       ASTMapper
@@ -1431,7 +1435,14 @@ transformValBind valbind = do
       tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just $ Info entry'})
       addLifted (valBindName valbind) (monoType t) (name, infer)
 
-  pure mempty {envPolyBindings = M.singleton (valBindName valbind) valbind'}
+  pure
+    mempty
+      { envPolyBindings = M.singleton (valBindName valbind) valbind',
+        envGlobalScope =
+          if null (valBindParams valbind)
+            then S.fromList $ retDims $ unInfo $ valBindRetType valbind
+            else mempty
+      }
 
 transformTypeBind :: TypeBind -> MonoM Env
 transformTypeBind (TypeBind name l tparams _ (Info (RetType dims t)) _ _) = do
