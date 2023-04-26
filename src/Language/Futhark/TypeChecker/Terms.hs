@@ -367,16 +367,16 @@ sizeFree tloc expKiller orig_t = do
               modify $ M.insert (SizeExpr e) vn
               pure $ sizeFromName (qualName vn) (srclocOf e)
 
--- Used to remove unknowable sizes from function body types before we
+-- Used to remove unknown sizes from function body types before we
 -- perform let-generalisation.  This is because if a function is
 -- inferred to return something of type '[x+y]t' where 'x' or 'y' are
--- unknowable, we want to turn that into '[z]t', where ''z' is a fresh
--- unknowable, which is then by let-generalisation turned into
+-- unknown, we want to turn that into '[z]t', where ''z' is a fresh
+-- unknown, which is then by let-generalisation turned into
 -- '?[z].[z]t'.
-unscopeUnknowable ::
+unscopeUnknown ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as)
-unscopeUnknowable t = do
+unscopeUnknown t = do
   constraints <- getConstraints
   -- These sizes will be immediately turned into existentials, so we
   -- do not need to care about their location.
@@ -386,7 +386,7 @@ unscopeUnknowable t = do
     expKiller constraints e =
       S.lookupMin $ S.filter (isUnknown constraints) $ (`S.difference` witnesses) $ fvVars $ freeInExp e
     isUnknown constraints vn
-      | Just UnknowableSize {} <- snd <$> M.lookup vn constraints = True
+      | Just UnknownSize {} <- snd <$> M.lookup vn constraints = True
     isUnknown _ _ = False
     (witnesses, _) = determineSizeWitnesses $ toStruct t
 
@@ -1414,13 +1414,10 @@ causalityCheck binding_body = do
   where
     unknown constraints known v = do
       guard $ v `S.notMember` known
-      loc <- unknowable constraints v
-      pure (v, loc)
-
-    unknowable constraints v =
-      case snd <$> M.lookup v constraints of
-        Just (UnknowableSize loc _) -> Just loc
+      loc <- case snd <$> M.lookup v constraints of
+        Just (UnknownSize loc _) -> Just loc
         _ -> Nothing
+      pure (v, loc)
 
     causality what loc d dloc t =
       Left . TypeError loc mempty . withIndexLink "causality-check" $
@@ -1720,7 +1717,7 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
 
     (tparams'', params''', rettype') <-
       letGeneralise fname loc tparams' params''
-        =<< unscopeUnknowable rettype
+        =<< unscopeUnknown rettype
 
     checkGlobalAliases params'' body_t loc
 
@@ -1894,7 +1891,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       <$> mapM closeOver (M.toList $ M.map snd to_close_over)
   let mkExt v =
         case M.lookup v substs of
-          Just (_, UnknowableSize {}) -> Just v
+          Just (_, UnknownSize {}) -> Just v
           _ -> Nothing
   pure
     ( tparams ++ more_tparams,
@@ -1918,12 +1915,12 @@ closeOverTypes defname defloc tparams paramts ret substs = do
       pure $ Just $ Left $ TypeParamType l k loc
     closeOver (k, Size Nothing usage) =
       pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
-    closeOver (k, UnknowableSize _ _)
+    closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
           notes <- dimNotes defloc $ sizeVar (qualName k) mempty
-          typeError defloc notes . withIndexLink "unknowable-param-def" $
-            "Unknowable size"
+          typeError defloc notes . withIndexLink "unknown-param-def" $
+            "Unknown size"
               <+> dquotes (prettyName k)
               <+> "in parameter of"
               <+> dquotes (prettyName defname)

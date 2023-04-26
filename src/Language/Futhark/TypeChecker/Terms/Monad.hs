@@ -507,7 +507,7 @@ instance MonadUnify TermTypeM where
   newDimVar usage rigidity name = do
     dim <- newTypeName name
     case rigidity of
-      Rigid rsrc -> constrain dim $ UnknowableSize (srclocOf usage) rsrc
+      Rigid rsrc -> constrain dim $ UnknownSize (srclocOf usage) rsrc
       Nonrigid -> constrain dim $ Size Nothing usage
     pure dim
 
@@ -846,7 +846,7 @@ checkTypeExpRigid ::
 checkTypeExpRigid te rsrc = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
-    constrain v $ UnknowableSize (srclocOf te) rsrc
+    constrain v $ UnknownSize (srclocOf te) rsrc
   pure (te', st, svars ++ dims)
 
 --- Sizes
