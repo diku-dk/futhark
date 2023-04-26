@@ -416,10 +416,10 @@ first, meaning that the size is available by the time ``a`` is bound.
 In many other cases, we can lift out the "size-producing" expressions
 into a separate ``let``-binding preceding the problematic expressions.
 
-.. _unknowable-param-def:
+.. _unknown-param-def:
 
-"Unknowable size *x* in parameter of *y*"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Unknown size *x* in parameter of *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you define a function that can never be
 applied, as it requires an input of a specific size, and that size is

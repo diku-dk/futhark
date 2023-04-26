@@ -130,7 +130,7 @@ data Constraint
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
     -- hiding a size.
-    UnknowableSize SrcLoc RigidSource
+    UnknownSize SrcLoc RigidSource
   deriving (Show)
 
 instance Located Constraint where
@@ -143,7 +143,7 @@ instance Located Constraint where
   locOf (HasConstrs _ _ usage) = locOf usage
   locOf (ParamSize loc) = locOf loc
   locOf (Size _ usage) = locOf usage
-  locOf (UnknowableSize loc _) = locOf loc
+  locOf (UnknownSize loc _) = locOf loc
 
 -- | Mapping from fresh type variables, instantiated from the type
 -- schemes of polymorphic functions, to (possibly) specific types as
@@ -251,7 +251,7 @@ dimNotes :: (Located a, MonadUnify m) => a -> Exp -> m Notes
 dimNotes ctx (Var d _ _) = do
   c <- M.lookup (qualLeaf d) <$> getConstraints
   case c of
-    Just (_, UnknowableSize loc rsrc) ->
+    Just (_, UnknownSize loc rsrc) ->
       pure . aNote $
         dquotes (pretty d) <+> prettySource (srclocOf ctx) loc rsrc
     _ -> pure mempty
@@ -350,7 +350,7 @@ normPatType t = pure t
 rigidConstraint :: Constraint -> Bool
 rigidConstraint ParamType {} = True
 rigidConstraint ParamSize {} = True
-rigidConstraint UnknowableSize {} = True
+rigidConstraint UnknownSize {} = True
 rigidConstraint _ = False
 
 unsharedConstructorsMsg :: M.Map Name t -> M.Map Name t -> Doc a
@@ -486,7 +486,7 @@ unifyWith onDims usage = subunify False
                       swap
                         ord
                         (Size Nothing $ Usage Nothing mempty)
-                        (UnknowableSize mempty RigidUnify)
+                        (UnknownSize mempty RigidUnify)
                 lvl <- curLevel
                 modifyConstraints (M.fromList (zip b1_dims $ repeat (lvl, r1)) <>)
                 modifyConstraints (M.fromList (zip b2_dims $ repeat (lvl, r2)) <>)
@@ -1208,7 +1208,7 @@ instance MonadUnify UnifyM where
     case rigidity of
       Rigid src ->
         modifyConstraints $
-          M.insert dim (0, UnknowableSize (srclocOf usage) src)
+          M.insert dim (0, UnknownSize (srclocOf usage) src)
       Nonrigid ->
         modifyConstraints $
           M.insert dim (0, Size Nothing usage)
