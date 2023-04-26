@@ -38,9 +38,8 @@ instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
   putNameSource = OrderingM . modify . second . const
 
-instance MonadState [Binding] OrderingM where
-  get = OrderingM $ gets fst
-  put = OrderingM . modify . first . const
+addBind :: Binding -> OrderingM ()
+addBind = OrderingM . modify . first . (:)
 
 runOrdering :: MonadFreshNames m => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
@@ -54,7 +53,7 @@ nameExp e = do
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
-  modify (PatBind pat e :)
+  addBind $ PatBind pat e
   pure $ Var (qualName name) (Info ty) loc
 
 getOrdering :: [AttrInfo VName] -> Exp -> OrderingM Exp
@@ -62,7 +61,7 @@ getOrdering attrs (Attr attr e _) =
   getOrdering (attr : attrs) e
 getOrdering attrs (Assert ass e txt loc) = do
   ass' <- getOrdering attrs ass
-  modify (Ass ass' txt loc :)
+  addBind $ Ass ass' txt loc
   getOrdering attrs e
 -- getOrdering (Update eb slice eu loc) ?
 -- getOrdering (RecordUpdate eb ns eu ty loc) ?
@@ -79,11 +78,11 @@ getOrdering attrs (AppExp (Apply f args loc) resT) = do
 -- Coerce
 getOrdering attrs (AppExp (LetPat _ pat expr body _) _) = do
   expr' <- getOrdering attrs expr
-  modify (PatBind pat expr' :)
+  addBind $ PatBind pat expr'
   getOrdering attrs body
 getOrdering attrs (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody attrs body
-  modify (FunBind vn (tparams, params, mrettype, rettype, body') :)
+  addBind $ FunBind vn (tparams, params, mrettype, rettype, body')
   getOrdering attrs e
 getOrdering attrs (AppExp (If cond et ef loc) resT) = do
   cond' <- getOrdering attrs cond
@@ -119,7 +118,7 @@ getOrdering attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
 getOrdering attrs (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering attrs e
   slice' <- astMap mapper slice
-  modify (PatBind (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc) :)
+  addBind $ PatBind (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
   getOrdering attrs body
   where
     mapper = identityMapper {mapOnExp = getOrdering attrs}
