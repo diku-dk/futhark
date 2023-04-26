@@ -47,8 +47,9 @@ runOrdering (OrderingM m) =
   where
     mod_tup (a, (s, src)) = ((a, s), src)
 
-nameExp :: Exp -> OrderingM Exp
-nameExp e = do
+nameExp :: Bool -> Exp -> OrderingM Exp
+nameExp True e = pure e
+nameExp False e = do
   name <- newNameFromString "tmp" -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
@@ -56,95 +57,95 @@ nameExp e = do
   addBind $ PatBind pat e
   pure $ Var (qualName name) (Info ty) loc
 
-getOrdering :: [AttrInfo VName] -> Exp -> OrderingM Exp
-getOrdering attrs (Attr attr e _) =
-  getOrdering (attr : attrs) e
-getOrdering attrs (Assert ass e txt loc) = do
-  ass' <- getOrdering attrs ass
+getOrdering :: Bool -> [AttrInfo VName] -> Exp -> OrderingM Exp
+getOrdering final attrs (Attr attr e _) =
+  getOrdering final (attr : attrs) e
+getOrdering final attrs (Assert ass e txt loc) = do
+  ass' <- getOrdering False attrs ass
   addBind $ Ass ass' txt loc
-  getOrdering attrs e
+  getOrdering final attrs e
 -- getOrdering (Update eb slice eu loc) ?
 -- getOrdering (RecordUpdate eb ns eu ty loc) ?
-getOrdering attrs (Lambda params body mte ret loc) = do
+getOrdering _ attrs (Lambda params body mte ret loc) = do
   body' <- transformBody attrs body
   pure $ attributing attrs (Lambda params body' mte ret loc)
 -- getOrdering (OpSectionLeft, Right) ?
-getOrdering attrs (AppExp (Apply f args loc) resT) = do
+getOrdering final attrs (AppExp (Apply f args loc) resT) = do
   args' <- NE.reverse <$> mapM onArg (NE.reverse args)
-  f' <- getOrdering attrs f
-  nameExp $ attributing attrs (AppExp (Apply f' args' loc) resT)
+  f' <- getOrdering False attrs f
+  nameExp final $ attributing attrs (AppExp (Apply f' args' loc) resT)
   where
-    onArg (d, e) = (d,) <$> getOrdering attrs e
+    onArg (d, e) = (d,) <$> getOrdering False attrs e
 -- Coerce
-getOrdering attrs (AppExp (LetPat _ pat expr body _) _) = do
-  expr' <- getOrdering attrs expr
+getOrdering final attrs (AppExp (LetPat _ pat expr body _) _) = do
+  expr' <- getOrdering True attrs expr
   addBind $ PatBind pat expr'
-  getOrdering attrs body
-getOrdering attrs (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
+  getOrdering final attrs body
+getOrdering final attrs (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody attrs body
   addBind $ FunBind vn (tparams, params, mrettype, rettype, body')
-  getOrdering attrs e
-getOrdering attrs (AppExp (If cond et ef loc) resT) = do
-  cond' <- getOrdering attrs cond
+  getOrdering final attrs e
+getOrdering final attrs (AppExp (If cond et ef loc) resT) = do
+  cond' <- getOrdering True attrs cond
   et' <- transformBody attrs et
   ef' <- transformBody attrs ef
-  nameExp $ attributing attrs (AppExp (If cond' et' ef' loc) resT)
-getOrdering attrs (AppExp (DoLoop sizes pat einit form body loc) resT) = do
-  einit' <- getOrdering attrs einit
+  nameExp final $ attributing attrs (AppExp (If cond' et' ef' loc) resT)
+getOrdering final attrs (AppExp (DoLoop sizes pat einit form body loc) resT) = do
+  einit' <- getOrdering False attrs einit
   form' <- case form of
-    For ident e -> For ident <$> getOrdering attrs e
-    ForIn fpat e -> ForIn fpat <$> getOrdering attrs e
+    For ident e -> For ident <$> getOrdering True attrs e
+    ForIn fpat e -> ForIn fpat <$> getOrdering True attrs e
     While e -> While <$> transformBody attrs e
   body' <- transformBody attrs body
-  nameExp $ attributing attrs (AppExp (DoLoop sizes pat einit' form' body' loc) resT)
-getOrdering attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
+  nameExp final $ attributing attrs (AppExp (DoLoop sizes pat einit' form' body' loc) resT)
+getOrdering final attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
-      el' <- getOrdering attrs el
+      el' <- getOrdering True attrs el
       er' <- transformBody attrs er
       pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) resT
     (_, True) -> do
-      el' <- getOrdering attrs el
+      el' <- getOrdering True attrs el
       er' <- transformBody attrs er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) resT
     (False, False) -> do
-      el' <- getOrdering attrs el
-      er' <- getOrdering attrs er
+      el' <- getOrdering False attrs el
+      er' <- getOrdering False attrs er
       pure $ AppExp (BinOp op opT (el', elT) (er', erT) loc) resT
-  nameExp $ attributing attrs expr'
+  nameExp final $ attributing attrs expr'
   where
     isOr = baseName (qualLeaf $ fst op) == "||"
     isAnd = baseName (qualLeaf $ fst op) == "&&"
-getOrdering attrs (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
-  e' <- getOrdering attrs e
+getOrdering final attrs (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
+  e' <- getOrdering False attrs e
   slice' <- astMap mapper slice
   addBind $ PatBind (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
-  getOrdering attrs body
+  getOrdering final attrs body
   where
-    mapper = identityMapper {mapOnExp = getOrdering attrs}
+    mapper = identityMapper {mapOnExp = getOrdering False attrs}
 -- Index
-getOrdering attrs (AppExp (Match expr cs loc) resT) = do
-  expr' <- getOrdering attrs expr
+getOrdering final attrs (AppExp (Match expr cs loc) resT) = do
+  expr' <- getOrdering False attrs expr
   cs' <- mapM f cs
-  nameExp $ attributing attrs (AppExp (Match expr' cs' loc) resT)
+  nameExp final $ attributing attrs (AppExp (Match expr' cs' loc) resT)
   where
     f (CasePat pat body cloc) = do
       body' <- transformBody attrs body
       pure (CasePat pat body' cloc)
-getOrdering attrs (AppExp app resT) = do
+getOrdering final attrs (AppExp app resT) = do
   app' <- astMap mapper app
-  nameExp $ attributing attrs (AppExp app' resT)
+  nameExp final $ attributing attrs (AppExp app' resT)
   where
     -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering attrs}
-getOrdering attrs e = attributing attrs <$> astMap mapper e
+    mapper = identityMapper {mapOnExp = getOrdering False attrs}
+getOrdering _ attrs e = attributing attrs <$> astMap mapper e
   where
     -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering attrs}
+    mapper = identityMapper {mapOnExp = getOrdering False attrs}
 
 transformBody :: MonadFreshNames m => [AttrInfo VName] -> Exp -> m Exp
 transformBody attrs e = do
-  (e', pre_eval) <- runOrdering (getOrdering attrs e)
+  (e', pre_eval) <- runOrdering (getOrdering True attrs e)
   let (last_ass, pre_eval') = mapAccumR accum [] pre_eval
   pure $ foldl f (asserting last_ass e') pre_eval'
   where
