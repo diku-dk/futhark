@@ -220,7 +220,7 @@ corresponding Unicode code point.
 
 An existential size quantifier brings an unknown size into scope
 within a type.  This can be used to encode constraints for statically
-unknowable array sizes.
+unknown array sizes.
 
 Declarations
 ------------
