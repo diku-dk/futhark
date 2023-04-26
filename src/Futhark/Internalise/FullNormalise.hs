@@ -28,7 +28,6 @@ data Binding
   = Ass Exp (Info T.Text) SrcLoc
   | PatBind Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
-  | WithBind Ident Ident Slice Exp
 
 -- state is the list of bindings, first to eval last
 newtype OrderingM a = OrderingM (State ([Binding], VNameSource) a)
@@ -117,10 +116,10 @@ getOrdering attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
   where
     isOr = baseName (qualLeaf $ fst op) == "||"
     isAnd = baseName (qualLeaf $ fst op) == "&&"
-getOrdering attrs (AppExp (LetWith ident1 ident2 slice e body _) _) = do
+getOrdering attrs (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering attrs e
   slice' <- astMap mapper slice
-  modify (WithBind ident1 ident2 slice' e' :)
+  modify (PatBind (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc) :)
   getOrdering attrs body
   where
     mapper = identityMapper {mapOnExp = getOrdering attrs}
@@ -156,7 +155,7 @@ transformBody attrs e = do
 
     accum acc b@(Ass ass txt loc) = ((ass, txt, loc) : acc, b)
     accum acc (PatBind p expr) = ([], PatBind p (asserting acc expr))
-    accum acc b = (acc, b) -- todo
+    accum acc b = (acc, b)
     f body Ass {} = body
     f body (PatBind p expr) =
       AppExp
@@ -170,8 +169,6 @@ transformBody attrs e = do
         appRes
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
-    f body (WithBind ident1 ident2 slice e') =
-      AppExp (LetWith ident1 ident2 slice e' body mempty) appRes
 
 transformDec :: MonadFreshNames m => Dec -> m Dec
 transformDec (ValDec valbind) = do
