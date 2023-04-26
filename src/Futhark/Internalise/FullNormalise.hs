@@ -100,9 +100,23 @@ getOrdering attrs (AppExp (DoLoop sizes pat einit form body loc) resT) = do
   body' <- transformBody attrs body
   nameExp $ attributing attrs (AppExp (DoLoop sizes pat einit' form' body' loc) resT)
 getOrdering attrs (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
-  el' <- getOrdering attrs el
-  er' <- getOrdering attrs er
-  nameExp $ attributing attrs (AppExp (BinOp op opT (el', elT) (er', erT) loc) resT)
+  expr' <- case (isOr, isAnd) of
+    (True, _) -> do
+      el' <- getOrdering attrs el
+      er' <- transformBody attrs er
+      pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) resT
+    (_, True) -> do
+      el' <- getOrdering attrs el
+      er' <- transformBody attrs er
+      pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) resT
+    (False, False) -> do
+      el' <- getOrdering attrs el
+      er' <- getOrdering attrs er
+      pure $ AppExp (BinOp op opT (el', elT) (er', erT) loc) resT
+  nameExp $ attributing attrs expr'
+  where
+    isOr = baseName (qualLeaf $ fst op) == "||"
+    isAnd = baseName (qualLeaf $ fst op) == "&&"
 getOrdering attrs (AppExp (LetWith ident1 ident2 slice e body _) _) = do
   e' <- getOrdering attrs e
   slice' <- astMap mapper slice
