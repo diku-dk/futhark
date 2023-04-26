@@ -1105,16 +1105,14 @@ instantiateDimsInReturnType ::
   TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType loc fname (RetType dims t) = do
   dims' <- mapM new dims
-  pure (first (onDim $ zip dims dims') t, dims')
+  pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeVar` loc) . qualName) dims') t, dims')
   where
     new =
       newRigidDim loc (RigidRet fname)
         . nameFromString
         . takeWhile isAscii
         . baseString
-    onDim dims' (SizeExpr (Var d _ _)) =
-      sizeFromName (maybe d qualName (lookup (qualLeaf d) dims')) loc
-    onDim _ d = d
+    onDim dims' = applySubst (`lookup` dims')
 
 -- Some information about the function/operator we are trying to
 -- apply, and how many arguments it has previously accepted.  Used for
