@@ -1219,7 +1219,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         rettype''' = applySubst (`M.lookup` substs') rettype''
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
-          partition ((`S.member` mustBeExplicitInBinding bind_t') . typeParamName) $
+          partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
             shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
         exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
