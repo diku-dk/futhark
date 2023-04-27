@@ -212,24 +212,24 @@ getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
     While e -> While <$> transformBody e
   body' <- transformBody body
   nameExp final $ AppExp (DoLoop sizes pat einit' form' body' loc) resT
-getOrdering final (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do -- to desugar
+getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (_, elp)) (er, Info (_, erp)) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
       el' <- getOrdering True el
       er' <- transformBody er
-      pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) resT
+      pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
     (_, True) -> do
       el' <- getOrdering True el
       er' <- transformBody er
-      pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) resT
+      pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
       el' <- getOrdering False el
       er' <- getOrdering False er
-      pure $ AppExp (BinOp op opT (el', elT) (er', erT) loc) resT
+      pure $ mkApply (Var op opT oloc) [(Observe, elp, el'), (Observe, erp, er')] resT
   nameExp final expr'
   where
-    isOr = baseName (qualLeaf $ fst op) == "||"
-    isAnd = baseName (qualLeaf $ fst op) == "&&"
+    isOr = baseName (qualLeaf op) == "||"
+    isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
