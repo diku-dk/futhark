@@ -588,8 +588,8 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   (pat', rr) <- withArgs dimArgs' $ transformPat pat
   params <- parametrizing dimArgs'
   let sizes' = sizes <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
-  res' <- transformAppRes res
   body' <- withRecordReplacements rr $ withParams params $ scoping argset $ transformExp body
+  res' <- transformAppRes res
   pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res')
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
