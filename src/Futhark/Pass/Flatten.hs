@@ -348,7 +348,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Copy v ->
       case lookup v inps of
@@ -514,63 +514,73 @@ transformDistStm segments env (DistStm inps res stm) = do
       | Just map_lam <- isMapSOAC form -> do
           (ws_flags, ws_offsets, ws) <- transformMap segments env inps pat w arrs map_lam
           pure $ insertIrregulars ws ws_flags ws_offsets (zip (map distResTag res) $ patNames pat) env
-    Let _ _ (Match scrutinee cases defaultCase _) -> do
-      let [Var scrut] = scrutinee
-      let [w] = NE.toList segments
-      let Regular scrut_L = inputReps inps env M.! scrut
-      let [Case [Just (BoolValue True)] body_then] = cases
-      let body_else = defaultCase
-      (inds, q) <- doPartition2 scrut_L
-      inds_t <- lookupType inds
-      size_then <- letSubExp "size_then" =<< toExp q
-      size_else <- letSubExp "size_else" =<< eBinOp (Sub Int64 OverflowUndef) (toExp w) (toExp size_then)
-      is_then <- letExp "is_then" $ BasicOp $ Index inds $ fullSlice inds_t [DimSlice (constant (0 :: Int64)) size_then (constant (1 :: Int64))]
-      is_else <- letExp "is_else" $ BasicOp $ Index inds $ fullSlice inds_t [DimSlice size_then size_else (constant (1 :: Int64))]
+    Let _ _ (Match scrutinees cases defaultCase _)
+      -- if then else case
+      | [Case [Just (BoolValue True)] body_then] <- cases -> do
+          -- As were just handling the if-then-else case there is only one scrutinee
+          let [cond] = scrutinees
+          let body_else = defaultCase
+          let [w] = NE.toList segments
+          -- Lift the condition. If it's a constant, simply replicate it.
+          -- If it's a variable, we know it's a scalar (boolean) and the lifted version will therefore be a regular array.
+          lifted_cond <- case cond of
+            c@(Constant _) -> letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
+            Var v -> let Regular v' = inputReps inps env M.! v in pure v'
+          -- Using the lifted condition, get the indices used for partitioning the 'then' (true) and 'else' (false) branches.
+          (inds, q) <- doPartition2 lifted_cond
+          inds_t <- lookupType inds
+          size_then <- letSubExp "size_then" =<< toExp q
+          size_else <- letSubExp "size_else" =<< eBinOp (Sub Int64 OverflowUndef) (toExp w) (toExp size_then)
+          is_then <- letExp "is_then" $ BasicOp $ Index inds $ fullSlice inds_t [DimSlice (constant (0 :: Int64)) size_then (constant (1 :: Int64))]
+          is_else <- letExp "is_else" $ BasicOp $ Index inds $ fullSlice inds_t [DimSlice size_then size_else (constant (1 :: Int64))]
 
-      let splitInput is v =
-            (v,) <$> case M.lookup v $ inputReps inps env of
-              Just (Regular arr) -> do
-                n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
-                arr' <- letExp "split_arr" <=< segMap (Solo n) $ \(Solo i) -> do
-                  idx <- letExp "idx" =<< eIndex is [eSubExp i]
-                  subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
-                pure $ Regular arr'
-              Just (Irregular _) -> error "under construction"
-              Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
-          mkInpsAndEnv is body = do
-            (vs, reps) <- mapAndUnzipM (splitInput is) (namesToList $ freeIn body)
-            let inputs = do
-                  (v, i) <- zip vs [0 ..]
-                  let t = distInputType $ fromMaybe (error "bad lookup") $ L.lookup v inps
-                  pure (v, DistInput (ResTag i) t)
-            let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-            pure (inputs, env')
-      (inputs_then, env_then) <- mkInpsAndEnv is_then body_then
-      (inputs_else, env_else) <- mkInpsAndEnv is_else body_else
-      scope <- askScope
-      let (inputs_then', dstms_then) = distributeBody scope w inputs_then body_then
-      let (inputs_else', dstms_else) = distributeBody scope w inputs_else body_else
+          -- Split the inputs of the 'then' and 'else' branches.
+          -- TODO: Handle irreglar arrays
+          let splitInput is v =
+                (v,) <$> case M.lookup v $ inputReps inps env of
+                  Just (Regular arr) -> do
+                    n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+                    arr' <- letExp "split_arr" <=< segMap (Solo n) $ \(Solo i) -> do
+                      idx <- letExp "idx" =<< eIndex is [eSubExp i]
+                      subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
+                    pure $ Regular arr'
+                  Just (Irregular _) -> error "under construction"
+                  Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
+              mkInpsAndEnv is body = do
+                (vs, reps) <- mapAndUnzipM (splitInput is) (namesToList $ freeIn body)
+                let inputs = do
+                      (v, i) <- zip vs [0 ..]
+                      let t = distInputType $ fromMaybe (error "bad lookup") $ L.lookup v inps
+                      pure (v, DistInput (ResTag i) t)
+                let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
+                pure (inputs, env')
+          (inputs_then, env_then) <- mkInpsAndEnv is_then body_then
+          (inputs_else, env_else) <- mkInpsAndEnv is_else body_else
+          scope <- askScope
+          let (inputs_then', dstms_then) = distributeBody scope w inputs_then body_then
+          let (inputs_else', dstms_else) = distributeBody scope w inputs_else body_else
 
-      result_then <- liftBody size_then inputs_then' env_then dstms_then (bodyResult body_then)
-      result_else <- liftBody size_else inputs_else' env_else dstms_else (bodyResult body_else)
+          -- Lift the 'then' and 'else' bodies
+          lifted_body_then <- liftBody size_then inputs_then' env_then dstms_then (bodyResult body_then)
+          lifted_body_else <- liftBody size_else inputs_else' env_else dstms_else (bodyResult body_else)
 
-      let resultTypes = map ((\(DistType n _ (Prim t)) -> Array t (Shape [n]) NoUniqueness) . distResType) res
-      blankRes <- mapM (letExp "blank_res" <=< eBlank) resultTypes
-      let scatterRes is xs gtid = do
-            i <- letExp "i" =<< eIndex is [eSubExp gtid]
-            xs' <- letExp "xs" =<< toExp xs
-            x <- letSubExp "x" =<< eIndex xs' [eSubExp gtid]
-            pure (i, x)
-      partialRes <-
-        mapM
-          (\(space, result) -> letExp "partial_res" <=< genScatter space size_then $ scatterRes is_then (resSubExp result))
-          (zip blankRes result_then)
-      result <-
-        mapM
-          (\(space, result) -> letExp "res" <=< genScatter space size_else $ scatterRes is_else (resSubExp result))
-          (zip partialRes result_else)
-
-      pure $ insertReps (zip (map distResTag res) (map Regular result)) env
+          -- Write the results of the 'then' and 'else' branches back to their original positions.
+          let resultTypes = map ((\(DistType n _ (Prim t)) -> Array t (Shape [n]) NoUniqueness) . distResType) res
+          blankRes <- mapM (letExp "blank_res" <=< eBlank) resultTypes
+          let scatterRes is xs gtid = do
+                i <- letExp "i" =<< eIndex is [eSubExp gtid]
+                xs' <- letExp "xs" =<< toExp xs
+                x <- letSubExp "x" =<< eIndex xs' [eSubExp gtid]
+                pure (i, x)
+          partialRes <-
+            mapM
+              (\(space, result) -> letExp "partial_res" <=< genScatter space size_then $ scatterRes is_then (resSubExp result))
+              (zip blankRes lifted_body_then)
+          result <-
+            mapM
+              (\(space, result) -> letExp "res" <=< genScatter space size_else $ scatterRes is_else (resSubExp result))
+              (zip partialRes lifted_body_else)
+          pure $ insertReps (zip (map distResTag res) (map Regular result)) env
     Let _ _ (Apply name args rettype s) -> do
       let [w] = NE.toList segments
       let name' = liftFunName name
