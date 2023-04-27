@@ -146,7 +146,7 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
 getOrdering final (ProjectSection names (Info ty) loc) = do
-  xn <-  newNameFromString "x"
+  xn <- newNameFromString "x"
   let (xty, RetType dims ret) = case ty of
                 Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
                 _ -> error $ "not a function type for project section: " ++ prettyString ty
@@ -165,9 +165,15 @@ getOrdering final (ProjectSection names (Info ty) loc) = do
               ++ prettyString t
               ++ " does not have field "
               ++ prettyString field
-getOrdering final (IndexSection slice ty loc) = do -- to desugar
+getOrdering final (IndexSection slice (Info ty) loc) = do
   slice' <- astMap mapper slice
-  nameExp final $ IndexSection slice' ty loc
+  xn <- newNameFromString "x"
+  let (xty, RetType dims ret) = case ty of
+                Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+                _ -> error $ "not a function type for index section: " ++ prettyString ty
+      x = Var (qualName xn) (Info $ fromStruct xty) mempty
+      body = AppExp (Index x slice' loc) (Info (AppRes ret []))
+  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering _ (Ascript e _ _) = getOrdering False e
