@@ -27,6 +27,7 @@ asserting asss e =
 data Binding
   = Ass Exp (Info T.Text) SrcLoc
   | Att (AttrInfo VName)
+  | UnAtt
   | PatBind Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
 
@@ -59,9 +60,11 @@ nameExp False e = do
   pure $ Var (qualName name) (Info ty) loc
 
 getOrdering :: Bool -> Exp -> OrderingM Exp
-getOrdering final (Attr attr e _) = do
+getOrdering final (Attr attr e loc) = do
   addBind $ Att attr
-  getOrdering final e
+  e' <- getOrdering final e
+  addBind UnAtt
+  pure $ Attr attr e' loc
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
   addBind $ Ass ass' txt loc
@@ -149,7 +152,8 @@ transformBody :: MonadFreshNames m => Exp -> m Exp
 transformBody e = do
   (e', pre_eval) <- runOrdering (getOrdering True e)
   let ((last_ass, atts), pre_eval') = mapAccumR accum ([], []) pre_eval
-  pure $ foldl f (attributing atts $ asserting last_ass e') pre_eval'
+  unless (null atts) $ pure $ error "not all attribute freed"
+  pure $ foldl f (asserting last_ass e') pre_eval'
   where
     appRes = case e of
       (AppExp _ r) -> r
@@ -157,10 +161,12 @@ transformBody e = do
 
     accum (asss, atts) b@(Ass ass txt loc) = (((ass, txt, loc) : asss, atts), b)
     accum (asss, atts) b@(Att info) = ((asss, info : atts), b)
+    accum (asss, atts) UnAtt = ((asss, tail atts), UnAtt)
     accum (asss, atts) (PatBind p expr) = (([], atts), PatBind p (attributing atts $ asserting asss expr))
     accum acc b = (acc, b)
     f body Ass {} = body
     f body Att {} = body
+    f body UnAtt {} = body
     f body (PatBind p expr) =
       AppExp
         ( LetPat
