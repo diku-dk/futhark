@@ -555,7 +555,6 @@ transformDistStm segments env (DistStm inps res stm) = do
       result_else <- liftBody size_else inputs_else' env_else dstms_else (bodyResult body_else)
 
       let resultTypes = map ((\(DistType n _ (Prim t)) -> Array t (Shape [n]) NoUniqueness) . distResType) res
-      let resultSizes = map (arraySize 0) resultTypes
       blankRes <- mapM (letExp "blank_res" <=< eBlank) resultTypes
       let scatterRes is xs gtid = do
             i <- letExp "i" =<< eIndex is [eSubExp gtid]
@@ -564,12 +563,12 @@ transformDistStm segments env (DistStm inps res stm) = do
             pure (i, x)
       partialRes <-
         mapM
-          (\(space, size, result) -> letExp "partial_res" <=< genScatter space size $ scatterRes is_then (resSubExp result))
-          (zip3 blankRes resultSizes result_then)
+          (\(space, result) -> letExp "partial_res" <=< genScatter space size_then $ scatterRes is_then (resSubExp result))
+          (zip blankRes result_then)
       result <-
         mapM
-          (\(space, size, result) -> letExp "res" <=< genScatter space size $ scatterRes is_else (resSubExp result))
-          (zip3 partialRes resultSizes result_else)
+          (\(space, result) -> letExp "res" <=< genScatter space size_else $ scatterRes is_else (resSubExp result))
+          (zip partialRes result_else)
 
       pure $ insertReps (zip (map distResTag res) (map Regular result)) env
     Let _ _ (Apply name args rettype s) -> do
