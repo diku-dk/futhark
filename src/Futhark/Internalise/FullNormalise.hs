@@ -3,13 +3,13 @@ module Futhark.Internalise.FullNormalise (transformProg) where
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Traversable
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
-import qualified Data.Map as M
 
 attributing :: [AttrInfo VName] -> Exp -> Exp
 attributing attrs e =
@@ -148,8 +148,8 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
 getOrdering final (ProjectSection names (Info ty) loc) = do
   xn <- newNameFromString "x"
   let (xty, RetType dims ret) = case ty of
-                Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
-                _ -> error $ "not a function type for project section: " ++ prettyString ty
+        Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+        _ -> error $ "not a function type for project section: " ++ prettyString ty
       x = Var (qualName xn) (Info $ fromStruct xty) mempty
       body = foldl project x names
   nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
@@ -169,8 +169,8 @@ getOrdering final (IndexSection slice (Info ty) loc) = do
   slice' <- astMap mapper slice
   xn <- newNameFromString "x"
   let (xty, RetType dims ret) = case ty of
-                Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
-                _ -> error $ "not a function type for index section: " ++ prettyString ty
+        Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+        _ -> error $ "not a function type for index section: " ++ prettyString ty
       x = Var (qualName xn) (Info $ fromStruct xty) mempty
       body = AppExp (Index x slice' loc) (Info (AppRes ret []))
   nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
