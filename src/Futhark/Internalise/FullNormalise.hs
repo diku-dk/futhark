@@ -8,6 +8,7 @@ import Data.Traversable
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Types
 
 attributing :: [AttrInfo VName] -> Exp -> Exp
 attributing attrs e =
@@ -119,12 +120,30 @@ getOrdering final (Lambda params body mte ret loc) = do
   nameExp final $ Lambda params body' mte ret loc
 getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
-getOrdering final (OpSectionLeft op ty e arginfo ret loc) = do -- to desugar
-  e' <- getOrdering False e
-  nameExp final $ OpSectionLeft op ty e' arginfo ret loc
-getOrdering final (OpSectionRight op ty e arginfo ret loc) = do -- to desugar
-  e' <- getOrdering False e
-  nameExp final $ OpSectionRight op ty e' arginfo ret loc
+getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
+  x <- getOrdering False e
+  yn <- newNameFromString "y"
+  let y = Var (qualName yn) (Info $ fromStruct yty) mempty
+      ret' = applySubst (pSubst x y) ret
+      body = mkApply (Var op ty mempty) [(Observe, xext, x), (Observe, Nothing, y)] $ AppRes ret' exts
+  nameExp final $ Lambda [Id yn (Info $ fromStruct yty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret')) loc
+  where
+    pSubst x y vn
+      | Named p <- xp, p == vn = Just $ ExpSubst x
+      | Named p <- yp, p == vn = Just $ ExpSubst y
+      | otherwise = Nothing
+getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (Info (RetType dims ret)) loc) = do
+  xn <- newNameFromString "x"
+  y <- getOrdering False e
+  let x = Var (qualName xn) (Info $ fromStruct xty) mempty
+      ret' = applySubst (pSubst x y) ret
+      body = mkApply (Var op ty mempty) [(Observe, Nothing, x), (Observe, yext, y)] $ AppRes ret' []
+  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret')) loc
+  where
+    pSubst x y vn
+      | Named p <- xp, p == vn = Just $ ExpSubst x
+      | Named p <- yp, p == vn = Just $ ExpSubst y
+      | otherwise = Nothing
 getOrdering final e@ProjectSection {} = nameExp final e -- to desugar
 getOrdering final (IndexSection slice ty loc) = do -- to desugar
   slice' <- astMap mapper slice
