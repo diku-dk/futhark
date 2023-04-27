@@ -346,7 +346,7 @@ jobs:
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   test-opencl:
-    runs-on: hendrix
+    runs-on: opencl
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
@@ -370,7 +370,7 @@ jobs:
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-pyopencl:
-    runs-on: hendrix
+    runs-on: opencl
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
@@ -391,7 +391,7 @@ jobs:
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
-    runs-on: hendrix
+    runs-on: cuda
     needs: [build-linux-nix]
     if: github.repository == 'diku-dk/futhark'
     steps:
