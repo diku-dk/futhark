@@ -68,8 +68,8 @@ getOrdering _ e@FloatLit {} = pure e
 getOrdering _ e@StringLit {} = pure e
 getOrdering _ e@Hole {} = pure e -- can we still have some ?
 getOrdering _ e@Var {} = pure e
-getOrdering _ (Parens e _) = getOrdering False e
-getOrdering _ (QualParens _ e _) = getOrdering False e
+getOrdering final (Parens e _) = getOrdering final e
+getOrdering final (QualParens _ e _) = getOrdering final e
 getOrdering _ (TupLit es loc) = do
   es' <- mapM (getOrdering False) es
   pure $ TupLit es' loc
