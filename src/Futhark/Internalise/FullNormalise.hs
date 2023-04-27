@@ -104,9 +104,9 @@ getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
 getOrdering final (Update eb slice eu loc) = do
-  eb' <- getOrdering False eb
-  slice' <- astMap mapper slice
   eu' <- getOrdering False eu
+  slice' <- astMap mapper slice
+  eb' <- getOrdering False eb
   nameExp final $ Update eb' slice' eu' loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
@@ -117,15 +117,16 @@ getOrdering final (RecordUpdate eb ns eu ty loc) = do
 getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
   nameExp final $ Lambda params body' mte ret loc
-getOrdering _ e@OpSection {} = pure e
-getOrdering final (OpSectionLeft op ty e arginfo ret loc) = do
+getOrdering _ (OpSection qn ty loc) =
+  pure $ Var qn ty loc
+getOrdering final (OpSectionLeft op ty e arginfo ret loc) = do -- to desugar
   e' <- getOrdering False e
   nameExp final $ OpSectionLeft op ty e' arginfo ret loc
-getOrdering final (OpSectionRight op ty e arginfo ret loc) = do
+getOrdering final (OpSectionRight op ty e arginfo ret loc) = do -- to desugar
   e' <- getOrdering False e
   nameExp final $ OpSectionRight op ty e' arginfo ret loc
-getOrdering final e@ProjectSection {} = nameExp final e
-getOrdering final (IndexSection slice ty loc) = do
+getOrdering final e@ProjectSection {} = nameExp final e -- to desugar
+getOrdering final (IndexSection slice ty loc) = do -- to desugar
   slice' <- astMap mapper slice
   nameExp final $ IndexSection slice' ty loc
   where
@@ -166,7 +167,7 @@ getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
     While e -> While <$> transformBody e
   body' <- transformBody body
   nameExp final $ AppExp (DoLoop sizes pat einit' form' body' loc) resT
-getOrdering final (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do
+getOrdering final (AppExp (BinOp op opT (el, elT) (er, erT) loc) resT) = do -- to desugar
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
       el' <- getOrdering True el
