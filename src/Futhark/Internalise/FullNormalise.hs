@@ -9,6 +9,7 @@ import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
+import qualified Data.Map as M
 
 attributing :: [AttrInfo VName] -> Exp -> Exp
 attributing attrs e =
@@ -144,7 +145,26 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
       | Named p <- xp, p == vn = Just $ ExpSubst x
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
-getOrdering final e@ProjectSection {} = nameExp final e -- to desugar
+getOrdering final (ProjectSection names (Info ty) loc) = do
+  xn <-  newNameFromString "x"
+  let (xty, RetType dims ret) = case ty of
+                Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+                _ -> error $ "not a function type for project section: " ++ prettyString ty
+      x = Var (qualName xn) (Info $ fromStruct xty) mempty
+      body = foldl project x names
+  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
+  where
+    project e field =
+      case typeOf e of
+        Scalar (Record fs)
+          | Just t <- M.lookup field fs ->
+              Project field e (Info t) mempty
+        t ->
+          error $
+            "desugar ProjectSection: type "
+              ++ prettyString t
+              ++ " does not have field "
+              ++ prettyString field
 getOrdering final (IndexSection slice ty loc) = do -- to desugar
   slice' <- astMap mapper slice
   nameExp final $ IndexSection slice' ty loc
