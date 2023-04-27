@@ -60,28 +60,91 @@ nameExp False e = do
   pure $ Var (qualName name) (Info ty) loc
 
 getOrdering :: Bool -> Exp -> OrderingM Exp
+getOrdering _ e@Literal {} = pure e
+getOrdering _ e@IntLit {} = pure e
+getOrdering _ e@FloatLit {} = pure e
+getOrdering _ e@StringLit {} = pure e
+getOrdering _ e@Hole {} = pure e -- can we still have some ?
+getOrdering _ e@Var {} = pure e
+getOrdering _ (Parens e _) = getOrdering False e
+getOrdering _ (QualParens _ e _) = getOrdering False e
+getOrdering _ (TupLit es loc) = do
+  es' <- mapM (getOrdering False) es
+  pure $ TupLit es' loc
+getOrdering _ (RecordLit fs loc) = do
+  fs' <- mapM f fs
+  pure $ RecordLit fs' loc
+  where
+    f (RecordFieldExplicit n e floc) = do
+      e' <- getOrdering False e
+      pure $ RecordFieldExplicit n e' floc
+    f field@RecordFieldImplicit {} = pure field
+getOrdering _ (ArrayLit es ty loc) = do
+  es' <- mapM (getOrdering False) es
+  pure $ ArrayLit es' ty loc
 getOrdering final (Attr attr e loc) = do
   addBind $ Att attr
   e' <- getOrdering final e
   addBind UnAtt
   pure $ Attr attr e' loc
+getOrdering _ (Project n e ty loc) = do
+  e' <- getOrdering False e
+  pure $ Project n e' ty loc
+getOrdering _ (Negate e loc) = do
+  e' <- getOrdering False e
+  pure $ Negate e' loc
+getOrdering _ (Not e loc) = do
+  e' <- getOrdering False e
+  pure $ Not e' loc
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
   addBind $ Ass ass' txt loc
   getOrdering final e
--- getOrdering (Update eb slice eu loc) ?
--- getOrdering (RecordUpdate eb ns eu ty loc) ?
-getOrdering _ (Lambda params body mte ret loc) = do
+getOrdering final (Constr n es ty loc) = do
+  es' <- mapM (getOrdering False) es
+  nameExp final $ Constr n es' ty loc
+getOrdering final (Update eb slice eu loc) = do
+  eb' <- getOrdering False eb
+  slice' <- astMap mapper slice
+  eu' <- getOrdering False eu
+  nameExp final $ Update eb' slice' eu' loc
+  where
+    mapper = identityMapper {mapOnExp = getOrdering False}
+getOrdering final (RecordUpdate eb ns eu ty loc) = do
+  eb' <- getOrdering False eb
+  eu' <- getOrdering False eu
+  nameExp final $ RecordUpdate eb' ns eu' ty loc
+getOrdering final (Lambda params body mte ret loc) = do
   body' <- transformBody body
-  pure $ Lambda params body' mte ret loc
--- getOrdering (OpSectionLeft, Right) ?
+  nameExp final $ Lambda params body' mte ret loc
+getOrdering _ e@OpSection {} = pure e
+getOrdering final (OpSectionLeft op ty e arginfo ret loc) = do
+  e' <- getOrdering False e
+  nameExp final $ OpSectionLeft op ty e' arginfo ret loc
+getOrdering final (OpSectionRight op ty e arginfo ret loc) = do
+  e' <- getOrdering False e
+  nameExp final $ OpSectionRight op ty e' arginfo ret loc
+getOrdering final e@ProjectSection {} = nameExp final e
+getOrdering final (IndexSection slice ty loc) = do
+  slice' <- astMap mapper slice
+  nameExp final $ IndexSection slice' ty loc
+  where
+    mapper = identityMapper {mapOnExp = getOrdering False}
+getOrdering _ (Ascript e _ _) = getOrdering False e
 getOrdering final (AppExp (Apply f args loc) resT) = do
   args' <- NE.reverse <$> mapM onArg (NE.reverse args)
   f' <- getOrdering False f
   nameExp final $ AppExp (Apply f' args' loc) resT
   where
     onArg (d, e) = (d,) <$> getOrdering False e
--- Coerce
+getOrdering final (AppExp (Coerce e ty loc) resT) = do
+  e' <- getOrdering False e
+  nameExp final $ AppExp (Coerce e' ty loc) resT
+getOrdering final (AppExp (Range start stride end loc) resT) = do
+  start' <- getOrdering False start
+  stride' <- mapM (getOrdering False) stride
+  end' <- mapM (getOrdering False) end
+  nameExp final $ AppExp (Range start' stride' end' loc) resT
 getOrdering final (AppExp (LetPat _ pat expr body _) _) = do
   expr' <- getOrdering True expr
   addBind $ PatBind pat expr'
@@ -128,7 +191,12 @@ getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) sl
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
--- Index
+getOrdering final (AppExp (Index e slice loc) resT) = do
+  e' <- getOrdering False e
+  slice' <- astMap mapper slice
+  nameExp final $ AppExp (Index e' slice' loc) resT
+  where
+    mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering final (AppExp (Match expr cs loc) resT) = do
   expr' <- getOrdering False expr
   cs' <- mapM f cs
@@ -137,16 +205,6 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
     f (CasePat pat body cloc) = do
       body' <- transformBody body
       pure (CasePat pat body' cloc)
-getOrdering final (AppExp app resT) = do
-  app' <- astMap mapper app
-  nameExp final $ AppExp app' resT
-  where
-    -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering False}
-getOrdering _ e = astMap mapper e
-  where
-    -- types ?
-    mapper = identityMapper {mapOnExp = getOrdering False}
 
 transformBody :: MonadFreshNames m => Exp -> m Exp
 transformBody e = do
