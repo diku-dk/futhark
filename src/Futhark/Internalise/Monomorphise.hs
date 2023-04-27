@@ -397,7 +397,7 @@ replaceExp e =
         (Just vn, _) -> pure $ sizeVar (qualName vn) (srclocOf e)
         (Nothing, Just vn) -> pure $ sizeVar (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
-          vn <- newNameFromString $ "d<{" ++ prettyString e ++ "}>"
+          vn <- newNameFromString $ "d<{" ++ prettyString (bareExp e) ++ "}>"
           modify ((e', vn) :)
           pure $ sizeVar (qualName vn) (srclocOf e)
   where
