@@ -1,3 +1,17 @@
+-- | This full normalisation module converts a well-typed, polymorphic,
+-- module-free Futhark program into an equivalent with only simple expresssions.
+-- Notably, all non-trivial expression are converted into a list of
+-- let-bindings to make them simpler, with no nested apply, nested lets...
+-- This module only performs synthatic operations.
+--
+-- Also, it performs desugaring that is:
+-- * Turn operator section into lambda
+-- * turn BinOp into application (&& and || are converted to if structure)
+-- * turn `let x [i] = e1` into `let x = x with [i] = e1`
+-- * binds all implicit sizes
+--
+-- This is currently not done for expressions inside sizes, this processing
+-- still needed in monomorphisation for now.
 module Futhark.Internalise.FullNormalise (transformProg) where
 
 import Control.Monad.State
@@ -10,10 +24,12 @@ import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
+-- Modifier to apply on binding, this is used to propagate attributes and move assertions
 data BindModifier
   = Ass Exp (Info T.Text) SrcLoc
   | Att (AttrInfo VName)
 
+-- Apply a list of modifiers, removing the assertions as it is not needed to check them multiple times
 applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
 applyModifiers =
   foldr f . (,[])
@@ -23,12 +39,20 @@ applyModifiers =
     f (Att attr) (body, modifs) =
       (Attr attr body mempty, Att attr : modifs)
 
--- something to bind
+-- A binding that occurs in the calculation flow
 data Binding
   = PatBind [SizeBinder VName] Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
 
--- state is the list of bindings, first to eval last
+-- | Main monad of this module, the state as 3 parts:
+-- * the VNameSource to produce new names
+-- * the [Binding] is the accumulator for the result
+--   It behave a bit like a writer
+-- * the [BindModifier] is the current list of modifiers to apply to the introduced bindings
+--   It behave like a reader for attributes modifier, and as a state for assertion,
+--   they have to be in the same list to conserve their order
+-- Direct interaction with the inside state should be done with caution, that's why their
+-- no instance of `MonadState`.
 newtype OrderingM a = OrderingM (State (([Binding], [BindModifier]), VNameSource) a)
   deriving
     (Functor, Applicative, Monad)
@@ -64,6 +88,10 @@ runOrdering (OrderingM m) =
         then ((a, binds), src)
         else error "not all bind modifiers were freed"
 
+-- | From now, we say an expression is "final" if it's going to be stored in a let-bind
+-- or is at the end of the body e.g. after all lets
+
+-- Replace a non-final expression by a let-binded variable
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
@@ -74,6 +102,8 @@ nameExp False e = do
   addBind $ PatBind [] pat e
   pure $ Var (qualName name) (Info ty) loc
 
+-- Modify an expression as describe in module introduction,
+-- introducing the let-bindings in the state.
 getOrdering :: Bool -> Exp -> OrderingM Exp
 getOrdering final (Assert ass e txt loc) = do
   ass' <- getOrdering False ass
@@ -81,12 +111,16 @@ getOrdering final (Assert ass e txt loc) = do
   addModifier $ Ass ass' txt loc
   e' <- getOrdering final e
   l_after <- OrderingM $ gets $ length . snd . fst
+  -- if the list of modifier has reduced in size, that means that
+  -- all assertions as been inserted,
+  -- else, we have to introduce the assertion ourself
   if l_after <= l_prev
     then pure e'
     else do
       rmModifier
       pure $ Assert ass' e' txt loc
 getOrdering final (Attr attr e loc) = do
+  -- propagate attribute
   addModifier $ Att attr
   e' <- getOrdering final e
   rmModifier
@@ -272,6 +306,10 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
       body' <- transformBody body
       pure (CasePat pat body' cloc)
 
+-- Transform a body, e.g. the expression of a valbind,
+-- branches of an if/match...
+-- Note that this is not producing an OrderingM, produce
+-- a complete separtion of states.
 transformBody :: MonadFreshNames m => Exp -> m Exp
 transformBody e = do
   (e', pre_eval) <- runOrdering (getOrdering True e)
