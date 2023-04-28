@@ -330,18 +330,18 @@ data MonoSize
   = -- | The integer encodes an equivalence class, so we can keep
     -- track of sizes that are statically identical.
     MonoKnown Int
-  | MonoAnon VName
+  | MonoAnon
   deriving (Show)
 
 -- We treat all MonoAnon as identical.
 instance Eq MonoSize where
   MonoKnown x == MonoKnown y = x == y
-  MonoAnon _ == MonoAnon _ = True
+  MonoAnon == MonoAnon = True
   _ == _ = False
 
 instance Pretty MonoSize where
   pretty (MonoKnown i) = "?" <> pretty i
-  pretty (MonoAnon v) = "?" <> prettyName v
+  pretty MonoAnon = "?"
 
 instance Pretty (Shape MonoSize) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
@@ -362,9 +362,10 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
     noExtsScalar (Arrow as p d t1 (RetType _ t2)) =
       Arrow as p d (noExts t1) (RetType [] (noExts t2))
     noExtsScalar t = t
-    onDim bound _ (SizeExpr (Var d _ _))
+    onDim bound _ (SizeExpr e)
       -- A locally bound size.
-      | qualLeaf d `S.member` bound = pure $ MonoAnon $ qualLeaf d
+      | any (`S.member` bound) $ fvVars $ freeInExp e =
+          pure MonoAnon
     onDim _ _ d = do
       (i, m) <- get
       case M.lookup d m of
@@ -417,40 +418,42 @@ replaceExp e =
     maybeNormalisedSize _ = Nothing
 
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
-transformFName loc fname t
-  | baseTag (qualLeaf fname) <= maxIntrinsicTag = pure $ var fname
-  | otherwise = do
-      t' <- removeTypeVariablesInType t
-      let mono_t = monoType t'
+transformFName loc fname t = do
+  t' <- removeTypeVariablesInType t
+  t'' <- transformTypeSizes t'
+  let mono_t = monoType t'
+  if baseTag (qualLeaf fname) <= maxIntrinsicTag
+    then pure $ var fname t''
+    else do
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
       maybe_funbind <- lookupFun $ qualLeaf fname
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' t' <$> infer t'
+          applySizeArgs fname' t'' <$> infer t''
         -- An intrinsic function.
-        (Nothing, Nothing) -> pure $ var fname
+        (Nothing, Nothing) -> pure $ var fname t''
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
           tell $ Seq.singleton (qualLeaf fname, funbind')
           addLifted (qualLeaf fname) mono_t (fname', infer)
-          applySizeArgs fname' t' <$> infer t'
+          applySizeArgs fname' t'' <$> infer t''
   where
-    var fname' = Var fname' (Info (fromStruct t)) loc
+    var fname' t'' = Var fname' (Info (fromStruct t'')) loc
 
-    applySizeArg (i, f) size_arg =
+    applySizeArg t' (i, f) size_arg =
       ( i - 1,
         mkApply
           f
           [(Observe, Nothing, size_arg)]
-          (AppRes (foldFunType (replicate i (Observe, i64)) (RetType [] (fromStruct t))) [])
+          (AppRes (foldFunType (replicate i (Observe, i64)) (RetType [] (fromStruct t'))) [])
       )
 
     applySizeArgs fname' t' size_args =
       snd $
         foldl'
-          applySizeArg
+          (applySizeArg t')
           ( length size_args - 1,
             Var
               (qualName fname')
@@ -662,7 +665,7 @@ transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   pure $ AppExp (DoLoop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   (AppRes ret ext) <- transformAppRes res
-  fname' <- transformFName loc fname =<< transformTypeSizes (toStruct t)
+  fname' <- transformFName loc fname (toStruct t)
   e1' <- transformExp e1
   e2' <- transformExp e2
   if orderZero (typeOf e1') && orderZero (typeOf e2')
@@ -781,9 +784,8 @@ transformExp (Var fname (Info t) loc) = do
             let f_v' = Var (qualName f_v) (Info f_t') loc
             pure $ RecordFieldExplicit f f_v' loc
       RecordLit <$> mapM toField (M.toList fs) <*> pure loc
-    Nothing -> do
-      t' <- transformType t
-      transformFName loc fname (toStruct t')
+    Nothing ->
+      transformFName loc fname (toStruct t)
 transformExp (Hole t loc) =
   Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
@@ -893,7 +895,7 @@ desugarBinOpSection ::
   MonoM Exp
 desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
   t' <- transformTypeSizes t
-  op <- transformFName loc fname $ toStruct t'
+  op <- transformFName loc fname $ toStruct t
   (v1, wrap_left, e1, p1) <- makeVarParam e_left . fromStruct =<< transformTypeSizes xtype
   (v2, wrap_right, e2, p2) <- makeVarParam e_right . fromStruct =<< transformTypeSizes ytype
   let apply_left =
@@ -1362,7 +1364,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           pure $ sizeFromName (qualName d) mempty
         Just d ->
           pure $ sizeFromName (qualName d) mempty
-    onDim (MonoAnon v) = pure $ AnySize $ Just v
+    onDim MonoAnon = pure $ AnySize Nothing
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: Bool -> (PatType -> PatType) -> Pat -> Pat
