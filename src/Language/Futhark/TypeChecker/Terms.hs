@@ -384,10 +384,11 @@ unscopeUnknown t = do
   where
     expKiller _ Var {} = Nothing
     expKiller constraints e =
-      S.lookupMin $ S.filter (isUnknown constraints) $ fvVars $ freeInExp e
+      S.lookupMin $ S.filter (isUnknown constraints) $ (`S.difference` witnesses) $ fvVars $ freeInExp e
     isUnknown constraints vn
       | Just UnknownSize {} <- snd <$> M.lookup vn constraints = True
     isUnknown _ _ = False
+    (witnesses, _) = determineSizeWitnesses $ toStruct t
 
 unscopeTypeBase ::
   SrcLoc ->
@@ -415,6 +416,37 @@ unscopePatType tloc unscoped t = do
   where
     unAlias (AliasBound v) | v `S.member` unscoped = AliasFree v
     unAlias a = a
+
+reboundI64 ::
+  ASTMappable (TypeBase Size as) =>
+  SrcLoc ->
+  S.Set VName ->
+  TypeBase Size as ->
+  TermTypeM (TypeBase Size as, [VName])
+reboundI64 tloc unscoped =
+  fmap (fmap M.elems) . (`runStateT` mempty) . astMap mapper
+  where
+    mapper =
+      ASTMapper
+        { mapOnExp,
+          mapOnName = pure,
+          mapOnStructType = astMap mapper,
+          mapOnPatType = astMap mapper,
+          mapOnStructRetType = astMap mapper,
+          mapOnPatRetType = astMap mapper
+        }
+
+    mapOnExp :: Exp -> StateT (M.Map VName VName) TermTypeM Exp
+    mapOnExp (Var (QualName _ vn) _ loc)
+      | vn `S.member` unscoped = do
+          prev <- gets $ M.lookup vn
+          case prev of
+            Just vn' -> pure $ sizeVar (qualName vn') loc
+            Nothing -> do
+              vn' <- lift $ newRigidDim tloc (RigidOutOfScope loc vn) "d"
+              modify $ M.insert vn vn'
+              pure $ sizeVar (qualName vn') loc
+    mapOnExp e = astMap mapper e
 
 checkExp :: UncheckedExp -> TermTypeM Exp
 checkExp (Literal val loc) =
@@ -690,20 +722,19 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) =
           (toStruct t)
       _ -> pure ()
 
-    constraints <- getConstraints
     incLevel . bindingSizes sizes $ \sizes' ->
       bindingPat sizes' pat (Ascribed t) $ \pat' -> do
-        let implicitSizes = S.filter (isUnknown constraints) $ fvVars $ freeInPat pat'
         body' <- checkExp body
+        let (i64, noni64) = S.partition i64Ident $ patIdents pat'
         (body_t, retext) <-
-          unscopePatType loc (sizesMap sizes' <> patNames pat' <> implicitSizes) =<< expTypeFully body'
+          reboundI64 loc (sizesMap sizes' <> S.map identName i64) =<< expTypeFully body'
+        (body_t', retext') <- unscopePatType loc (S.map identName noni64) body_t
 
-        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t retext)
+        pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info $ AppRes body_t' (retext <> retext'))
   where
+    i64Ident (Ident _ ty _) =
+      ty == Info (Scalar $ Prim $ Signed Int64)
     sizesMap = foldMap (S.singleton . sizeName)
-    isUnknown constraints vn
-      | Just UnknownSize {} <- snd <$> M.lookup vn constraints = True
-    isUnknown _ _ = False
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) =
   sequentially (checkBinding (name, maybe_retdecl, tparams, params, e, loc)) $
     \(tparams', params', maybe_retdecl', rettype, e') closure -> do
@@ -991,15 +1022,15 @@ checkCase ::
   TermTypeM (CaseBase Info VName, PatType, [VName])
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
-    constraints <- getConstraints
-    let implicitSizes = S.filter (isUnknown constraints) $ fvVars $ freeInPat p'
     e' <- checkExp e
-    (t, retext) <- unscopePatType loc (patNames p' <> implicitSizes) =<< expTypeFully e'
-    pure (CasePat p' e' loc, t, retext)
+    let (i64, noni64) = S.partition i64Ident $ patIdents p'
+    (t, retext) <-
+      reboundI64 loc (S.map identName i64) =<< expTypeFully e'
+    (t', retext') <- unscopePatType loc (S.map identName noni64) t
+    pure (CasePat p' e' loc, t', retext <> retext')
   where
-    isUnknown constraints vn
-      | Just UnknownSize {} <- snd <$> M.lookup vn constraints = True
-    isUnknown _ _ = False
+    i64Ident (Ident _ ty _) =
+      ty == Info (Scalar $ Prim $ Signed Int64)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
@@ -1074,16 +1105,14 @@ instantiateDimsInReturnType ::
   TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType loc fname (RetType dims t) = do
   dims' <- mapM new dims
-  pure (first (onDim $ zip dims dims') t, dims')
+  pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeVar` loc) . qualName) dims') t, dims')
   where
     new =
       newRigidDim loc (RigidRet fname)
         . nameFromString
         . takeWhile isAscii
         . baseString
-    onDim dims' (SizeExpr (Var d _ _)) =
-      sizeFromName (maybe d qualName (lookup (qualLeaf d) dims')) loc
-    onDim _ d = d
+    onDim dims' = applySubst (`lookup` dims')
 
 -- Some information about the function/operator we are trying to
 -- apply, and how many arguments it has previously accepted.  Used for

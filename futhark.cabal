@@ -321,6 +321,7 @@ library
       Futhark.Internalise.Defunctorise
       Futhark.Internalise.Entry
       Futhark.Internalise.Exps
+      Futhark.Internalise.FullNormalise
       Futhark.Internalise.Lambdas
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad

@@ -520,9 +520,8 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- old size substitution induced by retext and also apply it to the
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
-      subst v = fromMaybe v $ M.lookup v mapping
-      mapper = identityMapper {mapOnName = pure . subst}
-      t' = first (runIdentity . astMap mapper) $ typeOf e2'
+      subst v = ExpSubst . flip sizeVar mempty . qualName <$> M.lookup v mapping
+      t' = applySubst subst $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ show vn
