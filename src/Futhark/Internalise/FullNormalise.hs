@@ -196,14 +196,10 @@ getOrdering _ (Ascript e _ _) = getOrdering False e
 getOrdering final (AppExp (Apply f args loc) resT) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
-      -- Just in case of assert place on it, would be weird but...
-      _ <- getOrdering True f
       el' <- getOrdering True $ snd $ args NE.!! 0
       er' <- transformBody $ snd $ args NE.!! 1
       pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) resT
     (_, True) -> do
-      -- Just in case of assert place on it, would be weird but...
-      _ <- getOrdering True f
       el' <- getOrdering True $ snd $ args NE.!! 0
       er' <- transformBody $ snd $ args NE.!! 1
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) resT
