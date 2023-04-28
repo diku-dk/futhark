@@ -352,8 +352,16 @@ instance Pretty (Shape MonoSize) where
 type MonoType = TypeBase MonoSize ()
 
 monoType :: TypeBase Size als -> MonoType
-monoType = (`evalState` (0, mempty)) . traverseDims onDim . toStruct
+monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
   where
+    -- Remove exts from return types because we don't use them anymore.
+    noExts (Array as u shape t) = Array as u shape $ noExtsScalar t
+    noExts (Scalar t) = Scalar $ noExtsScalar t
+    noExtsScalar (Record fs) = Record $ M.map noExts fs
+    noExtsScalar (Sum fs) = Sum $ M.map (map noExts) fs
+    noExtsScalar (Arrow as p d t1 (RetType _ t2)) =
+      Arrow as p d (noExts t1) (RetType [] (noExts t2))
+    noExtsScalar t = t
     onDim bound _ (SizeExpr (Var d _ _))
       -- A locally bound size.
       | qualLeaf d `S.member` bound = pure $ MonoAnon $ qualLeaf d
