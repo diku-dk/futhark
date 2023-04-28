@@ -5,36 +5,31 @@ import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Data.Traversable
 import Futhark.MonadFreshNames
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-attributing :: [AttrInfo VName] -> Exp -> Exp
-attributing attrs e =
-  foldr f e attrs
-  where
-    f attr e' =
-      Attr attr e' mempty
+data BindModifier
+  = Ass Exp (Info T.Text) SrcLoc
+  | Att (AttrInfo VName)
 
-asserting :: [(Exp, Info T.Text, SrcLoc)] -> Exp -> Exp
-asserting asss e =
-  foldr f e asss
+applyModifiers :: Exp -> [BindModifier] -> (Exp, [BindModifier])
+applyModifiers =
+  foldr f . (,[])
   where
-    f (ass, txt, loc) e' =
-      Assert ass e' txt loc
+    f (Ass ass txt loc) (body, modifs) =
+      (Assert ass body txt loc, modifs)
+    f (Att attr) (body, modifs) =
+      (Attr attr body mempty, Att attr : modifs)
 
 -- something to bind
 data Binding
-  = Ass Exp (Info T.Text) SrcLoc
-  | Att (AttrInfo VName)
-  | UnAtt
-  | PatBind Pat Exp
+  = PatBind Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
 
 -- state is the list of bindings, first to eval last
-newtype OrderingM a = OrderingM (State ([Binding], VNameSource) a)
+newtype OrderingM a = OrderingM (State (([Binding], [BindModifier]), VNameSource) a)
   deriving
     (Functor, Applicative, Monad)
 
@@ -42,14 +37,28 @@ instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
   putNameSource = OrderingM . modify . second . const
 
+addModifier :: BindModifier -> OrderingM ()
+addModifier = OrderingM . modify . first . second . (:)
+
+rmModifier :: OrderingM ()
+rmModifier = OrderingM $ modify $ first $ second tail
+
 addBind :: Binding -> OrderingM ()
-addBind = OrderingM . modify . first . (:)
+addBind (PatBind p e) = OrderingM $ do
+  modifs <- gets $ snd . fst
+  let (e', modifs') = applyModifiers e modifs
+  modify $ first $ bimap (PatBind p e' :) (const modifs')
+addBind b@FunBind {} =
+  OrderingM $ modify $ first $ first (b :)
 
 runOrdering :: MonadFreshNames m => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
-  modifyNameSource $ mod_tup . runState m . (mempty,)
+  modifyNameSource $ mod_tup . runState m . (([], []),)
   where
-    mod_tup (a, (s, src)) = ((a, s), src)
+    mod_tup (a, ((binds, modifs), src)) =
+      if null modifs
+        then ((a, binds), src)
+        else error "not all bind modifiers were freed"
 
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
@@ -62,6 +71,22 @@ nameExp False e = do
   pure $ Var (qualName name) (Info ty) loc
 
 getOrdering :: Bool -> Exp -> OrderingM Exp
+getOrdering final (Assert ass e txt loc) = do
+  ass' <- getOrdering False ass
+  l_prev <- OrderingM $ gets $ length . snd . fst
+  addModifier $ Ass ass' txt loc
+  e' <- getOrdering final e
+  l_after <- OrderingM $ gets $ length . snd . fst
+  if l_after <= l_prev
+    then pure e'
+    else do
+      rmModifier
+      pure $ Assert ass' e' txt loc
+getOrdering final (Attr attr e loc) = do
+  addModifier $ Att attr
+  e' <- getOrdering final e
+  rmModifier
+  pure $ Attr attr e' loc
 getOrdering _ e@Literal {} = pure e
 getOrdering _ e@IntLit {} = pure e
 getOrdering _ e@FloatLit {} = pure e
@@ -84,11 +109,6 @@ getOrdering _ (RecordLit fs loc) = do
 getOrdering _ (ArrayLit es ty loc) = do
   es' <- mapM (getOrdering False) es
   pure $ ArrayLit es' ty loc
-getOrdering final (Attr attr e loc) = do
-  addBind $ Att attr
-  e' <- getOrdering final e
-  addBind UnAtt
-  pure $ Attr attr e' loc
 getOrdering _ (Project n e ty loc) = do
   e' <- getOrdering False e
   pure $ Project n e' ty loc
@@ -98,10 +118,6 @@ getOrdering _ (Negate e loc) = do
 getOrdering _ (Not e loc) = do
   e' <- getOrdering False e
   pure $ Not e' loc
-getOrdering final (Assert ass e txt loc) = do
-  ass' <- getOrdering False ass
-  addBind $ Ass ass' txt loc
-  getOrdering final e
 getOrdering final (Constr n es ty loc) = do
   es' <- mapM (getOrdering False) es
   nameExp final $ Constr n es' ty loc
@@ -276,22 +292,12 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
 transformBody :: MonadFreshNames m => Exp -> m Exp
 transformBody e = do
   (e', pre_eval) <- runOrdering (getOrdering True e)
-  let ((last_ass, atts), pre_eval') = mapAccumR accum ([], []) pre_eval
-  unless (null atts) $ pure $ error "not all attribute freed"
-  pure $ foldl f (asserting last_ass e') pre_eval'
+  pure $ foldl f e' pre_eval
   where
     appRes = case e of
       (AppExp _ r) -> r
       _ -> Info $ AppRes (typeOf e) []
 
-    accum (asss, atts) b@(Ass ass txt loc) = (((ass, txt, loc) : asss, atts), b)
-    accum (asss, atts) b@(Att info) = ((asss, info : atts), b)
-    accum (asss, atts) UnAtt = ((asss, tail atts), UnAtt)
-    accum (asss, atts) (PatBind p expr) = (([], atts), PatBind p (attributing atts $ asserting asss expr))
-    accum acc b = (acc, b)
-    f body Ass {} = body
-    f body Att {} = body
-    f body UnAtt {} = body
     f body (PatBind p expr) =
       AppExp
         ( LetPat
