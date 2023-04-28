@@ -25,7 +25,7 @@ applyModifiers =
 
 -- something to bind
 data Binding
-  = PatBind Pat Exp
+  = PatBind [SizeBinder VName] Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
 
 -- state is the list of bindings, first to eval last
@@ -44,10 +44,14 @@ rmModifier :: OrderingM ()
 rmModifier = OrderingM $ modify $ first $ second tail
 
 addBind :: Binding -> OrderingM ()
-addBind (PatBind p e) = OrderingM $ do
+addBind (PatBind s p e) = OrderingM $ do
   modifs <- gets $ snd . fst
   let (e', modifs') = applyModifiers e modifs
-  modify $ first $ bimap (PatBind p e' :) (const modifs')
+  modify $ first $ bimap (PatBind (s <> implicit) p e' :) (const modifs')
+  where
+    implicit = case e of
+      (AppExp _ (Info (AppRes _ ext))) -> map (`SizeBinder` mempty) ext
+      _ -> []
 addBind b@FunBind {} =
   OrderingM $ modify $ first $ first (b :)
 
@@ -67,7 +71,7 @@ nameExp False e = do
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
-  addBind $ PatBind pat e
+  addBind $ PatBind [] pat e
   pure $ Var (qualName name) (Info ty) loc
 
 getOrdering :: Bool -> Exp -> OrderingM Exp
@@ -207,9 +211,9 @@ getOrdering final (AppExp (Range start stride end loc) resT) = do
   stride' <- mapM (getOrdering False) stride
   end' <- mapM (getOrdering False) end
   nameExp final $ AppExp (Range start' stride' end' loc) resT
-getOrdering final (AppExp (LetPat _ pat expr body _) _) = do
+getOrdering final (AppExp (LetPat sizes pat expr body _) _) = do
   expr' <- getOrdering True expr
-  addBind $ PatBind pat expr'
+  addBind $ PatBind sizes pat expr'
   getOrdering final body
 getOrdering final (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
   body' <- transformBody body
@@ -249,7 +253,7 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (_, elp)) (er, Info (_
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
   e' <- getOrdering False e
   slice' <- astMap mapper slice
-  addBind $ PatBind (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
+  addBind $ PatBind [] (Id dest dty dloc) (Update (Var (qualName src) sty sloc) slice' e' loc)
   getOrdering final body
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
@@ -277,10 +281,10 @@ transformBody e = do
       (AppExp _ r) -> r
       _ -> Info $ AppRes (typeOf e) []
 
-    f body (PatBind p expr) =
+    f body (PatBind sizes p expr) =
       AppExp
         ( LetPat
-            []
+            sizes
             p
             expr
             body
