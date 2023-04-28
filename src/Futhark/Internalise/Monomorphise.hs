@@ -50,8 +50,6 @@ import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
-import Debug.Trace
-
 i64 :: TypeBase dim als
 i64 = Scalar $ Prim $ Signed Int64
 
@@ -387,14 +385,11 @@ modifyLifts :: (Lifts -> Lifts) -> MonoM ()
 modifyLifts = MonoM . lift . modify
 
 addLifted :: VName -> MonoType -> (VName, InferSizeArgs) -> MonoM ()
-addLifted fname il liftf = do
-  traceM ("adding " ++ show fname ++ " of type " ++ prettyString il)
+addLifted fname il liftf =
   modifyLifts (((fname, il), liftf) :)
 
 lookupLifted :: VName -> MonoType -> MonoM (Maybe (VName, InferSizeArgs))
-lookupLifted fname t = do
-  traceM ("looking for " ++ show fname ++ " of type " ++ prettyString t)
-  lookup (fname, t) <$> getLifts
+lookupLifted fname t = lookup (fname, t) <$> getLifts
 
 -- | Creates a new expression replacement if needed, this always produces normalised sizes.
 -- (e.g. single variable or constant)
@@ -425,9 +420,7 @@ transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
 transformFName loc fname t
   | baseTag (qualLeaf fname) <= maxIntrinsicTag = pure $ var fname
   | otherwise = do
-      traceM $ prettyString fname ++ " init type: " ++ prettyString t
       t' <- removeTypeVariablesInType t
-      traceM $ "noTypeVar: " ++ prettyString t'
       let mono_t = monoType t'
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
       maybe_funbind <- lookupFun $ qualLeaf fname
