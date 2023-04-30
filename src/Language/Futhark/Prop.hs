@@ -6,6 +6,7 @@ module Language.Futhark.Prop
   ( -- * Various
     Intrinsic (..),
     intrinsics,
+    intrinsicVar,
     isBuiltin,
     isBuiltinLoc,
     maxIntrinsicTag,
@@ -28,6 +29,8 @@ module Language.Futhark.Prop
     valBindTypeScheme,
     valBindBound,
     funType,
+    stripExp,
+    similarExps,
 
     -- * Queries on patterns and params
     patIdents,
@@ -50,6 +53,7 @@ module Language.Futhark.Prop
     foldFunType,
     foldFunTypeFromParams,
     typeVars,
+    isAccType,
 
     -- * Operations on types
     peelArray,
@@ -94,6 +98,27 @@ module Language.Futhark.Prop
     UncheckedSpec,
     UncheckedProg,
     UncheckedCase,
+    -- | Type-checked syntactical constructs
+    Ident,
+    DimIndex,
+    Slice,
+    AppExp,
+    Exp,
+    Pat,
+    ModExp,
+    ModParam,
+    SigExp,
+    ModBind,
+    SigBind,
+    ValBind,
+    Dec,
+    Spec,
+    Prog,
+    TypeBind,
+    StructTypeArg,
+    ScalarType,
+    TypeParam,
+    Case,
   )
 where
 
@@ -105,6 +130,7 @@ import Data.Bitraversable (bitraverse)
 import Data.Char
 import Data.Foldable
 import Data.List (genericLength, isPrefixOf, sortOn)
+import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (..), posFile)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -185,10 +211,10 @@ traverseDims f = go mempty PosImmediate
               Named p' -> S.insert p' bound
               Unnamed -> bound
 
-    onTypeArg bound b (TypeArgDim d loc) =
-      TypeArgDim <$> f bound b d <*> pure loc
-    onTypeArg bound b (TypeArgType t loc) =
-      TypeArgType <$> go bound b t <*> pure loc
+    onTypeArg bound b (TypeArgDim d) =
+      TypeArgDim <$> f bound b d
+    onTypeArg bound b (TypeArgType t) =
+      TypeArgType <$> go bound b t
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape as -> Uniqueness
@@ -347,8 +373,7 @@ combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arr
 combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
   Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
   where
-    f (TypeArgType t1 loc) (TypeArgType t2 _) =
-      TypeArgType (combineTypeShapes t1 t2) loc
+    f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
     f targ _ = targ
 combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
   arrayOfWithAliases
@@ -410,8 +435,8 @@ matchDims onDims = matchDims' mempty
         _ -> pure t1
 
     matchTypeArg _ ta@TypeArgType {} _ = pure ta
-    matchTypeArg bound (TypeArgDim x loc) (TypeArgDim y _) =
-      TypeArgDim <$> onDims bound x y <*> pure loc
+    matchTypeArg bound (TypeArgDim x) (TypeArgDim y) =
+      TypeArgDim <$> onDims bound x y
     matchTypeArg _ a _ = pure a
 
     onShapes bound shape1 shape2 =
@@ -480,11 +505,11 @@ typeOf (RecordLit fs _) =
         t
           `addAliases` S.insert (AliasBound name)
 typeOf (ArrayLit _ (Info t) _) = t
-typeOf (StringLit vs _) =
+typeOf (StringLit vs loc) =
   Array
     mempty
     Nonunique
-    (Shape [ConstSize $ genericLength vs])
+    (Shape [sizeFromInteger (genericLength vs) loc])
     (Prim (Unsigned Int8))
 typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
@@ -584,7 +609,7 @@ typeVars t =
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
-    typeArgFree (TypeArgType ta _) = typeVars ta
+    typeArgFree (TypeArgType ta) = typeVars ta
     typeArgFree TypeArgDim {} = mempty
 
 -- | @orderZero t@ is 'True' if the argument type has order 0, i.e., it is not
@@ -710,13 +735,415 @@ intrinsicAcc =
   where
     acc_v = VName "acc" 10
     t_v = VName "t" 11
-    arg = TypeArgType (Scalar (TypeVar () Nonunique (qualName t_v) [])) mempty
+    arg = TypeArgType $ Scalar (TypeVar () Nonunique (qualName t_v) [])
+
+-- | If this type corresponds to the builtin "acc" type, return the
+-- type of the underlying array.
+isAccType :: TypeBase d as -> Maybe (TypeBase d ())
+isAccType (Scalar (TypeVar _ _ (QualName [] v) [TypeArgType t]))
+  | v == fst intrinsicAcc =
+      Just t
+isAccType _ = Nothing
+
+-- | Find the 'VName' corresponding to a builtin.  Crashes if that
+-- name cannot be found.
+intrinsicVar :: Name -> VName
+intrinsicVar v =
+  fromMaybe bad $ find ((v ==) . baseName) $ M.keys intrinsics
+  where
+    bad = error $ "findBuiltin: " <> nameToString v
 
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
 intrinsics =
   (M.fromList [intrinsicAcc] <>) $
     M.fromList $
+      primOp
+        ++ zipWith
+          namify
+          [intrinsicStart ..]
+          ( [ ( "flatten",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m]
+                  [(Observe, Array () Nonunique (shape [n, m]) t_a)]
+                  $ RetType []
+                  $ Array
+                    ()
+                    Nonunique
+                    ( Shape
+                        [ SizeExpr
+                            $ AppExp
+                              ( BinOp
+                                  (findOp "*", mempty)
+                                  sizeBinOpInfo
+                                  (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
+                                  (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
+                                  mempty
+                              )
+                            $ Info
+                            $ AppRes i64 []
+                        ]
+                    )
+                    t_a
+              ),
+              ( "unflatten",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar $ Prim $ Signed Int64),
+                    (Observe, Scalar $ Prim $ Signed Int64),
+                    (Observe, Array () Nonunique (shape [n]) t_a)
+                  ]
+                  $ RetType [k, m]
+                  $ Array () Nonunique (shape [k, m]) t_a
+              ),
+              ( "concat",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m]
+                  [ (Observe, array_a $ shape [n]),
+                    (Observe, array_a $ shape [m])
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ Shape
+                    [ SizeExpr
+                        $ AppExp
+                          ( BinOp
+                              (findOp "+", mempty)
+                              sizeBinOpInfo
+                              (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
+                              (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
+                              mempty
+                          )
+                        $ Info
+                        $ AppRes i64 []
+                    ]
+              ),
+              ( "rotate",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar $ Prim $ Signed Int64),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  $ RetType []
+                  $ array_a
+                  $ shape [n]
+              ),
+              ( "transpose",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m]
+                  [(Observe, array_a $ shape [n, m])]
+                  $ RetType []
+                  $ array_a
+                  $ shape [m, n]
+              ),
+              ( "scatter",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_l]
+                  [ (Consume, Array () Unique (shape [n]) t_a),
+                    (Observe, Array () Nonunique (shape [l]) (Prim $ Signed Int64)),
+                    (Observe, Array () Nonunique (shape [l]) t_a)
+                  ]
+                  $ RetType []
+                  $ Array () Unique (shape [n]) t_a
+              ),
+              ( "scatter_2d",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m, sp_l]
+                  [ (Consume, uarray_a $ shape [n, m]),
+                    (Observe, Array () Nonunique (shape [l]) (tupInt64 2)),
+                    (Observe, Array () Nonunique (shape [l]) t_a)
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [n, m]
+              ),
+              ( "scatter_3d",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m, sp_k, sp_l]
+                  [ (Consume, uarray_a $ shape [n, m, k]),
+                    (Observe, Array () Nonunique (shape [l]) (tupInt64 3)),
+                    (Observe, Array () Nonunique (shape [l]) t_a)
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [n, m, k]
+              ),
+              ( "zip",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [ (Observe, array_a (shape [n])),
+                    (Observe, array_b (shape [n]))
+                  ]
+                  $ RetType []
+                  $ tuple_uarray (Scalar t_a) (Scalar t_b)
+                  $ shape [n]
+              ),
+              ( "unzip",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [(Observe, tuple_arr (Scalar t_a) (Scalar t_b) $ shape [n])]
+                  $ RetType [] . Scalar . Record . M.fromList
+                  $ zip tupleFieldNames [array_a $ shape [n], array_b $ shape [n]]
+              ),
+              ( "hist_1d",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m]
+                  [ (Consume, Scalar $ Prim $ Signed Int64),
+                    (Observe, uarray_a $ shape [m]),
+                    (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, Array () Nonunique (shape [n]) (tupInt64 1)),
+                    (Observe, array_a (shape [n]))
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [m]
+              ),
+              ( "hist_2d",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m, sp_k]
+                  [ (Observe, Scalar $ Prim $ Signed Int64),
+                    (Consume, uarray_a $ shape [m, k]),
+                    (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, Array () Nonunique (shape [n]) (tupInt64 2)),
+                    (Observe, array_a (shape [n]))
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [m, k]
+              ),
+              ( "hist_3d",
+                IntrinsicPolyFun
+                  [tp_a, sp_n, sp_m, sp_k, sp_l]
+                  [ (Observe, Scalar $ Prim $ Signed Int64),
+                    (Consume, uarray_a $ shape [m, k, l]),
+                    (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, Array () Nonunique (shape [n]) (tupInt64 3)),
+                    (Observe, array_a (shape [n]))
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [m, k, l]
+              ),
+              ( "map",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_n]
+                  [ (Observe, Scalar t_a `arr` Scalar t_b),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  $ RetType []
+                  $ uarray_b
+                  $ shape [n]
+              ),
+              ( "reduce",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  $ RetType []
+                  $ Scalar t_a
+              ),
+              ( "reduce_comm",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  $ RetType []
+                  $ Scalar t_a
+              ),
+              ( "scan",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [n]
+              ),
+              ( "partition",
+                IntrinsicPolyFun
+                  [tp_a, sp_n]
+                  [ (Observe, Scalar (Prim $ Signed Int32)),
+                    (Observe, Scalar t_a `arr` Scalar (Prim $ Signed Int64)),
+                    (Observe, array_a $ shape [n])
+                  ]
+                  ( RetType [k] . Scalar $
+                      tupleRecord
+                        [ uarray_a $ shape [n],
+                          Array () Unique (shape [k]) (Prim $ Signed Int64)
+                        ]
+                  )
+              ),
+              ( "acc_write",
+                IntrinsicPolyFun
+                  [sp_k, tp_a]
+                  [ (Consume, Scalar $ accType array_ka),
+                    (Observe, Scalar (Prim $ Signed Int64)),
+                    (Observe, Scalar t_a)
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ accType array_ka
+              ),
+              ( "scatter_stream",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_k, sp_n]
+                  [ (Consume, uarray_ka),
+                    ( Observe,
+                      Scalar (accType array_ka)
+                        `carr` ( Scalar t_b
+                                   `arr` Scalar (accType $ array_a $ shape [k])
+                               )
+                    ),
+                    (Observe, array_b $ shape [n])
+                  ]
+                  $ RetType [] uarray_ka
+              ),
+              ( "hist_stream",
+                IntrinsicPolyFun
+                  [tp_a, tp_b, sp_k, sp_n]
+                  [ (Consume, uarray_a $ shape [k]),
+                    (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
+                    (Observe, Scalar t_a),
+                    ( Observe,
+                      Scalar (accType array_ka)
+                        `carr` ( Scalar t_b
+                                   `arr` Scalar (accType $ array_a $ shape [k])
+                               )
+                    ),
+                    (Observe, array_b $ shape [n])
+                  ]
+                  $ RetType []
+                  $ uarray_a
+                  $ shape [k]
+              ),
+              ( "jvp2",
+                IntrinsicPolyFun
+                  [tp_a, tp_b]
+                  [ (Observe, Scalar t_a `arr` Scalar t_b),
+                    (Observe, Scalar t_a),
+                    (Observe, Scalar t_a)
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord [Scalar t_b, Scalar t_b]
+              ),
+              ( "vjp2",
+                IntrinsicPolyFun
+                  [tp_a, tp_b]
+                  [ (Observe, Scalar t_a `arr` Scalar t_b),
+                    (Observe, Scalar t_a),
+                    (Observe, Scalar t_b)
+                  ]
+                  $ RetType []
+                  $ Scalar
+                  $ tupleRecord [Scalar t_b, Scalar t_a]
+              )
+            ]
+              ++
+              -- Experimental LMAD ones.
+              [ ( "flat_index_2d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n]
+                    [ (Observe, array_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64))
+                    ]
+                    $ RetType [m, k]
+                    $ array_a
+                    $ shape [m, k]
+                ),
+                ( "flat_update_2d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n, sp_k, sp_l]
+                    [ (Consume, uarray_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, array_a $ shape [k, l])
+                    ]
+                    $ RetType []
+                    $ uarray_a
+                    $ shape [n]
+                ),
+                ( "flat_index_3d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n]
+                    [ (Observe, array_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64))
+                    ]
+                    $ RetType [m, k, l]
+                    $ array_a
+                    $ shape [m, k, l]
+                ),
+                ( "flat_update_3d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n, sp_k, sp_l, sp_p]
+                    [ (Consume, uarray_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, array_a $ shape [k, l, p])
+                    ]
+                    $ RetType []
+                    $ uarray_a
+                    $ shape [n]
+                ),
+                ( "flat_index_4d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n]
+                    [ (Observe, array_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64))
+                    ]
+                    $ RetType [m, k, l, p]
+                    $ array_a
+                    $ shape [m, k, l, p]
+                ),
+                ( "flat_update_4d",
+                  IntrinsicPolyFun
+                    [tp_a, sp_n, sp_k, sp_l, sp_p, sp_q]
+                    [ (Consume, uarray_a $ shape [n]),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, Scalar (Prim $ Signed Int64)),
+                      (Observe, array_a $ shape [k, l, p, q])
+                    ]
+                    $ RetType []
+                    $ uarray_a
+                    $ shape [n]
+                )
+              ]
+          )
+  where
+    primOp =
       zipWith namify [20 ..] $
         map primFun (M.toList Primitive.primFuns)
           ++ map unOpFun Primitive.allUnOps
@@ -748,357 +1175,14 @@ intrinsics =
           -- The reason for the loop formulation is to ensure that we
           -- get a missing case warning if we forget a case.
           mapMaybe mkIntrinsicBinOp [minBound .. maxBound]
-          ++ [ ( "flatten",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m]
-                   [(Observe, Array () Nonunique (shape [n, m]) t_a)]
-                   $ RetType [k]
-                   $ Array () Nonunique (shape [k]) t_a
-               ),
-               ( "unflatten",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar $ Prim $ Signed Int64),
-                     (Observe, Scalar $ Prim $ Signed Int64),
-                     (Observe, Array () Nonunique (shape [n]) t_a)
-                   ]
-                   $ RetType [k, m]
-                   $ Array () Nonunique (shape [k, m]) t_a
-               ),
-               ( "concat",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m]
-                   [ (Observe, array_a $ shape [n]),
-                     (Observe, array_a $ shape [m])
-                   ]
-                   $ RetType [k]
-                   $ uarray_a
-                   $ shape [k]
-               ),
-               ( "rotate",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar $ Prim $ Signed Int64),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   $ RetType []
-                   $ array_a
-                   $ shape [n]
-               ),
-               ( "transpose",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m]
-                   [(Observe, array_a $ shape [n, m])]
-                   $ RetType []
-                   $ array_a
-                   $ shape [m, n]
-               ),
-               ( "scatter",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_l]
-                   [ (Consume, Array () Unique (shape [n]) t_a),
-                     (Observe, Array () Nonunique (shape [l]) (Prim $ Signed Int64)),
-                     (Observe, Array () Nonunique (shape [l]) t_a)
-                   ]
-                   $ RetType []
-                   $ Array () Unique (shape [n]) t_a
-               ),
-               ( "scatter_2d",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m, sp_l]
-                   [ (Consume, uarray_a $ shape [n, m]),
-                     (Observe, Array () Nonunique (shape [l]) (tupInt64 2)),
-                     (Observe, Array () Nonunique (shape [l]) t_a)
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [n, m]
-               ),
-               ( "scatter_3d",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m, sp_k, sp_l]
-                   [ (Consume, uarray_a $ shape [n, m, k]),
-                     (Observe, Array () Nonunique (shape [l]) (tupInt64 3)),
-                     (Observe, Array () Nonunique (shape [l]) t_a)
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [n, m, k]
-               ),
-               ( "zip",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ (Observe, array_a (shape [n])),
-                     (Observe, array_b (shape [n]))
-                   ]
-                   $ RetType []
-                   $ tuple_uarray (Scalar t_a) (Scalar t_b)
-                   $ shape [n]
-               ),
-               ( "unzip",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [(Observe, tuple_arr (Scalar t_a) (Scalar t_b) $ shape [n])]
-                   $ RetType [] . Scalar . Record . M.fromList
-                   $ zip tupleFieldNames [array_a $ shape [n], array_b $ shape [n]]
-               ),
-               ( "hist_1d",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m]
-                   [ (Consume, Scalar $ Prim $ Signed Int64),
-                     (Observe, uarray_a $ shape [m]),
-                     (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, Array () Nonunique (shape [n]) (tupInt64 1)),
-                     (Observe, array_a (shape [n]))
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [m]
-               ),
-               ( "hist_2d",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m, sp_k]
-                   [ (Observe, Scalar $ Prim $ Signed Int64),
-                     (Consume, uarray_a $ shape [m, k]),
-                     (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, Array () Nonunique (shape [n]) (tupInt64 2)),
-                     (Observe, array_a (shape [n]))
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [m, k]
-               ),
-               ( "hist_3d",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n, sp_m, sp_k, sp_l]
-                   [ (Observe, Scalar $ Prim $ Signed Int64),
-                     (Consume, uarray_a $ shape [m, k, l]),
-                     (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, Array () Nonunique (shape [n]) (tupInt64 3)),
-                     (Observe, array_a (shape [n]))
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [m, k, l]
-               ),
-               ( "map",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_n]
-                   [ (Observe, Scalar t_a `arr` Scalar t_b),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   $ RetType []
-                   $ uarray_b
-                   $ shape [n]
-               ),
-               ( "reduce",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   $ RetType []
-                   $ Scalar t_a
-               ),
-               ( "reduce_comm",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   $ RetType []
-                   $ Scalar t_a
-               ),
-               ( "scan",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [n]
-               ),
-               ( "partition",
-                 IntrinsicPolyFun
-                   [tp_a, sp_n]
-                   [ (Observe, Scalar (Prim $ Signed Int32)),
-                     (Observe, Scalar t_a `arr` Scalar (Prim $ Signed Int64)),
-                     (Observe, array_a $ shape [n])
-                   ]
-                   ( RetType [m] . Scalar $
-                       tupleRecord
-                         [ uarray_a $ shape [k],
-                           Array () Unique (shape [n]) (Prim $ Signed Int64)
-                         ]
-                   )
-               ),
-               ( "acc_write",
-                 IntrinsicPolyFun
-                   [sp_k, tp_a]
-                   [ (Consume, Scalar $ accType array_ka),
-                     (Observe, Scalar (Prim $ Signed Int64)),
-                     (Observe, Scalar t_a)
-                   ]
-                   $ RetType []
-                   $ Scalar
-                   $ accType array_ka
-               ),
-               ( "scatter_stream",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_k, sp_n]
-                   [ (Consume, uarray_ka),
-                     ( Observe,
-                       Scalar (accType array_ka)
-                         `carr` ( Scalar t_b
-                                    `arr` Scalar (accType $ array_a $ shape [k])
-                                )
-                     ),
-                     (Observe, array_b $ shape [n])
-                   ]
-                   $ RetType [] uarray_ka
-               ),
-               ( "hist_stream",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b, sp_k, sp_n]
-                   [ (Consume, uarray_a $ shape [k]),
-                     (Observe, Scalar t_a `arr` (Scalar t_a `arr` Scalar t_a)),
-                     (Observe, Scalar t_a),
-                     ( Observe,
-                       Scalar (accType array_ka)
-                         `carr` ( Scalar t_b
-                                    `arr` Scalar (accType $ array_a $ shape [k])
-                                )
-                     ),
-                     (Observe, array_b $ shape [n])
-                   ]
-                   $ RetType []
-                   $ uarray_a
-                   $ shape [k]
-               ),
-               ( "jvp2",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b]
-                   [ (Observe, Scalar t_a `arr` Scalar t_b),
-                     (Observe, Scalar t_a),
-                     (Observe, Scalar t_a)
-                   ]
-                   $ RetType []
-                   $ Scalar
-                   $ tupleRecord [Scalar t_b, Scalar t_b]
-               ),
-               ( "vjp2",
-                 IntrinsicPolyFun
-                   [tp_a, tp_b]
-                   [ (Observe, Scalar t_a `arr` Scalar t_b),
-                     (Observe, Scalar t_a),
-                     (Observe, Scalar t_b)
-                   ]
-                   $ RetType []
-                   $ Scalar
-                   $ tupleRecord [Scalar t_b, Scalar t_a]
-               )
-             ]
-          ++
-          -- Experimental LMAD ones.
-          [ ( "flat_index_2d",
-              IntrinsicPolyFun
-                [tp_a, sp_n]
-                [ (Observe, array_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64))
-                ]
-                $ RetType [m, k]
-                $ array_a
-                $ shape [m, k]
-            ),
-            ( "flat_update_2d",
-              IntrinsicPolyFun
-                [tp_a, sp_n, sp_k, sp_l]
-                [ (Consume, uarray_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, array_a $ shape [k, l])
-                ]
-                $ RetType []
-                $ uarray_a
-                $ shape [n]
-            ),
-            ( "flat_index_3d",
-              IntrinsicPolyFun
-                [tp_a, sp_n]
-                [ (Observe, array_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64))
-                ]
-                $ RetType [m, k, l]
-                $ array_a
-                $ shape [m, k, l]
-            ),
-            ( "flat_update_3d",
-              IntrinsicPolyFun
-                [tp_a, sp_n, sp_k, sp_l, sp_p]
-                [ (Consume, uarray_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, array_a $ shape [k, l, p])
-                ]
-                $ RetType []
-                $ uarray_a
-                $ shape [n]
-            ),
-            ( "flat_index_4d",
-              IntrinsicPolyFun
-                [tp_a, sp_n]
-                [ (Observe, array_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64))
-                ]
-                $ RetType [m, k, l, p]
-                $ array_a
-                $ shape [m, k, l, p]
-            ),
-            ( "flat_update_4d",
-              IntrinsicPolyFun
-                [tp_a, sp_n, sp_k, sp_l, sp_p, sp_q]
-                [ (Consume, uarray_a $ shape [n]),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, Scalar (Prim $ Signed Int64)),
-                  (Observe, array_a $ shape [k, l, p, q])
-                ]
-                $ RetType []
-                $ uarray_a
-                $ shape [n]
-            )
-          ]
-  where
+
+    intrinsicStart = 1 + baseTag (fst $ last primOp)
+
+    findOp op =
+      qualName $ maybe bad fst $ find ((op ==) . baseString . fst) primOp
+      where
+        bad = error $ "Intrinsics making, findOp: \"" <> op <> "\""
+
     [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a = TypeVar () Nonunique (qualName a) []
@@ -1113,7 +1197,14 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape = Shape . map (NamedSize . qualName)
+    shape =
+      Shape
+        . map
+          (flip sizeFromName mempty . qualName)
+
+    i64 = Scalar $ Prim $ Signed Int64
+
+    sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
 
     tuple_arr x y s =
       Array
@@ -1126,11 +1217,11 @@ intrinsics =
     arr x y = Scalar $ Arrow mempty Unnamed Observe x (RetType [] y)
     carr x y = Scalar $ Arrow mempty Unnamed Consume x (RetType [] y)
 
-    array_ka = Array () Nonunique (Shape [NamedSize $ qualName k]) t_a
-    uarray_ka = Array () Unique (Shape [NamedSize $ qualName k]) t_a
+    array_ka = Array () Nonunique (Shape [sizeFromName (qualName k) mempty]) t_a
+    uarray_ka = Array () Unique (Shape [sizeFromName (qualName k) mempty]) t_a
 
     accType t =
-      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t mempty]
+      TypeVar () Unique (qualName (fst intrinsicAcc)) [TypeArgType t]
 
     namify i (x, y) = (VName (nameFromString x) i, y)
 
@@ -1370,6 +1461,154 @@ progHoles = foldMap holesInDec . progDecs
       modify ((locOf loc, toStruct t) :)
       pure e
     onExp e = astMap (identityMapper {mapOnExp = onExp}) e
+
+-- | Strip semantically irrelevant stuff from the top level of
+-- expression.  This is used to provide a slightly fuzzy notion of
+-- expression equality.
+--
+-- Ideally we'd implement unification on a simpler representation that
+-- simply didn't allow us.
+stripExp :: Exp -> Maybe Exp
+stripExp (Parens e _) = stripExp e `mplus` Just e
+stripExp (Assert _ e _ _) = stripExp e `mplus` Just e
+stripExp (Attr _ e _) = stripExp e `mplus` Just e
+stripExp (Ascript e _ _) = stripExp e `mplus` Just e
+stripExp _ = Nothing
+
+similarSlices :: Slice -> Slice -> Maybe [(Exp, Exp)]
+similarSlices slice1 slice2
+  | length slice1 == length slice2 = do
+      concat <$> zipWithM match slice1 slice2
+  | otherwise = Nothing
+  where
+    match (DimFix e1) (DimFix e2) = Just [(e1, e2)]
+    match (DimSlice a1 b1 c1) (DimSlice a2 b2 c2) =
+      concat <$> sequence [pair (a1, a2), pair (b1, b2), pair (c1, c2)]
+    match _ _ = Nothing
+    pair (Nothing, Nothing) = Just []
+    pair (Just x, Just y) = Just [(x, y)]
+    pair _ = Nothing
+
+-- | If these two expressions are structurally similar at top level as
+-- sizes, produce their subexpressions (which are not necessarily
+-- similar, but you can check for that!).  This is the machinery
+-- underlying expresssion unification.
+similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
+similarExps e1 e2 | e1 == e2 = Just []
+similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
+similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
+similarExps
+  (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
+  (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
+    | op1 == op2 = Just [(x1, x2), (y1, y2)]
+similarExps (AppExp (Apply f1 args1 _) _) (AppExp (Apply f2 args2 _) _)
+  | f1 == f2 = Just $ zip (map snd $ NE.toList args1) (map snd $ NE.toList args2)
+similarExps (AppExp (Index arr1 slice1 _) _) (AppExp (Index arr2 slice2 _) _)
+  | arr1 == arr2,
+    length slice1 == length slice2 =
+      similarSlices slice1 slice2
+similarExps (TupLit es1 _) (TupLit es2 _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (RecordLit fs1 _) (RecordLit fs2 _)
+  | length fs1 == length fs2 =
+      zipWithM onFields fs1 fs2
+  where
+    onFields (RecordFieldExplicit n1 fe1 _) (RecordFieldExplicit n2 fe2 _)
+      | n1 == n2 = Just (fe1, fe2)
+    onFields (RecordFieldImplicit vn1 ty1 _) (RecordFieldImplicit vn2 ty2 _) =
+      Just (Var (qualName vn1) ty1 mempty, Var (qualName vn2) ty2 mempty)
+    onFields _ _ = Nothing
+similarExps (ArrayLit es1 _ _) (ArrayLit es2 _ _)
+  | length es1 == length es2 =
+      Just $ zip es1 es2
+similarExps (Project field1 e1 _ _) (Project field2 e2 _ _)
+  | field1 == field2 =
+      Just [(e1, e2)]
+similarExps (Negate e1 _) (Negate e2 _) =
+  Just [(e1, e2)]
+similarExps (Not e1 _) (Not e2 _) =
+  Just [(e1, e2)]
+similarExps (Constr n1 es1 _ _) (Constr n2 es2 _ _)
+  | length es1 == length es2,
+    n1 == n2 =
+      Just $ zip es1 es2
+similarExps (Update e1 slice1 e'1 _) (Update e2 slice2 e'2 _) =
+  ([(e1, e2), (e'1, e'2)] ++) <$> similarSlices slice1 slice2
+similarExps (RecordUpdate e1 names1 e'1 _ _) (RecordUpdate e2 names2 e'2 _ _)
+  | names1 == names2 =
+      Just [(e1, e2), (e'1, e'2)]
+similarExps (OpSection op1 _ _) (OpSection op2 _ _)
+  | op1 == op2 = Just []
+similarExps (OpSectionLeft op1 _ x1 _ _ _) (OpSectionLeft op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (OpSectionRight op1 _ x1 _ _ _) (OpSectionRight op2 _ x2 _ _ _)
+  | op1 == op2 = Just [(x1, x2)]
+similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
+  | names1 == names2 = Just []
+similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
+  similarSlices slice1 slice2
+similarExps _ _ = Nothing
+
+-- | An identifier with type- and aliasing information.
+type Ident = IdentBase Info VName
+
+-- | An index with type information.
+type DimIndex = DimIndexBase Info VName
+
+-- | A slice with type information.
+type Slice = SliceBase Info VName
+
+-- | An expression with type information.
+type Exp = ExpBase Info VName
+
+-- | An application expression with type information.
+type AppExp = AppExpBase Info VName
+
+-- | A pattern with type information.
+type Pat = PatBase Info VName
+
+-- | An constant declaration with type information.
+type ValBind = ValBindBase Info VName
+
+-- | A type binding with type information.
+type TypeBind = TypeBindBase Info VName
+
+-- | A type-checked module binding.
+type ModBind = ModBindBase Info VName
+
+-- | A type-checked module type binding.
+type SigBind = SigBindBase Info VName
+
+-- | A type-checked module expression.
+type ModExp = ModExpBase Info VName
+
+-- | A type-checked module parameter.
+type ModParam = ModParamBase Info VName
+
+-- | A type-checked module type expression.
+type SigExp = SigExpBase Info VName
+
+-- | A type-checked declaration.
+type Dec = DecBase Info VName
+
+-- | A type-checked specification.
+type Spec = SpecBase Info VName
+
+-- | An Futhark program with type information.
+type Prog = ProgBase Info VName
+
+-- | A known type arg with shape annotations.
+type StructTypeArg = TypeArg Size
+
+-- | A type-checked type parameter.
+type TypeParam = TypeParamBase VName
+
+-- | A known scalar type with no shape annotations.
+type ScalarType = ScalarTypeBase ()
+
+-- | A type-checked case (of a match expression).
+type Case = CaseBase Info VName
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (Shape Name) ()

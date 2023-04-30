@@ -48,6 +48,7 @@ import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.Entry (visibleTypes)
 import Futhark.Internalise.Exps qualified as Exps
+import Futhark.Internalise.FullNormalise qualified as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
@@ -64,14 +65,16 @@ internaliseProg ::
 internaliseProg config prog = do
   maybeLog "Defunctorising"
   prog_decs <- Defunctorise.transformProg prog
+  maybeLog "Full Normalising"
+  prog_decs' <- FullNormalise.transformProg prog_decs
   maybeLog "Monomorphising"
-  prog_decs' <- Monomorphise.transformProg prog_decs
+  prog_decs'' <- Monomorphise.transformProg prog_decs'
   maybeLog "Lifting lambdas"
-  prog_decs'' <- LiftLambdas.transformProg prog_decs'
+  prog_decs''' <- LiftLambdas.transformProg prog_decs''
   maybeLog "Defunctionalising"
-  prog_decs''' <- Defunctionalise.transformProg prog_decs''
+  prog_decs'''' <- Defunctionalise.transformProg prog_decs'''
   maybeLog "Converting to core IR"
-  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs'''
+  Exps.transformProg (futharkSafe config) (visibleTypes prog) prog_decs''''
   where
     verbose = fst (futharkVerbose config) > NotVerbose
     maybeLog s

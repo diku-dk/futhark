@@ -9,13 +9,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Arbitrary expressions of type `i64` are now allowed as sizes.  Work
+  by Lubin Bailly.
+
 ### Removed
 
 ### Changed
 
+* The prelude functions `flatten` and `unflatten` (and their
+  multidimensional variants) have more restrictive types.
+
+### Fixed
+
+* Type checker crash on some ill-typed programs (#1926).
+
+## [0.24.3]
+
 ### Fixed
 
 * Certain cases of noninlined functions in `multicore` backend.
+
+* Defunctionalisation of `match` where the constructors carry
+  functions (#1917).
+
+* Shape coercions involving sum types (#1918).  This required
+  tightening the rules a little bit, so some coercions involving
+  anonymous sizes may now be rejected.  Add expected sizes as needed.
+
+* Defunctionalisation somtimes forgot about sizes bound at top level
+  (#1920).
 
 ## [0.24.2]
 

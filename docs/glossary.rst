@@ -73,11 +73,13 @@ documentation and in compiler output.
 
        * ``[n]bool``
        * ``([n]bool, bool -> [n]bool)``
+       * ``([n]bool, [n+1]bool)``
 
      The following do not:
 
        * ``[n+1]bool``
        * ``bool -> [n]bool``
+       * ``[n]bool -> bool``
 
    Consumption
 
@@ -296,6 +298,20 @@ documentation and in compiler output.
 
      The symbolic size of an array dimension or :term:`abstract type`.
 
+   Size expression
+
+     An expression that occurs as the size of an array or size
+     argument.  For example, in the type ``[x+2]i32``, ``x+2`` is a
+     size expression.  Size expressions can occur syntactically in
+     source code, or due to parameter substitution when applying a
+     :term:`size-dependent function`.
+
+   Size-dependent function
+
+     A function where the size of the result depends on the values of
+     the parameters.  The function ``iota`` is perhaps the simplest
+     example.
+
    Size types
    Size-dependent types
 
@@ -385,7 +401,9 @@ documentation and in compiler output.
    Unknown size
 
      A size produced by invoking a function whose result type contains
-     an existentially quantified size, such as ``filter``.
+     an existentially quantified size, such as ``filter``, or because
+     the original :term:`size expression` involves variables that have
+     gone out of scope.
 
    Value
 

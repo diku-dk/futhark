@@ -541,8 +541,8 @@ prettyShape (Shape ds) =
   mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg Size -> DocM Html
-typeArgHtml (TypeArgDim d _) = dimDeclHtml d
-typeArgHtml (TypeArgType t _) = typeHtml t
+typeArgHtml (TypeArgDim d) = dimDeclHtml d
+typeArgHtml (TypeArgType t) = typeHtml t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty
@@ -641,6 +641,7 @@ typeExpHtml e = case e of
         t' <- typeExpHtml t
         pure $ toHtml (nameToString name) <> ": " <> t'
   TEVar name _ -> qualNameHtml name
+  TEParens te _ -> parens <$> typeExpHtml te
   TEApply t arg _ -> do
     t' <- typeExpHtml t
     arg' <- typeArgExpHtml arg
@@ -705,8 +706,7 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ dest
 
 dimDeclHtml :: Size -> DocM Html
-dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
+dimDeclHtml (SizeExpr e) = pure $ brackets $ toHtml $ prettyString e
 dimDeclHtml AnySize {} = pure $ brackets mempty
 
 dimExpHtml :: SizeExp Info VName -> DocM Html

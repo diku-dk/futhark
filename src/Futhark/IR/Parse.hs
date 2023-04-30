@@ -12,7 +12,7 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (zipWith4)
+import Data.List (singleton, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as S
@@ -54,13 +54,13 @@ pName =
 pVName :: Parser VName
 pVName = lexeme $ do
   (s, tag) <-
-    satisfy constituent
+    choice [exprBox, singleton <$> satisfy constituent]
       `manyTill_` try pTag
       <?> "variable name"
-  pure $ VName (nameFromString s) tag
+  pure $ VName (nameFromString $ concat s) tag
   where
-    pTag =
-      "_" *> L.decimal <* notFollowedBy (satisfy constituent)
+    pTag = "_" *> L.decimal <* notFollowedBy (satisfy constituent)
+    exprBox = ("<{" <>) . (<> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
 pBool :: Parser Bool
 pBool = choice [keyword "true" $> True, keyword "false" $> False]
