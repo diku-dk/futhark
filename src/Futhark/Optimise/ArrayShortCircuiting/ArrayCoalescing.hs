@@ -526,7 +526,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_
                    (MemBlock tp return_shp pat_mem $ resultSlice pat_ixf)
                    mempty
                    & M.singleton return_name
-                   & flip (addInvAliassesVarTab td_env) return_name
+                   & flip (addInvAliasesVarTab td_env) return_name
                ) of
             (False, Just vtab) ->
               ( active
@@ -545,7 +545,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body (active, inhb) (PatElem pat_name (_
                        (MemBlock tp return_shp trans_mem $ resultSlice trans_ixf)
                        mempty
                        & M.singleton return_name
-                       & flip (addInvAliassesVarTab td_env) return_name
+                       & flip (addInvAliasesVarTab td_env) return_name
                ) of
             (False, Just vtab) ->
               let opts =
@@ -1008,7 +1008,7 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
     foldFunOptimPromotion ((act, inhb), succc) ((b, m_b), (a, m_a), (_r, m_r), (b_i, m_i))
       | m_r == m_i,
         Just info <- M.lookup m_i act,
-        Just vtab_i <- addInvAliassesVarTab td_env (vartab info) b_i =
+        Just vtab_i <- addInvAliasesVarTab td_env (vartab info) b_i =
           Exc.assert
             (m_r == m_b && m_a == m_b)
             ((M.insert m_b (info {vartab = vtab_i}) act, inhb), succc)
@@ -1020,7 +1020,7 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
         Just info_a0 <- M.lookup m_a act,
         Just info_i <- M.lookup m_i act,
         M.member m_r succc,
-        Just vtab_i <- addInvAliassesVarTab td_env (vartab info_i) b_i,
+        Just vtab_i <- addInvAliasesVarTab td_env (vartab info_i) b_i,
         [Just info_b, Just info_a] <- map translateIxFnInScope [(b, info_b0), (a, info_a0)] =
           let info_b' = info_b {optdeps = M.insert b_i m_i $ optdeps info_b}
               info_a' = info_a {optdeps = M.insert b_i m_i $ optdeps info_a}
@@ -1369,7 +1369,7 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
                       then M.empty
                       else M.insert x m_x x_deps
                   vtab = M.singleton b mem_info
-                  mvtab = addInvAliassesVarTab td_env vtab b
+                  mvtab = addInvAliasesVarTab td_env vtab b
 
                   is_inhibited = case M.lookup m_b $ inhibited td_env of
                     Just nms -> m_yx `nameIn` nms
