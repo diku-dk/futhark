@@ -140,7 +140,8 @@ mkCoalsTabProg ::
   ComputeScalarTableOnOp rep ->
   Prog (Aliases rep) ->
   m (M.Map Name CoalsTab)
-mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp = fmap M.fromList . mapM onFun . progFuns
+mkCoalsTabProg (_, lutab_prog) r computeScalarOnOp =
+  fmap M.fromList . mapM onFun . progFuns
   where
     onFun fun@(FunDef _ _ fname _ fpars body) = do
       -- First compute last-use information
@@ -595,7 +596,9 @@ fixPointCoalesce ::
   ShortCircuitM rep CoalsTab
 fixPointCoalesce lutab fpar bdy topenv = do
   buenv <- mkCoalsTabStms lutab (bodyStms bdy) topenv (emptyBotUpEnv {inhibit = inhibited topenv})
-  let (succ_tab, actv_tab, inhb_tab) = (successCoals buenv, activeCoals buenv, inhibit buenv)
+  let succ_tab = successCoals buenv
+      actv_tab = activeCoals buenv
+      inhb_tab = inhibit buenv
       -- Allow short-circuiting function parameters that are unique and have
       -- matching index functions, otherwise mark as failed
       handleFunctionParams (a, i, s) (_, u, MemBlock _ _ m ixf) =
@@ -615,12 +618,12 @@ fixPointCoalesce lutab fpar bdy topenv = do
 
       (succ_tab'', failed_optdeps) = fixPointFilterDeps succ_tab' M.empty
       inhb_tab'' = M.unionWith (<>) failed_optdeps inhb_tab'
-   in if not $ M.null actv_tab'
-        then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ show (M.keys actv_tab'))
-        else
-          if M.null $ inhb_tab'' `M.difference` inhibited topenv
-            then pure succ_tab''
-            else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''})
+  if not $ M.null actv_tab'
+    then error ("COALESCING ROOT: BROKEN INV, active not empty: " ++ show (M.keys actv_tab'))
+    else
+      if M.null $ inhb_tab'' `M.difference` inhibited topenv
+        then pure succ_tab''
+        else fixPointCoalesce lutab fpar bdy (topenv {inhibited = inhb_tab''})
   where
     fixPointFilterDeps :: CoalsTab -> InhibitTab -> (CoalsTab, InhibitTab)
     fixPointFilterDeps coaltab inhbtab =
@@ -1092,74 +1095,71 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
 -- The case of in-place update:
 --   @let x' = x with slice <- elm@
 mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (Update safety x _ _elm))) td_env bu_env
-  | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
-      do
-        -- (a) filter by the 3rd safety for @elm@ and @x'@
-        let (actv, inhbt) = recordMemRefUses td_env bu_env stm
-            -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
-            (actv', inhbt') =
-              case M.lookup m_x actv of
-                Nothing -> (actv, inhbt)
-                Just info ->
-                  case M.lookup (patElemName x') (vartab info) of
-                    Nothing ->
-                      markFailedCoal (actv, inhbt) m_x
-                    Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
-                      case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
-                        Just fv_subs
-                          | isInScope td_env (dstmem info) ->
-                              let coal_etry_x = Coalesced k mblk fv_subs
-                                  info' =
-                                    info
-                                      { vartab =
-                                          M.insert x coal_etry_x $
-                                            M.insert (patElemName x') coal_etry_x (vartab info)
-                                      }
-                               in (M.insert m_x info' actv, inhbt)
-                        _ ->
-                          markFailedCoal (actv, inhbt) m_x
+  | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat = do
+      -- (a) filter by the 3rd safety for @elm@ and @x'@
+      let (actv, inhbt) = recordMemRefUses td_env bu_env stm
+          -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
+          (actv', inhbt') =
+            case M.lookup m_x actv of
+              Nothing -> (actv, inhbt)
+              Just info ->
+                case M.lookup (patElemName x') (vartab info) of
+                  Nothing -> markFailedCoal (actv, inhbt) m_x
+                  Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
+                    case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
+                      Just fv_subs
+                        | isInScope td_env (dstmem info) ->
+                            let coal_etry_x = Coalesced k mblk fv_subs
+                                info' =
+                                  info
+                                    { vartab =
+                                        M.insert x coal_etry_x $
+                                          M.insert (patElemName x') coal_etry_x (vartab info)
+                                    }
+                             in (M.insert m_x info' actv, inhbt)
+                      _ ->
+                        markFailedCoal (actv, inhbt) m_x
 
-        -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- if safety == Unsafe then mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'} else pure actv'
-        pure $
-          bu_env {activeCoals = actv'', inhibit = inhbt'}
+      -- (c) this stm is also a potential source for coalescing, so process it
+      actv'' <-
+        if safety == Unsafe
+          then mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'}
+          else pure actv'
+      pure $ bu_env {activeCoals = actv'', inhibit = inhbt'}
 
 -- The case of flat in-place update:
 --   @let x' = x with flat-slice <- elm@
 mkCoalsTabStm lutab stm@(Let pat@(Pat [x']) _ (BasicOp (FlatUpdate x _ _elm))) td_env bu_env
-  | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat =
-      do
-        -- (a) filter by the 3rd safety for @elm@ and @x'@
-        let (actv, inhbt) = recordMemRefUses td_env bu_env stm
-            -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
-            (actv', inhbt') =
-              case M.lookup m_x actv of
-                Nothing -> (actv, inhbt)
-                Just info ->
-                  case M.lookup (patElemName x') (vartab info) of
-                    Nothing ->
-                      -- error "In ArrayCoalescing.hs, fun mkCoalsTabStm, case in-place update!"
-                      -- this case should not happen, but if it can that just fail conservatively
-                      markFailedCoal (actv, inhbt) m_x
-                    Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
-                      case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
-                        Just fv_subs
-                          | isInScope td_env (dstmem info) ->
-                              let coal_etry_x = Coalesced k mblk fv_subs
-                                  info' =
-                                    info
-                                      { vartab =
-                                          M.insert x coal_etry_x $
-                                            M.insert (patElemName x') coal_etry_x (vartab info)
-                                      }
-                               in (M.insert m_x info' actv, inhbt)
-                        _ ->
-                          markFailedCoal (actv, inhbt) m_x
+  | [(_, MemBlock _ _ m_x _)] <- getArrMemAssoc pat = do
+      -- (a) filter by the 3rd safety for @elm@ and @x'@
+      let (actv, inhbt) = recordMemRefUses td_env bu_env stm
+          -- (b) if @x'@ is in active coalesced table, then add an entry for @x@ as well
+          (actv', inhbt') =
+            case M.lookup m_x actv of
+              Nothing -> (actv, inhbt)
+              Just info ->
+                case M.lookup (patElemName x') (vartab info) of
+                  -- this case should not happen, but if it can that
+                  -- just fail conservatively
+                  Nothing -> markFailedCoal (actv, inhbt) m_x
+                  Just (Coalesced k mblk@(MemBlock _ _ _ x_indfun) _) ->
+                    case freeVarSubstitutions (scope td_env) (scals bu_env) x_indfun of
+                      Just fv_subs
+                        | isInScope td_env (dstmem info) ->
+                            let coal_etry_x = Coalesced k mblk fv_subs
+                                info' =
+                                  info
+                                    { vartab =
+                                        M.insert x coal_etry_x $
+                                          M.insert (patElemName x') coal_etry_x (vartab info)
+                                    }
+                             in (M.insert m_x info' actv, inhbt)
+                      _ ->
+                        markFailedCoal (actv, inhbt) m_x
 
-        -- (c) this stm is also a potential source for coalescing, so process it
-        actv'' <- mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'}
-        pure $
-          bu_env {activeCoals = actv'', inhibit = inhbt'}
+      -- (c) this stm is also a potential source for coalescing, so process it
+      actv'' <- mkCoalsHelper3PatternMatch stm lutab td_env {inhibited = inhbt'} bu_env {activeCoals = actv'}
+      pure $ bu_env {activeCoals = actv'', inhibit = inhbt'}
 --
 mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
   error $ "In ArrayCoalescing.hs, fun mkCoalsTabStm, illegal pattern for in-place update: " ++ show pat
@@ -1167,12 +1167,7 @@ mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
 mkCoalsTabStm lutab stm@(Let pat _ (Op op)) td_env bu_env = do
   -- Process body
   on_op <- asks onOp
-  activeCoals' <-
-    mkCoalsHelper3PatternMatch
-      stm
-      lutab
-      td_env
-      bu_env
+  activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env
   let bu_env' = bu_env {activeCoals = activeCoals'}
   on_op lutab pat op td_env bu_env'
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
@@ -1181,8 +1176,6 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --      the memory referenced in stm are added to memrefs::dstrefs
   --      in corresponding coal-tab entries.
   let (activeCoals', inhibit') = recordMemRefUses td_env bu_env stm
-      -- mkCoalsHelper1FilterActive pat (freeIn e) (scope td_env) (scals bu_env)
-      --                           (activeCoals bu_env) (inhibit bu_env)
 
       --  ii) promote any of the entries in @activeCoals@ to @successCoals@ as long as
       --        - this statement defined a variable consumed in a coalesced statement
