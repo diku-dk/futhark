@@ -45,9 +45,9 @@ import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Prelude
 
-type ScopeTab rep = Scope (Aliases rep)
--- ^ maps array-variable names to various info, including
+-- | maps array-variable names to various info, including
 --   types, memory block and index function, etc.
+type ScopeTab rep = Scope (Aliases rep)
 
 -- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (TPrimExp Int64 VName)
@@ -164,20 +164,20 @@ data CoalsEntry = CoalsEntry
     memrefs :: MemRefs
   }
 
+-- | the allocatted memory blocks
 type AllocTab = M.Map VName Space
--- ^ the allocatted memory blocks
 
+-- | maps a variable name to its PrimExp scalar expression
 type ScalarTab = M.Map VName (PrimExp VName)
--- ^ maps a variable name to its PrimExp scalar expression
 
-type CoalsTab = M.Map VName CoalsEntry
--- ^ maps a memory-block name to a 'CoalsEntry'. Among other things, it contains
+-- | maps a memory-block name to a 'CoalsEntry'. Among other things, it contains
 --   @vartab@, a map in which each variable associated to that memory block is
 --   bound to its 'Coalesced' info.
+type CoalsTab = M.Map VName CoalsEntry
 
-type InhibitTab = M.Map VName Names
--- ^ inhibited memory-block mergings from the key (memory block)
+-- | inhibited memory-block mergings from the key (memory block)
 --   to the value (set of memory blocks).
+type InhibitTab = M.Map VName Names
 
 data BotUpEnv = BotUpEnv
   { -- | maps scalar variables to theirs PrimExp expansion
