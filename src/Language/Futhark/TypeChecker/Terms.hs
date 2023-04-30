@@ -1219,9 +1219,15 @@ checkApply
                         (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
                       )
                   (False, False) ->
+                    -- We strip the argument expression to make it
+                    -- nicer (in particular, to remove parens).
                     pure
                       ( Nothing,
-                        (`M.lookup` M.singleton pname' (ExpSubst argexp))
+                        ( `M.lookup`
+                            M.singleton
+                              pname'
+                              (ExpSubst (fromMaybe argexp $ stripExp argexp))
+                        )
                       )
           _ -> pure (Nothing, const Nothing)
 
