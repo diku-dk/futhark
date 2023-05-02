@@ -535,34 +535,62 @@ transformDistStm segments env (DistStm inps res stm) = do
           is_else <- letExp "is_else" $ BasicOp $ Index inds $ fullSlice inds_t [DimSlice size_then size_else (constant (1 :: Int64))]
 
           -- Split the inputs of the 'then' and 'else' branches.
-          -- TODO: Handle irreglar arrays
           let splitInput is v =
                 (v,) <$> case M.lookup v $ inputReps inps env of
                   Just (Regular arr) -> do
+                    -- In the regular case we just take the elements of the array given by 'is'
                     n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
                     arr' <- letExp "split_arr" <=< segMap (Solo n) $ \(Solo i) -> do
                       idx <- letExp "idx" =<< eIndex is [eSubExp i]
                       subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
                     pure $ Regular arr'
-                  Just (Irregular _) -> error "under construction"
+                  Just (Irregular (IrregularRep segs flags offsets elems)) -> do
+                    -- In the irregular case we take the elements of the 'segs' array given by 'is' like in the regular case
+                    n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
+                    segs' <- letExp "split_segs" <=< segMap (Solo n) $ \(Solo i) -> do
+                      idx <- letExp "idx" =<< eIndex is [eSubExp i]
+                      subExpsRes . pure <$> (letSubExp "segs" =<< eIndex segs [toExp idx])
+                    -- From this we can calculate the offsets and total number of elements
+                    (_, offsets', num_elems) <- exScanAndSum segs'
+                    -- We also need the inner indices of the new segments
+                    (_, _, ii1) <- doRepIota segs'
+                    (_, _, ii2) <- doSegIota segs'
+                    -- With this we can take the elements we need from 'elems' and 'flags'
+                    -- For each index 'i', we roughly:
+                    -- Get the offset index of the segment we want to copy by indexing 'offsets'
+                    -- through 'inds' further through 'ii1' i.e. 'offset = offsets[is[ii1[i]]]'
+                    -- We then add 'ii2[i]' to 'offset' and use that to index 'elems' and 'flags'.
+                    ~[flags', elems'] <- letTupExp "split_flags_elems" <=< segMap (Solo num_elems) $ \(Solo i) -> do
+                      offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp i]]]
+                      idx <- letExp "idx" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp i])
+                      flags_split <- letSubExp "flags" =<< eIndex flags [toExp idx]
+                      elems_split <- letSubExp "elems" =<< eIndex elems [toExp idx]
+                      pure $ subExpsRes [flags_split, elems_split]
+                    pure $
+                      Irregular $
+                        IrregularRep
+                          { irregularSegments = segs',
+                            irregularFlags = flags',
+                            irregularOffsets = offsets',
+                            irregularElems = elems'
+                          }
                   Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
-              mkInpsAndEnv is body = do
+          let distributeBranch is body = do
                 (vs, reps) <- mapAndUnzipM (splitInput is) (namesToList $ freeIn body)
                 let inputs = do
                       (v, i) <- zip vs [0 ..]
                       let t = distInputType $ fromMaybe (error "bad lookup") $ L.lookup v inps
                       pure (v, DistInput (ResTag i) t)
                 let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
-                pure (inputs, env')
-          (inputs_then, env_then) <- mkInpsAndEnv is_then body_then
-          (inputs_else, env_else) <- mkInpsAndEnv is_else body_else
-          scope <- askScope
-          let (inputs_then', dstms_then) = distributeBody scope w inputs_then body_then
-          let (inputs_else', dstms_else) = distributeBody scope w inputs_else body_else
+                scope <- askScope
+                let (inputs', dstms) = distributeBody scope w inputs body
+                pure (inputs', env', dstms)
 
-          -- Lift the 'then' and 'else' bodies
-          lifted_body_then <- liftBody size_then inputs_then' env_then dstms_then (bodyResult body_then)
-          lifted_body_else <- liftBody size_else inputs_else' env_else dstms_else (bodyResult body_else)
+          -- Distribute and lift the 'then' and 'else' branches
+          (inputs_then, env_then, dstms_then) <- distributeBranch is_then body_then
+          (inputs_else, env_else, dstms_else) <- distributeBranch is_else body_else
+          lifted_body_then <- liftBody size_then inputs_then env_then dstms_then (bodyResult body_then)
+          lifted_body_else <- liftBody size_else inputs_else env_else dstms_else (bodyResult body_else)
 
           -- Write the results of the 'then' and 'else' branches back to their original positions.
           let resultTypes = map ((\(DistType n _ (Prim t)) -> Array t (Shape [n]) NoUniqueness) . distResType) res
