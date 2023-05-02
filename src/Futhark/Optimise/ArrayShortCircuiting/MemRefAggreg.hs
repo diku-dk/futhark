@@ -139,6 +139,12 @@ getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSl
        in case getDirAliasedIxfn td_env coal_tab v of
             Nothing -> Just ([r1], [r1])
             Just r2 -> Just ([r1], [r1, r2])
+-- getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp bop)) =
+--   let wrt = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
+--    in trace ("getUseBla: " <> show bop) $ pure (wrt, wrt)
+getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp Iota {})) =
+  let wrt = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
+   in pure (wrt, wrt)
 getUseSumFromStm _ _ (Let Pat {} _ BasicOp {}) = Just ([], [])
 getUseSumFromStm _ _ (Let Pat {} _ (Op (Alloc _ _))) = Just ([], [])
 getUseSumFromStm _ _ _ =
