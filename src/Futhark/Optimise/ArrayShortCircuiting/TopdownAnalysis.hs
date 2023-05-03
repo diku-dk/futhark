@@ -185,8 +185,11 @@ updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
       nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
-updateTopdownEnv env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
-  env {td_asserts = se : td_asserts env}
+updateTopdownEnv env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
+  env
+    { scope = scope env <> scopeOf stm,
+      td_asserts = se : td_asserts env
+    }
 updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
       let ixfn_inv = getInvAliasFromExp e

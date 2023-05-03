@@ -161,7 +161,12 @@ data CoalsEntry = CoalsEntry
     optdeps :: M.Map VName VName,
     -- | Access summaries of uses and writes of destination and source
     -- respectively.
-    memrefs :: MemRefs
+    memrefs :: MemRefs,
+    -- | Certificates of the destination, which must be propagated to
+    -- the source. When short-circuiting reaches the array creation
+    -- point, we must check whether the certs are in scope for
+    -- short-circuiting to succeed.
+    certs :: Certs
   }
 
 -- | the allocatted memory blocks
@@ -242,7 +247,7 @@ instance Pretty CoalsEntry where
 -- the same destination memory and use the same index function, the first
 -- 'CoalsEntry' is returned.
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2) =
+unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2 certs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
     then etry1
     else
@@ -250,7 +255,8 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
         { alsmem = alsmem etry1 <> alsmem2,
           optdeps = optdeps etry1 <> optdeps2,
           vartab = vartab etry1 <> vartab2,
-          memrefs = memrefs etry1 <> memrefs2
+          memrefs = memrefs etry1 <> memrefs2,
+          certs = certs etry1 <> certs2
         }
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding
