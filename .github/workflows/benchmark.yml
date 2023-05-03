@@ -1,0 +1,153 @@
+name: Benchmark
+
+on:
+  pull_request:
+
+  push:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+jobs:
+  build-linux-nix:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v20
+
+    - uses: cachix/cachix-action@v12
+      with:
+        name: futhark
+        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+    - name: Build Futhark
+      run: nix-build --argstr suffix nightly-linux-x86_64 --argstr commit $GITHUB_SHA
+
+    - uses: actions/upload-artifact@v1
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+        path: result/futhark-nightly-linux-x86_64.tar.xz
+
+  benchmark-MI100-opencl:
+    runs-on: MI100
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: MI100
+
+  benchmark-A100:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: A100
+        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-opencl-A100
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: cuda
+        system: A100
+        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-cuda-A100
+
+  benchmark-titanx-cuda:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: cuda
+        system: titanx
+        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-cuda-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        futhark-options: --exclude=mem_16gb
+
+  benchmark-titanx-opencl:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: titanx
+        slurm-options: -p gpu --gres=gpu:titanx:1 --job-name=fut-opencl-titanx --exclude=hendrixgpu05fl,hendrixgpu06fl
+        futhark-options: --exclude=mem_16gb
+
+  benchmark-titanrtx-cuda:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: cuda
+        system: titanrtx
+        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-cuda-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+
+  benchmark-titanrtx-opencl:
+    runs-on: hendrix
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: opencl
+        system: titanrtx
+        slurm-options: -p gpu --gres=gpu:titanrtx:1 --job-name=fut-opencl-titanrtx --exclude=hendrixgpu05fl,hendrixgpu06fl
+
+  benchmark-results:
+    runs-on: ubuntu-22.04
+    needs: [benchmark-A100, benchmark-MI100-opencl, benchmark-titanx-cuda, benchmark-titanx-opencl, benchmark-titanrtx-cuda, benchmark-titanrtx-opencl]
+    if: github.ref == 'refs/heads/master'
+    steps:
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSHKEY }}
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+    - uses: actions/download-artifact@v3
+    - run: |
+        ls -R
+    - name: Prepare package
+      run: |
+        mkdir -p package
+        cp */futhark-*.json package/
+        gzip package/*.json
+        for x in package/*.json.gz; do cp $x $(echo $x | sed "s/$GITHUB_SHA/latest/"); done
+    - name: scp to server
+      run: |
+        scp -o StrictHostKeyChecking=no package/* futhark@futhark-lang.org:/var/www/htdocs/futhark-lang.org/benchmark-results
