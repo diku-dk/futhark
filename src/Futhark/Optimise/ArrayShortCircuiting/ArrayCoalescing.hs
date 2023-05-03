@@ -1364,7 +1364,7 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
                         ixf
                       Nothing ->
                         ind_y
-                 in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0, certs' <> certs'')
+                 in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0, certs <> certs'')
           success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
        in if success0 && not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
