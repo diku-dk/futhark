@@ -3,8 +3,10 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | This pass attempts to lift allocations as far towards the top in their body
--- as possible. It does not try to hoist allocations outside across body
+-- | This pass attempts to lift allocations and asserts as far towards
+-- the top in their body as possible. This helps memory short
+-- circuiting do a better job, as it is sensitive to statement
+-- ordering.  It does not try to hoist allocations outside across body
 -- boundaries.
 module Futhark.Pass.LiftAllocations
   ( liftAllocationsSeqMem,
@@ -84,6 +86,8 @@ liftAllocationsInStms ::
   Names ->
   LiftM (inner rep) (Stms rep)
 liftAllocationsInStms Empty lifted acc _ = pure $ lifted <> acc
+liftAllocationsInStms (stms :|> stm@(Let (Pat [PatElem vname _]) _ (BasicOp (Assert {})))) lifted acc to_lift =
+  liftAllocationsInStms stms (stm :<| lifted) acc ((freeIn stm <> to_lift) `namesSubtract` oneName vname)
 liftAllocationsInStms (stms :|> stm@(Let (Pat [PatElem vname _]) _ (Op (Alloc _ _)))) lifted acc to_lift =
   liftAllocationsInStms stms (stm :<| lifted) acc ((freeIn stm <> to_lift) `namesSubtract` oneName vname)
 liftAllocationsInStms (stms :|> stm@(Let pat _ (Op (Inner inner)))) lifted acc to_lift = do

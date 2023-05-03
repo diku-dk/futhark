@@ -13,6 +13,7 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Data.Function ((&))
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe (fromMaybe)
 import Futhark.Analysis.Alias qualified as AnlAls
@@ -117,10 +118,14 @@ replaceInStm ::
   (Mem rep inner, LetDec rep ~ LetDecMem) =>
   Stm rep ->
   UpdateM (inner rep) (Stm rep)
-replaceInStm (Let (Pat elems) d e) = do
+replaceInStm (Let (Pat elems) (StmAux c a d) e) = do
   elems' <- mapM replaceInPatElem elems
   e' <- replaceInExp elems' e
-  pure $ Let (Pat elems') d e'
+  entries <- asks (M.elems . envCoalesceTab)
+  let c' = case filter (\entry -> (map patElemName elems `L.intersect` M.keys (vartab entry)) /= []) entries of
+        [] -> c
+        entries' -> c <> foldMap certs entries'
+  pure $ Let (Pat elems') (StmAux c' a d) e'
   where
     replaceInPatElem :: PatElem LetDecMem -> UpdateM inner (PatElem LetDecMem)
     replaceInPatElem p@(PatElem vname (MemArray _ _ u _)) =
