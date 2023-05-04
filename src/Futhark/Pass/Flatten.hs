@@ -592,44 +592,123 @@ transformDistStm segments env (DistStm inps res stm) = do
           lifted_body_then <- liftBody size_then inputs_then env_then dstms_then (bodyResult body_then)
           lifted_body_else <- liftBody size_else inputs_else env_else dstms_else (bodyResult body_else)
 
-          -- Write the results of the 'then' and 'else' branches back to their original positions.
-          let resultTypes = map ((\(DistType n _ (Prim t)) -> Array t (Shape [n]) NoUniqueness) . distResType) res
-          blankRes <- mapM (letExp "blank_res" <=< eBlank) resultTypes
-          let scatterRes is xs gtid = do
-                i <- letExp "i" =<< eIndex is [eSubExp gtid]
-                xs' <- letExp "xs" =<< toExp xs
-                x <- letSubExp "x" =<< eIndex xs' [eSubExp gtid]
-                pure (i, x)
-          partialRes <-
-            mapM
-              (\(space, result) -> letExp "partial_res" <=< genScatter space size_then $ scatterRes is_then (resSubExp result))
-              (zip blankRes lifted_body_then)
-          result <-
-            mapM
-              (\(space, result) -> letExp "res" <=< genScatter space size_else $ scatterRes is_else (resSubExp result))
-              (zip partialRes lifted_body_else)
-          pure $ insertReps (zip (map distResTag res) (map Regular result)) env
+          let resultTypes = map ((\(DistType _ _ t) -> t) . distResType) res
+          reps_then <- resultToResReps resultTypes <$> mapM (letExp "result_then" <=< toExp . resSubExp) lifted_body_then
+          reps_else <- resultToResReps resultTypes <$> mapM (letExp "result_else" <=< toExp . resSubExp) lifted_body_else
+
+          -- Write back the regular results of a branch to a (partially) blank space
+          let scatterRegular space (is, xs) = do
+                ~(Array _ (Shape [size]) _) <- lookupType xs
+                letExp "regular_scatter"
+                  =<< genScatter
+                    space
+                    size
+                    ( \gtid -> do
+                        x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
+                        i <- letExp "i" =<< eIndex is [eSubExp gtid]
+                        pure (i, x)
+                    )
+          -- Write back the irregular elements of a branch to a (partially) blank space
+          -- The 'offsets' variable is the offsets of the final result,
+          -- whereas 'irregRep' is the irregular representation of the result of a single branch.
+          let scatterIrregular offsets space (is, irregRep) = do
+                let IrregularRep {irregularSegments = segs, irregularElems = elems} = irregRep
+                (_, _, ii1) <- doRepIota segs
+                (_, _, ii2) <- doSegIota segs
+                ~(Array _ (Shape [size]) _) <- lookupType elems
+                letExp "irregular_scatter"
+                  =<< genScatter
+                    space
+                    size
+                    ( \gtid -> do
+                        x <- letSubExp "x" =<< eIndex elems [eSubExp gtid]
+                        offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp gtid]]]
+                        i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
+                        pure (i, x)
+                    )
+          -- Given a single result of each branch (in the form of 'branchesRep') as well the *unlifted*
+          -- result type, merge the results of all branches into a single result.
+          --
+          -- As we are currently only dealing with the if-then-else and not general match-expressions,
+          -- 'iss' and 'branches_rep' are always two-element lists
+          -- (one element for the "then" branch and one for the "else" branch) but if we expand to handle
+          -- general match-expressions this function should still work.
+          let mergeResult iss branchesRep resType =
+                case resType of
+                  -- Regular case
+                  Prim pt -> do
+                    let xs = map (\(Regular v) -> v) branchesRep
+                    let resultType = Array pt (Shape [w]) NoUniqueness
+                    -- Create the blank space for the result
+                    resultSpace <- letExp "blank_res" =<< eBlank resultType
+                    -- Write back the values of each branch to the blank space
+                    result <- foldM scatterRegular resultSpace $ zip iss xs
+                    pure $ Regular result
+                  -- Irregular case
+                  Array pt _ _ -> do
+                    let branchesIrregRep = map (\(Irregular irregRep) -> irregRep) branchesRep
+                    let segsType = Array (IntType Int64) (Shape [w]) NoUniqueness
+                    -- Create a blank space for the 'segs'
+                    segsSpace <- letExp "blank_segs" =<< eBlank segsType
+                    -- Write back the segs of each branch to the blank space
+                    segs <- foldM scatterRegular segsSpace $ zip iss (irregularSegments <$> branchesIrregRep)
+                    (_, offsets, num_elems) <- exScanAndSum segs
+                    let resultType = Array pt (Shape [num_elems]) NoUniqueness
+                    -- Create the blank space for the result
+                    resultSpace <- letExp "blank_res" =<< eBlank resultType
+                    -- Write back the values of each branch to the blank space
+                    elems <- foldM (scatterIrregular offsets) resultSpace $ zip iss branchesIrregRep
+                    flags <- genFlags num_elems offsets
+                    pure $
+                      Irregular $
+                        IrregularRep
+                          { irregularSegments = segs,
+                            irregularFlags = flags,
+                            irregularOffsets = offsets,
+                            irregularElems = elems
+                          }
+                  Acc {} -> error "transformDistStm: Acc"
+                  Mem {} -> error "transformDistStm: Mem"
+
+          -- Prepare the indices and res reps of the branches
+          let iss = [is_then, is_else]
+              branch_reps = L.transpose [reps_then, reps_else]
+          -- Merge the results of the branches and insert the resulting res reps
+          reps <- zipWithM (mergeResult iss) branch_reps resultTypes
+          pure $ insertReps (zip (map distResTag res) reps) env
     Let _ _ (Apply name args rettype s) -> do
       let [w] = NE.toList segments
       let name' = liftFunName name
       let rettype' = liftRetType w rettype
       args' <- ((w, Observe) :) . concat <$> mapM (liftArg segments inps env) args
       result <- letTupExp (nameToString name' <> "_res") $ Apply name' args' rettype' s
-      -- Go through the pattern and construct the reps.
-      -- If an array is encountered alone, it is a regular array.
-      -- If a scalar type (specifically i64) is encountered, it is an existensial size
-      -- and the next four arrays are irregular reps.
-      let reps = flip L.unfoldr (zip result rettype') $ \ret -> do
-            ((v, t) : ret') <- pure ret
-            pure $ case t of
-              Array {} -> (Regular v, ret')
-              Prim (IntType Int64) ->
-                let mkRep ~[segs, flags, offsets, elems] = Irregular $ IrregularRep segs flags offsets elems
-                 in first (mkRep . map fst) $ splitAt 4 ret'
-              _ -> error $ "Illegal return type: " ++ prettyString t
-
+      let reps = resultToResReps rettype result
       pure $ insertReps (zip (map distResTag res) reps) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
+
+-- | This function walks through the *unlifted* result types
+-- and uses the *lifted* results to construct the corresponding res reps.
+--
+-- See the 'liftResult' function for the opposite process i.e.
+-- turning 'ResRep's into results.
+resultToResReps :: [TypeBase s u] -> [VName] -> [ResRep]
+resultToResReps types results =
+  snd $
+    L.mapAccumL
+      ( \rs t -> case t of
+          Prim {} ->
+            let (v : rs') = rs
+                rep = Regular v
+             in (rs', rep)
+          Array {} ->
+            let (_ : segs : flags : offsets : elems : rs') = rs
+                rep = Irregular $ IrregularRep segs flags offsets elems
+             in (rs', rep)
+          Acc {} -> error "resultToResReps: Illegal type 'Acc'"
+          Mem {} -> error "resultToResReps: Illegal type 'Mem'"
+      )
+      results
+      types
 
 distResCerts :: DistEnv -> [DistInput] -> Certs
 distResCerts env = Certs . map f
