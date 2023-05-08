@@ -1,4 +1,4 @@
-module Language.Futhark.Unused (findUnused, partDefFuncs, fu, getBody, getDecs) where
+module Language.Futhark.Unused (partDefFuncs, fu, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.List.NonEmpty qualified as NE
@@ -11,12 +11,6 @@ import Language.Futhark.Semantic (FileModule (FileModule))
 import Debug.Trace
 import System.FilePath
 import Data.Foldable (Foldable(foldl'))
-
--- Pending work:
--- ∘ Here is a piece of advice: stop using the AST as quickly as possible.
--- ∘ Gather the immediate information you need into your own bespoke data structures, and then work on those.
--- ∘ Keeping in mind the previous point: Find transitive dependencies in the top level definitions.
--- ∘ take care of modules and their main problem as described in https://github.com/diku-dk/futhark/issues/550#issuecomment-1428229674
 
 -- Steps:
 -- ∘ For each definition of a VName x in any file (corresponding to a top level definition), find which VNames are mentioned in the definition of x. (Intuitively, which functions are called directly.)
@@ -41,13 +35,6 @@ getDecs :: FileModule -> [DecBase Info VName]
 getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 
-findUnused :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
-findUnused fp fml = do
-  let nfp = map (normalise . dropExtension) fp
-      (af,bf) = partDefFuncs nfp fml
-      uf = S.unions $ map snd $ M.toList $ tClosure bf af
-      imf = M.fromList $ map (BI.second importFuncs) $ filter (\(p,_) -> p `notElem` nfp) fml
-  M.map (filter (\(vn,_) -> vn `notElem` uf)) imf
 
 -- fu :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, Maybe SrcLoc)]
 fu fp fml = do
@@ -57,9 +44,9 @@ fu fp fml = do
       rf = map (BI.second funcsInFMod) rms
       locs = M.unions $ map (locsInFMod . snd) rms
       used1 = tClosure bf $ M.union bf $ M.unions $ map snd rf
-      used = S.unions $ map snd $ M.toList $ used1
+      used = S.unions $ map snd $ M.toList used1
       rt = M.fromList $ map (\(x,y) -> (x,map (\a -> (a, locs M.! a)) $ filter (`M.member` locs) $ S.toList $ S.fromList (map fst $ M.toList y) `S.difference` used)) rf
-  rt
+  (used1,rt)
 
 type VMap = M.Map VName (S.Set VName)
 type LocMap = M.Map VName SrcLoc

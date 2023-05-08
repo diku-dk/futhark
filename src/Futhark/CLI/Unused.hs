@@ -6,6 +6,9 @@
 module Futhark.CLI.Unused (main) where
 
 import Language.Futhark
+import Data.Set qualified as S
+import Futhark.IR.Pretty
+
 import Control.Monad.State
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
 import Futhark.Pipeline (Verbosity (..), runFutharkM)
@@ -28,15 +31,9 @@ printUnused files = do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right (_, imp, _) -> do
-      -- let decs = getDecs fm
-      -- print $ length decs
-      -- print $ head decs
-      -- print $ map fst imp
-      -- putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ findUnused files imp
-      putStrLn "did some stuff"
-      -- print $ partDefFuncs files imp
-      -- let u2 = concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
-      let un = fu files imp
+      let (c,un) = fu files imp
+      putStrLn $ unlines $ map (\(x,y) -> show (prettyString x) <> " -> {" <> unwords (map (show . prettyString) (S.toList y)) <> "}") $ M.toList c
+      putStrLn "---\nUnused functions:"
       putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList un
 
 
