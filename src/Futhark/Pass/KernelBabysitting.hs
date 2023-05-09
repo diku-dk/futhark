@@ -3,29 +3,14 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting (babysitKernels) where
 
-import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State.Strict
+import Data.Bifunctor (first)
 import Data.Foldable
-import Data.List (elemIndex, isPrefixOf, sort)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.IR
-import Futhark.IR.GPU hiding
-  ( BasicOp,
-    Body,
-    Exp,
-    FParam,
-    FunDef,
-    LParam,
-    Lambda,
-    Pat,
-    PatElem,
-    Prog,
-    RetType,
-    Stm,
-  )
-import Futhark.MonadFreshNames
+import Futhark.IR.GPU
 import Futhark.Pass
 import Futhark.Tools
 import Futhark.Util
@@ -332,7 +317,7 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
       Nothing
   | any (`nameIn` free_ker_vars) (subExpVars is) =
       Nothing
-  | is `isPrefixOf` tgids =
+  | is `L.isPrefixOf` tgids =
       Nothing
   | not (null tgids),
     not (null is),
@@ -348,7 +333,7 @@ coalescedIndexes free_ker_vars isGidVariant tgids is
     move is_rev (i, tgid)
       -- If tgid is in is_rev anywhere but at position i, and
       -- position i exists, we move it to position i instead.
-      | Just j <- elemIndex tgid is_rev,
+      | Just j <- L.elemIndex tgid is_rev,
         i /= j,
         i < num_is =
           swap i j is_rev
@@ -383,12 +368,12 @@ rearrangeInput ::
 rearrangeInput (Just (Just current_perm)) perm arr
   | current_perm == perm = pure arr -- Already has desired representation.
 rearrangeInput Nothing perm arr
-  | sort perm == perm = pure arr -- We don't know the current
+  | L.sort perm == perm = pure arr -- We don't know the current
   -- representation, but the indexing
   -- is linear, so let's hope the
   -- array is too.
 rearrangeInput (Just Just {}) perm arr
-  | sort perm == perm = rowMajorArray arr -- We just want a row-major array, no tricks.
+  | L.sort perm == perm = rowMajorArray arr -- We just want a row-major array, no tricks.
 rearrangeInput manifest perm arr = do
   -- We may first manifest the array to ensure that it is flat in
   -- memory.  This is sometimes unnecessary, in which case the copy
