@@ -14,10 +14,10 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc926
-      haskell.packages.ghc926.ormolu
-      haskell.packages.ghc926.weeder
-      haskell.packages.ghc926.haskell-language-server
+      haskell.compiler.ghc927
+      haskell.packages.ghc927.ormolu
+      haskell.packages.ghc927.weeder
+      haskell.packages.ghc927.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
