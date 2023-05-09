@@ -94,6 +94,9 @@ module Language.Futhark.Prop
     UncheckedTypeParam,
     UncheckedPat,
     UncheckedValBind,
+    UncheckedTypeBind,
+    UncheckedSigBind,
+    UncheckedModBind,
     UncheckedDec,
     UncheckedSpec,
     UncheckedProg,
@@ -1642,6 +1645,15 @@ type UncheckedPat = PatBase NoInfo Name
 
 -- | A function declaration with no type annotations.
 type UncheckedValBind = ValBindBase NoInfo Name
+
+-- | A type binding with no type annotations.
+type UncheckedTypeBind = TypeBindBase NoInfo Name
+
+-- | A module type binding with no type annotations.
+type UncheckedSigBind = SigBindBase NoInfo Name
+
+-- | A module binding with no type annotations.
+type UncheckedModBind = ModBindBase NoInfo Name
 
 -- | A declaration with no type annotations.
 type UncheckedDec = DecBase NoInfo Name

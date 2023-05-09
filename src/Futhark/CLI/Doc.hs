@@ -8,12 +8,13 @@ import Control.Monad
 import Control.Monad.State
 import Data.FileEmbed
 import Data.List (nubBy)
-import Data.Text.Lazy qualified as T
-import Data.Text.Lazy.IO qualified as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
+import Data.Text.Lazy qualified as LT
 import Futhark.Compiler (Imports, dumpError, fileProg, newFutharkConfig, readProgramFiles)
 import Futhark.Doc.Generator
 import Futhark.Pipeline (FutharkM, Verbosity (..), runFutharkM)
-import Futhark.Util (directoryContents, trim)
+import Futhark.Util (directoryContents)
 import Futhark.Util.Options
 import Language.Futhark.Semantic (mkInitialImport)
 import Language.Futhark.Syntax (DocComment (..), progDoc)
@@ -65,7 +66,7 @@ printDecs cfg dir files imports = do
       (file_htmls, _warnings) =
         renderFiles direct_imports $
           filter (not . ignored) imports
-  mapM_ (write . fmap renderHtml) file_htmls
+  mapM_ (write . fmap (LT.toStrict . renderHtml)) file_htmls
   write ("style.css", cssFile)
   where
     write :: (FilePath, T.Text) -> IO ()
@@ -82,7 +83,7 @@ printDecs cfg dir files imports = do
     -- recognise them by a file comment containing "ignore".
     ignored (_, fm) =
       case progDoc (fileProg fm) of
-        Just (DocComment s _) -> trim s == "ignore"
+        Just (DocComment s _) -> T.strip s == "ignore"
         _ -> False
 
 cssFile :: T.Text

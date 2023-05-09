@@ -1,11 +1,13 @@
 -- | Interface to the Futhark parser.
 module Language.Futhark.Parser
   ( parseFuthark,
+    parseFutharkWithComments,
     parseExp,
     parseModExp,
     parseType,
     parseDecOrExpIncrM,
     SyntaxError (..),
+    Comment (..),
   )
 where
 
@@ -21,6 +23,15 @@ parseFuthark ::
   T.Text ->
   Either SyntaxError UncheckedProg
 parseFuthark = parse prog
+
+-- | Parse an entire Futhark program from the given 'T.Text', using
+-- the 'FilePath' as the source name for error messages.  Also returns
+-- the comments encountered.
+parseFutharkWithComments ::
+  FilePath ->
+  T.Text ->
+  Either SyntaxError (UncheckedProg, [Comment])
+parseFutharkWithComments = parseWithComments prog
 
 -- | Parse an Futhark expression from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
@@ -55,7 +66,7 @@ parseExpIncrM ::
   T.Text ->
   m (Either SyntaxError UncheckedExp)
 parseExpIncrM fetch file program =
-  getLinesFromM fetch $ parseInMonad expression file program
+  getLinesFromM fetch $ fmap fst <$> parseInMonad expression file program
 
 -- | Parse either an expression or a declaration incrementally;
 -- favouring declarations in case of ambiguity.
@@ -68,7 +79,7 @@ parseDecOrExpIncrM ::
 parseDecOrExpIncrM fetch file input =
   case parseInMonad declaration file input of
     Value Left {} -> fmap Right <$> parseExpIncrM fetch file input
-    Value (Right d) -> pure $ Right $ Left d
+    Value (Right (d, _)) -> pure $ Right $ Left d
     GetLine _ -> do
       l <- fetch
       parseDecOrExpIncrM fetch file $ input <> "\n" <> l

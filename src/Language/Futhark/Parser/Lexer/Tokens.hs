@@ -128,7 +128,7 @@ data Token
   | LOCAL
   | MATCH
   | CASE
-  | DOC String
+  | DOC T.Text
   | EOF
   | HOLE
   deriving (Show, Eq, Ord)

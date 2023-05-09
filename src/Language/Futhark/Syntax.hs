@@ -982,8 +982,10 @@ instance Located (PatBase f vn) where
   locOf (PatConstr _ _ _ loc) = locOf loc
   locOf (PatAttr _ _ loc) = locOf loc
 
--- | Documentation strings, including source location.
-data DocComment = DocComment String SrcLoc
+-- | Documentation strings, including source location.  The string may
+-- contain newline characters, but it does not contain comment prefix
+-- markers.
+data DocComment = DocComment T.Text SrcLoc
   deriving (Show)
 
 instance Located DocComment where

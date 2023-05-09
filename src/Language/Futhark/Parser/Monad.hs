@@ -7,8 +7,10 @@ module Language.Futhark.Parser.Monad
   ( ParserMonad,
     ParserState,
     ReadLineMonad (..),
+    Comment (..),
     parseInMonad,
     parse,
+    parseWithComments,
     getLinesFromM,
     lexer,
     mustBeEmpty,
@@ -90,9 +92,19 @@ mustBeEmpty _ (Array _ _ (Shape dims) _)
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ prettyText t <> " is not an empty array."
 
+-- | A comment consists of its starting and end position, as well as
+-- its text.  The contents include the comment start marker.
+data Comment = Comment {commentLoc :: Loc, commentText :: T.Text}
+  deriving (Eq, Ord, Show)
+
+instance Located Comment where
+  locOf = commentLoc
+
 data ParserState = ParserState
   { _parserFile :: FilePath,
     parserInput :: T.Text,
+    -- | Note: reverse order.
+    parserComments :: [Comment],
     parserLexical :: ([L Token], Pos)
   }
 
@@ -175,6 +187,10 @@ getTokens = lift $ gets parserLexical
 putTokens :: ([L Token], Pos) -> ParserMonad ()
 putTokens l = lift $ modify $ \env -> env {parserLexical = l}
 
+putComment :: Comment -> ParserMonad ()
+putComment c = lift $ modify $ \env ->
+  env {parserComments = c : parserComments env}
+
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
 intNegate (Int16Value v) = Int16Value (-v)
@@ -221,7 +237,8 @@ lexer cont = do
             xs -> do
               putTokens (xs, pos')
               lexer cont
-    (L _ (COMMENT _) : xs) -> do
+    (L loc (COMMENT text) : xs) -> do
+      putComment $ Comment loc text
       putTokens (xs, pos)
       lexer cont
     (x : xs) -> do
@@ -271,14 +288,23 @@ data SyntaxError = SyntaxError {syntaxErrorLoc :: Loc, syntaxErrorMsg :: T.Text}
 lexerErrToParseErr :: LexerError -> SyntaxError
 lexerErrToParseErr (LexerError loc msg) = SyntaxError loc msg
 
-parseInMonad :: ParserMonad a -> FilePath -> T.Text -> ReadLineMonad (Either SyntaxError a)
+parseInMonad ::
+  ParserMonad a ->
+  FilePath ->
+  T.Text ->
+  ReadLineMonad (Either SyntaxError (a, [Comment]))
 parseInMonad p file program =
   either
     (pure . Left . lexerErrToParseErr)
-    (evalStateT (runExceptT p) . env)
+    (fmap onRes . runStateT (runExceptT p) . env)
     (scanTokensText (Pos file 1 1 0) program)
   where
-    env = ParserState file program
+    env = ParserState file program []
+    onRes (Left err, _) = Left err
+    onRes (Right x, s) = Right (x, reverse $ parserComments s)
+
+parseWithComments :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError (a, [Comment])
+parseWithComments p file program = join $ getNoLines $ parseInMonad p file program
 
 parse :: ParserMonad a -> FilePath -> T.Text -> Either SyntaxError a
-parse p file program = join $ getNoLines $ parseInMonad p file program
+parse p file program = fst <$> parseWithComments p file program
