@@ -2,7 +2,9 @@
 
 The Futhark compiler is a significant body of code with a not entirely
 straightforward design. The main source of documentation is the
-Haddock comments in the source code itself.
+Haddock comments in the source code itself, including [this general
+overview of the compiler
+architecture](https://hackage.haskell.org/package/futhark-0.24.3/docs/Futhark.html).
 
 To build the compiler, you need a recent version of
 [GHC](http://ghc.haskell.org/), which can be installed via
