@@ -181,7 +181,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
     unSizeExpr (SizeExpr e) = e
-    unSizeExpr AnySize {} = undefined
+    unSizeExpr AnySize {} = error "unSizeExpr: AnySize"
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
@@ -914,7 +914,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
               (Info (m1, toStruct t1'), Info (m2, toStruct t2', argext))
               (Info $ RetType dims2' $ addAliases ret' (<> aliases arrow'))
               loc
-        _ -> undefined
+        _ -> error $ "OpSectionRight: impossible type\n" <> prettyString arrow'
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
