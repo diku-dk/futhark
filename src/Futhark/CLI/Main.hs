@@ -82,7 +82,7 @@ commands =
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
       ("unused", (Unused.main, "Find Unused functions in a set of Futhark programs.")),
-      ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks."))
+      ("benchcmp", (Benchcmp.main, "Compare two benchmark results."))
     ]
 
 msg :: String
