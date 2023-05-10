@@ -141,13 +141,15 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         maybe True ((== Just 0) . isInt64) i,
         maybe True ((== Just 1) . isInt64) stride =
           let j' = maybe d SizeExpr j
-           in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j' <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j'
+                <*> adjustDims idxes' dims
     adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
         maybe True ((== Just 1) . isInt64) stride =
           let j' = fromMaybe (unSizeExpr d) j
-           in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i') <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i')
+                <*> adjustDims idxes' dims
     -- stride == -1
     adjustDims ((DimSlice Nothing Nothing stride, _) : idxes') (d : dims)
       | refine_sizes,
@@ -156,7 +158,8 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     adjustDims ((DimSlice (Just i) (Just j) stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
-          warnIfConsumingOrBinding mOcc (hasBinding i || hasBinding j) d (Just i) (Just j) stride (sizeMinus i j) <*> adjustDims idxes' dims
+          warnIfConsumingOrBinding mOcc (hasBinding i || hasBinding j) d (Just i) (Just j) stride (sizeMinus i j)
+            <*> adjustDims idxes' dims
     -- existential
     adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
