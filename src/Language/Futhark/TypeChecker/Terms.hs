@@ -41,59 +41,16 @@ import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
 hasBinding :: Exp -> Bool
-hasBinding Literal {} = False
-hasBinding IntLit {} = False
-hasBinding FloatLit {} = False
-hasBinding StringLit {} = False
-hasBinding Hole {} = False
-hasBinding Var {} = False
-hasBinding (Parens e _) = hasBinding e
-hasBinding (QualParens _ e _) = hasBinding e
-hasBinding (TupLit es _) = any hasBinding es
-hasBinding (RecordLit fs _) = any f fs
-  where
-    f (RecordFieldExplicit _ e _) = hasBinding e
-    f RecordFieldImplicit {} = False
-hasBinding (ArrayLit es _ _) = any hasBinding es
-hasBinding (Attr _ e _) = hasBinding e
-hasBinding (Project _ e _ _) = hasBinding e
-hasBinding (Negate e _) = hasBinding e
-hasBinding (Not e _) = hasBinding e
-hasBinding (Assert _ e _ _) = hasBinding e
-hasBinding (Constr _ es _ _) = any hasBinding es
-hasBinding (Update e1 slice e2 _) = hasBinding e1 || hasBinding e2 || any f slice
-  where
-    f (DimFix e) = hasBinding e
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
-hasBinding (RecordUpdate e1 _ e2 _ _) = hasBinding e1 || hasBinding e2
 hasBinding Lambda {} = True
-hasBinding OpSection {} = False
-hasBinding (OpSectionLeft _ _ e _ _ _) = hasBinding e
-hasBinding (OpSectionRight _ _ e _ _ _) = hasBinding e
-hasBinding ProjectSection {} = False
-hasBinding (IndexSection slice _ _) = any f slice
-  where
-    f (DimFix e) = hasBinding e
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
-hasBinding (Ascript e _ _) = hasBinding e
-hasBinding (AppExp (Apply f es _) _) = hasBinding f || any (hasBinding . snd) es
-hasBinding (AppExp (Coerce e _ _) _) = hasBinding e
-hasBinding (AppExp (Range ei es ef _) _) = hasBinding ei || maybe False hasBinding es || f ef
-  where
-    f (DownToExclusive e) = hasBinding e
-    f (ToInclusive e) = hasBinding e
-    f (UpToExclusive e) = hasBinding e
 hasBinding (AppExp LetPat {} _) = True
 hasBinding (AppExp LetFun {} _) = True
-hasBinding (AppExp (If ec et ef _) _) = hasBinding ec || hasBinding et || hasBinding ef
 hasBinding (AppExp DoLoop {} _) = True
-hasBinding (AppExp (BinOp _ _ (el, _) (er, _) _) _) = hasBinding el || hasBinding er
 hasBinding (AppExp LetWith {} _) = True
-hasBinding (AppExp (Index e slice _) _) = hasBinding e || any f slice
-  where
-    f (DimFix e') = hasBinding e'
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
 hasBinding (AppExp Match {} _) = True
+hasBinding e = isNothing $ astMap m e
+  where
+    m =
+      identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
 
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
