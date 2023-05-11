@@ -690,14 +690,12 @@ newFileWorker env (fname_desired, template) m = do
   exists <- liftIO $ doesFileExist fname
   liftIO $ createDirectoryIfMissing True $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
-    liftIO $
-      T.hPutStrLn stderr $
-        "Using existing file: " <> T.pack fname
+    liftIO . T.hPutStrLn stderr $
+      "Using existing file: " <> T.pack fname
   unless exists $ do
     when (scriptVerbose (envOpts env) > 0) $
-      liftIO $
-        T.hPutStrLn stderr $
-          "Generating new file: " <> T.pack fname
+      liftIO . T.hPutStrLn stderr $
+        "Generating new file: " <> T.pack fname
     m fname
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
   pure (fname, fname_rel)
@@ -848,8 +846,8 @@ processDirective env (DirectiveVideo e params) = do
     (progressStep, progressDone)
       | fancyTerminal,
         scriptVerbose (envOpts env) > 0 =
-          ( \j num_frames -> do
-              liftIO . T.putStr $
+          ( \j num_frames -> liftIO $ do
+              T.putStr $
                 "\r"
                   <> progressBar
                     (ProgressBar 40 (fromIntegral num_frames - 1) (fromIntegral j))
@@ -858,9 +856,8 @@ processDirective env (DirectiveVideo e params) = do
                   <> "/"
                   <> prettyText num_frames
                   <> " "
-              liftIO $ hFlush stdout,
-            liftIO $ do
-              T.putStrLn ""
+              hFlush stdout,
+            liftIO $ T.putStrLn ""
           )
       | otherwise =
           (\_ _ -> pure (), pure ())
