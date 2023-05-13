@@ -508,7 +508,14 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                       | not $ primType $ paramType p ->
                           Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
                     _ -> SubExp se
-          internaliseExp1 "loop_cond" cond
+
+          -- As the condition expression is inserted twice, we have to
+          -- avoid shadowing (#1935).
+          (cond_stms, cond') <-
+            uncurry (flip renameStmsWith)
+              =<< collectStms (internaliseExp1 "loop_cond" cond)
+          addStms cond_stms
+          pure cond'
 
         addStms init_loop_cond_stms
 
