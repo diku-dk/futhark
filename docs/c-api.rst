@@ -645,7 +645,7 @@ the manifest contains:
   * For opaques that are actually records (including tuples):
 
     * The list of fields, including their type and a projection
-      function.  The field ordering here is the one used expected by
+      function.  The field ordering here is the one expected by
       the *new* function.
 
     * The name of the C *new* function for creating a record from
