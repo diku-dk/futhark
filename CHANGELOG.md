@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Another compiler crash in block tiling (#1933).
 
+* Global arrays with size parameters no longer have aliases.
+
 ## [0.24.3]
 
 ### Fixed
