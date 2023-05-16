@@ -251,11 +251,10 @@ storageSize :: PrimType -> Int -> C.Exp -> C.Exp
 storageSize pt rank shape =
   [C.cexp|$int:header_size +
           $int:rank * sizeof(typename int64_t) +
-          $exp:(cproduct dims) * $int:pt_size|]
+          $exp:(cproduct dims) * sizeof($ty:(primStorageType pt))|]
   where
-    header_size, pt_size :: Int
+    header_size :: Int
     header_size = 1 + 1 + 1 + 4 -- 'b' <version> <num_dims> <type>
-    pt_size = primByteSize pt
     dims = [[C.cexp|$exp:shape[$int:i]|] | i <- [0 .. rank - 1]]
 
 typeStr :: Signedness -> PrimType -> String

@@ -1685,6 +1685,9 @@ primBitSize :: PrimType -> Int
 primBitSize = (* 8) . primByteSize
 
 -- | The size of a value of a given primitive type in eight-bit bytes.
+--
+-- Warning: note that this is 0 for 'Unit', but a 'Unit' takes up a
+-- byte in the binary data format.
 primByteSize :: Num a => PrimType -> a
 primByteSize (IntType t) = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
