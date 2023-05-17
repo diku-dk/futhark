@@ -9,6 +9,6 @@
 -- }
 def main: [][]i32 =
   let a = map (+1) (map i32.i64 (iota(3*3)))
-  let b = unflatten 3 3 a in
+  let b = unflatten a in
   map  (\(row: []i32) ->
          map  (\(x: i32): i32 -> x*2) row) b
