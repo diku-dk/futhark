@@ -192,7 +192,7 @@ entry main [m] [n] (Y: [m][n]f64) (q: i64) (jump: i64) =
             loess_m.loess_params q m_fun n_m nn_idx n_nn
          ) nn_idx_l n_nn_l |> unzip
 
-  let weights_l = replicate (m * n) 1f64 |> unflatten m n
+  let weights_l = replicate (m * n) 1f64 |> unflatten
   in
   loess_m.loess_outer_l nn_idx_l
                         nn_y_l

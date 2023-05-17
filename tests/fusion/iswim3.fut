@@ -7,8 +7,6 @@
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 
-def take(n: i64, a: []f64): []f64 = let (first, rest) = split (n) a in first
-
 def correlateDeltas [num_und] [num_dates]
                     (md_c:  [num_und][num_und]f64,
                      zds: [num_dates][num_und]f64

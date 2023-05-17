@@ -54,7 +54,7 @@ def unbytes(bs: [4]u8): u32 =
   u32.u8(bs[3]) * 0x1000000u32
 
 def unbytes_block(block: [16*4]u8): [16]u32 =
-  map unbytes (unflatten 16 4 block)
+  map unbytes (unflatten block)
 
 -- Process 512 bits of the input.
 def md5_chunk ((a0,b0,c0,d0): md5) (m: [16]u32): md5 =
@@ -89,5 +89,5 @@ def main [n] (ms: [n]u8): [16]u8 =
                   bytes (u32.i64(n*8)) ++
                   [0u8,0u8,0u8,0u8]
                   :> [num_blocks*(16*4)]u8
-  let (a,b,c,d) = md5 (map unbytes_block (unflatten num_blocks (16*4) ms_padded))
+  let (a,b,c,d) = md5 (map unbytes_block (unflatten ms_padded))
   in flatten (map bytes [a,b,c,d]) :> [16]u8

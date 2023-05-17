@@ -2,4 +2,4 @@
 -- generation.
 
 def main (w: i64) (h: i64) =
-  ([1,2,3] :> [w*h]i32) |> unflatten w h
+  ([1,2,3] :> [w*h]i32) |> unflatten

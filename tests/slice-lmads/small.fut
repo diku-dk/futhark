@@ -29,5 +29,5 @@ entry index_antidiag [n] (xs: [n]i64): [][][]i64 =
   flat_index_3d xs 2 3 3 2 4 2 1
 
 entry update_antidiag [n] (xs: *[n]i64): *[n]i64 =
-  let vs = iota (2*2*2) |> unflatten (2*2) 2 |> unflatten 2 2
+  let vs = iota (2*2*2) |> unflatten |> unflatten
   in flat_update_3d xs 1 9 4 1 vs

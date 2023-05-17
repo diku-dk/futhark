@@ -1,2 +1,2 @@
-let blocked = blockify 2 (copy <| unflatten 8 8 (map i32.i64 <| iota (8*8)))
+let blocked = blockify 2 (copy <| unflatten (map i32.i64 <| iota (8*8)))
 let pre_transpose = map (map transpose) blocked

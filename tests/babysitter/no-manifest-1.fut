@@ -31,7 +31,7 @@ def mat_inv [n] (A: [n][n]f32): [n][n]f32 =
                                             then 1.0
                                             else 0.0
                  ) (iota (n*m))
-    let Ap' = unflatten n m (gauss_jordan n m Ap)
+    let Ap' = unflatten (gauss_jordan n m Ap)
 
     -- Drop the identity matrix at the front.
     in Ap'[0:n,n:n * 2] :> [n][n]f32

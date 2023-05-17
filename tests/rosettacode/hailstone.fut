@@ -43,7 +43,7 @@ def hailstone_seq(x: i32): []i32 =
     let x = hailstone_step x
     let steps[i] = x
     in (capacity, i+1, steps, x)
-  in (split i steps).0
+  in take i steps
 
 def hailstone_len(x: i32): i32 =
   (loop (i,x)=(1,x) while x != 1 do (i+1, hailstone_step x)).0

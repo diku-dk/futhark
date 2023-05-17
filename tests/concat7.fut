@@ -6,5 +6,5 @@
 -- structure { Concat 0 }
 
 def main [n][m] (as: [][n]i32) (bs: [][m]i32) (i: i32) (j: i32): i32 =
-  let cs = map2 (concat_to (n+m)) as bs
+  let cs = map2 concat as bs
   in cs[i,j]
