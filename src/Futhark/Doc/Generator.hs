@@ -188,10 +188,10 @@ headerDoc :: Prog -> DocM (Html, Html, Html)
 headerDoc prog =
   case progDoc prog of
     Just (DocComment doc loc) -> do
-      let (abstract, more_sections) = splitHeaderDoc doc
+      let (abstract, more_sections) = splitHeaderDoc $ T.unpack doc
       first_paragraph <- docHtml $ Just $ DocComment (firstParagraph abstract) loc
-      abstract' <- docHtml $ Just $ DocComment abstract loc
-      more_sections' <- docHtml $ Just $ DocComment more_sections loc
+      abstract' <- docHtml $ Just $ DocComment (T.pack abstract) loc
+      more_sections' <- docHtml $ Just $ DocComment (T.pack more_sections) loc
       pure
         ( first_paragraph,
           selfLink "abstract" (H.h2 "Abstract") <> abstract',
@@ -203,7 +203,7 @@ headerDoc prog =
       fromMaybe (s, mempty) $
         find (("\n##" `isPrefixOf`) . snd) $
           zip (inits s) (tails s)
-    firstParagraph = unlines . takeWhile (not . paragraphSeparator) . lines
+    firstParagraph = T.pack . unlines . takeWhile (not . paragraphSeparator) . lines
     paragraphSeparator = all isSpace
 
 contentsPage :: [ImportName] -> [(ImportName, Html)] -> Html
@@ -734,7 +734,7 @@ docHtml (Just (DocComment doc loc)) =
   H.preEscapedText
     . GFM.commonmarkToHtml [] [GFM.extAutolink]
     . T.pack
-    <$> identifierLinks loc doc
+    <$> identifierLinks loc (T.unpack doc)
 docHtml Nothing = pure mempty
 
 identifierLinks :: SrcLoc -> String -> DocM String

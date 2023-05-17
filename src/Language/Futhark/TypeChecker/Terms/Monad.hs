@@ -403,8 +403,11 @@ envToTermScope env =
     }
   where
     vtable = M.mapWithKey valBinding $ envVtable env
-    valBinding k (TypeM.BoundV tps v) =
-      BoundV Global tps $ selfAliasing (S.singleton (AliasBound k)) v
+    valBinding k (TypeM.BoundV tps v)
+      | not $ any isSizeParam tps =
+          BoundV Global tps $ selfAliasing (S.singleton (AliasBound k)) v
+      | otherwise =
+          BoundV Global tps $ v `setAliases` mempty
     -- FIXME: hack, #1675
     selfAliasing als (Scalar (Record ts)) =
       Scalar $ Record $ M.map (selfAliasing als) ts

@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Type checker crash on some ill-typed programs (#1926).
 
+* Some soundness bugs in memory short circuiting (#1927, #1930).
+
+* Another compiler crash in block tiling (#1933).
+
+* Global arrays with size parameters no longer have aliases.
+
 ## [0.24.3]
 
 ### Fixed

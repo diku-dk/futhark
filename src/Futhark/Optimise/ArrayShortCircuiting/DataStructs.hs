@@ -45,9 +45,9 @@ import Futhark.IR.SeqMem
 import Futhark.Util.Pretty hiding (line, sep, (</>))
 import Prelude
 
-type ScopeTab rep = Scope (Aliases rep)
--- ^ maps array-variable names to various info, including
+-- | maps array-variable names to various info, including
 --   types, memory block and index function, etc.
+type ScopeTab rep = Scope (Aliases rep)
 
 -- | An LMAD specialized to TPrimExps (a typed primexp)
 type LmadRef = IxFun.LMAD (TPrimExp Int64 VName)
@@ -161,23 +161,28 @@ data CoalsEntry = CoalsEntry
     optdeps :: M.Map VName VName,
     -- | Access summaries of uses and writes of destination and source
     -- respectively.
-    memrefs :: MemRefs
+    memrefs :: MemRefs,
+    -- | Certificates of the destination, which must be propagated to
+    -- the source. When short-circuiting reaches the array creation
+    -- point, we must check whether the certs are in scope for
+    -- short-circuiting to succeed.
+    certs :: Certs
   }
 
+-- | the allocatted memory blocks
 type AllocTab = M.Map VName Space
--- ^ the allocatted memory blocks
 
+-- | maps a variable name to its PrimExp scalar expression
 type ScalarTab = M.Map VName (PrimExp VName)
--- ^ maps a variable name to its PrimExp scalar expression
 
-type CoalsTab = M.Map VName CoalsEntry
--- ^ maps a memory-block name to a 'CoalsEntry'. Among other things, it contains
+-- | maps a memory-block name to a 'CoalsEntry'. Among other things, it contains
 --   @vartab@, a map in which each variable associated to that memory block is
 --   bound to its 'Coalesced' info.
+type CoalsTab = M.Map VName CoalsEntry
 
-type InhibitTab = M.Map VName Names
--- ^ inhibited memory-block mergings from the key (memory block)
+-- | inhibited memory-block mergings from the key (memory block)
 --   to the value (set of memory blocks).
+type InhibitTab = M.Map VName Names
 
 data BotUpEnv = BotUpEnv
   { -- | maps scalar variables to theirs PrimExp expansion
@@ -242,7 +247,7 @@ instance Pretty CoalsEntry where
 -- the same destination memory and use the same index function, the first
 -- 'CoalsEntry' is returned.
 unionCoalsEntry :: CoalsEntry -> CoalsEntry -> CoalsEntry
-unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2) =
+unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memrefs2 certs2) =
   if dstmem etry1 /= dstmem2 || dstind etry1 /= dstind2
     then etry1
     else
@@ -250,7 +255,8 @@ unionCoalsEntry etry1 (CoalsEntry dstmem2 dstind2 alsmem2 vartab2 optdeps2 memre
         { alsmem = alsmem etry1 <> alsmem2,
           optdeps = optdeps etry1 <> optdeps2,
           vartab = vartab etry1 <> vartab2,
-          memrefs = memrefs etry1 <> memrefs2
+          memrefs = memrefs etry1 <> memrefs2,
+          certs = certs etry1 <> certs2
         }
 
 -- | Get the names of array 'PatElem's in a 'Pat' and the corresponding

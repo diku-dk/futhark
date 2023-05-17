@@ -276,14 +276,12 @@ partitionPrelude variance prestms private used_after =
         [] -> True -- Does not matter.
         v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
 
+    consumed_in_prestms =
+      foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
     consumed v = v `nameIn` consumed_in_prestms
     consumedStm stm = any consumed (patNames (stmPat stm))
-
     later_consumed =
-      namesFromList $
-        concatMap (patNames . stmPat) $
-          stmsToList $
-            Seq.filter consumedStm prestms
+      namesFromList $ foldMap (patNames . stmPat) $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
@@ -292,9 +290,6 @@ partitionPrelude variance prestms private used_after =
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
 
-    consumed_in_prestms =
-      foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
-
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Iota {}) = True
     mustBeInlinedExp (BasicOp Rotate {}) = True
@@ -302,14 +297,15 @@ partitionPrelude variance prestms private used_after =
     mustBeInlinedExp (BasicOp Reshape {}) = True
     mustBeInlinedExp _ = False
     mustBeInlined stm =
-      mustBeInlinedExp (stmExp stm)
-        && any (`nameIn` used_after) (patNames (stmPat stm))
+      ( mustBeInlinedExp (stmExp stm)
+          && any (`nameIn` used_after) (patNames (stmPat stm))
+      )
+        || any consumed (patNames (stmPat stm))
 
     must_be_inlined =
       namesFromList $
-        concatMap (patNames . stmPat) $
-          stmsToList $
-            Seq.filter mustBeInlined variant_prestms
+        foldMap (patNames . stmPat) $
+          Seq.filter mustBeInlined variant_prestms
     recompute stm =
       any (`nameIn` must_be_inlined) (patNames (stmPat stm))
         || not (invariantTo must_be_inlined stm)

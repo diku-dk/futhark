@@ -17,6 +17,7 @@ module Futhark.Transform.Rename
     renamePat,
     renameSomething,
     renameBound,
+    renameStmsWith,
 
     -- * Renaming annotations
     RenameM,
@@ -115,6 +116,17 @@ renameSomething ::
   a ->
   m a
 renameSomething = modifyNameSource . runRenamer . rename
+
+-- | Rename statements, then rename something within the scope of
+-- those statements.
+renameStmsWith ::
+  (MonadFreshNames m, Renameable rep, Rename a) =>
+  Stms rep ->
+  a ->
+  m (Stms rep, a)
+renameStmsWith stms a =
+  modifyNameSource . runRenamer $ renamingStms stms $ \stms' ->
+    (stms',) <$> rename a
 
 newtype RenameEnv = RenameEnv {envNameMap :: M.Map VName VName}
 

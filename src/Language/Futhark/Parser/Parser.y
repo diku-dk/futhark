@@ -7,10 +7,12 @@ module Language.Futhark.Parser.Parser
   , modExpression
   , futharkType
   , parse
+  , parseWithComments
   , ReadLineMonad (..)
   , getLinesFromM
   , parseInMonad
   , SyntaxError(..)
+  , Comment(..)
   )
   where
 

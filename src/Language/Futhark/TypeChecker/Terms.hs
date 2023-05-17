@@ -41,59 +41,16 @@ import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
 hasBinding :: Exp -> Bool
-hasBinding Literal {} = False
-hasBinding IntLit {} = False
-hasBinding FloatLit {} = False
-hasBinding StringLit {} = False
-hasBinding Hole {} = False
-hasBinding Var {} = False
-hasBinding (Parens e _) = hasBinding e
-hasBinding (QualParens _ e _) = hasBinding e
-hasBinding (TupLit es _) = any hasBinding es
-hasBinding (RecordLit fs _) = any f fs
-  where
-    f (RecordFieldExplicit _ e _) = hasBinding e
-    f RecordFieldImplicit {} = False
-hasBinding (ArrayLit es _ _) = any hasBinding es
-hasBinding (Attr _ e _) = hasBinding e
-hasBinding (Project _ e _ _) = hasBinding e
-hasBinding (Negate e _) = hasBinding e
-hasBinding (Not e _) = hasBinding e
-hasBinding (Assert _ e _ _) = hasBinding e
-hasBinding (Constr _ es _ _) = any hasBinding es
-hasBinding (Update e1 slice e2 _) = hasBinding e1 || hasBinding e2 || any f slice
-  where
-    f (DimFix e) = hasBinding e
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
-hasBinding (RecordUpdate e1 _ e2 _ _) = hasBinding e1 || hasBinding e2
 hasBinding Lambda {} = True
-hasBinding OpSection {} = False
-hasBinding (OpSectionLeft _ _ e _ _ _) = hasBinding e
-hasBinding (OpSectionRight _ _ e _ _ _) = hasBinding e
-hasBinding ProjectSection {} = False
-hasBinding (IndexSection slice _ _) = any f slice
-  where
-    f (DimFix e) = hasBinding e
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
-hasBinding (Ascript e _ _) = hasBinding e
-hasBinding (AppExp (Apply f es _) _) = hasBinding f || any (hasBinding . snd) es
-hasBinding (AppExp (Coerce e _ _) _) = hasBinding e
-hasBinding (AppExp (Range ei es ef _) _) = hasBinding ei || maybe False hasBinding es || f ef
-  where
-    f (DownToExclusive e) = hasBinding e
-    f (ToInclusive e) = hasBinding e
-    f (UpToExclusive e) = hasBinding e
 hasBinding (AppExp LetPat {} _) = True
 hasBinding (AppExp LetFun {} _) = True
-hasBinding (AppExp (If ec et ef _) _) = hasBinding ec || hasBinding et || hasBinding ef
 hasBinding (AppExp DoLoop {} _) = True
-hasBinding (AppExp (BinOp _ _ (el, _) (er, _) _) _) = hasBinding el || hasBinding er
 hasBinding (AppExp LetWith {} _) = True
-hasBinding (AppExp (Index e slice _) _) = hasBinding e || any f slice
-  where
-    f (DimFix e') = hasBinding e'
-    f (DimSlice me1 me2 me3) = any (maybe False hasBinding) [me1, me2, me3]
 hasBinding (AppExp Match {} _) = True
+hasBinding e = isNothing $ astMap m e
+  where
+    m =
+      identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
 
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
@@ -184,13 +141,15 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         maybe True ((== Just 0) . isInt64) i,
         maybe True ((== Just 1) . isInt64) stride =
           let j' = maybe d SizeExpr j
-           in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j' <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j'
+                <*> adjustDims idxes' dims
     adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
         maybe True ((== Just 1) . isInt64) stride =
           let j' = fromMaybe (unSizeExpr d) j
-           in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i') <*> adjustDims idxes' dims
+           in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i')
+                <*> adjustDims idxes' dims
     -- stride == -1
     adjustDims ((DimSlice Nothing Nothing stride, _) : idxes') (d : dims)
       | refine_sizes,
@@ -199,7 +158,8 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     adjustDims ((DimSlice (Just i) (Just j) stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
-          warnIfConsumingOrBinding mOcc (hasBinding i || hasBinding j) d (Just i) (Just j) stride (sizeMinus i j) <*> adjustDims idxes' dims
+          warnIfConsumingOrBinding mOcc (hasBinding i || hasBinding j) d (Just i) (Just j) stride (sizeMinus i j)
+            <*> adjustDims idxes' dims
     -- existential
     adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
@@ -221,7 +181,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
     unSizeExpr (SizeExpr e) = e
-    unSizeExpr AnySize {} = undefined
+    unSizeExpr AnySize {} = error "unSizeExpr: AnySize"
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
@@ -954,7 +914,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
               (Info (m1, toStruct t1'), Info (m2, toStruct t2', argext))
               (Info $ RetType dims2' $ addAliases ret' (<> aliases arrow'))
               loc
-        _ -> undefined
+        _ -> error $ "OpSectionRight: impossible type\n" <> prettyString arrow'
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype

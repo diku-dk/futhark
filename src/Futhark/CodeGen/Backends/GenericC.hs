@@ -174,14 +174,15 @@ defineMemorySpace space = do
     return ret;
   }
 
+  long long new_usage = ctx->$id:usagename + size;
   if (ctx->detail_memory) {
     fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
             (long long) size,
             desc, $string:spacedesc,
-            (long long) ctx->$id:usagename + size);
+            new_usage);
   }
-  if (ctx->$id:usagename > ctx->$id:peakname) {
-    ctx->$id:peakname = ctx->$id:usagename;
+  if (new_usage > ctx->$id:peakname) {
+    ctx->$id:peakname = new_usage;
     if (ctx->detail_memory) {
       fprintf(ctx->log, " (new peak).\n");
     }
@@ -196,7 +197,7 @@ defineMemorySpace space = do
     *(block->references) = 1;
     block->size = size;
     block->desc = desc;
-    ctx->$id:usagename += size;
+    ctx->$id:usagename = new_usage;
     return FUTHARK_SUCCESS;
   } else {
     // We are naively assuming that any memory allocation error is due to OOM.
