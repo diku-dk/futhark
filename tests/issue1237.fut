@@ -23,13 +23,12 @@ def intraBlockPar [len] (B: i64)
   let ref_l = reference2[b_y * B + 1: b_y * B + 1 + B,
                          b_x * B + 1: b_x * B + 1 + B] :> [B][B]i32
 
-  let inputsets' = unflatten len len inputsets
+  let inputsets' = unflatten inputsets
 
   let inp_l' = (copy inputsets'[b_y * B : b_y * B + B + 1, b_x * B : b_x * B + B + 1]) :> *[B+1][B+1]i32
 
   -- inp_l is the working memory
-  let inp_l = replicate ((B+1)*(B+1)) 0i32
-              |> unflatten (B+1) (B+1)
+  let inp_l = replicate ((B+1)*(B+1)) 0i32 |> unflatten
 
   -- Initialize inp_l with the already processed the column to the left of this
   -- block
@@ -55,7 +54,7 @@ def intraBlockPar [len] (B: i64)
                 ))
         in  scatter inp_l inds vals
 
-  let inp_l2 = unflatten (B+1) (B+1) inp_l
+  let inp_l2 = unflatten inp_l
   in  inp_l2[1:B+1,1:B+1] :> [B][B]i32
 
 
@@ -92,7 +91,7 @@ def main [lensq] (penalty : i32)
   let B = assert (worksize % B == 0) B
 
   let block_width = trace <| worksize / B
-  let reference2 = unflatten len len reference
+  let reference2 = unflatten reference
 
   let inputsets =
     loop inputsets for blk < block_width do

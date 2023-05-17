@@ -24,7 +24,7 @@ def intraBlockPar [len] (B: i64)
   let ref_l = reference2[b_y * B + 1: b_y * B + 1 + B,
                          b_x * B + 1: b_x * B + 1 + B] :> [B][B]i32
 
-  let inputsets' = unflatten len len inputsets
+  let inputsets' = unflatten inputsets
 
   let Bp1 = B + 1
 
@@ -79,7 +79,7 @@ def main [lensq] (penalty : i32)
   let B = assert (worksize % B == 0) B
 
   let block_width = trace <| worksize / B
-  let reference2 = unflatten len len (reference :> [len*len]i32)
+  let reference2 = unflatten (reference :> [len*len]i32)
   let inputsets = (inputsets :> [len*len]i32)
 
   -- First anti-diagonal half of the entire input matrix

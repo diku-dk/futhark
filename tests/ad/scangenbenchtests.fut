@@ -37,12 +37,12 @@ def onehot_2d n m x y =
 def fwd_J2 [n] (input: [n][4]i32) : [n][4][n][4]i32 =
   let input = fromarrs2 input
   in tabulate (n*4) (\i -> jvp primal2 input (fromarrs2 (onehot_2d n 4 (i/4) (i%4))))
-     |> map toarrs2 |> transpose |> map transpose |> map (map (unflatten n 4))
+     |> map toarrs2 |> transpose |> map transpose |> map (map unflatten)
 
 def rev_J2 [n] (input: [n][4]i32) : [n][4][n][4]i32 =
   let input = fromarrs2 input
   in tabulate (n*4) (\i -> vjp primal2 input (fromarrs2 (onehot_2d n 4 (i/4) (i%4))))
-     |> unflatten n 4 |> map (map toarrs2)
+     |> unflatten |> map (map toarrs2)
 
 entry testmm2by2 [n] (input: [n][4]i32) =
   let fwd = fwd_J2 input
@@ -73,12 +73,12 @@ def toarrs3 = map (\(a,b,c,d,e,f,g,h,i) -> [a,b,c,d,e,f,g,h,i])
 def fwd_J3 [n] (input: [n][9]i32) : [n][9][n][9]i32 =
   let input = fromarrs3 input
   in tabulate (n*9) (\i -> jvp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> map toarrs3 |> transpose |> map transpose |> map (map (unflatten n 9))
+     |> map toarrs3 |> transpose |> map transpose |> map (map unflatten)
 
 def rev_J3 [n] (input: [n][9]i32) : [n][9][n][9]i32 =
   let input = fromarrs3 input
   in tabulate (n*9) (\i -> vjp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> unflatten n 9 |> map (map toarrs3)
+     |> unflatten |> map (map toarrs3)
 
 entry testmm3by3 [n] (input: [n][9]i32) =
   let fwd = fwd_J3 input
@@ -117,12 +117,12 @@ def toarrs4 = map (\(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) -> [a,b,c,d,e,f,g,h,i,j,k,
 def fwd_J4 [n] (input: [n][16]i32) : [n][16][n][16]i32 =
   let input = fromarrs4 input
   in tabulate (n*16) (\i -> jvp primal4 input (fromarrs4 (onehot_2d n 16 (i/16) (i%16))))
-     |> map toarrs4 |> transpose |> map transpose |> map (map (unflatten n 16))
+     |> map toarrs4 |> transpose |> map transpose |> map (map unflatten)
 
 def rev_J4 [n] (input: [n][16]i32) : [n][16][n][16]i32 =
   let input = fromarrs4 input
   in tabulate (n*16) (\i -> vjp primal4 input (fromarrs4 (onehot_2d n 16 (i/16) (i%16))))
-     |> unflatten n 16 |> map (map toarrs4)
+     |> unflatten |> map (map toarrs4)
 
 entry testmm4by4 [n] (input: [n][16]i32) =
   let fwd = fwd_J4 input
@@ -138,12 +138,12 @@ def toarrslin = map (\(a,b) -> [a,b])
 def fwd_Jlin [n] (input: [n][2]i32) =
   let input = fromarrslin input
   in tabulate (n*2) (\i -> jvp primallin input (fromarrslin (onehot_2d n 2 (i/2) (i%2))))
-     |> map toarrslin |> transpose |> map transpose |> map (map (unflatten n 2))
+     |> map toarrslin |> transpose |> map transpose |> map (map unflatten)
 
 def rev_Jlin [n] (input: [n][2]i32) =
   let input = fromarrslin input
   in tabulate (n*2) (\i -> vjp primallin input (fromarrslin (onehot_2d n 2 (i/2) (i%2))))
-     |> unflatten n 2 |> map (map toarrslin)
+     |> unflatten |> map (map toarrslin)
 
 entry testlin [n] (input: [n][2]i32) =
   let fwd = fwd_Jlin input
@@ -170,12 +170,12 @@ def toarrslin2 = map (\((a,b),(c,d,e,f)) -> [a,b,c,d,e,f])
 def fwd_Jlin2 [n] (input: [n][6]i32) : [n][6][n][6]i32 =
   let input = fromarrslin2 input
   in tabulate (n*6) (\i -> jvp primallin2 input (fromarrslin2 (onehot_2d n 6 (i/6) (i%6))))
-     |> map toarrslin2 |> transpose |> map transpose |> map (map (unflatten n 6))
+     |> map toarrslin2 |> transpose |> map transpose |> map (map unflatten)
 
 def rev_Jlin2 [n] (input: [n][6]i32) : [n][6][n][6]i32 =
   let input = fromarrslin2 input
   in tabulate (n*6) (\i -> vjp primallin2 input (fromarrslin2 (onehot_2d n 6 (i/6) (i%6))))
-     |> unflatten n 6 |> map (map toarrslin2)
+     |> unflatten |> map (map toarrslin2)
 
 entry testlin2by2 [n] (input: [n][6]i32) =
   let fwd = fwd_Jlin2 input
