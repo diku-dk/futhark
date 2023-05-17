@@ -619,8 +619,9 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
       body' <- scoping (foldMap patNames params) $ transformExp body
+      ret' <- transformRetTypeSizes (foldMap patNames params) ret
       AppExp
-        <$> ( LetFun fname (tparams, params, retdecl, Info ret, body')
+        <$> ( LetFun fname (tparams, params, retdecl, Info ret', body')
                 <$> scoping (S.singleton fname) (transformExp e)
                 <*> pure loc
             )
