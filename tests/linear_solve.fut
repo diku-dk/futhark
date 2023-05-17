@@ -21,7 +21,7 @@ def Gauss_Jordan [n][m] (A: [n][m]f32): [n][m]f32 =
 
 def linear_solve [n][m] (A: [n][m]f32) (b: [n]f32): [n]f32 =
   -- Pad the matrix with b.
-  let Ap = map2 (concat_to (m+1)) A (transpose [b])
+  let Ap = map2 concat A (transpose [b])
   let Ap' = Gauss_Jordan Ap
   -- Extract last column.
   in Ap'[0:n,m]

@@ -8,7 +8,7 @@
 -- }
 def main (orig: [3*3]i32): ([]i32,[][]i32) =
   let a = map (+1) orig
-  let b = unflatten 3 3 a
+  let b = unflatten a
   let c = map  (\(row: []i32) ->
                     map  (\(x: i32): i32  -> x*2) row
               ) b

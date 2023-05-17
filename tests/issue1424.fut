@@ -50,14 +50,14 @@ def restrictCell (vals :[8][24]f64) :[24]f64 =
 def getDiagonalCellContribution [nelx][nely][nelz] (l :u8) (x :[nelx][nely][nelz]f32) (cellIndex, w) =
   let fineCells =
     loop vals = [(cellIndex,w)] for i < (i64.u8 l) do
-      vals |> map prolongateCell |> flatten_to (8**(i+1))
+      vals |> map prolongateCell |> flatten |> resize (8**(i+1))
   let fineValuesX = map (getFineValue x 0) fineCells
   let coarseValues =
     loop vx = fineValuesX for i < (i64.u8 l) do
       let ii = (i64.u8 l) - i - 1
-      let xx = (vx :> [(8**ii)*8][24]f64) |> unflatten (8**(ii)) 8 |> map restrictCell
+      let xx = (vx :> [(8**ii)*8][24]f64) |> unflatten |> map restrictCell
       in xx
-  let coarseX = flatten_to 24 coarseValues
+  let coarseX = resize 24 (flatten coarseValues)
   in coarseX
 
 entry getNodeDiagonalValues [nelx][nely][nelz] (l :u8) (x :[nelx][nely][nelz]f32) input =

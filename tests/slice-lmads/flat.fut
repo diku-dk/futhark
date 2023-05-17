@@ -31,7 +31,7 @@ import "intrinsics"
 entry my_iota (n: i64) = iota n
 
 entry update_antidiag [n] (xs: *[n]i64): [n]i64 =
-  let vs = iota (3*3*3) |> unflatten (3*3) 3 |> unflatten 3 3
+  let vs = iota (3*3*3) |> unflatten |> unflatten
   let zs = flat_update_3d xs 17 27 10 1 vs
   in zs
 
