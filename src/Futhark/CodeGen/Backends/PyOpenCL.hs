@@ -386,7 +386,7 @@ packArrayOutput mem "device" bt ept dims = do
     Call
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
-        Arg $ Tuple dims',
+        Arg $ Tuple $ dims' <> [Integer 0 | bt == Imp.Unit],
         Arg $ Var $ Py.compilePrimToExtNp bt ept,
         ArgKeyword "data" mem'
       ]
