@@ -381,7 +381,7 @@ instance PrettyRep rep => Pretty (KernelBody rep) where
   pretty (KernelBody _ stms res) =
     PP.stack (map pretty (stmsToList stms))
       </> "return"
-      <+> PP.braces (PP.commasep $ map pretty res)
+      <+> PP.braces (PP.commastack $ map pretty res)
 
 certAnnots :: Certs -> [Doc ann]
 certAnnots cs
