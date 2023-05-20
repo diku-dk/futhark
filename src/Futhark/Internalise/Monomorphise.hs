@@ -1224,18 +1224,20 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
     let args = foldMap patNames params
         arg_params = map snd exp_naming
 
-    rettype' <- withParams exp_naming (withArgs (args <> shape_names) $ hardTransformRetType rettype)
+    rettype' <-
+      withParams exp_naming $
+        withArgs (args <> shape_names) $
+          hardTransformRetType (applySubst (`M.lookup` substs') rettype)
     extNaming <- paramGetClean (args <> shape_names)
     scope <- S.union shape_names <$> askScope'
     let (rettype'', new_params) = arrowArg scope args arg_params rettype'
-        rettype''' = applySubst (`M.lookup` substs') rettype''
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
         (shape_params_explicit, shape_params_implicit) =
           partition ((`S.member` (mustBeExplicitInBinding bind_t'' `S.union` mustBeExplicitInBinding bind_t')) . typeParamName) $
             shape_params ++ t_shape_params ++ map (`TypeParamDim` mempty) (S.toList new_params)
         exp_naming' = filter ((`S.member` new_params) . snd) (extNaming <> exp_naming)
 
-        bind_t'' = funType params'' rettype'''
+        bind_t'' = funType params'' rettype''
         bind_r = exp_naming <> extNaming
     body' <- updateExpTypes (`M.lookup` substs') body
     body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
@@ -1260,14 +1262,14 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
               name'
               (shape_params_explicit ++ shape_params_implicit)
               params''
-              rettype'''
+              rettype''
               (entryAssert exp_naming body''')
           else
             toValBinding
               name'
               shape_params_implicit
               (map shapeParam shape_params_explicit ++ params'')
-              rettype'''
+              rettype''
               body'''
       )
   where
