@@ -14,6 +14,7 @@
 -- still needed in monomorphisation for now.
 module Futhark.Internalise.FullNormalise (transformProg) where
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
@@ -44,6 +45,8 @@ data Binding
   = PatBind [SizeBinder VName] Pat Exp
   | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
 
+type NormState = (([Binding], [BindModifier]), VNameSource)
+
 -- | Main monad of this module, the state as 3 parts:
 -- * the VNameSource to produce new names
 -- * the [Binding] is the accumulator for the result
@@ -53,9 +56,9 @@ data Binding
 --   they have to be in the same list to conserve their order
 -- Direct interaction with the inside state should be done with caution, that's why their
 -- no instance of `MonadState`.
-newtype OrderingM a = OrderingM (State (([Binding], [BindModifier]), VNameSource) a)
+newtype OrderingM a = OrderingM (StateT NormState (Reader String) a)
   deriving
-    (Functor, Applicative, Monad)
+    (Functor, Applicative, Monad, MonadReader String, MonadState NormState)
 
 instance MonadFreshNames OrderingM where
   getNameSource = OrderingM $ gets snd
@@ -68,7 +71,7 @@ rmModifier :: OrderingM ()
 rmModifier = OrderingM $ modify $ first $ second tail
 
 addBind :: Binding -> OrderingM ()
-addBind (PatBind s p e) = OrderingM $ do
+addBind (PatBind s p e) = do
   modifs <- gets $ snd . fst
   let (e', modifs') = applyModifiers e modifs
   modify $ first $ bimap (PatBind (s <> implicit) p e' :) (const modifs')
@@ -81,12 +84,15 @@ addBind b@FunBind {} =
 
 runOrdering :: MonadFreshNames m => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
-  modifyNameSource $ mod_tup . runState m . (([], []),)
+  modifyNameSource $ mod_tup . flip runReader "tmp" . runStateT m . (([], []),)
   where
     mod_tup (a, ((binds, modifs), src)) =
       if null modifs
         then ((a, binds), src)
         else error "not all bind modifiers were freed"
+
+naming :: String -> OrderingM a -> OrderingM a
+naming s = local (const s)
 
 -- | From now, we say an expression is "final" if it's going to be stored in a let-bind
 -- or is at the end of the body e.g. after all lets
@@ -95,12 +101,27 @@ runOrdering (OrderingM m) =
 nameExp :: Bool -> Exp -> OrderingM Exp
 nameExp True e = pure e
 nameExp False e = do
-  name <- newNameFromString "tmp" -- "e<{" ++ prettyString e ++ "}>"
+  name <- newNameFromString =<< ask -- "e<{" ++ prettyString e ++ "}>"
   let ty = typeOf e
       loc = srclocOf e
       pat = Id name (Info ty) loc
   addBind $ PatBind [] pat e
   pure $ Var (qualName name) (Info ty) loc
+
+-- An evocative name to use when naming subexpressions of the
+-- expression bound to this pattern.
+patRepName :: Pat -> String
+patRepName (PatAscription p _ _) = patRepName p
+patRepName (Id v _ _) = baseString v
+patRepName _ = "tmp"
+
+expRepName :: Exp -> String
+expRepName (Var v _ _) = prettyString v
+expRepName e = "d<{" ++ prettyString (bareExp e) ++ "}>"
+
+-- An evocative name to use when naming arguments to an application.
+argRepName :: Exp -> Int -> String
+argRepName e i = expRepName e <> "_arg" <> show i
 
 -- Modify an expression as describe in module introduction,
 -- introducing the let-bindings in the state.
@@ -232,11 +253,13 @@ getOrdering final (IndexSection slice (Info ty) loc) = do
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering _ (Ascript e _ _) = getOrdering False e
 getOrdering final (AppExp (Apply f args loc) resT) = do
-  args' <- NE.reverse <$> mapM onArg (NE.reverse args)
+  args' <-
+    NE.reverse <$> mapM onArg (NE.reverse (NE.zip args (NE.fromList [0 ..])))
   f' <- getOrdering False f
   nameExp final $ AppExp (Apply f' args' loc) resT
   where
-    onArg (d, e) = (d,) <$> getOrdering False e
+    onArg ((d, e), i) =
+      naming (argRepName f i) $ (d,) <$> getOrdering False e
 getOrdering final (AppExp (Coerce e ty loc) resT) = do
   e' <- getOrdering False e
   nameExp final $ AppExp (Coerce e' ty loc) resT
@@ -246,7 +269,7 @@ getOrdering final (AppExp (Range start stride end loc) resT) = do
   end' <- mapM (getOrdering False) end
   nameExp final $ AppExp (Range start' stride' end' loc) resT
 getOrdering final (AppExp (LetPat sizes pat expr body _) _) = do
-  expr' <- getOrdering True expr
+  expr' <- naming (patRepName pat) $ getOrdering True expr
   addBind $ PatBind sizes pat expr'
   getOrdering final body
 getOrdering final (AppExp (LetFun vn (tparams, params, mrettype, rettype, body) e _) _) = do
@@ -269,16 +292,16 @@ getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (_, elp)) (er, Info (_, erp)) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
-      el' <- getOrdering True el
-      er' <- transformBody er
+      el' <- naming "or_lhs" $ getOrdering True el
+      er' <- naming "or_rhs" $ transformBody er
       pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
     (_, True) -> do
-      el' <- getOrdering True el
-      er' <- transformBody er
+      el' <- naming "and_lhs" $ getOrdering True el
+      er' <- naming "and_rhs" $ transformBody er
       pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
     (False, False) -> do
-      el' <- getOrdering False el
-      er' <- getOrdering False er
+      el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
+      er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(Observe, elp, el'), (Observe, erp, er')] resT
   nameExp final expr'
   where
