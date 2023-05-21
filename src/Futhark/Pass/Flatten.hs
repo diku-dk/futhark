@@ -506,10 +506,19 @@ onMapFreeVar segments env inps ws (ws_flags, ws_offsets, ws_elems) v = do
             segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
             subExpsRes . pure <$> (letSubExp "v" =<< eIndex v' [eSubExp segment])
       DistInput rt t -> case resVar rt env of
-        Irregular r -> do
-          rep <- getIrregRep segments env inps v
-          -- FIXME, wrong: should be 'map (`replicate` rep) ws
-          rep' <- replicateIrreg segments env ws (baseString v) rep
+        Irregular rep -> do
+          offsets <- letExp (baseString v <> "_rep_free_irreg_offsets")
+            <=< segMap (Solo ws_prod)
+            $ \(Solo i) -> do
+              segment <- letSubExp "segment" =<< eIndex ws_elems [eSubExp i]
+              subExpsRes . pure <$> (letSubExp "v" =<< eIndex (irregularOffsets rep) [eSubExp segment])
+          let rep' =
+                IrregularRep
+                  { irregularSegments = ws,
+                    irregularFlags = irregularFlags rep,
+                    irregularOffsets = offsets,
+                    irregularElems = irregularElems rep
+                  }
           pure $ MapOther rep' t
         Regular vs ->
           fmap (`MapArray` t) . letExp (baseString v <> "_rep_free_reg_inp")
