@@ -8,5 +8,5 @@
 -- structure gpu { SegRed 1 }
 
 def main (n: i64) (m: i64): [n]i64 =
-  let a = unflatten n m (iota (n*m))
+  let a = unflatten (iota (n*m))
   in map (\a_r -> reduce (+) 0 a_r) a

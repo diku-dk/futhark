@@ -45,11 +45,16 @@ def take [n] 't (i: i64) (x: [n]t): [i]t = x[0:i]
 -- **Complexity:** O(1).
 def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 
+-- | Statically change the size of an array.  Fail at runtime if the
+-- imposed size does not match the actual size.  Essentially syntactic
+-- sugar for a size coercion.
+def resize [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
+
 -- | Split an array at a given position.
 --
 -- **Complexity:** O(1).
-def split [n] 't (i: i64) (xs: [n]t): ([i]t, [n-i]t) =
-  (xs[0:i], xs[i:])
+def split [n][m] 't (xs: [n+m]t): ([n]t, [m]t) =
+  (xs[0:n], xs[n:n+m] :> [m]t)
 
 -- | Return the elements of the array in reverse order.
 --
@@ -66,11 +71,6 @@ def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys
 
 -- | An old-fashioned way of saying `++`.
 def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys
-
--- | Concatenation where the result has a predetermined size.  If the
--- provided size is wrong, the function will fail with a run-time
--- error.
-def concat_to [n] [m] 't (k: i64) (xs: [n]t) (ys: [m]t): *[k]t = xs ++ ys :> [k]t
 
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
@@ -126,11 +126,6 @@ def copy 't (a: t): *t =
 def flatten [n][m] 't (xs: [n][m]t): [n*m]t =
   intrinsics.flatten xs
 
--- | Like `flatten`@term, but where the final size is known.  Fails at
--- runtime if the provided size is wrong.
-def flatten_to [n][m] 't (l: i64) (xs: [n][m]t): [l]t =
-  flatten xs :> [l]t
-
 -- | Like `flatten`, but on the outer three dimensions of an array.
 def flatten_3d [n][m][l] 't (xs: [n][m][l]t): [n*m*l]t =
   flatten (flatten xs)
@@ -142,16 +137,16 @@ def flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): [n*m*l*k]t =
 -- | Splits the outer dimension of an array in two.
 --
 -- **Complexity:** O(1).
-def unflatten 't (n: i64) (m: i64) (xs: [n*m]t): [n][m]t =
+def unflatten 't [n][m] (xs: [n*m]t): [n][m]t =
   intrinsics.unflatten n m xs :> [n][m]t
 
 -- | Like `unflatten`, but produces three dimensions.
-def unflatten_3d 't (n: i64) (m: i64) (l: i64) (xs: [n*m*l]t): [n][m][l]t =
-  unflatten n m (unflatten (n*m) l xs)
+def unflatten_3d 't [n][m][l] (xs: [n*m*l]t): [n][m][l]t =
+  unflatten (unflatten xs)
 
 -- | Like `unflatten`, but produces four dimensions.
-def unflatten_4d 't (n: i64) (m: i64) (l: i64) (k: i64) (xs: [n*m*l*k]t): [n][m][l][k]t =
-  unflatten n m (unflatten_3d (n*m) l k xs)
+def unflatten_4d 't [n][m][l][k] (xs: [n*m*l*k]t): [n][m][l][k]t =
+  unflatten (unflatten_3d xs)
 
 -- | Transpose an array.
 --
