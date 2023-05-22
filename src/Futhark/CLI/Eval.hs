@@ -14,6 +14,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pipeline
 import Futhark.Util.Options
 import Futhark.Util.Pretty
+import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
 import Language.Futhark.Parser
 import Language.Futhark.Semantic qualified as T
@@ -53,7 +54,13 @@ runExpr src env ctx str = do
     (_, Left terr) -> do
       hPutDoc stderr $ I.prettyTypeError terr
       exitWith $ ExitFailure 1
-    (_, Right (_, e)) -> pure e
+    (_, Right ([], e)) -> pure e
+    (_, Right (tparams, e)) -> do
+      putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e))
+      T.putStrLn $
+        "The following types are ambiguous: "
+          <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
+      exitWith $ ExitFailure 1
   pval <- runInterpreterNoBreak $ I.interpretExp ctx fexp
   case pval of
     Left err -> do
