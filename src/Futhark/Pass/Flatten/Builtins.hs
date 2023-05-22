@@ -305,7 +305,7 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = prefixSumName,
         funDefRetType =
-          [Array int64 (Shape [Free $ Var $ paramName np]) Nonunique],
+          [Array int64 (Shape [Free $ Var $ paramName np]) Unique],
         funDefParams = [np, nsp],
         funDefBody = body
       }

@@ -1,5 +1,7 @@
 packages: futhark.cabal
-index-state: 2023-03-21T22:16:32Z
+index-state: 2023-05-02T06:58:58Z
+
+allow-newer: vector-binary-instances:base, co-log-core:base
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie

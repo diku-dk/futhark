@@ -261,7 +261,11 @@ preludeToPostlude variance prelude stm_to_tile postlude = do
 -- results that are views of an array (slicing, rotate, etc) and which
 -- results are used after the prelude, because these cannot be
 -- efficiently represented by a scalar segmap (they'll be manifested
--- in memory).
+-- in memory).  To avoid unnecessarily moving computation from
+-- category 2 to category 3 simply because they depend on a category 3
+-- result, everything in category 3 is also in category 2.  This is
+-- efficient only when category 3 contains exclusively "free" or at
+-- least very cheap expressions (e.g. index space transformations).
 partitionPrelude ::
   VarianceTable ->
   Stms GPU ->
@@ -269,21 +273,19 @@ partitionPrelude ::
   Names ->
   (Stms GPU, Stms GPU, Stms GPU)
 partitionPrelude variance prestms private used_after =
-  (invariant_prestms, precomputed_variant_prestms, recomputed_variant_prestms)
+  (invariant_prestms, variant_prestms, recomputed_variant_prestms)
   where
     invariantTo names stm =
       case patNames (stmPat stm) of
         [] -> True -- Does not matter.
         v : _ -> all (`notNameIn` names) (namesToList $ M.findWithDefault mempty v variance)
 
+    consumed_in_prestms =
+      foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
     consumed v = v `nameIn` consumed_in_prestms
     consumedStm stm = any consumed (patNames (stmPat stm))
-
     later_consumed =
-      namesFromList $
-        concatMap (patNames . stmPat) $
-          stmsToList $
-            Seq.filter consumedStm prestms
+      namesFromList $ foldMap (patNames . stmPat) $ Seq.filter consumedStm prestms
 
     groupInvariant stm =
       invariantTo private stm
@@ -291,9 +293,6 @@ partitionPrelude variance prestms private used_after =
         && invariantTo later_consumed stm
     (invariant_prestms, variant_prestms) =
       Seq.partition groupInvariant prestms
-
-    consumed_in_prestms =
-      foldMap consumedInStm $ fst $ Alias.analyseStms mempty prestms
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Iota {}) = True
@@ -304,17 +303,14 @@ partitionPrelude variance prestms private used_after =
     mustBeInlined stm =
       mustBeInlinedExp (stmExp stm)
         && any (`nameIn` used_after) (patNames (stmPat stm))
-
     must_be_inlined =
       namesFromList $
-        concatMap (patNames . stmPat) $
-          stmsToList $
-            Seq.filter mustBeInlined variant_prestms
+        foldMap (patNames . stmPat) $
+          Seq.filter mustBeInlined variant_prestms
     recompute stm =
       any (`nameIn` must_be_inlined) (patNames (stmPat stm))
-        || not (invariantTo must_be_inlined stm)
-    (recomputed_variant_prestms, precomputed_variant_prestms) =
-      Seq.partition recompute variant_prestms
+    recomputed_variant_prestms =
+      Seq.filter recompute variant_prestms
 
 -- Anything that is variant to the "private" names should be
 -- considered thread-local.

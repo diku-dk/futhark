@@ -502,7 +502,7 @@ Show the type of a module expression, which must fit on a single line.
     ( "unbreak",
       ( unbreakCommand,
         [text|
-Skip all future occurences of the current breakpoint.
+Skip all future occurrences of the current breakpoint.
 |]
       )
     ),

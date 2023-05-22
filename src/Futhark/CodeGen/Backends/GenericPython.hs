@@ -1115,7 +1115,7 @@ compilePrimValue (FloatValue (Float64Value v))
       Var "np.nan"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
-compilePrimValue UnitValue = Var "None"
+compilePrimValue UnitValue = Var "np.byte(0)"
 
 compileVar :: VName -> CompilerM op s PyExp
 compileVar v = asks $ fromMaybe (Var v') . M.lookup v' . envVarExp

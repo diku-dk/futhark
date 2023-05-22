@@ -2,4 +2,4 @@
 -- source-language array is of lesser rank than the corresponding
 -- core-language array(s).
 
-def main (a: []([]i32,i32)) = unflatten 3 3 a
+entry main n m (a: [n*m]([]i32,i32)) = unflatten a
