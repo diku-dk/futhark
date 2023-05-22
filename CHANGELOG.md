@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Global arrays with size parameters no longer have aliases.
 
+* `futhark eval` no longer crashes on ambiguously typed expressions (#1946).
+
 ## [0.24.3]
 
 ### Fixed
