@@ -531,30 +531,50 @@ onMapInputArr ::
   Segments ->
   DistEnv ->
   DistInputs ->
-  SubExp ->
+  VName ->
   Param Type ->
   VName ->
-  Builder GPU (MapArray t)
-onMapInputArr segments env inps w p arr =
+  Builder GPU (MapArray IrregularRep)
+onMapInputArr segments env inps ii2 p arr = do
+  ws_prod <- arraySize 0 <$> lookupType ii2
   case lookup arr inps of
     Just v_inp ->
       case v_inp of
         DistInputFree vs t -> do
           v <-
             letExp (baseString vs <> "_flat") . BasicOp $
-              Reshape ReshapeArbitrary (Shape [w]) vs
+              Reshape ReshapeArbitrary (Shape [ws_prod]) vs
           pure $ MapArray v t
-        DistInput rt t ->
+        DistInput rt _ ->
           case resVar rt env of
-            Irregular r -> do
-              elems_t <- lookupType $ irregularElems r
+            Irregular rep -> do
+              elems_t <- lookupType $ irregularElems rep
               -- If parameter type of the map corresponds to the
               -- element type of the value array, we can map it
               -- directly.
               if stripArray (shapeRank (segmentsShape segments)) elems_t == paramType p
-                then pure $ MapArray (irregularElems r) elems_t
-                else -- Otherwise we need to perform surgery on the metadata.
-                  pure $ MapOther undefined elems_t
+                then pure $ MapArray (irregularElems rep) elems_t
+                else do
+                  -- Otherwise we need to perform surgery on the metadata.
+                  ~[p_segments, p_offsets] <- letTupExp
+                    (baseString (paramName p) <> "_rep_inp_irreg")
+                    <=< segMap (Solo ws_prod)
+                    $ \(Solo i) -> do
+                      segment_i <-
+                        letSubExp "segment" =<< eIndex ii2 [eSubExp i]
+                      segment <-
+                        letSubExp "v" =<< eIndex (irregularSegments rep) [eSubExp segment_i]
+                      offset <-
+                        letSubExp "v" =<< eIndex (irregularOffsets rep) [eSubExp segment_i]
+                      pure $ subExpsRes [segment, offset]
+                  let rep' =
+                        IrregularRep
+                          { irregularElems = irregularElems rep,
+                            irregularFlags = irregularFlags rep,
+                            irregularSegments = p_segments,
+                            irregularOffsets = p_offsets
+                          }
+                  pure $ MapOther rep' elems_t
             Regular vs ->
               undefined
     Nothing -> do
@@ -564,7 +584,7 @@ onMapInputArr segments env inps w p arr =
           Replicate (segmentsShape segments) (Var arr)
       v <-
         letExp (baseString arr <> "_inp_rep_flat") . BasicOp $
-          Reshape ReshapeArbitrary (Shape [w] <> arrayShape arr_row_t) arr_rep
+          Reshape ReshapeArbitrary (Shape [ws_prod] <> arrayShape arr_row_t) arr_rep
       pure $ MapArray v arr_row_t
 
 scopeOfDistInputs :: DistInputs -> Scope GPU
@@ -587,7 +607,7 @@ transformInnerMap segments env inps pat w arrs map_lam = do
   new_segment <- arraySize 0 <$> lookupType ws_elems
   arrs' <-
     zipWithM
-      (onMapInputArr segments env inps new_segment)
+      (onMapInputArr segments env inps ws_elems)
       (lambdaParams map_lam)
       arrs
   let free = freeIn map_lam

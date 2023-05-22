@@ -5,5 +5,5 @@
 def main = map2 (\n xs ->
                    #[unsafe]
                    let A = #[opaque] replicate n xs
-                   let B = #[opaque] map (\x -> (opaque x)[0]+2) A
+                   let B = #[opaque] map (\x -> (opaque x)[0]+2i32) A
                    in B[0])
