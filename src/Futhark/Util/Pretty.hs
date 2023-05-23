@@ -49,7 +49,7 @@ import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDul
 import Prettyprinter.Render.Terminal qualified
 import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
-import System.IO (Handle, hIsTerminalDevice, stdout)
+import System.IO (Handle, hIsTerminalDevice, hPutStrLn, stdout)
 
 -- | Print a doc with styling to the given file; stripping colors if
 -- the file does not seem to support such things.
@@ -67,7 +67,7 @@ hPutDoc h d = do
 hPutDocLn :: Handle -> Doc AnsiStyle -> IO ()
 hPutDocLn h d = do
   hPutDoc h d
-  putStrLn ""
+  hPutStrLn h ""
 
 -- | Like 'hPutDoc', but to stdout.
 putDoc :: Doc AnsiStyle -> IO ()
@@ -75,8 +75,8 @@ putDoc = hPutDoc stdout
 
 -- | Like 'putDoc', but with a final newline.
 putDocLn :: Doc AnsiStyle -> IO ()
-putDocLn h = do
-  putDoc h
+putDocLn d = do
+  putDoc d
   putStrLn ""
 
 -- | Produce text suitable for printing on the given handle.  This
