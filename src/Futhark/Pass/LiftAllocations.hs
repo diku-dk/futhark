@@ -1,6 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | This pass attempts to lift allocations and asserts as far towards
@@ -22,44 +19,31 @@ import Futhark.IR.MCMem
 import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
 
+liftInProg ::
+  (Mem rep inner, LetDec rep ~ LetDecMem) =>
+  (inner rep -> LiftM (inner rep) (inner rep)) ->
+  Prog rep ->
+  Prog rep
+liftInProg onOp prog =
+  prog {progFuns = fmap onFun (progFuns prog)}
+  where
+    onFun f = f {funDefBody = onBody (funDefBody f)}
+    onBody body = runReader (liftAllocationsInBody body) (Env onOp)
+
 liftAllocationsSeqMem :: Pass SeqMem SeqMem
 liftAllocationsSeqMem =
-  Pass "lift allocations" "lift allocations" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env pure)}
-              )
-              progFuns
-        }
+  Pass "lift allocations" "lift allocations" $
+    pure . liftInProg pure
 
 liftAllocationsGPUMem :: Pass GPUMem GPUMem
 liftAllocationsGPUMem =
-  Pass "lift allocations gpu" "lift allocations gpu" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env liftAllocationsInHostOp)}
-              )
-              progFuns
-        }
+  Pass "lift allocations gpu" "lift allocations gpu" $
+    pure . liftInProg liftAllocationsInHostOp
 
 liftAllocationsMCMem :: Pass MCMem MCMem
 liftAllocationsMCMem =
-  Pass "lift allocations mc" "lift allocations mc" $ \prog@Prog {progFuns} ->
-    pure $
-      prog
-        { progFuns =
-            fmap
-              ( \f@FunDef {funDefBody} ->
-                  f {funDefBody = runReader (liftAllocationsInBody funDefBody) (Env liftAllocationsInMCOp)}
-              )
-              progFuns
-        }
+  Pass "lift allocations mc" "lift allocations mc" $
+    pure . liftInProg liftAllocationsInMCOp
 
 newtype Env inner = Env
   {onInner :: inner -> LiftM inner inner}
