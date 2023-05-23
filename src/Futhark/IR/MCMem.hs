@@ -14,6 +14,7 @@ module Futhark.IR.MCMem
 where
 
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.MC.Op
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
@@ -37,6 +38,10 @@ instance ASTRep MCMem where
   expTypesFromPat = pure . map snd . bodyReturnsFromPat
 
 instance OpReturns (MCOp NoOp MCMem) where
+  opReturns (ParOp _ op) = segOpReturns op
+  opReturns (OtherOp NoOp) = pure []
+
+instance OpReturns (MCOp NoOp (Aliases MCMem)) where
   opReturns (ParOp _ op) = segOpReturns op
   opReturns (OtherOp NoOp) = pure []
 
