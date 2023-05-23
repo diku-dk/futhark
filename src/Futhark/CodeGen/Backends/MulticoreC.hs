@@ -477,9 +477,7 @@ compileOp (ParLoop s' body free) = do
   ftask <- multicoreDef (s' ++ "_parloop") $ \s -> do
     fbody <- benchmarkCode s (Just "tid") <=< GC.inNewFunction $
       GC.cachingMemory lexical $ \decl_cached free_cached -> GC.collect $ do
-        mapM_
-          GC.item
-          [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
+        GC.items [C.citems|$decls:(compileGetStructVals fstruct free_args free_ctypes)|]
 
         GC.decl [C.cdecl|typename int64_t iterations = end-start;|]
 
@@ -496,6 +494,7 @@ compileOp (ParLoop s' body free) = do
                                  typename int64_t end,
                                  int subtask_id,
                                  int tid) {
+                       (void)subtask_id;
                        int err = 0;
                        struct $id:fstruct *$id:fstruct = (struct $id:fstruct*) args;
                        struct futhark_context *ctx = $id:fstruct->ctx;

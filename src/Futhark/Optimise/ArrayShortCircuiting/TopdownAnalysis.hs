@@ -11,7 +11,7 @@ module Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
     updateTopdownEnvLoop,
     getDirAliasedIxfn,
     getDirAliasedIxfn',
-    addInvAliassesVarTab,
+    addInvAliasesVarTab,
     areAnyAliased,
     isInScope,
     nonNegativesInPat,
@@ -65,8 +65,7 @@ data TopdownEnv rep = TopdownEnv
   }
 
 isInScope :: TopdownEnv rep -> VName -> Bool
-isInScope td_env m =
-  m `M.member` scope td_env
+isInScope td_env m = m `M.member` scope td_env
 
 -- | Get alias and (direct) index function mapping from expression
 --
@@ -83,18 +82,14 @@ getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Rotate _ _)) =
-  Nothing -- Just (x, (`IxFun.rotate` fmap pe64 rs))
+  Nothing
 getDirAliasFromExp (BasicOp (Index x slc)) =
   Just (x, (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
 getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, id)
 getDirAliasFromExp (BasicOp (FlatIndex x (FlatSlice offset idxs))) =
   Just
     ( x,
-      ( `IxFun.flatSlice`
-          ( FlatSlice (pe64 offset) $
-              map (fmap pe64) idxs
-          )
-      )
+      (`IxFun.flatSlice` FlatSlice (pe64 offset) (map (fmap pe64) idxs))
     )
 getDirAliasFromExp (BasicOp (FlatUpdate x _ _)) = Just (x, id)
 getDirAliasFromExp _ = Nothing
@@ -190,8 +185,11 @@ updateTopdownEnv env stm@(Let pat _ (Op (Inner inner))) =
       nonNegatives = nonNegatives env <> innerNonNegatives (patNames pat) inner,
       knownLessThan = knownLessThan env <> innerKnownLessThan inner
     }
-updateTopdownEnv env (Let (Pat _) _ (BasicOp (Assert se _ _))) =
-  env {td_asserts = se : td_asserts env}
+updateTopdownEnv env stm@(Let (Pat _) _ (BasicOp (Assert se _ _))) =
+  env
+    { scope = scope env <> scopeOf stm,
+      td_asserts = se : td_asserts env
+    }
 updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
   | Just (x, ixfn) <- getDirAliasFromExp e =
       let ixfn_inv = getInvAliasFromExp e
@@ -203,9 +201,7 @@ updateTopdownEnv env stm@(Let (Pat [pe]) _ e)
 updateTopdownEnv env stm =
   env
     { scope = scope env <> scopeOf stm,
-      nonNegatives =
-        nonNegatives env
-          <> nonNegativesInPat (stmPat stm)
+      nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
     }
 
 nonNegativesInPat :: Typed rep => Pat rep -> Names
@@ -292,13 +288,13 @@ walkAliasTab _ _ _ = Nothing
 --     with @x2@ as argument should also insert entries for @x1@ and @x0@ to
 --     @vartab@, of course if their aliasing operations are invertible.
 --   We assume inverting aliases has been performed by the top-down pass.
-addInvAliassesVarTab ::
+addInvAliasesVarTab ::
   HasMemBlock (Aliases rep) =>
   TopdownEnv rep ->
   M.Map VName Coalesced ->
   VName ->
   Maybe (M.Map VName Coalesced)
-addInvAliassesVarTab td_env vtab x
+addInvAliasesVarTab td_env vtab x
   | Just (Coalesced _ (MemBlock _ _ m_y x_ixfun) fv_subs) <- M.lookup x vtab =
       case M.lookup x (v_alias td_env) of
         Nothing -> Just vtab
@@ -310,8 +306,8 @@ addInvAliassesVarTab td_env vtab x
                 Just (MemBlock ptp shp _ _) ->
                   let coal = Coalesced TransitiveCoal (MemBlock ptp shp m_y x_ixfn0) fv_subs
                       vartab' = M.insert x0 coal vtab
-                   in addInvAliassesVarTab td_env vartab' x0
-addInvAliassesVarTab _ _ _ = Nothing
+                   in addInvAliasesVarTab td_env vartab' x0
+addInvAliasesVarTab _ _ _ = Nothing
 
 areAliased :: TopdownEnv rep -> VName -> VName -> Bool
 areAliased _ m_x m_y =

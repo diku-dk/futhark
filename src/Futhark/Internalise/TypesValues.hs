@@ -127,8 +127,9 @@ internaliseDim ::
 internaliseDim exts d =
   case d of
     E.AnySize _ -> Ext <$> newId
-    E.ConstSize n -> pure $ Free $ intConst I.Int64 $ toInteger n
-    E.NamedSize name -> pure $ namedDim name
+    E.SizeExpr (E.IntLit n _ _) -> pure $ Free $ intConst I.Int64 n
+    E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
+    E.SizeExpr e -> error $ "Unexpected size expression: " ++ prettyString e
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = I.Ext x
@@ -152,7 +153,7 @@ internaliseTypeM exts orig_t =
       | null ets -> pure [I.Prim I.Unit]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
-    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t _])
+    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
           ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t

@@ -1,6 +1,6 @@
 -- Loop optimisation should not eliminate holes.
 -- ==
--- input { 0i32 } error: Reached hole
+-- input { 0i32 } error: hole
 
 def holey (x: i32) : i32 = ???
 

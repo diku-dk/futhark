@@ -38,7 +38,7 @@ check:
 	tools/style-check.sh src unittests
 
 check-commit:
-	tools/style-check.sh $$(git diff-index --cached --name-status HEAD | awk '$$1 != "D" { print $$2 }')
+	tools/style-check.sh $$(git diff-index --cached --ignore-submodules=all --name-status HEAD | awk '$$1 != "D" { print $$2 }')
 
 clean:
 	cabal clean

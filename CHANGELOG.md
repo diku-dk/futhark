@@ -9,12 +9,54 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark literate` (and FutharkScript in general) is now able to do
-  a bit of type-coercion of constants.
+* Arbitrary expressions of type `i64` are now allowed as sizes.  Work
+  by Lubin Bailly.
+
+* New prelude function `resize`.
 
 ### Removed
 
+* The prelude functions `concat_to` and `flatten_to`.  They are often
+  not necessary now, and otherwise `resize` is available.
+
 ### Changed
+
+* The prelude functions `flatten` and `unflatten` (and their
+  multidimensional variants), as well as `split`, now have more
+  precise types.
+
+### Fixed
+
+* Type checker crash on some ill-typed programs (#1926).
+
+* Some soundness bugs in memory short circuiting (#1927, #1930).
+
+* Another compiler crash in block tiling (#1933, #1940).
+
+* Global arrays with size parameters no longer have aliases.
+
+## [0.24.3]
+
+### Fixed
+
+* Certain cases of noninlined functions in `multicore` backend.
+
+* Defunctionalisation of `match` where the constructors carry
+  functions (#1917).
+
+* Shape coercions involving sum types (#1918).  This required
+  tightening the rules a little bit, so some coercions involving
+  anonymous sizes may now be rejected.  Add expected sizes as needed.
+
+* Defunctionalisation somtimes forgot about sizes bound at top level
+  (#1920).
+
+## [0.24.2]
+
+### Added
+
+* `futhark literate` (and FutharkScript in general) is now able to do
+  a bit of type-coercion of constants.
 
 ### Fixed
 
@@ -31,6 +73,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Defunctionalisation crashed on projection of holes.
 
 * Loop optimisation would sometimes remove holes.
+
+* A potential barrier divergence for certain GPU kernels that fail
+  bounds checking.
+
+* A potential infinite loop when looking up aliases (#1915).
+
+* `futhark literate`: less extraneous whitespace.
 
 ## [0.24.1]
 

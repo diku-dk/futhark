@@ -1,6 +1,8 @@
 module Futhark.Pass.Flatten.Distribute
   ( distributeMap,
     distributeBody,
+    MapArray (..),
+    mapArrayRowType,
     ResMap,
     Distributed (..),
     DistStm (..),
@@ -129,10 +131,10 @@ resultMap avail_inputs stms pat res = mconcat $ map f stms
 
 splitIrregDims :: Names -> Type -> (Rank, Type)
 splitIrregDims bound_outside (Array pt shape u) =
-  let (irreg, reg) = second reverse $ span regDim $ reverse $ shapeDims shape
+  let (reg, irreg) = second reverse $ span regDim $ reverse $ shapeDims shape
    in (Rank $ length irreg, Array pt (Shape reg) u)
   where
-    regDim (Var v) = v `notNameIn` bound_outside
+    regDim (Var v) = v `nameIn` bound_outside
     regDim Constant {} = True
 splitIrregDims _ t = (mempty, t)
 
@@ -178,11 +180,42 @@ distributeBody outer_scope w param_inputs body =
               stm
        in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
 
-distributeMap :: Scope rep -> Pat Type -> SubExp -> [VName] -> Lambda SOACS -> Distributed
+-- | The input we are mapping over in 'distributeMap'.
+data MapArray t
+  = -- | A straightforward array passed in to a
+    -- top-level map.
+    MapArray VName Type
+  | -- | Something more exotic - distribution will assign it a
+    -- 'ResTag', but not do anything else.  This is used to
+    -- distributed nested maps whose inputs are produced in the outer
+    -- nests.
+    MapOther t Type
+
+mapArrayRowType :: MapArray t -> Type
+mapArrayRowType (MapArray _ t) = t
+mapArrayRowType (MapOther _ t) = t
+
+distributeMap ::
+  Scope rep ->
+  Pat Type ->
+  SubExp ->
+  [MapArray t] ->
+  Lambda SOACS ->
+  (Distributed, M.Map ResTag t)
 distributeMap outer_scope map_pat w arrs lam =
-  let param_inputs =
-        zipWith paramInput (lambdaParams lam) arrs
+  let ((_, arrmap), param_inputs) =
+        L.mapAccumL paramInput (ResTag 0, mempty) $
+          zip (lambdaParams lam) arrs
       (avail_inputs, stms) = distributeBody outer_scope w param_inputs $ lambdaBody lam
-   in Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam
+   in ( Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam,
+        arrmap
+      )
   where
-    paramInput p arr = (paramName p, DistInputFree arr $ paramType p)
+    paramInput (ResTag i, m) (p, MapArray arr _) =
+      ( (ResTag i, m),
+        (paramName p, DistInputFree arr $ paramType p)
+      )
+    paramInput (ResTag i, m) (p, MapOther x _) =
+      ( (ResTag (i + 1), M.insert (ResTag i) x m),
+        (paramName p, DistInput (ResTag i) $ paramType p)
+      )

@@ -5,5 +5,5 @@
 
 def main (kr: [][]f32): [][]f32 =
   let f 'a [r][c] (arr: [r][c]a): [r][c]a =
-    flatten arr |> unflatten r c
+    flatten arr |> unflatten
   in f kr

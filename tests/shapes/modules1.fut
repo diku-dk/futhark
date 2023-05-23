@@ -1,7 +1,7 @@
 -- It is not allowed to create an opaque type whose size parameters
 -- are not used in array dimensions.
 -- ==
--- error: "n"
+-- error: is not used constructively
 
 module m = {
   type^ t [n] = [n]i32 -> i64

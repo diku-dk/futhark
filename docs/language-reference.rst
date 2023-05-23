@@ -117,9 +117,8 @@ Compound Types and Values
 
 Compound types can be constructed based on the primitive types.  The
 Futhark type system is entirely structural, and type abbreviations are
-merely shorthands (with one exception, see
-:ref:`sizes-in-abbreviations`).  The only exception is abstract types
-whose definition has been hidden via the module system (see
+merely shorthands.  The only exception is abstract types whose
+definition has been hidden via the module system (see
 :ref:`module-system`).
 
 .. productionlist::
@@ -136,18 +135,17 @@ although they are not very useful.  Empty tuples are written ``()``
 and are of type ``()``.
 
 .. productionlist::
-   array_type: "[" [`dim`] "]" `type`
-   dim: `qualid` | `decimal`
+   array_type: "[" [`exp`] "]" `type`
 
 An array value is written as a sequence of zero or more
 comma-separated values enclosed in square brackets: ``[1,2,3]``.  An
 array type is written as ``[d]t``, where ``t`` is the element type of
-the array, and ``d`` is an integer or variable indicating the size.
-We can often elide ``d`` and write just ``[]`` (an *anonymous size*),
-in which case the size will be inferred.  An anonymous size is a
-syntactic shorthand, and is always replaced by an actual size by the
-type checker (either via inference or by inventing a new name,
-depending on context).
+the array, and ``d`` is an expression of type ``i64`` indicating the
+number of elements in the array.  We can elide ``d`` and write just
+``[]`` (an :term:`anonymous size`), in which case the size will be
+inferred.  An anonymous size is a syntactic shorthand, and is always
+replaced by an actual size by the type checker (either via inference
+or by inventing a new name, depending on context).
 
 As an example, an array of three integers could be written as
 ``[1,2,3]``, and has type ``[3]i32``.  An empty array is written as
@@ -220,7 +218,7 @@ corresponding Unicode code point.
 
 An existential size quantifier brings an unknown size into scope
 within a type.  This can be used to encode constraints for statically
-unknowable array sizes.
+unknown array sizes.
 
 Declarations
 ------------
@@ -268,10 +266,9 @@ of the function::
 
 Hindley-Milner-style type inference is supported.  A parameter may be
 given a type with the notation ``(name: type)``.  Functions may not be
-recursive.  You may put *size annotations* in the return type and
-parameter types; see `Size Types`_.  A function can be *polymorphic*
-by using type parameters, in the same way as for `Type
-Abbreviations`_::
+recursive.  The sizes of the arguments can be constrained - see `Size
+Types`_.  A function can be *polymorphic* by using type parameters, in
+the same way as for `Type Abbreviations`_::
 
   def reverse [n] 't (xs: [n]t): [n]t = xs[::-1]
 
@@ -405,9 +402,9 @@ brackets.  Example::
 
   def x: two_intvecs [2] = (iota 2, replicate 2 0)
 
-Size parameters work much like shape declarations for arrays.  Like
-shape declarations, they can be elided via square brackets containing
-nothing.  All size parameters must be used in the definition of the
+When referencing a type abbreviation, size parameters work much like
+array sizes.  Like sizes, they can be passed an anonymous size
+(``[]``).  All size parameters must be used in the definition of the
 type abbreviation.
 
 A type parameter prefixed with a single quote is a *type parameter*.
@@ -1092,34 +1089,34 @@ they have at least one named parameter.
 Size Types
 ----------
 
-Futhark supports a simple system of size-dependent types that
-statically verifies that the sizes of arrays passed to a function are
-compatible.  The focus is on simplicity, not completeness.
+Futhark supports a system of size-dependent types that statically
+checks that the sizes of arrays passed to a function are compatible.
 
 Whenever a pattern occurs (in ``let``, ``loop``, and function
-parameters), as well as in return types, *size annotations* may be
-used to express invariants about the shapes of arrays that are
-accepted or produced by the function.  For example::
+parameters), as well as in return types, the types of the bindings
+express invariants about the shapes of arrays that are accepted or
+produced by the function.  For example::
 
   def f [n] (a: [n]i32) (b: [n]i32): [n]i32 =
     map2 (+) a b
 
-We use a *size parameter*, ``[n]``, to explicitly quantify sizes.  The
-``[n]`` parameter is not explicitly passed when calling ``f``.
+We use a *size parameter*, ``[n]``, to explicitly quantify a size.
+The ``[n]`` parameter is not explicitly passed when calling ``f``.
 Rather, its value is implicitly deduced from the arguments passed for
-the value parameters.  An array type can contain *anonymous
-dimensions*, e.g. ``[]i32``, for which the type checker will invent
-fresh size parameters, which ensures that all arrays have a (symbolic)
-size.  On the right-hand side of a function arrow ("return types"),
-this results in an *existential size* that is not known until the
-function is fully applied, e.g::
+the value parameters.  An array type can contain *anonymous sizes*,
+e.g. ``[]i32``, for which the type checker will invent fresh size
+parameters, which ensures that all arrays have a size.  On the
+right-hand side of a function arrow ("return types"), this results in
+an *existential size* that is not known until the function is fully
+applied, e.g::
 
   val filter [n] 'a : (p: a -> bool) -> (as: [n]a) -> ?[k].[k]a
 
-A size annotation can also be an integer constant (with no suffix).
-Size parameters can be used as ordinary variables within the scope of
-the parameters.  The type checker verifies that the program obeys any
-constraints imposed by size annotations.
+Sizes can be any expression of type ``i64`` that does not consume any
+free variables.  Size parameters can be used as ordinary variables of
+type ``i64`` within the scope of the parameters.  The type checker
+verifies that the program obeys any constraints imposed by size
+annotations.
 
 *Size-dependent types* are supported, as the names of parameters can
 be used in the return type of a function::
@@ -1128,30 +1125,29 @@ be used in the return type of a function::
 
 An application ``replicate 10 0`` will have type ``[10]i32``.
 
-Whenever we write a type ``[n]t``, ``n`` must already be a variable of
-type ``i64`` in scope (possibly by being bound as a size parameter).
+Whenever we write a type ``[e]t``, ``e`` must be a well-typed
+expression of type ``i64`` in scope (possibly by referencing names
+bound as a size parameter).
 
 .. _unknown-sizes:
 
 Unknown sizes
 ~~~~~~~~~~~~~
 
-Since sizes must be constants or variables, there are many cases where
-the type checker cannot assign a precise size to the result of some
-operation.  For example, the type of ``concat`` should conceptually be::
+There are cases where the type checker cannot assign a precise size to
+the result of some operation.  For example, the type of ``filter``
+is::
 
-  val concat [n] [m] 't : [n]t -> [m]t -> [n+m]t
+  val filter [n] 'a : (a -> bool) -> [n]t -> ?[m].[m]t
 
-But this is not presently allowed.  Instead, the return type contains
-an existential size::
+The function returns of an array of *some existential size* ``m``, but
+it cannot be known in advance.
 
-  val concat [n] [m] 't : [n]t -> [m]t -> ?[k].[k]t
-
-When an application ``concat xs ys`` is found, the result will be of
-type ``[k']t``, where ``k'`` is a fresh *unknown* size variable that
-is considered distinct from every other size in the program.  It is
-often necessary to perform a size coercion (see `Size coercion`_) to
-convert an unknown size to a known size.
+When an application ``filter p xs`` is found, the result will be of
+type ``[k]t``, where ``k`` is a fresh *unknown size* that is
+considered distinct from every other size in the program.  It is
+sometimes necessary to perform a size coercion (see `Size coercion`_)
+to convert an unknown size to a known size.
 
 Generally, unknown sizes are constructed whenever the true size cannot
 be expressed.  The following lists all possible sources of unknown
@@ -1170,12 +1166,12 @@ The type of ``replicate c 0`` is ``[c]i32``, but since ``c`` is
 locally bound, the type of the entire expression is ``[k]i32`` for
 some fresh ``k``.
 
-Compound expression passed as function argument
-...............................................
+Consuming expression passed as function argument
+................................................
 
-Intuitively, the type of ``replicate (x+y) 0`` should be ``[x+y]i32``,
-but since sizes must be names or constants, this is not expressible.
-Therefore an unknown size variable is created and the size of the
+The type of ``replicate e 0`` should be ``[e]i32``, but if ``e`` is an
+expression that is not valid as a size, this is not expressible.
+Therefore an unknown size ``k`` is created and the size of the
 expression becomes ``[k]i32``.
 
 Compound expression used as range bound
@@ -1379,38 +1375,6 @@ fresh size ``k``.  The lambda is then assigned the type ``[n]t ->
 be passed to ``map``, as explained before.  The solution is to bind
 ``length`` to a name *before* the lambda.
 
-.. _sizes-in-abbreviations:
-
-Sizes in type abbreviations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-When anonymous sizes are passed to type abbreviations, if that
-anonymous size is eventually instantiated with an existential size,
-the *same* existential size is going to be used for all instances of
-the corresponding parameter in the right-hand-side of the type
-abbreviation.  Note that this breaks with the usual conception of type
-abbreviations as purely a shorthand, as this could not be expressed
-without the abbreviation.  Example::
-
-  type square [n] = [n][n]i32
-
-The following function is be *known* to return a square array::
-
-  val f : () -> square []
-
-But this is not the case for the function that inlines the definition
-of ``square``::
-
-  val g : () -> [][]i32
-
-As this above would be elaborated as follows::
-
-  val g : () -> ?[n][m].[n][m]i32
-
-We can of course explicitly write that the function returns a square
-array of existential size::
-
-  val g : () -> ?[n].[n]i32
 
 .. _in-place-updates:
 

@@ -178,20 +178,25 @@ def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 -- **Work:** *O(n ✕ W(p))*
 --
 -- **Span:** *O(log(n) ✕ W(p))*
-def partition [n] 'a (p: a -> bool) (as: [n]a): ([]a, []a) =
+def partition [n] 'a (p: a -> bool) (as: [n]a): ?[k].([k]a, [n-k]a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition 2 p' as
-  in (as'[0:is[0]], as'[is[0]:n])
+  let k = is[0]
+  in (as'[0:k], as'[k:n])
 
 -- | Split an array by two predicates, producing three arrays.
 --
 -- **Work:** *O(n ✕ (W(p1) + W(p2)))*
 --
 -- **Span:** *O(log(n) ✕ (W(p1) + W(p2)))*
-def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ([]a, []a, []a) =
+def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ?[k][l].([k]a, [l]a, [n-k-l]a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition 3 p' as
-  in (as'[0:is[0]], as'[is[0]:is[0]+is[1]], as'[is[0]+is[1]:n])
+  let k = is[0]
+  let l = is[1]
+  in (as'[0:k],
+      as'[k:k+l] :> [l]a,
+      as'[k+l:n] :> [n-k-l]a)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.

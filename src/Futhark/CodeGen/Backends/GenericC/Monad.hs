@@ -608,7 +608,8 @@ cachingMemory lexical f = do
   -- cached.  This is not a deep technical restriction, but merely a
   -- heuristic based on GPU memory usually involving larger
   -- allocations, that do not suffer from the overhead of reference
-  -- counting.
+  -- counting.  Beware: there is code elsewhere in codegen that
+  -- assumes lexical memory is DefaultSpace too.
   let cached = M.keys $ M.filter (== DefaultSpace) lexical
 
   cached' <- forM cached $ \mem -> do

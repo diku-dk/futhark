@@ -63,5 +63,6 @@ compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
       | Just scan' <- canBeSinglePass scans ->
           SinglePass.compileSegScan pat lvl space scan' kbody
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
+  emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space

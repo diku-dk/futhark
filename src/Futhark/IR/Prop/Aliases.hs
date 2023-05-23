@@ -221,11 +221,19 @@ instance AliasesOf dec => AliasesOf (PatElem dec) where
 
 -- | Also includes the name itself.
 lookupAliases :: AliasesOf (LetDec rep) => VName -> Scope rep -> Names
-lookupAliases v scope =
-  case M.lookup v scope of
-    Just (LetName dec) ->
-      oneName v <> foldMap (`lookupAliases` scope) (namesToList (aliasesOf dec))
-    _ -> oneName v
+lookupAliases root scope =
+  -- We must be careful to handle circular aliasing properly (this
+  -- can happen due to Match and Loop).
+  expand mempty root
+  where
+    expand prev v =
+      case M.lookup v scope of
+        Just (LetName dec) ->
+          oneName v
+            <> foldMap
+              (expand (oneName v <> prev))
+              (filter (`notNameIn` prev) (namesToList (aliasesOf dec)))
+        _ -> oneName v
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.

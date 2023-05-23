@@ -343,7 +343,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = zip ext $ repeat $ E.SizeSubst $ E.ConstSize 0
+      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeInteger 0 mempty
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do
@@ -508,7 +508,14 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
                       | not $ primType $ paramType p ->
                           Reshape I.ReshapeCoerce (I.arrayShape $ paramType p) v
                     _ -> SubExp se
-          internaliseExp1 "loop_cond" cond
+
+          -- As the condition expression is inserted twice, we have to
+          -- avoid shadowing (#1935).
+          (cond_stms, cond') <-
+            uncurry (flip renameStmsWith)
+              =<< collectStms (internaliseExp1 "loop_cond" cond)
+          addStms cond_stms
+          pure cond'
 
         addStms init_loop_cond_stms
 
@@ -2151,6 +2158,9 @@ partitionWithSOACS k lam arrs = do
 typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.TEVar qn _) =
   pure [ErrorString $ prettyText qn]
+typeExpForError (E.TEParens te _) = do
+  msg <- typeExpForError te
+  pure $ ["("] <> msg <> [")"]
 typeExpForError (E.TEUnique te _) =
   ("*" :) <$> typeExpForError te
 typeExpForError (E.TEDim dims te _) =
