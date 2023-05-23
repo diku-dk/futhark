@@ -10,7 +10,7 @@ module Futhark.Pass.Flatten.Builtins
     doSegIota,
     doPrefixSum,
     doRepIota,
-    doPartition2,
+    doPartition,
   )
 where
 
@@ -28,11 +28,11 @@ import Futhark.Tools
 builtinName :: T.Text -> Name
 builtinName = nameFromText . ("builtin#" <>)
 
-segIotaName, repIotaName, prefixSumName, partition2Name :: Name
+segIotaName, repIotaName, prefixSumName, partitionName :: Name
 segIotaName = builtinName "segiota"
 repIotaName = builtinName "repiota"
 prefixSumName = builtinName "prefixsum"
-partition2Name = builtinName "partition2"
+partitionName = builtinName "partition"
 
 genScanomap :: String -> SubExp -> Lambda GPU -> [SubExp] -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
 genScanomap desc w lam nes m = do
@@ -211,35 +211,78 @@ genRepIota ks = do
     zero = intConst Int64 0
     negone = intConst Int64 (-1)
 
-genPartition2 :: VName -> VName -> Builder GPU (VName, VName)
-genPartition2 n cs = do
+genPartition :: VName -> VName -> VName -> Builder GPU (VName, VName)
+genPartition n k cls = do
   let n' = Var n
-  -- Calculate array of true flags (tfs) and false flags (ffs) via map
-  gtid <- newVName "gtid"
-  space <- mkSegSpace [(gtid, n')]
-  (flagRes, flagStms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-    let [zero, one] = map (toExp . constant) [0 :: Int64, 1 :: Int64]
-    tf <- letSubExp "tf" =<< eIf (eIndex cs [toExp gtid]) (eBody [one]) (eBody [zero])
-    ff <- letSubExp "ff" =<< eIf (eIndex cs [toExp gtid]) (eBody [zero]) (eBody [one])
-    pure $ map (Returns ResultMaySimplify mempty) [tf, ff]
-  let kbody = KernelBody () flagStms flagRes
-  let t = Prim int64
-  ~[tfs, ffs] <- letTupExp "tfs_ffs" $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [t, t] kbody
-  -- Get result indices via scatter
-  isT <- genPrefixSum "isT" tfs
-  isF <- genPrefixSum "isF" ffs
-  num_ts <- letExp "num_ts" =<< eLast isT
+  let k' = Var k
+  let dims = [k', n']
+  let reshape shp = BasicOp . Reshape ReshapeArbitrary shp
+
+  m <- letSubExp "m" =<< eBinOp (Mul Int64 OverflowUndef) (toExp k') (toExp n')
+  -- Calculate `[k][n]` (flat) array of flags such that `cls_flags[i][j]` is equal 1 if
+  -- the j'th element is a member of equivalence class `i`.
+  -- `seg_flags` is a flag array describing the shape of `cls_flags` i.e. every `k`'th element is `True`
+  ~[cls_flags, seg_flags] <-
+    mapM (letExp "flags_flat" . reshape (Shape [m])) =<< letTupExp "flags" =<< do
+      gtids <- traverse (const $ newVName "gtid") dims
+      space <- mkSegSpace $ zip gtids dims
+      ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+        let [i, j] = gtids
+        c <- letSubExp "c" =<< eIndex cls [toExp j]
+        cls_flag <-
+          letSubExp "cls_flag"
+            =<< eIf
+              (toExp $ pe64 (Var i) .==. pe64 c)
+              (eBody [toExp $ intConst Int64 1])
+              (eBody [toExp $ intConst Int64 0])
+        seg_flag <-
+          letSubExp "seg_flag"
+            =<< eIf
+              (toExp $ pe64 (Var j) .==. 0)
+              (eBody [toExp $ constant True])
+              (eBody [toExp $ constant False])
+        let res_ts = [(cls_flag, Prim int64), (seg_flag, Prim Bool)]
+        let (res, ts) = unzip res_ts
+        pure (map (Returns ResultMaySimplify mempty) res, ts)
+      let kbody = KernelBody () stms res
+      pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+
+  -- Offsets of each of the individual equivalence classes. Note: not an exclusive scan!
+  local_offs <- letExp "local_offs" . reshape (Shape dims) =<< genSegPrefixSum "local_offs_flat" seg_flags cls_flags
+  -- The number of elems in each class
+  counts <- letExp "counts" <=< genTabulate k' $ \i -> do
+    row <- letExp "offs_row" =<< eIndex local_offs [toExp i]
+    letTupExp' "count" =<< eLast row
+  -- Offsets of the whole equivalence classes
+  global_offs <- genExPrefixSum "global_offs" counts
+  -- Offsets over all of the equivalence classes.
+  cls_offs <-
+    letExp "cls_offs" =<< do
+      gtids <- traverse (const $ newVName "gtid") dims
+      space <- mkSegSpace $ zip gtids dims
+      ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+        let [i, j] = gtids
+        global_offset <- letExp "global_offset" =<< eIndex global_offs [toExp i]
+        offset <-
+          letSubExp "offset"
+            =<< eBinOp
+              (Add Int64 OverflowUndef)
+              (eIndex local_offs [toExp i, toExp j])
+              (toExp global_offset)
+        let res_ts = [(offset, Prim int64)]
+        let (res, ts) = unzip res_ts
+        pure (map (Returns ResultMaySimplify mempty) res, ts)
+      let kbody = KernelBody () stms res
+      pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+
   scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [n']
-  res <- letExp "scatter_res" <=< genScatter scratch n' $ \gtid' -> do
-    let idx = [toExp gtid']
-    let c = eIndex cs idx
-    let minus1 e = eBinOp (Sub Int64 OverflowUndef) e (toExp $ constant (1 :: Int64))
-    let iT = minus1 $ eIndex isT idx
-    let iF = minus1 $ eBinOp (Add Int64 OverflowUndef) (eIndex isF idx) (toExp num_ts)
-    ind <- letExp "ind" =<< eIf c (eBody [iT]) (eBody [iF])
-    i <- letSubExp "i" =<< toExp gtid'
+  res <- letExp "scatter_res" <=< genScatter scratch n' $ \gtid -> do
+    c <- letExp "c" =<< eIndex cls [toExp gtid]
+    offs <- letSubExp "offs" =<< eIndex cls_offs [toExp c, toExp gtid]
+    ind <- letExp "ind" =<< toExp (pe64 offs - 1)
+    i <- letSubExp "i" =<< toExp gtid
     pure (ind, i)
-  pure (res, num_ts)
+  pure (counts, res)
 
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
@@ -310,24 +353,25 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefBody = body
       }
 
-partition2Builtin :: FunDef GPU
-partition2Builtin = buildingBuiltin $ do
+partitionBuiltin :: FunDef GPU
+partitionBuiltin = buildingBuiltin $ do
   np <- newParam "n" $ Prim int64
-  csp <- newParam "cs" $ Array Bool (Shape [Var (paramName np)]) Nonunique
+  kp <- newParam "k" $ Prim int64
+  csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
-    localScope (scopeOfFParams [np, csp]) . buildBody_ $ do
-      (res, i) <- genPartition2 (paramName np) (paramName csp)
-      pure $ varsRes [res, i]
+    localScope (scopeOfFParams [np, kp, csp]) . buildBody_ $ do
+      (qs, res) <- genPartition (paramName np) (paramName kp) (paramName csp)
+      pure $ varsRes [qs, res]
   pure
     FunDef
       { funDefEntryPoint = Nothing,
         funDefAttrs = mempty,
-        funDefName = partition2Name,
+        funDefName = partitionName,
         funDefRetType =
-          [ Array int64 (Shape [Free $ Var $ paramName np]) Unique,
-            Prim int64
+          [ Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
+            Array int64 (Shape [Free $ Var $ paramName np]) Unique
           ],
-        funDefParams = [np, csp],
+        funDefParams = [np, kp, csp],
         funDefBody = body
       }
 
@@ -336,7 +380,7 @@ partition2Builtin = buildingBuiltin $ do
 -- avoid the code explosion that would result if we inserted
 -- primitives everywhere.
 flatteningBuiltins :: [FunDef GPU]
-flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin, partition2Builtin]
+flatteningBuiltins = [segIotaBuiltin, repIotaBuiltin, prefixSumBuiltin, partitionBuiltin]
 
 -- | @[0,1,2,0,1,0,1,2,3,4,...]@.  Returns @(flags,offsets,elems)@.
 doSegIota :: VName -> Builder GPU (VName, VName, VName)
@@ -398,23 +442,23 @@ doPrefixSum ns = do
       [toDecl (staticShapes1 ns_t) Unique]
       (Safe, mempty, mempty)
 
-doPartition2 :: VName -> Builder GPU (VName, VName)
-doPartition2 cs = do
+doPartition :: VName -> VName -> Builder GPU (VName, VName)
+doPartition k cs = do
   cs_t <- lookupType cs
   let n = arraySize 0 cs_t
-  res <- newVName "partition2_res"
-  i <- newVName "partition2_index"
-  let args = [(n, Prim int64), (Var cs, cs_t)]
+  qs <- newVName "partition_splits"
+  res <- newVName "partition_res"
+  let args = [(n, Prim int64), (Var k, Prim int64), (Var cs, cs_t)]
       restype =
-        fromMaybe (error "doPartition2: bad application") $
+        fromMaybe (error "doPartition: bad application") $
           applyRetType
-            (funDefRetType partition2Builtin)
-            (funDefParams partition2Builtin)
+            (funDefRetType partitionBuiltin)
+            (funDefParams partitionBuiltin)
             args
-  letBindNames [res, i] $
+  letBindNames [qs, res] $
     Apply
-      (funDefName partition2Builtin)
-      [(n, Observe), (Var cs, Observe)]
+      (funDefName partitionBuiltin)
+      [(n, Observe), (Var k, Observe), (Var cs, Observe)]
       restype
       (Safe, mempty, mempty)
-  pure (res, i)
+  pure (qs, res)
