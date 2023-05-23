@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark eval` no longer crashes on ambiguously typed expressions (#1946).
 
+* A code motion pass was ignorant of consumption constraints, leading
+  to compiler crash (#1947).
+
 ## [0.24.3]
 
 ### Fixed
