@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A code motion pass was ignorant of consumption constraints, leading
   to compiler crash (#1947).
 
+* Type checker could get confused and think unknown sizes were
+  available when they really weren't (#1950).
+
 ## [0.24.3]
 
 ### Fixed
