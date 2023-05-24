@@ -1684,15 +1684,15 @@ isIntrinsicFunction qname args loc = do
       arrs <- internaliseExpToVars "unflatten_arr" arr
       n' <- internaliseExp1 "n" n
       m' <- internaliseExp1 "m" m
-      -- The unflattened dimension needs to have the same number of elements
-      -- as the original dimension.
+      -- Each dimension must be nonnegative, and the unflattened
+      -- dimension needs to have the same number of elements as the
+      -- original dimension.
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
       dim_ok <-
-        letSubExp "dim_ok"
-          =<< eCmpOp
-            (I.CmpEq I.int64)
-            (eBinOp (I.Mul Int64 I.OverflowUndef) (eSubExp n') (eSubExp m'))
-            (eSubExp old_dim)
+        letSubExp "dim_ok" <=< toExp $
+          pe64 old_dim .==. pe64 n' * pe64 m'
+            .&&. pe64 n' .>=. 0
+            .&&. pe64 m' .>=. 0
       dim_ok_cert <-
         assert
           "dim_ok_cert"
