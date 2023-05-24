@@ -399,7 +399,9 @@ synopsisOpened (ModParens me _) = do
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
   let dest = fromString $ relativise (includeToFilePath file) current <> ".html"
-  pure $ keyword "import " <> (H.a ! A.href dest) (fromString $ show file)
+  pure $
+    keyword "import "
+      <> (H.a ! A.href dest) (fromString (show (includeToString file)))
 synopsisOpened (ModAscript _ se _ _) = Just $ do
   se' <- synopsisSigExp se
   pure $ "... : " <> se'
