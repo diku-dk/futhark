@@ -417,7 +417,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
       ns <- elemArr segments env inps n
@@ -716,17 +716,16 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- Parition the indices of the scrutinees by their equvalence class such
       -- that (the indices) of the scrutinees belonging to class 0 come first,
       -- then those belonging to class 1 and so on.
-      (partition_sizes, partition_inds) <- doPartition n_cases equiv_classes
-      (_, parition_offs, _) <- exScanAndSum partition_sizes
+      (partition_sizes, partition_offs, partition_inds) <- doPartition n_cases equiv_classes
       inds_t <- lookupType partition_inds
-      -- Get the indices of each equivalence class
+      -- Get the indices of each scrutinee by equivalence class
       inds <- forM [0 .. num_cases - 1] $ \i -> do
         num_elems <-
           letSubExp ("size" ++ show i)
             =<< eIndex partition_sizes [toExp $ intConst Int64 i]
         begin <-
           letSubExp ("idx_begin" ++ show i)
-            =<< eIndex parition_offs [toExp $ intConst Int64 i]
+            =<< eIndex partition_offs [toExp $ intConst Int64 i]
         letExp ("inds_branch" ++ show i) $
           BasicOp $
             Index partition_inds $

@@ -211,7 +211,7 @@ genRepIota ks = do
     zero = intConst Int64 0
     negone = intConst Int64 (-1)
 
-genPartition :: VName -> VName -> VName -> Builder GPU (VName, VName)
+genPartition :: VName -> VName -> VName -> Builder GPU (VName, VName, VName)
 genPartition n k cls = do
   let n' = Var n
   let k' = Var k
@@ -219,9 +219,10 @@ genPartition n k cls = do
   let reshape shp = BasicOp . Reshape ReshapeArbitrary shp
 
   m <- letSubExp "m" =<< eBinOp (Mul Int64 OverflowUndef) (toExp k') (toExp n')
-  -- Calculate `[k][n]` (flat) array of flags such that `cls_flags[i][j]` is equal 1 if
-  -- the j'th element is a member of equivalence class `i`.
-  -- `seg_flags` is a flag array describing the shape of `cls_flags` i.e. every `k`'th element is `True`
+  -- Calculate `[k][n]` (flat) array of flags such that `cls_flags[i][j]`
+  -- is equal 1 if the j'th element is a member of equivalence class `i`.
+  -- `seg_flags` is a flag array describing the shape of `cls_flags` i.e.
+  -- every `k`'th element is `True`
   ~[cls_flags, seg_flags] <-
     mapM (letExp "flags_flat" . reshape (Shape [m])) =<< letTupExp "flags" =<< do
       gtids <- traverse (const $ newVName "gtid") dims
@@ -247,12 +248,22 @@ genPartition n k cls = do
       let kbody = KernelBody () stms res
       pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
 
-  -- Offsets of each of the individual equivalence classes. Note: not an exclusive scan!
-  local_offs <- letExp "local_offs" . reshape (Shape dims) =<< genSegPrefixSum "local_offs_flat" seg_flags cls_flags
+  -- Offsets of each of the individual equivalence classes.
+  -- Note: not an exclusive scan!
+  --
+  -- There's probably a better way e.g. use a regular SegScan so
+  -- we avoid the `seg_flags` nonsense.
+  local_offs <-
+    letExp "local_offs" . reshape (Shape dims)
+      =<< genSegPrefixSum "local_offs_flat" seg_flags cls_flags
   -- The number of elems in each class
   counts <- letExp "counts" <=< genTabulate k' $ \i -> do
     row <- letExp "offs_row" =<< eIndex local_offs [toExp i]
-    letTupExp' "count" =<< eLast row
+    letTupExp' "count"
+      =<< eIf
+        (toExp (pe64 n' .==. 0))
+        (eBody [eSubExp $ intConst Int64 0])
+        (eBody [eLast row])
   -- Offsets of the whole equivalence classes
   global_offs <- genExPrefixSum "global_offs" counts
   -- Offsets over all of the equivalence classes.
@@ -282,7 +293,7 @@ genPartition n k cls = do
     ind <- letExp "ind" =<< toExp (pe64 offs - 1)
     i <- letSubExp "i" =<< toExp gtid
     pure (ind, i)
-  pure (counts, res)
+  pure (counts, global_offs, res)
 
 buildingBuiltin :: Builder GPU (FunDef GPU) -> FunDef GPU
 buildingBuiltin m = fst $ evalState (runBuilderT m mempty) blankNameSource
@@ -360,8 +371,8 @@ partitionBuiltin = buildingBuiltin $ do
   csp <- newParam "cs" $ Array int64 (Shape [Var (paramName np)]) Nonunique
   body <-
     localScope (scopeOfFParams [np, kp, csp]) . buildBody_ $ do
-      (qs, res) <- genPartition (paramName np) (paramName kp) (paramName csp)
-      pure $ varsRes [qs, res]
+      (counts, offsets, res) <- genPartition (paramName np) (paramName kp) (paramName csp)
+      pure $ varsRes [counts, offsets, res]
   pure
     FunDef
       { funDefEntryPoint = Nothing,
@@ -369,6 +380,7 @@ partitionBuiltin = buildingBuiltin $ do
         funDefName = partitionName,
         funDefRetType =
           [ Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
+            Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
             Array int64 (Shape [Free $ Var $ paramName np]) Unique
           ],
         funDefParams = [np, kp, csp],
@@ -442,11 +454,12 @@ doPrefixSum ns = do
       [toDecl (staticShapes1 ns_t) Unique]
       (Safe, mempty, mempty)
 
-doPartition :: VName -> VName -> Builder GPU (VName, VName)
+doPartition :: VName -> VName -> Builder GPU (VName, VName, VName)
 doPartition k cs = do
   cs_t <- lookupType cs
   let n = arraySize 0 cs_t
-  qs <- newVName "partition_splits"
+  counts <- newVName "partition_counts"
+  offsets <- newVName "partition_offsets"
   res <- newVName "partition_res"
   let args = [(n, Prim int64), (Var k, Prim int64), (Var cs, cs_t)]
       restype =
@@ -455,10 +468,10 @@ doPartition k cs = do
             (funDefRetType partitionBuiltin)
             (funDefParams partitionBuiltin)
             args
-  letBindNames [qs, res] $
+  letBindNames [counts, offsets, res] $
     Apply
       (funDefName partitionBuiltin)
       [(n, Observe), (Var k, Observe), (Var cs, Observe)]
       restype
       (Safe, mempty, mempty)
-  pure (qs, res)
+  pure (counts, offsets, res)
