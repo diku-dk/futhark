@@ -20,7 +20,7 @@ import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
-import System.FilePath (makeRelative, splitPath, (-<.>), (<.>), (</>))
+import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -180,7 +180,7 @@ renderFiles important_imports imports = runWriter $ do
   where
     file_map = vnameToFileMap imports
     importHtml import_name =
-      "doc" </> makeRelative "/" (fromString (includeToString import_name)) <.> "html"
+      "doc" </> makeRelative "/" (fromString (includeToString import_name)) -<.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -398,7 +398,7 @@ synopsisOpened (ModParens me _) = do
   Just $ parens <$> me'
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
-  let dest = fromString $ relativise (includeToFilePath file) current <> ".html"
+  let dest = fromString $ relativise (includeToFilePath file) current -<.> "html"
   pure $
     keyword "import "
       <> (H.a ! A.href dest) (fromString (show (includeToString file)))
@@ -693,7 +693,7 @@ vnameLink' :: VName -> String -> String -> String
 vnameLink' (VName _ tag) current file =
   if file == current
     then "#" ++ show tag
-    else relativise file current ++ ".html#" ++ show tag
+    else relativise file current -<.> ".html#" ++ show tag
 
 paramHtml :: Pat -> DocM Html
 paramHtml pat = do
@@ -705,7 +705,7 @@ paramHtml pat = do
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
-  concat (replicate (length (splitPath src) - 1) "../") ++ dest
+  concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml (SizeExpr e) = pure $ brackets $ toHtml $ prettyString e
