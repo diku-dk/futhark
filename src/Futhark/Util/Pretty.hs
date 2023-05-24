@@ -7,6 +7,7 @@ module Futhark.Util.Pretty
     prettyTuple,
     prettyTupleLines,
     prettyString,
+    prettyStringOneLine,
     prettyText,
     prettyTextOneLine,
     docText,
@@ -94,6 +95,10 @@ docTextForHandle h d = do
 -- | Prettyprint a value to a 'String', appropriately wrapped.
 prettyString :: Pretty a => a -> String
 prettyString = T.unpack . prettyText
+
+-- | Prettyprint a value to a 'String' on a single line.
+prettyStringOneLine :: Pretty a => a -> String
+prettyStringOneLine = T.unpack . prettyTextOneLine
 
 -- | Prettyprint a value to a 'Text', appropriately wrapped.
 prettyText :: Pretty a => a -> Text

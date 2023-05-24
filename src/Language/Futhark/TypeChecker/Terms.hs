@@ -1289,15 +1289,14 @@ causalityCheck binding_body = do
   let checkCausality what known t loc
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
-              M.keys $
-                unFV $
-                  freeInType $
-                    toStruct t =
+              M.keys (unFV $ freeInType $ toStruct t) =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
       checkParamCausality known p =
         checkCausality (pretty p) known (patternType p) (locOf p)
+
+      collectingNewKnown = lift . flip execStateT mempty
 
       onExp ::
         S.Set VName ->
@@ -1325,14 +1324,19 @@ causalityCheck binding_body = do
       onExp known (Hole (Info t) loc)
         | Just bad <- checkCausality "hole" known t loc =
             bad
-      onExp known (Lambda params _ _ _ _)
+      onExp known e@(Lambda params body _ _ _)
         | bad : _ <- mapMaybe (checkParamCausality known) params =
             bad
+        | otherwise = do
+            -- Existentials coming into existence in the lambda body
+            -- are not known outside of it.
+            void $ collectingNewKnown $ onExp known body
+            pure e
       onExp known e@(AppExp (LetPat _ _ bindee_e body_e _) (Info res)) = do
         sequencePoint known bindee_e body_e $ appResExt res
         pure e
       onExp known e@(AppExp (Match scrutinee cs _) (Info res)) = do
-        new_known <- lift $ execStateT (onExp known scrutinee) mempty
+        new_known <- collectingNewKnown $ onExp known scrutinee
         void $ recurse (new_known <> known) cs
         modify ((new_known <> S.fromList (appResExt res)) <>)
         pure e
@@ -1344,15 +1348,27 @@ causalityCheck binding_body = do
             void $ onExp known' f
             modify (S.fromList (appResExt res) <>)
           seqArgs known' ((Info (_, p), x) : xs) = do
-            new_known <- lift $ execStateT (onExp known' x) mempty
+            new_known <- collectingNewKnown $ onExp known' x
             void $ seqArgs (new_known <> known') xs
             modify ((new_known <> S.fromList (maybeToList p)) <>)
+      onExp known e@(Constr v args (Info t) loc) = do
+        seqArgs known args
+        pure e
+        where
+          seqArgs known' []
+            | Just bad <- checkCausality (dquotes ("#" <> pretty v)) known' t loc =
+                bad
+            | otherwise =
+                pure ()
+          seqArgs known' (x : xs) = do
+            new_known <- collectingNewKnown $ onExp known' x
+            void $ seqArgs (new_known <> known') xs
+            modify (new_known <>)
       onExp
         known
         e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
           args_known <-
-            lift $
-              execStateT (sequencePoint known x y $ catMaybes [xp, yp]) mempty
+            collectingNewKnown $ sequencePoint known x y $ catMaybes [xp, yp]
           void $ onExp (args_known <> known) (Var f ft floc)
           modify ((args_known <> S.fromList (appResExt res)) <>)
           pure e
@@ -1369,7 +1385,7 @@ causalityCheck binding_body = do
           mapper = identityMapper {mapOnExp = onExp known}
 
       sequencePoint known x y ext = do
-        new_known <- lift $ execStateT (onExp known x) mempty
+        new_known <- collectingNewKnown $ onExp known x
         void $ onExp (new_known <> known) y
         modify ((new_known <> S.fromList ext) <>)
 
@@ -1386,14 +1402,14 @@ causalityCheck binding_body = do
     causality what loc d dloc t =
       Left . TypeError loc mempty . withIndexLink "causality-check" $
         "Causality check: size"
-          </> dquotes (prettyName d)
+          <+> dquotes (prettyName d)
           <+> "needed for type of"
           <+> what <> colon
           </> indent 2 (pretty t)
           </> "But"
           <+> dquotes (prettyName d)
           <+> "is computed at"
-          </> pretty (locStrRel loc dloc) <> "."
+          <+> pretty (locStrRel loc dloc) <> "."
           </> ""
           </> "Hint:"
           <+> align
