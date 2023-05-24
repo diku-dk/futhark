@@ -37,8 +37,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     -- * Sizes
     isInt64,
     maybeDimFromExp,
-    dimFromExp,
-    noSizeEscape,
 
     -- * Control flow
     collectOccurrences,
@@ -460,12 +458,6 @@ nameReason loc (NameAppRes fname apploc) =
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
-    -- | Mapping function arguments encountered to
-    -- the sizes they ended up generating (when
-    -- they could not be substituted directly).
-    -- This happens for function arguments that are
-    -- not constants or names.
-    stateDimTable :: M.Map SizeSource VName,
     stateNames :: M.Map VName NameReason,
     stateOccs :: Occurrences
   }
@@ -722,27 +714,18 @@ onFailure c = local $ \env -> env {termChecking = Just c}
 
 extSize :: SrcLoc -> SizeSource -> TermTypeM (Size, Maybe VName)
 extSize loc e = do
-  prev <- gets $ M.lookup e . stateDimTable
-  case prev of
-    Nothing -> do
-      let rsrc = case e of
-            SourceArg (FName fname) e' ->
-              RigidArg fname $ prettyTextOneLine e'
-            SourceBound e' ->
-              RigidBound $ prettyTextOneLine e'
-            SourceSlice d i j s ->
-              RigidSlice d $ prettyTextOneLine $ DimSlice i j s
-      d <- newRigidDim loc rsrc "n"
-      modify $ \s -> s {stateDimTable = M.insert e d $ stateDimTable s}
-      pure
-        ( sizeFromName (qualName d) loc,
-          Just d
-        )
-    Just d ->
-      pure
-        ( sizeFromName (qualName d) loc,
-          Just d
-        )
+  let rsrc = case e of
+        SourceArg (FName fname) e' ->
+          RigidArg fname $ prettyTextOneLine e'
+        SourceBound e' ->
+          RigidBound $ prettyTextOneLine e'
+        SourceSlice d i j s ->
+          RigidSlice d $ prettyTextOneLine $ DimSlice i j s
+  d <- newRigidDim loc rsrc "n"
+  pure
+    ( sizeFromName (qualName d) loc,
+      Just d
+    )
 
 incLevel :: TermTypeM a -> TermTypeM a
 incLevel = local $ \env -> env {termLevel = termLevel env + 1}
@@ -867,29 +850,6 @@ maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = flip sizeFromInteger mempty . fromIntegral <$> isInt64 e
 
-dimFromExp :: (Exp -> SizeSource) -> Exp -> TermTypeM (Size, Maybe VName)
-dimFromExp rf (Attr _ e _) = dimFromExp rf e
-dimFromExp rf (Assert _ e _ _) = dimFromExp rf e
-dimFromExp rf (Parens e _) = dimFromExp rf e
-dimFromExp rf (QualParens _ e _) = dimFromExp rf e
-dimFromExp rf e
-  | Just d <- maybeDimFromExp e =
-      pure (d, Nothing)
-  | otherwise =
-      extSize (srclocOf e) $ rf e
-
--- | Any argument sizes created with 'extSize' inside the given action
--- will be removed once the action finishes.  This is to ensure that
--- just because e.g. @n+1@ appears as a size in one branch of a
--- conditional, that doesn't mean it's also available in the other
--- branch.
-noSizeEscape :: TermTypeM a -> TermTypeM a
-noSizeEscape m = do
-  dimtable <- gets stateDimTable
-  x <- m
-  modify $ \s -> s {stateDimTable = dimtable}
-  pure x
-
 --- Control flow
 
 tapOccurrences :: TermTypeM a -> TermTypeM (a, Occurrences)
@@ -909,8 +869,8 @@ collectOccurrences m = do
 
 alternative :: TermTypeM a -> TermTypeM b -> TermTypeM (a, b)
 alternative m1 m2 = do
-  (x, occurs1) <- collectOccurrences $ noSizeEscape m1
-  (y, occurs2) <- collectOccurrences $ noSizeEscape m2
+  (x, occurs1) <- collectOccurrences m1
+  (y, occurs2) <- collectOccurrences m2
   checkOccurrences occurs1
   checkOccurrences occurs2
   occur $ occurs1 `altOccurrences` occurs2
@@ -1037,4 +997,4 @@ runTermTypeM checker (TermTypeM m) = do
   second stateOccs
     <$> runStateT
       (runReaderT m initial_tenv)
-      (TermTypeState mempty 0 mempty mempty mempty)
+      (TermTypeState mempty 0 mempty mempty)

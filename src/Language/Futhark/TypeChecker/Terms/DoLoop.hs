@@ -344,7 +344,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           bindingIdent i bound_t $ \i' ->
             noUnique . bindingPat [] mergepat (Ascribed merge_t) $
               \mergepat' -> tapOccurrences $ incLevel $ do
-                loopbody' <- noSizeEscape $ checkExp loopbody
+                loopbody' <- checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                 pure
                   ( sparams,
@@ -362,7 +362,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                   bindingPat [] xpat (Ascribed t') $ \xpat' ->
                     noUnique . bindingPat [] mergepat (Ascribed merge_t) $
                       \mergepat' -> tapOccurrences $ incLevel $ do
-                        loopbody' <- noSizeEscape $ checkExp loopbody
+                        loopbody' <- checkExp loopbody
                         (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                         pure
                           ( sparams,
@@ -383,7 +383,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
                     >>= unifies "being the condition of a 'while' loop" (Scalar $ Prim Bool)
                 )
               $ \cond' _ -> do
-                loopbody' <- noSizeEscape $ checkExp loopbody
+                loopbody' <- checkExp loopbody
                 (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
                 pure
                   ( sparams,
