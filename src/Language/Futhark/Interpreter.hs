@@ -1888,7 +1888,7 @@ initialCtx =
         let (ShapeDim xs_size innershape, xs') = fromArray xs
             rowshape = ShapeDim (asInt64 m) innershape
             shape = ShapeDim (asInt64 n) rowshape
-        if asInt64 n * asInt64 m /= xs_size
+        if asInt64 n * asInt64 m /= xs_size || asInt64 n < 0 || asInt64 m < 0
           then
             bad mempty mempty $
               "Cannot unflatten array of shape ["
