@@ -1957,7 +1957,7 @@ checkFunBody ::
   SrcLoc ->
   TermTypeM Exp
 checkFunBody params body maybe_rettype loc = do
-  body' <- noSizeEscape $ checkExp body
+  body' <- checkExp body
 
   -- Unify body return type with return annotation, if one exists.
   case maybe_rettype of
