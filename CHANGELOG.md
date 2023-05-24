@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark doc` produced some invalid links.
+
 * `flatten` did not properly check for claimed negative array sizes.
 
 * Type checker crash on some ill-typed programs (#1926).
