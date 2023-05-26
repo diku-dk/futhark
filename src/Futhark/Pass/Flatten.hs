@@ -781,7 +781,10 @@ transformDistStm segments env (DistStm inps res stm) = do
             (vs, reps) <- mapAndUnzipM (splitInput is) (namesToList $ freeIn body)
             let inputs = do
                   (v, i) <- zip vs [0 ..]
-                  let t = distInputType $ fromMaybe (error "bad lookup") $ L.lookup v inps
+                  let t =
+                        distInputType $
+                          fromMaybe (error $ "Bad lookup: " ++ prettyString v) $
+                            L.lookup v inps
                   pure (v, DistInput (ResTag i) t)
             let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
             scope <- askScope
@@ -1007,7 +1010,7 @@ liftArg segments inps env (e, d) = case e of
   c@(Constant _) -> do
     v <- letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
     pure [(Var v, d)]
-  Var v -> case fromMaybe bad $ M.lookup v $ inputReps inps env of
+  Var v -> case fromMaybe (bad v) $ M.lookup v $ inputReps inps env of
     Regular v' -> pure [(Var v', d)]
     Irregular
       ( IrregularRep
@@ -1023,7 +1026,7 @@ liftArg segments inps env (e, d) = case e of
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_elems, segs, flags, offsets, elems] diets
   where
-    bad = error "liftArg: Bad lookup"
+    bad v = error $ "liftArg: Bad lookup: " ++ prettyString v
 
 -- Lifts a functions return type such that it matches the lifted functions return type.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
@@ -1052,7 +1055,7 @@ liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
     vs = case resSubExp res of
       c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
       Var v ->
-        case fromMaybe bad $ M.lookup v $ inputReps inps env of
+        case fromMaybe (bad v) $ M.lookup v $ inputReps inps env of
           Regular v' -> pure [v']
           Irregular
             ( IrregularRep
@@ -1065,7 +1068,7 @@ liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
               t <- lookupType elems
               num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
               pure [num_elems, segs, flags, offsets, elems]
-    bad = error "liftResult: Bad lookup"
+    bad v = error $ "liftResult: Bad lookup: " ++ prettyString v
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 liftBody w inputs env dstms result = do
