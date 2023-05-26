@@ -112,12 +112,12 @@ segsAndElems env (DistInput rt _ : vs) =
       bimap (mplus $ Just (segments, flags, offsets)) (elems :) $ segsAndElems env vs
 
 -- Mapping from original variable names to their distributed resreps
-inputReps :: DistInputs -> DistEnv -> M.Map VName ResRep
-inputReps inputs env = M.compose (distResMap env) (M.fromList inputs') <> M.fromList frees
+inputReps :: DistInputs -> DistEnv -> M.Map VName (Type, ResRep)
+inputReps inputs env = M.fromList $ map (second getRep) inputs
   where
-    (inputs', frees) = flip mapEither inputs $ \(v, di) -> case di of
-      DistInput rt _ -> Left (v, rt)
-      DistInputFree v' _ -> Right (v, Regular v')
+    getRep di = case di of
+      DistInput rt t -> (t, resVar rt env)
+      DistInputFree v' t -> (t, Regular v')
 
 type Segments = NE.NonEmpty SubExp
 
@@ -693,9 +693,12 @@ transformDistStm segments env (DistStm inps res stm) = do
           letExp "lifted_const" $
             BasicOp $
               Replicate (segmentsShape segments) c
-        Var v -> case inputReps inps env M.! v of
-          Regular v' -> pure v'
-          Irregular {} -> error $ "transformDistStm: Non-scalar match scrutinee: " ++ prettyString v
+        Var v -> case M.lookup v $ inputReps inps env of
+          Just (_, Regular v') -> pure v'
+          Just (_, Irregular {}) ->
+            error $
+              "transformDistStm: Non-scalar match scrutinee: " ++ prettyString v
+          Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
       -- Cases for tagging values that match the same branch.
       -- The default case is the 0'th equvalence class.
       let equiv_cases =
@@ -734,7 +737,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- Take the elements at index `is` from an input `v`.
       let splitInput is v =
             (v,) <$> case M.lookup v $ inputReps inps env of
-              Just (Regular arr) -> do
+              Just (_, Regular arr) -> do
                 -- In the regular case we just take the elements
                 -- of the array given by `is`
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -742,7 +745,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
                 pure $ Regular arr'
-              Just (Irregular (IrregularRep segs flags offsets elems)) -> do
+              Just (_, Irregular (IrregularRep segs flags offsets elems)) -> do
                 -- In the irregular case we take the elements
                 -- of the `segs` array given by `is` like in the regular case
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -1010,23 +1013,37 @@ liftArg segments inps env (e, d) = case e of
   c@(Constant _) -> do
     v <- letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
     pure [(Var v, d)]
-  Var v -> case fromMaybe (bad v) $ M.lookup v $ inputReps inps env of
-    Regular v' -> pure [(Var v', d)]
-    Irregular
+  Var v -> case M.lookup v $ inputReps inps env of
+    Just (_, Irregular irrep) -> do
+      mkIrrep irrep
+    Just (t, Regular v') -> do
+      case t of
+        Prim {} -> pure [(Var v', d)]
+        Array {} -> mkIrregFromReg segments v' >>= mkIrrep
+        Acc {} -> error "liftArg: Acc"
+        Mem {} -> error "liftArg: Mem"
+    Nothing -> do
+      t <- lookupType v
+      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+      case t of
+        Prim {} -> pure [(Var v', d)]
+        Array {} -> mkIrregFromReg segments v' >>= mkIrrep
+        Acc {} -> error "liftArg: Acc"
+        Mem {} -> error "liftArg: Mem"
+  where
+    mkIrrep
       ( IrregularRep
           { irregularSegments = segs,
             irregularFlags = flags,
             irregularOffsets = offsets,
             irregularElems = elems
           }
-        ) -> do
+        ) = do
         t <- lookupType elems
         num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
         -- Only apply the original diet to the 'elems' array
         let diets = replicate 4 Observe ++ [d]
         pure $ zipWith (curry (first Var)) [num_elems, segs, flags, offsets, elems] diets
-  where
-    bad v = error $ "liftArg: Bad lookup: " ++ prettyString v
 
 -- Lifts a functions return type such that it matches the lifted functions return type.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
@@ -1055,20 +1072,23 @@ liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
     vs = case resSubExp res of
       c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
       Var v ->
-        case fromMaybe (bad v) $ M.lookup v $ inputReps inps env of
-          Regular v' -> pure [v']
-          Irregular
-            ( IrregularRep
-                { irregularSegments = segs,
-                  irregularFlags = flags,
-                  irregularOffsets = offsets,
-                  irregularElems = elems
-                }
+        case M.lookup v $ inputReps inps env of
+          Just (_, Regular v') -> pure [v']
+          Just
+            ( _,
+              Irregular
+                ( IrregularRep
+                    { irregularSegments = segs,
+                      irregularFlags = flags,
+                      irregularOffsets = offsets,
+                      irregularElems = elems
+                    }
+                  )
               ) -> do
               t <- lookupType elems
               num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
               pure [num_elems, segs, flags, offsets, elems]
-    bad v = error $ "liftResult: Bad lookup: " ++ prettyString v
+          Nothing -> error $ "liftResult: Bad lookup: " ++ prettyString v
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 liftBody w inputs env dstms result = do
