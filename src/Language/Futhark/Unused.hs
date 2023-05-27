@@ -1,4 +1,4 @@
-module Language.Futhark.Unused (partDefFuncs, fu, getBody, getDecs) where
+module Language.Futhark.Unused (partDefFuncs, findUnused, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.List.NonEmpty qualified as NE
@@ -35,8 +35,8 @@ getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 
 
-fu :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
-fu fp fml = do
+findUnused :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
+findUnused fp fml = do
   let nfp = map (normalise . dropExtension) fp
       bf = M.unions $ map (funcsInFMod . snd) $ filter (\(x,_) -> x `elem` nfp) fml
       rms = filter (\(x,_) -> normalise x `notElem` nfp) fml
@@ -44,8 +44,8 @@ fu fp fml = do
       locs = M.unions $ map (locsInFMod . snd) rms
       used1 = tClosure bf $ M.union bf $ M.unions $ map snd rf
       used = S.unions $ map snd $ M.toList used1
-      rt = M.fromList $ map (\(x,y) -> (x,map (\a -> (a, locs M.! a)) $ filter (`M.member` locs) $ S.toList $ S.fromList (map fst $ M.toList y) `S.difference` used)) rf
-  rt
+  M.fromList $ map (\(x,y) -> (x,map (\a -> (a, locs M.! a)) $
+    filter (`M.member` locs) $ S.toList $ S.fromList (map fst $ M.toList y) `S.difference` used)) rf
 
 type VMap = M.Map VName (S.Set VName)
 type LocMap = M.Map VName SrcLoc
