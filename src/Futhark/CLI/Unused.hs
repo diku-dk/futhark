@@ -7,7 +7,6 @@ module Futhark.CLI.Unused (main) where
 
 import Language.Futhark
 import Data.Set qualified as S
-import Futhark.IR.Pretty
 
 import Control.Monad.State
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
@@ -31,10 +30,8 @@ printUnused files = do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right (_, imp, _) -> do
-      let (c,un) = fu files imp
-      putStrLn $ unlines $ map (\(x,y) -> show (prettyString x) <> " -> {" <> unwords (map (show . prettyString) (S.toList y)) <> "}") $ M.toList c
-      putStrLn "---\nUnused functions:"
-      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $ concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList un
+      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $
+        concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
 
 
 data CheckConfig = CheckConfig Bool
