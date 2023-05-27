@@ -4,11 +4,10 @@ import Data.Bifunctor qualified as BI
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Data.Maybe (catMaybes, maybeToList, isJust)
+import Data.Maybe (catMaybes, maybeToList)
 import Language.Futhark
 import Language.Futhark.Semantic (FileModule (FileModule))
 
-import Debug.Trace
 import System.FilePath
 import Data.Foldable (Foldable(foldl'))
 
@@ -36,7 +35,7 @@ getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 
 
--- fu :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, Maybe SrcLoc)]
+fu :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 fu fp fml = do
   let nfp = map (normalise . dropExtension) fp
       bf = M.unions $ map (funcsInFMod . snd) $ filter (\(x,_) -> x `elem` nfp) fml
@@ -46,7 +45,7 @@ fu fp fml = do
       used1 = tClosure bf $ M.union bf $ M.unions $ map snd rf
       used = S.unions $ map snd $ M.toList used1
       rt = M.fromList $ map (\(x,y) -> (x,map (\a -> (a, locs M.! a)) $ filter (`M.member` locs) $ S.toList $ S.fromList (map fst $ M.toList y) `S.difference` used)) rf
-  (used1,rt)
+  rt
 
 type VMap = M.Map VName (S.Set VName)
 type LocMap = M.Map VName SrcLoc
@@ -73,10 +72,6 @@ partDefFuncs fp fml = do
 defFuncs :: FileModule -> [(VName,S.Set VName)]
 defFuncs (FileModule _ _env (Prog _doc decs) _) =
   map funcsInDecBase $ filter isFuncDec decs
-
-importFuncs :: FileModule -> [(VName, SrcLoc)]
-importFuncs (FileModule _ _env (Prog _doc decs) _) =
-  map (\(ValDec (ValBind {valBindName = vn, valBindLocation = loc})) -> (vn,loc) ) $ filter isFuncDec decs
 
 funcsInDecBase :: DecBase Info VName -> (VName, S.Set VName)
 funcsInDecBase (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
