@@ -127,19 +127,6 @@ segmentsShape = Shape . toList
 segmentsDims :: Segments -> [SubExp]
 segmentsDims = shapeDims . segmentsShape
 
-segMap :: Traversable f => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
-segMap segments f = do
-  gtids <- traverse (const $ newVName "gtid") segments
-  space <- mkSegSpace $ zip (toList gtids) (toList segments)
-  ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-    res <- f $ fmap Var gtids
-    ts <- mapM (subExpType . resSubExp) res
-    pure (map mkResult res, ts)
-  let kbody = KernelBody () stms res
-  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
-  where
-    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
-
 readInput :: Segments -> DistEnv -> [SubExp] -> DistInputs -> SubExp -> Builder GPU SubExp
 readInput _ _ _ _ (Constant x) = pure $ Constant x
 readInput segments env is inputs (Var v) =

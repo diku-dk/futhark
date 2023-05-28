@@ -2,6 +2,7 @@
 
 module Futhark.Pass.Flatten.Builtins
   ( flatteningBuiltins,
+    segMap,
     genFlags,
     genSegScan,
     genSegRed,
@@ -16,6 +17,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State.Strict
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Futhark.IR.GPU
@@ -24,6 +26,7 @@ import Futhark.MonadFreshNames
 import Futhark.Pass.ExtractKernels.BlockedKernel (mkSegSpace)
 import Futhark.Pass.ExtractKernels.ToGPU (soacsLambdaToGPU)
 import Futhark.Tools
+import Futhark.Util (unsnoc)
 
 builtinName :: T.Text -> Name
 builtinName = nameFromText . ("builtin#" <>)
@@ -34,12 +37,25 @@ repIotaName = builtinName "repiota"
 prefixSumName = builtinName "prefixsum"
 partitionName = builtinName "partition"
 
-genScanomap :: String -> SubExp -> Lambda GPU -> [SubExp] -> (SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
-genScanomap desc w lam nes m = do
-  gtid <- newVName "gtid"
-  space <- mkSegSpace [(gtid, w)]
+segMap :: Traversable f => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap segments f = do
+  gtids <- traverse (const $ newVName "gtid") segments
+  space <- mkSegSpace $ zip (toList gtids) (toList segments)
+  ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
+    res <- f $ fmap Var gtids
+    ts <- mapM (subExpType . resSubExp) res
+    pure (map mkResult res, ts)
+  let kbody = KernelBody () stms res
+  pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+  where
+    mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
+
+genScanomap :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> (f SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
+genScanomap desc segments lam nes m = do
+  gtids <- traverse (const $ newVName "gtid") segments
+  space <- mkSegSpace $ zip (toList gtids) (toList segments)
   ((res, res_t), stms) <- runBuilder . localScope (scopeOfSegSpace space) $ do
-    res <- m $ Var gtid
+    res <- m $ fmap Var gtids
     res_t <- mapM subExpType res
     pure (map (Returns ResultMaySimplify mempty) res, res_t)
   let kbody = KernelBody () stms res
@@ -48,20 +64,21 @@ genScanomap desc w lam nes m = do
   where
     lvl = SegThread SegVirt Nothing
 
-genScan :: String -> SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
-genScan desc w lam nes arrs =
-  genScanomap desc w lam nes $ \gtid -> forM arrs $ \arr ->
-    letSubExp (baseString arr <> "_elem") =<< eIndex arr [eSubExp gtid]
+genScan :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genScan desc segments lam nes arrs =
+  genScanomap desc segments lam nes $ \gtids -> forM arrs $ \arr ->
+    letSubExp (baseString arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
 
 -- Also known as a prescan.
-genExScan :: String -> SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
-genExScan desc w lam nes arrs =
-  genScanomap desc w lam nes $ \gtid ->
-    letTupExp' "to_prescan"
-      =<< eIf
-        (toExp $ pe64 gtid .==. 0)
-        (eBody (map eSubExp nes))
-        (eBody (map (`eIndex` [toExp $ pe64 gtid - 1]) arrs))
+genExScan :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genExScan desc segments lam nes arrs =
+  genScanomap desc segments lam nes $ \gtids ->
+    let Just (outerDims, innerDim) = unsnoc $ toList gtids
+     in letTupExp' "to_prescan"
+          =<< eIf
+            (toExp $ pe64 innerDim .==. 0)
+            (eBody (map eSubExp nes))
+            (eBody (map (`eIndex` (map toExp outerDims ++ [toExp $ pe64 innerDim - 1])) arrs))
 
 segScanLambda ::
   (MonadBuilder m, BranchType (Rep m) ~ ExtType, LParamInfo (Rep m) ~ Type) =>
@@ -86,19 +103,19 @@ genSegScan :: String -> Lambda GPU -> [SubExp] -> VName -> [VName] -> Builder GP
 genSegScan desc lam nes flags arrs = do
   w <- arraySize 0 <$> lookupType flags
   lam' <- segScanLambda lam
-  drop 1 <$> genScan desc w lam' (constant False : nes) (flags : arrs)
+  drop 1 <$> genScan desc [w] lam' (constant False : nes) (flags : arrs)
 
 genPrefixSum :: String -> VName -> Builder GPU VName
 genPrefixSum desc ns = do
-  w <- arraySize 0 <$> lookupType ns
+  ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
-  head <$> genScan desc w add_lam [intConst Int64 0] [ns]
+  head <$> genScan desc ws add_lam [intConst Int64 0] [ns]
 
 genExPrefixSum :: String -> VName -> Builder GPU VName
 genExPrefixSum desc ns = do
-  w <- arraySize 0 <$> lookupType ns
+  ws <- arrayDims <$> lookupType ns
   add_lam <- binOpLambda (Add Int64 OverflowUndef) int64
-  head <$> genExScan desc w add_lam [intConst Int64 0] [ns]
+  head <$> genExScan desc ws add_lam [intConst Int64 0] [ns]
 
 genSegPrefixSum :: String -> VName -> VName -> Builder GPU VName
 genSegPrefixSum desc flags ns = do
@@ -158,20 +175,40 @@ genSegRed segments flags offsets elems red = do
     nes = redNeutral red
 
 -- Returns (#segments, segment start offsets, sum of segment sizes)
+-- Note: If given a multi-dimensional array,
+-- `#segments` and `sum of segment sizes` will be arrays, not scalars.
+-- `segment start offsets` will always have the same shape as `ks`.
 exScanAndSum :: VName -> Builder GPU (SubExp, VName, SubExp)
 exScanAndSum ks = do
-  n <- arraySize 0 <$> lookupType ks
-  is_empty <- letSubExp "is_empty" =<< toExp (pe64 n .==. 0)
-  offsets <- genExPrefixSum "offsets" ks
-  m <-
-    letSubExp "m"
-      =<< eIf
-        (eSubExp is_empty)
-        (eBody [eSubExp $ intConst Int64 0])
-        -- Add last size because 'offsets' is an *exclusive* prefix
-        -- sum.
-        (eBody [eBinOp (Add Int64 OverflowUndef) (eLast offsets) (eLast ks)])
-  pure (n, offsets, m)
+  ns <- arrayDims <$> lookupType ks
+  -- If `ks` only has a single dimension
+  -- the size will be a scalar, otherwise it's an array.
+  ns' <- letExp "ns" $ BasicOp $ case ns of
+    [] -> error $ "exScanAndSum: Given non-array argument: " ++ prettyString ks
+    [n] -> SubExp n
+    _ -> ArrayLit ns (Prim int64)
+  -- Check if the innermost dimension is empty.
+  is_empty <-
+    letExp "is_empty"
+      =<< ( case ns of
+              [n] -> toExp (pe64 n .==. 0)
+              _ -> eLast ns' >>= letSubExp "n" >>= (\n -> toExp $ pe64 n .==. 0)
+          )
+  offsets <- letExp "offsets" =<< toExp =<< genExPrefixSum "offsets" ks
+  ms <- letExp "ms" <=< segMap (init ns) $ \gtids -> do
+    let idxs = map toExp gtids
+    offset <- letExp "offset" =<< eIndex offsets idxs
+    k <- letExp "k" =<< eIndex ks idxs
+    m <-
+      letSubExp "m"
+        =<< eIf
+          (toExp is_empty)
+          (eBody [eSubExp $ intConst Int64 0])
+          -- Add last size because 'offsets' is an *exclusive* prefix
+          -- sum.
+          (eBody [eBinOp (Add Int64 OverflowUndef) (eLast offset) (eLast k)])
+    pure [subExpRes m]
+  pure (Var ns', offsets, Var ms)
 
 genSegIota :: VName -> Builder GPU (VName, VName, VName)
 genSegIota ks = do
@@ -216,63 +253,32 @@ genPartition n k cls = do
   let n' = Var n
   let k' = Var k
   let dims = [k', n']
-  let reshape shp = BasicOp . Reshape ReshapeArbitrary shp
-
-  m <- letSubExp "m" =<< eBinOp (Mul Int64 OverflowUndef) (toExp k') (toExp n')
-  -- Calculate `[k][n]` (flat) array of flags such that `cls_flags[i][j]`
-  -- is equal 1 if the j'th element is a member of equivalence class `i`.
-  -- `seg_flags` is a flag array describing the shape of `cls_flags` i.e.
-  -- every `k`'th element is `True`
-  ~[cls_flags, seg_flags] <-
-    mapM (letExp "flags_flat" . reshape (Shape [m])) =<< letTupExp "flags" =<< do
-      gtids <- traverse (const $ newVName "gtid") dims
-      space <- mkSegSpace $ zip gtids dims
-      ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-        let [i, j] = gtids
+  -- Create a `[k][n]` array of flags such that `cls_flags[i][j]`
+  -- is equal 1 if the j'th element is a member of equivalence class `i` i.e.
+  -- the `i`th row is a flag array for equivalence class `i`.
+  cls_flags <-
+    letExp "flags"
+      <=< segMap dims
+      $ \[i, j] -> do
         c <- letSubExp "c" =<< eIndex cls [toExp j]
         cls_flag <-
           letSubExp "cls_flag"
             =<< eIf
-              (toExp $ pe64 (Var i) .==. pe64 c)
+              (toExp $ pe64 i .==. pe64 c)
               (eBody [toExp $ intConst Int64 1])
               (eBody [toExp $ intConst Int64 0])
-        seg_flag <-
-          letSubExp "seg_flag"
-            =<< eIf
-              (toExp $ pe64 (Var j) .==. 0)
-              (eBody [toExp $ constant True])
-              (eBody [toExp $ constant False])
-        let res_ts = [(cls_flag, Prim int64), (seg_flag, Prim Bool)]
-        let (res, ts) = unzip res_ts
-        pure (map (Returns ResultMaySimplify mempty) res, ts)
-      let kbody = KernelBody () stms res
-      pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+        pure [subExpRes cls_flag]
 
   -- Offsets of each of the individual equivalence classes.
-  -- Note: not an exclusive scan!
-  --
-  -- There's probably a better way e.g. use a regular SegScan so
-  -- we avoid the `seg_flags` nonsense.
-  local_offs <-
-    letExp "local_offs" . reshape (Shape dims)
-      =<< genSegPrefixSum "local_offs_flat" seg_flags cls_flags
+  (_, local_offs, _counts) <- exScanAndSum cls_flags
   -- The number of elems in each class
-  counts <- letExp "counts" <=< genTabulate k' $ \i -> do
-    row <- letExp "offs_row" =<< eIndex local_offs [toExp i]
-    letTupExp' "count"
-      =<< eIf
-        (toExp (pe64 n' .==. 0))
-        (eBody [eSubExp $ intConst Int64 0])
-        (eBody [eLast row])
+  counts <- letExp "counts" =<< toExp _counts
   -- Offsets of the whole equivalence classes
   global_offs <- genExPrefixSum "global_offs" counts
   -- Offsets over all of the equivalence classes.
   cls_offs <-
     letExp "cls_offs" =<< do
-      gtids <- traverse (const $ newVName "gtid") dims
-      space <- mkSegSpace $ zip gtids dims
-      ((res, ts), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
-        let [i, j] = gtids
+      segMap dims $ \[i, j] -> do
         global_offset <- letExp "global_offset" =<< eIndex global_offs [toExp i]
         offset <-
           letSubExp "offset"
@@ -280,17 +286,12 @@ genPartition n k cls = do
               (Add Int64 OverflowUndef)
               (eIndex local_offs [toExp i, toExp j])
               (toExp global_offset)
-        let res_ts = [(offset, Prim int64)]
-        let (res, ts) = unzip res_ts
-        pure (map (Returns ResultMaySimplify mempty) res, ts)
-      let kbody = KernelBody () stms res
-      pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space ts kbody
+        pure [subExpRes offset]
 
   scratch <- letExp "scratch" $ BasicOp $ Scratch int64 [n']
   res <- letExp "scatter_res" <=< genScatter scratch n' $ \gtid -> do
     c <- letExp "c" =<< eIndex cls [toExp gtid]
-    offs <- letSubExp "offs" =<< eIndex cls_offs [toExp c, toExp gtid]
-    ind <- letExp "ind" =<< toExp (pe64 offs - 1)
+    ind <- letExp "ind" =<< eIndex cls_offs [toExp c, toExp gtid]
     i <- letSubExp "i" =<< toExp gtid
     pure (ind, i)
   pure (counts, global_offs, res)
