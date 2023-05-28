@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Type checker could get confused and think unknown sizes were
   available when they really weren't (#1950).
 
+* Some index optimisations removed certificates (#1952).
+
 ## [0.24.3]
 
 ### Fixed
