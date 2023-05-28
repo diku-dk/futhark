@@ -249,7 +249,8 @@ ruleBasicOp _ pat _ (Replicate (Shape []) (Var v)) = Simplify $ do
         then SubExp $ Var v
         else Copy v
 ruleBasicOp vtable pat _ (Replicate shape (Var v))
-  | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable =
+  | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable,
+    ST.subExpAvailable se vtable =
       Simplify $ certifying cs $ letBind pat $ BasicOp $ Replicate (shape <> shape2) se
 ruleBasicOp _ pat _ (ArrayLit (se : ses) _)
   | all (== se) ses =

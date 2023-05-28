@@ -128,7 +128,8 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
     Just (Replicate (Shape ds) v, cs)
       | (ds_inds, rest_inds) <- splitAt (length ds) inds,
         (ds', ds_inds') <- unzip $ mapMaybe index ds_inds,
-        ds' /= ds ->
+        ds' /= ds,
+        ST.subExpAvailable v vtable ->
           Just $ do
             arr <- letExp "smaller_replicate" $ BasicOp $ Replicate (Shape ds') v
             pure $ IndexResult cs arr $ Slice $ ds_inds' ++ rest_inds

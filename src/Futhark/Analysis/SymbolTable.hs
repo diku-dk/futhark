@@ -353,9 +353,9 @@ indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
   | length ds == length is,
     Just (Prim t) <- lookupSubExpType v table =
       Just $ Indexed mempty $ primExpFromSubExp t v
-indexExp table (BasicOp (Replicate (Shape [_]) (Var v))) _ (_ : is) = do
+indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
-  index' v is table
+  index' v (drop (shapeRank s) is) table
 indexExp table (BasicOp (Reshape _ newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =
       -- TODO: handle coercions more efficiently.
