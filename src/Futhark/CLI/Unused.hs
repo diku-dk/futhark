@@ -5,15 +5,14 @@
 -- | @futhark doc@
 module Futhark.CLI.Unused (main) where
 
-import Language.Futhark
-
 import Control.Monad.State
+import Data.Map.Strict qualified as M
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
 import Futhark.Pipeline (Verbosity (..), runFutharkM)
 import Futhark.Util.Options
+import Language.Futhark
 import Language.Futhark.Unused
 import System.Exit
-import Data.Map.Strict qualified as M
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialCheckConfig [] "files..." find
@@ -29,8 +28,12 @@ printUnused files = do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right (_, imp, _) -> do
-      putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $
-        concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
+      putStrLn $
+        unlines $
+          map (\(x, VName y _, z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $
+            concatMap (\(x, y) -> map (\(z, u) -> (x, z, u)) y) $
+              M.toList $
+                findUnused files imp
 
 data CheckConfig = CheckConfig Bool
 
