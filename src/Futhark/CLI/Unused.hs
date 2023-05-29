@@ -6,7 +6,6 @@
 module Futhark.CLI.Unused (main) where
 
 import Language.Futhark
-import Data.Set qualified as S
 
 import Control.Monad.State
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
@@ -32,7 +31,6 @@ printUnused files = do
     Right (_, imp, _) -> do
       putStrLn $ unlines $ map (\(x,VName y _,z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $
         concatMap (\(x,y) -> map (\(z,u) -> (x,z,u)) y ) $ M.toList $ findUnused files imp
-
 
 data CheckConfig = CheckConfig Bool
 

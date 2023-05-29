@@ -1,4 +1,4 @@
-module Language.Futhark.Unused (partDefFuncs, findUnused, getBody, getDecs) where
+module Language.Futhark.Unused (findUnused, getBody, getDecs) where
 
 import Data.Bifunctor qualified as BI
 import Data.List.NonEmpty qualified as NE
@@ -6,9 +6,8 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Maybe (catMaybes, maybeToList)
 import Language.Futhark
-import Language.Futhark.Semantic (FileModule (FileModule))
+import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
 
-import System.FilePath
 import Data.Foldable (Foldable(foldl'))
 
 -- Steps:
@@ -26,20 +25,17 @@ import Data.Foldable (Foldable(foldl'))
 
 -- cabal run futhark -- unused un/b.fut
 
-isFuncDec :: DecBase f vn -> Bool
-isFuncDec (ValDec _) = True
-isFuncDec _ = False
 
 getDecs :: FileModule -> [DecBase Info VName]
 getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 
 
-findUnused :: [FilePath] -> [(FilePath, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
+findUnused :: [FilePath] -> [(ImportName, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused fp fml = do
-  let nfp = map (normalise . dropExtension) fp
-      bf = M.unions $ map (funcsInFMod . snd) $ filter (\(x,_) -> x `elem` nfp) fml
-      rms = filter (\(x,_) -> normalise x `notElem` nfp) fml
+  let fml' = map (BI.first includeToFilePath)  fml
+      bf = M.unions $ map (funcsInFMod . snd) $ filter (\(x,_) -> x `elem` fp) fml'
+      rms = filter (\(x,_) -> x `notElem` fp) fml'
       rf = map (BI.second funcsInFMod) rms
       locs = M.unions $ map (locsInFMod . snd) rms
       used1 = tClosure bf $ M.union bf $ M.unions $ map snd rf
@@ -60,25 +56,6 @@ tClosure bf af =
 
 tStep :: VMap -> VMap -> VMap
 tStep af = M.map (\x -> S.union x $ S.unions $ S.foldl (<>) [] $ S.map (\y -> maybeToList $ y `M.lookup` af) x)
-
-
--- get all functions and base functions, both as maps.
-partDefFuncs :: [FilePath] -> [(FilePath, FileModule)] -> (VMap, VMap)
-partDefFuncs fp fml = do
-  let af = concatMap (defFuncs . snd) fml
-      bf = M.fromList $ concatMap (defFuncs . snd) $ filter (\(ifp, _) -> ifp `elem` fp) fml
-  (M.fromList af, bf)
-
-defFuncs :: FileModule -> [(VName,S.Set VName)]
-defFuncs (FileModule _ _env (Prog _doc decs) _) =
-  map funcsInDecBase $ filter isFuncDec decs
-
-funcsInDecBase :: DecBase Info VName -> (VName, S.Set VName)
-funcsInDecBase (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
-  (vn, S.fromList $ map (\(QualName _ v) -> v) $ funcsInDef' body)
-funcsInDecBase _ = error "not a val dec." -- TODO: change error
-
-
 
 -- Finding the VNames present in a function declaration and the declarations present in it.
 funcsInFMod :: FileModule -> VMap
@@ -113,11 +90,13 @@ funcsInExp (Ascript ex _ _) n vm = funcsInExp ex n vm
 funcsInExp (Var (QualName _ vn) _ _) n vm = M.adjust (S.insert vn) n vm
 funcsInExp (AppExp app _) n vm =
   case app of
-    Apply ex1 ex2 _ _ -> funcsInExp ex2 n (funcsInExp ex1 n vm)
+    Apply ex1 lst _ ->
+      foldl' (\mp (_, ex) -> funcsInExp ex n mp) (funcsInExp ex1 n vm) lst
     Coerce ex _ _ -> funcsInExp ex n vm
     Range ex1 mb_ex inc_ex _ -> foldl' (\x y -> funcsInExp y n x) vm (ex1 : fromInc inc_ex : maybeToList mb_ex)
     LetPat _ _ ex1 ex2 _ -> funcsInExp ex2 n (funcsInExp ex1 n vm)
-    LetFun vn (_, _, _, _, ex1) ex2 _ -> funcsInExp ex2 n (funcsInExp ex1 vn (M.insert vn S.empty vm)) -- Important case! function defn
+    LetFun vn (_, _, _, _, ex1) ex2 _ ->
+      funcsInExp ex2 n (funcsInExp ex1 vn (M.insert vn S.empty vm)) -- Important case! function defn
     If ex1 ex2 ex3 _ -> funcsInExp ex3 n $ funcsInExp ex2 n $ funcsInExp ex1 n vm
     DoLoop _ _ ex1 loop_ex ex2 _ -> funcsInExp (fromLoop loop_ex) n $ funcsInExp ex2 n $ funcsInExp ex1 n vm
     BinOp (QualName _ vn, _) _ (ex1, _) (ex2, _) _ -> funcsInExp ex2 n $ funcsInExp ex1 n $ M.adjust (S.insert vn) n vm
@@ -172,7 +151,8 @@ locsInExp (Ascript ex _ _)  = locsInExp ex
 -- locsInExp (Var (QualName _ vn) _ _)  = M.adjust (S.insert vn) 
 locsInExp (AppExp app _)  =
   case app of
-    Apply ex1 ex2 _ _ -> locsInExp ex2 `M.union` locsInExp ex1
+    Apply ex1 lst _ ->
+      M.unions (NE.toList $ NE.map (locsInExp . snd) lst) `M.union` locsInExp ex1
     Coerce ex _ _ -> locsInExp ex 
     Range ex1 mb_ex inc_ex _ -> M.unions $ map locsInExp (ex1 : fromInc inc_ex : maybeToList mb_ex)
     LetPat _ _ ex1 ex2 _ -> locsInExp ex2 `M.union` locsInExp ex1
@@ -192,43 +172,6 @@ locsInModExp (ModApply mex1 mex2 _ _ _) = locsInModExp mex1 `M.union` locsInModE
 locsInModExp (ModAscript mex _ _ _) = locsInModExp mex
 locsInModExp (ModLambda _ _ mex _) = locsInModExp mex
 locsInModExp _ = M.empty
-
-
--- OLD METHOD. Does not consider a lot of things.
--- Handles every constructor in ExpBase that can contain a function usage.
-funcsInDef' :: ExpBase Info VName -> [QualName VName]
-funcsInDef' (Parens ex _) = funcsInDef' ex
-funcsInDef' (QualParens (qn, _) ex _) = qn : funcsInDef' ex
-funcsInDef' (TupLit exs _) = concatMap funcsInDef' exs
-funcsInDef' (RecordLit exs _) = concatMap (funcsInDef' . getFieldExp) exs
-funcsInDef' (ArrayLit exs _ _) = concatMap funcsInDef' exs
-funcsInDef' (Attr _ ex _) = funcsInDef' ex
-funcsInDef' (Project _ ex _ _) = funcsInDef' ex
-funcsInDef' (Not ex _) = funcsInDef' ex
-funcsInDef' (Assert ex1 ex2 _ _) = funcsInDef' ex1 <> funcsInDef' ex2
-funcsInDef' (Constr _ exs _ _) = concatMap funcsInDef' exs
-funcsInDef' (Update ex1 _ ex2 _) = funcsInDef' ex1 <> funcsInDef' ex2
-funcsInDef' (RecordUpdate ex1 _ ex2 _ _) = funcsInDef' ex1 <> funcsInDef' ex2
-funcsInDef' (Lambda _ ex _ _ _) = funcsInDef' ex
-funcsInDef' (OpSection qn _ _) = [qn]
-funcsInDef' (OpSectionLeft qn _ ex _ _ _) = qn : funcsInDef' ex
-funcsInDef' (OpSectionRight qn _ ex _ _ _) = qn : funcsInDef' ex
-funcsInDef' (Ascript ex _ _) = funcsInDef' ex
-funcsInDef' (Var ex _ _) = [ex]
-funcsInDef' (AppExp app _) =
-  case app of
-    Apply ex1 ex2 _ _ -> funcsInDef' ex1 <> funcsInDef' ex2
-    Coerce ex _ _ -> funcsInDef' ex
-    Range ex1 mb_ex inc_ex _ -> concatMap funcsInDef' (ex1 : fromInc inc_ex : maybeToList mb_ex)
-    LetPat _ _ ex1 ex2 _ -> funcsInDef' ex1 <> funcsInDef' ex2
-    LetFun _ (_, _, _, _, ex1) ex2 _ -> funcsInDef' ex1 <> funcsInDef' ex2
-    If ex1 ex2 ex3 _ -> funcsInDef' ex1 <> funcsInDef' ex2 <> funcsInDef' ex3
-    DoLoop _ _ ex1 loop_ex ex2 _ -> funcsInDef' (fromLoop loop_ex) <> funcsInDef' ex1 <> funcsInDef' ex2
-    BinOp (qn, _) _ (ex1, _) (ex2, _) _ -> qn : funcsInDef' ex1 <> funcsInDef' ex2
-    LetWith _ _ sl ex1 ex2 _ -> concatMap funcsInDef' $ fromSlice sl <> [ex1, ex2]
-    Index ex sl _ -> concatMap funcsInDef' $ ex : fromSlice sl
-    Match ex cases _ -> concatMap funcsInDef' $ ex : map fromCase (NE.toList cases)
-funcsInDef' _ = []
 
 fromInc :: Inclusiveness (ExpBase Info VName) -> ExpBase Info VName
 fromInc (DownToExclusive x) = x
