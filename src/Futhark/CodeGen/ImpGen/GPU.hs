@@ -309,7 +309,15 @@ mapTransposeName bt = "gpu_map_transpose_" ++ prettyString bt
 
 mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
 mapTransposeFunction bt =
-  Imp.Function Nothing [] params transpose_code
+  Imp.Function Nothing [] params $
+    Imp.DebugPrint ("\n# Transpose " <> prettyString bt) Nothing
+      <> Imp.DebugPrint "Number of arrays  " (Just $ untyped $ Imp.le64 num_arrays)
+      <> Imp.DebugPrint "X elements        " (Just $ untyped $ Imp.le64 x)
+      <> Imp.DebugPrint "Y elements        " (Just $ untyped $ Imp.le64 y)
+      <> Imp.DebugPrint "Source      offset" (Just $ untyped $ Imp.le64 srcoffset)
+      <> Imp.DebugPrint "Destination offset" (Just $ untyped $ Imp.le64 destoffset)
+      <> transpose_code
+      <> Imp.DebugPrint "" Nothing
   where
     params =
       [ memparam destmem,
@@ -323,7 +331,7 @@ mapTransposeFunction bt =
 
     space = Space "device"
     memparam v = Imp.MemParam v space
-    intparam v = Imp.ScalarParam v $ IntType Int32
+    intparam v = Imp.ScalarParam v $ IntType Int64
 
     [ destmem,
       destoffset,
@@ -334,7 +342,8 @@ mapTransposeFunction bt =
       y,
       mulx,
       muly,
-      block
+      block,
+      use_32b
       ] =
         zipWith
           (VName . nameFromString)
@@ -349,7 +358,8 @@ mapTransposeFunction bt =
             -- transpose kernels
             "mulx",
             "muly",
-            "block"
+            "block",
+            "use_32b"
           ]
           [0 ..]
 
@@ -361,18 +371,23 @@ mapTransposeFunction bt =
     -- When an input array has either width==1 or height==1, performing a
     -- transpose will be the same as performing a copy.
     can_use_copy =
-      let onearr = Imp.le32 num_arrays .==. 1
-          height_is_one = Imp.le32 y .==. 1
-          width_is_one = Imp.le32 x .==. 1
+      let onearr = Imp.le64 num_arrays .==. 1
+          height_is_one = Imp.le64 y .==. 1
+          width_is_one = Imp.le64 x .==. 1
        in onearr .&&. (width_is_one .||. height_is_one)
 
     transpose_code =
       Imp.If input_is_empty mempty $
         mconcat
-          [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.le32 x,
-            Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int32),
-            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.le32 y,
+          [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int64),
+            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.le64 x,
+            Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int64),
+            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.le64 y,
+            Imp.DeclareScalar use_32b Imp.Nonvolatile Bool,
+            Imp.SetScalar use_32b $
+              untyped $
+                (le64 destoffset + le64 num_arrays * le64 x * le64 y) .<=. 2 ^ (31 :: Int) - 1
+                  .&&. (le64 srcoffset + le64 num_arrays * le64 x * le64 y) .<=. 2 ^ (31 :: Int) - 1,
             Imp.If can_use_copy copy_code $
               Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $
                 Imp.If should_use_lowheight (callTransposeKernel TransposeLowHeight) $
@@ -381,47 +396,91 @@ mapTransposeFunction bt =
           ]
 
     input_is_empty =
-      Imp.le32 num_arrays .==. 0 .||. Imp.le32 x .==. 0 .||. Imp.le32 y .==. 0
+      Imp.le64 num_arrays .==. 0 .||. Imp.le64 x .==. 0 .||. Imp.le64 y .==. 0
 
     should_use_small =
-      Imp.le32 x .<=. (block_dim `quot` 2)
-        .&&. Imp.le32 y .<=. (block_dim `quot` 2)
+      Imp.le64 x .<=. (block_dim `quot` 2)
+        .&&. Imp.le64 y .<=. (block_dim `quot` 2)
 
     should_use_lowwidth =
-      Imp.le32 x .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le32 y
+      Imp.le64 x .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.le64 y
 
     should_use_lowheight =
-      Imp.le32 y .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le32 x
+      Imp.le64 y .<=. (block_dim `quot` 2)
+        .&&. block_dim .<. Imp.le64 x
 
     copy_code =
-      let num_bytes = sExt64 $ Imp.le32 x * Imp.le32 y * primByteSize bt
+      let num_bytes = sExt64 $ Imp.le64 x * Imp.le64 y * primByteSize bt
        in Imp.Copy
             bt
             destmem
-            (Imp.Count $ sExt64 $ Imp.le32 destoffset)
+            (Imp.Count $ Imp.le64 destoffset)
             space
             srcmem
-            (Imp.Count $ sExt64 $ Imp.le32 srcoffset)
+            (Imp.Count $ Imp.le64 srcoffset)
             space
             (Imp.Count num_bytes)
 
-    callTransposeKernel =
+    callTransposeKernel which =
+      Imp.If
+        (isBool (LeafExp use_32b Bool))
+        ( Imp.DebugPrint "Using 32-bit indexing" Nothing
+            <> callTransposeKernel32 which
+        )
+        ( Imp.DebugPrint "Using 64-bit indexing" Nothing
+            <> callTransposeKernel64 which
+        )
+
+    callTransposeKernel64 =
       Imp.Op
         . Imp.CallKernel
         . mapTransposeKernel
+          (int64, le64)
           (mapTransposeName bt)
           block_dim_int
           ( destmem,
-            Imp.le32 destoffset,
+            le64 destoffset,
             srcmem,
-            Imp.le32 srcoffset,
-            Imp.le32 x,
-            Imp.le32 y,
-            Imp.le32 mulx,
-            Imp.le32 muly,
-            Imp.le32 num_arrays,
+            le64 srcoffset,
+            le64 x,
+            le64 y,
+            le64 mulx,
+            le64 muly,
+            le64 num_arrays,
             block
           )
           bt
+
+    callTransposeKernel32 =
+      Imp.Op
+        . Imp.CallKernel
+        . mapTransposeKernel
+          (int32, le32)
+          (mapTransposeName bt)
+          block_dim_int
+          ( destmem,
+            sExt32 (le64 destoffset),
+            srcmem,
+            sExt32 (le64 srcoffset),
+            sExt32 (le64 x),
+            sExt32 (le64 y),
+            sExt32 (le64 mulx),
+            sExt32 (le64 muly),
+            sExt32 (le64 num_arrays),
+            block
+          )
+          bt
+
+-- Note [32-bit transpositions]
+--
+-- Transposition kernels are much slower when they have to use 64-bit
+-- arithmetic.  I observed about 0.67x slowdown on an A100 GPU when
+-- transposing four-byte elements (much less when transposing 8-byte
+-- elements).  Unfortunately, 64-bit arithmetic is a requirement for
+-- large arrays (see #1953 for what happens otherwise).  We generate
+-- both 32- and 64-bit index arithmetic versions of transpositions,
+-- and dynamically pick between them at runtime.  This is an
+-- unfortunate code bloat, and it would be preferable if we could
+-- simply optimise the 64-bit version to make this distinction
+-- unnecessary.  Fortunately these kernels are quite small.
