@@ -13,6 +13,7 @@ import Futhark.Util.Options
 import Language.Futhark
 import Language.Futhark.Unused
 import System.Exit
+import Data.List ( elemIndices )
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialCheckConfig [] "files..." find
@@ -30,8 +31,8 @@ printUnused files = do
     Right (_, imp, _) -> do
       putStrLn $
         unlines $
-          map (\(x, VName y _, z) -> x <> ": " <> nameToString y <> " -> " <> locStr z) $
-            concatMap (\(x, y) -> map (\(z, u) -> (x, z, u)) y) $
+          map (\(VName y _, z) -> lineOnly (locStr z) <> " " <> nameToString y) $
+            concatMap snd $
               M.toList $
                 findUnused files imp
 
@@ -39,3 +40,6 @@ data CheckConfig = CheckConfig Bool
 
 initialCheckConfig :: CheckConfig
 initialCheckConfig = CheckConfig False
+
+lineOnly :: [Char] -> [Char]
+lineOnly str = (elemIndices ':' str !! 1) `take` str
