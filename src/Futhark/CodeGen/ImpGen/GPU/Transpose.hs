@@ -7,8 +7,9 @@ module Futhark.CodeGen.ImpGen.GPU.Transpose
   )
 where
 
+-- See also Note [32-bit transpositions].
+
 import Futhark.CodeGen.ImpCode.GPU
-import Futhark.IR.Prop.Types
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
 
@@ -23,98 +24,98 @@ data TransposeType
   deriving (Eq, Ord, Show)
 
 -- | The types of the arguments accepted by a transposition function.
-type TransposeArgs =
+type TransposeArgs int =
   ( VName,
-    TExp Int32,
+    TExp int,
     VName,
-    TExp Int32,
-    TExp Int32,
-    TExp Int32,
-    TExp Int32,
-    TExp Int32,
-    TExp Int32,
+    TExp int,
+    TExp int,
+    TExp int,
+    TExp int,
+    TExp int,
+    TExp int,
     VName
   )
 
-elemsPerThread :: TExp Int32
-elemsPerThread = 4
+elemsPerThread :: Num a => a
+elemsPerThread = 8
 
-mapTranspose :: TExp Int32 -> TransposeArgs -> PrimType -> TransposeType -> KernelCode
-mapTranspose block_dim args t kind =
+mapTranspose :: forall int. IntExp int => (PrimType, VName -> TExp int) -> TExp int -> TransposeArgs int -> PrimType -> TransposeType -> KernelCode
+mapTranspose (int, le) block_dim args t kind =
   case kind of
     TransposeSmall ->
       mconcat
         [ get_ids,
-          dec our_array_offset $ le32 get_global_id_0 `quot` (height * width) * (height * width),
-          dec x_index $ (le32 get_global_id_0 `rem` (height * width)) `quot` height,
-          dec y_index $ le32 get_global_id_0 `rem` height,
+          dec our_array_offset $ le get_global_id_0 `quot` (height * width) * (height * width),
+          dec x_index $ (le get_global_id_0 `rem` (height * width)) `quot` height,
+          dec y_index $ le get_global_id_0 `rem` height,
           DeclareScalar val Nonvolatile t,
           dec odata_offset $
-            (basic_odata_offset `quot` primByteSize t) + le32 our_array_offset,
+            (basic_odata_offset `quot` primByteSize t) + le our_array_offset,
           dec idata_offset $
-            (basic_idata_offset `quot` primByteSize t) + le32 our_array_offset,
-          dec index_in $ le32 y_index * width + le32 x_index,
-          dec index_out $ le32 x_index * height + le32 y_index,
+            (basic_idata_offset `quot` primByteSize t) + le our_array_offset,
+          dec index_in $ le y_index * width + le x_index,
+          dec index_out $ le x_index * height + le y_index,
           when
-            (le32 get_global_id_0 .<. width * height * num_arrays)
+            (le get_global_id_0 .<. width * height * num_arrays)
             ( mconcat
-                [ Read val idata (elements $ sExt64 $ le32 idata_offset + le32 index_in) t (Space "global") Nonvolatile,
-                  Write odata (elements $ sExt64 $ le32 odata_offset + le32 index_out) t (Space "global") Nonvolatile (var val t)
+                [ Read val idata (elements $ toOffset $ le idata_offset + le index_in) t (Space "global") Nonvolatile,
+                  Write odata (elements $ toOffset $ le odata_offset + le index_out) t (Space "global") Nonvolatile (var val t)
                 ]
             )
         ]
     TransposeLowWidth ->
       mkTranspose $
         lowDimBody
-          (le32 get_group_id_0 * block_dim + (le32 get_local_id_0 `quot` muly))
-          ( le32 get_group_id_1 * block_dim * muly
-              + le32 get_local_id_1
-              + (le32 get_local_id_0 `rem` muly) * block_dim
+          (le get_group_id_0 * block_dim + (le get_local_id_0 `quot` muly))
+          ( le get_group_id_1 * block_dim * muly
+              + le get_local_id_1
+              + (le get_local_id_0 `rem` muly) * block_dim
           )
-          ( le32 get_group_id_1 * block_dim * muly
-              + le32 get_local_id_0
-              + (le32 get_local_id_1 `rem` muly) * block_dim
+          ( le get_group_id_1 * block_dim * muly
+              + le get_local_id_0
+              + (le get_local_id_1 `rem` muly) * block_dim
           )
-          (le32 get_group_id_0 * block_dim + (le32 get_local_id_1 `quot` muly))
+          (le get_group_id_0 * block_dim + (le get_local_id_1 `quot` muly))
     TransposeLowHeight ->
       mkTranspose $
         lowDimBody
-          ( le32 get_group_id_0 * block_dim * mulx
-              + le32 get_local_id_0
-              + (le32 get_local_id_1 `rem` mulx) * block_dim
+          ( le get_group_id_0 * block_dim * mulx
+              + le get_local_id_0
+              + (le get_local_id_1 `rem` mulx) * block_dim
           )
-          (le32 get_group_id_1 * block_dim + (le32 get_local_id_1 `quot` mulx))
-          (le32 get_group_id_1 * block_dim + (le32 get_local_id_0 `quot` mulx))
-          ( le32 get_group_id_0 * block_dim * mulx
-              + le32 get_local_id_1
-              + (le32 get_local_id_0 `rem` mulx) * block_dim
+          (le get_group_id_1 * block_dim + (le get_local_id_1 `quot` mulx))
+          (le get_group_id_1 * block_dim + (le get_local_id_0 `quot` mulx))
+          ( le get_group_id_0 * block_dim * mulx
+              + le get_local_id_1
+              + (le get_local_id_0 `rem` mulx) * block_dim
           )
     TransposeNormal ->
       mkTranspose $
         mconcat
-          [ dec x_index $ le32 get_global_id_0,
-            dec y_index $ le32 get_group_id_1 * tile_dim + le32 get_local_id_1,
+          [ dec x_index $ le get_global_id_0,
+            dec y_index $ le get_group_id_1 * tile_dim + le get_local_id_1,
             DeclareScalar val Nonvolatile t,
-            when (le32 x_index .<. width) $
-              For j (untyped elemsPerThread) $
-                let i = le32 j * (tile_dim `quot` elemsPerThread)
+            when (le x_index .<. width) $
+              For j (untyped (elemsPerThread :: TExp int)) $
+                let i = le j * (tile_dim `quot` elemsPerThread)
                  in mconcat
-                      [ dec index_in $ (le32 y_index + i) * width + le32 x_index,
-                        when (le32 y_index + i .<. height) $
+                      [ dec index_in $ (le y_index + i) * width + le x_index,
+                        when (le y_index + i .<. height) $
                           mconcat
                             [ Read
                                 val
                                 idata
-                                (elements $ sExt64 $ le32 idata_offset + le32 index_in)
+                                (elements $ toOffset $ le idata_offset + le index_in)
                                 t
                                 (Space "global")
                                 Nonvolatile,
                               Write
                                 block
                                 ( elements $
-                                    sExt64 $
-                                      (le32 get_local_id_1 + i) * (tile_dim + 1)
-                                        + le32 get_local_id_0
+                                    toOffset $
+                                      (le get_local_id_1 + i) * (tile_dim + 1)
+                                        + le get_local_id_0
                                 )
                                 t
                                 (Space "local")
@@ -123,27 +124,27 @@ mapTranspose block_dim args t kind =
                             ]
                       ],
             Op $ Barrier FenceLocal,
-            SetScalar x_index $ untyped $ le32 get_group_id_1 * tile_dim + le32 get_local_id_0,
-            SetScalar y_index $ untyped $ le32 get_group_id_0 * tile_dim + le32 get_local_id_1,
-            when (le32 x_index .<. height) $
-              For j (untyped elemsPerThread) $
-                let i = le32 j * (tile_dim `quot` elemsPerThread)
+            SetScalar x_index $ untyped $ le get_group_id_1 * tile_dim + le get_local_id_0,
+            SetScalar y_index $ untyped $ le get_group_id_0 * tile_dim + le get_local_id_1,
+            when (le x_index .<. height) $
+              For j (untyped (elemsPerThread :: TExp int)) $
+                let i = le j * (tile_dim `quot` elemsPerThread)
                  in mconcat
-                      [ dec index_out $ (le32 y_index + i) * height + le32 x_index,
-                        when (le32 y_index + i .<. width) $
+                      [ dec index_out $ (le y_index + i) * height + le x_index,
+                        when (le y_index + i .<. width) $
                           mconcat
                             [ Read
                                 val
                                 block
-                                ( elements . sExt64 $
-                                    le32 get_local_id_0 * (tile_dim + 1) + le32 get_local_id_1 + i
+                                ( elements . toOffset $
+                                    le get_local_id_0 * (tile_dim + 1) + le get_local_id_1 + i
                                 )
                                 t
                                 (Space "local")
                                 Nonvolatile,
                               Write
                                 odata
-                                (elements $ sExt64 $ le32 odata_offset + le32 index_out)
+                                (elements $ toOffset $ le odata_offset + le index_out)
                                 t
                                 (Space "global")
                                 Nonvolatile
@@ -152,6 +153,9 @@ mapTranspose block_dim args t kind =
                       ]
           ]
   where
+    toOffset :: TExp int -> TExp Int64
+    toOffset = sExt64
+
     dec v (TPrimExp e) =
       DeclareScalar v Nonvolatile (primExpType e) <> SetScalar v e
     tile_dim = 2 * block_dim
@@ -216,30 +220,30 @@ mapTranspose block_dim args t kind =
 
     get_ids =
       mconcat
-        [ DeclareScalar get_local_id_0 Nonvolatile int32,
+        [ DeclareScalar get_local_id_0 Nonvolatile int,
           Op $ GetLocalId get_local_id_0 0,
-          DeclareScalar get_local_id_1 Nonvolatile int32,
+          DeclareScalar get_local_id_1 Nonvolatile int,
           Op $ GetLocalId get_local_id_1 1,
-          DeclareScalar get_group_id_0 Nonvolatile int32,
+          DeclareScalar get_group_id_0 Nonvolatile int,
           Op $ GetGroupId get_group_id_0 0,
-          DeclareScalar get_group_id_1 Nonvolatile int32,
+          DeclareScalar get_group_id_1 Nonvolatile int,
           Op $ GetGroupId get_group_id_1 1,
-          DeclareScalar get_group_id_2 Nonvolatile int32,
+          DeclareScalar get_group_id_2 Nonvolatile int,
           Op $ GetGroupId get_group_id_2 2,
-          DeclareScalar get_local_size_0 Nonvolatile int32,
+          DeclareScalar get_local_size_0 Nonvolatile int,
           Op $ GetLocalSize get_local_size_0 0,
-          DeclareScalar get_global_id_0 Nonvolatile int32,
-          SetScalar get_global_id_0 $ untyped $ le32 get_group_id_0 * le32 get_local_size_0 + le32 get_local_id_0
+          DeclareScalar get_global_id_0 Nonvolatile int,
+          SetScalar get_global_id_0 $ untyped $ le get_group_id_0 * le get_local_size_0 + le get_local_id_0
         ]
 
     mkTranspose body =
       mconcat
         [ get_ids,
-          dec our_array_offset $ le32 get_group_id_2 * width * height,
+          dec our_array_offset $ le get_group_id_2 * width * height,
           dec odata_offset $
-            (basic_odata_offset `quot` primByteSize t) + le32 our_array_offset,
+            (basic_odata_offset `quot` primByteSize t) + le our_array_offset,
           dec idata_offset $
-            (basic_idata_offset `quot` primByteSize t) + le32 our_array_offset,
+            (basic_idata_offset `quot` primByteSize t) + le our_array_offset,
           body
         ]
 
@@ -248,19 +252,19 @@ mapTranspose block_dim args t kind =
         [ dec x_index x_in_index,
           dec y_index y_in_index,
           DeclareScalar val Nonvolatile t,
-          dec index_in $ le32 y_index * width + le32 x_index,
-          when (le32 x_index .<. width .&&. le32 y_index .<. height) $
+          dec index_in $ le y_index * width + le x_index,
+          when (le x_index .<. width .&&. le y_index .<. height) $
             mconcat
               [ Read
                   val
                   idata
-                  (elements $ sExt64 $ le32 idata_offset + le32 index_in)
+                  (elements $ sExt64 $ le idata_offset + le index_in)
                   t
                   (Space "global")
                   Nonvolatile,
                 Write
                   block
-                  (elements $ sExt64 $ le32 get_local_id_1 * (block_dim + 1) + le32 get_local_id_0)
+                  (elements $ sExt64 $ le get_local_id_1 * (block_dim + 1) + le get_local_id_0)
                   t
                   (Space "local")
                   Nonvolatile
@@ -269,25 +273,40 @@ mapTranspose block_dim args t kind =
           Op $ Barrier FenceLocal,
           SetScalar x_index $ untyped x_out_index,
           SetScalar y_index $ untyped y_out_index,
-          dec index_out $ le32 y_index * height + le32 x_index,
-          when (le32 x_index .<. height .&&. le32 y_index .<. width) $
+          dec index_out $ le y_index * height + le x_index,
+          when (le x_index .<. height .&&. le y_index .<. width) $
             mconcat
               [ Read
                   val
                   block
-                  (elements $ sExt64 $ le32 get_local_id_0 * (block_dim + 1) + le32 get_local_id_1)
+                  (elements $ toOffset $ le get_local_id_0 * (block_dim + 1) + le get_local_id_1)
                   t
                   (Space "local")
                   Nonvolatile,
                 Write
                   odata
-                  (elements $ sExt64 (le32 odata_offset + le32 index_out))
+                  (elements $ toOffset (le odata_offset + le index_out))
                   t
                   (Space "global")
                   Nonvolatile
                   (var val t)
               ]
         ]
+
+lowDimKernelAndGroupSize ::
+  IntExp int =>
+  TExp int ->
+  TExp int ->
+  TExp int ->
+  TExp int ->
+  ([TExp int], [TExp int])
+lowDimKernelAndGroupSize block_dim num_arrays x_elems y_elems =
+  ( [ x_elems `divUp` block_dim,
+      y_elems `divUp` block_dim,
+      num_arrays
+    ],
+    [block_dim, block_dim, 1]
+  )
 
 -- | Generate a transpose kernel.  There is special support to handle
 -- input arrays with low width, low height, or both.
@@ -313,38 +332,41 @@ mapTranspose block_dim args t kind =
 -- an additional element prevents bank conflicts from occuring when
 -- the tile is accessed column-wise.
 mapTransposeKernel ::
+  forall int.
+  IntExp int =>
+  (PrimType, VName -> TExp int) ->
   String ->
   Integer ->
-  TransposeArgs ->
+  TransposeArgs int ->
   PrimType ->
   TransposeType ->
   Kernel
-mapTransposeKernel desc block_dim_int args t kind =
+mapTransposeKernel (int, le) desc block_dim_int args t kind =
   Kernel
     { kernelBody =
         DeclareMem block (Space "local")
           <> Op (LocalAlloc block block_size)
-          <> mapTranspose block_dim args t kind,
+          <> mapTranspose (int, le) block_dim args t kind,
       kernelUses = uses,
       kernelNumGroups = map untyped num_groups,
       kernelGroupSize = map (Left . untyped) group_size,
-      kernelName = nameFromString name,
+      kernelName = nameFromString (name <> "_" <> prettyString int),
       kernelFailureTolerant = True,
       kernelCheckLocalMemory = False
     }
   where
     pad2DBytes k = k * (k + 1) * primByteSize t
+    block_size :: Count Bytes (TExp Int64)
     block_size =
       bytes $
         case kind of
-          TransposeSmall -> 1 :: TExp Int64
-          -- Not used, but AMD's OpenCL
-          -- does not like zero-size
-          -- local memory.
+          TransposeSmall -> 1
+          -- Not used, but AMD's OpenCL does not like zero-size local
+          -- memory.
           TransposeNormal -> fromInteger $ pad2DBytes $ 2 * block_dim_int
           TransposeLowWidth -> fromInteger $ pad2DBytes block_dim_int
           TransposeLowHeight -> fromInteger $ pad2DBytes block_dim_int
-    block_dim = fromInteger block_dim_int :: TExp Int32
+    block_dim = fromInteger block_dim_int :: TExp int
 
     ( odata,
       basic_odata_offset,
@@ -379,7 +401,7 @@ mapTransposeKernel desc block_dim_int args t kind =
 
     uses =
       map
-        (`ScalarUse` int32)
+        (`ScalarUse` IntType Int64)
         ( namesToList $
             mconcat $
               map
@@ -401,17 +423,3 @@ mapTransposeKernel desc block_dim_int args t kind =
         TransposeLowHeight -> desc ++ "_low_height"
         TransposeLowWidth -> desc ++ "_low_width"
         TransposeNormal -> desc
-
-lowDimKernelAndGroupSize ::
-  TExp Int32 ->
-  TExp Int32 ->
-  TExp Int32 ->
-  TExp Int32 ->
-  ([TExp Int32], [TExp Int32])
-lowDimKernelAndGroupSize block_dim num_arrays x_elems y_elems =
-  ( [ x_elems `divUp` block_dim,
-      y_elems `divUp` block_dim,
-      num_arrays
-    ],
-    [block_dim, block_dim, 1]
-  )
