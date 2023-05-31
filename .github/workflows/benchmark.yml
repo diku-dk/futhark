@@ -10,6 +10,7 @@ on:
 
 jobs:
   build-linux-nix:
+    if: github.repository == 'diku-dk/futhark' && (!github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'run-benchmarks') || github.ref == 'refs/heads/master')
     runs-on: ubuntu-22.04
 
     steps:
@@ -34,7 +35,7 @@ jobs:
   benchmark-MI100-opencl:
     runs-on: MI100
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     env:
       TMPDIR: "/scratch"
     steps:
@@ -50,7 +51,7 @@ jobs:
   benchmark-A100:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -70,7 +71,7 @@ jobs:
   benchmark-titanx-cuda:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -86,7 +87,7 @@ jobs:
   benchmark-titanx-opencl:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -102,7 +103,7 @@ jobs:
   benchmark-titanrtx-cuda:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
@@ -117,7 +118,7 @@ jobs:
   benchmark-titanrtx-opencl:
     runs-on: hendrix
     needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark' && !github.event.pull_request.draft
+
     steps:
     - uses: actions/checkout@v3
       with:
