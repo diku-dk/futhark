@@ -1,6 +1,7 @@
 module Futhark.Internalise.TypesValues
   ( -- * Internalising types
     internaliseReturnType,
+    internaliseCoerceType,
     internaliseLambdaReturnType,
     internaliseEntryReturnType,
     internaliseType,
@@ -44,8 +45,8 @@ internaliseParamTypes ::
   [E.TypeBase E.Size ()] ->
   InternaliseM [[I.TypeBase Shape Uniqueness]]
 internaliseParamTypes ts =
-  mapM (mapM mkAccCerts) . runInternaliseTypeM $
-    mapM (fmap (map onType) . internaliseTypeM mempty) ts
+  mapM (mapM mkAccCerts) . fmap concat . runInternaliseTypeM $
+    mapM (fmap (map (map onType)) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
@@ -53,10 +54,13 @@ internaliseParamTypes ts =
 -- We need to fix up the arrays for any Acc return values or loop
 -- parameters.  We look at the concrete types for this, since the Acc
 -- parameter name in the second list will just be something we made up.
-fixupKnownTypes :: [TypeBase shape1 u1] -> [TypeBase shape2 u2] -> [TypeBase shape2 u2]
+fixupKnownTypes ::
+  [TypeBase shape1 u1] ->
+  [(TypeBase shape2 u2, b)] ->
+  [(TypeBase shape2 u2, b)]
 fixupKnownTypes = zipWith fixup
   where
-    fixup (Acc acc ispace ts _) (Acc _ _ _ u2) = Acc acc ispace ts u2
+    fixup (Acc acc ispace ts _) (Acc _ _ _ u2, b) = (Acc acc ispace ts u2, b)
     fixup _ t = t
 
 -- Generate proper certificates for the placeholder accumulator
@@ -78,16 +82,32 @@ internaliseLoopParamType ::
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  fixupKnownTypes ts . concat <$> internaliseParamTypes [et]
+  map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concat
+    <$> internaliseParamTypes [et]
+
+eqClasses :: [[a]] -> [(a, RetAls)]
+eqClasses all_ts = concat $ zipWith f all_ts $ scanl (+) 0 $ map length all_ts
+  where
+    num_ts = sum (map length all_ts)
+    classes ts o = [0, 1 .. o - 1] ++ [o + length ts .. num_ts - 1]
+    f ts o = map (,RetAls mempty $ classes ts o) ts
 
 internaliseReturnType ::
+  [I.TypeBase Shape Uniqueness] ->
   E.StructRetType ->
   [TypeBase shape u] ->
-  [I.TypeBase ExtShape Uniqueness]
-internaliseReturnType (E.RetType dims et) ts =
-  fixupKnownTypes ts $ runInternaliseTypeM' dims (internaliseTypeM exts et)
+  [(I.TypeBase ExtShape Uniqueness, RetAls)]
+internaliseReturnType paramts (E.RetType dims et) ts =
+  fixupKnownTypes ts . eqClasses $
+    runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
+
+internaliseCoerceType ::
+  E.StructType ->
+  [TypeBase shape u] ->
+  [I.TypeBase ExtShape Uniqueness]
+internaliseCoerceType et = map fst . internaliseReturnType [] (E.RetType [] et)
 
 internaliseLambdaReturnType ::
   E.TypeBase E.Size () ->
@@ -102,7 +122,7 @@ internaliseEntryReturnType ::
   E.StructRetType ->
   [[I.TypeBase ExtShape Uniqueness]]
 internaliseEntryReturnType (E.RetType dims et) =
-  runInternaliseTypeM' dims . mapM (internaliseTypeM exts) $
+  runInternaliseTypeM' dims . fmap concat . mapM (internaliseTypeM exts) $
     case E.isTupleRecord et of
       Just ets | not $ null ets -> ets
       _ -> [et]
@@ -112,7 +132,8 @@ internaliseEntryReturnType (E.RetType dims et) =
 internaliseType ::
   E.TypeBase E.Size () ->
   [I.TypeBase I.ExtShape Uniqueness]
-internaliseType = runInternaliseTypeM . internaliseTypeM mempty
+internaliseType =
+  runInternaliseTypeM . fmap concat . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
 newId = do
@@ -138,28 +159,28 @@ internaliseDim exts d =
 internaliseTypeM ::
   M.Map VName Int ->
   E.StructType ->
-  InternaliseTypeM [I.TypeBase ExtShape Uniqueness]
+  InternaliseTypeM [[I.TypeBase ExtShape Uniqueness]]
 internaliseTypeM exts orig_t =
   case orig_t of
     E.Array _ u shape et -> do
       dims <- internaliseShape shape
-      ets <- internaliseTypeM exts $ E.Scalar et
-      pure [I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]
+      ets <- concat <$> internaliseTypeM exts (E.Scalar et)
+      pure [[I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]]
     E.Scalar (E.Prim bt) ->
-      pure [I.Prim $ internalisePrimType bt]
+      pure [[I.Prim $ internalisePrimType bt]]
     E.Scalar (E.Record ets)
-      -- XXX: we map empty records to units, because otherwise
-      -- arrays of unit will lose their sizes.
-      | null ets -> pure [I.Prim I.Unit]
+      -- We map empty records to units, because otherwise arrays of
+      -- unit will lose their sizes.
+      | null ets -> pure [[I.Prim I.Unit]]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
-          ts <- map (fromDecl . onAccType) <$> internaliseTypeM exts arr_t
+          ts <- map (fromDecl . onAccType) . concat <$> internaliseTypeM exts arr_t
           let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
               acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
-          pure [acc_t]
+          pure [[acc_t]]
     E.Scalar E.TypeVar {} ->
       error $ "internaliseTypeM: cannot handle type variable: " ++ prettyString orig_t
     E.Scalar E.Arrow {} ->
@@ -167,8 +188,8 @@ internaliseTypeM exts orig_t =
     E.Scalar (E.Sum cs) -> do
       (ts, _) <-
         internaliseConstructors
-          <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
-      pure $ I.Prim (I.IntType I.Int8) : ts
+          <$> traverse (fmap (concat . concat) . mapM (internaliseTypeM exts)) cs
+      pure [I.Prim (I.IntType I.Int8) : ts]
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
@@ -209,7 +230,7 @@ internaliseSumType ::
 internaliseSumType cs =
   bitraverse (mapM mkAccCerts) pure . runInternaliseTypeM $
     internaliseConstructors
-      <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
+      <$> traverse (fmap (concat . concat) . mapM (internaliseTypeM mempty)) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

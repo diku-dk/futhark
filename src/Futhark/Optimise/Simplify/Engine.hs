@@ -66,6 +66,7 @@ where
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
+import Data.Bitraversable
 import Data.Either
 import Data.List (find, foldl', inits, mapAccumL)
 import Data.Map qualified as M
@@ -1123,8 +1124,8 @@ simplifyFun ::
   FunDef (Wise rep) ->
   SimpleM rep (FunDef (Wise rep))
 simplifyFun (FunDef entry attrs fname rettype params body) = do
-  rettype' <- simplify rettype
+  rettype' <- mapM (bitraverse simplify pure) rettype
   params' <- mapM (traverse simplify) params
-  let usages = map (usageFromDiet . diet . declExtTypeOf) rettype'
+  let usages = map (usageFromDiet . diet . declExtTypeOf . fst) rettype'
   body' <- bindFParams params $ simplifyBodyNoHoisting mempty usages body
   pure $ FunDef entry attrs fname rettype' params' body'

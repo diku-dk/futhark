@@ -15,6 +15,7 @@ import Data.Functor
 import Data.List (singleton, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Void
@@ -373,8 +374,14 @@ data PR rep = PR
     pExpDec :: ExpDec rep
   }
 
-pRetTypes :: PR rep -> Parser [RetType rep]
-pRetTypes pr = braces $ pRetType pr `sepBy` pComma
+pRetAls :: Parser RetAls
+pRetAls = fromMaybe (RetAls mempty mempty) <$> optional p
+  where
+    p = lexeme "@" *> parens (RetAls <$> pInts <* pComma <*> pInts)
+    pInts = brackets $ pInt `sepBy` pComma
+
+pRetTypes :: PR rep -> Parser [(RetType rep, RetAls)]
+pRetTypes pr = braces $ ((,) <$> pRetType pr <*> pRetAls) `sepBy` pComma
 
 pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma

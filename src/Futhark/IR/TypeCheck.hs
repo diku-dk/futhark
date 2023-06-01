@@ -46,11 +46,11 @@ import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Parallel.Strategies
+import Data.Bifunctor (first)
 import Data.List (find, intercalate, isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Analysis.Alias
 import Futhark.Analysis.PrimExp
@@ -189,7 +189,7 @@ instance Checkable rep => Show (TypeError rep) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding rep = ([RetType (Aliases rep)], [FParam (Aliases rep)])
+type FunBinding rep = ([(RetType (Aliases rep), RetAls)], [FParam (Aliases rep)])
 
 type VarBinding rep = NameInfo (Aliases rep)
 
@@ -488,18 +488,18 @@ lookupFun ::
   Checkable rep =>
   Name ->
   [SubExp] ->
-  TypeM rep ([RetType rep], [DeclType])
+  TypeM rep ([(RetType rep, RetAls)], [DeclType])
 lookupFun fname args = do
   stm <- asks $ M.lookup fname . envFtable
   case stm of
     Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
       argts <- mapM subExpType args
-      case applyRetType ftype params $ zip args argts of
+      case applyRetType (map fst ftype) params $ zip args argts of
         Nothing ->
           bad $ ParameterMismatch (Just fname) (map paramType params) argts
         Just rt ->
-          pure (rt, map paramDeclType params)
+          pure (zip rt $ map snd ftype, map paramDeclType params)
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -610,7 +610,7 @@ initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
   where
     addBuiltin (fname, (t, ts)) = do
       ps <- mapM (primFParam name) ts
-      pure (fname, ([primRetType t], ps))
+      pure (fname, ([(primRetType t, RetAls mempty mempty)], ps))
     name = VName (nameFromString "x") 0
 
 checkFun ::
@@ -621,13 +621,13 @@ checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " <> nameToText fname)
     $ checkFun'
       ( fname,
-        map declExtTypeOf rettype,
+        map (first declExtTypeOf) rettype,
         funParamsToNameInfos params
       )
       (Just consumable)
     $ do
       checkFunParams params
-      checkRetType rettype
+      checkRetType $ map fst rettype
       context "When checking function body" $ checkFunBody rettype body
   where
     consumable =
@@ -665,7 +665,7 @@ checkLambdaParams = mapM_ $ \param ->
 checkFun' ::
   Checkable rep =>
   ( Name,
-    [DeclExtType],
+    [(DeclExtType, RetAls)],
     [(VName, NameInfo (Aliases rep))]
   ) ->
   Maybe [(VName, Names)] ->
@@ -676,14 +676,11 @@ checkFun' (fname, rettype, params) consumable check = do
   binding (M.fromList params) $
     maybe id consumeOnlyParams consumable $ do
       body_aliases <- check
-      scope <- askScope
-      let isArray = maybe False ((> 0) . arrayRank . typeOf) . (`M.lookup` scope)
       context
         ( "When checking the body aliases: "
             <> prettyText (map namesToList body_aliases)
         )
-        $ checkReturnAlias
-        $ map (namesFromList . filter isArray . namesToList) body_aliases
+        $ checkReturnAlias body_aliases
   where
     param_names = map fst params
 
@@ -694,26 +691,20 @@ checkFun' (fname, rettype, params) consumable check = do
           bad $ DupParamError fname pname
       | otherwise =
           pure $ pname : seen
-    checkReturnAlias =
-      foldM_ checkReturnAlias' mempty . returnAliasing rettype
 
-    checkReturnAlias' seen (Unique, names)
-      | any (`S.member` S.map fst seen) $ namesToList names =
-          bad $ UniqueReturnAliased fname
-      | otherwise = do
-          consume names
-          pure $ seen <> tag Unique names
-    checkReturnAlias' seen (Nonunique, names)
-      | any (`S.member` seen) $ tag Unique names =
-          bad $ UniqueReturnAliased fname
-      | otherwise = pure $ seen <> tag Nonunique names
+    allowedAliases is =
+      namesFromList (map (param_names !!) is)
 
-    tag u = S.fromList . map (,u) . namesToList
-
-    returnAliasing expected got =
-      reverse $
-        zip (reverse (map uniqueness expected) ++ repeat Nonunique) $
-          reverse got
+    checkReturnAlias = zipWithM_ checkRet $ zip [(0 :: Int) ..] rettype
+      where
+        checkRet (i, (Array {}, RetAls is js)) als
+          | als' <- namesToList $ als `namesSubtract` allowedAliases is,
+            not $ null als' =
+              bad . TypeError . T.unlines $
+                [ T.unwords ["Result", prettyText i, "aliases", prettyText als'],
+                  T.unwords ["but is only allowed to alias", prettyText (allowedAliases is)]
+                ]
+        checkRet _ _ = pure ()
 
 checkSubExp :: Checkable rep => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
@@ -753,7 +744,7 @@ checkResult = mapM_ checkSubExpRes
 
 checkFunBody ::
   Checkable rep =>
-  [RetType rep] ->
+  [(RetType rep, RetAls)] ->
   Body (Aliases rep) ->
   TypeM rep [Names]
 checkFunBody rt (Body (_, rep) stms res) = do
@@ -761,7 +752,7 @@ checkFunBody rt (Body (_, rep) stms res) = do
   checkStms stms $ do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
-      matchReturnType rt res
+      matchReturnType (map fst rt) res
     map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
   where
     bound_here = namesFromList $ M.keys $ scopeOf stms
@@ -986,6 +977,10 @@ matchLoopResultExt merge loopres = do
           (staticShapes rettype')
           (staticShapes bodyt)
 
+allowAllAliases :: Int -> RetAls
+allowAllAliases n =
+  RetAls [0 .. n - 1] [0 .. n - 1]
+
 checkExp ::
   Checkable rep =>
   Exp (Aliases rep) ->
@@ -1016,9 +1011,9 @@ checkExp (Apply fname args rettype_annot _) = do
   when (rettype_derived /= rettype_annot) $
     bad . TypeError . docText $
       "Expected apply result type:"
-        </> indent 2 (pretty rettype_derived)
+        </> indent 2 (pretty $ map fst rettype_derived)
         </> "But annotation is:"
-        </> indent 2 (pretty rettype_annot)
+        </> indent 2 (pretty $ map fst rettype_annot)
   consumeArgs paramtypes argflows
 checkExp (DoLoop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
@@ -1040,7 +1035,7 @@ checkExp (DoLoop merge form loopbody) = do
     context "Inside the loop body"
       $ checkFun'
         ( nameFromString "<loop body>",
-          staticShapes rettype,
+          map (,allowAllAliases (length merge)) (staticShapes rettype),
           funParamsToNameInfos mergepat
         )
         (Just consumable)
@@ -1430,7 +1425,11 @@ checkAnyLambda soac (Lambda params body rettype) args = do
           params' =
             [(paramName param, LParamName $ paramDec param) | param <- params]
       checkFun'
-        (fname, staticShapes $ map (`toDecl` Nonunique) rettype, params')
+        ( fname,
+          map (,allowAllAliases (length params)) . staticShapes $
+            map (`toDecl` Nonunique) rettype,
+          params'
+        )
         consumable
         $ do
           checkLambdaParams params

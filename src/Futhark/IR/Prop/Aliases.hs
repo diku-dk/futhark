@@ -84,23 +84,11 @@ matchAliases l =
   where
     (alses, conses) = unzip l
 
-returnAliases :: [TypeBase shape Uniqueness] -> [(Names, Diet)] -> [Names]
-returnAliases rts args = map returnType' rts
+funcallAliases :: [(SubExp, Diet)] -> [(TypeBase shape Uniqueness, RetAls)] -> [Names]
+funcallAliases args = map onType
   where
-    returnType' (Array _ _ Nonunique) =
-      mconcat $ map (uncurry maskAliases) args
-    returnType' (Array _ _ Unique) =
-      mempty
-    returnType' (Prim _) =
-      mempty
-    returnType' Acc {} =
-      error "returnAliases Acc"
-    returnType' Mem {} =
-      mconcat $ map (uncurry maskAliases) args
-
-funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
-funcallAliases args t =
-  returnAliases t [(subExpAliases se, d) | (se, d) <- args]
+    onType (_t, RetAls is js) = mconcat $ map fst $ filter ((`elem` is) . snd) arg_als
+    arg_als = zip (map (subExpAliases . fst) args) [0 ..]
 
 -- | The aliases of an expression, one for each pattern element.
 --
@@ -146,7 +134,7 @@ expAliases _ (DoLoop merge _ loopbody) = do
         look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
         expand als = als <> foldMap look (namesToList als)
 expAliases _ (Apply _ args t _) =
-  funcallAliases args $ map declExtTypeOf t
+  funcallAliases args $ map (first declExtTypeOf) t
 expAliases _ (WithAcc inputs lam) =
   concatMap inputAliases inputs
     ++ drop num_accs (map (`namesSubtract` boundInBody body) $ bodyAliases body)
@@ -155,11 +143,6 @@ expAliases _ (WithAcc inputs lam) =
     inputAliases (_, arrs, _) = replicate (length arrs) mempty
     num_accs = length inputs
 expAliases _ (Op op) = opAliases op
-
-maskAliases :: Names -> Diet -> Names
-maskAliases _ Consume = mempty
-maskAliases _ ObservePrim = mempty
-maskAliases als Observe = als
 
 -- | The variables consumed in this statement.
 consumedInStm :: Aliased rep => Stm rep -> Names

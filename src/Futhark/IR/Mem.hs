@@ -1070,7 +1070,7 @@ expReturns e@(DoLoop merge _ _) = do
     isMergeVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
-  pure $ map funReturnsToExpReturns ret
+  pure $ map (funReturnsToExpReturns . fst) ret
 expReturns (Match _ _ _ (MatchDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =

@@ -133,8 +133,9 @@ cseInFunDef cse_arrays fundec =
     -- practical problem while we still perform such aggressive
     -- inlining.
     ds
-      | isJust $ funDefEntryPoint fundec = map (diet . declExtTypeOf) $ funDefRetType fundec
-      | otherwise = map retDiet $ funDefRetType fundec
+      | isJust $ funDefEntryPoint fundec =
+          map (diet . declExtTypeOf . fst) $ funDefRetType fundec
+      | otherwise = map (retDiet . fst) $ funDefRetType fundec
     retDiet t
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume

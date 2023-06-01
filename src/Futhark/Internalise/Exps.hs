@@ -7,6 +7,7 @@ module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad
 import Control.Monad.Reader
+import Data.Bifunctor
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -44,6 +45,7 @@ internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
 internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
+        all_params = shapeparams ++ concat params'
 
     msg <- case retdecl of
       Just dt ->
@@ -54,16 +56,15 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
-      rettype' <-
-        zeroExts . internaliseReturnType rettype <$> mapM subExpType body_res
+      (rettype', retals) <-
+        first zeroExts . unzip . internaliseReturnType (map paramDeclType all_params) rettype
+          <$> mapM subExpType body_res
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
       pure
         ( body_res',
-          replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+          replicate (length (shapeContext rettype')) (I.Prim int64, mempty) ++ zip rettype' retals
         )
-
-    let all_params = shapeparams ++ concat params'
 
     attrs' <- internaliseAttrs attrs
 
@@ -85,7 +86,7 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
           ( shapenames,
             map declTypeOf $ concat params',
             all_params,
-            applyRetType rettype' all_params
+            fmap (flip zip (map snd rettype')) . applyRetType (map fst rettype') all_params
           )
 
   case entry of
@@ -121,7 +122,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
       ctx <-
         extractShapeContext (zeroExts $ concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
-      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
+      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64, mempty)) ctx)
 
     attrs' <- internaliseAttrs attrs
     addFunDef $
@@ -129,7 +130,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
         (Just entry')
         attrs'
         ("entry_" <> baseName ofname)
-        (ctx_ts ++ zeroExts (concat entry_rettype))
+        (ctx_ts ++ zip (zeroExts (concat entry_rettype)) (repeat mempty))
         (shapeparams ++ concat params')
         entry_body
   where
@@ -373,7 +374,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               let tag ses = [(se, I.Observe) | se <- ses]
               args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
               let args'' = concatMap tag args'
-              letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+              letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
           | otherwise -> do
               args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
               funcall desc qfname args' loc
@@ -681,7 +682,7 @@ internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
 internaliseExp desc (E.Coerce e dt (Info et) loc) = do
   ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType [] (E.toStruct et)) <$> mapM subExpType ses
+  ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
   dt' <- typeExpForError dt
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
@@ -1971,8 +1972,7 @@ funcall ::
   SrcLoc ->
   InternaliseM [SubExp]
 funcall desc (QualName _ fname) args loc = do
-  (shapes, value_paramts, fun_params, rettype_fun) <-
-    lookupFunction fname
+  (shapes, value_paramts, fun_params, rettype_fun) <- lookupFunction fname
   argts <- mapM subExpType args
 
   shapeargs <- argShapes shapes fun_params argts
