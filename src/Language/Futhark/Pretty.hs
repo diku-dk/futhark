@@ -254,6 +254,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
   where
     linebreak = case e of
       AppExp {} -> True
+      Coerce {} -> True
       Attr {} -> True
       ArrayLit {} -> False
       _ -> hasArrayLit e
