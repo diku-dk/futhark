@@ -132,8 +132,8 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
-      AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
+    onExp substs (Coerce e te t loc) =
+      Coerce (onExp substs e) te' (replaceTypeSizes substs <$> t) loc
       where
         te' = onTypeExp substs te
     onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
@@ -506,10 +506,10 @@ defuncExp (Ascript e0 tydecl loc)
       (e0', sv) <- defuncExp e0
       pure (Ascript e0' tydecl loc, sv)
   | otherwise = defuncExp e0
-defuncExp (AppExp (Coerce e0 tydecl loc) res)
+defuncExp (Coerce e0 tydecl t loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0
-      pure (AppExp (Coerce e0' tydecl loc) res, sv)
+      pure (Coerce e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1

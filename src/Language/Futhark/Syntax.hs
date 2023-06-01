@@ -683,8 +683,6 @@ data AppExpBase f vn
       (ExpBase f vn)
       (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
       SrcLoc
-  | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeExp f vn) SrcLoc
   | Range
       (ExpBase f vn)
       (Maybe (ExpBase f vn))
@@ -747,7 +745,6 @@ instance Located (AppExpBase f vn) where
   locOf (Range _ _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ loc) = locOf loc
   locOf (If _ _ _ loc) = locOf loc
-  locOf (Coerce _ _ loc) = locOf loc
   locOf (Apply _ _ loc) = locOf loc
   locOf (LetPat _ _ _ _ loc) = locOf loc
   locOf (LetFun _ _ _ loc) = locOf loc
@@ -839,6 +836,8 @@ data ExpBase f vn
     IndexSection (SliceBase f vn) (f PatType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
+  | -- | Size coercion: @e :> t@.
+    Coerce (ExpBase f vn) (TypeExp f vn) (f PatType) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Show (ExpBase Info VName)
@@ -866,6 +865,7 @@ instance Located (ExpBase f vn) where
   locOf (StringLit _ loc) = locOf loc
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
+  locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos

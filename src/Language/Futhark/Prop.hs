@@ -518,6 +518,7 @@ typeOf (Project _ _ (Info t) _) = t
 typeOf (Var _ (Info t) _) = t
 typeOf (Hole (Info t) _) = t
 typeOf (Ascript e _ _) = typeOf e
+typeOf (Coerce _ _ (Info t) _) = t
 typeOf (Negate e _) = typeOf e
 typeOf (Not e _) = typeOf e
 typeOf (Update e _ _ _) = typeOf e `setAliases` mempty
