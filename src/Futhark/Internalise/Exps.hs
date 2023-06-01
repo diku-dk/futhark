@@ -320,19 +320,6 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
-internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
-  ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) <$> mapM subExpType ses
-  dt' <- typeExpForError dt
-  forM (zip ses ts) $ \(e', t') -> do
-    dims <- arrayDims <$> subExpType e'
-    let parts =
-          ["Value of (core language) shape ("]
-            ++ intersperse ", " (map (ErrorVal int64) dims)
-            ++ [") cannot match shape of type `"]
-            ++ dt'
-            ++ ["`."]
-    ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
   case findFuncall e of
     (FunctionHole loc, _args) -> do
@@ -692,6 +679,19 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       Just ([], [e])
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
+internaliseExp desc (E.Coerce e dt (Info et) loc) = do
+  ses <- internaliseExp desc e
+  ts <- internaliseReturnType (E.RetType [] (E.toStruct et)) <$> mapM subExpType ses
+  dt' <- typeExpForError dt
+  forM (zip ses ts) $ \(e', t') -> do
+    dims <- arrayDims <$> subExpType e'
+    let parts =
+          ["Value of (core language) shape ("]
+            ++ intersperse ", " (map (ErrorVal int64) dims)
+            ++ [") cannot match shape of type `"]
+            ++ dt'
+            ++ ["`."]
+    ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'

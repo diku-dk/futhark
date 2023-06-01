@@ -274,7 +274,7 @@ atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
 atPosInExp (Ascript _ te _) pos
   | te `contains` pos = atPosInTypeExp te pos
-atPosInExp (AppExp (Coerce _ te _) _) pos
+atPosInExp (Coerce _ te _ _) pos
   | te `contains` pos = atPosInTypeExp te pos
 atPosInExp e pos = do
   guard $ e `contains` pos

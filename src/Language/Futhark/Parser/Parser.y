@@ -549,7 +549,7 @@ QualName :: { (QualName Name, Loc) }
 -- array slices).
 Exp :: { UncheckedExp }
      : Exp ':' TypeExp  { Ascript $1 $3 (srcspan $1 $>) }
-     | Exp ':>' TypeExp { AppExp (Coerce $1 $3 (srcspan $1 $>)) NoInfo }
+     | Exp ':>' TypeExp { Coerce $1 $3 NoInfo (srcspan $1 $>) }
      | Exp2 %prec ':'   { $1 }
 
 Exp2 :: { UncheckedExp }

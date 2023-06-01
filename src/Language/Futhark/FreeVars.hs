@@ -59,8 +59,8 @@ freeInExp expr = case expr of
     freeInExp e <> foldMap freeInExp me <> foldMap freeInExp incl
   Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeInExp e
-  AppExp (Coerce e _ _) (Info ar) ->
-    freeInExp e <> freeInType (appResType ar)
+  Coerce e _ (Info t) _ ->
+    freeInExp e <> freeInType t
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
       <> ( (freeInPat pat <> freeInExp e2)

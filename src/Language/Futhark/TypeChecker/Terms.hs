@@ -549,11 +549,11 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
 checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
   pure $ Ascript e' te' loc
-checkExp (AppExp (Coerce e te loc) _) = do
+checkExp (Coerce e te NoInfo loc) = do
   (te', te_t, e') <- checkCoerce loc te e
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t $ fromStruct te_t
-  pure $ AppExp (Coerce e' te' loc) (Info $ AppRes t' [])
+  pure $ Coerce e' te' (Info t') loc
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
   e1_arg <- checkArg e1

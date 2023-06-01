@@ -109,8 +109,6 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (Coerce e tdecl loc) =
-    Coerce <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
   astMap tv (BinOp (fname, fname_loc) t (x, Info (xt, xext)) (y, Info (yt, yext)) loc) =
     BinOp
       <$> ((,) <$> astMap tv fname <*> pure fname_loc)
@@ -166,6 +164,8 @@ instance ASTMappable (ExpBase Info VName) where
     ArrayLit <$> mapM (mapOnExp tv) els <*> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Ascript e tdecl loc) =
     Ascript <$> mapOnExp tv e <*> astMap tv tdecl <*> pure loc
+  astMap tv (Coerce e tdecl t loc) =
+    Coerce <$> mapOnExp tv e <*> astMap tv tdecl <*> traverse (mapOnPatType tv) t <*> pure loc
   astMap tv (Negate x loc) =
     Negate <$> mapOnExp tv x <*> pure loc
   astMap tv (Not x loc) =
@@ -479,6 +479,7 @@ bareExp (StringLit vs loc) = StringLit vs loc
 bareExp (RecordLit fields loc) = RecordLit (map bareField fields) loc
 bareExp (ArrayLit els _ loc) = ArrayLit (map bareExp els) NoInfo loc
 bareExp (Ascript e te loc) = Ascript (bareExp e) (bareTypeExp te) loc
+bareExp (Coerce e te _ loc) = Coerce (bareExp e) (bareTypeExp te) NoInfo loc
 bareExp (Negate x loc) = Negate (bareExp x) loc
 bareExp (Not x loc) = Not (bareExp x) loc
 bareExp (Update src slice v loc) =
@@ -539,8 +540,6 @@ bareExp (AppExp appexp _) =
             loc
         Range start next end loc ->
           Range (bareExp start) (fmap bareExp next) (fmap bareExp end) loc
-        Coerce e te loc ->
-          Coerce (bareExp e) (bareTypeExp te) loc
         Index arr slice loc ->
           Index (bareExp arr) (map bareDimIndex slice) loc
 bareExp (Attr attr e loc) =

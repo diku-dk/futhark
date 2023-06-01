@@ -260,9 +260,9 @@ getOrdering final (AppExp (Apply f args loc) resT) = do
   where
     onArg ((d, e), i) =
       naming (argRepName f i) $ (d,) <$> getOrdering False e
-getOrdering final (AppExp (Coerce e ty loc) resT) = do
+getOrdering final (Coerce e te t loc) = do
   e' <- getOrdering False e
-  nameExp final $ AppExp (Coerce e' ty loc) resT
+  nameExp final $ Coerce e' te t loc
 getOrdering final (AppExp (Range start stride end loc) resT) = do
   start' <- getOrdering False start
   stride' <- mapM (getOrdering False) stride
