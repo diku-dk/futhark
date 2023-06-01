@@ -588,8 +588,6 @@ transformAppExp (Range e1 me incl loc) res = do
   incl' <- mapM transformExp incl
   res' <- transformAppRes res
   pure $ AppExp (Range e1' me' incl' loc) (Info res')
-transformAppExp (Coerce e tp loc) res =
-  AppExp <$> (Coerce <$> transformExp e <*> transformTypeExp tp <*> pure loc) <*> (Info <$> transformAppRes res)
 transformAppExp (LetPat sizes pat e body loc) res = do
   e' <- transformExp e
   let dimArgs = S.fromList (map sizeName sizes)
@@ -791,6 +789,8 @@ transformExp (Hole t loc) =
   Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
+transformExp (Coerce e tp t loc) =
+  Coerce <$> transformExp e <*> transformTypeExp tp <*> traverse transformType t <*> pure loc
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 transformExp (Not e loc) =
