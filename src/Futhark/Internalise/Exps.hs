@@ -117,7 +117,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
         Just ses ->
           pure ses
         Nothing ->
-          fst <$> funcall "entry_result" (E.qualName ofname) args loc
+          funcall "entry_result" (E.qualName ofname) args loc
       ctx <-
         extractShapeContext (zeroExts $ concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
@@ -389,7 +389,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
           | otherwise -> do
               args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              fst <$> funcall desc qfname args' loc
+              funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -1969,7 +1969,7 @@ funcall ::
   QualName VName ->
   [SubExp] ->
   SrcLoc ->
-  InternaliseM ([SubExp], [I.ExtType])
+  InternaliseM [SubExp]
 funcall desc (QualName _ fname) args loc = do
   (shapes, value_paramts, fun_params, rettype_fun) <-
     lookupFunction fname
@@ -2007,10 +2007,8 @@ funcall desc (QualName _ fname) args loc = do
     Just ts -> do
       safety <- askSafety
       attrs <- asks envAttrs
-      ses <-
-        attributing attrs . letValExp' desc $
-          I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
-      pure (ses, map I.fromDecl ts)
+      attributing attrs . letValExp' desc $
+        I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
 
 -- Bind existential names defined by an expression, based on the
 -- concrete values that expression evaluated to.  This most
