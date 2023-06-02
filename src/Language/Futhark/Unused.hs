@@ -20,9 +20,6 @@ import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
 -- (2) create a mapping from normalized filename to top-level functions inside the filename.
 -- (3) Compute transitive closure for the map in (1)
 
--- We are looking for VNames that represent functions.
-
--- cabal run futhark -- unused un/b.fut
 
 getDecs :: FileModule -> [DecBase Info VName]
 getDecs (FileModule _ _env (Prog _doc decs) _) = decs
