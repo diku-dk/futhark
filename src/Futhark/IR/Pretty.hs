@@ -267,7 +267,7 @@ prettyRet (t, RetAls pals rals)
     rals == mempty =
       pretty t
   | otherwise =
-      pretty t <> "@" <> pretty (pals, rals)
+      pretty t <> "#" <> pretty (pals, rals)
 
 instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =

@@ -84,11 +84,17 @@ matchAliases l =
   where
     (alses, conses) = unzip l
 
-funcallAliases :: [(SubExp, Diet)] -> [(TypeBase shape Uniqueness, RetAls)] -> [Names]
-funcallAliases args = map onType
+funcallAliases ::
+  [PatElem dec] ->
+  [(SubExp, Diet)] ->
+  [(TypeBase shape Uniqueness, RetAls)] ->
+  [Names]
+funcallAliases pes args = map onType
   where
-    onType (_t, RetAls is js) = mconcat $ map fst $ filter ((`elem` is) . snd) arg_als
-    arg_als = zip (map (subExpAliases . fst) args) [0 ..]
+    getAls als is = mconcat $ map fst $ filter ((`elem` is) . snd) $ zip als [0 ..]
+    arg_als = map (subExpAliases . fst) args
+    res_als = map (oneName . patElemName) pes
+    onType (_t, RetAls pals rals) = getAls arg_als pals <> getAls res_als rals
 
 -- | The aliases of an expression, one for each pattern element.
 --
@@ -133,8 +139,8 @@ expAliases _ (DoLoop merge _ loopbody) = do
       where
         look v = maybe mempty snd $ find ((== v) . paramName . fst) merge_and_als
         expand als = als <> foldMap look (namesToList als)
-expAliases _ (Apply _ args t _) =
-  funcallAliases args $ map (first declExtTypeOf) t
+expAliases pes (Apply _ args t _) =
+  funcallAliases pes args $ map (first declExtTypeOf) t
 expAliases _ (WithAcc inputs lam) =
   concatMap inputAliases inputs
     ++ drop num_accs (map (`namesSubtract` boundInBody body) $ bodyAliases body)

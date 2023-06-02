@@ -85,12 +85,15 @@ internaliseLoopParamType et ts =
   map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concat
     <$> internaliseParamTypes [et]
 
-eqClasses :: [[a]] -> [(a, RetAls)]
-eqClasses all_ts = concat $ zipWith f all_ts $ scanl (+) 0 $ map length all_ts
+eqClasses :: [I.TypeBase Shape Uniqueness] -> [[a]] -> [(a, RetAls)]
+eqClasses param_ts all_ts = concat $ zipWith f all_ts $ scanl (+) 0 $ map length all_ts
   where
     num_ts = sum (map length all_ts)
-    classes ts o = [0, 1 .. o - 1] ++ [o + length ts .. num_ts - 1]
-    f ts o = map (,RetAls mempty $ classes ts o) ts
+    doAlias t@Array {} = not $ unique t
+    doAlias _ = False
+    pclasses = map snd $ filter (doAlias . fst) (zip param_ts [0 ..])
+    rclasses ts o = [0, 1 .. o - 1] ++ [o + length ts .. num_ts - 1]
+    f ts o = map (,RetAls pclasses $ rclasses ts o) ts
 
 internaliseReturnType ::
   [I.TypeBase Shape Uniqueness] ->
@@ -98,7 +101,7 @@ internaliseReturnType ::
   [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
 internaliseReturnType paramts (E.RetType dims et) ts =
-  fixupKnownTypes ts . eqClasses $
+  fixupKnownTypes ts . eqClasses paramts $
     runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
@@ -107,7 +110,7 @@ internaliseCoerceType ::
   E.StructType ->
   [TypeBase shape u] ->
   [I.TypeBase ExtShape Uniqueness]
-internaliseCoerceType et = map fst . internaliseReturnType [] (E.RetType [] et)
+internaliseCoerceType et ts = map fst $ internaliseReturnType [] (E.RetType [] et) ts
 
 internaliseLambdaReturnType ::
   E.TypeBase E.Size () ->
