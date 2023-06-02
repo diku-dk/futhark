@@ -14,6 +14,7 @@ import Language.Futhark
 import Language.Futhark.Unused
 import System.Exit
 import Data.List ( elemIndices )
+import Futhark.Util.Loc
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialCheckConfig [] "files..." find
@@ -31,7 +32,7 @@ printUnused files = do
     Right (_, imp, _) -> do
       putStr $
         unlines $
-          map (\(VName y _, z) -> lineOnly (locStr z) <> " " <> nameToString y) $
+          map (\(VName y _, z) -> simpleLocStr z <> ": " <> nameToString y) $
             concatMap snd $
               M.toList $
                 findUnused files imp
@@ -41,5 +42,9 @@ data CheckConfig = CheckConfig Bool
 initialCheckConfig :: CheckConfig
 initialCheckConfig = CheckConfig False
 
-lineOnly :: [Char] -> [Char]
-lineOnly str = (elemIndices ':' str !! 1) `take` str
+simpleLocStr :: Located a => a -> String
+simpleLocStr a =
+  case locOf a of
+    NoLoc -> "unknown location"
+    Loc (Pos file line1 _col1 _) (Pos _ _line2 _col2 _) -> -- ignore second position, we only care about file and line number 1.
+      file ++ ":" ++ show line1
