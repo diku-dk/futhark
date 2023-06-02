@@ -916,7 +916,7 @@ allocInExp (Apply fname args rettype loc) = do
         mems space
           ++ zip
             (memoryInDeclExtType space num_arrays (map fst rettype))
-            (map (shiftRetAls num_extra_args num_arrays) (map snd rettype))
+            (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
     mems space = replicate num_arrays (MemMem space, RetAls mempty mempty)

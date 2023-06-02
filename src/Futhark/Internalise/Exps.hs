@@ -86,7 +86,7 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
           ( shapenames,
             map declTypeOf $ concat params',
             all_params,
-            fmap (flip zip (map snd rettype')) . applyRetType (map fst rettype') all_params
+            fmap (`zip` map snd rettype') . applyRetType (map fst rettype') all_params
           )
 
   case entry of
