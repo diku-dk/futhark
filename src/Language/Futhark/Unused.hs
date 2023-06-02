@@ -39,9 +39,7 @@ findUnused fp fml = do
       ( \(x, y) ->
           ( x,
             map (\a -> (a, locs M.! a)) $
-              filter (`M.member` locs) $
-                S.toList $
-                  S.fromList (map fst $ M.toList y) `S.difference` used
+              filter (\nm -> nm `M.member` locs && nm `S.notMember` used) $ map fst $ M.toList y 
           )
       )
       rf
