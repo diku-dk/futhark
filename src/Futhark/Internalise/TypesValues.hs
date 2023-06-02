@@ -19,6 +19,7 @@ where
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)
 import Data.List (delete, find, foldl')
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.SOACS as I
@@ -43,9 +44,9 @@ runInternaliseTypeM' exts (InternaliseTypeM m) = evalState m $ TypeState (length
 
 internaliseParamTypes ::
   [E.TypeBase E.Size ()] ->
-  InternaliseM [[I.TypeBase Shape Uniqueness]]
+  InternaliseM [[[I.TypeBase Shape Uniqueness]]]
 internaliseParamTypes ts =
-  mapM (mapM mkAccCerts) . fmap concat . runInternaliseTypeM $
+  mapM (mapM (mapM mkAccCerts)) . runInternaliseTypeM $
     mapM (fmap (map (map onType)) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
@@ -82,27 +83,59 @@ internaliseLoopParamType ::
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concat
+  map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concatMap concat
     <$> internaliseParamTypes [et]
 
-eqClasses :: [I.TypeBase Shape Uniqueness] -> [[a]] -> [(a, RetAls)]
-eqClasses param_ts all_ts = concat $ zipWith f all_ts $ scanl (+) 0 $ map length all_ts
+inferAliases ::
+  [[I.TypeBase Shape Uniqueness]] ->
+  [[I.TypeBase ExtShape Uniqueness]] ->
+  [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
+inferAliases all_param_ts all_res_ts =
+  map onRes all_res_ts
   where
-    num_ts = sum (map length all_ts)
-    doAlias t@Array {} = not $ unique t
-    doAlias _ = False
-    pclasses = map snd $ filter (doAlias . fst) (zip param_ts [0 ..])
-    rclasses ts o = [0, 1 .. o - 1] ++ [o + length ts .. num_ts - 1]
-    f ts o = map (,RetAls pclasses $ rclasses ts o) ts
+    woffsets xs = zip xs (scanl (+) 0 $ map length xs)
+    nonuniqueArray t@Array {} = not $ unique t
+    nonuniqueArray _ = False
+    unAlias t als
+      | Array {} <- t, not $ unique t = als
+      | otherwise = []
+    doAlias res_ts (param_ts, o)
+      | map elemType res_ts == map elemType param_ts =
+          zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
+      | otherwise = map (`unAlias` possible) res_ts
+      where
+        possible = map snd (filter (nonuniqueArray . fst) $ zip param_ts [o ..])
+    infer ts all_ts =
+      map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
+        woffsets all_ts
+    pclasses res_ts = infer res_ts all_param_ts
+    rclasses res_ts = infer res_ts all_res_ts
+    onRes res_ts =
+      zip res_ts $ zipWith RetAls (pclasses res_ts) (rclasses res_ts)
 
 internaliseReturnType ::
-  [I.TypeBase Shape Uniqueness] ->
+  [[I.TypeBase Shape Uniqueness]] ->
   E.StructRetType ->
   [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
 internaliseReturnType paramts (E.RetType dims et) ts =
-  fixupKnownTypes ts . eqClasses paramts $
+  fixupKnownTypes ts . concat . inferAliases paramts $
     runInternaliseTypeM' dims (internaliseTypeM exts et)
+  where
+    exts = M.fromList $ zip dims [0 ..]
+
+-- | As 'internaliseReturnType', but returns components of a top-level
+-- tuple type piecemeal.
+internaliseEntryReturnType ::
+  [[I.TypeBase Shape Uniqueness]] ->
+  E.StructRetType ->
+  [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
+internaliseEntryReturnType paramts (E.RetType dims et) =
+  inferAliases paramts $
+    runInternaliseTypeM' dims . fmap concat . mapM (internaliseTypeM exts) $
+      case E.isTupleRecord et of
+        Just ets | not $ null ets -> ets
+        _ -> [et]
   where
     exts = M.fromList $ zip dims [0 ..]
 
@@ -118,19 +151,6 @@ internaliseLambdaReturnType ::
   InternaliseM [I.TypeBase Shape NoUniqueness]
 internaliseLambdaReturnType et ts =
   map fromDecl <$> internaliseLoopParamType et ts
-
--- | As 'internaliseReturnType', but returns components of a top-level
--- tuple type piecemeal.
-internaliseEntryReturnType ::
-  E.StructRetType ->
-  [[I.TypeBase ExtShape Uniqueness]]
-internaliseEntryReturnType (E.RetType dims et) =
-  runInternaliseTypeM' dims . fmap concat . mapM (internaliseTypeM exts) $
-    case E.isTupleRecord et of
-      Just ets | not $ null ets -> ets
-      _ -> [et]
-  where
-    exts = M.fromList $ zip dims [0 ..]
 
 internaliseType ::
   E.TypeBase E.Size () ->

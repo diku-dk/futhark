@@ -684,6 +684,8 @@ checkFun' (fname, rettype, params) consumable check = do
   where
     param_names = map fst params
 
+    isParam = (`elem` param_names)
+
     checkNoDuplicateParams = foldM_ expand [] param_names
 
     expand seen pname
@@ -692,19 +694,34 @@ checkFun' (fname, rettype, params) consumable check = do
       | otherwise =
           pure $ pname : seen
 
-    allowedAliases is =
-      namesFromList (map (param_names !!) is)
+    unique_names = namesFromList $ do
+      (v, FParamName t) <- params
+      guard $ unique $ declTypeOf t
+      pure v
 
-    checkReturnAlias = zipWithM_ checkRet $ zip [(0 :: Int) ..] rettype
+    allowedArgAliases is =
+      namesFromList (map (param_names !!) is) <> unique_names
+
+    checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
-        checkRet (i, (Array {}, RetAls is js)) als
-          | als' <- namesToList $ als `namesSubtract` allowedAliases is,
+        checkRet (i, (Array {}, RetAls pals rals)) als
+          | als' <-
+              filter isParam . namesToList $
+                als `namesSubtract` allowedArgAliases pals,
             not $ null als' =
               bad . TypeError . T.unlines $
                 [ T.unwords ["Result", prettyText i, "aliases", prettyText als'],
-                  T.unwords ["but is only allowed to alias", prettyText (allowedAliases is)]
+                  T.unwords ["but is only allowed to alias arguments", prettyText (allowedArgAliases pals)]
+                ]
+          | ((j, _) : _) <- filter (isProblem i als rals) (zip [0 ..] retals) =
+              bad . TypeError . T.unlines $
+                [ T.unwords ["Results", prettyText i, "and", prettyText j, "alias each other"],
+                  T.unwords ["but result", prettyText i, " only allowed to alias results", prettyText rals]
                 ]
         checkRet _ _ = pure ()
+
+        isProblem i als rals (j, jals) =
+          i /= j && j `notElem` rals && namesIntersect als jals
 
 checkSubExp :: Checkable rep => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
@@ -1276,23 +1293,9 @@ checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e
-  binding (maybeWithoutAliases $ scopeOf stm) $ do
+  binding (scopeOf stm) $ do
     mapM_ checkPatElem (patElems $ removePatAliases pat)
     m
-  where
-    -- FIXME: this is wrong.  However, the core language type system
-    -- is not strong enough to fully capture the aliases we want (see
-    -- issue #803).  Since we eventually inline everything anyway, and
-    -- our intra-procedural alias analysis is much simpler and
-    -- correct, I could not justify spending time on improving the
-    -- inter-procedural alias analysis.  If we ever stop inlining
-    -- everything, probably we need to go back and refine this.
-    maybeWithoutAliases =
-      case stmExp stm of
-        Apply {} -> M.map withoutAliases
-        _ -> id
-    withoutAliases (LetName (_, ldec)) = LetName (mempty, ldec)
-    withoutAliases info = info
 
 matchExtPat ::
   Checkable rep =>

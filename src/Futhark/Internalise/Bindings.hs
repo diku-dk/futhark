@@ -16,6 +16,7 @@ import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.IR.SOACS qualified as I
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues
@@ -33,10 +34,16 @@ internaliseAttr (E.AttrComp f attrs _) =
 internaliseAttrs :: [E.AttrInfo VName] -> InternaliseM I.Attrs
 internaliseAttrs = fmap (mconcat . map I.oneAttr) . mapM internaliseAttr
 
+chunkLike :: [[a]] -> [b] -> [[b]]
+chunkLike as = chunks (map length as)
+
+chunkLike3 :: [[[a]]] -> [b] -> [[[b]]]
+chunkLike3 as bs = zipWith chunkLike as $ chunks (map (sum . map length) as) bs
+
 bindingFParams ::
   [E.TypeParam] ->
   [E.Pat] ->
-  ([I.FParam I.SOACS] -> [[I.FParam I.SOACS]] -> InternaliseM a) ->
+  ([I.FParam I.SOACS] -> [[[I.FParam I.SOACS]]] -> InternaliseM a) ->
   InternaliseM a
 bindingFParams tparams params m = do
   flattened_params <- mapM flattenPat params
@@ -44,17 +51,16 @@ bindingFParams tparams params m = do
   params_ts <-
     internaliseParamTypes $
       map (flip E.setAliases () . E.unInfo . E.identType . fst) params_idents
-  let num_param_idents = map length flattened_params
-      num_param_ts = map (sum . map length) $ chunks num_param_idents params_ts
+  let num_param_ts = map (sum . map length) $ chunkLike flattened_params $ concat params_ts
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
-  bindingFlatPat params_idents (concat params_ts) $ \valueparams -> do
-    let (certparams, valueparams') = unzip $ map fixAccParam (concat valueparams)
+  bindingFlatPat params_idents (concat $ concat params_ts) $ \valueparams -> do
+    let (certparams, valueparams') = unzip $ map fixAccParam $ concat valueparams
     I.localScope (I.scopeOfFParams $ catMaybes certparams ++ shape_params ++ valueparams') $
       substitutingVars shape_subst $
         m (catMaybes certparams ++ shape_params) $
-          chunks num_param_ts valueparams'
+          chunkLike3 params_ts valueparams'
   where
     fixAccParam (I.Param attrs pv (I.Acc acc ispace ts u)) =
       ( Just (I.Param attrs acc $ I.Prim I.Unit),
