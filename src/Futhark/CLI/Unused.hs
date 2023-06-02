@@ -29,7 +29,7 @@ printUnused files = do
       dumpError newFutharkConfig err
       exitWith $ ExitFailure 2
     Right (_, imp, _) -> do
-      putStrLn $
+      putStr $
         unlines $
           map (\(VName y _, z) -> lineOnly (locStr z) <> " " <> nameToString y) $
             concatMap snd $
