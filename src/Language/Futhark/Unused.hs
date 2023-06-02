@@ -24,6 +24,7 @@ import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
 getDecs :: FileModule -> [DecBase Info VName]
 getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
+-- fp here is a list of filepaths that we consider 'root' files. The files imported into these files will be check for unused functions.
 findUnused :: [FilePath] -> [(ImportName, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
 findUnused fp fml = do
   let fml' = map (BI.first includeToFilePath) fml
