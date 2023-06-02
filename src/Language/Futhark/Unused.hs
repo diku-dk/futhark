@@ -118,7 +118,9 @@ funcsInModExp (ModApply mex1 mex2 (Info mp1) (Info mp2) _) =
 funcsInModExp (ModAscript mex _ (Info mp) _) = M.map S.singleton mp `M.union` funcsInModExp mex
 funcsInModExp (ModLambda _ (Just (_, Info mp)) mex _) = M.map S.singleton mp `M.union` funcsInModExp mex
 funcsInModExp (ModLambda _ Nothing mex _) = funcsInModExp mex
-funcsInModExp _ = M.empty
+funcsInModExp (ModVar (QualName _ _) _) = M.empty
+funcsInModExp (ModImport _ _ _loc) = M.empty
+
 
 locsInFMod :: FileModule -> LocMap
 locsInFMod (FileModule _ _ (Prog _ decs) _) = M.unions $ map locsInDec decs
