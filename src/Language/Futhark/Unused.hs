@@ -146,11 +146,10 @@ locsInExp (Constr _ exs _ _) = M.unions $ map locsInExp exs
 locsInExp (Update ex1 _ ex2 _) = locsInExp ex2 `M.union` locsInExp ex1
 locsInExp (RecordUpdate ex1 _ ex2 _ _) = locsInExp ex2 `M.union` locsInExp ex1
 locsInExp (Lambda _ ex _ _ _) = locsInExp ex
--- locsInExp (OpSection (QualName _ vn) _ _)  = M.adjust (S.insert vn)
+
 locsInExp (OpSectionLeft _ _ ex _ _ _) = locsInExp ex
 locsInExp (OpSectionRight _ _ ex _ _ _) = locsInExp ex
 locsInExp (Ascript ex _ _) = locsInExp ex
--- locsInExp (Var (QualName _ vn) _ _)  = M.adjust (S.insert vn)
 locsInExp (AppExp app _) =
   case app of
     Apply ex1 lst _ ->
@@ -165,7 +164,18 @@ locsInExp (AppExp app _) =
     LetWith _ _ sl ex1 ex2 _ -> M.unions $ map locsInExp $ fromSlice sl <> [ex1, ex2]
     Index ex sl _ -> M.unions $ map locsInExp $ ex : fromSlice sl
     Match ex cases _ -> M.unions $ map locsInExp $ ex : map fromCase (NE.toList cases)
-locsInExp _ = M.empty
+-- from here there are cases which do not have any important locs as of the writing of this tool.
+locsInExp (Var _ _ _l) = M.empty
+locsInExp (Literal _ _l) = M.empty
+locsInExp (IntLit _ _ _l) = M.empty
+locsInExp (FloatLit _ _ _l) = M.empty
+locsInExp (StringLit _ _l) = M.empty
+locsInExp (Hole _ _l) = M.empty
+locsInExp (Negate _ _l) = M.empty
+locsInExp (OpSection _ _ _l) = M.empty
+locsInExp (ProjectSection _ _ _l) = M.empty
+locsInExp (IndexSection _ _ _l) = M.empty
+
 
 locsInModExp :: ModExpBase Info VName -> LocMap
 locsInModExp (ModParens mex _) = locsInModExp mex
