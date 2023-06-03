@@ -16,7 +16,6 @@ import Control.Monad.Reader
 import Data.Bifunctor
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.IR.SOACS qualified as I
 import Futhark.Internalise.Monad
 import Futhark.Internalise.TypesValues

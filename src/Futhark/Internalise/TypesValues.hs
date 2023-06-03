@@ -100,15 +100,17 @@ inferAliases all_param_ts all_res_ts =
       | Array {} <- t, not $ unique t = als
       | otherwise = []
     doAlias res_ts (param_ts, o)
-      | map elemType res_ts == map elemType param_ts =
+      | map rep res_ts == map rep param_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
       | otherwise = map (`unAlias` possible) res_ts
       where
         possible = map snd (filter (nonuniqueArray . fst) $ zip param_ts [o ..])
+        rep (Array pt _ _) = Prim pt
+        rep t = t
     infer ts all_ts =
       map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
         woffsets all_ts
-    pclasses res_ts = infer res_ts all_param_ts
+    pclasses res_ts = infer res_ts $ map staticShapes all_param_ts
     rclasses res_ts = infer res_ts all_res_ts
     onRes res_ts =
       zip res_ts $ zipWith RetAls (pclasses res_ts) (rclasses res_ts)
