@@ -51,7 +51,6 @@ bindingFParams tparams params m = do
   params_ts <-
     internaliseParamTypes $
       map (flip E.setAliases () . E.unInfo . E.identType . fst) params_idents
-  let num_param_ts = map (sum . map length) $ chunkLike flattened_params $ concat params_ts
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]

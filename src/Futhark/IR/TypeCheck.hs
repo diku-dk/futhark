@@ -662,6 +662,15 @@ checkLambdaParams = mapM_ $ \param ->
   context ("In lambda parameter " <> prettyText param) $
     checkLParamDec (paramName param) (paramDec param)
 
+checkNoDuplicateParams :: Name -> [VName] -> TypeM rep ()
+checkNoDuplicateParams fname = foldM_ expand []
+  where
+    expand seen pname
+      | Just _ <- find (== pname) seen =
+          bad $ DupParamError fname pname
+      | otherwise =
+          pure $ pname : seen
+
 checkFun' ::
   Checkable rep =>
   ( Name,
@@ -672,7 +681,7 @@ checkFun' ::
   TypeM rep [Names] ->
   TypeM rep ()
 checkFun' (fname, rettype, params) consumable check = do
-  checkNoDuplicateParams
+  checkNoDuplicateParams fname param_names
   binding (M.fromList params) $
     maybe id consumeOnlyParams consumable $ do
       body_aliases <- check
@@ -686,14 +695,6 @@ checkFun' (fname, rettype, params) consumable check = do
 
     isParam = (`elem` param_names)
 
-    checkNoDuplicateParams = foldM_ expand [] param_names
-
-    expand seen pname
-      | Just _ <- find (== pname) seen =
-          bad $ DupParamError fname pname
-      | otherwise =
-          pure $ pname : seen
-
     unique_names = namesFromList $ do
       (v, FParamName t) <- params
       guard $ unique $ declTypeOf t
@@ -705,19 +706,19 @@ checkFun' (fname, rettype, params) consumable check = do
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
         checkRet (i, (Array {}, RetAls pals rals)) als
-          | als' <-
-              filter isParam . namesToList $
-                als `namesSubtract` allowedArgAliases pals,
-            not $ null als' =
+          | als'' <- filter isParam $ namesToList als',
+            not $ null als'' =
               bad . TypeError . T.unlines $
-                [ T.unwords ["Result", prettyText i, "aliases", prettyText als'],
+                [ T.unwords ["Result", prettyText i, "aliases", prettyText als''],
                   T.unwords ["but is only allowed to alias arguments", prettyText (allowedArgAliases pals)]
                 ]
-          | ((j, _) : _) <- filter (isProblem i als rals) (zip [0 ..] retals) =
+          | ((j, _) : _) <- filter (isProblem i als' rals) (zip [0 ..] retals) =
               bad . TypeError . T.unlines $
                 [ T.unwords ["Results", prettyText i, "and", prettyText j, "alias each other"],
-                  T.unwords ["but result", prettyText i, " only allowed to alias results", prettyText rals]
+                  T.unwords ["but result", prettyText i, "only allowed to alias results", prettyText rals]
                 ]
+          where
+            als' = als `namesSubtract` allowedArgAliases pals
         checkRet _ _ = pure ()
 
         isProblem i als rals (j, jals) =
@@ -778,14 +779,10 @@ checkLambdaBody ::
   Checkable rep =>
   [Type] ->
   Body (Aliases rep) ->
-  TypeM rep [Names]
+  TypeM rep ()
 checkLambdaBody ret (Body (_, rep) stms res) = do
   checkBodyDec rep
-  checkStms stms $ do
-    checkLambdaResult ret res
-    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
-  where
-    bound_here = namesFromList $ M.keys $ scopeOf stms
+  checkStms stms $ checkLambdaResult ret res
 
 checkLambdaResult ::
   Checkable rep =>
@@ -994,9 +991,9 @@ matchLoopResultExt merge loopres = do
           (staticShapes rettype')
           (staticShapes bodyt)
 
-allowAllAliases :: Int -> RetAls
-allowAllAliases n =
-  RetAls [0 .. n - 1] [0 .. n - 1]
+allowAllAliases :: Int -> Int -> RetAls
+allowAllAliases n m =
+  RetAls [0 .. n - 1] [0 .. m - 1]
 
 checkExp ::
   Checkable rep =>
@@ -1052,7 +1049,7 @@ checkExp (DoLoop merge form loopbody) = do
     context "Inside the loop body"
       $ checkFun'
         ( nameFromString "<loop body>",
-          map (,allowAllAliases (length merge)) (staticShapes rettype),
+          map (,allowAllAliases (length merge) (length merge)) (staticShapes rettype),
           funParamsToNameInfos mergepat
         )
         (Just consumable)
@@ -1427,14 +1424,9 @@ checkAnyLambda soac (Lambda params body rettype) args = do
               else Nothing
           params' =
             [(paramName param, LParamName $ paramDec param) | param <- params]
-      checkFun'
-        ( fname,
-          map (,allowAllAliases (length params)) . staticShapes $
-            map (`toDecl` Nonunique) rettype,
-          params'
-        )
-        consumable
-        $ do
+      checkNoDuplicateParams fname $ map paramName params
+      binding (M.fromList params') $
+        maybe id consumeOnlyParams consumable $ do
           checkLambdaParams params
           mapM_ checkType rettype
           checkLambdaBody rettype body

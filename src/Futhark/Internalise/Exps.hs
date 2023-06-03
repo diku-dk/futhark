@@ -42,6 +42,9 @@ internaliseValBinds types = mapM_ $ internaliseValBind types
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromString . prettyString
 
+shiftRetAls :: Int -> RetAls -> RetAls
+shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
+
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
 internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
@@ -62,9 +65,11 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
           <$> mapM subExpType body_res
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+      let num_ctx = length (shapeContext rettype')
       pure
         ( body_res',
-          replicate (length (shapeContext rettype')) (I.Prim int64, mempty) ++ zip rettype' retals
+          replicate num_ctx (I.Prim int64, mempty)
+            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
         )
 
     attrs' <- internaliseAttrs attrs
@@ -128,12 +133,17 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
       pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64, mempty)) ctx)
 
     attrs' <- internaliseAttrs attrs
+    let num_ctx = length ctx_ts
     addFunDef $
       I.FunDef
         (Just entry')
         attrs'
         ("entry_" <> baseName ofname)
-        (ctx_ts ++ zip (zeroExts (concat entry_rettype)) (concat retals))
+        ( ctx_ts
+            ++ zip
+              (zeroExts (concat entry_rettype))
+              (map (shiftRetAls num_ctx) $ concat retals)
+        )
         (shapeparams ++ concat (concat params'))
         entry_body
   where

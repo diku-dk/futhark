@@ -267,7 +267,9 @@ prettyRet (t, RetAls pals rals)
     rals == mempty =
       pretty t
   | otherwise =
-      pretty t <> "#" <> pretty (pals, rals)
+      pretty t <> "#" <> parens (pl pals <> comma <+> brackets (pl rals))
+  where
+    pl = brackets . commasep . map pretty
 
 instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
