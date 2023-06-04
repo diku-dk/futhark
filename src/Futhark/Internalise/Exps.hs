@@ -82,7 +82,7 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
             rettype'
             (concat all_params)
             body'
-    traceM $ unlines [prettyString params', prettyString fd]
+
     if null params'
       then bindConstant fname fd
       else

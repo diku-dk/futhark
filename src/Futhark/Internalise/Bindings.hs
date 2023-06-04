@@ -48,7 +48,7 @@ bindingFParams tparams params m = do
   flattened_params <- mapM flattenPat params
   let params_idents = concat flattened_params
   params_ts <-
-    internaliseParamTypes $
+    fmap (chunkLike flattened_params . map concat) . internaliseParamTypes $
       map (flip E.setAliases () . E.unInfo . E.identType . fst) params_idents
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
