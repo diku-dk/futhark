@@ -28,7 +28,7 @@ instance IsBodyType ExtType where
 -- a list of these will be used.  It should contain at least the
 -- information contained in an 'ExtType', but may have more, notably
 -- an existential context.
-class (Show rt, Eq rt, Ord rt, DeclExtTyped rt) => IsRetType rt where
+class (Show rt, Eq rt, Ord rt, ExtTyped rt, DeclExtTyped rt) => IsRetType rt where
   -- | Contruct a return type from a primitive type.
   primRetType :: PrimType -> rt
 

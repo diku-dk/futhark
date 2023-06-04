@@ -279,6 +279,9 @@ instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemArray pt shape u _) = Array pt shape u
   declExtTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
 
+instance FixExt ret => ExtTyped (MemInfo ExtSize Uniqueness ret) where
+  extTypeOf = fromDecl . declExtTypeOf
+
 instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
