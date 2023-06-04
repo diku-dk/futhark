@@ -7,6 +7,7 @@ module Futhark.IR.Parse
     parseMCMem,
     parseSeq,
     parseSeqMem,
+    parseDeclExtType,
   )
 where
 
@@ -1114,10 +1115,13 @@ prMCMem =
   where
     op = pMemOp $ pMCOp prMCMem empty
 
-parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
-parseRep pr fname s =
+parseFull :: Parser a -> FilePath -> T.Text -> Either T.Text a
+parseFull p fname s =
   either (Left . T.pack . errorBundlePretty) Right $
-    parse (whitespace *> pProg pr <* eof) fname s
+    parse (whitespace *> p <* eof) fname s
+
+parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
+parseRep = parseFull . pProg
 
 parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
 parseSOACS = parseRep prSOACS
@@ -1139,3 +1143,6 @@ parseMC = parseRep prMC
 
 parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
 parseMCMem = parseRep prMCMem
+
+parseDeclExtType :: FilePath -> T.Text -> Either T.Text DeclExtType
+parseDeclExtType = parseFull pDeclExtType

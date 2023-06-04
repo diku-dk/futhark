@@ -532,6 +532,7 @@ test-suite unit
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Internalise.TypesValuesTests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests

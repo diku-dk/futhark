@@ -10,6 +10,7 @@ module Futhark.Internalise.TypesValues
     internalisePrimType,
     internalisedTypeSize,
     internaliseSumType,
+    internaliseConstructors,
 
     -- * Internalising values
     internalisePrimValue,
@@ -86,6 +87,10 @@ internaliseLoopParamType et ts =
   map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concatMap concat
     <$> internaliseParamTypes [et]
 
+-- Tag every sublist with its offset in corresponding flattened list.
+withOffsets :: [[a]] -> [([a], Int)]
+withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
+
 inferAliases ::
   [[I.TypeBase Shape Uniqueness]] ->
   [[I.TypeBase ExtShape Uniqueness]] ->
@@ -93,7 +98,6 @@ inferAliases ::
 inferAliases all_param_ts all_res_ts =
   map onRes all_res_ts
   where
-    woffsets xs = zip xs (scanl (+) 0 $ map length xs)
     nonuniqueArray t@Array {} = not $ unique t
     nonuniqueArray _ = False
     unAlias t als
@@ -102,11 +106,13 @@ inferAliases all_param_ts all_res_ts =
     doAlias res_ts (param_ts, o)
       | map rep res_ts == map rep param_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
+      | length res_ts == 1 = map (`unAlias` possible) res_ts
       | otherwise = zipWith unAlias res_ts $ do
           res_t <- res_ts
           (param_t, o') <- zip param_ts [o ..]
           guard $ rep res_t == rep param_t
           guard $ nonuniqueArray param_t
+          guard False
           pure [o']
       where
         possible = map snd (filter (nonuniqueArray . fst) $ zip param_ts [o ..])
@@ -114,7 +120,7 @@ inferAliases all_param_ts all_res_ts =
         rep t = t
     infer ts all_ts =
       map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
-        woffsets all_ts
+        withOffsets all_ts
     pclasses res_ts = infer res_ts $ map staticShapes all_param_ts
     rclasses res_ts = infer res_ts all_res_ts
     onRes res_ts =
@@ -218,17 +224,18 @@ internaliseTypeM exts orig_t =
     E.Scalar (E.Sum cs) -> do
       (ts, _) <-
         internaliseConstructors
-          <$> traverse (fmap (concat . concat) . mapM (internaliseTypeM exts)) cs
-      pure $ [I.Prim (I.IntType I.Int8)] : map pure ts
+          <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
+      pure $ [I.Prim (I.IntType I.Int8)] : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
     onAccType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseTypeM Acc: " ++ prettyString orig_t
 
+-- | Only exposed for testing purposes.
 internaliseConstructors ::
-  M.Map Name [I.TypeBase ExtShape Uniqueness] ->
-  ( [I.TypeBase ExtShape Uniqueness],
+  M.Map Name [[I.TypeBase ExtShape Uniqueness]] ->
+  ( [[I.TypeBase ExtShape Uniqueness]],
     M.Map Name (Int, [Int])
   )
 internaliseConstructors cs =
@@ -236,18 +243,19 @@ internaliseConstructors cs =
   where
     onConstructor (ts, mapping) ((c, c_ts), i) =
       let (_, js, new_ts) =
-            foldl' f (zip (map fromDecl ts) [0 ..], mempty, mempty) c_ts
+            foldl' f (withOffsets (map (map fromDecl) ts), mempty, mempty) c_ts
        in (ts ++ new_ts, M.insert c (i, js) mapping)
       where
+        size = sum . map length
         f (ts', js, new_ts) t
-          | Just (_, j) <- find ((== fromDecl t) . fst) ts' =
-              ( delete (fromDecl t, j) ts',
-                js ++ [j],
+          | Just (_, j) <- find ((== map fromDecl t) . fst) ts' =
+              ( delete (map fromDecl t, j) ts',
+                js ++ take (length t) [j ..],
                 new_ts
               )
           | otherwise =
               ( ts',
-                js ++ [length ts + length new_ts],
+                js ++ take (length t) [size ts + size new_ts ..],
                 new_ts ++ [t]
               )
 
@@ -258,9 +266,9 @@ internaliseSumType ::
       M.Map Name (Int, [Int])
     )
 internaliseSumType cs =
-  bitraverse (mapM mkAccCerts) pure . runInternaliseTypeM $
+  bitraverse (mapM mkAccCerts . concat) pure . runInternaliseTypeM $
     internaliseConstructors
-      <$> traverse (fmap (concat . concat) . mapM (internaliseTypeM mempty)) cs
+      <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

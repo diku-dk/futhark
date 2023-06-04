@@ -112,7 +112,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
           entryPoint
             types
             (baseName ofname)
-            (zip e_params $ concat params')
+            (zip e_params $ map concat params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
         args = map (I.Var . I.paramName) $ concat $ concat params'
 
