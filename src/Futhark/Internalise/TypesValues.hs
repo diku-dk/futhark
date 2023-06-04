@@ -102,7 +102,12 @@ inferAliases all_param_ts all_res_ts =
     doAlias res_ts (param_ts, o)
       | map rep res_ts == map rep param_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
-      | otherwise = map (`unAlias` possible) res_ts
+      | otherwise = zipWith unAlias res_ts $ do
+          res_t <- res_ts
+          (param_t, o') <- zip param_ts [o ..]
+          guard $ rep res_t == rep param_t
+          guard $ nonuniqueArray param_t
+          pure [o']
       where
         possible = map snd (filter (nonuniqueArray . fst) $ zip param_ts [o ..])
         rep (Array pt _ _) = Prim pt
@@ -214,7 +219,7 @@ internaliseTypeM exts orig_t =
       (ts, _) <-
         internaliseConstructors
           <$> traverse (fmap (concat . concat) . mapM (internaliseTypeM exts)) cs
-      pure [I.Prim (I.IntType I.Int8) : ts]
+      pure $ [I.Prim (I.IntType I.Int8)] : map pure ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
