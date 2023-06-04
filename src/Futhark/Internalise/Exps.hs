@@ -1774,7 +1774,8 @@ isIntrinsicFunction qname args loc = do
                 <$> internaliseExpToVars (desc ++ "_zip_x") x
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
-    handleRest [x] "unzip" = Just $ flip internaliseExp x
+    handleRest [x] "unzip" = Just $ \desc ->
+      mapM (letSubExp desc . BasicOp . Copy) =<< internaliseExpToVars desc x
     handleRest [arr, offset, n1, s1, n2, s2] "flat_index_2d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
     handleRest [arr1, offset, s1, s2, arr2] "flat_update_2d" = Just $ \desc -> do
