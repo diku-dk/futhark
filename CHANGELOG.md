@@ -55,9 +55,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Bug in alias checking for the core language type checker (#1949).
   Actually (finally) a proper fix of #803.
 
-* Bug in alias checking for the core language type checker (#1949).
-  Actually (finally) a proper fix of #803.
-
 ## [0.24.3]
 
 ### Fixed
