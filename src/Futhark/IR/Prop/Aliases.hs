@@ -110,6 +110,7 @@ expAliases pes (Match _ cases defbody _) =
     als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
     onBody body = (bodyAliases body, consumedInBody body)
     bound = foldMap boundInBody $ defbody : map caseBody cases
+    bound_als = map (`namesIntersection` bound) als
     grow v names = (names <> pe_names) `namesSubtract` bound
       where
         pe_names =
@@ -117,7 +118,7 @@ expAliases pes (Match _ cases defbody _) =
             . filter (/= v)
             . map (patElemName . fst)
             . filter (namesIntersect names . snd)
-            $ zip pes als
+            $ zip pes bound_als
 expAliases _ (BasicOp op) = basicOpAliases op
 expAliases _ (DoLoop merge _ loopbody) = do
   (p, als) <-

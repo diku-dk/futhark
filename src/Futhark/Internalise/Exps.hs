@@ -60,6 +60,14 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
+      when False $
+        traceM $
+          unlines
+            [ prettyString fname,
+              prettyString $ params',
+              prettyString $ (map (map paramDeclType) all_params),
+              prettyString rettype
+            ]
       (rettype', retals) <-
         first zeroExts . unzip . internaliseReturnType (map (map paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
@@ -589,7 +597,7 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = docText $ "Reached hole of type: " <> align (pretty t)
-      ts = internaliseType (E.toStruct t)
+      ts = concat $ internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of
     Nothing ->
@@ -652,7 +660,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      let arr_t_ext = internaliseType $ E.toStruct arr_t
+      let arr_t_ext = concat $ internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -2031,7 +2039,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  let ts = internaliseType $ E.toStruct ret
+  let ts = concat $ internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

@@ -10,10 +10,13 @@ module Futhark.Internalise.TypesValues
     internalisePrimType,
     internalisedTypeSize,
     internaliseSumType,
-    internaliseConstructors,
 
     -- * Internalising values
     internalisePrimValue,
+
+    -- * For internal testing
+    inferAliases,
+    internaliseConstructors,
   )
 where
 
@@ -23,6 +26,7 @@ import Data.List (delete, find, foldl')
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
 import Language.Futhark qualified as E
@@ -91,6 +95,10 @@ internaliseLoopParamType et ts =
 withOffsets :: [[a]] -> [([a], Int)]
 withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
 
+allEq :: Eq a => [a] -> Bool
+allEq [] = True
+allEq (x : xs) = all (== x) xs
+
 inferAliases ::
   [[I.TypeBase Shape Uniqueness]] ->
   [[I.TypeBase ExtShape Uniqueness]] ->
@@ -104,20 +112,31 @@ inferAliases all_param_ts all_res_ts =
       | Array {} <- t, not $ unique t = als
       | otherwise = []
     doAlias res_ts (param_ts, o)
-      | map rep res_ts == map rep param_ts =
+      | length res_ts > 1,
+        length res_ts == length param_ts,
+        Just True <- allEq <$> zipWithM canComeFrom param_ts res_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
-      | length res_ts == 1 = map (`unAlias` possible) res_ts
-      | otherwise = zipWith unAlias res_ts $ do
-          res_t <- res_ts
-          (param_t, o') <- zip param_ts [o ..]
-          guard $ rep res_t == rep param_t
-          guard $ nonuniqueArray param_t
-          guard False
-          pure [o']
+      | length res_ts == 1 =
+          if length param_ts > 1
+            then
+              [ unAlias res_t $
+                  map snd (filter ((`canBeProjectedFrom` res_t) . fst) $ filter (nonuniqueArray . fst) $ zip param_ts [o ..])
+                | res_t <- res_ts
+              ]
+            else
+              [ unAlias res_t $
+                  map snd (filter (isJust . (`canComeFrom` res_t) . fst) $ filter (nonuniqueArray . fst) $ zip param_ts [o ..])
+                | res_t <- res_ts
+              ]
+      | otherwise = []
       where
-        possible = map snd (filter (nonuniqueArray . fst) $ zip param_ts [o ..])
-        rep (Array pt _ _) = Prim pt
-        rep t = t
+        canComeFrom (Array pt1 shape1 _) (Array pt2 shape2 _)
+          | pt1 == pt2 =
+              Just $ shapeRank shape2 - shapeRank shape1
+        canComeFrom _ _ = Nothing
+        canBeProjectedFrom (Array pt1 shape1 _) (Array pt2 _ _) =
+          pt1 == pt2 && shapeRank shape1 > 1
+        canBeProjectedFrom _ _ = False
     infer ts all_ts =
       map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
         withOffsets all_ts
@@ -167,9 +186,9 @@ internaliseLambdaReturnType et ts =
 
 internaliseType ::
   E.TypeBase E.Size () ->
-  [I.TypeBase I.ExtShape Uniqueness]
+  [[I.TypeBase I.ExtShape Uniqueness]]
 internaliseType =
-  runInternaliseTypeM . fmap concat . internaliseTypeM mempty
+  runInternaliseTypeM . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
 newId = do
@@ -276,7 +295,8 @@ internalisedTypeSize :: E.TypeBase E.Size als -> Int
 -- A few special cases for performance.
 internalisedTypeSize (E.Scalar (E.Prim _)) = 1
 internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = 1
-internalisedTypeSize t = length $ internaliseType (t `E.setAliases` ())
+internalisedTypeSize t =
+  sum $ map length $ internaliseType (t `E.setAliases` ())
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

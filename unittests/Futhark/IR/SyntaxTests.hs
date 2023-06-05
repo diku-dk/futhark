@@ -15,3 +15,9 @@ instance IsString DeclExtType where
     either (error . T.unpack) id
       . parseDeclExtType "IsString DeclExtType"
       . T.pack
+
+instance IsString DeclType where
+  fromString =
+    either (error . T.unpack) id
+      . parseDeclType "IsString DeclType"
+      . T.pack

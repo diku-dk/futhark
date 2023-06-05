@@ -267,7 +267,7 @@ prettyRet (t, RetAls pals rals)
     rals == mempty =
       pretty t
   | otherwise =
-      pretty t <> "#" <> parens (pl pals <> comma <+> brackets (pl rals))
+      pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
   where
     pl = brackets . commasep . map pretty
 

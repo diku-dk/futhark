@@ -1,13 +1,17 @@
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
-  ( parseSOACS,
+  ( -- * Programs
+    parseSOACS,
     parseGPU,
     parseGPUMem,
     parseMC,
     parseMCMem,
     parseSeq,
     parseSeqMem,
+
+    -- * Fragments
     parseDeclExtType,
+    parseDeclType,
   )
 where
 
@@ -1146,3 +1150,6 @@ parseMCMem = parseRep prMCMem
 
 parseDeclExtType :: FilePath -> T.Text -> Either T.Text DeclExtType
 parseDeclExtType = parseFull pDeclExtType
+
+parseDeclType :: FilePath -> T.Text -> Either T.Text DeclType
+parseDeclType = parseFull pDeclType
