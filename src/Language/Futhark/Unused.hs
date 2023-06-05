@@ -4,7 +4,7 @@ import Data.Bifunctor qualified as BI
 import Data.Foldable (Foldable (foldl'))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, maybeToList)
+import Data.Maybe (catMaybes, maybeToList, mapMaybe)
 import Data.Set qualified as S
 import Language.Futhark
 import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
@@ -75,7 +75,7 @@ funcsInExp :: ExpBase Info VName -> VName -> VMap -> VMap
 funcsInExp (Parens ex _) n vm = funcsInExp ex n vm
 funcsInExp (QualParens (QualName _ vn, _) ex _) n vm = funcsInExp ex n (M.map (S.insert vn) vm)
 funcsInExp (TupLit exs _) n vm = foldl' (\x y -> funcsInExp y n x) vm exs
-funcsInExp (RecordLit exs _) n vm = foldl' (\x y -> funcsInExp (getFieldExp y) n x) vm exs
+funcsInExp (RecordLit exs _) n vm = foldl' (\x y -> funcsInExp y n x) vm (mapMaybe getFieldExp exs)
 funcsInExp (ArrayLit exs _ _) n vm = foldl' (\x y -> funcsInExp y n x) vm exs
 funcsInExp (Attr _ ex _) n vm = funcsInExp ex n vm
 funcsInExp (Project _ ex _ _) n vm = funcsInExp ex n vm
@@ -136,7 +136,7 @@ locsInExp :: ExpBase Info VName -> LocMap
 locsInExp (Parens ex _) = locsInExp ex
 locsInExp (QualParens _ ex _) = locsInExp ex
 locsInExp (TupLit exs _) = M.unions $ map locsInExp exs
-locsInExp (RecordLit exs _) = M.unions $ map (locsInExp . getFieldExp) exs
+locsInExp (RecordLit exs _) = M.unions $ map locsInExp $ mapMaybe getFieldExp exs
 locsInExp (ArrayLit exs _ _) = M.unions $ map locsInExp exs
 locsInExp (Attr _ ex _) = locsInExp ex
 locsInExp (Project _ ex _ _) = locsInExp ex
@@ -183,7 +183,9 @@ locsInModExp (ModDecs dbs _) = M.unions $ map locsInDec dbs
 locsInModExp (ModApply mex1 mex2 _ _ _) = locsInModExp mex1 `M.union` locsInModExp mex2
 locsInModExp (ModAscript mex _ _ _) = locsInModExp mex
 locsInModExp (ModLambda _ _ mex _) = locsInModExp mex
-locsInModExp _ = M.empty
+locsInModExp (ModVar _ _src) = M.empty
+locsInModExp (ModImport _ _ _src) = M.empty
+
 
 fromInc :: Inclusiveness (ExpBase Info VName) -> ExpBase Info VName
 fromInc (DownToExclusive x) = x
@@ -205,9 +207,10 @@ fromDimInd (DimSlice m1 m2 m3) = catMaybes [m1, m2, m3]
 fromCase :: CaseBase f vn -> ExpBase f vn
 fromCase (CasePat _ x _) = x
 
-getFieldExp :: FieldBase Info VName -> ExpBase Info VName
-getFieldExp (RecordFieldExplicit _ ex _) = ex
-getFieldExp _ = error "placeholder" -- TODO: provide an appropriate error here.
+getFieldExp :: FieldBase Info VName -> Maybe (ExpBase Info VName)
+getFieldExp (RecordFieldExplicit _ ex _) = Just ex
+getFieldExp (RecordFieldImplicit _ _ _loc) = Nothing
+
 
 -- testing functions
 getBody :: DecBase f vn -> ExpBase f vn
