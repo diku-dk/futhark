@@ -124,7 +124,7 @@ inferAliasesTests =
         [[("[n_0]i32", RetAls [1] [0])]],
       mkTest
         []
-        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1])],
+        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
           [("[n_0]i32", RetAls [] [1, 2])]
         ]
     ]

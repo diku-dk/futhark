@@ -29,6 +29,7 @@ import Data.Maybe
 import Debug.Trace
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
+import Futhark.Util (chunks, nubOrd)
 import Language.Futhark qualified as E
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
@@ -99,12 +100,20 @@ allEq :: Eq a => [a] -> Bool
 allEq [] = True
 allEq (x : xs) = all (== x) xs
 
+ensureMutuals :: [[(a, RetAls)]] -> [[(a, RetAls)]]
+ensureMutuals xs = zipWith zip (map (map fst) xs) $ chunks (map length xs) (map check als)
+  where
+    als = zip (concatMap (map snd) xs) [0 ..]
+    check (RetAls pals rals, o) = RetAls pals rals'
+      where
+        rals' = nubOrd $ rals <> map snd (filter (elem o . otherRetAls . fst) als)
+
 inferAliases ::
   [[I.TypeBase Shape Uniqueness]] ->
   [[I.TypeBase ExtShape Uniqueness]] ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 inferAliases all_param_ts all_res_ts =
-  map onRes all_res_ts
+  ensureMutuals $ map onRes all_res_ts
   where
     nonuniqueArray t@Array {} = not $ unique t
     nonuniqueArray _ = False

@@ -700,8 +700,10 @@ checkFun' (fname, rettype, params) consumable check = do
       guard $ unique $ declTypeOf t
       pure v
 
-    allowedArgAliases is =
-      namesFromList (map (param_names !!) is) <> unique_names
+    allowedArgAliases pals rals =
+      namesFromList (map (param_names !!) pals') <> unique_names
+      where
+        pals' = pals <> concatMap (paramAliases . snd . (rettype !!)) rals
 
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
@@ -710,7 +712,7 @@ checkFun' (fname, rettype, params) consumable check = do
             not $ null als'' =
               bad . TypeError . T.unlines $
                 [ T.unwords ["Result", prettyText i, "aliases", prettyText als''],
-                  T.unwords ["but is only allowed to alias arguments", prettyText (allowedArgAliases pals)]
+                  T.unwords ["but is only allowed to alias arguments", prettyText allowed_args]
                 ]
           | ((j, _) : _) <- filter (isProblem i als' rals) (zip [0 ..] retals) =
               bad . TypeError . T.unlines $
@@ -718,7 +720,8 @@ checkFun' (fname, rettype, params) consumable check = do
                   T.unwords ["but result", prettyText i, "only allowed to alias results", prettyText rals]
                 ]
           where
-            als' = als `namesSubtract` allowedArgAliases pals
+            allowed_args = allowedArgAliases pals rals
+            als' = als `namesSubtract` allowed_args
         checkRet _ _ = pure ()
 
         isProblem i als rals (j, jals) =
