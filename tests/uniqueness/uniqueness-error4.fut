@@ -1,5 +1,5 @@
 -- ==
--- error: "b".*consumed
+-- error: "a".*consumed
 
 def f(a: *[]i64, i: i32, v: i64): i64 = let a[i]=v in a[i]
 
