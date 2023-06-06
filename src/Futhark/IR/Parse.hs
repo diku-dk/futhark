@@ -382,7 +382,7 @@ data PR rep = PR
 pRetAls :: Parser RetAls
 pRetAls = fromMaybe (RetAls mempty mempty) <$> optional p
   where
-    p = lexeme "@" *> parens (RetAls <$> pInts <* pComma <*> pInts)
+    p = lexeme "#" *> parens (RetAls <$> pInts <* pComma <*> pInts)
     pInts = brackets $ pInt `sepBy` pComma
 
 pRetTypes :: PR rep -> Parser [(RetType rep, RetAls)]
