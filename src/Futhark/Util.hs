@@ -468,7 +468,7 @@ concatMapM f xs = mconcat <$> mapM f xs
 -- | Topological sorting of an array with an adjancency function,
 -- if there is a cycle, it cause an error
 -- @a `dep` b@ means 'a -> b', and the returned array guarantee that for i < j,
--- @not ( (ret !! i) `dep` (ret !! j) )@. (e.g. a depends of b)
+-- @not ( (ret !! j) `dep` (ret !! i) )@.
 topologicalSort :: (a -> a -> Bool) -> [a] -> [a]
 topologicalSort dep nodes =
   fst $ execState (mapM_ (sorting . snd) nodes_idx) (mempty, mempty)

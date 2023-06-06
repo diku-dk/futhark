@@ -1498,7 +1498,7 @@ similarSlices slice1 slice2
 -- similar, but you can check for that!).  This is the machinery
 -- underlying expresssion unification.
 similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
-similarExps e1 e2 | e1 == e2 = Just []
+similarExps e1 e2 | bareExp e1 == bareExp e2 = Just []
 similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
 similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
 similarExps
