@@ -9,12 +9,11 @@ import Control.Monad.State
 import Data.Map.Strict qualified as M
 import Futhark.Compiler (dumpError, newFutharkConfig, readProgramFiles)
 import Futhark.Pipeline (Verbosity (..), runFutharkM)
+import Futhark.Util.Loc
 import Futhark.Util.Options
 import Language.Futhark
 import Language.Futhark.Unused
 import System.Exit
-import Data.List ( elemIndices )
-import Futhark.Util.Loc
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions initialCheckConfig [] "files..." find
@@ -46,5 +45,6 @@ simpleLocStr :: Located a => a -> String
 simpleLocStr a =
   case locOf a of
     NoLoc -> "unknown location"
-    Loc (Pos file line1 _col1 _) (Pos _ _line2 _col2 _) -> -- ignore second position, we only care about file and line number 1.
+    Loc (Pos file line1 _col1 _) (Pos _ _line2 _col2 _) ->
+      -- ignore second position, we only care about file and line number 1.
       file ++ ":" ++ show line1

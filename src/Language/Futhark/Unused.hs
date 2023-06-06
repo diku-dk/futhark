@@ -55,7 +55,7 @@ tClosure bf af =
         else tClosure bf' af
 
 tStep :: VMap -> VMap -> VMap
-tStep af = M.map (\x -> S.union x $ S.unions $ S.foldl (<>) [] $ S.map (\y -> maybeToList $ y `M.lookup` af) x)
+tStep af = M.map (\x -> S.union x $ S.unions $ mapMaybe (`M.lookup` af) (S.toList x))
 
 -- Finding the VNames present in a function declaration and the declarations present in it.
 funcsInFMod :: FileModule -> VMap
