@@ -47,7 +47,7 @@ instance ToExp v => ToExp (PrimExp v) where
   toExp (FunExp h args t) =
     Apply (nameFromString h)
       <$> args'
-      <*> pure [(primRetType t, RetAls [] [])]
+      <*> pure [(primRetType t, mempty)]
       <*> pure (Safe, mempty, [])
     where
       args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
