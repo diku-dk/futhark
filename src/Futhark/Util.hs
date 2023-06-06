@@ -52,7 +52,6 @@ module Futhark.Util
   )
 where
 
-import Control.Arrow qualified as Arr
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
@@ -442,7 +441,7 @@ atMostChars n s
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
   M.toList m
-    & fmap (swap . Arr.first S.singleton)
+    & fmap (swap . first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
 
 -- | Compute the cartesian product of two foldable collections, using the given
