@@ -412,11 +412,10 @@ instance Traversable Case where
 
 -- | Information about the possible aliases of a function result.
 data RetAls = RetAls
-  { -- | Which of the parameters (or arguments) may be aliased,
-    -- numbered from zero.
+  { -- | Which of the parameters may be aliased, numbered from zero.
     paramAliases :: [Int],
     -- | Which of the other results may be aliased, numbered from
-    -- zero.
+    -- zero.  This must be a reflexive relation.
     otherRetAls :: [Int]
   }
   deriving (Eq, Ord, Show)
@@ -528,8 +527,6 @@ data FunDef rep = FunDef
     funDefEntryPoint :: Maybe EntryPoint,
     funDefAttrs :: Attrs,
     funDefName :: Name,
-    -- | The Int list a set of parameters (numbered from
-    -- zero) that this result may alias.
     funDefRetType :: [(RetType rep, RetAls)],
     funDefParams :: [FParam rep],
     funDefBody :: Body rep
