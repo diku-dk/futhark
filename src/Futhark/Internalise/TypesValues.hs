@@ -28,7 +28,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
-import Futhark.Util (chunks, nubOrd)
+import Futhark.Util (chunkLike, chunks, nubOrd)
 import Language.Futhark qualified as E
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
@@ -160,11 +160,11 @@ internaliseEntryReturnType ::
   E.StructRetType ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 internaliseEntryReturnType paramts (E.RetType dims et) =
-  inferAliases paramts $
-    runInternaliseTypeM' dims . fmap concat . mapM (internaliseTypeM exts) $
-      case E.isTupleRecord et of
-        Just ets | not $ null ets -> ets
-        _ -> [et]
+  let et' = runInternaliseTypeM' dims . mapM (internaliseTypeM exts) $
+        case E.isTupleRecord et of
+          Just ets | not $ null ets -> ets
+          _ -> [et]
+   in map concat $ chunkLike et' $ inferAliases paramts $ concat et'
   where
     exts = M.fromList $ zip dims [0 ..]
 
