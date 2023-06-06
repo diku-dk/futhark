@@ -280,7 +280,7 @@ sizeFree tloc expKiller orig_t = do
     witnessed_exps = execState (traverseDims onDim orig_t) mempty
       where
         onDim _ _ (SizeExpr e) = modify (e :)
-        onDim _ _ _ = undefined
+        onDim _ _ _ = error "AnySize in sizeFree"
     subExps e
       | Just e' <- stripExp e = subExps e'
       | otherwise = astMap mapper e `execState` mempty
