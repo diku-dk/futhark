@@ -52,13 +52,13 @@ module Futhark.Util
   )
 where
 
-import Control.Arrow (first)
+import Control.Arrow qualified as Arr
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.State
 import Crypto.Hash.MD5 as MD5
-import Data.Bifunctor qualified as BiFunc
+import Data.Bifunctor
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as Base16
 import Data.Char
@@ -442,7 +442,7 @@ atMostChars n s
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
   M.toList m
-    & fmap (swap . first S.singleton)
+    & fmap (swap . Arr.first S.singleton)
     & foldr (uncurry $ M.insertWith (<>)) mempty
 
 -- | Compute the cartesian product of two foldable collections, using the given
@@ -489,6 +489,6 @@ topologicalSort dep nodes =
       when (status == Just True) $ error "topological sorting has encountered a cycle"
       unless (status == Just False) $ do
         let node = nodes !! i
-        modify $ BiFunc.second $ IM.insert i True
+        modify $ second $ IM.insert i True
         mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
-        modify $ BiFunc.bimap (node :) (IM.insert i False)
+        modify $ bimap (node :) (IM.insert i False)
