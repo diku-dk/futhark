@@ -23,7 +23,7 @@ import Futhark.Server
 import Futhark.Test
 import Futhark.Util (atMostChars, fancyTerminal, showText)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (annotate, bold, hardline, pretty, putDoc, vsep)
+import Futhark.Util.Pretty (annotate, bgColor, bold, hardline, pretty, putDoc, vsep)
 import Futhark.Util.Table
 import System.Console.ANSI (clearFromCursorToScreenEnd, clearLine, cursorUpLine)
 import System.Console.Terminal.Size qualified as Terminal
@@ -567,7 +567,7 @@ runTests config paths = do
                     when fancy moveCursorToTableTop
                     clear
                     putDoc $
-                      annotate bold (pretty (testCaseProgram test) <> ":")
+                      annotate (bold <> bgColor Red) (pretty (testCaseProgram test) <> ":")
                         <> hardline
                         <> vsep (map pretty s)
                         <> hardline
