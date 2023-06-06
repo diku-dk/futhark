@@ -120,31 +120,20 @@ inferAliases all_param_ts all_res_ts =
       | Array {} <- t, not $ unique t = als
       | otherwise = []
     doAlias res_ts (param_ts, o)
-      | length res_ts > 1,
-        length res_ts == length param_ts,
+      | [res_t] <- res_ts =
+          [unAlias res_t $ map snd (possible res_t $ zip param_ts [o ..])]
+      | length res_ts == length param_ts,
         Just True <- allEq <$> zipWithM canComeFrom param_ts res_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
-      | length res_ts == 1 =
-          if length param_ts > 1
-            then
-              [ unAlias res_t $
-                  map snd (filter ((`canBeProjectedFrom` res_t) . fst) $ filter (nonuniqueArray . fst) $ zip param_ts [o ..])
-                | res_t <- res_ts
-              ]
-            else
-              [ unAlias res_t $
-                  map snd (filter (isJust . (`canComeFrom` res_t) . fst) $ filter (nonuniqueArray . fst) $ zip param_ts [o ..])
-                | res_t <- res_ts
-              ]
       | otherwise = []
       where
         canComeFrom (Array pt1 shape1 _) (Array pt2 shape2 _)
           | pt1 == pt2 =
               Just $ shapeRank shape2 - shapeRank shape1
         canComeFrom _ _ = Nothing
-        canBeProjectedFrom (Array pt1 shape1 _) (Array pt2 _ _) =
-          pt1 == pt2 && shapeRank shape1 > 1
-        canBeProjectedFrom _ _ = False
+        possible res_t =
+          filter (isJust . (`canComeFrom` res_t) . fst)
+            . filter (nonuniqueArray . fst)
     infer ts all_ts =
       map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
         withOffsets all_ts

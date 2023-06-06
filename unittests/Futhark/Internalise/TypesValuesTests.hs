@@ -80,6 +80,10 @@ sumTypeTests =
               )
     ]
 
+-- Be aware that some of these tests simply reinforce current
+-- behaviour - it may be that we want to restrict aliasing even
+-- further in the future; these tests would have to be updated in such
+-- cases.
 inferAliasesTests :: TestTree
 inferAliasesTests =
   testGroup
@@ -121,11 +125,11 @@ inferAliasesTests =
         [[("*[n_0][n_1]i32", RetAls [] [])]],
       mkTest
         [["[n_0]i32", "[n_0][n_1]i32"]]
-        [[("[n_0]i32", RetAls [1] [0])]],
+        [[("[n_0]i32", RetAls [0, 1] [0])]],
       mkTest
         []
-        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
-          [("[n_0]i32", RetAls [] [1, 2])]
+        [ [("[n_0]i32", RetAls [] [0, 2]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
+          [("[n_0]i32", RetAls [] [0, 1, 2])]
         ]
     ]
   where
