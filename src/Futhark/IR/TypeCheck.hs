@@ -439,18 +439,18 @@ binding ::
   TypeM rep a
 binding stms = check . local (`bindVars` stms)
   where
-    bindVars = M.foldlWithKey' bindVar
+    bindVars orig_env = M.foldlWithKey' (bindVar orig_env) orig_env
     boundnames = M.keys stms
 
-    bindVar env name (LetName (AliasDec als, dec)) =
+    bindVar orig_env env name (LetName (AliasDec als, dec)) =
       let als'
             | primType (typeOf dec) = mempty
-            | otherwise = expandAliases als env
+            | otherwise = expandAliases als orig_env
        in env
             { envVtable =
                 M.insert name (LetName (AliasDec als', dec)) $ envVtable env
             }
-    bindVar env name dec =
+    bindVar _ env name dec =
       env {envVtable = M.insert name dec $ envVtable env}
 
     -- Check whether the bound variables have been used correctly
