@@ -404,7 +404,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-            ~*~ primExpFromSubExp (IntType it) s'
+              ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
       ns <- elemArr segments env inps n
@@ -1028,9 +1028,11 @@ liftArg segments inps env (e, d) = case e of
         ) = do
         t <- lookupType elems
         num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+        flags' <- letExp "flags" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_elems]) flags
+        elems' <- letExp "elems" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_elems]) elems
         -- Only apply the original diet to the 'elems' array
         let diets = replicate 4 Observe ++ [d]
-        pure $ zipWith (curry (first Var)) [num_elems, segs, flags, offsets, elems] diets
+        pure $ zipWith (curry (first Var)) [num_elems, segs, flags', offsets, elems'] diets
 
 -- Lifts a functions return type such that it matches the lifted functions return type.
 liftRetType :: SubExp -> [RetType SOACS] -> [RetType GPU]
@@ -1063,19 +1065,22 @@ liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
           Just (_, Regular v') -> pure [v']
           Just
             ( _,
-              Irregular
-                ( IrregularRep
-                    { irregularSegments = segs,
-                      irregularFlags = flags,
-                      irregularOffsets = offsets,
-                      irregularElems = elems
-                    }
-                  )
-              ) -> do
-              t <- lookupType elems
-              num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
-              pure [num_elems, segs, flags, offsets, elems]
+              Irregular irregRep
+              ) -> mkIrrep irregRep
           Nothing -> error $ "liftResult: Bad lookup: " ++ prettyString v
+    mkIrrep
+      ( IrregularRep
+          { irregularSegments = segs,
+            irregularFlags = flags,
+            irregularOffsets = offsets,
+            irregularElems = elems
+          }
+        ) = do
+        t <- lookupType elems
+        num_elems <- letExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
+        flags' <- letExp "flags" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_elems]) flags
+        elems' <- letExp "elems" $ BasicOp $ Reshape ReshapeArbitrary (Shape [Var num_elems]) elems
+        pure [num_elems, segs, flags', offsets, elems']
 
 liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GPU Result
 liftBody w inputs env dstms result = do
