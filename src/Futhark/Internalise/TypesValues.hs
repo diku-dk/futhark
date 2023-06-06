@@ -26,7 +26,6 @@ import Data.List (delete, find, foldl')
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.IR.SOACS as I
 import Futhark.Internalise.Monad
 import Futhark.Util (chunks, nubOrd)
