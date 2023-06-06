@@ -1,4 +1,6 @@
-module Language.Futhark.Unused (findUnused, getBody, getDecs) where
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use record patterns" #-}
+module Language.Futhark.Unused (findUnused) where
 
 import Data.Bifunctor qualified as BI
 import Data.Foldable (Foldable (foldl'))
@@ -19,10 +21,6 @@ import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
 -- (1) create a mapping for functions in *any* import to the directly usable functions in it.
 -- (2) create a mapping from normalized filename to top-level functions inside the filename.
 -- (3) Compute transitive closure for the map in (1)
-
-
-getDecs :: FileModule -> [DecBase Info VName]
-getDecs (FileModule _ _env (Prog _doc decs) _) = decs
 
 -- fp here is a list of filepaths that we consider 'root' files. The files imported into these files will be check for unused functions.
 findUnused :: [FilePath] -> [(ImportName, FileModule)] -> M.Map FilePath [(VName, SrcLoc)]
@@ -68,7 +66,12 @@ funcsInDec (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr _loc)) =
   funcsInExp body vn (M.singleton vn S.empty)
 funcsInDec (ModDec (ModBind _ _ (Just (_, Info mp)) mex _ _)) = funcsInModExp mex `M.union` M.map S.singleton mp
 funcsInDec (ModDec (ModBind _ _ Nothing mex _ _)) = funcsInModExp mex
-funcsInDec _ = M.empty
+funcsInDec (TypeDec _) = M.empty
+funcsInDec (SigDec _) = M.empty
+funcsInDec (LocalDec _ _) = M.empty
+funcsInDec (OpenDec _ _) = M.empty
+funcsInDec (ImportDec _ _ _) = M.empty
+
 
 -- current expression, current function being traversed, map of functions seen so far.
 funcsInExp :: ExpBase Info VName -> VName -> VMap -> VMap
@@ -105,7 +108,15 @@ funcsInExp (AppExp app _) n vm =
     LetWith _ _ sl ex1 ex2 _ -> foldl' (\x y -> funcsInExp y n x) vm $ fromSlice sl <> [ex1, ex2]
     Index ex sl _ -> foldl' (\x y -> funcsInExp y n x) vm $ ex : fromSlice sl
     Match ex cases _ -> foldl' (\x y -> funcsInExp y n x) vm $ ex : map fromCase (NE.toList cases)
-funcsInExp _ _ vm = vm
+-- Cases which leave the map unchanged
+funcsInExp (Literal _ _) _ vm = vm
+funcsInExp (IntLit _ _ _) _ vm = vm
+funcsInExp (FloatLit _ _ _) _ vm = vm
+funcsInExp (StringLit _ _) _ vm = vm
+funcsInExp (Hole _ _) _ vm = vm
+funcsInExp (Negate _ _) _ vm = vm
+funcsInExp (ProjectSection _ _ _) _ vm = vm
+funcsInExp (IndexSection _ _ _) _ vm = vm
 
 -- funcs inside a module expression. also tracks functions that have different VNames inside and outside the module.
 -- ModVar omitted
@@ -130,7 +141,11 @@ locsInDec :: DecBase Info VName -> LocMap
 locsInDec (ValDec (ValBind _en vn _rd _rt _tp _bp body _doc _attr loc)) =
   M.insert vn loc $ locsInExp body
 locsInDec (ModDec (ModBind _ _ _ mex _ _)) = locsInModExp mex
-locsInDec _ = M.empty
+locsInDec (TypeDec _) = M.empty
+locsInDec (SigDec _) = M.empty
+locsInDec (OpenDec _ _) = M.empty
+locsInDec (LocalDec _ _) = M.empty
+locsInDec (ImportDec _ _ _) = M.empty
 
 locsInExp :: ExpBase Info VName -> LocMap
 locsInExp (Parens ex _) = locsInExp ex
@@ -146,7 +161,6 @@ locsInExp (Constr _ exs _ _) = M.unions $ map locsInExp exs
 locsInExp (Update ex1 _ ex2 _) = locsInExp ex2 `M.union` locsInExp ex1
 locsInExp (RecordUpdate ex1 _ ex2 _ _) = locsInExp ex2 `M.union` locsInExp ex1
 locsInExp (Lambda _ ex _ _ _) = locsInExp ex
-
 locsInExp (OpSectionLeft _ _ ex _ _ _) = locsInExp ex
 locsInExp (OpSectionRight _ _ ex _ _ _) = locsInExp ex
 locsInExp (Ascript ex _ _) = locsInExp ex
@@ -164,7 +178,7 @@ locsInExp (AppExp app _) =
     LetWith _ _ sl ex1 ex2 _ -> M.unions $ map locsInExp $ fromSlice sl <> [ex1, ex2]
     Index ex sl _ -> M.unions $ map locsInExp $ ex : fromSlice sl
     Match ex cases _ -> M.unions $ map locsInExp $ ex : map fromCase (NE.toList cases)
--- from here there are cases which do not have any important locs as of the writing of this tool.
+-- Empty cases (subject to change)
 locsInExp (Var _ _ _l) = M.empty
 locsInExp (Literal _ _l) = M.empty
 locsInExp (IntLit _ _ _l) = M.empty
@@ -210,9 +224,3 @@ fromCase (CasePat _ x _) = x
 getFieldExp :: FieldBase Info VName -> Maybe (ExpBase Info VName)
 getFieldExp (RecordFieldExplicit _ ex _) = Just ex
 getFieldExp (RecordFieldImplicit _ _ _loc) = Nothing
-
-
--- testing functions
-getBody :: DecBase f vn -> ExpBase f vn
-getBody (ValDec (ValBind _en _vn _rd _rt _tp _bp body _doc _attr _loc)) = body
-getBody _ = error ""
