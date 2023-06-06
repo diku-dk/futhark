@@ -43,7 +43,7 @@ import Data.Maybe
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
-import Futhark.Util (nubOrd)
+import Futhark.Util (nubOrd, topologicalSort)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Semantic (TypeBinding (..))
@@ -259,8 +259,6 @@ calculateDims :: Exp -> ExpReplacements -> MonoM Exp
 calculateDims body repl =
   foldCalc top_repl $ expReplace top_repl body
   where
-    ---- topological sorting
-    exp_idxs = zip (map fst repl) [0 ..]
     -- list of strict sub-expressions of e
     subExps e
       | Just e' <- stripExp e = subExps e'
@@ -272,23 +270,9 @@ calculateDims body repl =
               modify (ReplacedExp e' :)
               astMap mapper e'
         mapper = identityMapper {mapOnExp}
-    -- @a `depends_of` (b,i)@ returns @Just i@
-    -- iff b appear in a as an expression
-    depends_of a (b, i) =
-      if b `elem` subExps (unReplaced a)
-        then Just i
-        else Nothing
-    -- graph of dependencies, represented with adjacency list
-    depends_graph =
-      map (\(e, _) -> mapMaybe (depends_of e) exp_idxs) exp_idxs
-
-    sorting i = do
-      done <- gets $ (!! i) . snd
-      unless done $ do
-        mapM_ sorting $ depends_graph !! i
-        modify $ bimap (repl !! i :) (\status -> map (\j -> i == j || status !! j) [0 .. length status])
+    depends (a, _) (b, _) = b `elem` subExps (unReplaced a)
     top_repl =
-      fst $ execState (mapM_ (sorting . snd) exp_idxs) (mempty, map (const False) exp_idxs)
+      topologicalSort depends repl
 
     ---- Calculus insertion
     foldCalc [] body' = pure body'
