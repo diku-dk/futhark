@@ -1,7 +1,8 @@
 module Futhark.Internalise.TypesValuesTests (tests) where
 
+import Control.Monad.Free (Free (..))
 import Data.Map qualified as M
-import Futhark.IR.Syntax
+import Futhark.IR.Syntax hiding (Free)
 import Futhark.IR.SyntaxTests ()
 import Futhark.Internalise.TypesValues
 import Language.Futhark.SyntaxTests ()
@@ -41,11 +42,11 @@ sumTypeTests =
     [ testCase "Dedup of primitives" $
         internaliseConstructors
           ( M.fromList
-              [ ("foo", [["i64"]]),
-                ("bar", [["i64"]])
+              [ ("foo", [Pure "i64"]),
+                ("bar", [Pure "i64"])
               ]
           )
-          @?= ( [["i64"]],
+          @?= ( [Pure "i64"],
                 M.fromList
                   [ ("foo", (1, [0])),
                     ("bar", (0, [0]))
@@ -54,11 +55,11 @@ sumTypeTests =
       testCase "Dedup of array" $
         internaliseConstructors
           ( M.fromList
-              [ ("foo", [["[?0]i64"]]),
-                ("bar", [["[?0]i64"]])
+              [ ("foo", [Pure "[?0]i64"]),
+                ("bar", [Pure "[?0]i64"])
               ]
           )
-          @?= ( [["[?0]i64"]],
+          @?= ( [Pure "[?0]i64"],
                 M.fromList
                   [ ("foo", (1, [0])),
                     ("bar", (0, [0]))
@@ -68,11 +69,11 @@ sumTypeTests =
         "Dedup of array of tuple"
         $ internaliseConstructors
           ( M.fromList
-              [ ("foo", [["[?0]i64", "[?0]i64"]]),
-                ("bar", [["[?0]i64"]])
+              [ ("foo", [Free [Pure "[?0]i64", Pure "[?0]i64"]]),
+                ("bar", [Pure "[?0]i64"])
               ]
           )
-          @?= ( [["[?0]i64"], ["[?0]i64", "[?0]i64"]],
+          @?= ( [Pure "[?0]i64", Free [Pure "[?0]i64", Pure "[?0]i64"]],
                 M.fromList
                   [ ("foo", (1, [1, 2])),
                     ("bar", (0, [0]))

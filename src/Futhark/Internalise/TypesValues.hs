@@ -10,6 +10,7 @@ module Futhark.Internalise.TypesValues
     internalisePrimType,
     internalisedTypeSize,
     internaliseSumType,
+    Tree,
 
     -- * Internalising values
     internalisePrimValue,
@@ -20,13 +21,16 @@ module Futhark.Internalise.TypesValues
   )
 where
 
+import Control.Monad.Free (Free (..))
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)
+import Data.Foldable (toList)
 import Data.List (delete, find, foldl')
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.IR.SOACS as I
+import Futhark.IR.SOACS hiding (Free)
+import Futhark.IR.SOACS qualified as I
 import Futhark.Internalise.Monad
 import Futhark.Util (chunkLike, chunks, nubOrd)
 import Language.Futhark qualified as E
@@ -52,7 +56,7 @@ internaliseParamTypes ::
   InternaliseM [[[I.TypeBase Shape Uniqueness]]]
 internaliseParamTypes ts =
   mapM (mapM (mapM mkAccCerts)) . runInternaliseTypeM $
-    mapM (fmap (map (map onType)) . internaliseTypeM mempty) ts
+    mapM (fmap (map (map onType . toList)) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
@@ -92,7 +96,7 @@ internaliseLoopParamType et ts =
     <$> internaliseParamTypes [et]
 
 -- Tag every sublist with its offset in corresponding flattened list.
-withOffsets :: [[a]] -> [([a], Int)]
+withOffsets :: Foldable a => [a b] -> [(a b, Int)]
 withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
 
 allEq :: Eq a => [a] -> Bool
@@ -125,7 +129,8 @@ inferAliases all_param_ts all_res_ts =
       | length res_ts == length param_ts,
         Just True <- allEq <$> zipWithM canComeFrom param_ts res_ts =
           zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
-      | otherwise = []
+      | otherwise =
+          []
       where
         canComeFrom (Array pt1 shape1 _) (Array pt2 shape2 _)
           | pt1 == pt2 =
@@ -148,7 +153,7 @@ internaliseReturnType ::
   [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
 internaliseReturnType paramts (E.RetType dims et) ts =
-  fixupKnownTypes ts . concat . inferAliases paramts $
+  fixupKnownTypes ts . concat . inferAliases paramts . map toList $
     runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
@@ -164,7 +169,7 @@ internaliseEntryReturnType paramts (E.RetType dims et) =
         case E.isTupleRecord et of
           Just ets | not $ null ets -> ets
           _ -> [et]
-   in map concat $ chunkLike et' $ inferAliases paramts $ concat et'
+   in map concat $ chunkLike et' $ inferAliases paramts $ foldMap (map toList) et'
   where
     exts = M.fromList $ zip dims [0 ..]
 
@@ -185,7 +190,7 @@ internaliseType ::
   E.TypeBase E.Size () ->
   [[I.TypeBase I.ExtShape Uniqueness]]
 internaliseType =
-  runInternaliseTypeM . internaliseTypeM mempty
+  map toList . runInternaliseTypeM . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
 newId = do
@@ -200,7 +205,7 @@ internaliseDim ::
 internaliseDim exts d =
   case d of
     E.AnySize _ -> Ext <$> newId
-    E.SizeExpr (E.IntLit n _ _) -> pure $ Free $ intConst I.Int64 n
+    E.SizeExpr (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
     E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
     E.SizeExpr e -> error $ "Unexpected size expression: " ++ prettyString e
   where
@@ -208,31 +213,46 @@ internaliseDim exts d =
       | Just x <- name `M.lookup` exts = I.Ext x
       | otherwise = I.Free $ I.Var name
 
+-- | A tree is just an instantiation of the free monad with a list
+-- monad.
+--
+-- The important thing is that we use it to represent the original
+-- structure of arrays-of-tuples, as this matters for aliasing.
+-- E.g. @([]i32,[]i32)@ and @[](i32,i32)@ both have the same core
+-- representation, but their implications for aliasing are different.
+-- We use this when inferring the 'RetAls' during internalisation.
+type Tree = Free []
+
 internaliseTypeM ::
   M.Map VName Int ->
   E.StructType ->
-  InternaliseTypeM [[I.TypeBase ExtShape Uniqueness]]
+  InternaliseTypeM [Tree (I.TypeBase ExtShape Uniqueness)]
 internaliseTypeM exts orig_t =
   case orig_t of
     E.Array _ u shape et -> do
       dims <- internaliseShape shape
-      ets <- concat <$> internaliseTypeM exts (E.Scalar et)
-      pure [[I.arrayOf et' (Shape dims) $ internaliseUniqueness u | et' <- ets]]
+      ets <- internaliseTypeM exts (E.Scalar et)
+      let f et' = I.arrayOf et' (Shape dims) $ internaliseUniqueness u
+      pure [Free $ map (fmap f) ets]
     E.Scalar (E.Prim bt) ->
-      pure [[I.Prim $ internalisePrimType bt]]
+      pure [Pure $ I.Prim $ internalisePrimType bt]
     E.Scalar (E.Record ets)
       -- We map empty records to units, because otherwise arrays of
       -- unit will lose their sizes.
-      | null ets -> pure [[I.Prim I.Unit]]
+      | null ets -> pure [Pure $ I.Prim I.Unit]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
     E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
-          ts <- map (fromDecl . onAccType) . concat <$> internaliseTypeM exts arr_t
+          ts <-
+            foldMap (toList . fmap (fromDecl . onAccType))
+              <$> internaliseTypeM exts arr_t
           let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
-              acc_t = Acc acc_param (Shape [arraysSize 0 ts]) (map rowType ts) $ internaliseUniqueness u
-          pure [[acc_t]]
+              acc_shape = Shape [arraysSize 0 ts]
+              u' = internaliseUniqueness u
+              acc_t = Acc acc_param acc_shape (map rowType ts) u'
+          pure [Pure acc_t]
     E.Scalar E.TypeVar {} ->
       error $ "internaliseTypeM: cannot handle type variable: " ++ prettyString orig_t
     E.Scalar E.Arrow {} ->
@@ -241,7 +261,7 @@ internaliseTypeM exts orig_t =
       (ts, _) <-
         internaliseConstructors
           <$> traverse (fmap concat . mapM (internaliseTypeM exts)) cs
-      pure $ [I.Prim (I.IntType I.Int8)] : ts
+      pure $ Pure (I.Prim (I.IntType I.Int8)) : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
 
@@ -250,22 +270,30 @@ internaliseTypeM exts orig_t =
 
 -- | Only exposed for testing purposes.
 internaliseConstructors ::
-  M.Map Name [[I.TypeBase ExtShape Uniqueness]] ->
-  ( [[I.TypeBase ExtShape Uniqueness]],
+  M.Map Name [Tree (I.TypeBase ExtShape Uniqueness)] ->
+  ( [Tree (I.TypeBase ExtShape Uniqueness)],
     M.Map Name (Int, [Int])
   )
 internaliseConstructors cs =
   foldl' onConstructor mempty $ zip (E.sortConstrs cs) [0 ..]
   where
+    onConstructor ::
+      ( [Tree (I.TypeBase ExtShape Uniqueness)],
+        M.Map Name (Int, [Int])
+      ) ->
+      ((Name, [Tree (I.TypeBase ExtShape Uniqueness)]), Int) ->
+      ( [Tree (I.TypeBase ExtShape Uniqueness)],
+        M.Map Name (Int, [Int])
+      )
     onConstructor (ts, mapping) ((c, c_ts), i) =
       let (_, js, new_ts) =
-            foldl' f (withOffsets (map (map fromDecl) ts), mempty, mempty) c_ts
+            foldl' f (withOffsets (map (fmap fromDecl) ts), mempty, mempty) c_ts
        in (ts ++ new_ts, M.insert c (i, js) mapping)
       where
         size = sum . map length
         f (ts', js, new_ts) t
-          | Just (_, j) <- find ((== map fromDecl t) . fst) ts' =
-              ( delete (map fromDecl t, j) ts',
+          | Just (_, j) <- find ((== fmap fromDecl t) . fst) ts' =
+              ( delete (fmap fromDecl t, j) ts',
                 js ++ take (length t) [j ..],
                 new_ts
               )
@@ -282,7 +310,7 @@ internaliseSumType ::
       M.Map Name (Int, [Int])
     )
 internaliseSumType cs =
-  bitraverse (mapM mkAccCerts . concat) pure . runInternaliseTypeM $
+  bitraverse (mapM mkAccCerts . foldMap toList) pure . runInternaliseTypeM $
     internaliseConstructors
       <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
 

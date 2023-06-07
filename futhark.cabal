@@ -482,7 +482,7 @@ library
     , fgl-visualize
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
-    , free >=4.12.4
+    , free >=5.1.10
     , futhark-data >= 1.1.0.0
     , futhark-server >= 1.2.2.1
     , futhark-manifest >= 1.2.0.1
@@ -553,6 +553,7 @@ test-suite unit
       QuickCheck >=2.8
     , base
     , containers
+    , free
     , futhark
     , megaparsec
     , tasty
