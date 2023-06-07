@@ -3,7 +3,7 @@
 
 def foo n =
   let m = n+1
-  in (iota (m+2),
+  in (iota ((m+1)+1),
       zip (iota (m+1)),
       zip (iota m))
 
