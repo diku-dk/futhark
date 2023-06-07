@@ -309,7 +309,13 @@ instance Bitraversable RetTypeBase where
   bitraverse f g (RetType dims t) = RetType dims <$> bitraverse f g t
 
 instance Functor (RetTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (RetTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (RetTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor RetTypeBase where
   bimap = bimapDefault
@@ -340,7 +346,13 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Functor (ScalarTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (ScalarTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (ScalarTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor ScalarTypeBase where
   bimap = bimapDefault
@@ -364,7 +376,13 @@ instance Bitraversable TypeBase where
     Array <$> g a <*> pure u <*> traverse f shape <*> bitraverse f pure t
 
 instance Functor (TypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (TypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
