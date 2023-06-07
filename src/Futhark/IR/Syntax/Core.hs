@@ -248,7 +248,13 @@ instance Bitraversable TypeBase where
   bitraverse _ _ (Mem s) = pure $ Mem s
 
 instance Functor (TypeBase shape) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (TypeBase shape) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeBase shape) where
+  traverse = bitraverse pure
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
