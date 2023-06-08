@@ -268,8 +268,7 @@ sizeFree ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 sizeFree tloc expKiller orig_t = do
-  (orig_t', exts) <- runReaderT (to_be_replaced orig_t $ onType orig_t) mempty `runStateT` mempty
-  pure (orig_t', exts)
+  runReaderT (to_be_replaced orig_t $ onType orig_t) mempty `runStateT` mempty
   where
     same_exp e1 e2
       | Just es <- similarExps e1 e2 =
@@ -302,7 +301,6 @@ sizeFree tloc expKiller orig_t = do
         mapper = identityMapper {mapOnExp = pure . expReplace mapping}
 
     -- using ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) a
-
     replacing e = do
       e' <- asks (`expReplace` e)
       case expKiller e' of
@@ -327,7 +325,7 @@ sizeFree tloc expKiller orig_t = do
       argT' <- onType argT
       old_bound <- get
       retT' <- to_be_replaced retT $ onType retT
-      rl <- state $ partition (`elem` old_bound)
+      rl <- state $ partition (`notElem` old_bound)
       let dims' = dims <> rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
     onScalar (TypeVar as u v args) =
