@@ -181,8 +181,7 @@ def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
 def partition [n] 'a (p: a -> bool) (as: [n]a): ?[k].([k]a, [n-k]a) =
   let p' x = if p x then 0 else 1
   let (as', is) = intrinsics.partition 2 p' as
-  let k = is[0]
-  in (as'[0:k], as'[k:n])
+  in (as'[0:is[0]], as'[is[0]:n])
 
 -- | Split an array by two predicates, producing three arrays.
 --
@@ -192,11 +191,9 @@ def partition [n] 'a (p: a -> bool) (as: [n]a): ?[k].([k]a, [n-k]a) =
 def partition2 [n] 'a (p1: a -> bool) (p2: a -> bool) (as: [n]a): ?[k][l].([k]a, [l]a, [n-k-l]a) =
   let p' x = if p1 x then 0 else if p2 x then 1 else 2
   let (as', is) = intrinsics.partition 3 p' as
-  let k = is[0]
-  let l = is[1]
-  in (as'[0:k],
-      as'[k:k+l] :> [l]a,
-      as'[k+l:n] :> [n-k-l]a)
+  in (as'[0:is[0]],
+      as'[is[0]:is[0]+is[1]] :> [is[1]]a,
+      as'[is[0]+is[1]:n] :> [n-is[0]-is[1]]a)
 
 -- | Return `true` if the given function returns `true` for all
 -- elements in the array.
