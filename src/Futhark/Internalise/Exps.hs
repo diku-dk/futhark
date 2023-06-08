@@ -8,12 +8,14 @@ module Futhark.Internalise.Exps (transformProg) where
 import Control.Monad
 import Control.Monad.Reader
 import Data.Bifunctor
+import Data.Foldable (toList)
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -60,8 +62,17 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
       (rettype', retals) <-
-        first zeroExts . unzip . internaliseReturnType (map (map paramDeclType) all_params) rettype
+        first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
+
+      when False . traceM $
+        unlines
+          [ "internaliseValBind",
+            prettyString fname,
+            prettyString rettype,
+            prettyString rettype'
+          ]
+
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
       let num_ctx = length (shapeContext rettype')
@@ -79,7 +90,7 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
             attrs'
             (internaliseFunName fname)
             rettype'
-            (concat all_params)
+            (foldMap toList all_params)
             body'
 
     if null params'
@@ -89,9 +100,10 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
           fname
           fd
           ( shapenames,
-            map declTypeOf $ concat $ concat params',
-            concat all_params,
-            fmap (`zip` map snd rettype') . applyRetType (map fst rettype') (concat all_params)
+            map declTypeOf $ foldMap (foldMap toList) params',
+            foldMap toList all_params,
+            fmap (`zip` map snd rettype')
+              . applyRetType (map fst rettype') (foldMap toList all_params)
           )
 
   case entry of
@@ -106,14 +118,14 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let all_params = map pure shapeparams ++ concat params'
         (entry_rettype, retals) =
-          unzip $ map unzip $ internaliseEntryReturnType (map (map paramDeclType) all_params) rettype
+          unzip $ map unzip $ internaliseEntryReturnType (map (fmap paramDeclType) all_params) rettype
         (entry', opaques) =
           entryPoint
             types
             (baseName ofname)
-            (zip e_params $ map concat params')
+            (zip e_params $ map (foldMap toList) params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
-        args = map (I.Var . I.paramName) $ concat $ concat params'
+        args = map (I.Var . I.paramName) $ foldMap (foldMap toList) params'
 
     addOpaques opaques
 
@@ -143,7 +155,7 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
               (zeroExts (concat entry_rettype))
               (map (shiftRetAls num_ctx) $ concat retals)
         )
-        (shapeparams ++ concat (concat params'))
+        (shapeparams ++ foldMap (foldMap toList) params')
         entry_body
   where
     zeroExts ts = generaliseExtTypes ts ts

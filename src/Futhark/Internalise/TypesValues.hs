@@ -53,10 +53,10 @@ runInternaliseTypeM' exts (InternaliseTypeM m) = evalState m $ TypeState (length
 
 internaliseParamTypes ::
   [E.TypeBase E.Size ()] ->
-  InternaliseM [[[I.TypeBase Shape Uniqueness]]]
+  InternaliseM [[Tree (I.TypeBase Shape Uniqueness)]]
 internaliseParamTypes ts =
   mapM (mapM (mapM mkAccCerts)) . runInternaliseTypeM $
-    mapM (fmap (map (map onType . toList)) . internaliseTypeM mempty) ts
+    mapM (fmap (map (fmap onType)) . internaliseTypeM mempty) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
@@ -92,16 +92,12 @@ internaliseLoopParamType ::
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
-  map fst . fixupKnownTypes ts . map (,RetAls mempty mempty) . concatMap concat
+  map fst . fixupKnownTypes ts . map (,()) . concatMap (concatMap toList)
     <$> internaliseParamTypes [et]
 
 -- Tag every sublist with its offset in corresponding flattened list.
 withOffsets :: Foldable a => [a b] -> [(a b, Int)]
 withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
-
-allEq :: Eq a => [a] -> Bool
-allEq [] = True
-allEq (x : xs) = all (== x) xs
 
 ensureMutuals :: [[(a, RetAls)]] -> [[(a, RetAls)]]
 ensureMutuals xs = zipWith zip (map (map fst) xs) $ chunks (map length xs) (map check als)
@@ -111,49 +107,74 @@ ensureMutuals xs = zipWith zip (map (map fst) xs) $ chunks (map length xs) (map 
       where
         rals' = nubOrd $ rals <> map snd (filter (elem o . otherRetAls . fst) als)
 
+numberFrom :: Int -> Tree a -> Tree (a, Int)
+numberFrom o = flip evalState o . f
+  where
+    f (Pure x) = state $ \i -> (Pure (x, i), i + 1)
+    f (Free xs) = Free <$> traverse f xs
+
+numberTrees :: [Tree a] -> [Tree (a, Int)]
+numberTrees = map (uncurry $ flip numberFrom) . withOffsets
+
+nonuniqueArray :: TypeBase shape Uniqueness -> Bool
+nonuniqueArray t@Array {} = not $ unique t
+nonuniqueArray _ = False
+
+matchTrees :: Tree a -> Tree b -> Maybe (Tree (a, b))
+matchTrees (Pure a) (Pure b) = Just $ Pure (a, b)
+matchTrees (Free as) (Free bs)
+  | length as == length bs =
+      Free <$> zipWithM matchTrees as bs
+matchTrees _ _ = Nothing
+
+subtreesMatching :: Tree a -> Tree b -> [Tree (a, b)]
+subtreesMatching as bs =
+  case matchTrees as bs of
+    Just m -> [m]
+    Nothing -> case bs of
+      Pure _ -> []
+      Free bs' -> foldMap (subtreesMatching as) bs'
+
 inferAliases ::
-  [[I.TypeBase Shape Uniqueness]] ->
-  [[I.TypeBase ExtShape Uniqueness]] ->
+  [Tree (I.TypeBase Shape Uniqueness)] ->
+  [Tree (I.TypeBase ExtShape Uniqueness)] ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 inferAliases all_param_ts all_res_ts =
   ensureMutuals $ map onRes all_res_ts
   where
-    nonuniqueArray t@Array {} = not $ unique t
-    nonuniqueArray _ = False
-    unAlias t als
-      | Array {} <- t, not $ unique t = als
-      | otherwise = []
-    doAlias res_ts (param_ts, o)
-      | [res_t] <- res_ts =
-          [unAlias res_t $ map snd (possible res_t $ zip param_ts [o ..])]
-      | length res_ts == length param_ts,
-        Just True <- allEq <$> zipWithM canComeFrom param_ts res_ts =
-          zipWith unAlias res_ts $ zipWith unAlias param_ts $ map pure [o ..]
-      | otherwise =
-          []
+    all_res_ts' = numberTrees all_res_ts
+    all_param_ts' = numberTrees all_param_ts
+    all_res_ts_flat = foldMap toList all_res_ts'
+    all_param_ts_flat = foldMap toList all_param_ts'
+    aliasable_param_ts = filter (all $ nonuniqueArray . fst) all_param_ts'
+    aliasable_res_ts = filter (all $ nonuniqueArray . fst) all_res_ts'
+    possible res_t t =
+      nonuniqueArray res_t && nonuniqueArray t && elemType res_t == elemType t
+    onRes (Pure res_t) =
+      -- Necessarily a non-array.
+      [(res_t, RetAls mempty mempty)]
+    onRes (Free res_ts) =
+      [ if nonuniqueArray res_t
+          then (res_t, RetAls pals rals)
+          else (res_t, mempty)
+        | (res_t, pals, rals) <- zip3 (toList (Free res_ts)) palss ralss
+      ]
       where
-        canComeFrom (Array pt1 shape1 _) (Array pt2 shape2 _)
-          | pt1 == pt2 =
-              Just $ shapeRank shape2 - shapeRank shape1
-        canComeFrom _ _ = Nothing
-        possible res_t =
-          filter (isJust . (`canComeFrom` res_t) . fst)
-            . filter (nonuniqueArray . fst)
-    infer ts all_ts =
-      map concat . L.transpose . (map (const []) ts :) . map (doAlias ts) $
-        withOffsets all_ts
-    pclasses res_ts = infer res_ts $ map staticShapes all_param_ts
-    rclasses res_ts = infer res_ts all_res_ts
-    onRes res_ts =
-      zip res_ts $ zipWith RetAls (pclasses res_ts) (rclasses res_ts)
+        reorder [] = replicate (length (Free res_ts)) []
+        reorder xs = L.transpose xs
+        infer ts =
+          reorder . map (toList . fmap (snd . snd)) $
+            foldMap (subtreesMatching (Free res_ts)) ts
+        palss = infer aliasable_param_ts
+        ralss = infer aliasable_res_ts
 
 internaliseReturnType ::
-  [[I.TypeBase Shape Uniqueness]] ->
+  [Tree (I.TypeBase Shape Uniqueness)] ->
   E.StructRetType ->
   [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
 internaliseReturnType paramts (E.RetType dims et) ts =
-  fixupKnownTypes ts . concat . inferAliases paramts . map toList $
+  fixupKnownTypes ts . concat . inferAliases paramts $
     runInternaliseTypeM' dims (internaliseTypeM exts et)
   where
     exts = M.fromList $ zip dims [0 ..]
@@ -161,7 +182,7 @@ internaliseReturnType paramts (E.RetType dims et) ts =
 -- | As 'internaliseReturnType', but returns components of a top-level
 -- tuple type piecemeal.
 internaliseEntryReturnType ::
-  [[I.TypeBase Shape Uniqueness]] ->
+  [Tree (I.TypeBase Shape Uniqueness)] ->
   E.StructRetType ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 internaliseEntryReturnType paramts (E.RetType dims et) =
@@ -169,7 +190,7 @@ internaliseEntryReturnType paramts (E.RetType dims et) =
         case E.isTupleRecord et of
           Just ets | not $ null ets -> ets
           _ -> [et]
-   in map concat $ chunkLike et' $ inferAliases paramts $ foldMap (map toList) et'
+   in map concat $ chunkLike et' $ inferAliases paramts $ concat et'
   where
     exts = M.fromList $ zip dims [0 ..]
 
@@ -217,7 +238,10 @@ internaliseDim exts d =
 -- monad.
 --
 -- The important thing is that we use it to represent the original
--- structure of arrays-of-tuples, as this matters for aliasing.
+-- structure of arrayss, as this matters for aliasing.  Each 'Free'
+-- constructor corresponds to an array dimension.  Only non-arrays
+-- have a 'Pure' at the top level.
+--
 -- E.g. @([]i32,[]i32)@ and @[](i32,i32)@ both have the same core
 -- representation, but their implications for aliasing are different.
 -- We use this when inferring the 'RetAls' during internalisation.

@@ -2,6 +2,7 @@ module Futhark.Internalise.TypesValuesTests (tests) where
 
 import Control.Monad.Free (Free (..))
 import Data.Map qualified as M
+import Data.String (fromString)
 import Futhark.IR.Syntax hiding (Free)
 import Futhark.IR.SyntaxTests ()
 import Futhark.Internalise.TypesValues
@@ -90,55 +91,71 @@ inferAliasesTests =
   testGroup
     "inferAliases"
     [ mkTest
-        [["[0i64]i32"]]
+        [Free [Pure "[0i64]i32"]]
+        [Free [Pure "[?0]i32"]]
         [[("[?0]i32", RetAls [0] [0])]],
       mkTest
-        [["[0i64]i32", "[0i64]i32"]]
-        [ [ ("[?0]i32", RetAls [0] [0]),
-            ("[?0]i32", RetAls [1] [1])
+        [Free [Pure "[0i64]i32", Pure "[0i64]i32"]]
+        [Free [Pure "[0i64]i32", Pure "[0i64]i32"]]
+        [ [ ("[0i64]i32", RetAls [0] [0]),
+            ("[0i64]i32", RetAls [1] [1])
+          ]
+        ],
+      -- Basically zip.
+      mkTest
+        [Free [Pure "[n_0]i32"], Free [Pure "[n_0]i32"]]
+        [Free [Pure "[n_0]i32", Pure "[n_0]i32"]]
+        [ [ ("[n_0]i32", RetAls [] [0]),
+            ("[n_0]i32", RetAls [] [1])
           ]
         ],
       mkTest
-        [["[0i64]i32"], ["[0i64]i32", "[0i64]i32"]]
+        [Free [Pure "[0i64]i32"], Free [Pure "[0i64]i32", Pure "[0i64]i32"]]
+        [Free [Pure "[?0]i32", Pure "[?0]i32"]]
         [ [ ("[?0]i32", RetAls [1] [0]),
             ("[?0]i32", RetAls [2] [1])
           ]
         ],
       mkTest
-        [["[0i64][1i64]i32", "[0i64][1i64]i32"]]
+        [Free [Free [Pure "[0i64][1i64]i32", Pure "[0i64][1i64]i32"]]]
+        [Free [Pure "[?0]i32", Pure "[?0]i32"]]
         [ [ ("[?0]i32", RetAls [0] [0]),
             ("[?0]i32", RetAls [1] [1])
           ]
         ],
       mkTest
-        [["[0i64][1i64]i32", "[0i64]i32"]]
-        [ [ ("[?0]i32", RetAls [] [0]),
-            ("[?0]i32", RetAls [] [1])
-          ]
-        ],
-      mkTest
-        [["[n_0][n_1]i32", "[n_0][n_1]i32"]]
+        [Free [Free [Pure "[n_0][n_1]i32"], Free [Pure "[n_0][n_1]i32"]]]
+        [Free [Pure "[?0]i32"], Free [Pure "[?0]i32"]]
         [ [("[?0]i32", RetAls [0, 1] [0, 1])],
           [("[?0]i32", RetAls [0, 1] [0, 1])]
         ],
       mkTest
-        [["*[n_0][n_1]i32"], ["[n_2]i64"], ["[n_3]i64"]]
+        [ Free [Free [Pure "*[n_0][n_1]i32"]],
+          Free [Pure "[n_2]i64"],
+          Free [Pure "[n_3]i64"]
+        ]
+        [Free [Free [Pure "*[n_0][n_1]i32"]]]
         [[("*[n_0][n_1]i32", RetAls [] [])]],
       mkTest
-        [["[n_0]i32", "[n_0][n_1]i32"]]
-        [[("[n_0]i32", RetAls [0, 1] [0])]],
+        [Free [Pure "[n_0]i32", Free [Free [Pure "[n_0][n_1]i32"]]]]
+        [Free [Pure "[n_0]i32"]]
+        [[("[n_0]i32", RetAls [1] [0])]],
       mkTest
         []
-        [ [("[n_0]i32", RetAls [] [0, 2]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
-          [("[n_0]i32", RetAls [] [0, 1, 2])]
+        [ Free [Pure "[n_0]i32", Free [Pure "[n_0][n_1]i32"]],
+          Free [Pure "[n_0]i32"]
+        ]
+        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
+          [("[n_0]i32", RetAls [] [1, 2])]
         ]
     ]
   where
-    mkTest all_param_ts expected =
-      testCase (prettyString (all_param_ts, all_res_ts)) $
-        inferAliases all_param_ts all_res_ts @?= expected
-      where
-        all_res_ts = map (map fst) expected
+    mkTest all_param_ts all_res_ts expected =
+      testCase (show all_param_ts <> " " <> show all_res_ts) $
+        inferAliases
+          (map (fmap fromString) all_param_ts)
+          (map (fmap fromString) all_res_ts)
+          @?= expected
 
 tests :: TestTree
 tests =

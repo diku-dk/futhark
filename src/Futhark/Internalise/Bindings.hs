@@ -12,8 +12,10 @@ module Futhark.Internalise.Bindings
 where
 
 import Control.Monad
+import Control.Monad.Free (Free (..))
 import Control.Monad.Reader
 import Data.Bifunctor
+import Data.Foldable (toList)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.SOACS qualified as I
@@ -33,10 +35,15 @@ internaliseAttr (E.AttrComp f attrs _) =
 internaliseAttrs :: [E.AttrInfo VName] -> InternaliseM I.Attrs
 internaliseAttrs = fmap (mconcat . map I.oneAttr) . mapM internaliseAttr
 
+treeLike :: Tree a -> [b] -> Tree b
+treeLike (Pure _) [b] = Pure b
+treeLike (Pure _) _ = error "treeLike: invalid input"
+treeLike (Free ls) bs = Free $ zipWith treeLike ls (chunks (map length ls) bs)
+
 bindingFParams ::
   [E.TypeParam] ->
   [E.Pat] ->
-  ([I.FParam I.SOACS] -> [[[I.FParam I.SOACS]]] -> InternaliseM a) ->
+  ([I.FParam I.SOACS] -> [[Tree (I.FParam I.SOACS)]] -> InternaliseM a) ->
   InternaliseM a
 bindingFParams tparams params m = do
   flattened_params <- mapM flattenPat params
@@ -48,7 +55,7 @@ bindingFParams tparams params m = do
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
-  bindingFlatPat params_idents (concat $ concat params_ts) $ \valueparams -> do
+  bindingFlatPat params_idents (concatMap (concatMap toList) params_ts) $ \valueparams -> do
     let (certparams, valueparams') =
           first concat $ unzip $ map fixAccParams valueparams
         all_params = certparams ++ shape_params ++ concat valueparams'
@@ -56,6 +63,7 @@ bindingFParams tparams params m = do
       substitutingVars shape_subst $ do
         let values_grouped_by_params = chunks num_param_idents valueparams'
             types_grouped_by_params = chunks num_param_idents params_ts
+
         m (certparams ++ shape_params) $
           zipWith chunkValues types_grouped_by_params values_grouped_by_params
   where
@@ -67,9 +75,14 @@ bindingFParams tparams params m = do
       )
     fixAccParam p = (Nothing, p)
 
-    chunkValues :: [[[I.DeclType]]] -> [[I.FParam I.SOACS]] -> [[I.FParam I.SOACS]]
-    chunkValues ts vs =
-      chunkLike (concat ts) (concat vs)
+    chunkValues ::
+      [[Tree (I.TypeBase I.Shape Uniqueness)]] ->
+      [[I.FParam I.SOACS]] ->
+      [Tree (I.FParam I.SOACS)]
+    chunkValues tss vss =
+      concat $ zipWith f tss vss
+      where
+        f ts vs = zipWith treeLike ts (chunks (map length ts) vs)
 
 bindingLoopParams ::
   [E.TypeParam] ->
@@ -127,7 +140,7 @@ processFlatPat x y = processFlatPat' [] x y
       let (ps, ts') = handleMapping attrs ts rs
        in (I.Param attrs r t : ps, ts')
     handleMapping _ [] _ =
-      error $ "handleMapping: insufficient identifiers in pattern." ++ show (x, y)
+      error $ "handleMapping: insufficient identifiers in pattern.\n" ++ show (x, y)
 
     internaliseBindee :: E.Ident -> InternaliseM [VName]
     internaliseBindee bindee = do
