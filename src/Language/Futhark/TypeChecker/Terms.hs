@@ -268,19 +268,18 @@ sizeFree ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 sizeFree tloc expKiller orig_t = do
-  scope <- asks termScope
-  (orig_t', m) <- runStateT (to_be_replacedM >> onType (M.keysSet $ scopeVtable scope) orig_t) mempty
-  pure (orig_t', map snd $ snd m)
+  (orig_t', exts) <- runReaderT (to_be_replaced orig_t $ onType orig_t) mempty `runStateT` mempty
+  pure (orig_t', exts)
   where
     same_exp e1 e2
       | Just es <- similarExps e1 e2 =
           all (uncurry same_exp) es
       | otherwise = False
 
-    witnessed_exps = execState (traverseDims onDim orig_t) mempty
+    witnessed_exps t = execState (traverseDims onDim t) mempty
       where
-        onDim _ _ (SizeExpr e) = modify (e :)
-        onDim _ _ _ = error "AnySize in sizeFree"
+        onDim _ PosImmediate (SizeExpr e) = modify (e :)
+        onDim _ _ _ = pure ()
     subExps e
       | Just e' <- stripExp e = subExps e'
       | otherwise = astMap mapper e `execState` mempty
@@ -293,7 +292,7 @@ sizeFree tloc expKiller orig_t = do
         mapper = identityMapper {mapOnExp}
     depends a b = any (same_exp b) $ subExps a
     top_wit =
-      topologicalSort depends witnessed_exps
+      topologicalSort depends . witnessed_exps
 
     lookReplacement e repl = snd <$> find (same_exp e . fst) repl
     expReplace mapping e
@@ -302,55 +301,51 @@ sizeFree tloc expKiller orig_t = do
       where
         mapper = identityMapper {mapOnExp = pure . expReplace mapping}
 
-    -- using StateT ([(Exp, Exp)], [(Exp, VName)]) TermTypeM a
-    to_be_replacedM = mapM_ replacing $ reverse top_wit
-      where
-        replacing e = do
-          e' <- gets $ (`expReplace` e) . fst
-          case expKiller e' of
-            Nothing -> modify $ first ((e, e') :)
-            Just cause -> do
-              vn <- lift $ newRigidDim tloc (RigidOutOfScope (srclocOf e) cause) "d"
-              modify $ bimap ((e, sizeVar (qualName vn) (srclocOf e)) :) ((e, vn) :)
+    -- using ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) a
 
-    onScalar scope (Record fs) =
-      Record <$> traverse (onType scope) fs
-    onScalar scope (Sum cs) =
-      Sum <$> (traverse . traverse) (onType scope) cs
-    onScalar scope (Arrow as argName d argT (RetType dims retT)) = do
-      argT' <- onType scope argT
-      retT' <- onType (scope `S.union` argset) retT
-      let get_linked (repls, freed) =
-            let (rf, rl) = partition (S.disjoint intros . fvVars . freeInExp . fst) freed
-             in (rl, (repls, rf))
-      rl <- state get_linked
-      let dims' = dims <> map snd rl
-      pure $ Arrow as argName d argT' (RetType dims' retT')
+    replacing e = do
+      e' <- asks (`expReplace` e)
+      case expKiller e' of
+        Nothing -> pure e'
+        Just cause -> do
+          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (srclocOf e) cause) "d"
+          modify (vn :)
+          pure $ sizeVar (qualName vn) (srclocOf e)
+
+    to_be_replaced t m' = do
+      foldl f m' $ top_wit t
       where
-        -- to check : completeness of the filter
-        intros = argset `S.difference` scope
-        argset =
-          fvVars (freeInType argT)
-            <> case argName of
-              Unnamed -> mempty
-              Named vn -> S.singleton vn
-    onScalar scope (TypeVar as u v args) =
+        f m e = do
+          e' <- replacing e
+          local ((e, e') :) m
+
+    onScalar (Record fs) =
+      Record <$> traverse onType fs
+    onScalar (Sum cs) =
+      Sum <$> (traverse . traverse) onType cs
+    onScalar (Arrow as argName d argT (RetType dims retT)) = do
+      argT' <- onType argT
+      old_bound <- get
+      retT' <- to_be_replaced retT $ onType retT
+      rl <- state $ partition (`elem` old_bound)
+      let dims' = dims <> rl
+      pure $ Arrow as argName d argT' (RetType dims' retT')
+    onScalar (TypeVar as u v args) =
       TypeVar as u v <$> mapM onTypeArg args
       where
         onTypeArg (TypeArgDim d) = TypeArgDim <$> onSize d
-        onTypeArg (TypeArgType ty) = TypeArgType <$> onType scope ty
-    onScalar _ (Prim pt) = pure $ Prim pt
+        onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
+    onScalar (Prim pt) = pure $ Prim pt
 
     onType ::
-      S.Set VName ->
       TypeBase Size as ->
-      StateT ([(Exp, Exp)], [(Exp, VName)]) TermTypeM (TypeBase Size as) -- Precise the typing, else haskell refuse it
-    onType scope (Array as u shape scalar) =
-      Array as u <$> traverse onSize shape <*> onScalar scope scalar
-    onType scope (Scalar ty) =
-      Scalar <$> onScalar scope ty
+      ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) (TypeBase Size as) -- Precise the typing, else haskell refuse it
+    onType (Array as u shape scalar) =
+      Array as u <$> traverse onSize shape <*> onScalar scalar
+    onType (Scalar ty) =
+      Scalar <$> onScalar ty
 
-    onSize (SizeExpr e) = gets $ SizeExpr . fromJust . lookReplacement e . fst
+    onSize (SizeExpr e) = SizeExpr <$> replacing e
     onSize AnySize {} = error "onSize: AnySize"
 
 -- Used to remove unknown sizes from function body types before we

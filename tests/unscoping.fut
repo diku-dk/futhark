@@ -1,5 +1,5 @@
 -- ==
--- error: bad programmer
+-- error: Cannot apply "bar" to "xs"
 
 def foo n =
   let m = n+1
