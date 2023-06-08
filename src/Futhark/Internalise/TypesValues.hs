@@ -144,12 +144,8 @@ inferAliases all_param_ts all_res_ts =
   where
     all_res_ts' = numberTrees all_res_ts
     all_param_ts' = numberTrees all_param_ts
-    all_res_ts_flat = foldMap toList all_res_ts'
-    all_param_ts_flat = foldMap toList all_param_ts'
     aliasable_param_ts = filter (all $ nonuniqueArray . fst) all_param_ts'
     aliasable_res_ts = filter (all $ nonuniqueArray . fst) all_res_ts'
-    possible res_t t =
-      nonuniqueArray res_t && nonuniqueArray t && elemType res_t == elemType t
     onRes (Pure res_t) =
       -- Necessarily a non-array.
       [(res_t, RetAls mempty mempty)]
