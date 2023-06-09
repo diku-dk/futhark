@@ -681,8 +681,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   where
     applyOp ret ext fname' x y =
       mkApply
-        (mkApply fname' [(Observe, snd (unInfo d1), x)] (AppRes ret mempty))
-        [(Observe, snd (unInfo d2), y)]
+        (mkApply fname' [(Observe, unInfo d1, x)] (AppRes ret mempty))
+        [(Observe, unInfo d2, y)]
         (AppRes ret ext)
 
     makeVarParam arg = do

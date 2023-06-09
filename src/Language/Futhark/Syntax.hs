@@ -733,8 +733,8 @@ data AppExpBase f vn
   | BinOp
       (QualName vn, SrcLoc)
       (f PatType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
       SrcLoc
   | LetWith
       (IdentBase f vn)
