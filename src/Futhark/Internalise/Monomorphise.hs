@@ -530,6 +530,7 @@ transformTypeExp (TESum cs loc) =
   TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
 transformTypeExp (TEDim dims te loc) =
   TEDim dims <$> transformTypeExp te <*> pure loc
+transformTypeExp TERefine {} = error "TERefine not implemented in transformTypeExp"
 
 -- This carries out record replacements in the alias information of a type.
 --

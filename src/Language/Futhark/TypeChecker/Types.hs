@@ -461,6 +461,7 @@ evalTypeExp ote@TEApply {} = do
           <+> pretty a
           <+> "not valid for a type parameter"
           <+> pretty p <> "."
+evalTypeExp TERefine {} = error "TERefine not implemented in evalTypeExp"
 
 -- | Check a type expression, producing:
 --
@@ -554,6 +555,7 @@ checkForDuplicateNamesInType = check mempty
     check _ TEArray {} = pure ()
     check _ TEVar {} = pure ()
     check seen (TEParens te _) = check seen te
+    check _ TERefine {} = error "TERefine not implemented in checkForDuplicateNamesInType"
 
 -- | @checkTypeParams ps m@ checks the type parameters @ps@, then
 -- invokes the continuation @m@ with the checked parameters, while

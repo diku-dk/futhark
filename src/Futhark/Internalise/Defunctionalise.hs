@@ -173,6 +173,7 @@ replaceStaticValSizes globals orig_substs sv =
       TEParens (onTypeExp substs te) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
+    onTypeExp _ TERefine {} = error "TERefine not implemented in replaceStaticValSizes"
 
     onEnv substs =
       M.fromList
