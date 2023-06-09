@@ -13,6 +13,7 @@ module Futhark.Util
     maxinum,
     chunk,
     chunks,
+    chunkLike,
     dropAt,
     takeLast,
     dropLast,
@@ -132,6 +133,12 @@ chunks [] _ = []
 chunks (n : ns) xs =
   let (bef, aft) = splitAt n xs
    in bef : chunks ns aft
+
+-- | @chunkLike xss ys@ chunks the elements of @ys@ to match the
+-- elements of @xss@.  The sum of the lengths of the sublists of @xss@
+-- must match the length of @ys@.
+chunkLike :: [[a]] -> [b] -> [[b]]
+chunkLike as = chunks (map length as)
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
