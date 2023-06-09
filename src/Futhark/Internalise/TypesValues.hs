@@ -105,7 +105,7 @@ ensureMutuals xs = zipWith zip (map (map fst) xs) $ chunks (map length xs) (map 
     als = zip (concatMap (map snd) xs) [0 ..]
     check (RetAls pals rals, o) = RetAls pals rals'
       where
-        rals' = nubOrd $ rals <> map snd (filter (elem o . otherRetAls . fst) als)
+        rals' = nubOrd $ rals <> map snd (filter (elem o . otherAls . fst) als)
 
 numberFrom :: Int -> Tree a -> Tree (a, Int)
 numberFrom o = flip evalState o . f
@@ -135,6 +135,7 @@ subtreesMatching as bs =
       Pure _ -> []
       Free bs' -> foldMap (subtreesMatching as) bs'
 
+-- See Note [Alias Inference].
 inferAliases ::
   [Tree (I.TypeBase Shape Uniqueness)] ->
   [Tree (I.TypeBase ExtShape Uniqueness)] ->
@@ -236,11 +237,7 @@ internaliseDim exts d =
 -- The important thing is that we use it to represent the original
 -- structure of arrayss, as this matters for aliasing.  Each 'Free'
 -- constructor corresponds to an array dimension.  Only non-arrays
--- have a 'Pure' at the top level.
---
--- E.g. @([]i32,[]i32)@ and @[](i32,i32)@ both have the same core
--- representation, but their implications for aliasing are different.
--- We use this when inferring the 'RetAls' during internalisation.
+-- have a 'Pure' at the top level.  See Note [Alias Inference].
 type Tree = Free []
 
 internaliseTypeM ::
@@ -356,3 +353,50 @@ internalisePrimValue (E.SignedValue v) = I.IntValue v
 internalisePrimValue (E.UnsignedValue v) = I.IntValue v
 internalisePrimValue (E.FloatValue v) = I.FloatValue v
 internalisePrimValue (E.BoolValue b) = I.BoolValue b
+
+-- Note [Alias Inference]
+--
+-- The core language requires us to precisely indicate the aliasing of
+-- function results (the RetAls type).  This is a problem when coming
+-- from the source language, where it is implicit: a non-unique
+-- function return value aliases every function argument.  The problem
+-- now occurs because the core language uses a different value
+-- representation than the source language - in particular, we do not
+-- have arrays of tuples. E.g. @([]i32,[]i32)@ and @[](i32,i32)@ both
+-- have the same core representation, but their implications for
+-- aliasing are different.
+--
+--
+-- To understand why this is a problem, consider a source program
+--
+--     def id (x: [](i32,i32)) = x
+--
+--     def f n =
+--       let x = replicate n (0,0)
+--       let x' = id x
+--       let x'' = x' with [0] = (1,1)
+--       in x''
+--
+-- With the core language value representation, it will be this:
+--
+--   def id (x1: []i32) (x2: []i32) = (x1,x2)
+--
+--   def f n =
+--     let x1 = replicate n 0
+--     let x2 = replicate n 0
+--     let (x1', x2') = id x1 x2
+--     let x1'' = x1' with [0] = 1
+--     let x2'' = x2' with [0] = 1
+--     in (x1'', x2'')
+--
+-- The results of 'id' alias *both* of the arguments, so x1' aliases
+-- x1 and x2, and x2' also aliases x1 and x2.  This means that the
+-- first with-expression will consume all of x1/x2/x1'/x2', and then
+-- the second with-expression is a type error, as it references a
+-- consumed variable.
+--
+-- Our solution is to deduce the possible aliasing such that
+-- components that originally constituted the same array-of-tuples are
+-- not aliased.  The main complexity is that we have to keep
+-- information on the original (source) type structure around for a
+-- while.  This is done with the Tree type.
