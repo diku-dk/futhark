@@ -114,7 +114,7 @@ mapExpM tv (Match ses cases defbody (MatchDec ts s)) =
 mapExpM tv (Apply fname args ret loc) = do
   args' <- forM args $ \(arg, d) ->
     (,) <$> mapOnSubExp tv arg <*> pure d
-  Apply fname args' <$> mapM (mapOnRetType tv) ret <*> pure loc
+  Apply fname args' <$> mapM (bitraverse (mapOnRetType tv) pure) ret <*> pure loc
 mapExpM tv (BasicOp (Index arr slice)) =
   BasicOp
     <$> ( Index
@@ -308,8 +308,9 @@ walkExpM tv (Match ses cases defbody (MatchDec ts _)) = do
   mapM_ (walkOnBody tv mempty . caseBody) cases
   walkOnBody tv mempty defbody
   mapM_ (walkOnBranchType tv) ts
-walkExpM tv (Apply _ args ret _) =
-  mapM_ (walkOnSubExp tv . fst) args >> mapM_ (walkOnRetType tv) ret
+walkExpM tv (Apply _ args ret _) = do
+  mapM_ (walkOnSubExp tv . fst) args
+  mapM_ (walkOnRetType tv . fst) ret
 walkExpM tv (BasicOp (Index arr slice)) =
   walkOnVName tv arr >> traverse_ (walkOnSubExp tv) slice
 walkExpM tv (BasicOp (Update _ arr slice se)) =

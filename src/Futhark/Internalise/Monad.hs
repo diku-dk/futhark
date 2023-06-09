@@ -12,7 +12,6 @@ module Futhark.Internalise.Monad
     addOpaques,
     addFunDef,
     lookupFunction,
-    lookupFunction',
     lookupConst,
     bindFunction,
     bindConstant,
@@ -36,7 +35,7 @@ type FunInfo =
   ( [VName],
     [DeclType],
     [FParam SOACS],
-    [(SubExp, Type)] -> Maybe [DeclExtType]
+    [(SubExp, Type)] -> Maybe [(DeclExtType, RetAls)]
   )
 
 type FunTable = M.Map VName FunInfo
@@ -145,11 +144,8 @@ addOpaques ts = modify $ \s ->
 addFunDef :: FunDef SOACS -> InternaliseM ()
 addFunDef fd = modify $ \s -> s {stateFuns = fd : stateFuns s}
 
-lookupFunction' :: VName -> InternaliseM (Maybe FunInfo)
-lookupFunction' fname = gets $ M.lookup fname . stateFunTable
-
 lookupFunction :: VName -> InternaliseM FunInfo
-lookupFunction fname = maybe bad pure =<< lookupFunction' fname
+lookupFunction fname = maybe bad pure =<< gets (M.lookup fname . stateFunTable)
   where
     bad = error $ "Internalise.lookupFunction: Function '" ++ prettyString fname ++ "' not found."
 
@@ -176,7 +172,7 @@ bindConstant cname fd = do
       letBindNames [cname] $ BasicOp $ SubExp se
     ses -> do
       let substs =
-            drop (length (shapeContext (funDefRetType fd))) ses
+            drop (length (shapeContext (map fst (funDefRetType fd)))) ses
       modify $ \s ->
         s
           { stateConstSubsts = M.insert cname substs $ stateConstSubsts s

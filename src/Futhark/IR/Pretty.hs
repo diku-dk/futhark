@@ -261,6 +261,16 @@ instance PrettyRep rep => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
     "case" <+> ppTuple' (map (maybe "_" pretty) vs) <+> "->" <+> maybeNest b
 
+prettyRet :: Pretty t => (t, RetAls) -> Doc a
+prettyRet (t, RetAls pals rals)
+  | pals == mempty,
+    rals == mempty =
+      pretty t
+  | otherwise =
+      pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
+  where
+    pl = brackets . commasep . map pretty
+
 instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     "if"
@@ -296,7 +306,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> pretty (nameToString fname)
         <> apply (map (align . prettyArg) args)
       </> colon
-      <+> braces (commasep $ map pretty ret)
+      <+> braces (commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -379,7 +389,7 @@ instance PrettyRep rep => Pretty (FunDef rep) where
       fun
         </> indent 2 (pretty (nameToString name))
         <+> parens (commastack $ map pretty fparams)
-        </> indent 2 (colon <+> align (ppTupleLines' $ map pretty rettype))
+        </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
         <+> nestedBlock "{" "}" (pretty body)
     where

@@ -589,6 +589,9 @@ class FixExt t => ExtTyped t where
 instance ExtTyped ExtType where
   extTypeOf = id
 
+instance ExtTyped DeclExtType where
+  extTypeOf = fromDecl . declExtTypeOf
+
 -- | Typeclass for things that contain 'DeclExtType's.
 class FixExt t => DeclExtTyped t where
   declExtTypeOf :: t -> DeclExtType

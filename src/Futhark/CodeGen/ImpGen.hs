@@ -684,7 +684,7 @@ compileFunDef types (FunDef entry _ fname rettype params body) =
       Just (x, y, z) -> (Just x, Just y, Just z)
     compile = do
       (inparams, arrayds, args) <- compileInParams types params params_entry
-      (results, outparams, dests) <- compileOutParams types rettype ret_entry
+      (results, outparams, dests) <- compileOutParams types (map fst rettype) ret_entry
       addFParams params
       addArrays arrayds
 

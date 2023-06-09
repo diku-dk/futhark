@@ -15,6 +15,7 @@ module Futhark.IR.Rephrase
   )
 where
 
+import Data.Bitraversable
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 
@@ -46,7 +47,7 @@ rephraseFunDef :: Monad m => Rephraser m from to -> FunDef from -> m (FunDef to)
 rephraseFunDef rephraser fundec = do
   body' <- rephraseBody rephraser $ funDefBody fundec
   params' <- mapM (rephraseParam $ rephraseFParamDec rephraser) $ funDefParams fundec
-  rettype' <- mapM (rephraseRetType rephraser) $ funDefRetType fundec
+  rettype' <- mapM (bitraverse (rephraseRetType rephraser) pure) $ funDefRetType fundec
   pure fundec {funDefBody = body', funDefParams = params', funDefRetType = rettype'}
 
 -- | Rephrase an expression.

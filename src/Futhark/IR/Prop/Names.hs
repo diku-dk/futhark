@@ -239,7 +239,7 @@ instance
   where
   freeIn' (FunDef _ _ _ rettype params body) =
     fvBind (namesFromList $ map paramName params) $
-      freeIn' rettype <> freeIn' params <> freeIn' body
+      foldMap (freeIn' . fst) rettype <> freeIn' params <> freeIn' body
 
 instance
   ( FreeDec (ExpDec rep),

@@ -279,6 +279,9 @@ instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemArray pt shape u _) = Array pt shape u
   declExtTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
 
+instance FixExt ret => ExtTyped (MemInfo ExtSize Uniqueness ret) where
+  extTypeOf = fromDecl . declExtTypeOf
+
 instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
@@ -1070,7 +1073,7 @@ expReturns e@(DoLoop merge _ _) = do
     isMergeVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
-  pure $ map funReturnsToExpReturns ret
+  pure $ map (funReturnsToExpReturns . fst) ret
 expReturns (Match _ _ _ (MatchDec ret _)) =
   pure $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =

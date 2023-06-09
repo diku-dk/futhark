@@ -47,7 +47,7 @@ instance ToExp v => ToExp (PrimExp v) where
   toExp (FunExp h args t) =
     Apply (nameFromString h)
       <$> args'
-      <*> pure [primRetType t]
+      <*> pure [(primRetType t, mempty)]
       <*> pure (Safe, mempty, [])
     where
       args' = zip <$> mapM (toSubExp "apply_arg") args <*> pure (repeat Observe)
@@ -78,7 +78,7 @@ primExpFromExp f (BasicOp (SubExp se)) =
   primExpFromSubExpM f se
 primExpFromExp f (Apply fname args ts _)
   | isBuiltInFunction fname,
-    [Prim t] <- map declExtTypeOf ts =
+    [Prim t] <- map (declExtTypeOf . fst) ts =
       FunExp (nameToString fname) <$> mapM (primExpFromSubExpM f . fst) args <*> pure t
 primExpFromExp _ _ = fail "Not a PrimExp"
 
