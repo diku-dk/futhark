@@ -173,8 +173,8 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           ( BinOp
               (qualName (intrinsicVar "-"), mempty)
               sizeBinOpInfo
-              (j, Info (i64, Nothing))
-              (i, Info (i64, Nothing))
+              (j, Info Nothing)
+              (i, Info Nothing)
               mempty
           )
         $ Info
@@ -557,8 +557,8 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
           ( BinOp
               (qualName (intrinsicVar "-"), mempty)
               sizeBinOpInfo
-              (j, Info (i64, Nothing))
-              (i, Info (i64, Nothing))
+              (j, Info Nothing)
+              (i, Info Nothing)
               mempty
           )
         $ Info
@@ -580,16 +580,16 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, p1_t, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
-  (_, p2_t, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
+  (_, _, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
+  (_, _, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
 
   pure $
     AppExp
       ( BinOp
           (op', oploc)
           (Info ftype)
-          (argExp e1_arg, Info (toStruct p1_t, p1_ext))
-          (argExp e2_arg, Info (toStruct p2_t, p2_ext))
+          (argExp e1_arg, Info p1_ext)
+          (argExp e2_arg, Info p2_ext)
           loc
       )
       (Info (AppRes rt' retext))
@@ -1385,7 +1385,7 @@ causalityCheck binding_body = do
             modify (new_known <>)
       onExp
         known
-        e@(AppExp (BinOp (f, floc) ft (x, Info (_, xp)) (y, Info (_, yp)) _) (Info res)) = do
+        e@(AppExp (BinOp (f, floc) ft (x, Info xp) (y, Info yp) _) (Info res)) = do
           args_known <-
             collectingNewKnown $ sequencePoint known x y $ catMaybes [xp, yp]
           void $ onExp (args_known <> known) (Var f ft floc)
@@ -1467,8 +1467,9 @@ localChecks = void . check
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e@(AppExp (BinOp (QualName [] v, _) _ (_, Info (Array {}, _)) _ loc) _)
+    check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
       | baseName v == "==",
+        Array {} <- typeOf x,
         baseTag v <= maxIntrinsicTag = do
           warn loc $
             textwrap
