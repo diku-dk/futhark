@@ -413,10 +413,10 @@ instance Traversable Case where
 -- | Information about the possible aliases of a function result.
 data RetAls = RetAls
   { -- | Which of the parameters may be aliased, numbered from zero.
-    paramAliases :: [Int],
+    paramAls :: [Int],
     -- | Which of the other results may be aliased, numbered from
     -- zero.  This must be a reflexive relation.
-    otherRetAls :: [Int]
+    otherAls :: [Int]
   }
   deriving (Eq, Ord, Show)
 
