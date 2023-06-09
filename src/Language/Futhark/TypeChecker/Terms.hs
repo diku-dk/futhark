@@ -539,6 +539,10 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
       (_, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
             warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinus end'' start'
+      (_, Nothing, ToInclusive end'')
+        -- No stride means we assume a stride of one.
+        | Scalar (Prim (Signed Int64)) <- end_t ->
+            warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinusInc end'' start'
       (Just 1, Just (Just 2), ToInclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
             warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
@@ -551,19 +555,21 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
 
   pure $ AppExp (Range start' maybe_step' end' loc) (Info res)
   where
-    sizeMinus j i =
-      SizeExpr
-        $ AppExp
-          ( BinOp
-              (qualName (intrinsicVar "-"), mempty)
-              sizeBinOpInfo
-              (j, Info Nothing)
-              (i, Info Nothing)
-              mempty
-          )
-        $ Info
-        $ AppRes i64 []
     i64 = Scalar $ Prim $ Signed Int64
+    mkBinOp op t x y =
+      AppExp
+        ( BinOp
+            (qualName (intrinsicVar op), mempty)
+            sizeBinOpInfo
+            (x, Info Nothing)
+            (y, Info Nothing)
+            mempty
+        )
+        (Info $ AppRes t [])
+    mkSub = mkBinOp "-" i64
+    mkAdd = mkBinOp "+" i64
+    sizeMinus j i = SizeExpr $ j `mkSub` i
+    sizeMinusInc j i = SizeExpr $ (j `mkSub` i) `mkAdd` sizeInteger 1 mempty
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
 checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
