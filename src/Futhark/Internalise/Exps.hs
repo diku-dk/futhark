@@ -15,7 +15,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -64,14 +63,6 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
       (rettype', retals) <-
         first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
-
-      when False . traceM $
-        unlines
-          [ "internaliseValBind",
-            prettyString fname,
-            prettyString rettype,
-            prettyString rettype'
-          ]
 
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
