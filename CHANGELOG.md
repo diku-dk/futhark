@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * GPU backends can now transpose arrays whose size does not fit in a
   32-bit integer (#1953).
 
+* Bug in alias checking for the core language type checker (#1949).
+  Actually (finally) a proper fix of #803.
+
 ## [0.24.3]
 
 ### Fixed

@@ -7,6 +7,7 @@ import Futhark.IR.Mem.IntervalTests qualified
 import Futhark.IR.Mem.IxFunTests qualified
 import Futhark.IR.PropTests qualified
 import Futhark.IR.Syntax.CoreTests qualified
+import Futhark.Internalise.TypesValuesTests qualified
 import Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests qualified
 import Futhark.Pkg.SolveTests qualified
 import Language.Futhark.PrimitiveTests qualified
@@ -24,6 +25,7 @@ allTests =
       Futhark.IR.PropTests.tests,
       Futhark.IR.Syntax.CoreTests.tests,
       Futhark.Pkg.SolveTests.tests,
+      Futhark.Internalise.TypesValuesTests.tests,
       Futhark.IR.Mem.IntervalTests.tests,
       Futhark.IR.Mem.IxFunTests.tests,
       Language.Futhark.PrimitiveTests.tests,

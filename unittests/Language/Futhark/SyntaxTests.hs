@@ -124,7 +124,7 @@ pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
       pTypeVar,
-      tupleRecord <$> parens (pStructType `sepBy1` lexeme ","),
+      tupleRecord <$> parens (pStructType `sepBy` lexeme ","),
       Record . M.fromList <$> braces (pField `sepBy1` lexeme ",")
     ]
   where

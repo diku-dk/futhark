@@ -64,16 +64,23 @@ performCSE ::
   Bool ->
   Pass rep rep
 performCSE cse_arrays =
-  Pass "CSE" "Combine common subexpressions." $
+  Pass "CSE" "Combine common subexpressions." $ \prog ->
     fmap removeProgAliases
-      . intraproceduralTransformationWithConsts onConsts onFun
+      . intraproceduralTransformationWithConsts
+        (onConsts (freeIn (progFuns prog)))
+        onFun
       . aliasAnalysis
+      $ prog
   where
-    onConsts stms =
+    onConsts free_in_funs stms =
       pure $
         fst $
           runReader
-            (cseInStms (consumedInStms stms) (stmsToList stms) (pure ()))
+            ( cseInStms
+                (free_in_funs <> consumedInStms stms)
+                (stmsToList stms)
+                (pure ())
+            )
             (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
 
@@ -133,8 +140,9 @@ cseInFunDef cse_arrays fundec =
     -- practical problem while we still perform such aggressive
     -- inlining.
     ds
-      | isJust $ funDefEntryPoint fundec = map (diet . declExtTypeOf) $ funDefRetType fundec
-      | otherwise = map retDiet $ funDefRetType fundec
+      | isJust $ funDefEntryPoint fundec =
+          map (diet . declExtTypeOf . fst) $ funDefRetType fundec
+      | otherwise = map (retDiet . fst) $ funDefRetType fundec
     retDiet t
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume
