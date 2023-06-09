@@ -1063,7 +1063,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
           ( eBinOp
               (Add Int64 I.OverflowWrap)
               x
-              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum $ toExp s'))
+              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum y))
           )
           y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
