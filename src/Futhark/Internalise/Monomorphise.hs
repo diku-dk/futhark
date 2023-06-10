@@ -478,7 +478,7 @@ transformTypeSizes typ =
     transformScalarSizes ty@Prim {} = pure ty
 
     onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
-    onDim (AnySize v) = pure $ AnySize v
+    onDim d = pure d
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
 transformRetTypeSizes argset (RetType dims ty) = do
