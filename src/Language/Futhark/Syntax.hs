@@ -227,16 +227,15 @@ data Size
     -- all non-trivial expression should have variable in scope.
     -- In a return type, existential name don't appear in expression.
     SizeExpr (ExpBase Info VName)
-  | -- | No known size.  If @Nothing@, then this is a name distinct
-    -- from any other.  The type checker should _never_ produce these
+  | -- | No known size.  The type checker should _never_ produce these
     -- - they are a (hopefully temporary) thing introduced by
     -- defunctorisation and monomorphisation.
-    AnySize (Maybe VName)
+    AnySize
   deriving (Show, Eq, Ord)
 
 instance Located Size where
   locOf (SizeExpr e) = locOf e
-  locOf AnySize {} = mempty
+  locOf AnySize = mempty
 
 -- | Create a 'Var' expression of type @i64@.
 sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName

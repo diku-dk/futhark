@@ -222,7 +222,7 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    E.AnySize _ -> Ext <$> newId
+    E.AnySize -> Ext <$> newId
     E.SizeExpr (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
     E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
     E.SizeExpr e -> error $ "Unexpected size expression: " ++ prettyString e

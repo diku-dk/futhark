@@ -606,8 +606,7 @@ expandType env (Scalar (TypeVar () u tn args)) =
           -- has been hidden by a module ascription,
           -- e.g. tests/modules/sizeparams4.fut.
           onDim (SizeExpr e)
-            | any (`elem` ext) $ freeVarsInExp e =
-                AnySize Nothing
+            | any (`elem` ext) $ freeVarsInExp e = AnySize
           onDim d = d
        in if null ps
             then first onDim t'

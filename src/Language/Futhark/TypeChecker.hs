@@ -611,7 +611,7 @@ entryPoint params orig_ret_te (RetType ret orig_ret) =
 
     -- Since the entry point type is not a RetType but just a plain
     -- StructType, we have to remove any existentially bound sizes.
-    extToAny (SizeExpr (Var v _ _)) | qualLeaf v `elem` ret = AnySize Nothing
+    extToAny (SizeExpr (Var v _ _)) | qualLeaf v `elem` ret = AnySize
     extToAny d = d
 
     patternEntry (PatParens p _) =
