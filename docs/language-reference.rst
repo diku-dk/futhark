@@ -1247,16 +1247,11 @@ Size coercion
 ~~~~~~~~~~~~~
 
 Size coercion, written with ``:>``, can be used to perform a
-runtime-checked coercion of one size to another.  Since size
-annotations can refer only to variables and constants, this is
-necessary when writing more complicated size functions::
+runtime-checked coercion of one size to another.  This can be useful
+as an escape hatch in the size type system::
 
   def concat_to 'a (m: i32) (a: []a) (b: []a) : [m]a =
     a ++ b :> [m]a
-
-Only expression-level type annotations give rise to run-time checks.
-Despite their similar syntax, parameter and return type annotations
-must be valid at compile-time, or type checking will fail.
 
 .. _causality:
 
