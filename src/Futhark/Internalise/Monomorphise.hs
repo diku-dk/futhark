@@ -555,7 +555,7 @@ sizesForPat pat = do
   pure (sizes, params')
   where
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnySize _) = do
+    onDim AnySize = do
       v <- lift $ newVName "size"
       modify (v :)
       pure $ sizeFromName (qualName v) mempty
@@ -1351,7 +1351,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           pure $ sizeFromName (qualName d) mempty
         Just d ->
           pure $ sizeFromName (qualName d) mempty
-    onDim MonoAnon = pure $ AnySize Nothing
+    onDim MonoAnon = pure AnySize
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: Bool -> (PatType -> PatType) -> Pat -> Pat
