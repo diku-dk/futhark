@@ -794,10 +794,7 @@ sizesForAll bound_sizes params = do
   where
     bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnySize (Just v)) = do
-      modify $ S.insert v
-      pure $ sizeFromName (qualName v) mempty
-    onDim (AnySize Nothing) = do
+    onDim AnySize = do
       v <- lift $ newVName "size"
       modify $ S.insert v
       pure $ sizeFromName (qualName v) mempty
@@ -809,11 +806,11 @@ sizesForAll bound_sizes params = do
       pure $ SizeExpr $ Var d typ loc
     onDim d = pure d
 
-unRetType :: StructRetType -> StructType
+unRetType :: RetTypeBase Size as -> TypeBase Size as
 unRetType (RetType [] t) = t
 unRetType (RetType ext t) = first onDim t
   where
-    onDim (SizeExpr (Var d _ _)) | qualLeaf d `elem` ext = AnySize Nothing
+    onDim (SizeExpr (Var d _ _)) | qualLeaf d `elem` ext = AnySize
     onDim d = d
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
@@ -889,7 +886,10 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
       params_for_rettype = params ++ svParams f_sv ++ svParams arg_sv
       svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
       svParams _ = []
-      lifted_rettype = buildRetType closure_env params_for_rettype (unRetType lam_e_t) $ typeOf lam_e'
+      lifted_rettype =
+        RetType (retDims lam_e_t) $
+          buildRetType closure_env params_for_rettype (retType lam_e_t) $
+            typeOf lam_e'
 
       already_bound =
         globals
@@ -910,7 +910,7 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   fname <- newNameFromString fname_s
   liftValDec
     fname
-    (RetType [] $ toStruct lifted_rettype)
+    (second (const ()) lifted_rettype)
     (dims ++ more_dims ++ missing_dims)
     params'
     lam_e'
@@ -918,9 +918,9 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   let f_t = toStruct $ typeOf f'
       arg_t = toStruct $ typeOf arg'
       d1 = Observe
-      fname_t = foldFunType [(d1, f_t), (d, arg_t)] $ RetType [] lifted_rettype
+      fname_t = foldFunType [(d1, f_t), (d, arg_t)] lifted_rettype
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
-      callret = AppRes lifted_rettype []
+      callret = AppRes (unRetType lifted_rettype) []
 
   pure
     ( mkApply fname' [(Observe, Nothing, f'), (Observe, argext, arg')] callret,
@@ -1305,7 +1305,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
     )
   where
     anyDimIfNotBound bound_sizes (SizeExpr (Var v _ _))
-      | qualLeaf v `S.notMember` bound_sizes = AnySize $ Just $ qualLeaf v
+      | qualLeaf v `S.notMember` bound_sizes = AnySize
     anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.

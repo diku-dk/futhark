@@ -804,7 +804,7 @@ substTypesAny lookupSubst ot =
       -- may happen as we substitute types during monomorphisation and
       -- defunctorisation later on. See Note [AnySize]
       let toAny (SizeExpr (Var v _ _))
-            | qualLeaf v `elem` dims = AnySize Nothing
+            | qualLeaf v `elem` dims = AnySize
           toAny d = d
        in first toAny ot'
 
