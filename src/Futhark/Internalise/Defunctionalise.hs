@@ -806,12 +806,14 @@ sizesForAll bound_sizes params = do
       pure $ SizeExpr $ Var d typ loc
     onDim d = pure d
 
-unRetType :: RetTypeBase Size as -> TypeBase Size as
-unRetType (RetType [] t) = t
-unRetType (RetType ext t) = first onDim t
-  where
-    onDim (SizeExpr (Var d _ _)) | qualLeaf d `elem` ext = AnySize
-    onDim d = d
+unRetType :: PatRetType -> DefM AppRes
+unRetType (RetType [] t) = pure $ AppRes t []
+unRetType (RetType ext t) = do
+  ext' <- mapM newName ext
+  let extsubst =
+        M.fromList . zip ext $
+          map (ExpSubst . flip sizeVar mempty . qualName) ext'
+  pure $ AppRes (applySubst (`M.lookup` extsubst) t) ext'
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
@@ -920,7 +922,7 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
       d1 = Observe
       fname_t = foldFunType [(d1, f_t), (d, arg_t)] lifted_rettype
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
-      callret = AppRes (unRetType lifted_rettype) []
+  callret <- unRetType lifted_rettype
 
   pure
     ( mkApply fname' [(Observe, Nothing, f'), (Observe, argext, arg')] callret,
