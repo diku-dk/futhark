@@ -986,7 +986,10 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Part of the type of an entry point.  Has an actual type, and
--- maybe also an ascribed type expression.
+-- maybe also an ascribed type expression.  Note that although size
+-- expressions in the elaborated type can contain variables, they are
+-- no longer in scope, and are considered more like equivalence
+-- classes.
 data EntryType = EntryType
   { entryType :: StructType,
     entryAscribed :: Maybe (TypeExp Info VName)
