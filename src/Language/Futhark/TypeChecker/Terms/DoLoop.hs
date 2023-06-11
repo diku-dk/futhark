@@ -54,7 +54,7 @@ someDimsFreshInType loc desc fresh t = do
   let freshen v = any (areSameSize v) fresh
   bitraverse (onDim freshen) pure t
   where
-    onDim freshen (SizeExpr (Var d _ _))
+    onDim freshen (Var d _ _)
       | freshen $ qualLeaf d = do
           v <- newFlexibleDim (mkUsage' loc) desc
           pure $ sizeFromName (qualName v) loc
@@ -73,7 +73,7 @@ freshDimsInType usage r desc fresh t = do
   areSameSize <- getAreSame
   second (map snd) <$> runStateT (bitraverse (onDim areSameSize) pure t) mempty
   where
-    onDim areSameSize (SizeExpr (Var (QualName _ d) _ _))
+    onDim areSameSize (Var (QualName _ d) _ _)
       | any (areSameSize d) fresh = do
           prev_subst <- gets $ L.find (areSameSize d . fst)
           case prev_subst of
@@ -281,20 +281,19 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           areSameSize <- getAreSame
           let onDims _ x y
                 | x == y = pure x
-              onDims _ x@(SizeExpr e) d = do
+              onDims _ e d = do
                 let vs = M.keys . unFV $ freeInExp e
                 forM_ vs $ \v -> do
                   case L.find (areSameSize v . fst) new_dims_to_initial_dim of
-                    Just (_, d'@(SizeExpr e')) ->
-                      if d' == d
+                    Just (_, e') ->
+                      if e' == d
                         then modify $ first $ M.insert v $ ExpSubst e'
                         else
                           unless (v `S.member` known_before) $
                             modify (second (v :))
                     _ ->
                       pure ()
-                pure x
-              onDims _ x _ = pure x
+                pure e
           loopbody_t' <- normTypeFully loopbody_t
           merge_t' <- normTypeFully merge_t
 

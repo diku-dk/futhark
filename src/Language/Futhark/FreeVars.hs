@@ -139,7 +139,7 @@ freeInType :: TypeBase Size as -> FV
 freeInType t =
   case t of
     Array _ _ s a ->
-      freeInType (Scalar a) <> foldMap onSize (shapeDims s)
+      freeInType (Scalar a) <> foldMap freeInExp (shapeDims s)
     Scalar (Record fs) ->
       foldMap freeInType fs
     Scalar Prim {} ->
@@ -154,11 +154,8 @@ freeInType t =
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
   where
-    typeArgDims (TypeArgDim d) = onSize d
+    typeArgDims (TypeArgDim d) = freeInExp d
     typeArgDims (TypeArgType at) = freeInType at
 
     notV Unnamed = const True
     notV (Named v) = (/= v)
-
-    onSize (SizeExpr e) = freeInExp e
-    onSize _ = mempty
