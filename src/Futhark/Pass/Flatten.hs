@@ -404,7 +404,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
       ns <- elemArr segments env inps n
@@ -673,19 +673,15 @@ transformDistStm segments env (DistStm inps res stm) = do
     Let _ _ (Match scrutinees cases defaultCase _) -> do
       let [w] = NE.toList segments
 
-      -- Lift the scrutinees. If it's a constant, simply replicate it.
+      -- Lift the scrutinees.
       -- If it's a variable, we know it's a scalar and the lifted version will therefore be a regular array.
-      lifted_scrutinees <- forM scrutinees $ \case
-        c@(Constant _) ->
-          letExp "lifted_const" $
-            BasicOp $
-              Replicate (segmentsShape segments) c
-        Var v -> case M.lookup v $ inputReps inps env of
-          Just (_, Regular v') -> pure v'
-          Just (_, Irregular {}) ->
+      lifted_scrutinees <- forM scrutinees $ \scrut -> do
+        (_, rep) <- liftSubExp segments inps env scrut
+        case rep of
+          Regular v' -> pure v'
+          Irregular {} ->
             error $
-              "transformDistStm: Non-scalar match scrutinee: " ++ prettyString v
-          Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
+              "transformDistStm: Non-scalar match scrutinee: " ++ prettyString scrut
       -- Cases for tagging values that match the same branch.
       -- The default case is the 0'th equvalence class.
       let equiv_cases =
@@ -722,9 +718,10 @@ transformDistStm segments env (DistStm inps res stm) = do
               fullSlice inds_t [DimSlice begin num_elems (intConst Int64 1)]
 
       -- Take the elements at index `is` from an input `v`.
-      let splitInput is v =
-            (v,) <$> case M.lookup v $ inputReps inps env of
-              Just (_, Regular arr) -> do
+      let splitInput is v = do
+            (t, rep) <- liftSubExp segments inps env (Var v)
+            (t,v,) <$> case rep of
+              Regular arr -> do
                 -- In the regular case we just take the elements
                 -- of the array given by `is`
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -732,7 +729,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                   idx <- letExp "idx" =<< eIndex is [eSubExp i]
                   subExpsRes . pure <$> (letSubExp "arr" =<< eIndex arr [toExp idx])
                 pure $ Regular arr'
-              Just (_, Irregular (IrregularRep segs flags offsets elems)) -> do
+              Irregular (IrregularRep segs flags offsets elems) -> do
                 -- In the irregular case we take the elements
                 -- of the `segs` array given by `is` like in the regular case
                 n <- letSubExp "n" =<< (toExp . arraySize 0 =<< lookupType is)
@@ -764,17 +761,12 @@ transformDistStm segments env (DistStm inps res stm) = do
                         irregularOffsets = offsets',
                         irregularElems = elems'
                       }
-              Nothing -> error $ "transformDistStm: bad lookup: " ++ prettyString v
       -- Given the indices for which a branch is taken and its body,
       -- distribute the statements of the body of that branch.
       let distributeBranch is body = do
-            (vs, reps) <- mapAndUnzipM (splitInput is) (namesToList $ freeIn body)
+            (ts, vs, reps) <- unzip3 <$> mapM (splitInput is) (namesToList $ freeIn body)
             let inputs = do
-                  (v, i) <- zip vs [0 ..]
-                  let t =
-                        distInputType $
-                          fromMaybe (error $ "Bad lookup: " ++ prettyString v) $
-                            L.lookup v inps
+                  (v, t, i) <- zip3 vs ts [0 ..]
                   pure (v, DistInput (ResTag i) t)
             let env' = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
             scope <- askScope
@@ -954,6 +946,33 @@ transformStms :: Scope SOACS -> Stms SOACS -> PassM (Stms GPU)
 transformStms scope stms =
   fold <$> traverse (transformStm (scope <> scopeOf stms)) stms
 
+-- If the sub-expression is a constant, replicate it to match the shape of `segments`
+-- If it's a variable, lookup the variable in the dist inputs and dist env,
+-- and if it can't be found it is a free variable, so we replicate it to match the shape of `segments`.
+liftSubExp :: Segments -> DistInputs -> DistEnv -> SubExp -> Builder GPU (Type, ResRep)
+liftSubExp segments inps env se = case se of
+  c@(Constant prim) ->
+    let t = Prim $ primValueType prim
+     in ((t,) . Regular <$> letExp "lifted_const" (BasicOp $ Replicate (segmentsShape segments) c))
+  Var v -> case M.lookup v $ inputReps inps env of
+    Just (t, Regular v') -> do
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> Irregular <$> mkIrregFromReg segments v'
+          Acc {} -> error "getRepSubExp: Acc"
+          Mem {} -> error "getRepSubExp: Mem"
+    Just (t, Irregular irreg) -> pure (t, Irregular irreg)
+    Nothing -> do
+      t <- lookupType v
+      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+      (t,)
+        <$> case t of
+          Prim {} -> pure $ Regular v'
+          Array {} -> Irregular <$> mkIrregFromReg segments v'
+          Acc {} -> error "getRepSubExp: Acc"
+          Mem {} -> error "getRepSubExp: Mem"
+
 liftParam :: SubExp -> FParam SOACS -> PassM ([FParam GPU], ResRep)
 liftParam w fparam =
   case declTypeOf fparam of
@@ -996,27 +1015,11 @@ liftParam w fparam =
     desc = baseString (paramName fparam)
 
 liftArg :: Segments -> DistInputs -> DistEnv -> (SubExp, Diet) -> Builder GPU [(SubExp, Diet)]
-liftArg segments inps env (e, d) = case e of
-  c@(Constant _) -> do
-    v <- letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c
-    pure [(Var v, d)]
-  Var v -> case M.lookup v $ inputReps inps env of
-    Just (_, Irregular irrep) -> do
-      mkIrrep irrep
-    Just (t, Regular v') -> do
-      case t of
-        Prim {} -> pure [(Var v', d)]
-        Array {} -> mkIrregFromReg segments v' >>= mkIrrep
-        Acc {} -> error "liftArg: Acc"
-        Mem {} -> error "liftArg: Mem"
-    Nothing -> do
-      t <- lookupType v
-      v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
-      case t of
-        Prim {} -> pure [(Var v', d)]
-        Array {} -> mkIrregFromReg segments v' >>= mkIrrep
-        Acc {} -> error "liftArg: Acc"
-        Mem {} -> error "liftArg: Mem"
+liftArg segments inps env (se, d) = do
+  (_, rep) <- liftSubExp segments inps env se
+  case rep of
+    Regular v -> pure [(Var v, d)]
+    Irregular irreg -> mkIrrep irreg
   where
     mkIrrep
       ( IrregularRep
@@ -1053,30 +1056,14 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
        in (i + length lifted, lifted)
 
 -- Lift a result of a function.
--- If the original result subexp is a variable, lookup the 'ResRep'.
--- If it's a constant, replicate it 'w' times.
 liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
 liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
   where
-    vs = case resSubExp res of
-      c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c)
-      Var v -> case M.lookup v $ inputReps inps env of
-        Just (_, Irregular irrep) -> do
-          mkIrrep irrep
-        Just (t, Regular v') -> do
-          case t of
-            Prim {} -> pure [v']
-            Array {} -> mkIrregFromReg segments v' >>= mkIrrep
-            Acc {} -> error "liftArg: Acc"
-            Mem {} -> error "liftArg: Mem"
-        Nothing -> do
-          t <- lookupType v
-          v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
-          case t of
-            Prim {} -> pure [v']
-            Array {} -> mkIrregFromReg segments v' >>= mkIrrep
-            Acc {} -> error "liftArg: Acc"
-            Mem {} -> error "liftArg: Mem"
+    vs = do
+      (_, rep) <- liftSubExp segments inps env (resSubExp res)
+      case rep of
+        Regular v -> pure [v]
+        Irregular irreg -> mkIrrep irreg
     mkIrrep
       ( IrregularRep
           { irregularSegments = segs,
