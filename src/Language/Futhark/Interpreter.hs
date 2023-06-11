@@ -180,16 +180,13 @@ resolveTypeParams names orig_t1 orig_t2 =
     match bound poly_t t
       | d1 : _ <- shapeDims (arrayShape poly_t),
         d2 : _ <- shapeDims (arrayShape t) = do
-          matchDims bound d1 d2
+          matchExps bound d1 d2
           match bound (stripArray 1 poly_t) (stripArray 1 t)
     match bound t1 t2
       | Just t1' <- isAccType t1,
         Just t2' <- isAccType t2 =
           match bound t1' t2'
     match _ _ _ = pure mempty
-
-    matchDims bound (SizeExpr e1) (SizeExpr e2) = matchExps bound e1 e2
-    matchDims _ _ _ = pure mempty
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
@@ -226,7 +223,7 @@ resolveExistentials names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) rowshape
     match _ _ = mempty
 
-    matchDims (SizeExpr (Var (QualName _ d1) _ _)) d2
+    matchDims (Var (QualName _ d1) _ _) d2
       | d1 `elem` names = M.singleton d1 d2
     matchDims _ _ = mempty
 
@@ -599,14 +596,14 @@ expandType env (Scalar (TypeVar () u tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeExpr (Var v _ _))
+          onDim (Var v _ _)
             | Just e <- M.lookup (qualLeaf v) substs =
                 e
           -- The next case can occur when a type with existential size
           -- has been hidden by a module ascription,
           -- e.g. tests/modules/sizeparams4.fut.
-          onDim (SizeExpr e)
-            | any (`elem` ext) $ freeVarsInExp e = AnySize
+          onDim e
+            | any (`elem` ext) $ freeVarsInExp e = anySize
           onDim d = d
        in if null ps
             then first onDim t'
@@ -616,8 +613,8 @@ expandType env (Scalar (TypeVar () u tn args)) =
       -- e.g. accumulators.
       Scalar (TypeVar () u tn $ map expandArg args)
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e)) =
-      (M.singleton p $ SizeExpr e, mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim e) =
+      (M.singleton p e, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t') =
       let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -635,10 +632,10 @@ evalWithExts env = do
 -- variables in the set of names.
 evalType :: Eval -> S.Set VName -> StructType -> EvalM StructType
 evalType eval' outer_bound t = do
-  let evalDim bound _ (SizeExpr e)
+  let evalDim bound _ e
         | canBeEvaluated bound e = do
             x <- asInteger <$> eval' e
-            pure $ SizeExpr $ IntLit x (Info (Scalar (Prim (Signed Int64)))) mempty
+            pure $ sizeFromInteger x mempty
       evalDim _ _ d = pure d
   traverseDims evalDim t
   where
@@ -666,7 +663,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
-    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
+    dim (IntLit x _ _) = Just $ fromIntegral x
     dim _ = Nothing
 
 -- Sometimes type instantiation is not quite enough - then we connect
@@ -1111,10 +1108,9 @@ substituteInModule substs = onModule
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
-    onDim (SizeExpr (IntLit x t loc)) = SizeExpr (IntLit x t loc)
-    onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
-    onDim AnySize {} = error "substituteInModule onDim: AnySize"
+    onDim (Var v typ loc) = Var (replaceQ v) typ loc
+    onDim (IntLit x t loc) = IntLit x t loc
+    onDim _ = error "Arbitrary expression not supported yet"
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =
