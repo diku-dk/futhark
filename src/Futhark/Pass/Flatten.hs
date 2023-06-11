@@ -1055,19 +1055,28 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
 -- Lift a result of a function.
 -- If the original result subexp is a variable, lookup the 'ResRep'.
 -- If it's a constant, replicate it 'w' times.
-liftResult :: SubExp -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
-liftResult w inps env res = map (SubExpRes mempty . Var) <$> vs
+liftResult :: Segments -> DistInputs -> DistEnv -> SubExpRes -> Builder GPU Result
+liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
   where
     vs = case resSubExp res of
-      c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (Shape [w]) c)
-      Var v ->
-        case M.lookup v $ inputReps inps env of
-          Just (_, Regular v') -> pure [v']
-          Just
-            ( _,
-              Irregular irregRep
-              ) -> mkIrrep irregRep
-          Nothing -> error $ "liftResult: Bad lookup: " ++ prettyString v
+      c@(Constant _) -> fmap L.singleton (letExp "lifted_const" $ BasicOp $ Replicate (segmentsShape segments) c)
+      Var v -> case M.lookup v $ inputReps inps env of
+        Just (_, Irregular irrep) -> do
+          mkIrrep irrep
+        Just (t, Regular v') -> do
+          case t of
+            Prim {} -> pure [v']
+            Array {} -> mkIrregFromReg segments v' >>= mkIrrep
+            Acc {} -> error "liftArg: Acc"
+            Mem {} -> error "liftArg: Mem"
+        Nothing -> do
+          t <- lookupType v
+          v' <- letExp "free_replicated" $ BasicOp $ Replicate (segmentsShape segments) (Var v)
+          case t of
+            Prim {} -> pure [v']
+            Array {} -> mkIrregFromReg segments v' >>= mkIrrep
+            Acc {} -> error "liftArg: Acc"
+            Mem {} -> error "liftArg: Mem"
     mkIrrep
       ( IrregularRep
           { irregularSegments = segs,
@@ -1086,7 +1095,7 @@ liftBody :: SubExp -> DistInputs -> DistEnv -> [DistStm] -> Result -> Builder GP
 liftBody w inputs env dstms result = do
   let segments = NE.singleton w
   env' <- foldM (transformDistStm segments) env dstms
-  result' <- mapM (liftResult w inputs env') result
+  result' <- mapM (liftResult segments inputs env') result
   pure $ concat result'
 
 liftFunName :: Name -> Name
