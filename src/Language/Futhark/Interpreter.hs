@@ -180,13 +180,17 @@ resolveTypeParams names orig_t1 orig_t2 =
     match bound poly_t t
       | d1 : _ <- shapeDims (arrayShape poly_t),
         d2 : _ <- shapeDims (arrayShape t) = do
-          matchExps bound d1 d2
+          matchDims bound d1 d2
           match bound (stripArray 1 poly_t) (stripArray 1 t)
     match bound t1 t2
       | Just t1' <- isAccType t1,
         Just t2' <- isAccType t2 =
           match bound t1' t2'
     match _ _ _ = pure mempty
+
+    matchDims bound e1 e2
+      | e1 == anySize || e2 == anySize = pure mempty
+      | otherwise = matchExps bound e1 e2
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
