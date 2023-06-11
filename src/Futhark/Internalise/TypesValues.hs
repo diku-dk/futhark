@@ -294,14 +294,6 @@ internaliseConstructors ::
 internaliseConstructors cs =
   foldl' onConstructor mempty $ zip (E.sortConstrs cs) [0 ..]
   where
-    onConstructor ::
-      ( [Tree (I.TypeBase ExtShape Uniqueness)],
-        M.Map Name (Int, [Int])
-      ) ->
-      ((Name, [Tree (I.TypeBase ExtShape Uniqueness)]), Int) ->
-      ( [Tree (I.TypeBase ExtShape Uniqueness)],
-        M.Map Name (Int, [Int])
-      )
     onConstructor (ts, mapping) ((c, c_ts), i) =
       let (_, js, new_ts) =
             foldl' f (withOffsets (map (fmap fromDecl) ts), mempty, mempty) c_ts
