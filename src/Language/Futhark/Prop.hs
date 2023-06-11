@@ -79,10 +79,8 @@ module Language.Futhark.Prop
     isSizeParam,
     combineTypeShapes,
     matchDims,
-    -- | Values of these types are produces by the parser.  They use
-    -- unadorned names and have no type information, apart from that
-    -- which is syntactically required.
-    NoInfo (..),
+
+    -- * Un-typechecked ASTs
     UncheckedType,
     UncheckedTypeExp,
     UncheckedIdent,
@@ -101,7 +99,8 @@ module Language.Futhark.Prop
     UncheckedSpec,
     UncheckedProg,
     UncheckedCase,
-    -- | Type-checked syntactical constructs
+
+    -- * Type-checked ASTs
     Ident,
     DimIndex,
     Slice,
