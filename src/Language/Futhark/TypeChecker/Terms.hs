@@ -141,14 +141,14 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
       | refine_sizes,
         maybe True ((== Just 0) . isInt64) i,
         maybe True ((== Just 1) . isInt64) stride =
-          let j' = maybe d SizeExpr j
+          let j' = fromMaybe d j
            in warnIfConsumingOrBinding mOcc (maybe False hasBinding j) d i j stride j'
                 <*> adjustDims idxes' dims
     adjustDims ((DimSlice i j stride, mOcc) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
         maybe True ((== Just 1) . isInt64) stride =
-          let j' = fromMaybe (unSizeExpr d) j
+          let j' = fromMaybe d j
            in warnIfConsumingOrBinding mOcc (hasBinding j' || hasBinding i') d i j stride (sizeMinus j' i')
                 <*> adjustDims idxes' dims
     -- stride == -1
@@ -168,21 +168,18 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
       pure dims
 
     sizeMinus j i =
-      SizeExpr
-        $ AppExp
-          ( BinOp
-              (qualName (intrinsicVar "-"), mempty)
-              sizeBinOpInfo
-              (j, Info Nothing)
-              (i, Info Nothing)
-              mempty
-          )
+      AppExp
+        ( BinOp
+            (qualName (intrinsicVar "-"), mempty)
+            sizeBinOpInfo
+            (j, Info Nothing)
+            (i, Info Nothing)
+            mempty
+        )
         $ Info
         $ AppRes i64 []
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
-    unSizeExpr (SizeExpr e) = e
-    unSizeExpr AnySize {} = error "unSizeExpr: AnySize"
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
@@ -252,7 +249,7 @@ checkCoerce loc te e = do
   where
     makeNonExtFresh ext = bitraverse onDim pure
       where
-        onDim d@(SizeExpr (Var v _ _))
+        onDim d@(Var v _ _)
           | qualLeaf v `elem` ext = pure d
         onDim d = do
           v <- newTypeName "coerce"
@@ -277,7 +274,7 @@ sizeFree tloc expKiller orig_t = do
 
     witnessed_exps t = execState (traverseDims onDim t) mempty
       where
-        onDim _ PosImmediate (SizeExpr e) = modify (e :)
+        onDim _ PosImmediate e = modify (e :)
         onDim _ _ _ = pure ()
     subExps e
       | Just e' <- stripExp e = subExps e'
@@ -308,7 +305,7 @@ sizeFree tloc expKiller orig_t = do
         Just cause -> do
           vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (srclocOf e) cause) "d"
           modify (vn :)
-          pure $ sizeVar (qualName vn) (srclocOf e)
+          pure $ sizeFromName (qualName vn) (srclocOf e)
 
     to_be_replaced t m' = do
       foldl f m' $ top_wit t
@@ -331,7 +328,7 @@ sizeFree tloc expKiller orig_t = do
     onScalar (TypeVar as u v args) =
       TypeVar as u v <$> mapM onTypeArg args
       where
-        onTypeArg (TypeArgDim d) = TypeArgDim <$> onSize d
+        onTypeArg (TypeArgDim d) = TypeArgDim <$> replacing d
         onTypeArg (TypeArgType ty) = TypeArgType <$> onType ty
     onScalar (Prim pt) = pure $ Prim pt
 
@@ -339,12 +336,9 @@ sizeFree tloc expKiller orig_t = do
       TypeBase Size as ->
       ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) (TypeBase Size as) -- Precise the typing, else haskell refuse it
     onType (Array as u shape scalar) =
-      Array as u <$> traverse onSize shape <*> onScalar scalar
+      Array as u <$> traverse replacing shape <*> onScalar scalar
     onType (Scalar ty) =
       Scalar <$> onScalar ty
-
-    onSize (SizeExpr e) = SizeExpr <$> replacing e
-    onSize AnySize {} = error "onSize: AnySize"
 
 -- Used to remove unknown sizes from function body types before we
 -- perform let-generalisation.  This is because if a function is
@@ -420,11 +414,11 @@ reboundI64 tloc unscoped =
       | vn `S.member` unscoped = do
           prev <- gets $ M.lookup vn
           case prev of
-            Just vn' -> pure $ sizeVar (qualName vn') loc
+            Just vn' -> pure $ sizeFromName (qualName vn') loc
             Nothing -> do
               vn' <- lift $ newRigidDim tloc (RigidOutOfScope loc vn) "d"
               modify $ M.insert vn vn'
-              pure $ sizeVar (qualName vn') loc
+              pure $ sizeFromName (qualName vn') loc
     mapOnExp e = astMap mapper e
 
 checkExp :: UncheckedExp -> TermTypeM Exp
@@ -532,10 +526,10 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
     case (isInt64 start', isInt64 <$> maybe_step', end') of
       (Just 0, Just (Just 1), UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') end''
       (Just 0, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') end''
       (_, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
             warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinus end'' start'
@@ -545,7 +539,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
             warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinusInc end'' start'
       (Just 1, Just (Just 2), ToInclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') $ SizeExpr end''
+            warnIfConsumingOrBinding (hasBinding end'') end''
       _ -> do
         d <- newRigidDim loc RigidRange "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
@@ -568,8 +562,8 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         (Info $ AppRes t [])
     mkSub = mkBinOp "-" i64
     mkAdd = mkBinOp "+" i64
-    sizeMinus j i = SizeExpr $ j `mkSub` i
-    sizeMinusInc j i = SizeExpr $ (j `mkSub` i) `mkAdd` sizeInteger 1 mempty
+    sizeMinus j i = j `mkSub` i
+    sizeMinusInc j i = (j `mkSub` i) `mkAdd` sizeFromInteger 1 mempty
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
 checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
@@ -1090,7 +1084,7 @@ instantiateDimsInReturnType ::
   TermTypeM (TypeBase Size als, [VName])
 instantiateDimsInReturnType loc fname (RetType dims t) = do
   dims' <- mapM new dims
-  pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeVar` loc) . qualName) dims') t, dims')
+  pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeFromName` loc) . qualName) dims') t, dims')
   where
     new =
       newRigidDim loc (RigidRet fname)
@@ -1126,9 +1120,9 @@ boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
 dimUses :: StructType -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (SizeExpr (Var v _ _)) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (SizeExpr (Var v _ _)) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (SizeExpr (Var v _ _)) = modify ((mempty, S.singleton (qualLeaf v)) <>)
+    f bound _ (Var v _ _) | qualLeaf v `S.member` bound = pure ()
+    f _ PosImmediate (Var v _ _) = modify ((S.singleton (qualLeaf v), mempty) <>)
+    f _ PosParam (Var v _ _) = modify ((mempty, S.singleton (qualLeaf v)) <>)
     f _ _ _ = pure ()
 
 checkApply ::
@@ -1191,7 +1185,7 @@ checkApply
                     d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
-                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
+                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp))
                       )
                   (_, True) -> do
                     warn (srclocOf argexp) $
@@ -1201,7 +1195,7 @@ checkApply
                     d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
                     pure
                       ( Just d,
-                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeVar (qualName d) $ srclocOf argexp))
+                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp))
                       )
                   (False, False) ->
                     -- We strip the argument expression to make it
@@ -1739,7 +1733,7 @@ sizeNamesPos (Scalar (Arrow _ _ _ t1 (RetType _ t2))) = onParam t1 <> sizeNamesP
     onParam (Scalar (Record fs)) = mconcat $ map onParam $ M.elems fs
     onParam (Scalar (TypeVar _ _ _ targs)) = mconcat $ map onTypeArg targs
     onParam t = fvVars $ freeInType t
-    onTypeArg (TypeArgDim (SizeExpr (Var d _ _))) = S.singleton $ qualLeaf d
+    onTypeArg (TypeArgDim (Var d _ _)) = S.singleton $ qualLeaf d
     onTypeArg (TypeArgDim _) = mempty
     onTypeArg (TypeArgType t) = onParam t
 sizeNamesPos _ = mempty
@@ -1924,7 +1918,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, UnknownSize _ _)
       | k `S.member` param_sizes,
         k `S.notMember` produced_sizes = do
-          notes <- dimNotes defloc $ sizeVar (qualName k) mempty
+          notes <- dimNotes defloc $ sizeFromName (qualName k) mempty
           typeError defloc notes . withIndexLink "unknown-param-def" $
             "Unknown size"
               <+> dquotes (prettyName k)

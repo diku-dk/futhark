@@ -264,10 +264,6 @@ instance ASTMappable (SizeExp Info VName) where
   astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
-instance ASTMappable Size where
-  astMap tv (SizeExpr expr) = SizeExpr <$> mapOnExp tv expr
-  astMap _ AnySize = pure AnySize
-
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
 
@@ -332,10 +328,10 @@ traverseTypeArg f g (TypeArgType t) =
   TypeArgType <$> traverseType f g pure t
 
 instance ASTMappable StructType where
-  astMap tv = traverseType (astMap tv) (astMap tv) pure
+  astMap tv = traverseType (astMap tv) (mapOnExp tv) pure
 
 instance ASTMappable PatType where
-  astMap tv = traverseType (astMap tv) (astMap tv) (astMap tv)
+  astMap tv = traverseType (astMap tv) (mapOnExp tv) (astMap tv)
 
 instance ASTMappable StructRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t
