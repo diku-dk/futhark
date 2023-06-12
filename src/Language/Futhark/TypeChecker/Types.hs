@@ -467,7 +467,7 @@ evalTypeExp ote@TEApply {} = do
 evalTypeExp (TERefine te e loc) = do
   (te', svars, RetType dims ty, ls) <- evalTypeExp te
   e' <- checkExpForPred ty e
-  pure (TERefine te' e' loc, svars, RetType dims ty, ls)
+  pure (TERefine te' e' loc, svars, RetType dims (Scalar $ Refinement ty e'), ls)
 
 -- | Check a type expression, producing:
 --
@@ -775,8 +775,8 @@ substTypesRet lookupSubst ot =
       Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
-    onType (Scalar Refinement {}) =
-      error "Refinement not implemented in substTypesRet"
+    onType (Scalar (Refinement ty e)) =
+      Scalar . (`Refinement` e) <$> onType ty
 
     onRetType (RetType dims t) = do
       ext <- get

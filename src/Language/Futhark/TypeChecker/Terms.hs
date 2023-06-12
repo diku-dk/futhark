@@ -306,8 +306,8 @@ sizeFree tloc expKiller orig_t = do
           e' <- replacing e
           local ((e, e') :) m
 
-    onScalar Refinement {} =
-      error "Refinement not implemented in sizeFree"
+    onScalar (Refinement ty e) =
+      Refinement <$> onType ty <*> pure e
     onScalar (Record fs) =
       Record <$> traverse onType fs
     onScalar (Sum cs) =
