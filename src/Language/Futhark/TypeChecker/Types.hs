@@ -461,7 +461,10 @@ evalTypeExp ote@TEApply {} = do
           <+> pretty a
           <+> "not valid for a type parameter"
           <+> pretty p <> "."
-evalTypeExp TERefine {} = error "TERefine not implemented in evalTypeExp"
+evalTypeExp (TERefine te e loc) = do
+  (te', svars, RetType dims ty, ls) <- evalTypeExp te
+  e' <- checkExpForPred ty e
+  pure (TERefine te' e' loc, svars, RetType dims ty, ls)
 
 -- | Check a type expression, producing:
 --

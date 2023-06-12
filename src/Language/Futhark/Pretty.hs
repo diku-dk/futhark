@@ -188,7 +188,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
   pretty (TEDim dims te _) =
     "?" <> mconcat (map (brackets . prettyName) dims) <> "." <> pretty te
   pretty (TERefine ty p _) =
-    "<" <> pretty ty <> "," <> pretty p <> ">"
+    "{" <> pretty ty <> "," <> pretty p <> "}"
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (TypeArgExp f vn) where
   pretty (TypeArgExpSize d) = pretty d
