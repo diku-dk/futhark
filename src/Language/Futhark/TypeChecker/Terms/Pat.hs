@@ -73,6 +73,7 @@ checkIfUsed allow_consume occs v
     consumes = maybe False (identName v `S.member`) . consumed
 
     consumable (Scalar (Record fs)) = all consumable fs
+    consumable (Scalar (Refinement ty _)) = consumable ty
     consumable (Scalar (Sum cs)) = all (all consumable) cs
     consumable (Scalar (TypeVar _ u _ _)) = u == Unique
     consumable (Scalar Arrow {}) = True

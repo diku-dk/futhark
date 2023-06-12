@@ -306,6 +306,8 @@ sizeFree tloc expKiller orig_t = do
           e' <- replacing e
           local ((e, e') :) m
 
+    onScalar Refinement {} =
+      error "Refinement not implemented in sizeFree"
     onScalar (Record fs) =
       Record <$> traverse onType fs
     onScalar (Sum cs) =
@@ -1097,6 +1099,7 @@ boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
     f TypeArgDim {} = mempty
 boundInsideType (Scalar (Record fs)) = foldMap boundInsideType fs
 boundInsideType (Scalar (Sum cs)) = foldMap (foldMap boundInsideType) cs
+boundInsideType (Scalar (Refinement ty _)) = boundInsideType ty
 boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
   pn' <> boundInsideType t1 <> S.fromList dims <> boundInsideType t2
   where
@@ -1662,6 +1665,7 @@ checkReturnAlias loc rettp params =
     consumableParamType (Scalar (TypeVar _ u _ _)) = u == Unique
     consumableParamType (Scalar (Record fs)) = all consumableParamType fs
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
+    consumableParamType (Scalar (Refinement ty _)) = consumableParamType ty
     consumableParamType (Scalar Arrow {}) = False
 
 checkBinding ::
@@ -1795,6 +1799,7 @@ boundArrayAliases (Scalar (TypeVar als _ _ _)) = boundAliases als
 boundArrayAliases (Scalar Arrow {}) = mempty
 boundArrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map boundArrayAliases) $ M.elems fs
+boundArrayAliases (Scalar (Refinement ty _)) = boundArrayAliases ty
 
 nothingMustBeUnique :: SrcLoc -> TypeBase () () -> TermTypeM ()
 nothingMustBeUnique loc = check
@@ -1859,6 +1864,7 @@ injectExt ext ret = RetType ext_here $ deeper ret
     (ext_here, ext_there) = partition (`S.member` immediate) ext
     deeper (Scalar (Prim t)) = Scalar $ Prim t
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
+    deeper (Scalar (Refinement ty e)) = Scalar $ Refinement (deeper ty) e
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
     deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
       Scalar $ Arrow als p d1 t1 $ injectExt (ext_there <> t2_ext) t2

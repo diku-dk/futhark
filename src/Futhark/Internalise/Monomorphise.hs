@@ -476,6 +476,7 @@ transformTypeSizes typ =
         onArg (TypeArgDim dim) = TypeArgDim <$> onDim dim
         onArg (TypeArgType ty) = TypeArgType <$> transformTypeSizes ty
     transformScalarSizes ty@Prim {} = pure ty
+    transformScalarSizes Refinement {} = error "Refinement not implemented in transformTypeSizes"
 
     onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
     onDim (AnySize v) = pure $ AnySize v

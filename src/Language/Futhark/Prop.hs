@@ -195,6 +195,8 @@ traverseDims f = go mempty PosImmediate
       DimPos ->
       TypeBase fdim als' ->
       f (TypeBase tdim als')
+    go bound b t@(Scalar Refinement {}) =
+      bitraverse (f bound b) pure t
     go bound b t@Array {} =
       bitraverse (f bound b) pure t
     go bound b (Scalar (Record fields)) =
@@ -249,6 +251,7 @@ diet (Array _ Nonunique _ _) = Observe
 diet (Scalar (TypeVar _ Unique _ _)) = Consume
 diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
+diet (Scalar (Refinement ty _)) = diet ty
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -611,6 +614,7 @@ typeVars t =
     Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
+    Scalar (Refinement ty _) -> typeVars ty
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
     typeArgFree (TypeArgType ta) = typeVars ta
@@ -626,6 +630,7 @@ orderZero (Scalar (Record fs)) = all orderZero $ M.elems fs
 orderZero (Scalar TypeVar {}) = True
 orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
+orderZero (Scalar (Refinement ty _)) = orderZero ty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.

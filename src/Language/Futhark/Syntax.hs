@@ -334,6 +334,7 @@ data ScalarTypeBase dim as
   | -- | The aliasing corresponds to the lexical
     -- closure of the function.
     Arrow as PName Diet (TypeBase dim ()) (RetTypeBase dim as)
+  | Refinement (TypeBase dim as) (ExpBase Info VName)
   deriving (Eq, Ord, Show)
 
 instance Bitraversable ScalarTypeBase where
@@ -344,6 +345,7 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Arrow als v d t1 t2) =
     Arrow <$> g als <*> pure v <*> pure d <*> bitraverse f pure t1 <*> bitraverse f g t2
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
+  bitraverse f g (Refinement ty predicate) = Refinement <$> bitraverse f g ty <*> pure predicate
 
 instance Functor (ScalarTypeBase dim) where
   fmap = fmapDefault

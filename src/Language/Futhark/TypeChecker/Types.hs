@@ -106,6 +106,8 @@ returnType _ (Scalar (Arrow old_als v pd t1 (RetType dims t2))) d arg =
     als = old_als <> aliases (maskAliases arg d)
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
+returnType _ (Scalar Refinement {}) _ _ =
+  error "Refinement not implemented in returnType"
 
 -- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
@@ -321,6 +323,7 @@ evalTypeExp (TEUnique t loc) = do
     mayContainArray (Scalar TypeVar {}) = True
     mayContainArray (Scalar Arrow {}) = False
     mayContainArray (Scalar (Sum cs)) = (any . any) mayContainArray cs
+    mayContainArray (Scalar (Refinement ty _)) = mayContainArray ty
 --
 evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', svars1, RetType dims1 st1, _) <- evalTypeExp t1
@@ -772,6 +775,8 @@ substTypesRet lookupSubst ot =
       Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
+    onType (Scalar Refinement {}) =
+      error "Refinement not implemented in substTypesRet"
 
     onRetType (RetType dims t) = do
       ext <- get

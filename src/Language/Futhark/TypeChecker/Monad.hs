@@ -442,6 +442,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
         except' = case p of
           Named p' -> S.insert p' except
           Unnamed -> except
+    onScalar _ Refinement {} = error "Refinement not implemented in qualifyTypeVars"
 
     onTypeArg except (TypeArgDim d) =
       TypeArgDim $ onDim except d

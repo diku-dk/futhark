@@ -145,6 +145,8 @@ newNamesForMTy orig_mty = do
               map substituteInTypeArg targs
         substituteInType (Scalar (Prim t)) =
           Scalar $ Prim t
+        substituteInType (Scalar (Refinement ty e)) =
+          Scalar $ Refinement (substituteInType ty) e
         substituteInType (Scalar (Record ts)) =
           Scalar $ Record $ fmap substituteInType ts
         substituteInType (Scalar (Sum ts)) =
