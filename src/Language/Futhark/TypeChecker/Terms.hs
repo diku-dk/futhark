@@ -9,6 +9,7 @@
 module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
     checkSizeExp,
+    checkPredExp,
     checkFunDef,
   )
 where
@@ -40,18 +41,6 @@ import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
-
-hasBinding :: Exp -> Bool
-hasBinding Lambda {} = True
-hasBinding (AppExp LetPat {} _) = True
-hasBinding (AppExp LetFun {} _) = True
-hasBinding (AppExp DoLoop {} _) = True
-hasBinding (AppExp LetWith {} _) = True
-hasBinding (AppExp Match {} _) = True
-hasBinding e = isNothing $ astMap m e
-  where
-    m =
-      identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
 
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
@@ -1296,6 +1285,15 @@ checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
     typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
       "Size expression with binding is forbidden."
   unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
+  updateTypes e'
+
+-- | Type-check a single predicate expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case it is unified with t -> bool.
+checkPredExp :: StructType -> UncheckedExp -> TypeM Exp
+checkPredExp t e = fmap fst . runTermTypeM checkExp $ do
+  e' <- noUnique $ checkExp e
+  let t' = toStruct $ typeOf e'
+  unify (mkUsage e' "Refinement Predicate") t' (Scalar (Arrow () Unnamed Observe t (RetType [] $ Scalar $ Prim Bool)))
   updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
