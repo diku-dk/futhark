@@ -32,7 +32,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     unifies,
     require,
     checkTypeExpNonrigid,
-    checkTypeExpRigid,
 
     -- * Sizes
     isInt64,
@@ -823,16 +822,6 @@ checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
     constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
-  pure (te', st, svars ++ dims)
-
-checkTypeExpRigid ::
-  TypeExp NoInfo Name ->
-  RigidSource ->
-  TermTypeM (TypeExp Info VName, StructType, [VName])
-checkTypeExpRigid te rsrc = do
-  (te', svars, RetType dims st) <- termCheckTypeExp te
-  forM_ (svars ++ dims) $ \v ->
-    constrain v $ UnknownSize (srclocOf te) rsrc
   pure (te', st, svars ++ dims)
 
 --- Sizes
