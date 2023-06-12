@@ -558,7 +558,7 @@ checkForDuplicateNamesInType = check mempty
     check _ TEArray {} = pure ()
     check _ TEVar {} = pure ()
     check seen (TEParens te _) = check seen te
-    check _ TERefine {} = error "TERefine not implemented in checkForDuplicateNamesInType"
+    check seen (TERefine te _ _) = check seen te
 
 -- | @checkTypeParams ps m@ checks the type parameters @ps@, then
 -- invokes the continuation @m@ with the checked parameters, while
