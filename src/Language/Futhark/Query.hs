@@ -230,7 +230,7 @@ atPosInTypeExp te pos =
       msum $ map (`atPosInTypeExp` pos) $ concatMap snd cs
     TEDim _ t _ ->
       atPosInTypeExp t pos
-    TERefine {} -> error "TERefine not implemented in atPosInTypeExp"
+    TERefine t _ _ -> atPosInTypeExp t pos
   where
     inArg (TypeArgExpSize dim) = inDim dim
     inArg (TypeArgExpType e2) = atPosInTypeExp e2 pos

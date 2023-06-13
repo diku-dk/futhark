@@ -104,8 +104,8 @@ returnType _ (Scalar (Arrow old_als v pd t1 (RetType dims t2))) d arg =
     als = old_als <> aliases (maskAliases arg d)
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
-returnType _ (Scalar Refinement {}) _ _ =
-  error "Refinement not implemented in returnType"
+returnType appres (Scalar (Refinement ty e)) d arg =
+  Scalar $ Refinement (returnType appres ty d arg) e
 
 -- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
