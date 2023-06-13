@@ -686,9 +686,9 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
       link
       equalityType usage tp
     Just (Overloaded ts old_usage)
-      | tp `notElem` map (Scalar . Prim) ts -> do
+      | removeRefinement tp `notElem` map (Scalar . Prim) ts -> do
           link
-          case tp of
+          case removeRefinement tp of
             Scalar (TypeVar _ _ (QualName [] v) [])
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
@@ -706,7 +706,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   <+> pretty old_usage <> "."
     Just (HasFields l required_fields old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
-      case tp of
+      case removeRefinement tp of
         Scalar (Record tp_fields)
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
@@ -749,7 +749,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
     -- See Note [Linking variables to sum types]
     Just (HasConstrs l required_cs old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
-      case tp of
+      case removeRefinement tp of
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
@@ -850,7 +850,7 @@ mustBeOneOf ts usage t = do
   constraints <- getConstraints
   let isRigid' v = isRigid v constraints
 
-  case t' of
+  case removeRefinement t' of
     Scalar (TypeVar _ _ (QualName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
     Scalar (Prim pt) | pt `elem` ts -> pure ()

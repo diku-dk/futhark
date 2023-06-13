@@ -14,6 +14,7 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+    removeRefinement,
 
     -- * Witnesses
     mustBeExplicitInType,
@@ -36,6 +37,15 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
+
+removeRefinement :: TypeBase dim () -> TypeBase dim ()
+removeRefinement (Array () u shape scal) =
+  let ty' = removeRefinement (Scalar scal)
+  in case ty' of
+    Array () u' shape' scal' -> Array () (u <> u') (shape <> shape') scal'
+    Scalar scal' -> Array () u shape scal'
+removeRefinement (Scalar (Refinement ty _)) = removeRefinement ty
+removeRefinement t = t
 
 mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
@@ -210,7 +220,7 @@ unifyScalarTypes _ _ _ = Nothing
 -- to @y@), meaning @x@ is valid whenever @y@ is.  Ignores sizes.
 -- Mostly used for checking uniqueness.
 subtypeOf :: TypeBase () () -> TypeBase () () -> Bool
-subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
+subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (removeRefinement $ toStruct t1) (removeRefinement $ toStruct t2)
   where
     unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
 
