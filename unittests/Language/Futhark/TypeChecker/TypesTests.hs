@@ -32,7 +32,7 @@ evalTest te expected =
         assertFailure $ "Expected error, got: " <> show actual_t
   where
     extract (_, svars, t, _) = (svars, t)
-    run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource checkSizeExp
+    run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource checkSizeExp checkPredExp
     -- We hack up an environment with some predefined type
     -- abbreviations for testing.  This is all prettyString sensitive to the
     -- specific unique names, so we have to be careful!
