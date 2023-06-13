@@ -454,7 +454,6 @@ TypeExp :: { UncheckedTypeExp }
            { TEArrow Nothing $1 $3 (srcspan $1 $>) }
          | '?' TypeExpDims '.' TypeExp { TEDim $2 $4 (srcspan $1 $>) }
          | TypeExpTerm %prec typeprec { $1 }
-         | '{' TypeExp ',' Exp '}' { TERefine $2 $4 (srcspan $1 $>) }
 
 TypeExpDims :: { [Name] }
          : '[' id ']'             { let L _ (ID v) = $2 in [v] }
@@ -468,6 +467,7 @@ TypeExpTerm :: { UncheckedTypeExp }
          | TypeExpApply %prec typeprec { $1 }
          | SumClauses %prec sumprec
            { let (cs, loc) = $1 in TESum cs (srclocOf loc) }
+         | '{' TypeExp ',' Exp '}' { TERefine $2 $4 (srcspan $1 $>) }
 
 SumClauses :: { ([(Name, [UncheckedTypeExp])], Loc) }
             : SumClauses '|' SumClause %prec sumprec

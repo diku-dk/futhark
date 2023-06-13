@@ -776,7 +776,7 @@ substTypesRet lookupSubst ot =
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
     onType (Scalar (Refinement ty e)) =
-      Scalar . (`Refinement` e) <$> onType ty
+      Scalar . (`Refinement` applySubst lookupSubst' e) <$> onType ty
 
     onRetType (RetType dims t) = do
       ext <- get
