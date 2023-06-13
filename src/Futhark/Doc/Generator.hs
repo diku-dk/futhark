@@ -714,8 +714,7 @@ relativise dest src =
   concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
 dimDeclHtml :: Size -> DocM Html
-dimDeclHtml (SizeExpr e) = pure $ brackets $ toHtml $ prettyString e
-dimDeclHtml AnySize {} = pure $ brackets mempty
+dimDeclHtml = pure . brackets . toHtml . prettyString
 
 dimExpHtml :: SizeExp Info VName -> DocM Html
 dimExpHtml (SizeExpAny _) = pure $ brackets mempty

@@ -19,7 +19,7 @@ module Language.Futhark.Syntax
     IntType (..),
     FloatType (..),
     PrimType (..),
-    Size (..),
+    Size,
     Shape (..),
     shapeRank,
     stripDims,
@@ -93,8 +93,6 @@ module Language.Futhark.Syntax
     QualName (..),
     mkApply,
     mkApplyUT,
-    sizeVar,
-    sizeInteger,
     sizeFromName,
     sizeFromInteger,
   )
@@ -221,38 +219,16 @@ data AttrInfo vn
   | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
--- | The elaborated size of a dimension.
-data Size
-  = -- | The size of the dimension is this expression
-    -- all non-trivial expression should have variable in scope.
-    -- In a return type, existential name don't appear in expression.
-    SizeExpr (ExpBase Info VName)
-  | -- | No known size.  If @Nothing@, then this is a name distinct
-    -- from any other.  The type checker should _never_ produce these
-    -- - they are a (hopefully temporary) thing introduced by
-    -- defunctorisation and monomorphisation.
-    AnySize (Maybe VName)
-  deriving (Show, Eq, Ord)
+-- | The elaborated size of a dimension is just an expression.
+type Size = ExpBase Info VName
 
-instance Located Size where
-  locOf (SizeExpr e) = locOf e
-  locOf AnySize {} = mempty
-
--- | Create a 'Var' expression of type @i64@.
-sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
-sizeVar name = Var name (Info $ Scalar $ Prim $ Signed Int64)
-
--- | Create an 'IntLit' expression of type @i64@.
-sizeInteger :: Integer -> SrcLoc -> ExpBase Info VName
-sizeInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
-
--- | Create a 'Size' with 'sizeVar'.
+-- | Create a 'Size' from a name.
 sizeFromName :: QualName VName -> SrcLoc -> Size
-sizeFromName name loc = SizeExpr $ sizeVar name loc
+sizeFromName name = Var name (Info $ Scalar $ Prim $ Signed Int64)
 
--- | Create a 'Size' with 'sizeInt'.
+-- | Create a 'Size' from a constant integer.
 sizeFromInteger :: Integer -> SrcLoc -> Size
-sizeFromInteger x loc = SizeExpr $ sizeInteger x loc
+sizeFromInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -737,8 +713,8 @@ data AppExpBase f vn
   | BinOp
       (QualName vn, SrcLoc)
       (f PatType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
       SrcLoc
   | LetWith
       (IdentBase f vn)
@@ -1014,7 +990,10 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Part of the type of an entry point.  Has an actual type, and
--- maybe also an ascribed type expression.
+-- maybe also an ascribed type expression.  Note that although size
+-- expressions in the elaborated type can contain variables, they are
+-- no longer in scope, and are considered more like equivalence
+-- classes.
 data EntryType = EntryType
   { entryType :: StructType,
     entryAscribed :: Maybe (TypeExp Info VName)

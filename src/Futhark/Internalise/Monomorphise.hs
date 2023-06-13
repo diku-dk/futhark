@@ -281,7 +281,7 @@ calculateDims body repl =
       let expr = expReplace repls $ unReplaced dim
           subst vn' =
             if vn' == vn
-              then Just $ ExpSubst $ sizeVar (qualName reName) mempty
+              then Just $ ExpSubst $ sizeFromName (qualName reName) mempty
               else Nothing
           appRes = case body' of
             (AppExp _ (Info (AppRes ty ext))) -> Info $ AppRes (applySubst subst ty) (reName : ext)
@@ -346,7 +346,7 @@ monoType = noExts . (`evalState` (0, mempty)) . traverseDims onDim . toStruct
     noExtsScalar (Arrow as p d t1 (RetType _ t2)) =
       Arrow as p d (noExts t1) (RetType [] (noExts t2))
     noExtsScalar t = t
-    onDim bound _ (SizeExpr e)
+    onDim bound _ e
       -- A locally bound size.
       | any (`S.member` bound) $ fvVars $ freeInExp e =
           pure MonoAnon
@@ -387,17 +387,17 @@ replaceExp e =
       prev <- gets $ lookup e'
       prev_param <- asks $ lookup e' . envParametrized
       case (prev_param, prev) of
-        (Just vn, _) -> pure $ sizeVar (qualName vn) (srclocOf e)
-        (Nothing, Just vn) -> pure $ sizeVar (qualName vn) (srclocOf e)
+        (Just vn, _) -> pure $ sizeFromName (qualName vn) (srclocOf e)
+        (Nothing, Just vn) -> pure $ sizeFromName (qualName vn) (srclocOf e)
         (Nothing, Nothing) -> do
           vn <- newNameFromString $ "d<{" ++ prettyString (bareExp e) ++ "}>"
           modify ((e', vn) :)
-          pure $ sizeVar (qualName vn) (srclocOf e)
+          pure $ sizeFromName (qualName vn) (srclocOf e)
   where
     -- Avoid replacing of some 'already normalised' sizes that are just surounded by some parentheses.
     maybeNormalisedSize e'
       | Just e'' <- stripExp e' = maybeNormalisedSize e''
-    maybeNormalisedSize (Var qn _ loc) = Just $ sizeVar qn loc
+    maybeNormalisedSize (Var qn _ loc) = Just $ sizeFromName qn loc
     maybeNormalisedSize (IntLit v _ loc) = Just $ IntLit v (Info i64) loc
     maybeNormalisedSize _ = Nothing
 
@@ -478,8 +478,9 @@ transformTypeSizes typ =
     transformScalarSizes ty@Prim {} = pure ty
     transformScalarSizes Refinement {} = error "Refinement not implemented in transformTypeSizes"
 
-    onDim (SizeExpr e) = SizeExpr <$> (replaceExp =<< transformExp e)
-    onDim (AnySize v) = pure $ AnySize v
+    onDim e
+      | e == anySize = pure e
+      | otherwise = replaceExp =<< transformExp e
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
 transformRetTypeSizes argset (RetType dims ty) = do
@@ -557,11 +558,12 @@ sizesForPat pat = do
   pure (sizes, params')
   where
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnySize _) = do
-      v <- lift $ newVName "size"
-      modify (v :)
-      pure $ sizeFromName (qualName v) mempty
-    onDim d = pure d
+    onDim d
+      | d == anySize = do
+          v <- lift $ newVName "size"
+          modify (v :)
+          pure $ sizeFromName (qualName v) mempty
+      | otherwise = pure d
 
 transformAppRes :: AppRes -> MonoM AppRes
 transformAppRes (AppRes t ext) =
@@ -683,8 +685,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   where
     applyOp ret ext fname' x y =
       mkApply
-        (mkApply fname' [(Observe, snd (unInfo d1), x)] (AppRes ret mempty))
-        [(Observe, snd (unInfo d2), y)]
+        (mkApply fname' [(Observe, unInfo d1, x)] (AppRes ret mempty))
+        [(Observe, unInfo d2, y)]
         (AppRes ret ext)
 
     makeVarParam arg = do
@@ -890,9 +892,9 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (
           op
           [(Observe, xext, e1)]
           (AppRes (Scalar $ Arrow mempty yp Observe ytype (RetType [] t')) [])
-      onDim (SizeExpr (Var d typ _))
-        | Named p <- xp, qualLeaf d == p = SizeExpr $ Var (qualName v1) typ loc
-        | Named p <- yp, qualLeaf d == p = SizeExpr $ Var (qualName v2) typ loc
+      onDim (Var d typ _)
+        | Named p <- xp, qualLeaf d == p = Var (qualName v1) typ loc
+        | Named p <- yp, qualLeaf d == p = Var (qualName v2) typ loc
       onDim d = d
       rettype' = first onDim rettype
       rettype'' = toStruct rettype'
@@ -1030,16 +1032,13 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
     named1 = revMap r1
     named2 = revMap r2
 
-    onDims bound (SizeExpr e1) (SizeExpr e2) = do
+    onDims bound e1 e2 = do
       onExps bound e1 e2
-      pure $ SizeExpr e1
-    onDims _ d _ = pure d
+      pure e1
 
     onExps bound (Var v _ _) e = do
       unless (any (`elem` bound) $ freeVarsInExp e) $
-        modify $
-          M.insert (qualLeaf v) $
-            SizeExpr e
+        modify (M.insert (qualLeaf v) e)
       case lookup (qualLeaf v) named1 of
         Just rexp -> onExps bound (unReplaced rexp) e
         Nothing -> pure ()
@@ -1060,10 +1059,10 @@ inferSizeArgs tparams bind_t bind_r t = do
   where
     tparamArg dinst tp =
       case M.lookup (typeParamName tp) dinst of
-        Just (SizeExpr e) ->
+        Just e ->
           replaceExp e
-        _ ->
-          pure $ Literal (SignedValue $ Int64Value 0) mempty
+        Nothing ->
+          pure $ sizeFromInteger 0 mempty
 
 -- Monomorphising higher-order functions can result in function types
 -- where the same named parameter occurs in multiple spots.  When
@@ -1150,7 +1149,7 @@ arrowArg scope argset args_params rety =
     arrowArgType env (Scalar ty) =
       Scalar <$> arrowArgScalar env ty
 
-    arrowArgSize s@(SizeExpr (Var qn _ _)) = writer (s, (mempty, S.singleton $ qualLeaf qn))
+    arrowArgSize s@(Var qn _ _) = writer (s, (mempty, S.singleton $ qualLeaf qn))
     arrowArgSize s = pure s
 
     -- \| arrowClean cleans the mess in the type
@@ -1353,7 +1352,7 @@ typeSubstsM loc orig_t1 orig_t2 =
           pure $ sizeFromName (qualName d) mempty
         Just d ->
           pure $ sizeFromName (qualName d) mempty
-    onDim MonoAnon = pure $ AnySize Nothing
+    onDim MonoAnon = pure anySize
 
 -- Perform a given substitution on the types in a pattern.
 substPat :: Bool -> (PatType -> PatType) -> Pat -> Pat

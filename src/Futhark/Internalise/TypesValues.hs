@@ -222,10 +222,10 @@ internaliseDim ::
   InternaliseTypeM ExtSize
 internaliseDim exts d =
   case d of
-    E.AnySize _ -> Ext <$> newId
-    E.SizeExpr (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
-    E.SizeExpr (E.Var name _ _) -> pure $ namedDim name
-    E.SizeExpr e -> error $ "Unexpected size expression: " ++ prettyString e
+    e | e == E.anySize -> Ext <$> newId
+    (E.IntLit n _ _) -> pure $ I.Free $ intConst I.Int64 n
+    (E.Var name _ _) -> pure $ namedDim name
+    e -> error $ "Unexpected size expression: " ++ prettyString e
   where
     namedDim (E.QualName _ name)
       | Just x <- name `M.lookup` exts = I.Ext x
@@ -296,14 +296,6 @@ internaliseConstructors ::
 internaliseConstructors cs =
   foldl' onConstructor mempty $ zip (E.sortConstrs cs) [0 ..]
   where
-    onConstructor ::
-      ( [Tree (I.TypeBase ExtShape Uniqueness)],
-        M.Map Name (Int, [Int])
-      ) ->
-      ((Name, [Tree (I.TypeBase ExtShape Uniqueness)]), Int) ->
-      ( [Tree (I.TypeBase ExtShape Uniqueness)],
-        M.Map Name (Int, [Int])
-      )
     onConstructor (ts, mapping) ((c, c_ts), i) =
       let (_, js, new_ts) =
             foldl' f (withOffsets (map (fmap fromDecl) ts), mempty, mempty) c_ts

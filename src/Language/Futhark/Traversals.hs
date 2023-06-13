@@ -109,18 +109,12 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (BinOp (fname, fname_loc) t (x, Info (xt, xext)) (y, Info (yt, yext)) loc) =
+  astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
     BinOp
       <$> ((,) <$> astMap tv fname <*> pure fname_loc)
       <*> traverse (mapOnPatType tv) t
-      <*> ( (,)
-              <$> mapOnExp tv x
-              <*> (Info <$> ((,) <$> mapOnStructType tv xt <*> pure xext))
-          )
-      <*> ( (,)
-              <$> mapOnExp tv y
-              <*> (Info <$> ((,) <$> mapOnStructType tv yt <*> pure yext))
-          )
+      <*> ((,) <$> mapOnExp tv x <*> pure xext)
+      <*> ((,) <$> mapOnExp tv y <*> pure yext)
       <*> pure loc
   astMap tv (DoLoop sparams mergepat mergeexp form loopbody loc) =
     DoLoop
@@ -272,10 +266,6 @@ instance ASTMappable (SizeExp Info VName) where
   astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
-instance ASTMappable Size where
-  astMap tv (SizeExpr expr) = SizeExpr <$> mapOnExp tv expr
-  astMap tv (AnySize vn) = AnySize <$> traverse (mapOnName tv) vn
-
 instance ASTMappable (TypeParamBase VName) where
   astMap = traverse . mapOnName
 
@@ -302,52 +292,50 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
   (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   (als1 -> f als2) ->
-  (ExpBase Info VName -> f (ExpBase Info VName)) ->
   t dim1 als1 ->
   f (t dim2 als2)
 
 traverseScalarType ::
   Applicative f =>
   TypeTraverser f ScalarTypeBase dim1 als1 dims als2
-traverseScalarType _ _ _ _ (Prim t) = pure $ Prim t
-traverseScalarType f g h e (Record fs) = Record <$> traverse (traverseType f g h e) fs
-traverseScalarType f g h e (TypeVar als u t args) =
-  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g e) args
-traverseScalarType f g h e (Arrow als v u t1 (RetType dims t2)) =
+traverseScalarType _ _ _ (Prim t) = pure $ Prim t
+traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
+traverseScalarType f g h (TypeVar als u t args) =
+  TypeVar <$> h als <*> pure u <*> f t <*> traverse (traverseTypeArg f g) args
+traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
   Arrow
     <$> h als
     <*> pure v
     <*> pure u
-    <*> traverseType f g pure e t1
-    <*> (RetType dims <$> traverseType f g h e t2)
-traverseScalarType f g h e (Sum cs) =
-  Sum <$> (traverse . traverse) (traverseType f g h e) cs
-traverseScalarType f g h e (Refinement ty p) =
-  Refinement <$> traverseType f g h e ty <*> e p
+    <*> traverseType f g pure t1
+    <*> (RetType dims <$> traverseType f g h t2)
+traverseScalarType f g h (Sum cs) =
+  Sum <$> (traverse . traverse) (traverseType f g h) cs
+traverseScalarType f g h (Refinement ty p) =
+  Refinement <$> traverseType f g h ty <*> g p
 
 traverseType :: Applicative f => TypeTraverser f TypeBase dim1 als1 dims als2
-traverseType f g h e (Array als u shape et) =
-  Array <$> h als <*> pure u <*> traverse g shape <*> traverseScalarType f g pure e et
-traverseType f g h e (Scalar t) =
-  Scalar <$> traverseScalarType f g h e t
+traverseType f g h (Array als u shape et) =
+  Array <$> h als <*> pure u <*> traverse g shape <*> traverseScalarType f g pure et
+traverseType f g h (Scalar t) =
+  Scalar <$> traverseScalarType f g h t
 
 traverseTypeArg ::
   Applicative f =>
   (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
-  (ExpBase Info VName -> f (ExpBase Info VName)) ->
   TypeArg dim1 ->
   f (TypeArg dim2)
-traverseTypeArg _ g _ (TypeArgDim d) =
+traverseTypeArg _ g (TypeArgDim d) =
   TypeArgDim <$> g d
-traverseTypeArg f g e (TypeArgType t) =
-  TypeArgType <$> traverseType f g pure e t
+traverseTypeArg f g (TypeArgType t) =
+  TypeArgType <$> traverseType f g pure t
 
 instance ASTMappable StructType where
-  astMap tv = traverseType (astMap tv) (astMap tv) pure (mapOnExp tv)
+  astMap tv = traverseType (astMap tv) (mapOnExp tv) pure
 
 instance ASTMappable PatType where
-  astMap tv = traverseType (astMap tv) (astMap tv) (astMap tv) (mapOnExp tv)
+  astMap tv = traverseType (astMap tv) (mapOnExp tv) (astMap tv)
 
 instance ASTMappable StructRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t

@@ -20,7 +20,7 @@ where
 
 import Control.Monad
 import Control.Monad.Except
-import Data.Bifunctor (first, second)
+import Data.Bifunctor
 import Data.Either
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -604,15 +604,10 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
         )
 
 entryPoint :: [Pat] -> Maybe (TypeExp Info VName) -> StructRetType -> EntryPoint
-entryPoint params orig_ret_te (RetType ret orig_ret) =
+entryPoint params orig_ret_te (RetType _ret orig_ret) =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
-    (more_params, rettype') = onRetType orig_ret_te $ first extToAny orig_ret
-
-    -- Since the entry point type is not a RetType but just a plain
-    -- StructType, we have to remove any existentially bound sizes.
-    extToAny (SizeExpr (Var v _ _)) | qualLeaf v `elem` ret = AnySize Nothing
-    extToAny d = d
+    (more_params, rettype') = onRetType orig_ret_te orig_ret
 
     patternEntry (PatParens p _) =
       patternEntry p

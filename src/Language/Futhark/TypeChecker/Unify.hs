@@ -260,7 +260,7 @@ dimNotes _ _ = pure mempty
 typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
-    . mapM (dimNotes ctx . flip sizeVar mempty . qualName)
+    . mapM (dimNotes ctx . flip sizeFromName mempty . qualName)
     . M.keys
     . unFV
     . freeInType
@@ -414,7 +414,7 @@ unifyWith onDims usage = subunify False
                 | ord' = flipUnifySizes onDims
                 | otherwise = onDims
 
-          unifyTypeArg bcs' (TypeArgDim (SizeExpr d1)) (TypeArgDim (SizeExpr d2)) =
+          unifyTypeArg bcs' (TypeArgDim d1) (TypeArgDim d2) =
             onDims' bcs' (swap ord d1 d2)
           unifyTypeArg bcs' (TypeArgType t) (TypeArgType arg_t) =
             subunify ord bound bcs' t arg_t
@@ -517,7 +517,7 @@ unifyWith onDims usage = subunify False
                 case (p1, p2) of
                   (Named p1', Named p2') ->
                     let f v
-                          | v == p2' = Just $ ExpSubst $ sizeVar (qualName p1') mempty
+                          | v == p2' = Just $ ExpSubst $ sizeFromName (qualName p1') mempty
                           | otherwise = Nothing
                      in (b1, applySubst f b2)
                   (_, _) ->
@@ -526,8 +526,8 @@ unifyWith onDims usage = subunify False
               pname (Named x) = Just x
               pname Unnamed = Nothing
         (Array {}, Array {})
-          | Shape (SizeExpr t1_d : _) <- arrayShape t1',
-            Shape (SizeExpr t2_d : _) <- arrayShape t2',
+          | Shape (t1_d : _) <- arrayShape t1',
+            Shape (t2_d : _) <- arrayShape t2',
             Just t1'' <- peelArray 1 t1',
             Just t2'' <- peelArray 1 t2' -> do
               onDims' bcs (swap ord t1_d t2_d)

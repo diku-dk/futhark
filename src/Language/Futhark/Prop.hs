@@ -23,6 +23,7 @@ module Language.Futhark.Prop
     progHoles,
     defaultEntryPoint,
     paramName,
+    anySize,
 
     -- * Queries on expressions
     typeOf,
@@ -79,10 +80,8 @@ module Language.Futhark.Prop
     isSizeParam,
     combineTypeShapes,
     matchDims,
-    -- | Values of these types are produces by the parser.  They use
-    -- unadorned names and have no type information, apart from that
-    -- which is syntactically required.
-    NoInfo (..),
+
+    -- * Un-typechecked ASTs
     UncheckedType,
     UncheckedTypeExp,
     UncheckedIdent,
@@ -101,7 +100,8 @@ module Language.Futhark.Prop
     UncheckedSpec,
     UncheckedProg,
     UncheckedCase,
-    -- | Type-checked syntactical constructs
+
+    -- * Type-checked ASTs
     Ident,
     DimIndex,
     Slice,
@@ -393,6 +393,20 @@ combineTypeShapes _ new_tp = new_tp
 paramName :: PName -> Maybe VName
 paramName (Named v) = Just v
 paramName Unnamed = Nothing
+
+-- | A special expression representing no known size.  When present in
+-- a type, each instance represents a distinct size.  The type checker
+-- should _never_ produce these - they are a (hopefully temporary)
+-- thing introduced by defunctorisation and monomorphisation.  They
+-- represent a flaw in our implementation.  When they occur in a
+-- return type, they can be replaced with freshly created existential
+-- sizes.  When they occur in parameter types, they can be replaced
+-- with size parameters.
+anySize :: Size
+anySize =
+  -- The definition here is weird to avoid seeing this as a free
+  -- variable.
+  StringLit [65, 78, 89] mempty
 
 -- | Match the dimensions of otherwise assumed-equal types.  The
 -- combining function is also passed the names bound within the type
@@ -780,15 +794,14 @@ intrinsics =
                     ()
                     Nonunique
                     ( Shape
-                        [ SizeExpr
-                            $ AppExp
-                              ( BinOp
-                                  (findOp "*", mempty)
-                                  sizeBinOpInfo
-                                  (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
-                                  (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
-                                  mempty
-                              )
+                        [ AppExp
+                            ( BinOp
+                                (findOp "*", mempty)
+                                sizeBinOpInfo
+                                (Var (qualName n) (Info i64) mempty, Info Nothing)
+                                (Var (qualName m) (Info i64) mempty, Info Nothing)
+                                mempty
+                            )
                             $ Info
                             $ AppRes i64 []
                         ]
@@ -814,15 +827,14 @@ intrinsics =
                   $ RetType []
                   $ uarray_a
                   $ Shape
-                    [ SizeExpr
-                        $ AppExp
-                          ( BinOp
-                              (findOp "+", mempty)
-                              sizeBinOpInfo
-                              (Var (qualName n) (Info i64) mempty, Info (i64, Nothing))
-                              (Var (qualName m) (Info i64) mempty, Info (i64, Nothing))
-                              mempty
-                          )
+                    [ AppExp
+                        ( BinOp
+                            (findOp "+", mempty)
+                            sizeBinOpInfo
+                            (Var (qualName n) (Info i64) mempty, Info Nothing)
+                            (Var (qualName m) (Info i64) mempty, Info Nothing)
+                            mempty
+                        )
                         $ Info
                         $ AppRes i64 []
                     ]

@@ -289,7 +289,7 @@ getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
     While e -> While <$> transformBody e
   body' <- transformBody body
   nameExp final $ AppExp (DoLoop sizes pat einit' form' body' loc) resT
-getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (_, elp)) (er, Info (_, erp)) loc) (Info resT)) = do
+getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
       el' <- naming "or_lhs" $ getOrdering True el

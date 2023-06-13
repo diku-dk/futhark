@@ -15,7 +15,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -64,14 +63,6 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
       (rettype', retals) <-
         first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
-
-      when False . traceM $
-        unlines
-          [ "internaliseValBind",
-            prettyString fname,
-            prettyString rettype,
-            prettyString rettype'
-          ]
 
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
@@ -355,7 +346,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeInteger 0 mempty
+      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeFromInteger 0 mempty
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do
@@ -1063,7 +1054,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
           ( eBinOp
               (Add Int64 I.OverflowWrap)
               x
-              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum $ toExp s'))
+              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum y))
           )
           y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
@@ -1097,14 +1088,14 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) i' j'
   forwards_ok <-
     letSubExp "forwards_ok"
-      =<< eAll [zero_lte_i, zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
+      =<< eAll [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
 
   negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) negone j'
   j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) j' i'
   backwards_ok <-
     letSubExp "backwards_ok"
       =<< eAll
-        [negone_lte_j, negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+        [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
   slice_ok <-
     letSubExp "slice_ok"

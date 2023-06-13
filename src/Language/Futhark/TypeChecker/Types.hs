@@ -41,15 +41,13 @@ mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
   execState (traverseDims onDim t) mempty
   where
-    onDim bound _ (SizeExpr (Var d _ _))
+    onDim bound _ (Var d _ _)
       | qualLeaf d `S.member` bound =
           modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ PosImmediate (SizeExpr (Var d _ _)) =
+    onDim _ PosImmediate (Var d _ _) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
-    onDim _ _ (SizeExpr e) =
+    onDim _ _ e =
       modify $ M.unionWith (&&) (M.map (const True) (unFV $ freeInExp e))
-    onDim _ _ _ =
-      pure ()
 
 -- | Determine which of the sizes in a type are used as sizes outside
 -- of functions in the type, and which are not.  The former are said
@@ -227,7 +225,7 @@ renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
-      let mkSubst = ExpSubst . flip sizeVar mempty . qualName
+      let mkSubst = ExpSubst . flip sizeFromName mempty . qualName
           m = M.fromList . zip dims $ map mkSubst dims'
           st' = applySubst (`M.lookup` m) st
       pure $ RetType dims' st'
@@ -308,7 +306,7 @@ evalTypeExp (TEArray d t loc) = do
       pure ([dv], SizeExpAny dloc, sizeFromName (qualName dv) dloc)
     checkSizeExp (SizeExp e dloc) = do
       e' <- checkExpForSize e
-      pure ([], SizeExp e' dloc, SizeExpr e')
+      pure ([], SizeExp e' dloc, e')
 --
 evalTypeExp (TEUnique t loc) = do
   (t', svars, RetType dims st, l) <- evalTypeExp t
@@ -445,7 +443,7 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( TypeArgExpSize (SizeExpAny loc),
           [d],
-          ExpSubst $ sizeVar (qualName d) loc
+          ExpSubst $ sizeFromName (qualName d) loc
         )
 
     checkArgApply (TypeParamDim pv _) (TypeArgExpSize d) = do
@@ -669,19 +667,6 @@ instance Substitutable Exp where
             mapOnPatRetType = pure . applySubst f
           }
 
-instance Substitutable Size where
-  applySubst f size = runIdentity $ astMap mapper size
-    where
-      mapper =
-        ASTMapper
-          { mapOnExp = pure . applySubst f,
-            mapOnName = pure,
-            mapOnStructType = pure . applySubst f,
-            mapOnPatType = pure . applySubst f,
-            mapOnStructRetType = pure . applySubst f,
-            mapOnPatRetType = pure . applySubst f
-          }
-
 instance Substitutable d => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
 
@@ -708,7 +693,7 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
     -- We are assuming everything has already been type-checked for correctness.
-    mkSubst (TypeParamDim pv _) (TypeArgDim (SizeExpr e)) =
+    mkSubst (TypeParamDim pv _) (TypeArgDim e) =
       (pv, ExpSubst e)
     mkSubst (TypeParamType _ pv _) (TypeArgType at) =
       (pv, Subst [] $ RetType [] $ second mempty at)
@@ -740,7 +725,7 @@ substTypesRet lookupSubst ot =
         else do
           let start = maximum $ map baseTag seen_ext
               ext' = zipWith VName (map baseName ext) [start + 1 ..]
-              mkSubst = ExpSubst . flip sizeVar mempty . qualName
+              mkSubst = ExpSubst . flip sizeFromName mempty . qualName
               extsubsts = M.fromList $ zip ext $ map mkSubst ext'
               RetType [] t' = substTypesRet (`M.lookup` extsubsts) t
           pure $ RetType ext' t'
@@ -813,8 +798,7 @@ substTypesAny lookupSubst ot =
       -- AnySize.  This should _never_ happen during type-checking, but
       -- may happen as we substitute types during monomorphisation and
       -- defunctorisation later on. See Note [AnySize]
-      let toAny (SizeExpr (Var v _ _))
-            | qualLeaf v `elem` dims = AnySize Nothing
+      let toAny (Var v _ _) | qualLeaf v `elem` dims = anySize
           toAny d = d
        in first toAny ot'
 

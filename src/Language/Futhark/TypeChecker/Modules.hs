@@ -107,7 +107,7 @@ newNamesForMTy orig_mty = do
 
         -- For applySubst and friends.
         subst v =
-          ExpSubst . flip sizeVar mempty . qualName <$> M.lookup v substs
+          ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v substs
 
         substituteInMap f m =
           let (ks, vs) = unzip $ M.toList m
@@ -156,14 +156,10 @@ newNamesForMTy orig_mty = do
         substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
           Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
 
-        substituteInShape (Shape ds) = Shape $ map substituteInDim ds
-        substituteInDim (SizeExpr e) = SizeExpr $ applySubst subst e
-        substituteInDim AnySize {} = error "substituteInDim: AnySize"
+        substituteInShape (Shape ds) = Shape $ map (applySubst subst) ds
 
-        substituteInTypeArg (TypeArgDim (SizeExpr e)) =
-          TypeArgDim $ SizeExpr (applySubst subst e)
-        substituteInTypeArg (TypeArgDim AnySize {}) =
-          error "substituteInTypeArg: AnySize"
+        substituteInTypeArg (TypeArgDim e) =
+          TypeArgDim $ applySubst subst e
         substituteInTypeArg (TypeArgType t) =
           TypeArgType $ substituteInType t
 
@@ -390,7 +386,7 @@ matchMTys ::
   Either TypeError (M.Map VName VName)
 matchMTys orig_mty orig_mty_sig =
   matchMTys'
-    (M.map (ExpSubst . flip sizeVar mempty) $ resolveMTyNames orig_mty orig_mty_sig)
+    (M.map (ExpSubst . flip sizeFromName mempty) $ resolveMTyNames orig_mty orig_mty_sig)
     []
     orig_mty
     orig_mty_sig
@@ -618,7 +614,7 @@ applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
   let a_abbrs = mtyTypeAbbrs a_mty
       isSub v = case M.lookup v a_abbrs of
         Just abbr -> Just $ substFromAbbr abbr
-        _ -> Just $ ExpSubst $ sizeVar (qualName v) mempty
+        _ -> Just $ ExpSubst $ sizeFromName (qualName v) mempty
       type_subst = M.mapMaybe isSub p_subst
       body_mty' = substituteTypesInMTy (`M.lookup` type_subst) body_mty
   (body_mty'', body_subst) <- newNamesForMTy body_mty'
