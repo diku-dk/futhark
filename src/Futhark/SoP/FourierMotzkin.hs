@@ -33,11 +33,11 @@ module Futhark.SoP.FourierMotzkin
   )
 where
 
-import Control.Monad.State
 import Data.Set qualified as S
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+import Futhark.Util.Pretty
 
 ---------------------------------------------
 --- Fourier-Motzkin elimination algorithm ---
@@ -50,19 +50,19 @@ import Futhark.SoP.Util
 -- | Solves the inequation `sop < 0` by reducing it to
 --   `sop + 1 <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveLTh0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
+fmSolveLTh0 :: MonadSoP u m => SoP u -> m Bool
 fmSolveLTh0 = fmSolveLEq0 . (.+. int2SoP 1)
 
 -- | Solves the inequation `sop > 0` by reducing it to
 --   `(-1)*sop < 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGTh0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
+fmSolveGTh0 :: MonadSoP u m => SoP u -> m Bool
 fmSolveGTh0 = fmSolveLTh0 . negSoP
 
 -- | Solves the inequation `sop >= 0` by reducing it to
 --   `(-1)*sop <= 0`, where `sop` denotes an expression
 --   in  sum-of-product form.
-fmSolveGEq0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
+fmSolveGEq0 :: MonadSoP u m => SoP u -> m Bool
 fmSolveGEq0 = fmSolveLEq0 . negSoP
 
 -- | Assuming `sop` an expression in sum-of-products (SoP) form,
@@ -80,7 +80,7 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (i)   `True`  if the inequality is found to always holds;
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
-fmSolveLEq0 :: (Nameable u, Ord u, Show u) => SoP u -> SoPM u Bool
+fmSolveLEq0 :: MonadSoP u m => SoP u -> m Bool
 fmSolveLEq0 sop
   | Just v <- justConstant sop = pure (v <= 0)
   | not (null syms) = do
@@ -114,26 +114,26 @@ fmSolveLEq0 sop
   where
     syms = S.toList $ free sop
 
-($<$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
+($<$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
 x $<$ y = fmSolveLTh0 $ x .-. y
 
-($<=$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
+($<=$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
 x $<=$ y = fmSolveLEq0 $ x .-. y
 
-($>$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
+($>$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
 x $>$ y = fmSolveGTh0 $ x .-. y
 
-($>=$) :: (Nameable u, Ord u, Show u) => SoP u -> SoP u -> SoPM u Bool
+($>=$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
 x $>=$ y = fmSolveGEq0 $ x .-. y
 
-fmSolveLTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveLTh0_ :: (Ord u, Nameable u, Show u, Pretty u) => RangeEnv u -> SoP u -> Bool
 fmSolveLTh0_ rs = evalSoPM mempty {ranges = rs} . fmSolveLTh0
 
-fmSolveGTh0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveGTh0_ :: (Ord u, Nameable u, Show u, Pretty u) => RangeEnv u -> SoP u -> Bool
 fmSolveGTh0_ rs = evalSoPM mempty {ranges = rs} . fmSolveGTh0
 
-fmSolveGEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveGEq0_ :: (Ord u, Nameable u, Show u, Pretty u) => RangeEnv u -> SoP u -> Bool
 fmSolveGEq0_ rs = evalSoPM mempty {ranges = rs} . fmSolveGEq0
 
-fmSolveLEq0_ :: (Nameable u, Ord u, Show u) => RangeEnv u -> SoP u -> Bool
+fmSolveLEq0_ :: (Ord u, Nameable u, Show u, Pretty u) => RangeEnv u -> SoP u -> Bool
 fmSolveLEq0_ rs = evalSoPM mempty {ranges = rs} . fmSolveLEq0

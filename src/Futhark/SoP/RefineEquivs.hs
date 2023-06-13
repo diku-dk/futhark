@@ -7,7 +7,6 @@ module Futhark.SoP.RefineEquivs
 where
 
 import Control.Monad
-import Control.Monad.State
 import Data.Foldable (minimumBy)
 import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
@@ -23,7 +22,7 @@ import Futhark.SoP.ToFromSoP
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
-addEqZeroPEs :: (Show u, Ord u, Nameable u) => Set (PrimExp u == 0) -> SoPM u (Set (SoP u >= 0))
+addEqZeroPEs :: MonadSoP u m => Set (PrimExp u == 0) -> m (Set (SoP u >= 0))
 addEqZeroPEs pes = do
   -- Substitute already known equivalences in the equality set.
   equivs_pes <- fromSoP <$> getEquivs
@@ -63,7 +62,7 @@ instance Ord u => Substitute u (SoP u) (EquivCand u) where
 --   ToDo: try to give common factor first, e.g.,
 --         nx - nbq - n = 0 => n*(x-bq-1) = 0 => x = bq+1,
 --         if we can prove that n != 0
-mkEquivCands :: (Nameable u, Ord u) => SoP u -> SoPM u (Set (EquivCand u))
+mkEquivCands :: MonadSoP u m => SoP u -> m (Set (EquivCand u))
 mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
   where
     mkEquivCand (Term term) v mcands
@@ -100,8 +99,7 @@ mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
 --        * Possibly add the constraints @0 <= sop <= pe2 - 1@.
 --
 --   2: TODO: try to give common factors and get simpler.
-refineEquivCand ::
-  (Show u, Ord u, Nameable u) => EquivCand u -> SoPM u (Set (SoP u >= 0), EquivCand u)
+refineEquivCand :: MonadSoP u m => EquivCand u -> m (Set (SoP u >= 0), EquivCand u)
 refineEquivCand cand@(EquivCand sym sop) = do
   mpe <- lookupUntransSym sym
   case mpe of
@@ -134,9 +132,9 @@ refineEquivCand cand@(EquivCand sym sop) = do
 --     creation/refinement of the mapping.
 --   * @cands@: set of equivalence candidates.
 addEquiv2CandSet ::
-  (Show u, Ord u, Nameable u) =>
+  MonadSoP u m =>
   PrimExp u == 0 ->
-  SoPM u (Set (SoP u >= 0), Set (EquivCand u))
+  m (Set (SoP u >= 0), Set (EquivCand u))
 addEquiv2CandSet pe = do
   (_, sop) <- toNumSoP pe
   cands <- mkEquivCands sop
@@ -144,7 +142,7 @@ addEquiv2CandSet pe = do
   pure (mconcat ineqss, S.fromList cands')
 
 -- | Add legal equivalence candidates to the environment.
-addLegalCands :: (Ord u, Nameable u) => Set (EquivCand u) -> SoPM u ()
+addLegalCands :: MonadSoP u m => Set (EquivCand u) -> m ()
 addLegalCands cand_set
   | S.null cand_set = pure ()
 addLegalCands cand_set = do

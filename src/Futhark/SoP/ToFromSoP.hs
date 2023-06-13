@@ -18,6 +18,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.SoP.Monad
 import Futhark.SoP.PrimExp
 import Futhark.SoP.SoP
+import Futhark.Util.Pretty
 
 -- | Conversion from (structures of) 'SoP's to other representations
 --   (e.g., 'PrimExp's).
@@ -42,7 +43,7 @@ instance {-# OVERLAPS #-} (Ord b, FromSoP a b) => FromSoP (Set a) (Set b) where
 class Monad m => ToSoPM m a b where
   toSoP :: a -> m b
 
-instance (Nameable u, Ord u) => ToSoPM (SoPM u) (PrimExp u) (Integer, SoP u) where
+instance (Nameable u, Ord u, Show u, Pretty u) => ToSoPM (SoPM u) (PrimExp u) (Integer, SoP u) where
   toSoP = toNumSoP
 
 instance (Traversable t, ToSoPM m a b) => ToSoPM m (t a) (t b) where
@@ -56,12 +57,12 @@ instance {-# OVERLAPS #-} (Ord b, ToSoPM m a b) => ToSoPM m (Set a) (Set b) wher
 --
 --   TODO: please extend to return also an integral
 --   quotient, e.g., in order to support, e.g., @i <= (n+1)/16 + 3@.
-toNumSoP :: (Ord u, Nameable u) => PrimExp u -> SoPM u (Integer, SoP u)
+toNumSoP :: (Ord u, Nameable u, MonadSoP u m) => PrimExp u -> m (Integer, SoP u)
 toNumSoP primExp = do
   (f, sop) <- toNumSoP' 1 primExp
   pure (abs f, signum f `scaleSoP` sop)
   where
-    toNumSoP' :: (Ord u, Nameable u) => Integer -> PrimExp u -> SoPM u (Integer, SoP u)
+    toNumSoP' :: (Ord u, Nameable u, MonadSoP u m) => Integer -> PrimExp u -> m (Integer, SoP u)
     toNumSoP' _ pe
       | notIntType (primExpType pe) =
           error "toNumSoP applied to a PrimExp whose prim type is not Integer"
@@ -169,7 +170,7 @@ fromSym sym = LeafExp sym $ IntType Int64
 
 -- | Translates a 'PrimExp' containing a (top-level) comparison
 -- operator into a 'SoP' representation such that @sop >= 0@.
-toNumSoPCmp :: (Ord u, Nameable u) => PrimExp u -> SoPM u (Integer, SoP u >= 0)
+toNumSoPCmp :: (Ord u, Nameable u, Show u, Pretty u) => PrimExp u -> SoPM u (Integer, SoP u >= 0)
 toNumSoPCmp (CmpOpExp (CmpEq ptp) x y)
   -- x = y => x - y = 0
   | IntType {} <- ptp = toNumSoP $ x ~-~ y

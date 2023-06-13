@@ -78,6 +78,8 @@ mkNameM = modifyNameSource mkName
 class
   ( Ord u,
     Nameable u,
+    Show u, -- To be removed
+    Pretty u, -- To be removed
     MonadFreshNames m
   ) =>
   MonadSoP u m
@@ -150,6 +152,8 @@ evalSoPM_ = evalSoPM mempty
 instance
   ( Ord u,
     Nameable u,
+    Show u,
+    Pretty u,
     MonadFreshNames m
   ) =>
   MonadSoP u (SoPMT u m)

@@ -18,11 +18,10 @@ import Futhark.SoP.Monad
 import Futhark.SoP.SoP
 import Futhark.SoP.ToFromSoP
 import Futhark.SoP.Util
-import Futhark.Util.Pretty
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeroPEs :: (Show u, Pretty u, Ord u, Nameable u) => Set (PrimExp u >= 0) -> SoPM u ()
+addIneqZeroPEs :: MonadSoP u m => Set (PrimExp u >= 0) -> m ()
 addIneqZeroPEs pes = do
   -- Substitute equivalence env.
   pes' <- (flip S.map pes . substituteInPrimExp . fmap fromSoP) <$> getEquivs
@@ -89,9 +88,9 @@ mkRangeCands sop = M.foldrWithKey mkRangeCand mempty $ getTerms sop
 --   these are @lbs' <= -j_z * sop@ (@j_z * sop <= ubs'@) where @lbs'@
 --   (@ubs'@) are the refined bounds from the previous step.
 refineRangeInEnv ::
-  (Nameable u, Ord u, Show u) =>
+  MonadSoP u m =>
   RangeCand u ->
-  SoPM u (Set (RangeCand u))
+  m (Set (RangeCand u))
 refineRangeInEnv (RangeCand j sym sop) = do
   Range lbs k ubs <- lookupRange sym
   let z = lcm k j
@@ -116,13 +115,6 @@ refineRangeInEnv (RangeCand j sym sop) = do
       -- New candidates: sop' <= ubs --> ubs - sop' >= 0
       pure $ foldMap (mkRangeCands . (.-. sop')) ubs'
   where
-    mergeBound ::
-      (Ord u) =>
-      (SoP u -> SoPM u Bool) ->
-      (SoP u -> SoPM u Bool) ->
-      Set (SoP u) ->
-      SoP u ->
-      SoPM u (Set (SoP u))
     mergeBound reject remove bs sop' =
       ifM
         (anyM reject bs)
@@ -141,7 +133,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: (Show u, Ord u, Nameable u, Pretty u) => Set (RangeCand u) -> SoPM u ()
+addRangeCands :: MonadSoP u m => Set (RangeCand u) -> m ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do

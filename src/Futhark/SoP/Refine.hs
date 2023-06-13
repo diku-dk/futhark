@@ -14,12 +14,11 @@ import Futhark.SoP.PrimExp
 import Futhark.SoP.RefineEquivs
 import Futhark.SoP.RefineRanges
 import Futhark.SoP.ToFromSoP
-import Futhark.Util.Pretty
 
 refineAlgEnv ::
-  (Show u, Ord u, Nameable u, Pretty u) =>
+  MonadSoP u m =>
   Set (PrimExp u) ->
-  SoPM u ()
+  m ()
 refineAlgEnv candidates = do
   -- Split candidates into equality and inequality sets.
   let (eqZs, ineqZs) = processPEs candidates
