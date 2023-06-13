@@ -30,6 +30,7 @@ module Futhark.SoP.FourierMotzkin
     ($<=$),
     ($>$),
     ($>=$),
+    ($==$),
   )
 where
 
@@ -125,6 +126,9 @@ x $>$ y = fmSolveGTh0 $ x .-. y
 
 ($>=$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
 x $>=$ y = fmSolveGEq0 $ x .-. y
+
+($==$) :: MonadSoP u m => SoP u -> SoP u -> m Bool
+x $==$ y = (&&) <$> (x $<=$ y) <*> (x $>=$ y)
 
 fmSolveLTh0_ :: (Ord u, Nameable u, Show u, Pretty u) => RangeEnv u -> SoP u -> Bool
 fmSolveLTh0_ rs = evalSoPM mempty {ranges = rs} . fmSolveLTh0

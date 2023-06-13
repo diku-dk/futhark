@@ -1,5 +1,6 @@
 module Futhark.SoP.Util
   ( anyM,
+    allM,
     ifM,
     toMS,
     localS,
@@ -18,6 +19,9 @@ ifM mb mt mf = do
 
 anyM :: (Monad m, Foldable t) => (a -> m Bool) -> t a -> m Bool
 anyM p = foldr (\a b -> ifM (p a) (pure True) b) (pure False)
+
+allM :: (Monad m, Foldable t) => (a -> m Bool) -> t a -> m Bool
+allM p = foldr (\a b -> ifM (p a) b (pure False)) (pure True)
 
 toMS :: (Ord a, Foldable t) => t a -> MultiSet a
 toMS = MS.fromList . Data.Foldable.toList

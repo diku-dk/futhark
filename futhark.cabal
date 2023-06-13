@@ -335,7 +335,7 @@ library
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
       Futhark.Internalise.Monomorphise
-      Futhark.Internalise.SoP
+      Futhark.Internalise.Refinement
       Futhark.Internalise.TypesValues
       Futhark.LSP.Compile
       Futhark.LSP.Diagnostic
