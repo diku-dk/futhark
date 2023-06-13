@@ -159,7 +159,8 @@ arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
 arrayShape :: TypeBase dim as -> Shape dim
-arrayShape (Array _ _ ds _) = ds
+arrayShape (Array _ _ ds scal) = ds <> arrayShape (Scalar scal)
+arrayShape (Scalar (Refinement t _)) = arrayShape t
 arrayShape _ = mempty
 
 -- | Change the shape of a type to be just the rank.
