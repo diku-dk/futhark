@@ -29,6 +29,7 @@ import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.Refinement as Refinement
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -75,6 +76,8 @@ data FutharkPipeline
     Pipeline [UntypedPass]
   | -- | Partially evaluate away the module language.
     Defunctorise
+  | -- | Perform refinement checking.
+    RefinementCheck
   | -- | Defunctorise and normalise.
     FullNormalise
   | -- | Defunctorise, normalise and monomorphise.
@@ -538,6 +541,11 @@ commandLineOptions =
       "Print AST metrics of the resulting internal representation on standard output.",
     Option
       []
+      ["refinement-check"]
+      (NoArg $ Right $ \opts -> opts {futharkPipeline = RefinementCheck})
+      "Perform refinement checking.",
+    Option
+      []
       ["defunctorise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Defunctorise})
       "Partially evaluate all module constructs and print the residual program.",
@@ -733,6 +741,15 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
           (_, imports, _) <- readProgram'
           liftIO $
             forM_ (map snd imports) $ \fm ->
+              putStrLn $
+                if futharkPrintAST config
+                  then show $ fileProg fm
+                  else prettyString $ fileProg fm
+        RefinementCheck -> do
+          (_, imports, src) <- readProgram'
+          let imports' = evalState (Refinement.transformProg imports) src
+          liftIO $
+            forM_ (map snd imports') $ \fm ->
               putStrLn $
                 if futharkPrintAST config
                   then show $ fileProg fm
