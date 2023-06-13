@@ -539,8 +539,8 @@ unifyWith onDims usage = subunify False
                 unifySharedConstructors onDims usage bound bcs cs arg_cs
             | otherwise ->
                 unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
-        ( Scalar (Refinement ty _), _) -> subunify ord bound bcs ty t2'
-        ( _, Scalar (Refinement ty _)) -> subunify ord bound bcs t1' ty
+        (Scalar (Refinement ty _), _) -> subunify ord bound bcs ty t2'
+        (_, Scalar (Refinement ty _)) -> subunify ord bound bcs t1' ty
         _
           | t1' == t2' -> pure ()
           | otherwise -> failure
