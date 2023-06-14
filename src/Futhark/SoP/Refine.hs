@@ -8,23 +8,21 @@ module Futhark.SoP.Refine
 where
 
 import Data.Set (Set)
+import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
+import Futhark.SoP.Convert
+import Futhark.SoP.Expression
 import Futhark.SoP.Monad
-import Futhark.SoP.PrimExp
 import Futhark.SoP.RefineEquivs
 import Futhark.SoP.RefineRanges
-import Futhark.SoP.ToFromSoP
 
-refineAlgEnv ::
-  MonadSoP u m =>
-  Set (PrimExp u) ->
-  m ()
+refineAlgEnv :: (FromSoP u e, ToSoP u e, MonadSoP u e m) => Set e -> m ()
 refineAlgEnv candidates = do
   -- Split candidates into equality and inequality sets.
-  let (eqZs, ineqZs) = processPEs candidates
+  let (eqZs, ineqZs) = processExps candidates
 
   -- Refine the environment with the equality set.
   extra_ineqZs <- addEqZeroPEs eqZs
 
   -- Refine the environment with the extended inequality set.
-  addIneqZeroPEs $ ineqZs <> fromSoP extra_ineqZs
+  addIneqZeroPEs $ ineqZs <> S.map fromSoP extra_ineqZs

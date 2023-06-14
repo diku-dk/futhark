@@ -1,9 +1,14 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
 module Futhark.SoP.Util
   ( anyM,
     allM,
     ifM,
     toMS,
     localS,
+    type (>=),
+    type (==),
   )
 where
 
@@ -11,6 +16,7 @@ import Control.Monad.State
 import Data.Foldable
 import Data.MultiSet (MultiSet)
 import Data.MultiSet qualified as MS
+import GHC.TypeLits (Natural)
 
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM mb mt mf = do
@@ -32,3 +38,9 @@ localS m = do
   a <- m
   put env
   pure a
+
+-- | A type label to indicate @a >= 0@.
+type a >= (b :: Natural) = a
+
+-- | A type label to indicate @a = 0@.
+type a == (b :: Natural) = a

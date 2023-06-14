@@ -1,6 +1,4 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | The Algebraic Environment, which is in principle
@@ -13,8 +11,6 @@ module Futhark.SoP.Monad
     EquivEnv,
     UntransEnv (..),
     AlgEnv (..),
-    type (>=),
-    type (==),
     addUntrans,
     transClosInRanges,
     lookupUntransPE,
@@ -45,9 +41,9 @@ import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.MonadFreshNames
+import Futhark.SoP.Expression
 import Futhark.SoP.SoP
 import Futhark.Util.Pretty
-import GHC.TypeLits (Natural)
 import Language.Futhark.Syntax hiding (Range)
 
 --------------------------------------------------------------------------------
@@ -77,40 +73,44 @@ mkNameM = modifyNameSource mkName
 
 class
   ( Ord u,
+    Ord e,
     Nameable u,
     Show u, -- To be removed
     Pretty u, -- To be removed
-    MonadFreshNames m
+    MonadFreshNames m,
+    Substitute u e e,
+    Expression e
   ) =>
-  MonadSoP u m
-    | m -> u
+  MonadSoP u e m
+    | m -> u,
+      m -> e
   where
-  getUntrans :: m (UntransEnv u)
+  getUntrans :: m (UntransEnv u e)
   getRanges :: m (RangeEnv u)
   getEquivs :: m (EquivEnv u)
-  modifyEnv :: (AlgEnv u -> AlgEnv u) -> m ()
+  modifyEnv :: (AlgEnv u e -> AlgEnv u e) -> m ()
 
 -- | The algebraic monad; consists of a an algebraic
 --   environment along with a fresh variable source.
-newtype SoPMT u m a = SoPMT (StateT (AlgEnv u) m a)
+newtype SoPMT u e m a = SoPMT (StateT (AlgEnv u e) m a)
   deriving
     ( Functor,
       Applicative,
       Monad
     )
 
-instance MonadTrans (SoPMT u) where
+instance MonadTrans (SoPMT u e) where
   lift = SoPMT . lift
 
-instance MonadFreshNames m => MonadFreshNames (SoPMT u m) where
+instance MonadFreshNames m => MonadFreshNames (SoPMT u e m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (MonadFreshNames m) => MonadFreshNames (StateT (AlgEnv u) m) where
+instance (MonadFreshNames m) => MonadFreshNames (StateT (AlgEnv u e) m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance MonadReader r m => MonadReader r (SoPMT u m) where
+instance MonadReader r m => MonadReader r (SoPMT u e m) where
   ask = SoPMT $ lift ask
   local f (SoPMT m) =
     SoPMT $ do
@@ -119,44 +119,47 @@ instance MonadReader r m => MonadReader r (SoPMT u m) where
       put env'
       pure a
 
-instance MonadState s m => MonadState s (SoPMT u m) where
+instance MonadState s m => MonadState s (SoPMT u e m) where
   get = SoPMT $ lift get
   put = SoPMT . lift . put
 
-type SoPM u = SoPMT u (State VNameSource)
+type SoPM u e = SoPMT u e (State VNameSource)
 
-runSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m (a, AlgEnv u)
+runSoPMT :: MonadFreshNames m => AlgEnv u e -> SoPMT u e m a -> m (a, AlgEnv u e)
 runSoPMT env (SoPMT sm) = runStateT sm env
 
-runSoPMT_ :: (Ord u, MonadFreshNames m) => SoPMT u m a -> m (a, AlgEnv u)
+runSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e m a -> m (a, AlgEnv u e)
 runSoPMT_ = runSoPMT mempty
 
-runSoPM :: Ord u => AlgEnv u -> SoPM u a -> (a, AlgEnv u)
+runSoPM :: (Ord u, Ord e) => AlgEnv u e -> SoPM u e a -> (a, AlgEnv u e)
 runSoPM env = flip evalState mempty . runSoPMT env
 
-runSoPM_ :: Ord u => SoPM u a -> (a, AlgEnv u)
+runSoPM_ :: (Ord u, Ord e) => SoPM u e a -> (a, AlgEnv u e)
 runSoPM_ = runSoPM mempty
 
-evalSoPMT :: MonadFreshNames m => AlgEnv u -> SoPMT u m a -> m a
+evalSoPMT :: MonadFreshNames m => AlgEnv u e -> SoPMT u e m a -> m a
 evalSoPMT env m = fst <$> runSoPMT env m
 
-evalSoPMT_ :: (Ord u, MonadFreshNames m) => SoPMT u m a -> m a
+evalSoPMT_ :: (Ord u, Ord e, MonadFreshNames m) => SoPMT u e m a -> m a
 evalSoPMT_ = evalSoPMT mempty
 
-evalSoPM :: Ord u => AlgEnv u -> SoPM u a -> a
+evalSoPM :: (Ord u, Ord e) => AlgEnv u e -> SoPM u e a -> a
 evalSoPM env = fst . runSoPM env
 
-evalSoPM_ :: Ord u => SoPM u a -> a
+evalSoPM_ :: (Ord u, Ord e) => SoPM u e a -> a
 evalSoPM_ = evalSoPM mempty
 
 instance
   ( Ord u,
+    Ord e,
     Nameable u,
     Show u,
     Pretty u,
-    MonadFreshNames m
+    MonadFreshNames m,
+    Substitute u e e,
+    Expression e
   ) =>
-  MonadSoP u (SoPMT u m)
+  MonadSoP u e (SoPMT u e m)
   where
   getUntrans = SoPMT $ gets untrans
 
@@ -167,7 +170,7 @@ instance
   modifyEnv f = SoPMT $ modify f
 
 -- \| Insert a symbol equal to an untranslatable 'PrimExp'.
-addUntrans :: MonadSoP u m => u -> PrimExp u -> m ()
+addUntrans :: MonadSoP u e m => u -> e -> m ()
 addUntrans sym pe =
   modifyEnv $ \env ->
     env
@@ -179,12 +182,12 @@ addUntrans sym pe =
       }
 
 -- \| Look-up the sum-of-products representation of a symbol.
-lookupSoP :: MonadSoP u m => u -> m (Maybe (SoP u))
+lookupSoP :: MonadSoP u e m => u -> m (Maybe (SoP u))
 lookupSoP x = (M.!? x) <$> getEquivs
 
 -- \| Look-up the symbol for a 'PrimExp'. If no symbol is bound
 --    to the expression, bind a new one.
-lookupUntransPE :: MonadSoP u m => PrimExp u -> m u
+lookupUntransPE :: MonadSoP u e m => e -> m u
 lookupUntransPE pe = do
   inv_map <- inv <$> getUntrans
   case inv_map M.!? pe of
@@ -195,12 +198,12 @@ lookupUntransPE pe = do
     Just x -> pure x
 
 -- \| Look-up the untranslatable 'PrimExp' bound to the given symbol.
-lookupUntransSym :: MonadSoP u m => u -> m (Maybe (PrimExp u))
+lookupUntransSym :: MonadSoP u e m => u -> m (Maybe e)
 lookupUntransSym sym = ((M.!? sym) . dir) <$> getUntrans
 
 -- \| Look-up the range of a symbol. If no such range exists,
 --    return the empty range (and add it to the environment).
-lookupRange :: MonadSoP u m => u -> m (Range u)
+lookupRange :: MonadSoP u e m => u -> m (Range u)
 lookupRange sym = do
   mr <- (M.!? sym) <$> getRanges
   case mr of
@@ -214,7 +217,7 @@ lookupRange sym = do
 
 -- \| Add range information for a symbol; augments the existing
 --   range.
-addRange :: MonadSoP u m => u -> Range u -> m ()
+addRange :: MonadSoP u e m => u -> Range u -> m ()
 addRange sym r =
   modifyEnv $ \env ->
     env {ranges = M.insertWith (<>) sym r (ranges env)}
@@ -223,28 +226,22 @@ addRange sym r =
 -- Environment
 --------------------------------------------------------------------------------
 
--- | A type label to indicate @a >= 0@.
-type a >= (b :: Natural) = a
-
--- | A type label to indicate @a = 0@.
-type a == (b :: Natural) = a
-
 -- | The environment of untranslatable 'PrimeExp's.  It maps both
 --   ways:
 --
 --   1. A fresh symbol is generated and mapped to the
 --      corresponding 'PrimeExp' @pe@ in 'dir'.
 --   2. The target @pe@ is mapped backed to the corresponding symbol in 'inv'.
-data UntransEnv u = Unknowns
-  { dir :: Map u (PrimExp u),
-    inv :: Map (PrimExp u) u
+data UntransEnv u e = Unknowns
+  { dir :: Map u e,
+    inv :: Map e u
   }
   deriving (Eq, Show, Ord)
 
-instance Ord u => Semigroup (UntransEnv u) where
+instance (Ord u, Ord e) => Semigroup (UntransEnv u e) where
   Unknowns d1 i1 <> Unknowns d2 i2 = Unknowns (d1 <> d2) (i1 <> i2)
 
-instance Ord u => Monoid (UntransEnv u) where
+instance (Ord u, Ord e) => Monoid (UntransEnv u e) where
   mempty = Unknowns mempty mempty
 
 -- | The equivalence environment binds a variable name to
@@ -258,9 +255,9 @@ instance Pretty u => Pretty (RangeEnv u) where
   pretty = pretty . M.toList
 
 -- | The main algebraic environment.
-data AlgEnv u = AlgEnv
+data AlgEnv u e = AlgEnv
   { -- | Binds untranslatable PrimExps to fresh symbols.
-    untrans :: UntransEnv u,
+    untrans :: UntransEnv u e,
     -- | Binds symbols to their sum-of-product representation..
     equivs :: EquivEnv u,
     -- | Binds symbols to ranges (in sum-of-product form).
@@ -268,11 +265,11 @@ data AlgEnv u = AlgEnv
   }
   deriving (Ord, Show, Eq)
 
-instance Ord u => Semigroup (AlgEnv u) where
+instance (Ord u, Ord e) => Semigroup (AlgEnv u e) where
   AlgEnv u1 s1 r1 <> AlgEnv u2 s2 r2 =
     AlgEnv (u1 <> u2) (s1 <> s2) (r1 <> r2)
 
-instance Ord u => Monoid (AlgEnv u) where
+instance (Ord u, Ord e) => Monoid (AlgEnv u e) where
   mempty = AlgEnv mempty mempty mempty
 
 transClosInRanges :: (Ord u) => RangeEnv u -> Set u -> Set u

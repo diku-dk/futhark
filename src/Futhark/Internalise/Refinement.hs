@@ -7,12 +7,11 @@ import Futhark.Analysis.PrimExp (PrimExp)
 import Futhark.Analysis.PrimExp qualified as PE
 import Futhark.Internalise.TypesValues (internalisePrimType, internalisePrimValue)
 import Futhark.MonadFreshNames
+import Futhark.SoP.Convert
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
-import Futhark.SoP.PrimExp
 import Futhark.SoP.Refine
 import Futhark.SoP.SoP
-import Futhark.SoP.ToFromSoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
 import Language.Futhark
@@ -22,127 +21,25 @@ import Language.Futhark.Semantic hiding (Env)
 type Env = ()
 
 newtype RefineM a
-  = RefineM (SoPMT VName (RWS Env () VNameSource) a)
+  = RefineM (SoPMT VName Exp (RWS Env () VNameSource) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader Env,
-      MonadSoP VName
+      MonadSoP VName Exp
     )
 
 instance MonadFreshNames RefineM where
   getNameSource = RefineM $ getNameSource
   putNameSource = RefineM . putNameSource
 
-convertBinOp :: BinOp -> PrimExp VName -> PrimExp VName -> PrimType -> PrimType -> Maybe (PrimExp VName)
-convertBinOp LogAnd x y Bool _ =
-  simpleBinOp PE.LogAnd x y
-convertBinOp LogOr x y Bool _ =
-  simpleBinOp PE.LogOr x y
-convertBinOp Plus x y (Signed t) _ =
-  simpleBinOp (PE.Add t PE.OverflowWrap) x y
-convertBinOp Plus x y (Unsigned t) _ =
-  simpleBinOp (PE.Add t PE.OverflowWrap) x y
-convertBinOp Plus x y (FloatType t) _ =
-  simpleBinOp (PE.FAdd t) x y
-convertBinOp Minus x y (Signed t) _ =
-  simpleBinOp (PE.Sub t PE.OverflowWrap) x y
-convertBinOp Minus x y (Unsigned t) _ =
-  simpleBinOp (PE.Sub t PE.OverflowWrap) x y
-convertBinOp Minus x y (FloatType t) _ =
-  simpleBinOp (PE.FSub t) x y
-convertBinOp Times x y (Signed t) _ =
-  simpleBinOp (PE.Mul t PE.OverflowWrap) x y
-convertBinOp Times x y (Unsigned t) _ =
-  simpleBinOp (PE.Mul t PE.OverflowWrap) x y
-convertBinOp Times x y (FloatType t) _ =
-  simpleBinOp (PE.FMul t) x y
-convertBinOp Equal x y t _ =
-  simpleCmpOp (PE.CmpEq $ internalisePrimType t) x y
-convertBinOp NotEqual x y t _ = do
-  Just $ PE.UnOpExp PE.Not $ PE.CmpOpExp (PE.CmpEq $ internalisePrimType t) x y
-convertBinOp Less x y (Signed t) _ =
-  simpleCmpOp (PE.CmpSlt t) x y
-convertBinOp Less x y (Unsigned t) _ =
-  simpleCmpOp (PE.CmpUlt t) x y
-convertBinOp Leq x y (Signed t) _ =
-  simpleCmpOp (PE.CmpSle t) x y
-convertBinOp Leq x y (Unsigned t) _ =
-  simpleCmpOp (PE.CmpUle t) x y
-convertBinOp Greater x y (Signed t) _ =
-  simpleCmpOp (PE.CmpSlt t) y x -- Note the swapped x and y
-convertBinOp Greater x y (Unsigned t) _ =
-  simpleCmpOp (PE.CmpUlt t) y x -- Note the swapped x and y
-convertBinOp Geq x y (Signed t) _ =
-  simpleCmpOp (PE.CmpSle t) y x -- Note the swapped x and y
-convertBinOp Geq x y (Unsigned t) _ =
-  simpleCmpOp (PE.CmpUle t) y x -- Note the swapped x and y
-convertBinOp Less x y (FloatType t) _ =
-  simpleCmpOp (PE.FCmpLt t) x y
-convertBinOp Leq x y (FloatType t) _ =
-  simpleCmpOp (PE.FCmpLe t) x y
-convertBinOp Greater x y (FloatType t) _ =
-  simpleCmpOp (PE.FCmpLt t) y x -- Note the swapped x and y
-convertBinOp Geq x y (FloatType t) _ =
-  simpleCmpOp (PE.FCmpLe t) y x -- Note the swapped x and y
-convertBinOp Less x y Bool _ =
-  simpleCmpOp PE.CmpLlt x y
-convertBinOp Leq x y Bool _ =
-  simpleCmpOp PE.CmpLle x y
-convertBinOp Greater x y Bool _ =
-  simpleCmpOp PE.CmpLlt y x -- Note the swapped x and y
-convertBinOp Geq x y Bool _ =
-  simpleCmpOp PE.CmpLle y x -- Note the swapped x and y
-convertBinOp _ _ _ _ _ = Nothing
-
-simpleBinOp op x y = Just $ PE.BinOpExp op x y
-
-simpleCmpOp op x y = Just $ PE.CmpOpExp op x y
-
-expToPrimExp :: Exp -> Maybe (PrimExp VName)
-expToPrimExp (Literal v _) = Just $ PE.ValueExp $ internalisePrimValue v
-expToPrimExp (IntLit v (Info t) _) =
-  case t of
-    Scalar (Prim (Signed it)) -> Just $ PE.ValueExp $ PE.IntValue $ PE.intValue it v
-    Scalar (Prim (Unsigned it)) -> Just $ PE.ValueExp $ PE.IntValue $ PE.intValue it v
-    Scalar (Prim (FloatType ft)) -> Just $ PE.ValueExp $ PE.FloatValue $ PE.floatValue ft v
-    _ -> Nothing
-expToPrimExp (FloatLit v (Info t) _) =
-  case t of
-    Scalar (Prim (FloatType ft)) -> Just $ PE.ValueExp $ PE.FloatValue $ PE.floatValue ft v
-    _ -> Nothing
-expToPrimExp (AppExp (BinOp (op, _) _ (e_x, _) (e_y, _) _) _) = do
-  x <- expToPrimExp e_x
-  y <- expToPrimExp e_y
-  guard $ baseTag (qualLeaf op) <= maxIntrinsicTag
-  let name = baseString $ qualLeaf op
-  bop <- find ((name ==) . prettyString) [minBound .. maxBound :: BinOp]
-  t_x <- getPrimType $ typeOf e_x
-  t_y <- getPrimType $ typeOf e_y
-  convertBinOp bop x y t_x t_y
-  where
-    getPrimType (Scalar (Prim t)) = Just t
-    getPrimType _ = Nothing
-expToPrimExp _ = Nothing
-
 checkExp :: Exp -> RefineM Bool
-checkExp e =
-  case expToPrimExp e of
-    Just pe -> checkPrimExp pe
-    Nothing -> pure False
-
-checkPrimExp :: PrimExp VName -> RefineM Bool
-checkPrimExp (PE.BinOpExp PE.LogAnd x y) =
-  (&&) <$> checkPrimExp x <*> checkPrimExp y
-checkPrimExp (PE.BinOpExp PE.LogOr x y) =
-  (||) <$> checkPrimExp x <*> checkPrimExp y
-checkPrimExp pe@(PE.CmpOpExp cop x y) = do
-  (_, sop) <- toNumSoPCmp pe
+checkExp e = do
+  (_, sop) <- toSoPCmp e
   sop $>=$ zeroSoP
-checkPrimExp pe = pure False
 
-runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName, VNameSource)
+runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName Exp, VNameSource)
 runRefineM src (RefineM m) =
   let ((a, algenv), src', _) = runRWS (runSoPMT_ m) mempty src
    in (a, algenv, src')

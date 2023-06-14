@@ -274,14 +274,14 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.SoP.Convert
+      Futhark.SoP.Expression
       Futhark.SoP.Monad
       Futhark.SoP.Refine
       Futhark.SoP.RefineEquivs
       Futhark.SoP.FourierMotzkin
-      Futhark.SoP.PrimExp
       Futhark.SoP.RefineRanges
       Futhark.SoP.SoP
-      Futhark.SoP.ToFromSoP
       Futhark.SoP.Util
       Futhark.FreshNames
       Futhark.IR

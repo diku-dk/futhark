@@ -45,6 +45,8 @@ import Data.Set qualified as S
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
+import Language.Futhark.Core
+import Language.Futhark.Prop
 
 -- | A 'Term' is a product of symbols.
 newtype Term u = Term {getTerm :: MultiSet u}
@@ -386,3 +388,6 @@ instance Ord u => Substitute u (SoP u) (Range u) where
 
 instance Ord u => Substitute u (PrimExp u) (PrimExp u) where
   substitute = substituteInPrimExp
+
+instance Substitute VName Exp Exp where
+  substitute = undefined

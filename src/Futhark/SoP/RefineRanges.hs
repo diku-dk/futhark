@@ -13,22 +13,22 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.SoP.Convert
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
-import Futhark.SoP.ToFromSoP
 import Futhark.SoP.Util
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeroPEs :: MonadSoP u m => Set (PrimExp u >= 0) -> m ()
+addIneqZeroPEs :: forall u e m. (ToSoP u e, FromSoP u e, MonadSoP u e m) => Set (e >= 0) -> m ()
 addIneqZeroPEs pes = do
   -- Substitute equivalence env.
-  pes' <- (flip S.map pes . substituteInPrimExp . fmap fromSoP) <$> getEquivs
+  pes' <- (flip S.map pes . substitute . fmap (fromSoP :: SoP u -> e)) <$> getEquivs
 
   ineq_cands <-
     mconcat
-      <$> mapM (fmap (mkRangeCands . snd) . toNumSoP) (S.toList pes')
+      <$> mapM (fmap (mkRangeCands . snd) . toSoPNum) (S.toList pes')
 
   addRangeCands ineq_cands
 
@@ -88,7 +88,7 @@ mkRangeCands sop = M.foldrWithKey mkRangeCand mempty $ getTerms sop
 --   these are @lbs' <= -j_z * sop@ (@j_z * sop <= ubs'@) where @lbs'@
 --   (@ubs'@) are the refined bounds from the previous step.
 refineRangeInEnv ::
-  MonadSoP u m =>
+  MonadSoP u e m =>
   RangeCand u ->
   m (Set (RangeCand u))
 refineRangeInEnv (RangeCand j sym sop) = do
@@ -133,7 +133,7 @@ data CandRank
   | SymNotBound
   deriving (Ord, Eq)
 
-addRangeCands :: MonadSoP u m => Set (RangeCand u) -> m ()
+addRangeCands :: MonadSoP u e m => Set (RangeCand u) -> m ()
 addRangeCands cand_set
   | S.null cand_set = pure ()
 addRangeCands cand_set = do
