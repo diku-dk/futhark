@@ -474,6 +474,8 @@ setUniqueness (Scalar (Record ets)) u =
   Scalar $ Record $ fmap (`setUniqueness` u) ets
 setUniqueness (Scalar (Sum ets)) u =
   Scalar $ Sum $ fmap (map (`setUniqueness` u)) ets
+setUniqueness (Scalar (Refinement ty e)) u =
+  Scalar $ Refinement (setUniqueness ty u) e
 setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for

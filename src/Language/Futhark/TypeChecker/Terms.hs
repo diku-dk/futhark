@@ -70,11 +70,17 @@ sliceShape ::
   [(DimIndex, Maybe Occurrence)] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-sliceShape r slice t@(Array als u (Shape orig_dims) et) =
-  runStateT (setDims <$> adjustDims slice orig_dims) []
+sliceShape r slice (Array als u (Shape orig_dims) et) = do
+  (ty, (exts, _)) <- runStateT (setDims =<< adjustDims slice orig_dims) ([], (et, als, u))
+  pure (ty, exts)
   where
-    setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u (Shape dims') et
+    setDims :: [Size] -> StateT ([VName], (ScalarTypeBase Size (), as, Uniqueness)) TermTypeM (TypeBase Size as)
+    setDims [] = do
+      (et', als', u') <- gets snd
+      pure $ stripArray 0 $ Array als' u' (Shape []) et'
+    setDims dims' = do
+      (et', als', u') <- gets snd
+      pure $ Array als' u' (Shape dims') et'
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -90,7 +96,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           (d, ext) <-
             lift . extSize loc $
               SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
-          modify (maybeToList ext ++)
+          modify $ first (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
           lift $
@@ -98,7 +104,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
               <$> newFlexibleDim (mkUsage loc "size of slice") "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
-          modify (v :)
+          modify $ first (v :)
           pure $ sizeFromName (qualName v) mempty
       where
         -- The original size does not matter if the slice is fully specified.
@@ -123,6 +129,9 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         (_, False) ->
           pure (size :)
 
+    adjustDims :: [(DimIndex, Maybe Occurrence)] -> [Size] -> StateT ([VName], (ScalarTypeBase Size (), as, Uniqueness)) TermTypeM [Size]
+    adjustDims [] dims =
+      pure dims
     adjustDims ((DimFix {}, _) : idxes') (_ : dims) =
       adjustDims idxes' dims
     -- Pat match some known slices to be non-existential.
@@ -153,8 +162,19 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     -- existential
     adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
-    adjustDims _ dims =
-      pure dims
+    -- go through Refinement
+    adjustDims idxes [] = do
+      (et', als', u') <- gets snd
+      let throughRefine ty =
+            case ty of
+              Scalar (Refinement ty' _) -> throughRefine ty'
+              _ -> ty
+          underlying = throughRefine $ stripArray 0 $ Array als' u' (Shape []) et'
+      case underlying of
+        Array als'' u'' (Shape dims'') et'' -> do
+          modify $ second $ const (et'', als'', u'')
+          adjustDims idxes dims''
+        _ -> error $ "no more dimension to take from " ++ prettyString et'
 
     sizeMinus j i =
       AppExp
@@ -169,6 +189,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         $ AppRes i64 []
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
+sliceShape r slice (Scalar (Refinement ty _)) = sliceShape r slice ty
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
