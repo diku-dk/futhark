@@ -29,7 +29,6 @@ import Control.Monad.State
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
-import Futhark.SoP.Monad
 import Futhark.Tools
 
 type FunInfo =
@@ -62,14 +61,7 @@ data InternaliseState = InternaliseState
 
 newtype InternaliseM a
   = InternaliseM
-      ( BuilderT
-          SOACS
-          ( SoPMT
-              VName
-              (ReaderT InternaliseEnv (State InternaliseState))
-          )
-          a
-      )
+      (BuilderT SOACS (ReaderT InternaliseEnv (State InternaliseState)) a)
   deriving
     ( Functor,
       Applicative,
@@ -112,9 +104,7 @@ runInternaliseM ::
 runInternaliseM safe (InternaliseM m) =
   modifyNameSource $ \src ->
     let ((_, consts), s) =
-          runState
-            (runReaderT (evalSoPMT mempty (runBuilderT m mempty)) newEnv)
-            (newState src)
+          runState (runReaderT (runBuilderT m mempty) newEnv) (newState src)
      in ( (stateTypes s, consts, reverse $ stateFuns s),
           stateNameSource s
         )
