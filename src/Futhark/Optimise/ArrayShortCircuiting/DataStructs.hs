@@ -333,7 +333,6 @@ createsNewArrOK :: Exp rep -> Bool
 createsNewArrOK (BasicOp Replicate {}) = True
 createsNewArrOK (BasicOp Iota {}) = True
 createsNewArrOK (BasicOp Manifest {}) = True
-createsNewArrOK (BasicOp Copy {}) = True
 createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True

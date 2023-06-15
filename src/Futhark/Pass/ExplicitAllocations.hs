@@ -483,7 +483,8 @@ arrayWithIxFun space ixfun v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseString v <> "_scalcopy"
-  letBind (Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]) $ BasicOp $ Copy v
+  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun
+  letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
 
 ensureDirectArray ::
