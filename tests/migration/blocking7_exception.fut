@@ -3,7 +3,7 @@
 -- ==
 
 -- structure gpu {
---   GPUBody/If/True/Copy 1
+--   GPUBody/If/True/Replicate 1
 -- }
 
 -- This fails due to a memory allocation error.

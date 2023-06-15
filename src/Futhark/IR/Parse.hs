@@ -263,7 +263,7 @@ pBasicOp =
       keyword "trace"
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
-      keyword "copy" $> Copy <*> parens pVName,
+      keyword "copy" $> Replicate mempty . Var <*> parens pVName,
       keyword "assert"
         *> parens
           ( Assert

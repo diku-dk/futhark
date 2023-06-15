@@ -28,8 +28,8 @@ bindLambda ::
 bindLambda pat aux (Lambda params body _) args = do
   auxing aux . forM_ (zip params args) $ \(param, arg) ->
     letBindNames [paramName param] $
-      BasicOp $ case (paramType param, arg) of
-        (Array {}, Var v) -> Copy v
+      BasicOp $ case paramType param of
+        Array {} -> Replicate mempty arg
         _ -> SubExp arg
   res <- bodyBind body
   forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->

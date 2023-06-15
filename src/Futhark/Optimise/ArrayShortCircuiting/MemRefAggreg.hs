@@ -112,12 +112,13 @@ getUseSumFromStm td_env coal_tab (Let (Pat [x']) _ (BasicOp (Update _ _x (Slice 
     Var a -> case getDirAliasedIxfn td_env coal_tab a of
       Nothing -> Just ([r1], [r1])
       Just r2 -> Just ([r1], [r1, r2])
-getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Copy x))) = do
+getUseSumFromStm td_env coal_tab (Let (Pat [y]) _ (BasicOp (Replicate (Shape []) (Var x)))) = do
   -- y = copy x
   wrt <- getDirAliasedIxfn td_env coal_tab $ patElemName y
   rd <- getDirAliasedIxfn td_env coal_tab x
   pure ([wrt], [wrt, rd])
-getUseSumFromStm _ _ (Let Pat {} _ (BasicOp Copy {})) = error "Impossible"
+getUseSumFromStm _ _ (Let Pat {} _ (BasicOp (Replicate (Shape []) _))) =
+  error "Impossible"
 getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Concat _i (a :| bs) _ses))) =
   -- concat
   let ws = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys

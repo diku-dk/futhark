@@ -183,7 +183,9 @@ diffMinMaxHist _ops x aux n minmax ne is vs w rf dst m = do
   dst_type <- lookupType dst
   let dst_dims = arrayDims dst_type
 
-  dst_cpy <- letExp (baseString dst <> "_copy") $ BasicOp $ Copy dst
+  dst_cpy <-
+    letExp (baseString dst <> "_copy") . BasicOp $
+      Replicate mempty (Var dst)
 
   acc_v_p <- newParam "acc_v" $ Prim t
   acc_i_p <- newParam "acc_i" $ Prim int64
@@ -492,7 +494,9 @@ diffAddHist ::
 diffAddHist _ops x aux n add ne is vs w rf dst m = do
   let t = paramDec $ head $ lambdaParams add
 
-  dst_cpy <- letExp (baseString dst <> "_copy") $ BasicOp $ Copy dst
+  dst_cpy <-
+    letExp (baseString dst <> "_copy") . BasicOp $
+      Replicate mempty (Var dst)
 
   f <- mkIdentityLambda [Prim int64, t]
   auxing aux . letBindNames [x] . Op $

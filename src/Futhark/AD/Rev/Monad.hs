@@ -254,7 +254,9 @@ copyConsumedArrsInStm s = inScopeOf s $ collectStms $ copyConsumedArrsInStm' s
             v_t <- lookupType v
             case v_t of
               Array {} -> do
-                v' <- letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+                v' <-
+                  letExp (baseString v <> "_ad_copy") . BasicOp $
+                    Replicate mempty (Var v)
                 addSubstitution v' v
                 pure [(v, v')]
               _ -> pure mempty
@@ -269,7 +271,11 @@ copyConsumedArrsInBody dontCopy b =
       v_t <- lookupType v
       case v_t of
         Acc {} -> error $ "copyConsumedArrsInBody: Acc " <> prettyString v
-        Array {} -> M.singleton v <$> letExp (baseString v <> "_ad_copy") (BasicOp $ Copy v)
+        Array {} ->
+          M.singleton v
+            <$> letExp
+              (baseString v <> "_ad_copy")
+              (BasicOp $ Replicate mempty (Var v))
         _ -> pure mempty
 
 returnSweepCode :: ADM a -> ADM a

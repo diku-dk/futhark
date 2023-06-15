@@ -1771,13 +1771,14 @@ isIntrinsicFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         pure $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
     handleRest [x, y] "zip" = Just $ \desc ->
-      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+      mapM (letSubExp "zip_copy" . BasicOp . Replicate mempty . I.Var)
         =<< ( (++)
                 <$> internaliseExpToVars (desc ++ "_zip_x") x
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
     handleRest [x] "unzip" = Just $ \desc ->
-      mapM (letSubExp desc . BasicOp . Copy) =<< internaliseExpToVars desc x
+      mapM (letSubExp desc . BasicOp . Replicate mempty . I.Var)
+        =<< internaliseExpToVars desc x
     handleRest [arr, offset, n1, s1, n2, s2] "flat_index_2d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
     handleRest [arr1, offset, s1, s2, arr2] "flat_update_2d" = Just $ \desc -> do

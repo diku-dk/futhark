@@ -2,7 +2,7 @@
 -- This is to avoid turning a parallel device copy into a sequential operation.
 -- ==
 -- structure gpu {
---   /If/True/Copy 1
+--   /If/True/Replicate 1
 -- }
 
 def main (A: [5]i64) : [1]i64 =

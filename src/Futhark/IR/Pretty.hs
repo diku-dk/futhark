@@ -220,6 +220,7 @@ instance Pretty BasicOp where
   pretty (Iota e x s et) = "iota" <> et' <> apply [pretty e, pretty x, pretty s]
     where
       et' = pretty $ show $ primBitSize $ IntType et
+  pretty (Replicate (Shape []) e) = "copy" <> parens (pretty e)
   pretty (Replicate ne ve) =
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
@@ -234,7 +235,6 @@ instance Pretty BasicOp where
     "rotate" <> apply [apply (map pretty es), pretty e]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Copy e) = "copy" <> parens (pretty e)
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]

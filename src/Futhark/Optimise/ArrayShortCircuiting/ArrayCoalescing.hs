@@ -1529,7 +1529,7 @@ genCoalStmtInfo ::
   Stm (Aliases rep) ->
   ShortCircuitM rep (Maybe [SSPointInfo])
 -- CASE a) @let x <- copy(b^{lu})@
-genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Copy b)))
+genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Replicate (Shape []) (Var b))))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat =
       pure $ case (M.lookup x lutab, getScopeMemInfo b scopetab) of
         (Just last_uses, Just (MemBlock tpb shpb m_b ind_b)) ->

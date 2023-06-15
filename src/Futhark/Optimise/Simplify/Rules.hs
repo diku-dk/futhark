@@ -63,7 +63,7 @@ standardRules =
 --
 -- This simplistic rule is only valid before we introduce memory.
 removeUnnecessaryCopy :: BuilderOps rep => BottomUpRuleBasicOp rep
-removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Copy v)
+removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v))
   | not (v `UT.isConsumed` used),
     -- This two first clauses below are too conservative, but the
     -- problem is that 'v' might not look like it has been consumed if

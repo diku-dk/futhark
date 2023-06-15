@@ -339,13 +339,13 @@ simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
       Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
--- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
--- itself.
-copyScratchToScratch :: SimpleRule rep
-copyScratchToScratch defOf seType (Copy src) = do
+-- | If we are replicating a scratch array (possibly indirectly), just
+-- turn it into a scratch by itself.
+repScratchToScratch :: SimpleRule rep
+repScratchToScratch defOf seType (Replicate shape (Var src)) = do
   t <- seType $ Var src
   cs <- isActuallyScratch src
-  pure (Scratch (elemType t) (arrayDims t), cs)
+  pure (Scratch (elemType t) (shapeDims shape <> arrayDims t), cs)
   where
     isActuallyScratch v =
       case defOf v of
@@ -356,7 +356,7 @@ copyScratchToScratch defOf seType (Copy src) = do
         Just (BasicOp (Reshape _ _ v'), cs) ->
           (cs <>) <$> isActuallyScratch v'
         _ -> Nothing
-copyScratchToScratch _ _ _ =
+repScratchToScratch _ _ _ =
   Nothing
 
 simpleRules :: [SimpleRule rep]
@@ -366,7 +366,7 @@ simpleRules =
     simplifyUnOp,
     simplifyConvOp,
     simplifyAssert,
-    copyScratchToScratch,
+    repScratchToScratch,
     simplifyIdentityReshape,
     simplifyReshapeReshape,
     simplifyReshapeScratch,

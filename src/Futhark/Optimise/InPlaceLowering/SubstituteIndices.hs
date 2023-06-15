@@ -119,12 +119,13 @@ substituteIndicesInExp substs e = do
             | Just (cs2, src2, src2dec, is2) <- lookup v substs = do
                 row <-
                   certifying cs2 $
-                    letExp (baseString v ++ "_row") $
+                    letSubExp (baseString v ++ "_row") $
                       BasicOp $
                         Index src2 $
                           fullSlice (typeOf src2dec) (unSlice is2)
                 row_copy <-
-                  letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
+                  letExp (baseString v ++ "_row_copy") . BasicOp $
+                    Replicate mempty row
                 pure $
                   update
                     v

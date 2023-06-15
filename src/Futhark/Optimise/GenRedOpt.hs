@@ -419,7 +419,6 @@ costRedundantStmt (Let _ _ (BasicOp FlatIndex {})) = Small 0
 costRedundantStmt (Let _ _ (BasicOp Update {})) = Break
 costRedundantStmt (Let _ _ (BasicOp FlatUpdate {})) = Break
 costRedundantStmt (Let _ _ (BasicOp Concat {})) = Big
-costRedundantStmt (Let _ _ (BasicOp Copy {})) = Big
 costRedundantStmt (Let _ _ (BasicOp Manifest {})) = Big
 costRedundantStmt (Let _ _ (BasicOp Replicate {})) = Big
 costRedundantStmt (Let _ _ (BasicOp UpdateAcc {})) = Break

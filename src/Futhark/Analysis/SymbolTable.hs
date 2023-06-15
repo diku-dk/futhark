@@ -355,6 +355,7 @@ indexExp table (BasicOp (Replicate (Shape ds) v)) _ is
       Just $ Indexed mempty $ primExpFromSubExp t v
 indexExp table (BasicOp (Replicate s (Var v))) _ is = do
   guard $ v `available` table
+  guard $ s /= mempty
   index' v (drop (shapeRank s) is) table
 indexExp table (BasicOp (Reshape _ newshape v)) _ is
   | Just oldshape <- arrayDims <$> lookupType v table =

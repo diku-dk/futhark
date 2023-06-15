@@ -1393,7 +1393,7 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
             then do
               precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
               index kpe {patElemName = precopy}
-              letBindNames [patElemName kpe] $ BasicOp $ Copy precopy
+              letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
             else index kpe
           pure
             ( kpes'',

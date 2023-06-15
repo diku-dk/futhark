@@ -219,7 +219,7 @@ makeCopyStms ::
 makeCopyStms vs = do
   vs' <- mapM makeNewName vs
   copies <- forM (zip vs vs') $ \(name, name') ->
-    mkLetNames [name'] $ BasicOp $ Copy name
+    mkLetNames [name'] $ BasicOp $ Replicate mempty $ Var name
   pure (stmsFromList copies, M.fromList $ zip vs vs')
   where
     makeNewName name = newVName $ baseString name <> "_copy"

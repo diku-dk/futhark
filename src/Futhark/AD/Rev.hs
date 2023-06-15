@@ -150,6 +150,10 @@ diffBasicOp pat aux e m =
           updateAdj arr <=< letExp "adj_rotate" . BasicOp $
             Rotate rots' pat_adj
     --
+    Replicate (Shape []) (Var se) -> do
+      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
+      returnSweepCode $ void $ updateAdj se pat_adj
+    --
     Replicate (Shape ns) x -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ do
@@ -184,10 +188,6 @@ diffBasicOp pat aux e m =
 
         zipWithM_ updateAdj (arr : arrs) slices
     --
-    Copy se -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ void $ updateAdj se pat_adj
-    --
     Manifest _ se -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ void $ updateAdj se pat_adj
@@ -211,7 +211,9 @@ diffBasicOp pat aux e m =
         t <- lookupType v_adj
         v_adj_copy <-
           case t of
-            Array {} -> letExp "update_val_adj_copy" $ BasicOp $ Copy v_adj
+            Array {} ->
+              letExp "update_val_adj_copy" . BasicOp $
+                Replicate mempty (Var v_adj)
             _ -> pure v_adj
         updateSubExpAdj v v_adj_copy
         zeroes <- letSubExp "update_zero" . zeroExp =<< subExpType v

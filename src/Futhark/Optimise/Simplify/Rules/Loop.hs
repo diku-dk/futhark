@@ -78,7 +78,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
     dummyStm ((p, e), _)
       | unique (paramDeclType p),
         Var v <- e =
-          ([paramName p], BasicOp $ Copy v)
+          ([paramName p], BasicOp $ Replicate mempty $ Var v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)
 removeRedundantMergeVariables _ _ _ _ =
   Skip

@@ -501,9 +501,6 @@ graphStm stm = do
       -- Is unlikely to prevent a scalar read as the only SubExp operand in
       -- practice is a computation of host-only size variables.
       graphHostOnly e
-    BasicOp Copy {} ->
-      -- Only takes an array operand, so cannot directly prevent a scalar read.
-      graphHostOnly e
     BasicOp Manifest {} ->
       -- Takes no scalar operands so cannot directly prevent a scalar read.
       -- It is introduced as part of the BlkRegTiling kernel optimization and
