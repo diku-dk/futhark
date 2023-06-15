@@ -30,6 +30,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.FreshNames hiding (newName)
@@ -220,7 +221,7 @@ instance Renameable rep => Rename (FunDef rep) where
     renameBound (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
-      ret' <- rename ret
+      ret' <- mapM (bitraverse rename pure) ret
       pure $ FunDef entry attrs fname ret' params' body'
 
 instance Rename SubExp where

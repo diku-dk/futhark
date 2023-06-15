@@ -314,11 +314,13 @@ segIotaBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = segIotaName,
         funDefRetType =
-          [ Prim int64,
-            Array Bool (Shape [Ext 0]) Unique,
-            Array int64 (Shape [Free $ Var $ paramName np]) Unique,
-            Array int64 (Shape [Ext 0]) Unique
-          ],
+          map
+            (,mempty)
+            [ Prim int64,
+              Array Bool (Shape [Ext 0]) Unique,
+              Array int64 (Shape [Free $ Var $ paramName np]) Unique,
+              Array int64 (Shape [Ext 0]) Unique
+            ],
         funDefParams = [np, nsp],
         funDefBody = body
       }
@@ -338,11 +340,13 @@ repIotaBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = repIotaName,
         funDefRetType =
-          [ Prim int64,
-            Array Bool (Shape [Ext 0]) Unique,
-            Array int64 (Shape [Free $ Var $ paramName np]) Unique,
-            Array int64 (Shape [Ext 0]) Unique
-          ],
+          map
+            (,mempty)
+            [ Prim int64,
+              Array Bool (Shape [Ext 0]) Unique,
+              Array int64 (Shape [Free $ Var $ paramName np]) Unique,
+              Array int64 (Shape [Ext 0]) Unique
+            ],
         funDefParams = [np, nsp],
         funDefBody = body
       }
@@ -360,7 +364,9 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = prefixSumName,
         funDefRetType =
-          [Array int64 (Shape [Free $ Var $ paramName np]) Unique],
+          map
+            (,mempty)
+            [Array int64 (Shape [Free $ Var $ paramName np]) Unique],
         funDefParams = [np, nsp],
         funDefBody = body
       }
@@ -380,10 +386,12 @@ partitionBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = partitionName,
         funDefRetType =
-          [ Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
-            Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
-            Array int64 (Shape [Free $ Var $ paramName np]) Unique
-          ],
+          map
+            (,mempty)
+            [ Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
+              Array int64 (Shape [Free $ Var $ paramName kp]) Unique,
+              Array int64 (Shape [Free $ Var $ paramName np]) Unique
+            ],
         funDefParams = [np, kp, csp],
         funDefBody = body
       }
@@ -408,14 +416,14 @@ doSegIota ns = do
       restype =
         fromMaybe (error "doSegIota: bad application") $
           applyRetType
-            (funDefRetType segIotaBuiltin)
+            (map fst $ funDefRetType segIotaBuiltin)
             (funDefParams segIotaBuiltin)
             args
   letBindNames [m, flags, offsets, elems] $
     Apply
       (funDefName segIotaBuiltin)
       [(n, Observe), (Var ns, Observe)]
-      restype
+      (map (,mempty) restype)
       (Safe, mempty, mempty)
   pure (flags, offsets, elems)
 
@@ -433,14 +441,14 @@ doRepIota ns = do
       restype =
         fromMaybe (error "doRepIota: bad application") $
           applyRetType
-            (funDefRetType repIotaBuiltin)
+            (map fst $ funDefRetType repIotaBuiltin)
             (funDefParams repIotaBuiltin)
             args
   letBindNames [m, flags, offsets, elems] $
     Apply
       (funDefName repIotaBuiltin)
       [(n, Observe), (Var ns, Observe)]
-      restype
+      (map (,mempty) restype)
       (Safe, mempty, mempty)
   pure (flags, offsets, elems)
 
@@ -452,7 +460,7 @@ doPrefixSum ns = do
     Apply
       (funDefName prefixSumBuiltin)
       [(n, Observe), (Var ns, Observe)]
-      [toDecl (staticShapes1 ns_t) Unique]
+      [(toDecl (staticShapes1 ns_t) Unique, mempty)]
       (Safe, mempty, mempty)
 
 doPartition :: VName -> VName -> Builder GPU (VName, VName, VName)
@@ -466,13 +474,13 @@ doPartition k cs = do
       restype =
         fromMaybe (error "doPartition: bad application") $
           applyRetType
-            (funDefRetType partitionBuiltin)
+            (map fst $ funDefRetType partitionBuiltin)
             (funDefParams partitionBuiltin)
             args
   letBindNames [counts, offsets, res] $
     Apply
       (funDefName partitionBuiltin)
       [(n, Observe), (Var k, Observe), (Var cs, Observe)]
-      restype
+      (map (,mempty) restype)
       (Safe, mempty, mempty)
   pure (counts, offsets, res)

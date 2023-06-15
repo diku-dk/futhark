@@ -72,11 +72,11 @@ replaceTypeSizes ::
   TypeBase Size als
 replaceTypeSizes substs = first onDim
   where
-    onDim (SizeExpr (Var v typ loc)) =
+    onDim (Var v typ loc) =
       case M.lookup (qualLeaf v) substs of
-        Just (SubstNamed v') -> SizeExpr (Var v' typ loc)
+        Just (SubstNamed v') -> Var v' typ loc
         Just (SubstConst d) -> sizeFromInteger (toInteger d) loc
-        Nothing -> SizeExpr (Var v typ loc)
+        Nothing -> Var v typ loc
     onDim d = d
 
 replaceStaticValSizes ::
@@ -132,8 +132,8 @@ replaceStaticValSizes globals orig_substs sv =
           Literal (SignedValue (Int64Value (fromIntegral d))) loc
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
-    onExp substs (AppExp (Coerce e te loc) (Info (AppRes t ext))) =
-      AppExp (Coerce (onExp substs e) te' loc) (Info (AppRes (replaceTypeSizes substs t) ext))
+    onExp substs (Coerce e te t loc) =
+      Coerce (onExp substs e) te' (replaceTypeSizes substs <$> t) loc
       where
         te' = onTypeExp substs te
     onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
@@ -268,7 +268,7 @@ arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
-    f (TypeArgDim (SizeExpr (Var d _ _))) = S.singleton $ qualLeaf d
+    f (TypeArgDim (Var d _ _)) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
     f (TypeArgType t) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
@@ -276,7 +276,7 @@ arraySizes (Array _ _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
     dimName :: Size -> S.Set VName
-    dimName (SizeExpr (Var qn _ _)) = S.singleton $ qualLeaf qn
+    dimName (Var qn _ _) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
 patternArraySizes :: Pat -> S.Set VName
@@ -294,14 +294,14 @@ dimMapping ::
   M.Map VName SizeSubst
 dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
   where
-    f bound d1 (SizeExpr (Var d2 _ _))
+    f bound d1 (Var d2 _ _)
       | qualLeaf d2 `elem` bound = pure d1
-    f _ (SizeExpr (Var d1 typ loc)) (SizeExpr (Var d2 _ _)) = do
+    f _ (Var d1 typ loc) (Var d2 _ _) = do
       modify $ M.insert (qualLeaf d1) $ SubstNamed d2
-      pure $ SizeExpr $ Var d1 typ loc
-    f _ (SizeExpr (Var d1 typ loc)) (SizeExpr (IntLit d2 _ _)) = do
+      pure $ Var d1 typ loc
+    f _ (Var d1 typ loc) (IntLit d2 _ _) = do
       modify $ M.insert (qualLeaf d1) $ SubstConst $ fromInteger d2
-      pure $ SizeExpr $ Var d1 typ loc
+      pure $ Var d1 typ loc
     f _ d _ = pure d
 
 dimMapping' ::
@@ -506,10 +506,10 @@ defuncExp (Ascript e0 tydecl loc)
       (e0', sv) <- defuncExp e0
       pure (Ascript e0' tydecl loc, sv)
   | otherwise = defuncExp e0
-defuncExp (AppExp (Coerce e0 tydecl loc) res)
+defuncExp (Coerce e0 tydecl t loc)
   | orderZero (typeOf e0) = do
       (e0', sv) <- defuncExp e0
-      pure (AppExp (Coerce e0' tydecl loc) res, sv)
+      pure (Coerce e0' tydecl t loc, sv)
   | otherwise = defuncExp e0
 defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
@@ -520,7 +520,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   -- old size substitution induced by retext and also apply it to the
   -- newly computed body type.
   let mapping = dimMapping' (typeOf e2) t
-      subst v = ExpSubst . flip sizeVar mempty . qualName <$> M.lookup v mapping
+      subst v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v mapping
       t' = applySubst subst $ typeOf e2'
   pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
@@ -713,7 +713,7 @@ etaExpand e_t e = do
   ext' <- mapM newName $ retDims ret
   let extsubst =
         M.fromList . zip (retDims ret) $
-          map (ExpSubst . flip sizeVar mempty . qualName) ext'
+          map (ExpSubst . flip sizeFromName mempty . qualName) ext'
       ret' = applySubst (`M.lookup` extsubst) ret
       e' =
         mkApply
@@ -794,27 +794,27 @@ sizesForAll bound_sizes params = do
   where
     bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
-    onDim (AnySize (Just v)) = do
-      modify $ S.insert v
-      pure $ sizeFromName (qualName v) mempty
-    onDim (AnySize Nothing) = do
-      v <- lift $ newVName "size"
-      modify $ S.insert v
-      pure $ sizeFromName (qualName v) mempty
-    onDim (SizeExpr (Var d typ loc)) = do
+    onDim d
+      | d == anySize = do
+          v <- lift $ newVName "size"
+          modify $ S.insert v
+          pure $ sizeFromName (qualName v) mempty
+    onDim (Var d typ loc) = do
       unless (qualLeaf d `S.member` bound) $
         modify $
           S.insert $
             qualLeaf d
-      pure $ SizeExpr $ Var d typ loc
+      pure $ Var d typ loc
     onDim d = pure d
 
-unRetType :: StructRetType -> StructType
-unRetType (RetType [] t) = t
-unRetType (RetType ext t) = first onDim t
-  where
-    onDim (SizeExpr (Var d _ _)) | qualLeaf d `elem` ext = AnySize Nothing
-    onDim d = d
+unRetType :: PatRetType -> DefM AppRes
+unRetType (RetType [] t) = pure $ AppRes t []
+unRetType (RetType ext t) = do
+  ext' <- mapM newName ext
+  let extsubst =
+        M.fromList . zip ext $
+          map (ExpSubst . flip sizeFromName mempty . qualName) ext'
+  pure $ AppRes (applySubst (`M.lookup` extsubst) t) ext'
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
@@ -889,7 +889,10 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
       params_for_rettype = params ++ svParams f_sv ++ svParams arg_sv
       svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
       svParams _ = []
-      lifted_rettype = buildRetType closure_env params_for_rettype (unRetType lam_e_t) $ typeOf lam_e'
+      lifted_rettype =
+        RetType (retDims lam_e_t) $
+          buildRetType closure_env params_for_rettype (retType lam_e_t) $
+            typeOf lam_e'
 
       already_bound =
         globals
@@ -910,7 +913,7 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   fname <- newNameFromString fname_s
   liftValDec
     fname
-    (RetType [] $ toStruct lifted_rettype)
+    (second (const ()) lifted_rettype)
     (dims ++ more_dims ++ missing_dims)
     params'
     lam_e'
@@ -918,9 +921,9 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   let f_t = toStruct $ typeOf f'
       arg_t = toStruct $ typeOf arg'
       d1 = Observe
-      fname_t = foldFunType [(d1, f_t), (d, arg_t)] $ RetType [] lifted_rettype
+      fname_t = foldFunType [(d1, f_t), (d, arg_t)] lifted_rettype
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
-      callret = AppRes lifted_rettype []
+  callret <- unRetType lifted_rettype
 
   pure
     ( mkApply fname' [(Observe, Nothing, f'), (Observe, argext, arg')] callret,
@@ -1304,8 +1307,8 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           sv
     )
   where
-    anyDimIfNotBound bound_sizes (SizeExpr (Var v _ _))
-      | qualLeaf v `S.notMember` bound_sizes = AnySize $ Just $ qualLeaf v
+    anyDimIfNotBound bound_sizes (Var v _ _)
+      | qualLeaf v `S.notMember` bound_sizes = anySize
     anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.

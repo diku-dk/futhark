@@ -59,8 +59,8 @@ freeInExp expr = case expr of
     freeInExp e <> foldMap freeInExp me <> foldMap freeInExp incl
   Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
   Ascript e _ _ -> freeInExp e
-  AppExp (Coerce e _ _) (Info ar) ->
-    freeInExp e <> freeInType (appResType ar)
+  Coerce e _ (Info t) _ ->
+    freeInExp e <> freeInType t
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
       <> ( (freeInPat pat <> freeInExp e2)
@@ -139,7 +139,7 @@ freeInType :: TypeBase Size as -> FV
 freeInType t =
   case t of
     Array _ _ s a ->
-      freeInType (Scalar a) <> foldMap onSize (shapeDims s)
+      freeInType (Scalar a) <> foldMap freeInExp (shapeDims s)
     Scalar (Record fs) ->
       foldMap freeInType fs
     Scalar Prim {} ->
@@ -154,11 +154,8 @@ freeInType t =
     Scalar (TypeVar _ _ _ targs) ->
       foldMap typeArgDims targs
   where
-    typeArgDims (TypeArgDim d) = onSize d
+    typeArgDims (TypeArgDim d) = freeInExp d
     typeArgDims (TypeArgType at) = freeInType at
 
     notV Unnamed = const True
     notV (Named v) = (/= v)
-
-    onSize (SizeExpr e) = freeInExp e
-    onSize _ = mempty

@@ -19,7 +19,7 @@ module Language.Futhark.Syntax
     IntType (..),
     FloatType (..),
     PrimType (..),
-    Size (..),
+    Size,
     Shape (..),
     shapeRank,
     stripDims,
@@ -93,8 +93,6 @@ module Language.Futhark.Syntax
     QualName (..),
     mkApply,
     mkApplyUT,
-    sizeVar,
-    sizeInteger,
     sizeFromName,
     sizeFromInteger,
   )
@@ -221,38 +219,16 @@ data AttrInfo vn
   | AttrComp Name [AttrInfo vn] SrcLoc
   deriving (Eq, Ord, Show)
 
--- | The elaborated size of a dimension.
-data Size
-  = -- | The size of the dimension is this expression
-    -- all non-trivial expression should have variable in scope.
-    -- In a return type, existential name don't appear in expression.
-    SizeExpr (ExpBase Info VName)
-  | -- | No known size.  If @Nothing@, then this is a name distinct
-    -- from any other.  The type checker should _never_ produce these
-    -- - they are a (hopefully temporary) thing introduced by
-    -- defunctorisation and monomorphisation.
-    AnySize (Maybe VName)
-  deriving (Show, Eq, Ord)
+-- | The elaborated size of a dimension is just an expression.
+type Size = ExpBase Info VName
 
-instance Located Size where
-  locOf (SizeExpr e) = locOf e
-  locOf AnySize {} = mempty
-
--- | Create a 'Var' expression of type @i64@.
-sizeVar :: QualName VName -> SrcLoc -> ExpBase Info VName
-sizeVar name = Var name (Info $ Scalar $ Prim $ Signed Int64)
-
--- | Create an 'IntLit' expression of type @i64@.
-sizeInteger :: Integer -> SrcLoc -> ExpBase Info VName
-sizeInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
-
--- | Create a 'Size' with 'sizeVar'.
+-- | Create a 'Size' from a name.
 sizeFromName :: QualName VName -> SrcLoc -> Size
-sizeFromName name loc = SizeExpr $ sizeVar name loc
+sizeFromName name = Var name (Info $ Scalar $ Prim $ Signed Int64)
 
--- | Create a 'Size' with 'sizeInt'.
+-- | Create a 'Size' from a constant integer.
 sizeFromInteger :: Integer -> SrcLoc -> Size
-sizeFromInteger x loc = SizeExpr $ sizeInteger x loc
+sizeFromInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
@@ -309,7 +285,13 @@ instance Bitraversable RetTypeBase where
   bitraverse f g (RetType dims t) = RetType dims <$> bitraverse f g t
 
 instance Functor (RetTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (RetTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (RetTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor RetTypeBase where
   bimap = bimapDefault
@@ -340,7 +322,13 @@ instance Bitraversable ScalarTypeBase where
   bitraverse f g (Sum cs) = Sum <$> (traverse . traverse) (bitraverse f g) cs
 
 instance Functor (ScalarTypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (ScalarTypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (ScalarTypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor ScalarTypeBase where
   bimap = bimapDefault
@@ -364,7 +352,13 @@ instance Bitraversable TypeBase where
     Array <$> g a <*> pure u <*> traverse f shape <*> bitraverse f pure t
 
 instance Functor (TypeBase dim) where
-  fmap = second
+  fmap = fmapDefault
+
+instance Foldable (TypeBase dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeBase dim) where
+  traverse = bitraverse pure
 
 instance Bifunctor TypeBase where
   bimap = bimapDefault
@@ -683,8 +677,6 @@ data AppExpBase f vn
       (ExpBase f vn)
       (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
       SrcLoc
-  | -- | Size coercion: @e :> t@.
-    Coerce (ExpBase f vn) (TypeExp f vn) SrcLoc
   | Range
       (ExpBase f vn)
       (Maybe (ExpBase f vn))
@@ -717,8 +709,8 @@ data AppExpBase f vn
   | BinOp
       (QualName vn, SrcLoc)
       (f PatType)
-      (ExpBase f vn, f (StructType, Maybe VName))
-      (ExpBase f vn, f (StructType, Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
+      (ExpBase f vn, f (Maybe VName))
       SrcLoc
   | LetWith
       (IdentBase f vn)
@@ -747,7 +739,6 @@ instance Located (AppExpBase f vn) where
   locOf (Range _ _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ loc) = locOf loc
   locOf (If _ _ _ loc) = locOf loc
-  locOf (Coerce _ _ loc) = locOf loc
   locOf (Apply _ _ loc) = locOf loc
   locOf (LetPat _ _ _ _ loc) = locOf loc
   locOf (LetFun _ _ _ loc) = locOf loc
@@ -839,6 +830,8 @@ data ExpBase f vn
     IndexSection (SliceBase f vn) (f PatType) SrcLoc
   | -- | Type ascription: @e : t@.
     Ascript (ExpBase f vn) (TypeExp f vn) SrcLoc
+  | -- | Size coercion: @e :> t@.
+    Coerce (ExpBase f vn) (TypeExp f vn) (f PatType) SrcLoc
   | AppExp (AppExpBase f vn) (f AppRes)
 
 deriving instance Show (ExpBase Info VName)
@@ -866,6 +859,7 @@ instance Located (ExpBase f vn) where
   locOf (StringLit _ loc) = locOf loc
   locOf (Var _ _ loc) = locOf loc
   locOf (Ascript _ _ loc) = locOf loc
+  locOf (Coerce _ _ _ loc) = locOf loc
   locOf (Negate _ pos) = locOf pos
   locOf (Not _ pos) = locOf pos
   locOf (Update _ _ _ pos) = locOf pos
@@ -992,7 +986,10 @@ instance Located DocComment where
   locOf (DocComment _ loc) = locOf loc
 
 -- | Part of the type of an entry point.  Has an actual type, and
--- maybe also an ascribed type expression.
+-- maybe also an ascribed type expression.  Note that although size
+-- expressions in the elaborated type can contain variables, they are
+-- no longer in scope, and are considered more like equivalence
+-- classes.
 data EntryType = EntryType
   { entryType :: StructType,
     entryAscribed :: Maybe (TypeExp Info VName)

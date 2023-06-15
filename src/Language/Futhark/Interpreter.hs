@@ -188,8 +188,9 @@ resolveTypeParams names orig_t1 orig_t2 =
           match bound t1' t2'
     match _ _ _ = pure mempty
 
-    matchDims bound (SizeExpr e1) (SizeExpr e2) = matchExps bound e1 e2
-    matchDims _ _ _ = pure mempty
+    matchDims bound e1 e2
+      | e1 == anySize || e2 == anySize = pure mempty
+      | otherwise = matchExps bound e1 e2
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
@@ -226,7 +227,7 @@ resolveExistentials names = match
           matchDims d1 d2 <> match (stripArray 1 poly_t) rowshape
     match _ _ = mempty
 
-    matchDims (SizeExpr (Var (QualName _ d1) _ _)) d2
+    matchDims (Var (QualName _ d1) _ _) d2
       | d1 `elem` names = M.singleton d1 d2
     matchDims _ _ = mempty
 
@@ -599,15 +600,14 @@ expandType env (Scalar (TypeVar () u tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
-          onDim (SizeExpr (Var v _ _))
+          onDim (Var v _ _)
             | Just e <- M.lookup (qualLeaf v) substs =
                 e
           -- The next case can occur when a type with existential size
           -- has been hidden by a module ascription,
           -- e.g. tests/modules/sizeparams4.fut.
-          onDim (SizeExpr e)
-            | any (`elem` ext) $ freeVarsInExp e =
-                AnySize Nothing
+          onDim e
+            | any (`elem` ext) $ freeVarsInExp e = anySize
           onDim d = d
        in if null ps
             then first onDim t'
@@ -617,8 +617,8 @@ expandType env (Scalar (TypeVar () u tn args)) =
       -- e.g. accumulators.
       Scalar (TypeVar () u tn $ map expandArg args)
   where
-    matchPtoA (TypeParamDim p _) (TypeArgDim (SizeExpr e)) =
-      (M.singleton p $ SizeExpr e, mempty)
+    matchPtoA (TypeParamDim p _) (TypeArgDim e) =
+      (M.singleton p e, mempty)
     matchPtoA (TypeParamType l p _) (TypeArgType t') =
       let t'' = expandType env t'
        in (mempty, M.singleton p $ T.TypeAbbr l [] $ RetType [] t'')
@@ -636,10 +636,10 @@ evalWithExts env = do
 -- variables in the set of names.
 evalType :: Eval -> S.Set VName -> StructType -> EvalM StructType
 evalType eval' outer_bound t = do
-  let evalDim bound _ (SizeExpr e)
+  let evalDim bound _ e
         | canBeEvaluated bound e = do
             x <- asInteger <$> eval' e
-            pure $ SizeExpr $ IntLit x (Info (Scalar (Prim (Signed Int64)))) mempty
+            pure $ sizeFromInteger x mempty
       evalDim _ _ d = pure d
   traverseDims evalDim t
   where
@@ -667,7 +667,7 @@ typeValueShape env t = do
     Nothing -> error $ "typeValueShape: failed to fully evaluate type " <> prettyString t'
     Just shape -> pure shape
   where
-    dim (SizeExpr (IntLit x _ _)) = Just $ fromIntegral x
+    dim (IntLit x _ _) = Just $ fromIntegral x
     dim _ = Nothing
 
 -- Sometimes type instantiation is not quite enough - then we connect
@@ -754,8 +754,8 @@ returned env ret retext v = do
       valueShape v
   pure v
 
-evalAppExp :: Env -> StructType -> AppExp -> EvalM Value
-evalAppExp env _ (Range start maybe_second end loc) = do
+evalAppExp :: Env -> AppExp -> EvalM Value
+evalAppExp env (Range start maybe_second end loc) = do
   start' <- asInteger <$> eval env start
   maybe_second' <- traverse (fmap asInteger . eval env) maybe_second
   end' <- traverse (fmap asInteger . eval env) end
@@ -803,56 +803,36 @@ evalAppExp env _ (Range start maybe_second end loc) = do
                UpToExclusive x -> "..<" <> prettyText x
            )
         <> " is invalid."
-evalAppExp env t (Coerce e te loc) = do
-  v <- eval env e
-  eval' <- evalWithExts env
-  t' <- evalType eval' mempty $ expandType env t
-  case checkShape (structTypeShape t') (valueShape v) of
-    Just _ -> pure v
-    Nothing ->
-      bad loc env . docText $
-        "Value `"
-          <> prettyValue v
-          <> "` of shape `"
-          <> pretty (valueShape v)
-          <> "` cannot match shape of type `"
-          <> pretty te
-          <> "` (`"
-          <> pretty t'
-          <> "`)"
-evalAppExp env _ (LetPat sizes p e body _) = do
+evalAppExp env (LetPat sizes p e body _) = do
   v <- eval env e
   env' <- matchPat env p v
   let p_t = expandType env $ patternStructType p
       v_s = valueShape v
       env'' = env' <> i64Env (resolveExistentials (map sizeName sizes) p_t v_s)
   eval env'' body
-evalAppExp env _ (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
+evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp
-  env
-  _
-  (BinOp (op, _) op_t (x, Info (_, xext)) (y, Info (_, yext)) loc)
-    | baseString (qualLeaf op) == "&&" = do
-        x' <- asBool <$> eval env x
-        if x'
-          then eval env y
-          else pure $ ValuePrim $ BoolValue False
-    | baseString (qualLeaf op) == "||" = do
-        x' <- asBool <$> eval env x
-        if x'
-          then pure $ ValuePrim $ BoolValue True
-          else eval env y
-    | otherwise = do
-        x' <- evalArg env x xext
-        y' <- evalArg env y yext
-        op' <- eval env $ Var op op_t loc
-        apply2 loc env op' x' y'
-evalAppExp env _ (If cond e1 e2 _) = do
+evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
+  | baseString (qualLeaf op) == "&&" = do
+      x' <- asBool <$> eval env x
+      if x'
+        then eval env y
+        else pure $ ValuePrim $ BoolValue False
+  | baseString (qualLeaf op) == "||" = do
+      x' <- asBool <$> eval env x
+      if x'
+        then pure $ ValuePrim $ BoolValue True
+        else eval env y
+  | otherwise = do
+      x' <- evalArg env x xext
+      y' <- evalArg env y yext
+      op' <- eval env $ Var op op_t loc
+      apply2 loc env op' x' y'
+evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
-evalAppExp env _ (Apply f args loc) = do
+evalAppExp env (Apply f args loc) = do
   -- It is important that 'arguments' are evaluated in reverse order
   -- in order to bring any sizes into scope that may be used in the
   -- type of the functions.
@@ -861,11 +841,11 @@ evalAppExp env _ (Apply f args loc) = do
   foldM (apply loc env) f' args'
   where
     evalArg' (Info (_, ext), x) = evalArg env x ext
-evalAppExp env _ (Index e is loc) = do
+evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
   evalIndex loc env is' arr
-evalAppExp env _ (LetWith dest src is v body loc) = do
+evalAppExp env (LetWith dest src is v body loc) = do
   let Ident src_vn (Info src_t) _ = src
   dest' <-
     maybe oob pure
@@ -877,7 +857,7 @@ evalAppExp env _ (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
+evalAppExp env (DoLoop sparams pat init_e form body _) = do
   init_v <- eval env init_e
   case form of
     For iv bound -> do
@@ -928,7 +908,7 @@ evalAppExp env _ (DoLoop sparams pat init_e form body _) = do
       env' <- withLoopParams v
       env'' <- matchPat env' in_pat in_v
       evalBody env''
-evalAppExp env _ (Match e cs _) = do
+evalAppExp env (Match e cs _) = do
   v <- eval env e
   match v (NE.toList cs)
   where
@@ -973,10 +953,27 @@ eval env (ArrayLit (v : vs) _ _) = do
   pure $ toArray' (valueShape v') (v' : vs')
 eval env (AppExp e (Info (AppRes t retext))) = do
   let t' = expandType env $ toStruct t
-  v <- evalAppExp env t' e
+  v <- evalAppExp env e
   returned env t' retext v
 eval env (Var qv (Info t) _) = evalTermVar env qv (toStruct t)
 eval env (Ascript e _ _) = eval env e
+eval env (Coerce e te (Info t) loc) = do
+  v <- eval env e
+  eval' <- evalWithExts env
+  t' <- evalType eval' mempty $ expandType env $ toStruct t
+  case checkShape (structTypeShape t') (valueShape v) of
+    Just _ -> pure v
+    Nothing ->
+      bad loc env . docText $
+        "Value `"
+          <> prettyValue v
+          <> "` of shape `"
+          <> pretty (valueShape v)
+          <> "` cannot match shape of type `"
+          <> pretty te
+          <> "` (`"
+          <> pretty t'
+          <> "`)"
 eval _ (IntLit v (Info t) _) =
   case t of
     Scalar (Prim (Signed it)) ->
@@ -1115,10 +1112,9 @@ substituteInModule substs = onModule
     onTerm (TermPoly t v) = TermPoly t v
     onTerm (TermModule m) = TermModule $ onModule m
     onType (T.TypeAbbr l ps t) = T.TypeAbbr l ps $ first onDim t
-    onDim (SizeExpr (Var v typ loc)) = SizeExpr (Var (replaceQ v) typ loc)
-    onDim (SizeExpr (IntLit x t loc)) = SizeExpr (IntLit x t loc)
-    onDim (SizeExpr _) = error "Arbitrary expression not supported yet"
-    onDim AnySize {} = error "substituteInModule onDim: AnySize"
+    onDim (Var v typ loc) = Var (replaceQ v) typ loc
+    onDim (IntLit x t loc) = IntLit x t loc
+    onDim _ = error "Arbitrary expression not supported yet"
 
 evalModuleVar :: Env -> QualName VName -> EvalM Module
 evalModuleVar env qv =

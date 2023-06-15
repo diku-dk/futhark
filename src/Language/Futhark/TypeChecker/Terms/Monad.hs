@@ -32,7 +32,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     unifies,
     require,
     checkTypeExpNonrigid,
-    checkTypeExpRigid,
 
     -- * Sizes
     isInt64,
@@ -574,7 +573,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, ExpSubst $ sizeVar (qualName v) loc)
+      pure (v, ExpSubst $ sizeFromName (qualName v) loc)
 
 checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkQualNameWithEnv space qn@(QualName quals name) loc = do
@@ -825,16 +824,6 @@ checkTypeExpNonrigid te = do
     constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
 
-checkTypeExpRigid ::
-  TypeExp NoInfo Name ->
-  RigidSource ->
-  TermTypeM (TypeExp Info VName, StructType, [VName])
-checkTypeExpRigid te rsrc = do
-  (te', svars, RetType dims st) <- termCheckTypeExp te
-  forM_ (svars ++ dims) $ \v ->
-    constrain v $ UnknownSize (srclocOf te) rsrc
-  pure (te', st, svars ++ dims)
-
 --- Sizes
 
 isInt64 :: Exp -> Maybe Int64
@@ -845,7 +834,7 @@ isInt64 (Parens x _) = isInt64 x
 isInt64 _ = Nothing
 
 maybeDimFromExp :: Exp -> Maybe Size
-maybeDimFromExp (Var v typ loc) = Just $ SizeExpr $ Var v typ loc
+maybeDimFromExp (Var v typ loc) = Just $ Var v typ loc
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = flip sizeFromInteger mempty . fromIntegral <$> isInt64 e

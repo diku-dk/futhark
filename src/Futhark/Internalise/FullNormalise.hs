@@ -260,9 +260,9 @@ getOrdering final (AppExp (Apply f args loc) resT) = do
   where
     onArg ((d, e), i) =
       naming (argRepName f i) $ (d,) <$> getOrdering False e
-getOrdering final (AppExp (Coerce e ty loc) resT) = do
+getOrdering final (Coerce e te t loc) = do
   e' <- getOrdering False e
-  nameExp final $ AppExp (Coerce e' ty loc) resT
+  nameExp final $ Coerce e' te t loc
 getOrdering final (AppExp (Range start stride end loc) resT) = do
   start' <- getOrdering False start
   stride' <- mapM (getOrdering False) stride
@@ -289,7 +289,7 @@ getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
     While e -> While <$> transformBody e
   body' <- transformBody body
   nameExp final $ AppExp (DoLoop sizes pat einit' form' body' loc) resT
-getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (_, elp)) (er, Info (_, erp)) loc) (Info resT)) = do
+getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
       el' <- naming "or_lhs" $ getOrdering True el

@@ -348,12 +348,12 @@ eSignum em = do
     _ ->
       error $ "eSignum: operand " ++ prettyString e ++ " has invalid type."
 
--- | Construct a 'Copy' expression.
+-- | Copy a value.
 eCopy ::
   MonadBuilder m =>
   m (Exp (Rep m)) ->
   m (Exp (Rep m))
-eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
+eCopy e = BasicOp . Replicate mempty <$> (letSubExp "copy_arg" =<< e)
 
 -- | Construct a body from expressions.  If multiple expressions are
 -- provided, their results will be concatenated in order and returned

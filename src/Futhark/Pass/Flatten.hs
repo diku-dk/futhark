@@ -417,20 +417,26 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
       w <- arraySize 0 <$> lookupType elems
       elems' <- letExp "rep_const" $ BasicOp $ Replicate (Shape [w]) (Constant v)
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
-    Copy v ->
+    Replicate (Shape []) (Var v) ->
       case lookup v inps of
         Just (DistInputFree v' _) -> do
-          v'' <- letExp (baseString v' <> "_copy") $ BasicOp $ Copy v'
+          v'' <-
+            letExp (baseString v' <> "_copy") . BasicOp $
+              Replicate mempty (Var v')
           pure $ insertRegulars [distResTag res] [v''] env
         Just (DistInput rt _) ->
           case resVar rt env of
             Irregular r -> do
               let name = baseString (irregularElems r) <> "_copy"
-              elems_copy <- letExp name $ BasicOp $ Copy $ irregularElems r
+              elems_copy <-
+                letExp name . BasicOp $
+                  Replicate mempty (Var $ irregularElems r)
               let rep = Irregular $ r {irregularElems = elems_copy}
               pure $ insertRep (distResTag res) rep env
             Regular v' -> do
-              v'' <- letExp (baseString v' <> "_copy") $ BasicOp $ Copy v'
+              v'' <-
+                letExp (baseString v' <> "_copy") . BasicOp $
+                  Replicate mempty (Var v')
               pure $ insertRegulars [distResTag res] [v''] env
         Nothing -> do
           v' <-
@@ -869,11 +875,17 @@ transformDistStm segments env (DistStm inps res stm) = do
       pure $ insertReps (zip (map distResTag res) reps) env
     Let _ _ (Apply name args rettype s) -> do
       let [w] = NE.toList segments
-      let name' = liftFunName name
-      let rettype' = liftRetType w rettype
+          name' = liftFunName name
       args' <- ((w, Observe) :) . concat <$> mapM (liftArg segments inps env) args
+      args_ts <- mapM (subExpType . fst) args'
+      let dietToUnique Consume = Unique
+          dietToUnique Observe = Nonunique
+          dietToUnique ObservePrim = Nonunique
+          param_ts = zipWith toDecl args_ts $ map (dietToUnique . snd) args'
+          rettype' = addRetAls param_ts $ liftRetType w $ map fst rettype
+
       result <- letTupExp (nameToString name' <> "_res") $ Apply name' args' rettype' s
-      let reps = resultToResReps rettype result
+      let reps = resultToResReps (map fst rettype) result
       pure $ insertReps (zip (map distResTag res) reps) env
     _ -> error $ "Unhandled Stm:\n" ++ prettyString stm
 
@@ -919,14 +931,19 @@ transformDistributed irregs segments dist = do
   env <- foldM (transformDistStm segments) env_initial dstms
   forM_ (M.toList resmap) $ \(rt, (cs_inps, v, v_t)) ->
     certifying (distResCerts env cs_inps) $
+      -- FIXME: the copies are because we have too liberal aliases on
+      -- lifted functions.
       case resVar rt env of
-        Regular v' -> letBindNames [v] $ BasicOp $ SubExp $ Var v'
+        Regular v' -> letBindNames [v] $ BasicOp $ Replicate mempty $ Var v'
         Irregular irreg -> do
           -- It might have an irregular representation, but we know
           -- that it is actually regular because it is a result.
           let shape = segmentsShape segments <> arrayShape v_t
+          v_copy <-
+            letExp (baseString v) . BasicOp $
+              Replicate mempty (Var $ irregularElems irreg)
           letBindNames [v] $
-            BasicOp (Reshape ReshapeArbitrary shape (irregularElems irreg))
+            BasicOp (Reshape ReshapeArbitrary shape v_copy)
   forM_ reps $ \(v, r) ->
     case r of
       Left se ->
@@ -1055,9 +1072,9 @@ liftRetType w = concat . snd . L.mapAccumL liftType 0
             Array pt _ u ->
               let num_elems = Prim int64
                   segs = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-                  flags = arrayOf (Prim Bool) (Shape [Ext i :: Ext SubExp]) Nonunique
+                  flags = arrayOf (Prim Bool) (Shape [Ext i]) Nonunique
                   offsets = arrayOf (Prim int64) (Shape [Free w]) Nonunique
-                  elems = arrayOf (Prim pt) (Shape [Ext i :: Ext SubExp]) u
+                  elems = arrayOf (Prim pt) (Shape [Ext i]) u
                in [num_elems, segs, flags, offsets, elems]
             Acc {} -> error "liftRetType: Acc"
             Mem {} -> error "liftRetType: Mem"
@@ -1096,6 +1113,19 @@ liftBody w inputs env dstms result = do
 liftFunName :: Name -> Name
 liftFunName name = name <> "_lifted"
 
+addRetAls :: [DeclType] -> [RetType GPU] -> [(RetType GPU, RetAls)]
+addRetAls params rettype = zip rettype $ map possibleAliases rettype
+  where
+    aliasable (Array _ _ Nonunique) = True
+    aliasable _ = False
+    aliasable_params =
+      map snd $ filter (aliasable . fst) $ zip params [0 ..]
+    aliasable_rets =
+      map snd $ filter (aliasable . declExtTypeOf . fst) $ zip rettype [0 ..]
+    possibleAliases t
+      | aliasable t = RetAls aliasable_params aliasable_rets
+      | otherwise = mempty
+
 liftFunDef :: Scope SOACS -> FunDef SOACS -> PassM (FunDef GPU)
 liftFunDef const_scope fd = do
   let FunDef
@@ -1106,10 +1136,13 @@ liftFunDef const_scope fd = do
   wp <- newParam "w" $ Prim int64
   let w = Var $ paramName wp
   (fparams', reps) <- mapAndUnzipM (liftParam w) fparams
+  let fparams'' = wp : concat fparams'
   let inputs = do
         (p, i) <- zip fparams [0 ..]
         pure (paramName p, DistInput (ResTag i) (paramType p))
-  let rettype' = liftRetType w rettype
+  let rettype' =
+        addRetAls (map paramDeclType fparams'') $
+          liftRetType w (map fst rettype)
   let (inputs', dstms) =
         distributeBody const_scope (Var (paramName wp)) inputs body
       env = DistEnv $ M.fromList $ zip (map ResTag [0 ..]) reps
@@ -1117,13 +1150,13 @@ liftFunDef const_scope fd = do
   (result, stms) <-
     runReaderT
       (runBuilder $ liftBody w inputs' env dstms $ bodyResult body)
-      (const_scope <> scopeOfFParams (concat fparams'))
+      (const_scope <> scopeOfFParams fparams'')
   let name = liftFunName $ funDefName fd
   pure $
     fd
       { funDefName = name,
         funDefBody = Body () stms result,
-        funDefParams = wp : concat fparams',
+        funDefParams = fparams'',
         funDefRetType = rettype'
       }
 

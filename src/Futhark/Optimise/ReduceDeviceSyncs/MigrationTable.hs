@@ -184,9 +184,9 @@ hostOnlyFunDefs funs =
 -- include user defined functions that could turn out to be host-only.
 checkFunDef :: FunDef GPU -> Maybe (Set Name)
 checkFunDef fun = do
-  checkFParams (funDefParams fun)
-  checkRetTypes (funDefRetType fun)
-  checkBody (funDefBody fun)
+  checkFParams $ funDefParams fun
+  checkRetTypes $ map fst $ funDefRetType fun
+  checkBody $ funDefBody fun
   where
     hostOnly = Nothing
     ok = Just ()
@@ -249,7 +249,7 @@ analyseConsts hof funs consts =
 analyseFunDef :: HostOnlyFuns -> FunDef GPU -> MigrationTable
 analyseFunDef hof fd =
   let body = funDefBody fd
-      usage = foldl' f [] $ zip (bodyResult body) (funDefRetType fd)
+      usage = foldl' f [] $ zip (bodyResult body) (map fst $ funDefRetType fd)
       stms = bodyStms body
    in analyseStms hof usage stms
   where
@@ -500,9 +500,6 @@ graphStm stm = do
     BasicOp Concat {} ->
       -- Is unlikely to prevent a scalar read as the only SubExp operand in
       -- practice is a computation of host-only size variables.
-      graphHostOnly e
-    BasicOp Copy {} ->
-      -- Only takes an array operand, so cannot directly prevent a scalar read.
       graphHostOnly e
     BasicOp Manifest {} ->
       -- Takes no scalar operands so cannot directly prevent a scalar read.

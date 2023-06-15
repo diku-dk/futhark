@@ -1,12 +1,17 @@
 -- | Parser for the Futhark core language.
 module Futhark.IR.Parse
-  ( parseSOACS,
+  ( -- * Programs
+    parseSOACS,
     parseGPU,
     parseGPUMem,
     parseMC,
     parseMCMem,
     parseSeq,
     parseSeqMem,
+
+    -- * Fragments
+    parseDeclExtType,
+    parseDeclType,
   )
 where
 
@@ -15,6 +20,7 @@ import Data.Functor
 import Data.List (singleton, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Void
@@ -257,7 +263,7 @@ pBasicOp =
       keyword "trace"
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
-      keyword "copy" $> Copy <*> parens pVName,
+      keyword "copy" $> Replicate mempty . Var <*> parens pVName,
       keyword "assert"
         *> parens
           ( Assert
@@ -373,8 +379,14 @@ data PR rep = PR
     pExpDec :: ExpDec rep
   }
 
-pRetTypes :: PR rep -> Parser [RetType rep]
-pRetTypes pr = braces $ pRetType pr `sepBy` pComma
+pRetAls :: Parser RetAls
+pRetAls = fromMaybe (RetAls mempty mempty) <$> optional p
+  where
+    p = lexeme "#" *> parens (RetAls <$> pInts <* pComma <*> pInts)
+    pInts = brackets $ pInt `sepBy` pComma
+
+pRetTypes :: PR rep -> Parser [(RetType rep, RetAls)]
+pRetTypes pr = braces $ ((,) <$> pRetType pr <*> pRetAls) `sepBy` pComma
 
 pBranchTypes :: PR rep -> Parser [BranchType rep]
 pBranchTypes pr = braces $ pBranchType pr `sepBy` pComma
@@ -1107,10 +1119,13 @@ prMCMem =
   where
     op = pMemOp $ pMCOp prMCMem empty
 
-parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
-parseRep pr fname s =
+parseFull :: Parser a -> FilePath -> T.Text -> Either T.Text a
+parseFull p fname s =
   either (Left . T.pack . errorBundlePretty) Right $
-    parse (whitespace *> pProg pr <* eof) fname s
+    parse (whitespace *> p <* eof) fname s
+
+parseRep :: PR rep -> FilePath -> T.Text -> Either T.Text (Prog rep)
+parseRep = parseFull . pProg
 
 parseSOACS :: FilePath -> T.Text -> Either T.Text (Prog SOACS)
 parseSOACS = parseRep prSOACS
@@ -1132,3 +1147,9 @@ parseMC = parseRep prMC
 
 parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
 parseMCMem = parseRep prMCMem
+
+parseDeclExtType :: FilePath -> T.Text -> Either T.Text DeclExtType
+parseDeclExtType = parseFull pDeclExtType
+
+parseDeclType :: FilePath -> T.Text -> Either T.Text DeclType
+parseDeclType = parseFull pDeclType

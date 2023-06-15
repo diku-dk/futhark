@@ -8,6 +8,7 @@ module Futhark.IR.Pretty
   ( prettyTuple,
     prettyTupleLines,
     prettyString,
+    prettyRet,
     PrettyRep (..),
   )
 where
@@ -220,6 +221,7 @@ instance Pretty BasicOp where
   pretty (Iota e x s et) = "iota" <> et' <> apply [pretty e, pretty x, pretty s]
     where
       et' = pretty $ show $ primBitSize $ IntType et
+  pretty (Replicate (Shape []) e) = "copy" <> parens (pretty e)
   pretty (Replicate ne ve) =
     "replicate" <> apply [pretty ne, align (pretty ve)]
   pretty (Scratch t shape) =
@@ -234,7 +236,6 @@ instance Pretty BasicOp where
     "rotate" <> apply [apply (map pretty es), pretty e]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
-  pretty (Copy e) = "copy" <> parens (pretty e)
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]
   pretty (Assert e msg (loc, _)) =
     "assert" <> apply [pretty e, pretty msg, pretty $ show $ locStr loc]
@@ -260,6 +261,17 @@ maybeNest b
 instance PrettyRep rep => Pretty (Case (Body rep)) where
   pretty (Case vs b) =
     "case" <+> ppTuple' (map (maybe "_" pretty) vs) <+> "->" <+> maybeNest b
+
+-- | Print something tupled with a 'RetAls'.
+prettyRet :: Pretty t => (t, RetAls) -> Doc a
+prettyRet (t, RetAls pals rals)
+  | pals == mempty,
+    rals == mempty =
+      pretty t
+  | otherwise =
+      pretty t <> "#" <> parens (pl pals <> comma <+> pl rals)
+  where
+    pl = brackets . commasep . map pretty
 
 instance PrettyRep rep => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
@@ -296,7 +308,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
       <+> pretty (nameToString fname)
         <> apply (map (align . prettyArg) args)
       </> colon
-      <+> braces (commasep $ map pretty ret)
+      <+> braces (commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -379,7 +391,7 @@ instance PrettyRep rep => Pretty (FunDef rep) where
       fun
         </> indent 2 (pretty (nameToString name))
         <+> parens (commastack $ map pretty fparams)
-        </> indent 2 (colon <+> align (ppTupleLines' $ map pretty rettype))
+        </> indent 2 (colon <+> align (ppTupleLines' $ map prettyRet rettype))
         <+> equals
         <+> nestedBlock "{" "}" (pretty body)
     where

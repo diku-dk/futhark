@@ -7,6 +7,8 @@ module Futhark.Internalise.Exps (transformProg) where
 
 import Control.Monad
 import Control.Monad.Reader
+import Data.Bifunctor
+import Data.Foldable (toList)
 import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -40,10 +42,14 @@ internaliseValBinds types = mapM_ $ internaliseValBind types
 internaliseFunName :: VName -> Name
 internaliseFunName = nameFromString . prettyString
 
+shiftRetAls :: Int -> RetAls -> RetAls
+shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
+
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
 internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
+        all_params = map pure shapeparams ++ concat params'
 
     msg <- case retdecl of
       Just dt ->
@@ -54,16 +60,18 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
-      rettype' <-
-        zeroExts . internaliseReturnType rettype <$> mapM subExpType body_res
+      (rettype', retals) <-
+        first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
+          <$> mapM subExpType body_res
+
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
+      let num_ctx = length (shapeContext rettype')
       pure
         ( body_res',
-          replicate (length (shapeContext rettype')) (I.Prim int64) ++ rettype'
+          replicate num_ctx (I.Prim int64, mempty)
+            ++ zip rettype' (map (shiftRetAls num_ctx) retals)
         )
-
-    let all_params = shapeparams ++ concat params'
 
     attrs' <- internaliseAttrs attrs
 
@@ -73,7 +81,7 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
             attrs'
             (internaliseFunName fname)
             rettype'
-            all_params
+            (foldMap toList all_params)
             body'
 
     if null params'
@@ -83,9 +91,10 @@ internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparam
           fname
           fd
           ( shapenames,
-            map declTypeOf $ concat params',
-            all_params,
-            applyRetType rettype' all_params
+            map declTypeOf $ foldMap (foldMap toList) params',
+            foldMap toList all_params,
+            fmap (`zip` map snd rettype')
+              . applyRetType (map fst rettype') (foldMap toList all_params)
           )
 
   case entry of
@@ -98,14 +107,16 @@ generateEntryPoint :: VisibleTypes -> E.EntryPoint -> E.ValBind -> InternaliseM 
 generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
   let (E.ValBind _ ofname _ (Info rettype) tparams params _ _ attrs loc) = vb
   bindingFParams tparams params $ \shapeparams params' -> do
-    let entry_rettype = internaliseEntryReturnType rettype
+    let all_params = map pure shapeparams ++ concat params'
+        (entry_rettype, retals) =
+          unzip $ map unzip $ internaliseEntryReturnType (map (fmap paramDeclType) all_params) rettype
         (entry', opaques) =
           entryPoint
             types
             (baseName ofname)
-            (zip e_params params')
+            (zip e_params $ map (foldMap toList) params')
             (e_rettype, map (map I.rankShaped) entry_rettype)
-        args = map (I.Var . I.paramName) $ concat params'
+        args = map (I.Var . I.paramName) $ foldMap (foldMap toList) params'
 
     addOpaques opaques
 
@@ -117,20 +128,25 @@ generateEntryPoint types (E.EntryPoint e_params e_rettype) vb = do
         Just ses ->
           pure ses
         Nothing ->
-          fst <$> funcall "entry_result" (E.qualName ofname) args loc
+          funcall "entry_result" (E.qualName ofname) args loc
       ctx <-
         extractShapeContext (zeroExts $ concat entry_rettype)
           <$> mapM (fmap I.arrayDims . subExpType) vals
-      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64)) ctx)
+      pure (subExpsRes $ ctx ++ vals, map (const (I.Prim int64, mempty)) ctx)
 
     attrs' <- internaliseAttrs attrs
+    let num_ctx = length ctx_ts
     addFunDef $
       I.FunDef
         (Just entry')
         attrs'
         ("entry_" <> baseName ofname)
-        (ctx_ts ++ zeroExts (concat entry_rettype))
-        (shapeparams ++ concat params')
+        ( ctx_ts
+            ++ zip
+              (zeroExts (concat entry_rettype))
+              (map (shiftRetAls num_ctx) $ concat retals)
+        )
+        (shapeparams ++ foldMap (foldMap toList) params')
         entry_body
   where
     zeroExts ts = generaliseExtTypes ts ts
@@ -320,19 +336,6 @@ internaliseAppExp desc _ (E.Range start maybe_second end loc) = do
 
   se <- letSubExp desc (I.BasicOp $ I.Iota num_elems start' step it)
   pure [se]
-internaliseAppExp desc (E.AppRes et ext) (E.Coerce e dt loc) = do
-  ses <- internaliseExp desc e
-  ts <- internaliseReturnType (E.RetType ext (E.toStruct et)) <$> mapM subExpType ses
-  dt' <- typeExpForError dt
-  forM (zip ses ts) $ \(e', t') -> do
-    dims <- arrayDims <$> subExpType e'
-    let parts =
-          ["Value of (core language) shape ("]
-            ++ intersperse ", " (map (ErrorVal int64) dims)
-            ++ [") cannot match shape of type `"]
-            ++ dt'
-            ++ ["`."]
-    ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
   case findFuncall e of
     (FunctionHole loc, _args) -> do
@@ -343,7 +346,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeInteger 0 mempty
+      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeFromInteger 0 mempty
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do
@@ -386,10 +389,10 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
               let tag ses = [(se, I.Observe) | se <- ses]
               args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
               let args'' = concatMap tag args'
-              letValExp' desc $ I.Apply fname args'' [I.Prim rettype] (Safe, loc, [])
+              letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
           | otherwise -> do
               args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              fst <$> funcall desc qfname args' loc
+              funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -588,7 +591,7 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = docText $ "Reached hole of type: " <> align (pretty t)
-      ts = internaliseType (E.toStruct t)
+      ts = concat $ internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of
     Nothing ->
@@ -651,7 +654,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      let arr_t_ext = internaliseType $ E.toStruct arr_t
+      let arr_t_ext = concat $ internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -692,6 +695,19 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       Just ([], [e])
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
+internaliseExp desc (E.Coerce e dt (Info et) loc) = do
+  ses <- internaliseExp desc e
+  ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
+  dt' <- typeExpForError dt
+  forM (zip ses ts) $ \(e', t') -> do
+    dims <- arrayDims <$> subExpType e'
+    let parts =
+          ["Value of (core language) shape ("]
+            ++ intersperse ", " (map (ErrorVal int64) dims)
+            ++ [") cannot match shape of type `"]
+            ++ dt'
+            ++ ["`."]
+    ensureExtShape (errorMsg parts) loc (I.fromDecl t') desc e'
 internaliseExp desc (E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
@@ -1038,7 +1054,7 @@ internaliseDimIndex w (E.DimSlice i j s) = do
           ( eBinOp
               (Add Int64 I.OverflowWrap)
               x
-              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum $ toExp s'))
+              (eBinOp (Sub Int64 I.OverflowWrap) y (eSignum y))
           )
           y
   n <- letSubExp "n" =<< divRounding (toExp j_m_i) (toExp s')
@@ -1072,14 +1088,14 @@ internaliseDimIndex w (E.DimSlice i j s) = do
   i_lte_j <- letSubExp "i_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) i' j'
   forwards_ok <-
     letSubExp "forwards_ok"
-      =<< eAll [zero_lte_i, zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
+      =<< eAll [zero_lte_i, i_lte_j, zero_leq_i_p_m_t_s, i_p_m_t_s_lth_w]
 
   negone_lte_j <- letSubExp "negone_lte_j" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) negone j'
   j_lte_i <- letSubExp "j_lte_i" $ I.BasicOp $ I.CmpOp (I.CmpSle Int64) j' i'
   backwards_ok <-
     letSubExp "backwards_ok"
       =<< eAll
-        [negone_lte_j, negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
+        [negone_lte_j, j_lte_i, zero_leq_i_p_m_t_s, i_p_m_t_s_leq_w]
 
   slice_ok <-
     letSubExp "slice_ok"
@@ -1755,12 +1771,14 @@ isIntrinsicFunction qname args loc = do
         r <- I.arrayRank <$> lookupType v
         pure $ I.Rearrange ([1, 0] ++ [2 .. r - 1]) v
     handleRest [x, y] "zip" = Just $ \desc ->
-      mapM (letSubExp "zip_copy" . BasicOp . Copy)
+      mapM (letSubExp "zip_copy" . BasicOp . Replicate mempty . I.Var)
         =<< ( (++)
                 <$> internaliseExpToVars (desc ++ "_zip_x") x
                 <*> internaliseExpToVars (desc ++ "_zip_y") y
             )
-    handleRest [x] "unzip" = Just $ flip internaliseExp x
+    handleRest [x] "unzip" = Just $ \desc ->
+      mapM (letSubExp desc . BasicOp . Replicate mempty . I.Var)
+        =<< internaliseExpToVars desc x
     handleRest [arr, offset, n1, s1, n2, s2] "flat_index_2d" = Just $ \desc -> do
       flatIndexHelper desc loc arr offset [(n1, s1), (n2, s2)]
     handleRest [arr1, offset, s1, s2, arr2] "flat_update_2d" = Just $ \desc -> do
@@ -1969,10 +1987,9 @@ funcall ::
   QualName VName ->
   [SubExp] ->
   SrcLoc ->
-  InternaliseM ([SubExp], [I.ExtType])
+  InternaliseM [SubExp]
 funcall desc (QualName _ fname) args loc = do
-  (shapes, value_paramts, fun_params, rettype_fun) <-
-    lookupFunction fname
+  (shapes, value_paramts, fun_params, rettype_fun) <- lookupFunction fname
   argts <- mapM subExpType args
 
   shapeargs <- argShapes shapes fun_params argts
@@ -2007,10 +2024,8 @@ funcall desc (QualName _ fname) args loc = do
     Just ts -> do
       safety <- askSafety
       attrs <- asks envAttrs
-      ses <-
-        attributing attrs . letValExp' desc $
-          I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
-      pure (ses, map I.fromDecl ts)
+      attributing attrs . letValExp' desc $
+        I.Apply (internaliseFunName fname) (zip args' diets) ts (safety, loc, mempty)
 
 -- Bind existential names defined by an expression, based on the
 -- concrete values that expression evaluated to.  This most
@@ -2019,7 +2034,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  let ts = internaliseType $ E.toStruct ret
+  let ts = concat $ internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

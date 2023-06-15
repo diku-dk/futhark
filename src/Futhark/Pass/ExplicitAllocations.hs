@@ -483,7 +483,8 @@ arrayWithIxFun space ixfun v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseString v <> "_scalcopy"
-  letBind (Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]) $ BasicOp $ Copy v
+  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun
+  letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
 
 ensureDirectArray ::
@@ -563,6 +564,10 @@ linearFuncallArg Array {} space (Var v) = do
 linearFuncallArg _ _ arg =
   pure arg
 
+shiftRetAls :: Int -> Int -> RetAls -> RetAls
+shiftRetAls a b (RetAls is js) =
+  RetAls (map (+ a) is) (map (+ b) js)
+
 explicitAllocationsGeneric ::
   (Allocable fromrep torep inner) =>
   Space ->
@@ -581,7 +586,13 @@ explicitAllocationsGeneric space handleOp hints =
         allocInFParams (zip params $ repeat space) $ \params' -> do
           (fbody', mem_rets) <-
             allocInFunBody (map (const $ Just space) rettype) fbody
-          let rettype' = mem_rets ++ memoryInDeclExtType space (length mem_rets) rettype
+          let num_extra_params = length params' - length params
+              num_extra_rets = length mem_rets
+              rettype' =
+                map (,RetAls mempty mempty) mem_rets
+                  ++ zip
+                    (memoryInDeclExtType space (length mem_rets) (map fst rettype))
+                    (map (shiftRetAls num_extra_params num_extra_rets . snd) rettype)
           pure $ FunDef entry attrs fname rettype' params' fbody'
 
 explicitAllocationsInStmsGeneric ::
@@ -901,10 +912,16 @@ allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
   -- We assume that every array is going to be in its own memory.
-  pure $ Apply fname args' (mems space ++ memoryInDeclExtType space num_arrays rettype) loc
+  let num_extra_args = length args' - length args
+      rettype' =
+        mems space
+          ++ zip
+            (memoryInDeclExtType space num_arrays (map fst rettype))
+            (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
+  pure $ Apply fname args' rettype' loc
   where
-    mems space = replicate num_arrays (MemMem space)
-    num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf) rettype
+    mems space = replicate num_arrays (MemMem space, RetAls mempty mempty)
+    num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf . fst) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody
   (cases', cases_reqs) <- mapAndUnzipM onCase cases

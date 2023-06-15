@@ -684,7 +684,7 @@ compileFunDef types (FunDef entry _ fname rettype params body) =
       Just (x, y, z) -> (Just x, Just y, Just z)
     compile = do
       (inparams, arrayds, args) <- compileInParams types params params_entry
-      (results, outparams, dests) <- compileOutParams types rettype ret_entry
+      (results, outparams, dests) <- compileOutParams types (map fst rettype) ret_entry
       addFParams params
       addArrays arrayds
 
@@ -937,6 +937,8 @@ defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
     slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate shape se)
   | Acc {} <- patElemType pe = pure ()
+  | shape == mempty =
+      copyDWIM (patElemName pe) [] se []
   | otherwise =
       sLoopNest shape $ \is -> copyDWIMFix (patElemName pe) is se []
 defCompileBasicOp _ Scratch {} =
@@ -951,8 +953,6 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
     copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
-defCompileBasicOp (Pat [pe]) (Copy src) =
-  copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do

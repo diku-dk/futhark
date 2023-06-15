@@ -286,7 +286,7 @@ compileGroupExp _ (BasicOp (UpdateAcc acc is vs)) = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
   sWhen (ltid .==. 0) $ updateAcc acc is vs
   sOp $ Imp.Barrier Imp.FenceLocal
-compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) = do
+compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) | ds /= mempty = do
   flat <- newVName "rep_flat"
   is <- replicateM (arrayRank dest_t) (newVName "rep_i")
   let is' = map le64 is
@@ -695,8 +695,6 @@ segOpSizes = onStms
     onStm (Let (Pat [pe]) _ (BasicOp (Replicate {}))) =
       S.singleton $ arrayDims $ patElemType pe
     onStm (Let (Pat [pe]) _ (BasicOp (Iota {}))) =
-      S.singleton $ arrayDims $ patElemType pe
-    onStm (Let (Pat [pe]) _ (BasicOp (Copy {}))) =
       S.singleton $ arrayDims $ patElemType pe
     onStm (Let (Pat [pe]) _ (BasicOp (Manifest {}))) =
       S.singleton $ arrayDims $ patElemType pe

@@ -115,8 +115,6 @@ basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Copy v) =
-  pure <$> lookupType v
 basicOpType (Manifest _ v) =
   pure <$> lookupType v
 basicOpType Assert {} =
@@ -129,7 +127,7 @@ expExtType ::
   (HasScope rep m, TypedOp (Op rep)) =>
   Exp rep ->
   m [ExtType]
-expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf) rt
+expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf . fst) rt
 expExtType (Match _ _ _ rt) = pure $ map extTypeOf $ matchReturns rt
 expExtType (DoLoop merge _ _) =
   pure $ loopExtType $ map fst merge

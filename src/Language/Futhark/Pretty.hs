@@ -81,11 +81,6 @@ instance Pretty PrimValue where
   pretty (BoolValue False) = "false"
   pretty (FloatValue v) = pretty v
 
-instance Pretty Size where
-  pretty (AnySize Nothing) = mempty
-  pretty (AnySize (Just v)) = "?" <> prettyName v
-  pretty (SizeExpr e) = pretty e
-
 instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
   pretty SizeExpAny {} = brackets mempty
   pretty (SizeExp e _) = brackets $ pretty e
@@ -229,8 +224,6 @@ letBody body@(AppExp LetFun {} _) = pretty body
 letBody body = "in" <+> align (pretty body)
 
 prettyAppExp :: (Eq vn, IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
-prettyAppExp p (Coerce e t _) =
-  parensIf (p /= -1) $ prettyExp 0 e <+> ":>" <+> align (pretty t)
 prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (DoLoop sizeparams pat initexp form loopbody _) =
@@ -256,6 +249,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
   where
     linebreak = case e of
       AppExp {} -> True
+      Coerce {} -> True
       Attr {} -> True
       ArrayLit {} -> False
       _ -> hasArrayLit e
@@ -338,6 +332,8 @@ prettyExp _ (Parens e _) = align $ parens $ pretty e
 prettyExp _ (QualParens (v, _) e _) = pretty v <> "." <> align (parens $ pretty e)
 prettyExp p (Ascript e t _) =
   parensIf (p /= -1) $ prettyExp 0 e <+> ":" <+> align (pretty t)
+prettyExp p (Coerce e t _ _) =
+  parensIf (p /= -1) $ prettyExp 0 e <+> ":>" <+> align (pretty t)
 prettyExp _ (Literal v _) = pretty v
 prettyExp _ (IntLit v t _) = pretty v <> prettyInst t
 prettyExp _ (FloatLit v t _) = pretty v <> prettyInst t
