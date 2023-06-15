@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- The idea is to perform distribution on one level at a time, and
@@ -404,7 +403,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-            ~*~ primExpFromSubExp (IntType it) s'
+              ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
       ns <- elemArr segments env inps n
@@ -915,7 +914,8 @@ transformDistributed ::
   Segments ->
   Distributed ->
   Builder GPU ()
-transformDistributed irregs segments (Distributed dstms resmap) = do
+transformDistributed irregs segments dist = do
+  let Distributed dstms (DistResults resmap reps) = dist
   env <- foldM (transformDistStm segments) env_initial dstms
   forM_ (M.toList resmap) $ \(rt, (cs_inps, v, v_t)) ->
     certifying (distResCerts env cs_inps) $
@@ -927,6 +927,14 @@ transformDistributed irregs segments (Distributed dstms resmap) = do
           let shape = segmentsShape segments <> arrayShape v_t
           letBindNames [v] $
             BasicOp (Reshape ReshapeArbitrary shape (irregularElems irreg))
+  forM_ reps $ \(v, r) ->
+    case r of
+      Left se ->
+        letBindNames [v] $ BasicOp $ Replicate (segmentsShape segments) se
+      Right (DistInputFree arr _) ->
+        letBindNames [v] $ BasicOp $ SubExp $ Var arr
+      Right DistInput {} ->
+        error "replication of irregular identity result"
   where
     env_initial = DistEnv {distResMap = M.map Irregular irregs}
 

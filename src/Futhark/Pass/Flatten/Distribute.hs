@@ -3,6 +3,8 @@ module Futhark.Pass.Flatten.Distribute
     distributeBody,
     MapArray (..),
     mapArrayRowType,
+    DistResults (..),
+    DistRep,
     ResMap,
     Distributed (..),
     DistStm (..),
@@ -15,10 +17,10 @@ module Futhark.Pass.Flatten.Distribute
   )
 where
 
-import Data.Bifunctor (second)
+import Data.Bifunctor
 import Data.List qualified as L
 import Data.Map qualified as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe
 import Futhark.IR.SOACS
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -73,7 +75,15 @@ data DistStm = DistStm
 -- Third is the element type (i.e. excluding segments).
 type ResMap = M.Map ResTag ([DistInput], VName, Type)
 
-data Distributed = Distributed [DistStm] ResMap
+-- | The results of a map-distribution that were free or identity
+-- mapped in the original map function.  These correspond to plain
+-- replicated arrays.
+type DistRep = (VName, Either SubExp DistInput)
+
+data DistResults = DistResults ResMap [DistRep]
+  deriving (Eq, Ord, Show)
+
+data Distributed = Distributed [DistStm] DistResults
   deriving (Eq, Ord, Show)
 
 instance Pretty ResTag where
@@ -109,12 +119,16 @@ instance Pretty DistStm where
           <+> pretty inp
 
 instance Pretty Distributed where
-  pretty (Distributed stms res) =
+  pretty (Distributed stms (DistResults resmap reps)) =
     stms' </> res'
     where
-      res' = stack $ map onRes $ M.toList res
+      res' = stack $ map onRes (M.toList resmap) <> map onRep reps
       stms' = stack $ map pretty stms
       onRes (rt, v) = "let" <+> pretty v <+> "=" <+> pretty rt
+      onRep (v, Left se) =
+        "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty se)
+      onRep (v, Right tag) =
+        "let" <+> pretty v <+> "=" <+> "rep" <> parens (pretty tag)
 
 resultMap :: [(VName, DistInput)] -> [DistStm] -> Pat Type -> Result -> ResMap
 resultMap avail_inputs stms pat res = mconcat $ map f stms
@@ -195,6 +209,22 @@ mapArrayRowType :: MapArray t -> Type
 mapArrayRowType (MapArray _ t) = t
 mapArrayRowType (MapOther _ t) = t
 
+-- This is used to handle those results that are constants or lambda
+-- parameters.
+findReps :: [(VName, DistInput)] -> Pat Type -> Lambda SOACS -> [DistRep]
+findReps avail_inputs map_pat lam =
+  mapMaybe f $ zip (patElems map_pat) (bodyResult (lambdaBody lam))
+  where
+    f (pe, SubExpRes _ (Var v)) =
+      case lookup v avail_inputs of
+        Nothing -> Just (patElemName pe, Left $ Var v)
+        Just inp
+          | v `elem` map paramName (lambdaParams lam) ->
+              Just (patElemName pe, Right inp)
+          | otherwise -> Nothing
+    f (pe, SubExpRes _ (Constant v)) = do
+      Just (patElemName pe, Left $ Constant v)
+
 distributeMap ::
   Scope rep ->
   Pat Type ->
@@ -207,7 +237,11 @@ distributeMap outer_scope map_pat w arrs lam =
         L.mapAccumL paramInput (ResTag 0, mempty) $
           zip (lambdaParams lam) arrs
       (avail_inputs, stms) = distributeBody outer_scope w param_inputs $ lambdaBody lam
-   in ( Distributed stms $ resultMap avail_inputs stms map_pat $ bodyResult $ lambdaBody lam,
+      resmap =
+        resultMap avail_inputs stms map_pat $
+          bodyResult (lambdaBody lam)
+      reps = findReps avail_inputs map_pat lam
+   in ( Distributed stms $ DistResults resmap reps,
         arrmap
       )
   where
