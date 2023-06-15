@@ -188,7 +188,8 @@ runDistNestT env (DistNestT m) = do
       stmsFromList $ zipWith identityStm (patElems rem_pat) res
     identityStm pe (SubExpRes cs (Var v))
       | Just arr <- lookup v params_to_arrs =
-          certify cs $ Let (Pat [pe]) (defAux ()) $ BasicOp $ Copy arr
+          certify cs . Let (Pat [pe]) (defAux ()) . BasicOp $
+            Replicate mempty (Var arr)
     identityStm pe (SubExpRes cs se) =
       certify cs . Let (Pat [pe]) (defAux ()) . BasicOp $
         Replicate (Shape [loopNestingWidth outermost]) se
@@ -260,9 +261,11 @@ leavingNesting acc =
 
               remnantStm pe (SubExpRes cs (Var v))
                 | Just (_, arr) <- find ((== v) . paramName . fst) inps =
-                    certify cs $ Let (Pat [pe]) aux $ BasicOp $ Copy arr
+                    certify cs . Let (Pat [pe]) aux . BasicOp $
+                      Replicate mempty (Var arr)
               remnantStm pe (SubExpRes cs se) =
-                certify cs $ Let (Pat [pe]) aux $ BasicOp $ Replicate (Shape [w]) se
+                certify cs . Let (Pat [pe]) aux . BasicOp $
+                  Replicate (Shape [w]) se
 
               stms =
                 stmsFromList $ zipWith remnantStm (patElems pat) res
@@ -577,15 +580,15 @@ maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
                 lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
               }
       maybeDistributeStm newstm acc
-maybeDistributeStm stm@(Let _ aux (BasicOp (Copy stm_arr))) acc =
+maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate (Shape []) (Var stm_arr)))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
+    pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
 maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) acc
   | not $ primType $ typeOf pe =
       distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
-        pure $ oneStm $ Let outerpat aux $ BasicOp $ Copy arr
+        pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
 maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let r = length (snd nest) + 1
@@ -596,7 +599,7 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Rearrange perm stm_arr))) acc =
     arr_t <- lookupType arr
     pure $
       stmsFromList
-        [ Let (Pat [PatElem arr' arr_t]) aux $ BasicOp $ Copy arr,
+        [ Let (Pat [PatElem arr' arr_t]) aux $ BasicOp $ Replicate mempty $ Var arr,
           Let outerpat aux $ BasicOp $ Rearrange perm' arr'
         ]
 maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape k reshape stm_arr))) acc =

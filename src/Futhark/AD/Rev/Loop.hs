@@ -318,7 +318,8 @@ restore stms_adj loop_params' i' =
               v' <- letExp "restore" $ BasicOp $ Index vs $ fullSlice vs_t [DimFix i_i64']
               t <- lookupType v
               v'' <- case (t, v `elem` consumed) of
-                (Array {}, True) -> letExp "restore_copy" $ BasicOp $ Copy v'
+                (Array {}, True) ->
+                  letExp "restore_copy" $ BasicOp $ Replicate mempty $ Var v'
                 _ -> pure v'
               pure $ Just (v, v'')
       | otherwise = pure Nothing

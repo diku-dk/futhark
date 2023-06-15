@@ -206,7 +206,7 @@ determineKnownBindings look lam accs arrs =
           zip (map paramName arrparams) arrs
 
     isReplicate (p, v)
-      | Just (BasicOp (Replicate _ ve), cs) <- look v,
+      | Just (BasicOp (Replicate (Shape (_ : _)) ve), cs) <- look v,
         cs == mempty =
           Just (p, ve)
     isReplicate _ = Nothing

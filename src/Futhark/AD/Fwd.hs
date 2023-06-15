@@ -226,9 +226,6 @@ basicFwd pat aux op = do
       arr_tan <- tangent arr
       arrs_tans <- mapM tangent arrs
       addStm $ Let pat_tan aux $ BasicOp $ Concat d (arr_tan :| arrs_tans) w
-    Copy arr -> do
-      arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Copy arr_tan
     Manifest ds arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Manifest ds arr_tan

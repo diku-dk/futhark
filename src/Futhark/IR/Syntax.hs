@@ -356,8 +356,6 @@ data BasicOp
     --
     -- @concat(1, [[1,2], [3, 4]] :| [[[5,6]], [[7, 8]]], 4) = [[1, 2, 5, 6], [3, 4, 7, 8]]@
     Concat Int (NonEmpty VName) SubExp
-  | -- | Copy the given array.  The result will not alias anything.
-    Copy VName
   | -- | Manifest an array with dimensions represented in the given
     -- order.  The result will not alias anything.
     Manifest [Int] VName
@@ -368,7 +366,8 @@ data BasicOp
     -- The t'IntType' indicates the type of the array returned and the
     -- offset/stride arguments, but not the length argument.
     Iota SubExp SubExp SubExp IntType
-  | -- | @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@
+  | -- | @replicate([3][2],1) = [[1,1], [1,1], [1,1]]@.  The result
+    -- has no aliases.  Copy a value by passing an empty shape.
     Replicate Shape SubExp
   | -- | Create array of given type and shape, with undefined elements.
     Scratch PrimType [SubExp]
