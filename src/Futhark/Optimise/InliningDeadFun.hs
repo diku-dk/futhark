@@ -173,7 +173,7 @@ inlineBecauseSOACs cg prog =
     inline _ InAD = True
     inline fd InSOAC =
       any (isArray . paramType) (funDefParams fd)
-        || any isArray (funDefRetType fd)
+        || any (isArray . fst) (funDefRetType fd)
         || arrayInBody (funDefBody fd)
     onFunDef fd = do
       guard $ maybe False (inline fd) $ M.lookup (funDefName fd) called

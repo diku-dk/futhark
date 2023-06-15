@@ -20,7 +20,7 @@ import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
 import Language.Futhark.TypeChecker.Monad hiding (warn)
-import System.FilePath (makeRelative, splitPath, (-<.>), (<.>), (</>))
+import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
 import Text.Blaze.Html5.Attributes qualified as A
@@ -180,7 +180,7 @@ renderFiles important_imports imports = runWriter $ do
   where
     file_map = vnameToFileMap imports
     importHtml import_name =
-      "doc" </> makeRelative "/" (fromString (includeToString import_name)) <.> "html"
+      "doc" </> makeRelative "/" (fromString (includeToString import_name)) -<.> "html"
 
 -- | The header documentation (which need not be present) can contain
 -- an abstract and further sections.
@@ -188,10 +188,10 @@ headerDoc :: Prog -> DocM (Html, Html, Html)
 headerDoc prog =
   case progDoc prog of
     Just (DocComment doc loc) -> do
-      let (abstract, more_sections) = splitHeaderDoc doc
+      let (abstract, more_sections) = splitHeaderDoc $ T.unpack doc
       first_paragraph <- docHtml $ Just $ DocComment (firstParagraph abstract) loc
-      abstract' <- docHtml $ Just $ DocComment abstract loc
-      more_sections' <- docHtml $ Just $ DocComment more_sections loc
+      abstract' <- docHtml $ Just $ DocComment (T.pack abstract) loc
+      more_sections' <- docHtml $ Just $ DocComment (T.pack more_sections) loc
       pure
         ( first_paragraph,
           selfLink "abstract" (H.h2 "Abstract") <> abstract',
@@ -203,7 +203,7 @@ headerDoc prog =
       fromMaybe (s, mempty) $
         find (("\n##" `isPrefixOf`) . snd) $
           zip (inits s) (tails s)
-    firstParagraph = unlines . takeWhile (not . paragraphSeparator) . lines
+    firstParagraph = T.pack . unlines . takeWhile (not . paragraphSeparator) . lines
     paragraphSeparator = all isSpace
 
 contentsPage :: [ImportName] -> [(ImportName, Html)] -> Html
@@ -398,8 +398,10 @@ synopsisOpened (ModParens me _) = do
   Just $ parens <$> me'
 synopsisOpened (ModImport _ (Info file) _) = Just $ do
   current <- asks ctxCurrent
-  let dest = fromString $ relativise (includeToFilePath file) current <> ".html"
-  pure $ keyword "import " <> (H.a ! A.href dest) (fromString $ show file)
+  let dest = fromString $ relativise (includeToFilePath file) current -<.> "html"
+  pure $
+    keyword "import "
+      <> (H.a ! A.href dest) (fromString (show (includeToString file)))
 synopsisOpened (ModAscript _ se _ _) = Just $ do
   se' <- synopsisSigExp se
   pure $ "... : " <> se'
@@ -541,8 +543,8 @@ prettyShape (Shape ds) =
   mconcat <$> mapM dimDeclHtml ds
 
 typeArgHtml :: TypeArg Size -> DocM Html
-typeArgHtml (TypeArgDim d _) = dimDeclHtml d
-typeArgHtml (TypeArgType t _) = typeHtml t
+typeArgHtml (TypeArgDim d) = dimDeclHtml d
+typeArgHtml (TypeArgType t) = typeHtml t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty
@@ -641,6 +643,7 @@ typeExpHtml e = case e of
         t' <- typeExpHtml t
         pure $ toHtml (nameToString name) <> ": " <> t'
   TEVar name _ -> qualNameHtml name
+  TEParens te _ -> parens <$> typeExpHtml te
   TEApply t arg _ -> do
     t' <- typeExpHtml t
     arg' <- typeArgExpHtml arg
@@ -690,7 +693,7 @@ vnameLink' :: VName -> String -> String -> String
 vnameLink' (VName _ tag) current file =
   if file == current
     then "#" ++ show tag
-    else relativise file current ++ ".html#" ++ show tag
+    else relativise file current -<.> ".html#" ++ show tag
 
 paramHtml :: Pat -> DocM Html
 paramHtml pat = do
@@ -702,12 +705,10 @@ paramHtml pat = do
 
 relativise :: FilePath -> FilePath -> FilePath
 relativise dest src =
-  concat (replicate (length (splitPath src) - 1) "../") ++ dest
+  concat (replicate (length (splitPath src) - 1) "../") ++ makeRelative "/" dest
 
 dimDeclHtml :: Size -> DocM Html
-dimDeclHtml (NamedSize v) = brackets <$> qualNameHtml v
-dimDeclHtml (ConstSize n) = pure $ brackets $ toHtml (show n)
-dimDeclHtml AnySize {} = pure $ brackets mempty
+dimDeclHtml = pure . brackets . toHtml . prettyString
 
 dimExpHtml :: SizeExp Info VName -> DocM Html
 dimExpHtml (SizeExpAny _) = pure $ brackets mempty
@@ -734,7 +735,7 @@ docHtml (Just (DocComment doc loc)) =
   H.preEscapedText
     . GFM.commonmarkToHtml [] [GFM.extAutolink]
     . T.pack
-    <$> identifierLinks loc doc
+    <$> identifierLinks loc (T.unpack doc)
 docHtml Nothing = pure mempty
 
 identifierLinks :: SrcLoc -> String -> DocM String

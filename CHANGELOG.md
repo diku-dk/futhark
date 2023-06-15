@@ -9,13 +9,67 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Arbitrary expressions of type `i64` are now allowed as sizes.  Work
+  by Lubin Bailly.
+
+* New prelude function `resize`.
+
 ### Removed
 
+* The prelude functions `concat_to` and `flatten_to`.  They are often
+  not necessary now, and otherwise `resize` is available.
+
 ### Changed
+
+* The prelude functions `flatten` and `unflatten` (and their
+  multidimensional variants), as well as `split`, now have more
+  precise types.
+
+### Fixed
+
+* `futhark doc` produced some invalid links.
+
+* `flatten` did not properly check for claimed negative array sizes.
+
+* Type checker crash on some ill-typed programs (#1926).
+
+* Some soundness bugs in memory short circuiting (#1927, #1930).
+
+* Another compiler crash in block tiling (#1933, #1940).
+
+* Global arrays with size parameters no longer have aliases.
+
+* `futhark eval` no longer crashes on ambiguously typed expressions (#1946).
+
+* A code motion pass was ignorant of consumption constraints, leading
+  to compiler crash (#1947).
+
+* Type checker could get confused and think unknown sizes were
+  available when they really weren't (#1950).
+
+* Some index optimisations removed certificates (#1952).
+
+* GPU backends can now transpose arrays whose size does not fit in a
+  32-bit integer (#1953).
+
+* Bug in alias checking for the core language type checker (#1949).
+  Actually (finally) a proper fix of #803.
+
+## [0.24.3]
 
 ### Fixed
 
 * Certain cases of noninlined functions in `multicore` backend.
+
+* Defunctionalisation of `match` where the constructors carry
+  functions (#1917).
+
+* Shape coercions involving sum types (#1918).  This required
+  tightening the rules a little bit, so some coercions involving
+  anonymous sizes may now be rejected.  Add expected sizes as needed.
+
+* Defunctionalisation somtimes forgot about sizes bound at top level
+  (#1920).
 
 ## [0.24.2]
 

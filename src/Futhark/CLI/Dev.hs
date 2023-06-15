@@ -26,6 +26,7 @@ import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.TypeCheck (Checkable, checkProg)
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
+import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
@@ -74,11 +75,13 @@ data FutharkPipeline
     Pipeline [UntypedPass]
   | -- | Partially evaluate away the module language.
     Defunctorise
-  | -- | Defunctorise and monomorphise.
+  | -- | Defunctorise and normalise.
+    FullNormalise
+  | -- | Defunctorise, normalise and monomorphise.
     Monomorphise
-  | -- | Defunctorise, monomorphise, and lambda-lift.
+  | -- | Defunctorise, normalise, monomorphise and lambda-lift.
     LiftLambdas
-  | -- | Defunctorise, monomorphise, lambda-lift, and defunctionalise.
+  | -- | Defunctorise, normalise, monomorphise, lambda-lift and defunctionalise.
     Defunctionalise
 
 data Config = Config
@@ -540,6 +543,11 @@ commandLineOptions =
       "Partially evaluate all module constructs and print the residual program.",
     Option
       []
+      ["normalise"]
+      (NoArg $ Right $ \opts -> opts {futharkPipeline = FullNormalise})
+      "Fully normalise the program.",
+    Option
+      []
       ["monomorphise"]
       (NoArg $ Right $ \opts -> opts {futharkPipeline = Monomorphise})
       "Monomorphise the program.",
@@ -732,12 +740,20 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
         Defunctorise -> do
           (_, imports, src) <- readProgram'
           liftIO $ p $ evalState (Defunctorise.transformProg imports) src
+        FullNormalise -> do
+          (_, imports, src) <- readProgram'
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= FullNormalise.transformProg
         Monomorphise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
         LiftLambdas -> do
           (_, imports, src) <- readProgram'
@@ -745,6 +761,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
@@ -753,6 +770,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg

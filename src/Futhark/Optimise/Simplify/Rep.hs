@@ -302,7 +302,7 @@ class CanBeWise op where
   addOpWisdom :: Informing rep => op rep -> op (Wise rep)
 
 instance CanBeWise NoOp where
-  addOpWisdom _ = undefined
+  addOpWisdom NoOp = NoOp
 
 -- | Construct a 'Wise' statement.
 informStm :: Informing rep => Stm rep -> Stm (Wise rep)

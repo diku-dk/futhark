@@ -17,6 +17,7 @@ module Futhark.Transform.Rename
     renamePat,
     renameSomething,
     renameBound,
+    renameStmsWith,
 
     -- * Renaming annotations
     RenameM,
@@ -29,6 +30,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bitraversable
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.FreshNames hiding (newName)
@@ -115,6 +117,17 @@ renameSomething ::
   a ->
   m a
 renameSomething = modifyNameSource . runRenamer . rename
+
+-- | Rename statements, then rename something within the scope of
+-- those statements.
+renameStmsWith ::
+  (MonadFreshNames m, Renameable rep, Rename a) =>
+  Stms rep ->
+  a ->
+  m (Stms rep, a)
+renameStmsWith stms a =
+  modifyNameSource . runRenamer $ renamingStms stms $ \stms' ->
+    (stms',) <$> rename a
 
 newtype RenameEnv = RenameEnv {envNameMap :: M.Map VName VName}
 
@@ -208,7 +221,7 @@ instance Renameable rep => Rename (FunDef rep) where
     renameBound (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
-      ret' <- rename ret
+      ret' <- mapM (bitraverse rename pure) ret
       pure $ FunDef entry attrs fname ret' params' body'
 
 instance Rename SubExp where

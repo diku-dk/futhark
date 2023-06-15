@@ -167,9 +167,9 @@ def onehot_2d n m x y =
 entry fwd [n] (input: [n][9]f32) : [n][9][n][9]f32 =
   let input = fromarrs3 input
   in tabulate (n*9) (\i -> jvp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> map toarrs3 |> transpose |> map transpose |> map (map (unflatten n 9))
+     |> map toarrs3 |> transpose |> map transpose |> map (map unflatten)
 
 entry rev [n] (input: [n][9]f32) : [n][9][n][9]f32 =
   let input = fromarrs3 input
   in tabulate (n*9) (\i -> vjp primal3 input (fromarrs3 (onehot_2d n 9 (i/9) (i%9))))
-     |> unflatten n 9 |> map (map toarrs3)
+     |> unflatten |> map (map toarrs3)

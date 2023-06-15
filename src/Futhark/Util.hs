@@ -13,6 +13,7 @@ module Futhark.Util
     maxinum,
     chunk,
     chunks,
+    chunkLike,
     dropAt,
     takeLast,
     dropLast,
@@ -48,21 +49,23 @@ module Futhark.Util
     traverseFold,
     fixPoint,
     concatMapM,
+    topologicalSort,
   )
 where
 
-import Control.Arrow (first)
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Control.Monad.State
 import Crypto.Hash.MD5 as MD5
+import Data.Bifunctor
 import Data.ByteString qualified as BS
 import Data.ByteString.Base16 qualified as Base16
 import Data.Char
 import Data.Either
 import Data.Foldable (fold, toList)
 import Data.Function ((&))
+import Data.IntMap qualified as IM
 import Data.List (findIndex, foldl', genericDrop, genericSplitAt, sortBy)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -130,6 +133,12 @@ chunks [] _ = []
 chunks (n : ns) xs =
   let (bef, aft) = splitAt n xs
    in bef : chunks ns aft
+
+-- | @chunkLike xss ys@ chunks the elements of @ys@ to match the
+-- elements of @xss@.  The sum of the lengths of the sublists of @xss@
+-- must match the length of @ys@.
+chunkLike :: [[a]] -> [b] -> [[b]]
+chunkLike as = chunks (map length as)
 
 -- | Like 'maximum', but returns zero for an empty list.
 maxinum :: (Num a, Ord a, Foldable f) => f a -> a
@@ -461,3 +470,31 @@ fixPoint f x =
 
 concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
 concatMapM f xs = mconcat <$> mapM f xs
+
+-- | Topological sorting of an array with an adjancency function,
+-- if there is a cycle, it cause an error
+-- @a `dep` b@ means 'a -> b', and the returned array guarantee that for i < j,
+-- @not ( (ret !! j) `dep` (ret !! i) )@.
+topologicalSort :: (a -> a -> Bool) -> [a] -> [a]
+topologicalSort dep nodes =
+  fst $ execState (mapM_ (sorting . snd) nodes_idx) (mempty, mempty)
+  where
+    nodes_idx = zip nodes [0 ..]
+    depends_of a (b, i) =
+      if a `dep` b
+        then Just i
+        else Nothing
+
+    -- Using an IntMap Bool
+    -- when reading a lookup:
+    -- \* Nothing : never explored
+    -- \* Just True : being explored
+    -- \* Just False : explored
+    sorting i = do
+      status <- gets $ IM.lookup i . snd
+      when (status == Just True) $ error "topological sorting has encountered a cycle"
+      unless (status == Just False) $ do
+        let node = nodes !! i
+        modify $ second $ IM.insert i True
+        mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
+        modify $ bimap (node :) (IM.insert i False)

@@ -267,6 +267,44 @@ not any free variables.  Use ``copy`` to fix this:
 
   def f () = copy x
 
+.. _size-expression-bind:
+
+"Size expression with binding is replaced by unknown size."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To illustrate this error, consider the following program
+
+.. code-block:: futhark
+
+   def main (xs: *[]i64) =
+     let a = iota (let n = 10 in n+n)
+     in ...
+
+Intuitively, the type of ``a`` should be ``[let n = 10 in n+n]i32``,
+but this puts a binding into a size expression, which is invalid.
+Therefore, the type checker invents an :term:`unknown size`
+variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
+
+.. _size-expression-consume:
+
+"Size expression with consumption is replaced by unknown size."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To illustrate this error, consider the following program
+
+.. code-block:: futhark
+
+   def consume (xs: *[]i64): i64 = xs[0]
+
+   def main (xs: *[]i64) =
+     let a = iota (consume xs)
+     in ...
+
+Intuitively, the type of ``a`` should be ``[consume ys]i32``, but this
+puts a consumption of the array ``ys`` into a size expression, which
+is invalid.  Therefore, the type checker invents an :term:`unknown
+size` variable, say ``l``, and assigns ``a`` the type ``[l]i32``.
+
 .. _inaccessible-size:
 
 "Parameter *x* refers to size *y* which will not be accessible to the caller
@@ -378,14 +416,14 @@ first, meaning that the size is available by the time ``a`` is bound.
 In many other cases, we can lift out the "size-producing" expressions
 into a separate ``let``-binding preceding the problematic expressions.
 
-.. _unknowable-param-def:
+.. _unknown-param-def:
 
-"Unknowable size *x* in parameter of *y*"
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"Unknown size *x* in parameter of *y*"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error occurs when you define a function that can never be
 applied, as it requires an input of a specific size, and that size is
-not known.  Somewhat contrived example:
+an :term:`unknown size`.  Somewhat contrived example:
 
 .. code-block:: futhark
 
@@ -471,8 +509,9 @@ use of either pipelining or composition.
 "Existential size *n* not used as array size"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This error occurs for type expressions that use explicit existential
-quantification in an incorrect way, such as the following examples:
+This error occurs for type expressions that bind an existential size
+for which there is no :term:`constructive use`, such as in the
+following examples:
 
 .. code-block:: futhark
 
@@ -481,12 +520,12 @@ quantification in an incorrect way, such as the following examples:
   ?[n].bool -> [n]bool
 
 When we use existential quantification, we are required to use the
-size within its scope, *and* it must not exclusively be used to the
-right of function arrow.
+size constructively within its scope, *in particular* it must not be
+exclusively as the parameter or return type of a function.
 
 To understand the motivation behind this rule, consider that when we
-use an existential quantifier we are saying that there is *some size*,
-it just cannot be known statically, but must be read from some value
+use an existential quantifier we are saying that there is *some size*.
+The size is not known statically, but must be read from some value
 (i.e. array) at runtime.  In the first example above, the existential
 size ``n`` is not used at all, so the actual value cannot be
 determined at runtime.  In the second example, while an array
@@ -943,3 +982,41 @@ ordinary parameter:
 .. code-block:: futhark
 
    entry f (n: i64) : [0][n]i32 = []
+
+.. _nonconstructive-entry:
+
+"Entry point size parameter [n] only used non-constructively."
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This error occurs for programs such as the following::
+
+.. code-block:: futhark
+
+   entry main [x] (A: [x+1]i32) = ...
+
+The size parameter ``[x]`` is only used in an size expression ``x+1``,
+rather than directly as an array size.  This is allowed for ordinary
+functions, but not for entry points.  The reason is that entry points
+are not subject to ordinary type inference, as they are called from
+the external world, meaning that the value of the size parameter
+``[x]`` will have to be determined from the size of the array ``A``.
+This is in principle not a problem for simple sizes like ``x+1``, as
+it is obvious that ``x == length A - 1``, but in the general case it
+would require computing function inverses that might not exist.  For
+this reason, entry points require that all size parameters are used
+:term:`constructively<constructive use>`.
+
+As a workaround, you can rewrite the entry point as follows:
+
+.. code-block:: futhark
+
+   entry main [n] (A: [n]i32) =
+     let x = n-1
+     let A = A :> [x+1]i32
+     ...
+
+Or by passing the ``x`` explicitly:
+
+.. code-block:: futhark
+
+   entry main (x: i64) (A: [x+1]i32) = ...

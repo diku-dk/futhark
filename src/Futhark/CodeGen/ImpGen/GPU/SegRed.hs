@@ -83,6 +83,7 @@ compileSegRed ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegRed pat lvl space reds body = do
+  emit $ Imp.DebugPrint "\n# SegRed" Nothing
   KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
   let grid = KernelGrid num_groups group_size
   compileSegRed' pat grid space reds $ \red_cont ->
@@ -94,6 +95,7 @@ compileSegRed pat lvl space reds body = do
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
       red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+  emit $ Imp.DebugPrint "" Nothing
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
@@ -197,8 +199,6 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     dPrimV "num_threads" $
       unCount num_groups' * unCount group_size'
 
-  emit $ Imp.DebugPrint "\n# SegRed" Nothing
-
   sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
@@ -253,8 +253,6 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
           group_res_arrs
           red_arrs
 
-  emit $ Imp.DebugPrint "" Nothing
-
 smallSegmentsReduction ::
   Pat LetDecMem ->
   Count NumGroups SubExp ->
@@ -279,7 +277,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
       segments_per_group = unCount group_size' `quot` segment_size_nonzero
       required_groups = sExt32 $ num_segments `divUp` segments_per_group
 
-  emit $ Imp.DebugPrint "\n# SegRed-small" Nothing
+  emit $ Imp.DebugPrint "# SegRed-small" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
   emit $ Imp.DebugPrint "segment_size" $ Just $ untyped segment_size
   emit $ Imp.DebugPrint "segments_per_group" $ Just $ untyped segments_per_group
@@ -370,8 +368,6 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
       -- local memory array first thing in the next iteration.
       sOp $ Imp.Barrier Imp.FenceLocal
 
-  emit $ Imp.DebugPrint "" Nothing
-
 largeSegmentsReduction ::
   Pat LetDecMem ->
   Count NumGroups SubExp ->
@@ -406,7 +402,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     dPrimV "threads_per_segment" $
       groups_per_segment * unCount group_size'
 
-  emit $ Imp.DebugPrint "\n# SegRed-large" Nothing
+  emit $ Imp.DebugPrint "# SegRed-large" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
   emit $ Imp.DebugPrint "segment_size" $ Just $ untyped segment_size
   emit $ Imp.DebugPrint "virt_num_groups" $ Just $ untyped $ tvExp virt_num_groups
@@ -508,8 +504,6 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                     copyDWIMFix (patElemName v) (map Imp.le64 segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
-
-  emit $ Imp.DebugPrint "" Nothing
 
 -- Careful to avoid division by zero here.  We have at least one group
 -- per segment.

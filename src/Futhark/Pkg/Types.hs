@@ -45,7 +45,7 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Traversable
-import Data.Versions (SemVer (..), VUnit (..), prettySemVer)
+import Data.Versions (Chunk (Alphanum), Release (Release), SemVer (..), prettySemVer)
 import Data.Void
 import System.FilePath
 import System.FilePath.Posix qualified as Posix
@@ -68,13 +68,13 @@ pkgPathFilePath = joinPath . Posix.splitPath . T.unpack
 -- @hash@ (typically the Git commit ID).  This function detects such
 -- versions.
 isCommitVersion :: SemVer -> Maybe T.Text
-isCommitVersion (SemVer 0 0 0 [_] (Just s)) = Just s
+isCommitVersion (SemVer 0 0 0 (Just (Release (_ NE.:| []))) (Just s)) = Just s
 isCommitVersion _ = Nothing
 
 -- | @commitVersion timestamp commit@ constructs a commit version.
 commitVersion :: T.Text -> T.Text -> SemVer
 commitVersion time commit =
-  SemVer 0 0 0 [NE.singleton (Str time)] (Just commit)
+  SemVer 0 0 0 (Just $ Release $ NE.singleton $ Alphanum time) (Just commit)
 
 -- | Unfortunately, Data.Versions has a buggy semver parser that
 -- collapses consecutive zeroes in the metadata field.  So, we define
@@ -90,8 +90,8 @@ semver' = SemVer <$> majorP <*> minorP <*> patchP <*> preRel <*> metaData
     minorP = majorP
     patchP = digitsP
     digitsP = read <$> ((T.unpack <$> string "0") <|> some digitChar)
-    preRel = maybe [] pure <$> optional preRel'
-    preRel' = char '-' *> (pure . Str . T.pack <$> some digitChar)
+    preRel = fmap (Release . NE.singleton) <$> optional preRel'
+    preRel' = char '-' *> (Alphanum . T.pack <$> some digitChar)
     metaData = optional metaData'
     metaData' = char '+' *> (T.pack <$> some alphaNumChar)
 

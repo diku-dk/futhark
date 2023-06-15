@@ -34,17 +34,18 @@ nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
 nonrigidFor [] t = pure t -- Minor optimisation.
 nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
   where
-    onDim (NamedSize (QualName _ v))
+    onDim (Var (QualName _ v) typ loc)
       | Just size <- find ((== v) . sizeName) sizes = do
           prev <- gets $ lookup v
           case prev of
             Nothing -> do
               v' <- lift $ newID $ baseName v
-              lift $ constrain v' $ Size Nothing $ mkUsage' $ srclocOf size
+              lift . constrain v' . Size Nothing $
+                mkUsage size "ambiguous size of bound expression"
               modify ((v, v') :)
-              pure $ NamedSize $ qualName v'
+              pure $ Var (qualName v') typ loc
             Just v' ->
-              pure $ NamedSize $ qualName v'
+              pure $ Var (qualName v') typ loc
     onDim d = pure d
 
 -- | The set of in-scope variables that are being aliased.
@@ -107,21 +108,11 @@ binding allow_consume idents = check . handleVars
 
     bindVar :: TermScope -> Ident -> TermScope
     bindVar scope (Ident name (Info tp) _) =
-      let inedges = boundAliases $ aliases tp
-          update (BoundV l tparams in_t)
-            | Array {} <- tp = BoundV l tparams (in_t `addAliases` S.insert (AliasBound name))
-            | otherwise = BoundV l tparams in_t
-          update b = b
-
-          tp' = tp `addAliases` S.insert (AliasBound name)
+      let tp' = tp `addAliases` S.insert (AliasBound name)
        in scope
             { scopeVtable =
-                M.insert name (BoundV Local [] tp') $
-                  adjustSeveral update inedges $
-                    scopeVtable scope
+                M.insert name (BoundV Local [] tp') $ scopeVtable scope
             }
-
-    adjustSeveral f = flip $ foldl $ flip $ M.adjust f
 
     -- Check whether the bound variables have been used correctly
     -- within their scope.
@@ -242,8 +233,8 @@ bindingPat sizes p t m = do
           Ident v (Info (Scalar $ Prim $ Signed Int64)) loc
     mapM_ (observe . ident) sizes
 
-    let used_sizes = freeInType $ patternStructType p'
-    case filter ((`S.notMember` used_sizes) . sizeName) sizes of
+    let used_sizes = unFV $ freeInType $ patternStructType p'
+    case filter ((`M.notMember` used_sizes) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
 

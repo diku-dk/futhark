@@ -17,8 +17,8 @@
 --          , [ [1, 2, 3, 4], [4, 5, 6, 7] ]
 --          ]
 --        }
--- structure seq-mem { Alloc 3 }
--- structure gpu-mem { Alloc 4 }
+-- structure seq-mem { Alloc 2 }
+-- structure gpu-mem { Alloc 3 }
 
 -- Needs two-dimensional overlap checking
 

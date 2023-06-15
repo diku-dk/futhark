@@ -54,7 +54,7 @@ $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 tokens :-
 
   $white+                               ;
-  @doc                     { tokenM $ pure . DOC . T.unpack . T.unlines .
+  @doc                     { tokenM $ pure . DOC . T.intercalate "\n" .
                                       map (T.drop 3 . T.stripStart) .
                                            T.split (== '\n') . ("--"<>) .
                                            T.drop 4 }

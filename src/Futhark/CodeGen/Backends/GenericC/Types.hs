@@ -415,7 +415,7 @@ opaqueLibraryFunctions types desc ot = do
          in ( storageSize pt rank shape',
               storeValueHeader sign pt rank shape' [C.cexp|out|]
                 ++ [C.cstms|ret |= $id:values_array(ctx, obj->$id:field, (void*)out);
-                            out += $exp:num_elems * $int:(primByteSize pt::Int);|]
+                            out += $exp:num_elems * sizeof($ty:(primStorageType pt));|]
             )
 
   ctx_ty <- contextType
@@ -452,7 +452,7 @@ opaqueLibraryFunctions types desc ot = do
         stms $ loadValueHeader sign pt rank [C.cexp|$id:shapearr|] [C.cexp|src|]
         item [C.citem|const void* $id:dataptr = src;|]
         stm [C.cstm|obj->$id:field = NULL;|]
-        stm [C.cstm|src += $exp:num_elems * $int:(primByteSize pt::Int);|]
+        stm [C.cstm|src += $exp:num_elems * sizeof($ty:(primStorageType pt));|]
         pure
           [C.cstms|
              obj->$id:field = $id:new_array(ctx, $id:dataptr, $args:dims);

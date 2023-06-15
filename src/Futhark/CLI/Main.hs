@@ -79,7 +79,7 @@ commands =
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
-      ("benchcmp", (Benchcmp.main, "Compare two Futhark benchmarks."))
+      ("benchcmp", (Benchcmp.main, "Compare two benchmark results."))
     ]
 
 msg :: String

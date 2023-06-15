@@ -321,6 +321,7 @@ library
       Futhark.Internalise.Defunctorise
       Futhark.Internalise.Entry
       Futhark.Internalise.Exps
+      Futhark.Internalise.FullNormalise
       Futhark.Internalise.Lambdas
       Futhark.Internalise.LiftLambdas
       Futhark.Internalise.Monad
@@ -481,7 +482,7 @@ library
     , fgl-visualize
     , file-embed >=0.0.14.0
     , filepath >=1.4.1.1
-    , free >=4.12.4
+    , free >=5.1.10
     , futhark-data >= 1.1.0.0
     , futhark-server >= 1.2.2.1
     , futhark-manifest >= 1.2.0.1
@@ -508,7 +509,7 @@ library
     , time >=1.6.0.1
     , transformers >=0.3
     , vector >=0.12
-    , versions >=5.0.0
+    , versions >=6.0.0
     , zlib >=0.6.1.2
     , statistics
     , mwc-random
@@ -531,6 +532,7 @@ test-suite unit
       Futhark.BenchTests
       Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
+      Futhark.Internalise.TypesValuesTests
       Futhark.IR.Prop.RearrangeTests
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
@@ -551,6 +553,7 @@ test-suite unit
       QuickCheck >=2.8
     , base
     , containers
+    , free
     , futhark
     , megaparsec
     , tasty

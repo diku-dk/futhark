@@ -115,8 +115,8 @@ pSize :: Parser Size
 pSize =
   brackets $
     choice
-      [ ConstSize <$> lexeme L.decimal,
-        NamedSize <$> pQualName
+      [ flip sizeFromInteger mempty <$> lexeme L.decimal,
+        flip sizeFromName mempty <$> pQualName
       ]
 
 pScalarNonFun :: Parser (ScalarTypeBase Size ())
@@ -124,7 +124,7 @@ pScalarNonFun =
   choice
     [ Prim <$> pPrimType,
       pTypeVar,
-      tupleRecord <$> parens (pStructType `sepBy1` lexeme ","),
+      tupleRecord <$> parens (pStructType `sepBy` lexeme ","),
       Record . M.fromList <$> braces (pField `sepBy1` lexeme ",")
     ]
   where
@@ -132,8 +132,8 @@ pScalarNonFun =
     pTypeVar = TypeVar () <$> pUniqueness <*> pQualName <*> many pTypeArg
     pTypeArg =
       choice
-        [ TypeArgDim <$> pSize <*> pure mempty,
-          TypeArgType <$> pTypeArgType <*> pure mempty
+        [ TypeArgDim <$> pSize,
+          TypeArgType <$> pTypeArgType
         ]
     pTypeArgType =
       choice

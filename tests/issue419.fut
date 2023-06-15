@@ -28,8 +28,8 @@ def bin_packing_ffh [q] (w: i32) (all_perm  : *[q]i32) (all_data0 :  [q]i32) =
     let count = 0
     let (_,all_perm,_,_, _,_) =
     loop ((len,all_perm,all_data,cur_shape, goOn,count)) while goOn && count < 100 do
-        let (data, _) = split (len) all_data
-        let (perm, _) = split (len) all_perm
+        let data = take (len) all_data
+        let perm = take (len) all_perm
 
         -- 1. initial attempt by first fit heuristic
         let scan_data = scan (+) 0 data

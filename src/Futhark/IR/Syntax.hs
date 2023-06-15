@@ -139,6 +139,7 @@ module Futhark.IR.Syntax
     MatchSort (..),
     Safety (..),
     Lambda (..),
+    RetAls (..),
 
     -- * Definitions
     Param (..),
@@ -409,13 +410,30 @@ instance Foldable Case where
 instance Traversable Case where
   traverse f (Case vs b) = Case vs <$> f b
 
+-- | Information about the possible aliases of a function result.
+data RetAls = RetAls
+  { -- | Which of the parameters may be aliased, numbered from zero.
+    paramAls :: [Int],
+    -- | Which of the other results may be aliased, numbered from
+    -- zero.  This must be a reflexive relation.
+    otherAls :: [Int]
+  }
+  deriving (Eq, Ord, Show)
+
+instance Monoid RetAls where
+  mempty = RetAls mempty mempty
+
+instance Semigroup RetAls where
+  RetAls pals1 rals1 <> RetAls pals2 rals2 =
+    RetAls (pals1 <> pals2) (rals1 <> rals2)
+
 -- | The root Futhark expression type.  The v'Op' constructor contains
 -- a rep-specific operation.  Do-loops, branches and function calls
 -- are special.  Everything else is a simple t'BasicOp'.
 data Exp rep
   = -- | A simple (non-recursive) operation.
     BasicOp BasicOp
-  | Apply Name [(SubExp, Diet)] [RetType rep] (Safety, SrcLoc, [SrcLoc])
+  | Apply Name [(SubExp, Diet)] [(RetType rep, RetAls)] (Safety, SrcLoc, [SrcLoc])
   | -- | A match statement picks a branch by comparing the given
     -- subexpressions (called the /scrutinee/) with the pattern in
     -- each of the cases.  If none of the cases match, the /default
@@ -509,7 +527,7 @@ data FunDef rep = FunDef
     funDefEntryPoint :: Maybe EntryPoint,
     funDefAttrs :: Attrs,
     funDefName :: Name,
-    funDefRetType :: [RetType rep],
+    funDefRetType :: [(RetType rep, RetAls)],
     funDefParams :: [FParam rep],
     funDefBody :: Body rep
   }
