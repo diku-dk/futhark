@@ -20,7 +20,6 @@ module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
@@ -143,8 +142,8 @@ kkLoopBody
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmads _ _) <- ixf_fn =
-            all innerHasStride1 $ NE.toList lmads
+          (IxFun.IxFun lmad _ _) <- ixf_fn =
+            innerHasStride1 lmad
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =

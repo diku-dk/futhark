@@ -19,7 +19,6 @@ import Data.Char (isAlpha)
 import Data.Functor
 import Data.List (singleton, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -976,8 +975,8 @@ pIxFunBase pNum =
   braces $ do
     base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
     ct <- pLab "contiguous" $ pBool <* pSemi
-    lmads <- pLab "LMADs" $ brackets (pLMAD `sepBy1` pComma)
-    pure $ IxFun.IxFun (NE.fromList lmads) base ct
+    lmad <- pLab "LMAD" pLMAD
+    pure $ IxFun.IxFun lmad base ct
   where
     pLab s m = keyword s *> pColon *> m
     pMon =
