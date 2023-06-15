@@ -1,5 +1,6 @@
 module Futhark.Pass.Flatten.Distribute
   ( distributeMap,
+    distributeBody,
     MapArray (..),
     mapArrayRowType,
     DistResults (..),
@@ -12,7 +13,7 @@ module Futhark.Pass.Flatten.Distribute
     DistType (..),
     distInputType,
     DistResult (..),
-    ResTag,
+    ResTag (..),
   )
 where
 
@@ -159,6 +160,40 @@ patInput :: ResTag -> PatElem Type -> (VName, DistInput)
 patInput tag pe =
   (patElemName pe, DistInput tag $ patElemType pe)
 
+distributeBody ::
+  Scope rep ->
+  SubExp ->
+  DistInputs ->
+  Body SOACS ->
+  (DistInputs, [DistStm])
+distributeBody outer_scope w param_inputs body =
+  let ((_, avail_inputs), stms) =
+        L.mapAccumL distributeStm (ResTag (length param_inputs), param_inputs) $
+          stmsToList $
+            bodyStms body
+   in (avail_inputs, stms)
+  where
+    bound_outside = namesFromList $ M.keys outer_scope
+    distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
+    distributeStm (ResTag tag, avail_inputs) stm =
+      let pat = stmPat stm
+          new_tags = map ResTag $ take (patSize pat) [tag ..]
+          avail_inputs' =
+            avail_inputs <> zipWith patInput new_tags (patElems pat)
+          free_in_stm = freeIn stm
+          used_free = mapMaybe (freeInput avail_inputs) $ namesToList free_in_stm
+          used_free_types =
+            mapMaybe (freeInput avail_inputs)
+              . namesToList
+              . foldMap (freeIn . distInputType . snd)
+              $ used_free
+          stm' =
+            DistStm
+              (nubOrd $ used_free_types <> used_free)
+              (zipWith DistResult new_tags $ map distType $ patTypes pat)
+              stm
+       in ((ResTag $ tag + length new_tags, avail_inputs'), stm')
+
 -- | The input we are mapping over in 'distributeMap'.
 data MapArray t
   = -- | A straightforward array passed in to a
@@ -198,12 +233,10 @@ distributeMap ::
   Lambda SOACS ->
   (Distributed, M.Map ResTag t)
 distributeMap outer_scope map_pat w arrs lam =
-  let ((tag, arrmap), param_inputs) =
+  let ((_, arrmap), param_inputs) =
         L.mapAccumL paramInput (ResTag 0, mempty) $
           zip (lambdaParams lam) arrs
-      ((_, avail_inputs), stms) =
-        L.mapAccumL distributeStm (tag, param_inputs) $
-          stmsToList (bodyStms (lambdaBody lam))
+      (avail_inputs, stms) = distributeBody outer_scope w param_inputs $ lambdaBody lam
       resmap =
         resultMap avail_inputs stms map_pat $
           bodyResult (lambdaBody lam)
@@ -212,7 +245,6 @@ distributeMap outer_scope map_pat w arrs lam =
         arrmap
       )
   where
-    bound_outside = namesFromList $ M.keys outer_scope
     paramInput (ResTag i, m) (p, MapArray arr _) =
       ( (ResTag i, m),
         (paramName p, DistInputFree arr $ paramType p)
@@ -221,23 +253,3 @@ distributeMap outer_scope map_pat w arrs lam =
       ( (ResTag (i + 1), M.insert (ResTag i) x m),
         (paramName p, DistInput (ResTag i) $ paramType p)
       )
-    distType t = uncurry (DistType w) $ splitIrregDims bound_outside t
-
-    distributeStm (ResTag tag, avail_inputs) stm =
-      let pat = stmPat stm
-          new_tags = map ResTag $ take (patSize pat) [tag ..]
-          avail_inputs' =
-            avail_inputs <> zipWith patInput new_tags (patElems pat)
-          free_in_stm = freeIn stm
-          used_free = mapMaybe (freeInput avail_inputs) $ namesToList free_in_stm
-          used_free_types =
-            mapMaybe (freeInput avail_inputs)
-              . namesToList
-              . foldMap (freeIn . distInputType . snd)
-              $ used_free
-          stm' =
-            DistStm
-              (nubOrd $ used_free_types <> used_free)
-              (zipWith DistResult new_tags $ map distType $ patTypes pat)
-              stm
-       in ((ResTag $ tag + length new_tags, avail_inputs'), stm')

@@ -20,6 +20,7 @@ module Futhark.Util
     partitionMaybe,
     maybeNth,
     maybeHead,
+    unsnoc,
     splitFromEnd,
     splitAt3,
     focusNth,
@@ -171,6 +172,12 @@ maybeNth i l
 maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
+
+-- | Split the last element from the list, if it exists.
+unsnoc :: [a] -> Maybe ([a], a)
+unsnoc [] = Nothing
+unsnoc [x] = Just ([], x)
+unsnoc (x : xs) = unsnoc xs >>= \(ys, y) -> Just (x : ys, y)
 
 -- | Like 'splitAt', but from the end.
 splitFromEnd :: Int -> [a] -> ([a], [a])
