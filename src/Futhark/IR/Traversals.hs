@@ -162,8 +162,6 @@ mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   ys' <- mapM (mapOnVName tv) ys
   size' <- mapOnSubExp tv size
   pure $ BasicOp $ Concat i (x' :| ys') size'
-mapExpM tv (BasicOp (Copy e)) =
-  BasicOp <$> (Copy <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Manifest perm e)) =
   BasicOp <$> (Manifest perm <$> mapOnVName tv e)
 mapExpM tv (BasicOp (Assert e msg loc)) =
@@ -337,8 +335,6 @@ walkExpM tv (BasicOp (Rotate es e)) =
   mapM_ (walkOnSubExp tv) es >> walkOnVName tv e
 walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
-walkExpM tv (BasicOp (Copy e)) =
-  walkOnVName tv e
 walkExpM tv (BasicOp (Manifest _ e)) =
   walkOnVName tv e
 walkExpM tv (BasicOp (Assert e msg _)) =

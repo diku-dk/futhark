@@ -1,5 +1,5 @@
 -- ==
--- structure gpu { Copy 0 }
+-- structure gpu { Replicate 0 }
 
 let lud_perimeter_upper [m][b] (diag: [b][b]f32, a0s: [m][b][b]f32): *[m][b][b]f32 =
     let a1s = map (\ (x: [b][b]f32): [b][b]f32  -> transpose(x)) a0s in

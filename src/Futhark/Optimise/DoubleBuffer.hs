@@ -310,8 +310,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
               arg_copy <- newVName (baseString arg <> "_dbcopy")
               letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
-                BasicOp $
-                  Copy arg
+                BasicOp (Replicate mempty $ Var arg)
               -- We need to make this parameter unique to avoid invalid
               -- hoisting (see #1533), because we are invalidating the
               -- underlying memory.
@@ -432,7 +431,10 @@ allocStms merge = runWriterT . zipWithM allocation merge
       let bt = elemType $ paramType f
           shape = arrayShape $ paramType f
           bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
-      tell [Let (Pat [PatElem v_copy bound]) (defAux ()) $ BasicOp $ Copy v]
+      tell
+        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
+            BasicOp (Replicate mempty $ Var v)
+        ]
       -- It is important that we treat this as a consumption, to
       -- avoid the Copy from being hoisted out of any enclosing
       -- loops.  Since we re-use (=overwrite) memory in the loop,
@@ -464,9 +466,10 @@ doubleBufferResult valparams buffered (Body _ stms res) =
       let t = resultType $ paramType fparam
           summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
           copystm =
-            Let (Pat [PatElem copyname summary]) (defAux ()) $
-              BasicOp $
-                Copy v
+            Let
+              (Pat [PatElem copyname summary])
+              (defAux ())
+              (BasicOp $ Replicate mempty $ Var v)
        in (Just copystm, SubExpRes cs (Var copyname))
     buffer _ _ se =
       (Nothing, se)

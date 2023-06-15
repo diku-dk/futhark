@@ -178,12 +178,10 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
                   letExp (baseString (paramName p)) . BasicOp $
                     Index arr $
                       fullSlice arr_t [DimFix $ Var i]
-                letBindNames [paramName p] $ BasicOp $ Copy p'
+                letBindNames [paramName p] $ BasicOp $ Replicate mempty $ Var p'
             | otherwise ->
-                letBindNames [paramName p] $
-                  BasicOp $
-                    Index arr $
-                      fullSlice arr_t [DimFix $ Var i]
+                letBindNames [paramName p] . BasicOp . Index arr $
+                  fullSlice arr_t [DimFix $ Var i]
 
       -- Insert the statements of the lambda.  We have taken care to
       -- ensure that the parameters are bound at this point.
@@ -248,7 +246,8 @@ transformSOAC pat (Stream w arrs nes lam) = do
   let copyIfArray se = do
         se_t <- subExpType se
         case (se_t, se) of
-          (Array {}, Var v) -> letSubExp (baseString v) $ BasicOp $ Copy v
+          (Array {}, Var v) ->
+            letSubExp (baseString v) $ BasicOp $ Replicate mempty se
           _ -> pure se
   nes' <- mapM copyIfArray nes
 

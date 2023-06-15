@@ -934,8 +934,6 @@ checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
     bad $
       TypeError "Types of arguments to concat do not match."
   require [Prim int64] ressize
-checkBasicOp (Copy e) =
-  void $ checkArrIdent e
 checkBasicOp (Manifest perm arr) =
   checkBasicOp $ Rearrange perm arr -- Basically same thing!
 checkBasicOp (Assert e (ErrorMsg parts) _) = do
