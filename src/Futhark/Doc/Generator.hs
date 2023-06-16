@@ -533,7 +533,7 @@ typeHtml t = case t of
       ppConstr name = "#" <> toHtml (nameToString name)
   Scalar (Refinement ty e) -> do
     tyH <- typeHtml ty
-    pure $ "{" <> tyH <> "," <> toHtml (prettyString e) <> "}"
+    pure $ "{" <> tyH <> ", " <> toHtml (prettyString e) <> "}"
 
 retTypeHtml :: StructRetType -> DocM Html
 retTypeHtml (RetType [] t) = typeHtml t
@@ -670,7 +670,7 @@ typeExpHtml e = case e of
     pure $ "?" <> mconcat (map (brackets . renderName . baseName) dims) <> "." <> t'
   TERefine te p _ -> do
     teH <- typeExpHtml te
-    pure $ "{" <> teH <> "," <> toHtml (prettyString p) <> "}"
+    pure $ "{" <> teH <> ", " <> toHtml (prettyString p) <> "}"
 
 qualNameHtml :: QualName VName -> DocM Html
 qualNameHtml (QualName names vname@(VName name tag)) =
