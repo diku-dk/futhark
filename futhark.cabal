@@ -297,6 +297,7 @@ library
       Futhark.IR.Mem
       Futhark.IR.Mem.Interval
       Futhark.IR.Mem.IxFun
+      Futhark.IR.Mem.LMAD
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse
       Futhark.IR.Pretty
@@ -501,7 +502,8 @@ library
     , haskeline
     , language-c-quote >= 0.12
     , lens
-    , lsp >= 1.5.0
+    , lsp >= 2.0.0.0
+    , lsp-types >= 2.0.0.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1
     , megaparsec >=9.0.0

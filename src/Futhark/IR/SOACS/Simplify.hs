@@ -271,7 +271,7 @@ liftIdentityMapping _ pat aux op
             where
               e inp = case patElemType outId of
                 Acc {} -> BasicOp $ SubExp $ Var inp
-                _ -> BasicOp (Copy inp)
+                _ -> BasicOp (Replicate mempty (Var inp))
           checkInvariance (outId, SubExpRes _ e, t) (invariant, mapresult, rettype')
             | freeOrConst e =
                 ( (Pat [outId], BasicOp $ Replicate (Shape [w]) e) : invariant,
@@ -308,7 +308,7 @@ liftIdentityStreaming _ (Pat pes) aux (Stream w arrs nes lam)
       partitionEithers $ map isInvariantRes $ zip3 map_ts map_pes map_res,
     not $ null invariant_map = Simplify $ do
       forM_ invariant_map $ \(pe, arr) ->
-        letBind (Pat [pe]) $ BasicOp $ Copy arr
+        letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var arr
 
       let (variant_map_ts, variant_map_pes, variant_map_res) = unzip3 variant_map
           lam' =
@@ -462,7 +462,7 @@ removeDuplicateMapOutput _ (Pat pes) aux (Screma w arrs form)
                       }
               auxing aux $ letBind (Pat pes') $ Op $ Screma w arrs $ mapSOAC fun'
               forM_ copies $ \(from, to) ->
-                letBind (Pat [to]) $ BasicOp $ Copy $ patElemName from
+                letBind (Pat [to]) $ BasicOp $ Replicate mempty $ Var $ patElemName from
   where
     checkForDuplicates (ses_ts_pes', copies) (se, t, pe)
       | Just (_, _, pe') <- find (\(x, _, _) -> resSubExp x == resSubExp se) ses_ts_pes' =
@@ -728,7 +728,7 @@ isArrayOp cs (BasicOp (Rotate rots arr)) =
   Just $ ArrayRotate cs arr rots
 isArrayOp cs (BasicOp (Reshape k new_shape arr)) =
   Just $ ArrayReshape cs arr k new_shape
-isArrayOp cs (BasicOp (Copy arr)) =
+isArrayOp cs (BasicOp (Replicate (Shape []) (Var arr))) =
   Just $ ArrayCopy cs arr
 isArrayOp _ _ =
   Nothing
@@ -738,7 +738,7 @@ fromArrayOp (ArrayIndexing cs arr slice) = (cs, BasicOp $ Index arr slice)
 fromArrayOp (ArrayRearrange cs arr perm) = (cs, BasicOp $ Rearrange perm arr)
 fromArrayOp (ArrayRotate cs arr rots) = (cs, BasicOp $ Rotate rots arr)
 fromArrayOp (ArrayReshape cs arr k new_shape) = (cs, BasicOp $ Reshape k new_shape arr)
-fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Copy arr)
+fromArrayOp (ArrayCopy cs arr) = (cs, BasicOp $ Replicate mempty $ Var arr)
 fromArrayOp (ArrayVar cs arr) = (cs, BasicOp $ SubExp $ Var arr)
 
 arrayOps ::
@@ -964,7 +964,7 @@ moveTransformToInput vtable screma_pat aux soac@(Screma w arrs (ScremaForm scan 
                 ArrayReshape _ _ k new_shape ->
                   BasicOp $ Reshape k (Shape [w] <> new_shape) arr
                 ArrayCopy {} ->
-                  BasicOp $ Copy arr
+                  BasicOp $ Replicate mempty $ Var arr
                 ArrayVar {} ->
                   BasicOp $ SubExp $ Var arr
           arr_transformed_t <- lookupType arr_transformed

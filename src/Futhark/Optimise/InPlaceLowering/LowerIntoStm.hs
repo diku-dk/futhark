@@ -164,7 +164,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                 ret',
                 stmsFromList
                   [ mkLet [Ident v_aliased $ typeOf v_dec] $ BasicOp $ Index bindee_nm slice,
-                    mkLet [Ident v $ typeOf v_dec] $ BasicOp $ Copy v_aliased
+                    mkLet [Ident v $ typeOf v_dec] $ BasicOp $ Replicate mempty $ Var v_aliased
                   ]
               )
     onRet pe ret =
@@ -267,7 +267,7 @@ lowerUpdateIntoLoop scope updates pat val form body = do
                   Index
                     (updateName update)
                     (fullSlice source_t $ unSlice $ updateIndices update),
-                mkLet [Ident (updateValue update) elm_t] $ BasicOp $ Copy precopy
+                mkLet [Ident (updateValue update) elm_t] $ BasicOp $ Replicate mempty $ Var precopy
               ]
             )
           pure $

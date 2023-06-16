@@ -115,8 +115,6 @@ basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where
     result xt = [setDimSize i xt ressize]
-basicOpType (Copy v) =
-  pure <$> lookupType v
 basicOpType (Manifest _ v) =
   pure <$> lookupType v
 basicOpType Assert {} =

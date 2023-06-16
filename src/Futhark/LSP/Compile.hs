@@ -16,13 +16,13 @@ import Futhark.LSP.Diagnostic (diagnosticSource, maxDiagnostic, publishErrorDiag
 import Futhark.LSP.State (State (..), emptyState, updateStaleContent, updateStaleMapping)
 import Futhark.LSP.Tool (computeMapping)
 import Language.Futhark.Warnings (listWarnings)
-import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
-import Language.LSP.Types
+import Language.LSP.Protocol.Types
   ( filePathToUri,
     fromNormalizedFilePath,
     toNormalizedUri,
     uriToNormalizedFilePath,
   )
+import Language.LSP.Server (LspT, flushDiagnosticsBySource, getVirtualFile, getVirtualFiles)
 import Language.LSP.VFS (VFS, vfsMap, virtualFileText)
 
 -- | Try to take state from IORef, if it's empty, try to compile.

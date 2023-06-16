@@ -143,7 +143,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
       where
         isIndex DimFix {} = True
         isIndex _ = False
-    Just (Copy src, cs)
+    Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
         -- It is generally not safe to simplify a slice of a copy,

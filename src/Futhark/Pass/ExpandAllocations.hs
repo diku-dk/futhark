@@ -824,7 +824,7 @@ copyConsumed stms = do
     let substs = M.fromList (zip consumed consumed')
     addStms $ substituteNames substs stms
   where
-    copy v = letExp (baseString v <> "_copy") $ BasicOp $ Copy v
+    copy v = letExp (baseString v <> "_copy") $ BasicOp $ Replicate mempty $ Var v
 
 -- Important for edge cases (#1838) that the Stms here still have the
 -- Allocs we are actually trying to get rid of.
