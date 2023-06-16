@@ -1,11 +1,12 @@
 module Futhark.SoP.RefineTests (tests) where
 
 import Data.Set qualified as S
-import Futhark.SoP.Monad
-import Futhark.SoP.Refine
+import Futhark.Analysis.PrimExp
+import Futhark.SoP.Convert
 import Futhark.SoP.FourierMotzkin
+import Futhark.SoP.Monad
 import Futhark.SoP.Parse
-import Futhark.SoP.ToFromSoP
+import Futhark.SoP.Refine
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -32,10 +33,11 @@ test_nw =
                     non_negatives = ["n_13434", "i_13617", "gtid_14374"]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (64i64) (fptosi_f64_i64 (sqrt64 (sitofp_i64_f64 (n_13434)))))"
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True,
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True,
             testCase
               "Example 2"
               $ let less_thans =
@@ -45,10 +47,12 @@ test_nw =
                     non_negatives = ["n_13783", "mul64 (n_13783) (n_13783)", "i_13969", "gtid_14718"]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (add_nw64 (add_nw64 (64i64) (mul_nw64 (64i64) (gtid_14718))) (mul_nw64 (62i64) (fptosi_f64_i64 (sqrt64 (sitofp_i64_f64 (mul64 (n_13783) (n_13783))))))) (add_nw64 (-64i64) (mul_nw64 (64i64) (fptosi_f64_i64 (sqrt64 (sitofp_i64_f64 (mul64 (n_13783) (n_13783))))))))"
+
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True,
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True,
             testCase
               "Example 3 (test the limits of the range of Example 1)"
               $ let less_thans =
@@ -58,18 +62,18 @@ test_nw =
                     non_negatives = ["n_13434", "i_13617", "gtid_14374"]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     maximalTrue =
-                      runSoPM_ $ do
+                      fst $ (runSoPM_ :: SoPM String (PrimExp String) a -> (a, AlgEnv String (PrimExp String))) $ do
                         refineAlgEnv pes
                         fmSolveGEq0 . snd
-                          =<< toNumSoPCmp
+                          =<< toSoPCmp
                             ( parsePrimExp "(slt64 (129i64) (fptosi_f64_i64 (sqrt64 (sitofp_i64_f64 (n_13434)))))"
                             )
 
                     minimalFalse =
-                      runSoPM_ $ do
+                      fst $ (runSoPM_ :: SoPM String (PrimExp String) a -> (a, AlgEnv String (PrimExp String))) $ do
                         refineAlgEnv pes
                         fmSolveGEq0 . snd
-                          =<< toNumSoPCmp
+                          =<< toSoPCmp
                             ( parsePrimExp "(slt64 (130i64) (fptosi_f64_i64 (sqrt64 (sitofp_i64_f64 (n_13434)))))"
                             )
                  in maximalTrue && not minimalFalse @?= True
@@ -127,10 +131,11 @@ test_lud =
                       ]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (1023i64) (mul_nw64 (1024i64) (num_blocks_14902)) )"
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True,
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True,
             testCase
               "Example 2"
               $ let less_thans =
@@ -173,10 +178,12 @@ test_lud =
                       ]
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (add_nw64 (add_nw64 (add_nw64 (1023i64) (mul_nw64 (1024i64) (gtid_16449))) (mul_nw64 (1024i64) (gid_y_17184))) (mul_nw64 (32i64) (gid_x_17183))) (mul_nw64 (1024i64) (num_blocks_14902)))"
+
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True,
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True,
             testCase
               "Example 3"
               $ let less_thans =
@@ -221,10 +228,12 @@ test_lud =
 
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (add_nw64 (add_nw64 (mul_nw64 (1024i64) (gid_y_17184)) (mul_nw64 (32i64) (gid_x_17183))) (1024i64) ) (1025i64 ))"
+
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True,
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True,
             testCase
               "Example 4"
               $ let less_thans =
@@ -275,8 +284,10 @@ test_lud =
 
                     pes = lessThans less_thans <> nonNegatives non_negatives
                     goal = parsePrimExp "(slt64 (mul_nw64 (1024i64) (gtid_16449) ) (add_nw64 (add_nw64 (add_nw64 (mul_nw64 (1024i64) (gtid_16449)) (mul_nw64 (1024i64) (gid_y_17184))) (mul_nw64 (32i64) (gid_x_17183))) (1i64) ))"
+
+                    resM :: SoPM String (PrimExp String) Bool
                     resM = do
                       refineAlgEnv pes
-                      fmSolveGEq0 . snd =<< toNumSoPCmp goal
-                 in runSoPM_ resM @?= True
+                      fmSolveGEq0 . snd =<< toSoPCmp goal
+                 in fst (runSoPM_ resM) @?= True
           ]

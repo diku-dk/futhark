@@ -20,9 +20,9 @@ import Data.Text qualified as T
 import Data.Void
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Parse
+import Futhark.SoP.Convert
 import Futhark.SoP.Monad
 import Futhark.SoP.SoP
-import Futhark.SoP.ToFromSoP
 import Language.Futhark.Primitive.Parse
 import Text.Megaparsec (Parsec, manyTill_, notFollowedBy, parse, try, (<?>))
 import Text.Megaparsec qualified as MP
@@ -152,5 +152,5 @@ parsePrimExp s =
     Left bundle -> error $ show bundle
     Right pe -> pe
 
-parsePrimExpToSoP :: String -> SoPM String (Integer, SoP String)
-parsePrimExpToSoP = toNumSoP . parsePrimExp
+parsePrimExpToSoP :: String -> SoPM String (PrimExp String) (Integer, SoP String)
+parsePrimExpToSoP = toSoPNum . parsePrimExp

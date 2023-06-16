@@ -25,12 +25,9 @@ import Futhark.SoP.Util
 --   for each 'PrimExp' in the set.
 addEqZeroPEs :: forall u e m. (ToSoP u e, FromSoP u e, MonadSoP u e m) => Set (e == 0) -> m (Set (SoP u >= 0))
 addEqZeroPEs pes = do
-  -- Substitute already known equivalences in the equality set.
-  equivs_pes <- (fmap . fmap) (fromSoP :: SoP u -> e) getEquivs
-  let pes' = S.map (substitute equivs_pes) pes
   -- Make equivalence candidates along with any extra constraints.
   (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <-
-    mconcat <$> mapM addEquiv2CandSet (S.toList pes')
+    mconcat <$> mapM addEquiv2CandSet (S.toList pes)
   -- Add one-by-one all legal equivalences to the algebraic
   -- environment, i.e., range and equivalence envs are updated
   -- as long as the new substitutions do not introduce cycles.
@@ -64,7 +61,9 @@ instance Ord u => Substitute u (SoP u) (EquivCand u) where
 --         nx - nbq - n = 0 => n*(x-bq-1) = 0 => x = bq+1,
 --         if we can prove that n != 0
 mkEquivCands :: MonadSoP u e m => SoP u -> m (Set (EquivCand u))
-mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
+mkEquivCands sop =
+  getTerms <$> substEquivs sop
+    >>= M.foldrWithKey mkEquivCand (pure mempty)
   where
     mkEquivCand (Term term) v mcands
       | abs v == 1,
@@ -74,7 +73,7 @@ mkEquivCands sop = M.foldrWithKey mkEquivCand (pure mempty) $ getTerms sop
           msop <- lookupSoP sym
           case msop of
             Nothing ->
-              S.insert (EquivCand sym (scaleSoP (-v) sop)) <$> mcands
+              S.insert (EquivCand sym (scaleSoP (-v) sop')) <$> mcands
             Just {} ->
               mcands
       | otherwise = mcands

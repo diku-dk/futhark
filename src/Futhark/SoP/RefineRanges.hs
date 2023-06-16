@@ -23,12 +23,9 @@ import Futhark.SoP.Util
 --   for each 'PrimExp' in the set.
 addIneqZeroPEs :: forall u e m. (ToSoP u e, FromSoP u e, MonadSoP u e m) => Set (e >= 0) -> m ()
 addIneqZeroPEs pes = do
-  -- Substitute equivalence env.
-  pes' <- (flip S.map pes . substitute . fmap (fromSoP :: SoP u -> e)) <$> getEquivs
-
   ineq_cands <-
     mconcat
-      <$> mapM (fmap (mkRangeCands . snd) . toSoPNum) (S.toList pes')
+      <$> mapM ((mkRangeCands . snd) <=< toSoPNum) (S.toList pes)
 
   addRangeCands ineq_cands
 
@@ -55,15 +52,17 @@ instance Ord u => Free u (RangeCand u) where
 --          @nx - nbq - n = 0@ is equivalent to
 --          @n*(x-bq-1) >= 0@, hence, if we can prove
 --          that @n >= 0@ we can derive @x >= bq+1@.
-mkRangeCands :: Ord u => SoP u -> Set (RangeCand u)
-mkRangeCands sop = M.foldrWithKey mkRangeCand mempty $ getTerms sop
+mkRangeCands :: MonadSoP u e m => SoP u -> m (Set (RangeCand u))
+mkRangeCands sop =
+  (M.foldrWithKey mkRangeCand mempty . getTerms)
+    <$> substEquivs sop
   where
-    mkRangeCand (Term term) v
+    mkRangeCand (Term term) v cands
       | [sym] <- MS.toList term,
         sop' <- deleteTerm term sop,
         sym `notElem` free sop' =
-          S.insert $ RangeCand v sym sop'
-      | otherwise = id
+          S.insert (RangeCand v sym sop') cands
+      | otherwise = cands
 
 -- | Refines a range in the range environment from a range
 --   canditate.
@@ -106,14 +105,14 @@ refineRangeInEnv (RangeCand j sym sop) = do
       ubs'' <- mergeBound (sop' $>=$) ($<=$ sop') ubs' sop'
       addRange sym $ Range lbs' z ubs''
       -- New candidates: lbs <= sop' --> sop' - lbs >= 0
-      pure $ foldMap (mkRangeCands . (sop' .-.)) lbs'
+      mconcat <$> mapM (mkRangeCands . (sop' .-.)) (S.toList lbs')
     else do
       -- reject: ∃b.new_bound <= b?
       -- remove: only keep b with new_bound < b = !(new_bound >= b)
       lbs'' <- mergeBound (sop' $<=$) ($>=$ sop') lbs' sop'
       addRange sym $ Range lbs'' z ubs'
       -- New candidates: sop' <= ubs --> ubs - sop' >= 0
-      pure $ foldMap (mkRangeCands . (.-. sop')) ubs'
+      mconcat <$> mapM (mkRangeCands . (.-. sop')) (S.toList ubs')
   where
     mergeBound reject remove bs sop' =
       ifM

@@ -36,17 +36,6 @@ instance Ord u => FromSoP u (PrimExp u) where
           map fromSym term
       fromSym sym = PE.LeafExp sym $ PE.IntType PE.Int64
 
--- instance FromSoP VName Exp where
---  fromSoP sop = undefined
---    where
---      -- foldr ((~+~) . fromTerm) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 (0 :: Integer)) (sopToLists sop)
---      mult = (E.AppExp (E.Var (E.QualName [] (VName "*" 0)) (E.Info $ i64) mempty) (E.Info $ E.AppRes i64 []))
---      fromTerm (term, n) =
---        foldl mult (E.Literal $ E.SignedValue $ PE.intValue PE.Int64 n) $
---          map fromSym term
---      fromSym sym = E.Var (E.QualName [] sym) (E.Info i64) mempty
---      i64 = E.Scalar $ E.Prim $ E.Signed $ PE.Int64
-
 -- | Conversion from some expressions to
 --   'SoP's. Monadic because it may involve look-ups in the
 --   untranslatable expression environment.
@@ -171,24 +160,24 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u (PrimExp u) where
         x <- lookupUntransPE pe
         toSoPNum' f $ PE.LeafExp x $ PE.primExpType pe
 
-      toSoPCmp (PE.CmpOpExp (PE.CmpEq ptp) x y)
-        -- x = y => x - y = 0
-        | PE.IntType {} <- ptp = toSoPNum $ x ~-~ y
-      toSoPCmp (PE.CmpOpExp lessop x y)
-        -- x < y => x + 1 <= y => y >= x + 1 => y - (x+1) >= 0
-        | Just itp <- lthishType lessop =
-            toSoPNum $ y ~-~ (x ~+~ PE.ValueExp (PE.IntValue $ PE.intValue itp (1 :: Integer)))
-        -- x <= y => y >= x => y - x >= 0
-        | Just _ <- leqishType lessop =
-            toSoPNum $ y ~-~ x
-        where
-          lthishType (PE.CmpSlt itp) = Just itp
-          lthishType (PE.CmpUlt itp) = Just itp
-          lthishType _ = Nothing
-          leqishType (PE.CmpUle itp) = Just itp
-          leqishType (PE.CmpSle itp) = Just itp
-          leqishType _ = Nothing
-      toSoPCmp pe = error $ "toSoPCmp: not a comparison " <> prettyString pe
+  toSoPCmp (PE.CmpOpExp (PE.CmpEq ptp) x y)
+    -- x = y => x - y = 0
+    | PE.IntType {} <- ptp = toSoPNum $ x ~-~ y
+  toSoPCmp (PE.CmpOpExp lessop x y)
+    -- x < y => x + 1 <= y => y >= x + 1 => y - (x+1) >= 0
+    | Just itp <- lthishType lessop =
+        toSoPNum $ y ~-~ (x ~+~ PE.ValueExp (PE.IntValue $ PE.intValue itp (1 :: Integer)))
+    -- x <= y => y >= x => y - x >= 0
+    | Just _ <- leqishType lessop =
+        toSoPNum $ y ~-~ x
+    where
+      lthishType (PE.CmpSlt itp) = Just itp
+      lthishType (PE.CmpUlt itp) = Just itp
+      lthishType _ = Nothing
+      leqishType (PE.CmpUle itp) = Just itp
+      leqishType (PE.CmpSle itp) = Just itp
+      leqishType _ = Nothing
+  toSoPCmp pe = error $ "toSoPCmp: not a comparison " <> prettyString pe
 
 instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Exp where
   toSoPNum (E.Literal v _) =

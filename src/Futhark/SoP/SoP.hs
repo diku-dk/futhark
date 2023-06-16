@@ -385,9 +385,3 @@ instance Ord u => Substitute u (SoP u) (SoP u) where
 instance Ord u => Substitute u (SoP u) (Range u) where
   substitute subst (Range lb k ub) =
     Range (substitute subst lb) k (substitute subst ub)
-
-instance Ord u => Substitute u (PrimExp u) (PrimExp u) where
-  substitute = substituteInPrimExp
-
-instance Substitute VName Exp Exp where
-  substitute = undefined

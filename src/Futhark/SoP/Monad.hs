@@ -29,6 +29,7 @@ module Futhark.SoP.Monad
     evalSoPM,
     evalSoPM_,
     MonadSoP (..),
+    substEquivs,
   )
 where
 
@@ -78,7 +79,6 @@ class
     Show u, -- To be removed
     Pretty u, -- To be removed
     MonadFreshNames m,
-    Substitute u e e,
     Expression e
   ) =>
   MonadSoP u e m
@@ -156,7 +156,6 @@ instance
     Show u,
     Pretty u,
     MonadFreshNames m,
-    Substitute u e e,
     Expression e
   ) =>
   MonadSoP u e (SoPMT u e m)
@@ -288,3 +287,6 @@ transClosInRanges rs syms =
                   clos_syms' = S.union clos_syms new_syms
                   active'' = S.union new_syms active'
                in transClosHelper rs' clos_syms' seen' active''
+
+substEquivs :: MonadSoP u e m => SoP u -> m (SoP u)
+substEquivs sop = flip substitute sop <$> getEquivs
