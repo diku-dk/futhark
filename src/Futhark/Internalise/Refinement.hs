@@ -3,6 +3,8 @@ module Futhark.Internalise.Refinement (transformProg) where
 import Control.Monad
 import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWS, asks, lift, runRWS)
 import Data.List (find)
+import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.PrimExp (PrimExp)
 import Futhark.Analysis.PrimExp qualified as PE
 import Futhark.Internalise.TypesValues (internalisePrimType, internalisePrimValue)
@@ -44,105 +46,85 @@ runRefineM src (RefineM m) =
   let ((a, algenv), src', _) = runRWS (runSoPMT_ m) mempty src
    in (a, algenv, src')
 
-mkBinOp :: Name -> PatType -> Exp -> Exp -> Exp
-mkBinOp op t x y =
-  AppExp
-    ( BinOp
-        (qualName (intrinsicVar op), mempty)
-        (Info t)
-        (x, Info Nothing)
-        (y, Info Nothing)
-        mempty
-    )
-    (Info $ AppRes t [])
-
-mkAnd, mkOr, mkLt, mkLe, mkEq, mkNotEq :: Exp -> Exp -> Exp
-mkAnd = mkBinOp "&&" $ Scalar $ Prim Bool
-mkOr = mkBinOp "||" $ Scalar $ Prim Bool
-mkLt = mkBinOp "<" $ Scalar $ Prim Bool
-mkLe = mkBinOp "<=" $ Scalar $ Prim Bool
-mkEq = mkBinOp "==" $ Scalar $ Prim Bool
-mkNotEq = mkBinOp "!=" $ Scalar $ Prim Bool
-
-mkAdd, mkSub, mkMul, mkSQuot :: Exp -> Exp -> Exp
-mkAdd = mkBinOp "+" $ Scalar $ Prim $ Signed Int64
-mkSub = mkBinOp "-" $ Scalar $ Prim $ Signed Int64
-mkMul = mkBinOp "*" $ Scalar $ Prim $ Signed Int64
-mkSQuot = mkBinOp "%" $ Scalar $ Prim $ Signed Int64
-
-mkSignum :: Exp -> Exp
-mkSignum e =
-  mkApply
-    (Var (qualName (intrinsicVar "ssignum64")) (Info funt) mempty)
-    [(Observe, Nothing, e)]
-    (AppRes i64 [])
-  where
-    funt = Scalar $ Arrow mempty Unnamed Observe i64 (RetType [] i64)
-    i64 = Scalar $ Prim $ Signed Int64
-
--- Something like a division-rounding-up, but accomodating negative
--- operands in a contrived way.
-mkDivRound :: Exp -> Exp -> Exp
-mkDivRound x y =
-  (x `mkAdd` (y `mkSub` mkSignum y)) `mkSQuot` y
-
-sizeInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
-
-zero, one, negone :: Exp
-zero = sizeInteger 0 mempty
-one = sizeInteger 1 mempty
-negone = sizeInteger (-1) mempty
-
 considerSlice :: PatType -> Slice -> RefineM Bool
 considerSlice (Array _ _ (Shape ds) _) is =
   and <$> zipWithM check ds is
   where
-    inBounds d i =
-      mkLe (sizeInteger 0 mempty) i `mkAnd` mkLt i d
+    inBounds :: Exp -> Exp -> RefineM Bool
+    inBounds d i = do
+      d' <- toSoPNum_ d
+      i' <- toSoPNum_ i
+      andM
+        [ zeroSoP $<=$ i',
+          i' $<$ d'
+        ]
+    check :: Size -> DimIndexBase Info VName -> RefineM Bool
     check _ (DimSlice Nothing Nothing Nothing) =
       pure True
     check d (DimFix i) =
-      checkExp $ inBounds d i
-    check d (DimSlice (Just start) (Just end) Nothing) =
-      checkExp $
-        inBounds d start `mkAnd` (end `mkLe` d) `mkAnd` (start `mkLe` end)
+      inBounds d i
+    check d (DimSlice (Just start) (Just end) Nothing) = do
+      d' <- toSoPNum_ d
+      start' <- toSoPNum_ start
+      end' <- toSoPNum_ end
+      andM
+        [ inBounds d start,
+          end' $<=$ d',
+          start' $<=$ end'
+        ]
     check d (DimSlice (Just i) Nothing Nothing) =
-      checkExp $
-        inBounds d i
-    check d (DimSlice Nothing (Just j) Nothing) =
-      checkExp $
-        j `mkLe` d
-    check _ (DimSlice Nothing Nothing (Just stride)) =
-      checkExp $
-        mkNotEq stride (sizeInteger 0 mempty)
-    check d (DimSlice (Just i) Nothing (Just s)) =
-      checkExp $
-        inBounds d i `mkAnd` (zero `mkLe` s)
-    check d (DimSlice Nothing (Just j) (Just s)) =
-      checkExp $
-        j `mkLe` d `mkAnd` (zero `mkLe` s)
-    check d (DimSlice (Just i) (Just j) (Just s)) =
-      -- This case is super nasty.
-      checkExp $
-        nonzero_stride `mkAnd` ok_or_empty
-      where
-        nonzero_stride = mkNotEq s (sizeInteger 0 mempty)
-        ok_or_empty = (n `mkEq` zero) `mkOr` slice_ok
-        slice_ok = (backwards `mkAnd` backwards_ok) `mkOr` forwards_ok
-        backwards_ok =
-          (negone `mkLe` j)
-            `mkAnd` (j `mkLe` i)
-            `mkAnd` (zero `mkLe` i_p_m_t_s)
-            `mkAnd` (i_p_m_t_s `mkLe` d)
-        forwards_ok =
-          (zero `mkLe` i)
-            `mkAnd` (i `mkLe` j)
-            `mkAnd` (zero `mkLe` i_p_m_t_s)
-            `mkAnd` (i_p_m_t_s `mkLt` d)
-        backwards = mkSignum s `mkEq` negone
-        i_p_m_t_s = i `mkAdd` mkMul m s
-        m = n `mkSub` one
-        n = (j `mkSub` i) `mkDivRound` s
+      inBounds d i
+    check d (DimSlice Nothing (Just j) Nothing) = do
+      d' <- toSoPNum_ d
+      j' <- toSoPNum_ j
+      j' $<=$ d'
+    check _ (DimSlice Nothing Nothing (Just stride)) = do
+      stride' <- toSoPNum_ stride
+      stride' $/=$ zeroSoP
+    check d (DimSlice (Just i) Nothing (Just s)) = do
+      s' <- toSoPNum_ s
+      andM
+        [ inBounds d i,
+          zeroSoP $<=$ s'
+        ]
+    check d (DimSlice Nothing (Just j) (Just s)) = do
+      d' <- toSoPNum_ d
+      j' <- toSoPNum_ j
+      s' <- toSoPNum_ s
+      andM
+        [ j' $<=$ d',
+          zeroSoP $<=$ s'
+        ]
+    check d (DimSlice (Just i) (Just j) (Just s)) = do
+      d' <- toSoPNum_ d
+      i' <- toSoPNum_ i
+      j' <- toSoPNum_ j
+      s' <- toSoPNum_ s
+      let nonzero_stride = s' $/=$ zeroSoP
+          ok_or_empty = n $==$ zeroSoP ^|| slice_ok
+          slice_ok = backwards ^&& backwards_ok ^|| forwards_ok
+          backwards_ok =
+            andM
+              [ int2SoP (-1) $<=$ j',
+                j' $<=$ i',
+                zeroSoP $<=$ i_p_m_t_s,
+                i_p_m_t_s $<=$ d'
+              ]
+          forwards_ok =
+            andM
+              [ zeroSoP $<=$ i',
+                i' $<=$ j',
+                zeroSoP $<=$ i_p_m_t_s,
+                i_p_m_t_s $<$ d'
+              ]
+          backwards = fromJust (signumSoP s') $==$ int2SoP (-1)
+          i_p_m_t_s = i' .+. m .*. s'
+          m = n .-. int2SoP 1
+          n = fromJust $ (j' .-. i') `divSoPInt` s'
+      andM
+        [ nonzero_stride,
+          ok_or_empty
+        ]
 considerSlice t _ = error $ "considerSlice: not an array " <> show t
 
 mkUnsafe :: Exp -> Exp

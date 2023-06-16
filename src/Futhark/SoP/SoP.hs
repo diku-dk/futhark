@@ -18,6 +18,8 @@ module Futhark.SoP.SoP
     (.*.),
     divSoPs,
     (./.),
+    divSoPInt,
+    signumSoP,
     factorSoP,
     numTerms,
     justSym,
@@ -299,6 +301,15 @@ divSoPs (SoP x) (SoP q_sop)
 (./.) = divSoPs
 
 infixl 7 ./.
+
+-- | Integer division of 'SoP's. Both 'SoP's must be constants.
+divSoPInt :: Ord u => SoP u -> SoP u -> Maybe (SoP u)
+divSoPInt x y =
+  int2SoP <$> (div <$> justConstant x <*> justConstant y)
+
+-- | Sign of a constant 'SoP'.
+signumSoP :: Ord u => SoP u -> Maybe (SoP u)
+signumSoP = fmap (int2SoP . signum) . justConstant
 
 --------------------------------------------------------------------------------
 -- SoP queries

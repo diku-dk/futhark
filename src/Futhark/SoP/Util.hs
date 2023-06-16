@@ -9,6 +9,10 @@ module Futhark.SoP.Util
     localS,
     type (>=),
     type (==),
+    (^&&),
+    (^||),
+    andM,
+    orM,
   )
 where
 
@@ -22,6 +26,22 @@ ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM mb mt mf = do
   b <- mb
   if b then mt else mf
+
+(^&&) :: Monad m => m Bool -> m Bool -> m Bool
+x ^&& y = ifM x y (pure False)
+
+infixr 3 ^&&
+
+(^||) :: Monad m => m Bool -> m Bool -> m Bool
+x ^|| y = ifM x (pure True) y
+
+infixr 2 ^||
+
+andM :: (Monad m, Foldable t) => t (m Bool) -> m Bool
+andM = allM id
+
+orM :: (Monad m, Foldable t) => t (m Bool) -> m Bool
+orM = anyM id
 
 anyM :: (Monad m, Foldable t) => (a -> m Bool) -> t a -> m Bool
 anyM p = foldr (\a b -> ifM (p a) (pure True) b) (pure False)

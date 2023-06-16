@@ -5,6 +5,8 @@
 module Futhark.SoP.Convert
   ( FromSoP (..),
     ToSoP (..),
+    toSoPNum_,
+    toSoPCmp_,
   )
 where
 
@@ -22,6 +24,12 @@ import Language.Futhark.Core
 import Language.Futhark.Prop
 import Language.Futhark.Syntax (VName)
 import Language.Futhark.Syntax qualified as E
+
+toSoPNum_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u)
+toSoPNum_ e = snd <$> toSoPNum e
+
+toSoPCmp_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u >= 0)
+toSoPCmp_ e = snd <$> toSoPNum e
 
 -- | Conversion from 'SoP's to other representations.
 class FromSoP u a where
@@ -51,6 +59,11 @@ class ToSoP u e where
   -- | Translates a 'PrimExp' containing a (top-level) comparison
   -- operator into a 'SoP' representation such that @sop >= 0@.
   toSoPCmp :: MonadSoP u e m => e -> m (Integer, SoP u >= 0)
+
+instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Integer where
+  toSoPNum x = pure (1, int2SoP x)
+
+  toSoPCmp x = pure (1, int2SoP x)
 
 instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u (PrimExp u) where
   toSoPNum primExp = do
@@ -186,11 +199,10 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Exp where
         E.SignedValue x -> int2SoP $ PE.valueIntegral x
         E.UnsignedValue x -> int2SoP $ PE.valueIntegral x
         _ -> error ""
+  toSoPNum (E.IntLit v _ _) = pure (1, int2SoP v)
   toSoPNum e = do
     x <- lookupUntransPE e
     pure (1, sym2SoP x)
-
-  -- expToPrimExp (IntLit v (Info t) _) =
 
   toSoPCmp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
     | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
@@ -205,6 +217,7 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Exp where
             E.Leq -> pure $ y .-. x
             E.Greater -> pure $ x .-. (y .+. int2SoP 1)
             E.Geq -> pure $ x .-. y
+            bop -> error $ "toSoPCmp: " <> prettyString bop
 
 --
 -- {--

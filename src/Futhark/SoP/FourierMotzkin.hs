@@ -27,6 +27,7 @@ module Futhark.SoP.FourierMotzkin
     ($>$),
     ($>=$),
     ($==$),
+    ($/=$),
   )
 where
 
@@ -125,3 +126,6 @@ x $>=$ y = fmSolveGEq0 $ x .-. y
 
 ($==$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
 x $==$ y = (&&) <$> (x $<=$ y) <*> (x $>=$ y)
+
+($/=$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
+x $/=$ y = (||) <$> (x $<$ y) <*> (x $>$ y)
