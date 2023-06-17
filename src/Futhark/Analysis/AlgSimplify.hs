@@ -27,7 +27,7 @@ import Data.Maybe (mapMaybe)
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Prop.Names
-import Futhark.IR.Syntax.Core
+import Futhark.IR.Syntax.Core (SubExp (..), VName)
 import Futhark.Util
 import Futhark.Util.Pretty
 import Prelude hiding (negate)
