@@ -3,7 +3,6 @@ module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
     subtypeOf,
-    subuniqueOf,
     returnType,
     addAliasesFromType,
     checkForDuplicateNames,
