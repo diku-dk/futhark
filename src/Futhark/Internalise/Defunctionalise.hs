@@ -242,6 +242,36 @@ runDefM src (DefM m) =
 addValBind :: ValBind -> DefM ()
 addValBind vb = modify $ first (vb :)
 
+-- | Create a new top-level value declaration with the given function name,
+-- return type, list of parameters, and body expression.
+liftValDec :: VName -> StructRetType -> [VName] -> [Pat] -> Exp -> DefM ()
+liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
+  where
+    dims' = map (`TypeParamDim` mempty) dims
+    -- FIXME: this pass is still not correctly size-preserving, so
+    -- forget those return sizes that we forgot to propagate along
+    -- the way.  Hopefully the internaliser is conservative and
+    -- will insert reshapes...
+    bound_here = S.fromList dims <> S.map identName (foldMap patIdents pats)
+    mkExt v
+      | not $ v `S.member` bound_here = Just v
+    mkExt _ = Nothing
+    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
+
+    dec =
+      ValBind
+        { valBindEntryPoint = Nothing,
+          valBindName = fname,
+          valBindRetDecl = Nothing,
+          valBindRetType = Info rettype_st,
+          valBindTypeParams = dims',
+          valBindParams = pats,
+          valBindBody = body,
+          valBindDoc = Nothing,
+          valBindAttrs = mempty,
+          valBindLocation = mempty
+        }
+
 -- | Looks up the associated static value for a given name in the environment.
 lookupVar :: StructType -> VName -> DefM StaticVal
 lookupVar t x = do
@@ -1028,36 +1058,6 @@ envFromDimNames :: [VName] -> Env
 envFromDimNames = M.fromList . flip zip (repeat d)
   where
     d = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
-
--- | Create a new top-level value declaration with the given function name,
--- return type, list of parameters, and body expression.
-liftValDec :: VName -> StructRetType -> [VName] -> [Pat] -> Exp -> DefM ()
-liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
-  where
-    dims' = map (`TypeParamDim` mempty) dims
-    -- FIXME: this pass is still not correctly size-preserving, so
-    -- forget those return sizes that we forgot to propagate along
-    -- the way.  Hopefully the internaliser is conservative and
-    -- will insert reshapes...
-    bound_here = S.fromList dims <> S.map identName (foldMap patIdents pats)
-    mkExt v
-      | not $ v `S.member` bound_here = Just v
-    mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
-
-    dec =
-      ValBind
-        { valBindEntryPoint = Nothing,
-          valBindName = fname,
-          valBindRetDecl = Nothing,
-          valBindRetType = Info rettype_st,
-          valBindTypeParams = dims',
-          valBindParams = pats,
-          valBindBody = body,
-          valBindDoc = Nothing,
-          valBindAttrs = mempty,
-          valBindLocation = mempty
-        }
 
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.  Insert wildcard for any patterns
