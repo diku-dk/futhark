@@ -2,7 +2,6 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
-    subtypeOf,
     returnType,
     addAliasesFromType,
     checkForDuplicateNames,
@@ -28,7 +27,6 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (find, foldl', sort, unzip4, (\\))
 import Data.Map.Strict qualified as M
-import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty
@@ -138,83 +136,6 @@ addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
 addAliasesFromType (Scalar (Prim t)) _ = Scalar $ Prim t
 addAliasesFromType t1 t2 =
   error $ "addAliasesFromType invalid args: " ++ show (t1, t2)
-
--- | @unifyTypes uf t1 t2@ attempts to unify @t1@ and @t2@.  If
--- unification cannot happen, 'Nothing' is returned, otherwise a type
--- that combines the aliasing of @t1@ and @t2@ is returned.
--- Uniqueness is unified with @uf@.  Assumes sizes already match, and
--- always picks the size of the leftmost type.
-unifyTypesU ::
-  (Monoid als) =>
-  (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
-  TypeBase dim als ->
-  TypeBase dim als ->
-  Maybe (TypeBase dim als)
-unifyTypesU uf (Array als1 u1 shape1 et1) (Array als2 u2 _shape2 et2) =
-  Array (als1 <> als2)
-    <$> uf u1 u2
-    <*> pure shape1
-    <*> unifyScalarTypes uf et1 et2
-unifyTypesU uf (Scalar t1) (Scalar t2) = Scalar <$> unifyScalarTypes uf t1 t2
-unifyTypesU _ _ _ = Nothing
-
-unifyScalarTypes ::
-  (Monoid als) =>
-  (Uniqueness -> Uniqueness -> Maybe Uniqueness) ->
-  ScalarTypeBase dim als ->
-  ScalarTypeBase dim als ->
-  Maybe (ScalarTypeBase dim als)
-unifyScalarTypes _ (Prim t1) (Prim t2)
-  | t1 == t2 = Just $ Prim t1
-  | otherwise = Nothing
-unifyScalarTypes uf (TypeVar als1 u1 tv1 targs1) (TypeVar als2 u2 tv2 targs2)
-  | tv1 == tv2 = do
-      u3 <- uf u1 u2
-      targs3 <- zipWithM unifyTypeArgs targs1 targs2
-      Just $ TypeVar (als1 <> als2) u3 tv1 targs3
-  | otherwise = Nothing
-  where
-    unifyTypeArgs (TypeArgDim d1) (TypeArgDim _d2) =
-      pure $ TypeArgDim d1
-    unifyTypeArgs (TypeArgType t1) (TypeArgType t2) =
-      TypeArgType <$> unifyTypesU uf t1 t2
-    unifyTypeArgs _ _ =
-      Nothing
-unifyScalarTypes uf (Record ts1) (Record ts2)
-  | length ts1 == length ts2,
-    sort (M.keys ts1) == sort (M.keys ts2) =
-      Record
-        <$> traverse
-          (uncurry (unifyTypesU uf))
-          (M.intersectionWith (,) ts1 ts2)
-unifyScalarTypes
-  uf
-  (Arrow as1 mn1 d1 t1 (RetType dims1 t1'))
-  (Arrow as2 _ _ t2 (RetType _ t2')) =
-    Arrow (as1 <> as2) mn1 d1
-      <$> unifyTypesU (flip uf) t1 t2
-      <*> (RetType dims1 <$> unifyTypesU uf t1' t2')
-unifyScalarTypes uf (Sum cs1) (Sum cs2)
-  | length cs1 == length cs2,
-    sort (M.keys cs1) == sort (M.keys cs2) =
-      Sum
-        <$> traverse
-          (uncurry (zipWithM (unifyTypesU uf)))
-          (M.intersectionWith (,) cs1 cs2)
-unifyScalarTypes _ _ _ = Nothing
-
--- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal
--- to @y@), meaning @x@ is valid whenever @y@ is.  Ignores sizes.
--- Mostly used for checking uniqueness.
-subtypeOf :: TypeBase () () -> TypeBase () () -> Bool
-subtypeOf t1 t2 = isJust $ unifyTypesU unifyUniqueness (toStruct t1) (toStruct t2)
-  where
-    unifyUniqueness u2 u1 = if u2 `subuniqueOf` u1 then Just u1 else Nothing
-
--- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
-subuniqueOf :: Uniqueness -> Uniqueness -> Bool
-subuniqueOf Nonunique Unique = False
-subuniqueOf _ _ = True
 
 -- | Ensure that the dimensions of the RetType are unique by
 -- generating new names for them.  This is to avoid name capture.
