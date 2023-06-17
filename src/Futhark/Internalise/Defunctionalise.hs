@@ -15,7 +15,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
@@ -817,20 +817,23 @@ defuncLet _ [] body (RetType _ rettype) = do
       RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
     imposeType sv _ = sv
 
-sizesForAll :: MonadFreshNames m => S.Set VName -> [Pat] -> m ([VName], [Pat])
-sizesForAll bound_sizes params = do
-  (params', sizes) <- runStateT (mapM (astMap tv) params) mempty
-  pure (S.toList sizes, params')
+instAnySizes :: MonadFreshNames m => [Pat] -> m [Pat]
+instAnySizes = mapM (astMap tv)
   where
-    bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim d
       | d == anySize = do
-          v <- lift $ newVName "size"
-          modify $ S.insert v
+          v <- newVName "size"
           pure $ sizeFromName (qualName v) mempty
+    onDim d = pure d
+
+unboundSizes :: S.Set VName -> [Pat] -> [VName]
+unboundSizes bound_sizes params = nubOrd $ execState (mapM (astMap tv) params) []
+  where
+    bound = bound_sizes <> foldMap patNames params
+    tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (Var d typ loc) = do
-      unless (qualLeaf d `S.member` bound) $ modify $ S.insert $ qualLeaf d
+      unless (qualLeaf d `S.member` bound) $ modify (qualLeaf d :)
       pure $ Var d typ loc
     onDim d = pure d
 
@@ -866,9 +869,9 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           -- first-order.
           globals <- asks fst
           let bound_sizes = S.fromList dims' <> globals
-          (missing_dims, pats') <- sizesForAll bound_sizes pats
+          pats' <- instAnySizes pats
 
-          liftValDec fname (RetType [] $ toStruct rettype) (dims' ++ missing_dims) pats' e0
+          liftValDec fname (RetType [] $ toStruct rettype) (dims' ++ unboundSizes bound_sizes pats') pats' e0
           pure
             ( Var
                 (qualName fname)
@@ -935,13 +938,13 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   -- expects this.  This is easy, because they are all
   -- first-order.
   let bound_sizes = S.fromList (dims <> more_dims) <> globals
-  (missing_dims, params') <- sizesForAll bound_sizes params
+  params' <- instAnySizes params
 
   fname <- newNameFromString fname_s
   liftValDec
     fname
     (second (const ()) lifted_rettype)
-    (dims ++ more_dims ++ missing_dims)
+    (dims ++ more_dims ++ unboundSizes bound_sizes params')
     params'
     lam_e'
 
@@ -1283,7 +1286,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
         -- the types in the return type annotation.
         combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
       ret_dims' = filter (`M.member` (unFV $ freeInType rettype')) ret_dims
-  (missing_dims, params'') <- sizesForAll bound_sizes params'
+  params'' <- instAnySizes params'
 
   pure
     ( valbind
@@ -1294,7 +1297,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
                 then RetType ret_dims' $ rettype' `setUniqueness` Nonunique
                 else RetType ret_dims' rettype',
           valBindTypeParams =
-            map (`TypeParamDim` mempty) $ tparams' ++ missing_dims,
+            map (`TypeParamDim` mempty) $ tparams' ++ unboundSizes bound_sizes params'',
           valBindParams = params'',
           valBindBody = body'
         },
