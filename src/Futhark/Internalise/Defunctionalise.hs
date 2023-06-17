@@ -364,6 +364,50 @@ sizesToRename (LambdaSV param _ _ _) =
     couldBeSize ident =
       unInfo (identType ident) == Scalar (Prim (Signed Int64))
 
+-- | Combine the shape information of types as much as possible. The first
+-- argument is the orignal type and the second is the type of the transformed
+-- expression. This is necessary since the original type may contain additional
+-- information (e.g., shape restrictions) from the user given annotation.
+combineTypeShapes ::
+  (Monoid as) =>
+  TypeBase Size as ->
+  TypeBase Size as ->
+  TypeBase Size as
+combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
+  | M.keys ts1 == M.keys ts2 =
+      Scalar $
+        Record $
+          M.map
+            (uncurry combineTypeShapes)
+            (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 =
+      Scalar $
+        Sum $
+          M.map
+            (uncurry $ zipWith combineTypeShapes)
+            (M.intersectionWith (,) cs1 cs2)
+combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arrow als2 _p2 _d2 a2 (RetType _ b2))) =
+  Scalar $
+    Arrow
+      (als1 <> als2)
+      p1
+      d1
+      (combineTypeShapes a1 a2)
+      (RetType dims1 (combineTypeShapes b1 b2))
+combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
+  Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
+  where
+    f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
+    f targ _ = targ
+combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
+  arrayOfWithAliases
+    (als1 <> als2)
+    u1
+    shape1
+    (combineTypeShapes (Scalar et1) (Scalar et2) `setAliases` mempty)
+combineTypeShapes _ new_tp = new_tp
+
 -- When we instantiate a polymorphic StaticVal, we rename all the
 -- sizes to avoid name conflicts later on.  This is a bit of a hack...
 instStaticVal ::
