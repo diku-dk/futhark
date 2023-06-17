@@ -830,10 +830,7 @@ sizesForAll bound_sizes params = do
           modify $ S.insert v
           pure $ sizeFromName (qualName v) mempty
     onDim (Var d typ loc) = do
-      unless (qualLeaf d `S.member` bound) $
-        modify $
-          S.insert $
-            qualLeaf d
+      unless (qualLeaf d `S.member` bound) $ modify $ S.insert $ qualLeaf d
       pure $ Var d typ loc
     onDim d = pure d
 
