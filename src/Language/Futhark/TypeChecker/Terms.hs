@@ -1167,11 +1167,6 @@ checkApply
       checkIfConsumable loc $ mconcat arg_consumed
       occur $ dflow `seqOccurrences` map (`consumption` argloc) arg_consumed
 
-      -- Unification ignores uniqueness in higher-order arguments, so
-      -- we check for that here.
-      unless (toStructural argtype' `subtypeOf` setUniqueness (toStructural tp1') Nonunique) $
-        typeError loc mempty "Difference in whether argument is consumed."
-
       (argext, parsubst) <-
         case pname of
           Named pname'
