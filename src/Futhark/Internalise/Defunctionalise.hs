@@ -1279,14 +1279,10 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
   globals <- asks fst
   let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
-      rettype' =
-        -- FIXME: dubious that we cannot assume that all sizes in the
-        -- body are in scope.  This is because when we insert
-        -- applications of lifted functions, we don't properly update
-        -- the types in the return type annotation.
-        combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`M.member` (unFV $ freeInType rettype')) ret_dims
   params'' <- instAnySizes params'
+  let rettype' = combineTypeShapes rettype $ toStruct $ typeOf body'
+      tparams'' = tparams' ++ unboundSizes bound_sizes params''
+      ret_dims' = filter (`notElem` bound_sizes) $ S.toList $ fvVars $ freeInType rettype'
 
   pure
     ( valbind
@@ -1296,8 +1292,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
               if null params'
                 then RetType ret_dims' $ rettype' `setUniqueness` Nonunique
                 else RetType ret_dims' rettype',
-          valBindTypeParams =
-            map (`TypeParamDim` mempty) $ tparams' ++ unboundSizes bound_sizes params'',
+          valBindTypeParams = map (`TypeParamDim` mempty) tparams'',
           valBindParams = params'',
           valBindBody = body'
         },
@@ -1306,10 +1301,6 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           (Just (first (map typeParamName) (valBindTypeScheme valbind)))
           sv
     )
-  where
-    anyDimIfNotBound bound_sizes (Var v _ _)
-      | qualLeaf v `S.notMember` bound_sizes = anySize
-    anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()
