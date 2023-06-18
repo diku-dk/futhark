@@ -64,6 +64,12 @@ infixr 3 :&&:
 
 infixr 2 :||:
 
+andC :: [Constraint] -> Constraint
+andC = foldr1 (:&&:)
+
+orC :: [Constraint] -> Constraint
+orC = foldr1 (:||:)
+
 instance Pretty Constraint where
   pretty c =
     case c of
@@ -112,7 +118,10 @@ considerSlice (Array _ _ (Shape ds) _) is =
   where
     inBounds :: SoP VName -> SoP VName -> Constraint
     inBounds d' i' =
-      zeroSoP :<=: i' :&&: i' :<: d'
+      andC
+        [ zeroSoP :<=: i',
+          i' :<: d'
+        ]
     check :: Size -> DimIndexBase Info VName -> RefineM Bool
     check _ (DimSlice Nothing Nothing Nothing) =
       pure True
@@ -126,11 +135,11 @@ considerSlice (Array _ _ (Shape ds) _) is =
       start' <- toSoPNum_ start
       end' <- toSoPNum_ end
       mustBeTrue (locOf start) $
-        inBounds d' start'
-          :&&: end'
-          :<=: d'
-          :&&: start'
-          :<=: end'
+        andC
+          [ inBounds d' start',
+            end' :<=: d',
+            start' :<=: end'
+          ]
     check d (DimSlice (Just i) Nothing Nothing) = do
       d' <- toSoPNum_ d
       i' <- toSoPNum_ i
@@ -150,18 +159,19 @@ considerSlice (Array _ _ (Shape ds) _) is =
       i' <- toSoPNum_ i
       s' <- toSoPNum_ s
       mustBeTrue (locOf i) $
-        inBounds d' i'
-          :&&: zeroSoP
-          :<=: s'
+        andC
+          [ inBounds d' i',
+            zeroSoP :<=: s'
+          ]
     check d (DimSlice Nothing (Just j) (Just s)) = do
       d' <- toSoPNum_ d
       j' <- toSoPNum_ j
       s' <- toSoPNum_ s
       mustBeTrue (locOf j) $
-        j'
-          :<=: d'
-          :&&: zeroSoP
-          :<=: s'
+        andC
+          [ j' :<=: d',
+            zeroSoP :<=: s'
+          ]
     check d (DimSlice (Just i) (Just j) (Just s)) = do
       d' <- toSoPNum_ d
       i' <- toSoPNum_ i
@@ -171,23 +181,19 @@ considerSlice (Array _ _ (Shape ds) _) is =
           ok_or_empty = n :==: zeroSoP :||: slice_ok
           slice_ok = backwards :&&: backwards_ok :||: forwards_ok
           backwards_ok =
-            int2SoP (-1)
-              :<=: j'
-              :&&: j'
-              :<=: i'
-              :&&: zeroSoP
-              :<=: i_p_m_t_s
-              :&&: i_p_m_t_s
-              :<=: d'
+            andC
+              [ int2SoP (-1) :<=: j',
+                j' :<=: i',
+                zeroSoP :<=: i_p_m_t_s,
+                i_p_m_t_s :<=: d'
+              ]
           forwards_ok =
-            zeroSoP
-              :<=: i'
-              :&&: i'
-              :<=: j'
-              :&&: zeroSoP
-              :<=: i_p_m_t_s
-              :&&: i_p_m_t_s
-              :<: d'
+            andC
+              [ zeroSoP :<=: i',
+                i' :<=: j',
+                zeroSoP :<=: i_p_m_t_s,
+                i_p_m_t_s :<: d'
+              ]
           backwards = fromJust (signumSoP s') :==: int2SoP (-1)
           i_p_m_t_s = i' .+. m .*. s'
           m = n .-. int2SoP 1
