@@ -994,7 +994,6 @@ defCompileBasicOp (Pat [pe]) (Rotate rs arr) = do
     is' <- sequence $ zipWith3 rotate (shapeDims shape) (map pe64 rs) is
     copyDWIMFix (patElemName pe) is (Var arr) is'
   where
-    rotate _ 0 i = pure i
     rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) r i
 defCompileBasicOp _ Reshape {} =
   pure ()
@@ -1762,6 +1761,7 @@ rotateIndex ::
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
   Imp.TExp Int64
+rotateIndex _ 0 i = i
 rotateIndex d r i = (i + r) `mod` d
 
 sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
