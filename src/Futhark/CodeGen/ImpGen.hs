@@ -991,10 +991,11 @@ defCompileBasicOp _ Rearrange {} =
 defCompileBasicOp (Pat [pe]) (Rotate rs arr) = do
   shape <- arrayShape <$> lookupType arr
   sLoopNest shape $ \is -> do
-    is' <- sequence $ zipWith3 rotate (shapeDims shape) rs is
+    is' <- sequence $ zipWith3 rotate (shapeDims shape) (map pe64 rs) is
     copyDWIMFix (patElemName pe) is (Var arr) is'
   where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) (pe64 r) i
+    rotate _ 0 i = pure i
+    rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) r i
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
