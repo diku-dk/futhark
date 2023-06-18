@@ -52,7 +52,6 @@ import Futhark.Internalise.FullNormalise qualified as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.Monomorphise as Monomorphise
-import Futhark.Internalise.Refinement as Refinement
 import Futhark.Util.Log
 import Language.Futhark.Semantic (Imports)
 
@@ -64,10 +63,8 @@ internaliseProg ::
   Imports ->
   m (I.Prog SOACS)
 internaliseProg config prog = do
-  maybeLog "Refinement checking"
-  prog' <- Refinement.transformProg prog
   maybeLog "Defunctorising"
-  prog_decs <- Defunctorise.transformProg prog'
+  prog_decs <- Defunctorise.transformProg prog
   maybeLog "Full Normalising"
   prog_decs' <- FullNormalise.transformProg prog_decs
   maybeLog "Monomorphising"

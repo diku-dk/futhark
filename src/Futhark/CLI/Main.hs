@@ -29,6 +29,7 @@ import Futhark.CLI.PyOpenCL qualified as PyOpenCL
 import Futhark.CLI.Python qualified as Python
 import Futhark.CLI.Query qualified as Query
 import Futhark.CLI.REPL qualified as REPL
+import Futhark.CLI.Refinement qualified as Refinement
 import Futhark.CLI.Run qualified as Run
 import Futhark.CLI.Test qualified as Test
 import Futhark.CLI.WASM qualified as WASM
@@ -69,6 +70,7 @@ commands =
       ("doc", (Doc.main, "Generate documentation for Futhark code.")),
       ("pkg", (Pkg.main, "Manage local packages.")),
       ("check", (Check.main, "Type-check a program.")),
+      ("refinement", (Refinement.main, "Perform refinement checking.")),
       ("check-syntax", (Misc.mainCheckSyntax, "Syntax-check a program.")),
       ("imports", (Misc.mainImports, "Print all non-builtin imported Futhark files.")),
       ("hash", (Misc.mainHash, "Print hash of program AST.")),
