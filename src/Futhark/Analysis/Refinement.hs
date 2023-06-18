@@ -1,4 +1,4 @@
-module Futhark.Analysis.Refinement (refineProg, refineProg_) where
+module Futhark.Analysis.Refinement (refineProg) where
 
 import Control.Monad
 import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWS, asks, lift, runRWS)
@@ -23,108 +23,178 @@ import Language.Futhark.Semantic hiding (Env)
 type Env = ()
 
 newtype RefineM a
-  = RefineM (SoPMT VName Exp (RWS Env () VNameSource) a)
+  = RefineM (SoPMT VName Exp (RWS Env [String] VNameSource) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader Env,
-      MonadSoP VName Exp
+      MonadSoP VName Exp,
+      MonadWriter [String]
     )
 
 instance MonadFreshNames RefineM where
   getNameSource = RefineM $ getNameSource
   putNameSource = RefineM . putNameSource
 
+data Constraint
+  = (:<:) (SoP VName) (SoP VName)
+  | (:<=:) (SoP VName) (SoP VName)
+  | (:>:) (SoP VName) (SoP VName)
+  | (:>=:) (SoP VName) (SoP VName)
+  | (:==:) (SoP VName) (SoP VName)
+  | (:/=:) (SoP VName) (SoP VName)
+  | (:&&:) Constraint Constraint
+  | (:||:) Constraint Constraint
+  deriving (Show)
+
+infixr 4 :<:
+
+infixr 4 :<=:
+
+infixr 4 :>:
+
+infixr 4 :>=:
+
+infixr 4 :==:
+
+infixr 4 :/=:
+
+infixr 3 :&&:
+
+infixr 2 :||:
+
+instance Pretty Constraint where
+  pretty c =
+    case c of
+      x :<: y -> op "<" x y
+      x :<=: y -> op "<=" x y
+      x :>: y -> op ">" x y
+      x :>=: y -> op ">=" x y
+      x :==: y -> op "==" x y
+      x :/=: y -> op "/=" x y
+      x :&&: y -> op "&&" x y
+      x :||: y -> op "||" x y
+    where
+      op s x y = pretty x <+> s <+> pretty y
+
+checkConstraint :: Constraint -> RefineM Bool
+checkConstraint (x :<: y) = x $<$ y
+checkConstraint (x :<=: y) = x $<=$ y
+checkConstraint (x :>: y) = x $>$ y
+checkConstraint (x :>=: y) = x $>=$ y
+checkConstraint (x :==: y) = x $==$ y
+checkConstraint (x :/=: y) = x $/=$ y
+checkConstraint (x :&&: y) = checkConstraint x ^&& checkConstraint y
+checkConstraint (x :||: y) = checkConstraint x ^|| checkConstraint y
+
+mustBeTrue :: Loc -> Constraint -> RefineM Bool
+mustBeTrue loc c = do
+  b <- checkConstraint c
+  unless b $
+    tell
+      [prettyString (locText loc) <> ": " <> prettyString c]
+  pure b
+
 checkExp :: Exp -> RefineM Bool
 checkExp e = do
   (_, sop) <- toSoPCmp e
   sop $>=$ zeroSoP
 
-runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName Exp, VNameSource)
+runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName Exp, VNameSource, [String])
 runRefineM src (RefineM m) =
-  let ((a, algenv), src', _) = runRWS (runSoPMT_ m) mempty src
-   in (a, algenv, src')
+  let ((a, algenv), src', w) = runRWS (runSoPMT_ m) mempty src
+   in (a, algenv, src', w)
 
 considerSlice :: PatType -> Slice -> RefineM Bool
 considerSlice (Array _ _ (Shape ds) _) is =
   and <$> zipWithM check ds is
   where
-    inBounds :: Exp -> Exp -> RefineM Bool
-    inBounds d i = do
-      d' <- toSoPNum_ d
-      i' <- toSoPNum_ i
-      andM
-        [ zeroSoP $<=$ i',
-          i' $<$ d'
-        ]
+    inBounds :: SoP VName -> SoP VName -> Constraint
+    inBounds d' i' =
+      zeroSoP :<=: i' :&&: i' :<: d'
     check :: Size -> DimIndexBase Info VName -> RefineM Bool
     check _ (DimSlice Nothing Nothing Nothing) =
       pure True
-    check d (DimFix i) =
-      inBounds d i
+    check d (DimFix i) = do
+      d' <- toSoPNum_ d
+      i' <- toSoPNum_ i
+      mustBeTrue (locOf i) $
+        inBounds d' i'
     check d (DimSlice (Just start) (Just end) Nothing) = do
       d' <- toSoPNum_ d
       start' <- toSoPNum_ start
       end' <- toSoPNum_ end
-      andM
-        [ inBounds d start,
-          end' $<=$ d',
-          start' $<=$ end'
-        ]
-    check d (DimSlice (Just i) Nothing Nothing) =
-      inBounds d i
+      mustBeTrue (locOf start) $
+        inBounds d' start'
+          :&&: end'
+          :<=: d'
+          :&&: start'
+          :<=: end'
+    check d (DimSlice (Just i) Nothing Nothing) = do
+      d' <- toSoPNum_ d
+      i' <- toSoPNum_ i
+      mustBeTrue (locOf i) $
+        inBounds d' i'
     check d (DimSlice Nothing (Just j) Nothing) = do
       d' <- toSoPNum_ d
       j' <- toSoPNum_ j
-      j' $<=$ d'
+      mustBeTrue (locOf j) $
+        j' :<=: d'
     check _ (DimSlice Nothing Nothing (Just stride)) = do
       stride' <- toSoPNum_ stride
-      stride' $/=$ zeroSoP
+      mustBeTrue (locOf stride) $
+        stride' :/=: zeroSoP
     check d (DimSlice (Just i) Nothing (Just s)) = do
+      d' <- toSoPNum_ d
+      i' <- toSoPNum_ i
       s' <- toSoPNum_ s
-      andM
-        [ inBounds d i,
-          zeroSoP $<=$ s'
-        ]
+      mustBeTrue (locOf i) $
+        inBounds d' i'
+          :&&: zeroSoP
+          :<=: s'
     check d (DimSlice Nothing (Just j) (Just s)) = do
       d' <- toSoPNum_ d
       j' <- toSoPNum_ j
       s' <- toSoPNum_ s
-      andM
-        [ j' $<=$ d',
-          zeroSoP $<=$ s'
-        ]
+      mustBeTrue (locOf j) $
+        j'
+          :<=: d'
+          :&&: zeroSoP
+          :<=: s'
     check d (DimSlice (Just i) (Just j) (Just s)) = do
       d' <- toSoPNum_ d
       i' <- toSoPNum_ i
       j' <- toSoPNum_ j
       s' <- toSoPNum_ s
-      let nonzero_stride = s' $/=$ zeroSoP
-          ok_or_empty = n $==$ zeroSoP ^|| slice_ok
-          slice_ok = backwards ^&& backwards_ok ^|| forwards_ok
+      let nonzero_stride = s' :/=: zeroSoP
+          ok_or_empty = n :==: zeroSoP :||: slice_ok
+          slice_ok = backwards :&&: backwards_ok :||: forwards_ok
           backwards_ok =
-            andM
-              [ int2SoP (-1) $<=$ j',
-                j' $<=$ i',
-                zeroSoP $<=$ i_p_m_t_s,
-                i_p_m_t_s $<=$ d'
-              ]
+            int2SoP (-1)
+              :<=: j'
+              :&&: j'
+              :<=: i'
+              :&&: zeroSoP
+              :<=: i_p_m_t_s
+              :&&: i_p_m_t_s
+              :<=: d'
           forwards_ok =
-            andM
-              [ zeroSoP $<=$ i',
-                i' $<=$ j',
-                zeroSoP $<=$ i_p_m_t_s,
-                i_p_m_t_s $<$ d'
-              ]
-          backwards = fromJust (signumSoP s') $==$ int2SoP (-1)
+            zeroSoP
+              :<=: i'
+              :&&: i'
+              :<=: j'
+              :&&: zeroSoP
+              :<=: i_p_m_t_s
+              :&&: i_p_m_t_s
+              :<: d'
+          backwards = fromJust (signumSoP s') :==: int2SoP (-1)
           i_p_m_t_s = i' .+. m .*. s'
           m = n .-. int2SoP 1
           n = fromJust $ (j' .-. i') `divSoPInt` s'
-      andM
-        [ nonzero_stride,
-          ok_or_empty
-        ]
+      mustBeTrue (locOf i) $
+        nonzero_stride
+          :&&: ok_or_empty
 considerSlice t _ = error $ "considerSlice: not an array " <> show t
 
 mkUnsafe :: Exp -> Exp
@@ -144,7 +214,8 @@ refineExp e@(AppExp (Index arr slice loc) res) = do
   let e' = AppExp (Index arr' slice loc) res
   if b
     then pure $ mkUnsafe e'
-    else pure e'
+    else do
+      pure e'
 refineExp e = pure e
 
 refineValBind :: ValBind -> RefineM ValBind
@@ -162,10 +233,7 @@ refineImport (name, imp) = do
   decs <- mapM refineDec $ progDecs p
   pure $ (name, imp {fileProg = p {progDecs = decs}})
 
-refineProg :: MonadFreshNames m => Imports -> m Imports
-refineProg prog = modifyNameSource $ flip refineProg_ prog
-
-refineProg_ :: VNameSource -> Imports -> (Imports, VNameSource)
-refineProg_ namesrc prog =
-  let (prog', _, namesrc') = runRefineM namesrc $ mapM refineImport prog
-   in (prog', namesrc')
+refineProg :: VNameSource -> Imports -> (Imports, VNameSource, [String])
+refineProg namesrc prog =
+  let (prog', _, namesrc', ws) = runRefineM namesrc $ mapM refineImport prog
+   in (prog', namesrc', ws)

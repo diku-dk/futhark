@@ -35,6 +35,7 @@ where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer
 import Data.Map (Map)
 import Data.Map.Strict qualified as M
 import Data.Set (Set)
@@ -122,6 +123,11 @@ instance MonadReader r m => MonadReader r (SoPMT u e m) where
 instance MonadState s m => MonadState s (SoPMT u e m) where
   get = SoPMT $ lift get
   put = SoPMT . lift . put
+
+instance MonadWriter w m => MonadWriter w (SoPMT u e m) where
+  tell = SoPMT . lift . tell
+  listen (SoPMT m) = SoPMT $ listen m
+  pass (SoPMT m) = SoPMT $ pass m
 
 type SoPM u e = SoPMT u e (State VNameSource)
 

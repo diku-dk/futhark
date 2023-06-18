@@ -5,7 +5,7 @@ import Control.Monad.IO.Class
 import Futhark.Analysis.Refinement
 import Futhark.Compiler
 import Futhark.Util.Options
-import Futhark.Util.Pretty (hPutDoc, pretty, prettyString, vsep)
+import Futhark.Util.Pretty (hPutDoc, prettyString)
 import Language.Futhark.Warnings
 import System.IO
 
@@ -17,7 +17,7 @@ data RefineConfig = RefineConfig
   }
 
 newRefineConfig :: RefineConfig
-newRefineConfig = RefineConfig False True True False
+newRefineConfig = RefineConfig False True False False
 
 options :: [FunOptDescr RefineConfig]
 options =
@@ -53,7 +53,8 @@ main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
         liftIO $
           hPutDoc stderr $
             prettyWarnings warnings
-      let (imps', _) = refineProg_ vns imps
+      let (imps', _, ws) = refineProg vns imps
+      liftIO $ mapM_ putStrLn ws
       when (printProg cfg) $
         liftIO $
           forM_ (map snd imps') $ \fm ->
