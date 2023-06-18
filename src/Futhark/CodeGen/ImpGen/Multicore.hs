@@ -67,7 +67,6 @@ parallelRotate dest rs src = do
       is' <- dIndexSpace' "rep_i" ds i
       is'' <- sequence $ zipWith3 rotate ds rs is'
       copyDWIMFix dest is' (Var src) is''
-    rotate _ 0 i = pure i
     rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 topLevelOps, inThreadOps :: Operations MCMem HostEnv Imp.Multicore
