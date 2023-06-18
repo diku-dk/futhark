@@ -1418,6 +1418,7 @@ sRotateKernel dest rs src = do
       is'' <- sequence $ zipWith3 rotate ds rs is'
       copyDWIMFix dest is' (Var src) is''
   where
+    rotate _ 0 i = pure i
     rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 compileThreadResult ::
