@@ -546,8 +546,7 @@ matchMTys orig_mty orig_mty_sig =
       let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
           nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
       case doUnification loc spec_ps nonrigid (retType spec_t') (retType t) of
-        Right t'
-          | noSizes t' `subtypeOf` noSizes (retType spec_t') -> pure (spec_name, name)
+        Right _ -> pure (spec_name, name)
         _ -> nomatch spec_t'
       where
         nomatch spec_t' =
@@ -577,18 +576,15 @@ matchMTys orig_mty orig_mty_sig =
                 </> indent 2 (ppValBind (QualName quals spec_name) spec_v)
                 </> "but module provides"
                 </> indent 2 (ppValBind (QualName quals spec_name) v)
-                </> fromMaybe mempty problem
+                </> problem
 
-    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe (Doc ()))
+    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Doc ())
     matchValBinding loc (BoundV spec_tps orig_spec_t) (BoundV tps orig_t) = do
       case doUnification loc spec_tps tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
-          Just $ Just $ msg <> pretty notes
-        -- Even if they unify, we still have to verify the uniqueness
-        -- properties.
-        Right t
-          | noSizes t `subtypeOf` noSizes orig_spec_t -> Nothing
-          | otherwise -> Just Nothing
+          Just $ msg <> pretty notes
+        Right _ ->
+          Nothing
 
     ppValBind v (BoundV tps t) =
       "val"

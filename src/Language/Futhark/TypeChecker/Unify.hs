@@ -478,6 +478,13 @@ unifyWith onDims usage = subunify False
                     </> "and"
                     </> indent 2 (pretty d2 <> pretty a2)
                     </> "are incompatible regarding consuming their arguments."
+            | uncurry (<) $ swap ord (uniqueness b2) (uniqueness b1) -> do
+                unifyError usage mempty bcs . withIndexLink "unify-return-uniqueness" $
+                  "Return types"
+                    </> indent 2 (pretty d1 <> pretty b1)
+                    </> "and"
+                    </> indent 2 (pretty d2 <> pretty b2)
+                    </> "have incompatible uniqueness."
             | otherwise -> do
                 -- Introduce the existentials as size variables so they
                 -- are subject to unification.  We will remove them again

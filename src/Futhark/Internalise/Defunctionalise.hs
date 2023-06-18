@@ -15,7 +15,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
@@ -243,6 +243,36 @@ runDefM src (DefM m) =
 addValBind :: ValBind -> DefM ()
 addValBind vb = modify $ first (vb :)
 
+-- | Create a new top-level value declaration with the given function name,
+-- return type, list of parameters, and body expression.
+liftValDec :: VName -> StructRetType -> [VName] -> [Pat] -> Exp -> DefM ()
+liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
+  where
+    dims' = map (`TypeParamDim` mempty) dims
+    -- FIXME: this pass is still not correctly size-preserving, so
+    -- forget those return sizes that we forgot to propagate along
+    -- the way.  Hopefully the internaliser is conservative and
+    -- will insert reshapes...
+    bound_here = S.fromList dims <> S.map identName (foldMap patIdents pats)
+    mkExt v
+      | not $ v `S.member` bound_here = Just v
+    mkExt _ = Nothing
+    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
+
+    dec =
+      ValBind
+        { valBindEntryPoint = Nothing,
+          valBindName = fname,
+          valBindRetDecl = Nothing,
+          valBindRetType = Info rettype_st,
+          valBindTypeParams = dims',
+          valBindParams = pats,
+          valBindBody = body,
+          valBindDoc = Nothing,
+          valBindAttrs = mempty,
+          valBindLocation = mempty
+        }
+
 -- | Looks up the associated static value for a given name in the environment.
 lookupVar :: StructType -> VName -> DefM StaticVal
 lookupVar t x = do
@@ -335,6 +365,50 @@ sizesToRename (LambdaSV param _ _ _) =
   where
     couldBeSize ident =
       unInfo (identType ident) == Scalar (Prim (Signed Int64))
+
+-- | Combine the shape information of types as much as possible. The first
+-- argument is the orignal type and the second is the type of the transformed
+-- expression. This is necessary since the original type may contain additional
+-- information (e.g., shape restrictions) from the user given annotation.
+combineTypeShapes ::
+  (Monoid as) =>
+  TypeBase Size as ->
+  TypeBase Size as ->
+  TypeBase Size as
+combineTypeShapes (Scalar (Record ts1)) (Scalar (Record ts2))
+  | M.keys ts1 == M.keys ts2 =
+      Scalar $
+        Record $
+          M.map
+            (uncurry combineTypeShapes)
+            (M.intersectionWith (,) ts1 ts2)
+combineTypeShapes (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 =
+      Scalar $
+        Sum $
+          M.map
+            (uncurry $ zipWith combineTypeShapes)
+            (M.intersectionWith (,) cs1 cs2)
+combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arrow als2 _p2 _d2 a2 (RetType _ b2))) =
+  Scalar $
+    Arrow
+      (als1 <> als2)
+      p1
+      d1
+      (combineTypeShapes a1 a2)
+      (RetType dims1 (combineTypeShapes b1 b2))
+combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
+  Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
+  where
+    f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
+    f targ _ = targ
+combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
+  arrayOfWithAliases
+    (als1 <> als2)
+    u1
+    shape1
+    (combineTypeShapes (Scalar et1) (Scalar et2) `setAliases` mempty)
+combineTypeShapes _ new_tp = new_tp
 
 -- When we instantiate a polymorphic StaticVal, we rename all the
 -- sizes to avoid name conflicts later on.  This is a bit of a hack...
@@ -790,23 +864,23 @@ defuncLet _ [] body (RetType _ rettype) = do
       RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
     imposeType sv _ = sv
 
-sizesForAll :: MonadFreshNames m => S.Set VName -> [Pat] -> m ([VName], [Pat])
-sizesForAll bound_sizes params = do
-  (params', sizes) <- runStateT (mapM (astMap tv) params) mempty
-  pure (S.toList sizes, params')
+instAnySizes :: MonadFreshNames m => [Pat] -> m [Pat]
+instAnySizes = mapM (astMap tv)
   where
-    bound = bound_sizes <> foldMap patNames params
     tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim d
       | d == anySize = do
-          v <- lift $ newVName "size"
-          modify $ S.insert v
+          v <- newVName "size"
           pure $ sizeFromName (qualName v) mempty
+    onDim d = pure d
+
+unboundSizes :: S.Set VName -> [Pat] -> [VName]
+unboundSizes bound_sizes params = nubOrd $ execState (mapM (astMap tv) params) []
+  where
+    bound = bound_sizes <> foldMap patNames params
+    tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (Var d typ loc) = do
-      unless (qualLeaf d `S.member` bound) $
-        modify $
-          S.insert $
-            qualLeaf d
+      unless (qualLeaf d `S.member` bound) $ modify (qualLeaf d :)
       pure $ Var d typ loc
     onDim d = pure d
 
@@ -842,9 +916,9 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           -- first-order.
           globals <- asks fst
           let bound_sizes = S.fromList dims' <> globals
-          (missing_dims, pats') <- sizesForAll bound_sizes pats
+          pats' <- instAnySizes pats
 
-          liftValDec fname (RetType [] $ toStruct rettype) (dims' ++ missing_dims) pats' e0
+          liftValDec fname (RetType [] $ toStruct rettype) (dims' ++ unboundSizes bound_sizes pats') pats' e0
           pure
             ( Var
                 (qualName fname)
@@ -911,13 +985,13 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   -- expects this.  This is easy, because they are all
   -- first-order.
   let bound_sizes = S.fromList (dims <> more_dims) <> globals
-  (missing_dims, params') <- sizesForAll bound_sizes params
+  params' <- instAnySizes params
 
   fname <- newNameFromString fname_s
   liftValDec
     fname
     (second (const ()) lifted_rettype)
-    (dims ++ more_dims ++ missing_dims)
+    (dims ++ more_dims ++ unboundSizes bound_sizes params')
     params'
     lam_e'
 
@@ -1031,36 +1105,6 @@ envFromDimNames :: [VName] -> Env
 envFromDimNames = M.fromList . flip zip (repeat d)
   where
     d = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
-
--- | Create a new top-level value declaration with the given function name,
--- return type, list of parameters, and body expression.
-liftValDec :: VName -> StructRetType -> [VName] -> [Pat] -> Exp -> DefM ()
-liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
-  where
-    dims' = map (`TypeParamDim` mempty) dims
-    -- FIXME: this pass is still not correctly size-preserving, so
-    -- forget those return sizes that we forgot to propagate along
-    -- the way.  Hopefully the internaliser is conservative and
-    -- will insert reshapes...
-    bound_here = S.fromList dims <> S.map identName (foldMap patIdents pats)
-    mkExt v
-      | not $ v `S.member` bound_here = Just v
-    mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
-
-    dec =
-      ValBind
-        { valBindEntryPoint = Nothing,
-          valBindName = fname,
-          valBindRetDecl = Nothing,
-          valBindRetType = Info rettype_st,
-          valBindTypeParams = dims',
-          valBindParams = pats,
-          valBindBody = body,
-          valBindDoc = Nothing,
-          valBindAttrs = mempty,
-          valBindLocation = mempty
-        }
 
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.  Insert wildcard for any patterns
@@ -1282,14 +1326,10 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
   globals <- asks fst
   let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
-      rettype' =
-        -- FIXME: dubious that we cannot assume that all sizes in the
-        -- body are in scope.  This is because when we insert
-        -- applications of lifted functions, we don't properly update
-        -- the types in the return type annotation.
-        combineTypeShapes rettype $ first (anyDimIfNotBound bound_sizes) $ toStruct $ typeOf body'
-      ret_dims' = filter (`M.member` (unFV $ freeInType rettype')) ret_dims
-  (missing_dims, params'') <- sizesForAll bound_sizes params'
+  params'' <- instAnySizes params'
+  let rettype' = combineTypeShapes rettype $ toStruct $ typeOf body'
+      tparams'' = tparams' ++ unboundSizes bound_sizes params''
+      ret_dims' = filter (`notElem` bound_sizes) $ S.toList $ fvVars $ freeInType rettype'
 
   pure
     ( valbind
@@ -1299,8 +1339,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
               if null params'
                 then RetType ret_dims' $ rettype' `setUniqueness` Nonunique
                 else RetType ret_dims' rettype',
-          valBindTypeParams =
-            map (`TypeParamDim` mempty) $ tparams' ++ missing_dims,
+          valBindTypeParams = map (`TypeParamDim` mempty) tparams'',
           valBindParams = params'',
           valBindBody = body'
         },
@@ -1309,10 +1348,6 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
           (Just (first (map typeParamName) (valBindTypeScheme valbind)))
           sv
     )
-  where
-    anyDimIfNotBound bound_sizes (Var v _ _)
-      | qualLeaf v `S.notMember` bound_sizes = anySize
-    anyDimIfNotBound _ d = d
 
 -- | Defunctionalize a list of top-level declarations.
 defuncVals :: [ValBind] -> DefM ()
