@@ -192,7 +192,7 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u (PrimExp u) where
       leqishType _ = Nothing
   toSoPCmp pe = error $ "toSoPCmp: not a comparison " <> prettyString pe
 
-instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Exp where
+instance ToSoP VName Exp where
   toSoPNum (E.Literal v _) =
     (pure . (1,)) $
       case v of
@@ -200,6 +200,19 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Exp where
         E.UnsignedValue x -> int2SoP $ PE.valueIntegral x
         _ -> error ""
   toSoPNum (E.IntLit v _ _) = pure (1, int2SoP v)
+  toSoPNum (E.Var (E.QualName [] v) _ _) = pure (1, sym2SoP v)
+  toSoPNum (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+    | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
+      name <- E.baseString $ E.qualLeaf op,
+      Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
+        (_, x) <- toSoPNum e_x
+        (_, y) <- toSoPNum e_y
+        (1,)
+          <$> case bop of
+            E.Plus -> pure $ x .+. y
+            E.Minus -> pure $ x .-. y
+            E.Times -> pure $ y .-. x
+            bop -> error $ "toSoPNum: " <> prettyString bop
   toSoPNum e = do
     x <- lookupUntransPE e
     pure (1, sym2SoP x)

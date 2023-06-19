@@ -2,6 +2,7 @@ module Futhark.Analysis.Refinement (refineProg) where
 
 import Control.Monad
 import Control.Monad.RWS (MonadReader (..), MonadWriter (..), RWS, asks, lift, runRWS)
+import Data.Either
 import Data.List (find)
 import Data.Maybe
 import Debug.Trace
@@ -9,82 +10,41 @@ import Futhark.Analysis.PrimExp (PrimExp)
 import Futhark.Analysis.PrimExp qualified as PE
 import Futhark.Internalise.TypesValues (internalisePrimType, internalisePrimValue)
 import Futhark.MonadFreshNames
+import Futhark.SoP.Constraint
 import Futhark.SoP.Convert
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
 import Futhark.SoP.Refine
+import Futhark.SoP.RefineEquivs
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
-import Language.Futhark
+import Language.Futhark hiding (Range)
+import Language.Futhark qualified as E
 import Language.Futhark.Prop
 import Language.Futhark.Semantic hiding (Env)
+import Language.Futhark.Traversals
 
 type Env = ()
 
+type Log = Either String String
+
 newtype RefineM a
-  = RefineM (SoPMT VName Exp (RWS Env [String] VNameSource) a)
+  = RefineM (SoPMT VName Exp (RWS Env [Log] VNameSource) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadReader Env,
       MonadSoP VName Exp,
-      MonadWriter [String]
+      MonadWriter [Log]
     )
 
 instance MonadFreshNames RefineM where
   getNameSource = RefineM $ getNameSource
   putNameSource = RefineM . putNameSource
 
-data Constraint
-  = (:<:) (SoP VName) (SoP VName)
-  | (:<=:) (SoP VName) (SoP VName)
-  | (:>:) (SoP VName) (SoP VName)
-  | (:>=:) (SoP VName) (SoP VName)
-  | (:==:) (SoP VName) (SoP VName)
-  | (:/=:) (SoP VName) (SoP VName)
-  | (:&&:) Constraint Constraint
-  | (:||:) Constraint Constraint
-  deriving (Show)
-
-infixr 4 :<:
-
-infixr 4 :<=:
-
-infixr 4 :>:
-
-infixr 4 :>=:
-
-infixr 4 :==:
-
-infixr 4 :/=:
-
-infixr 3 :&&:
-
-infixr 2 :||:
-
-andC :: [Constraint] -> Constraint
-andC = foldr1 (:&&:)
-
-orC :: [Constraint] -> Constraint
-orC = foldr1 (:||:)
-
-instance Pretty Constraint where
-  pretty c =
-    case c of
-      x :<: y -> op "<" x y
-      x :<=: y -> op "<=" x y
-      x :>: y -> op ">" x y
-      x :>=: y -> op ">=" x y
-      x :==: y -> op "==" x y
-      x :/=: y -> op "/=" x y
-      x :&&: y -> op "&&" x y
-      x :||: y -> op "||" x y
-    where
-      op s x y = pretty x <+> s <+> pretty y
-
-checkConstraint :: Constraint -> RefineM Bool
+checkConstraint :: Constraint VName -> RefineM Bool
 checkConstraint (x :<: y) = x $<$ y
 checkConstraint (x :<=: y) = x $<=$ y
 checkConstraint (x :>: y) = x $>$ y
@@ -94,37 +54,39 @@ checkConstraint (x :/=: y) = x $/=$ y
 checkConstraint (x :&&: y) = checkConstraint x ^&& checkConstraint y
 checkConstraint (x :||: y) = checkConstraint x ^|| checkConstraint y
 
-mustBeTrue :: Loc -> Constraint -> RefineM Bool
+mustBeTrue :: Loc -> Constraint VName -> RefineM ()
 mustBeTrue loc c = do
   b <- checkConstraint c
-  unless b $
-    tell
-      [prettyString (locText loc) <> ": " <> prettyString c]
-  pure b
+  if b
+    then
+      tell
+        [Right $ prettyString (locText loc) <> ": " <> prettyString c]
+    else
+      tell
+        [Left $ prettyString (locText loc) <> ": " <> prettyString c]
 
-checkExp :: Exp -> RefineM Bool
-checkExp e = do
-  (_, sop) <- toSoPCmp e
-  sop $>=$ zeroSoP
+-- checkCmpExp :: Exp -> RefineM ()
+-- checkCmpExp e = do
+-- (_, sop) <- toSoPCmp e
 
-runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName Exp, VNameSource, [String])
+runRefineM :: VNameSource -> RefineM a -> (a, AlgEnv VName Exp, VNameSource, [String], [String])
 runRefineM src (RefineM m) =
   let ((a, algenv), src', w) = runRWS (runSoPMT_ m) mempty src
-   in (a, algenv, src', w)
+   in (a, algenv, src', lefts w, rights w)
 
-considerSlice :: PatType -> Slice -> RefineM Bool
+considerSlice :: PatType -> Slice -> RefineM ()
 considerSlice (Array _ _ (Shape ds) _) is =
-  and <$> zipWithM check ds is
+  zipWithM_ check ds is
   where
-    inBounds :: SoP VName -> SoP VName -> Constraint
+    inBounds :: SoP VName -> SoP VName -> Constraint VName
     inBounds d' i' =
       andC
         [ zeroSoP :<=: i',
           i' :<: d'
         ]
-    check :: Size -> DimIndexBase Info VName -> RefineM Bool
+    check :: Size -> DimIndexBase Info VName -> RefineM ()
     check _ (DimSlice Nothing Nothing Nothing) =
-      pure True
+      pure ()
     check d (DimFix i) = do
       d' <- toSoPNum_ d
       i' <- toSoPNum_ i
@@ -207,39 +169,104 @@ mkUnsafe :: Exp -> Exp
 mkUnsafe e =
   Attr (AttrAtom (AtomName "unsafe") mempty) e mempty
 
-refineExp :: Exp -> RefineM Exp
-refineExp (Assert cond e t loc) = do
-  e' <- refineExp e
-  safe <- checkExp cond
-  if safe
-    then pure e'
-    else pure $ Assert cond e' t loc
-refineExp e@(AppExp (Index arr slice loc) res) = do
-  arr' <- refineExp arr
-  b <- considerSlice (typeOf arr) slice
-  let e' = AppExp (Index arr' slice loc) res
-  if b
-    then pure $ mkUnsafe e'
-    else do
-      pure e'
-refineExp e = pure e
+considerCoerce :: Loc -> PatType -> PatType -> RefineM ()
+considerCoerce loc t1 t2 = void $ matchDims onDims t1 t2
+  where
+    onDims _bound d1 d2
+      | d1 /= d2 = do
+          d1' <- toSoPNum_ d1
+          d2' <- toSoPNum_ d2
+          mustBeTrue loc $ d1' :==: d2'
+          pure d1
+    onDims _ d1 _ =
+      pure d1
 
-refineValBind :: ValBind -> RefineM ValBind
-refineValBind vb = do
-  body <- refineExp $ valBindBody vb
-  pure $ vb {valBindBody = body}
+considerRange :: Loc -> Exp -> Maybe Exp -> Inclusiveness Exp -> RefineM ()
+considerRange loc start Nothing (ToInclusive end) = do
+  start' <- toSoPNum_ start
+  end' <- toSoPNum_ end
+  mustBeTrue loc $ start' :<=: end'
+considerRange loc start Nothing (UpToExclusive end) = do
+  start' <- toSoPNum_ start
+  end' <- toSoPNum_ end
+  mustBeTrue loc $ start' :<=: end'
+considerRange loc start Nothing (DownToExclusive end) = do
+  start' <- toSoPNum_ start
+  end' <- toSoPNum_ end
+  mustBeTrue loc $ end' :<=: start'
+considerRange loc start (Just stride) (ToInclusive end) = do
+  start' <- toSoPNum_ start
+  stride' <- toSoPNum_ stride
+  end' <- toSoPNum_ end
+  mustBeTrue loc $
+    (zeroSoP :<=: stride')
+      :&&: (start' :<=: end')
+      :||: (end' :<=: start')
+considerRange loc start (Just stride) (UpToExclusive end) = do
+  start' <- toSoPNum_ start
+  stride' <- toSoPNum_ stride
+  end' <- toSoPNum_ end
+  mustBeTrue loc $
+    (start' :<=: end')
+      :&&: (zeroSoP :<: stride')
+considerRange loc start (Just stride) (DownToExclusive end) = do
+  start' <- toSoPNum_ start
+  stride' <- toSoPNum_ stride
+  end' <- toSoPNum_ end
+  mustBeTrue loc $
+    (end' :<=: start')
+      :&&: (stride' :<: zeroSoP)
 
-refineDec :: Dec -> RefineM Dec
-refineDec (ValDec vb) = ValDec <$> refineValBind vb
-refineDec d = pure d
+expMapper :: ASTMapper RefineM
+expMapper = identityMapper {mapOnExp = \e' -> refineExp e' >> pure e'}
 
-refineImport :: (ImportName, FileModule) -> RefineM (ImportName, FileModule)
+refineExp :: Exp -> RefineM ()
+-- refineExp (Assert cond e t loc) = do
+-- (_, sop) <- toSoPCmp e
+-- mustBeTrue loc $ sop :>=: zeroSoP
+refineExp (AppExp (Index e slice loc) res) = do
+  refineExp e
+  considerSlice (typeOf e) slice
+refineExp (Update e slice v _) = do
+  refineExp e
+  considerSlice (typeOf e) slice
+  refineExp v
+refineExp (Coerce e _ (Info t) loc) = do
+  refineExp e
+  considerCoerce (locOf loc) (typeOf e) t
+refineExp (AppExp (Index e slice _) _) = do
+  refineExp e
+  void $ astMap expMapper slice
+  considerSlice (typeOf e) slice
+refineExp (AppExp (LetWith _ src slice e body _) _) = do
+  refineExp e
+  considerSlice (unInfo $ identType src) slice
+  refineExp body
+refineExp (AppExp (E.Range start stride end loc) _) = do
+  refineExp start
+  void $ traverse refineExp stride
+  void $ traverse refineExp end
+  considerRange (locOf loc) start stride end
+refineExp e'@(AppExp (LetPat _ (Id x _ _) e body _) _) = do
+  refineExp e
+  e' <- toSoPNum_ e
+  addConstraint $ sym2SoP x :==: e'
+  refineExp body
+refineExp e = void $ astMap expMapper e
+
+refineValBind :: ValBind -> RefineM ()
+refineValBind = refineExp . valBindBody
+
+refineDec :: Dec -> RefineM ()
+refineDec (ValDec vb) = refineValBind vb
+refineDec d = pure ()
+
+refineImport :: (ImportName, FileModule) -> RefineM ()
 refineImport (name, imp) = do
   let p = fileProg imp
-  decs <- mapM refineDec $ progDecs p
-  pure $ (name, imp {fileProg = p {progDecs = decs}})
+  mapM_ refineDec $ progDecs p
 
-refineProg :: VNameSource -> Imports -> (Imports, VNameSource, [String])
+refineProg :: VNameSource -> Imports -> (VNameSource, AlgEnv VName Exp, [String], [String])
 refineProg namesrc prog =
-  let (prog', _, namesrc', ws) = runRefineM namesrc $ mapM refineImport prog
-   in (prog', namesrc', ws)
+  let (_, algenv, namesrc', failed, checked) = runRefineM namesrc $ mapM refineImport prog
+   in (namesrc', algenv, failed, checked)

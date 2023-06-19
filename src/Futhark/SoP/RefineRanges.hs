@@ -2,7 +2,7 @@
 
 -- | Functionality for processing the range environment
 module Futhark.SoP.RefineRanges
-  ( addIneqZeroPEs,
+  ( addIneqZeros,
   )
 where
 
@@ -21,12 +21,11 @@ import Futhark.SoP.Util
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe >= 0@
 --   for each 'PrimExp' in the set.
-addIneqZeroPEs :: forall u e m. (ToSoP u e, FromSoP u e, MonadSoP u e m) => Set (e >= 0) -> m ()
-addIneqZeroPEs pes = do
+addIneqZeros :: forall u e m. (ToSoP u e, MonadSoP u e m) => Set (SoP u >= 0) -> m ()
+addIneqZeros sops = do
   ineq_cands <-
     mconcat
-      <$> mapM ((mkRangeCands . snd) <=< toSoPNum) (S.toList pes)
-
+      <$> mapM mkRangeCands (S.toList sops)
   addRangeCands ineq_cands
 
 -- | A range candidate; a candidate @'RangeCand' v sym sop@ means

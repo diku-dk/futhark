@@ -2,7 +2,7 @@
 
 -- | Functionality for refining the equivalence environment
 module Futhark.SoP.RefineEquivs
-  ( addEqZeroPEs,
+  ( addEqZeros,
   )
 where
 
@@ -12,22 +12,40 @@ import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
 import Data.Set (Set)
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.Analysis.PrimExp
+import Futhark.SoP.Constraint
 import Futhark.SoP.Convert
 import Futhark.SoP.Expression
 import Futhark.SoP.FourierMotzkin
 import Futhark.SoP.Monad
--- import Futhark.SoP.PrimExp
 import Futhark.SoP.SoP
 import Futhark.SoP.Util
+import Futhark.Util.Pretty
+
+-- addEqConstraint :: forall u e m. (ToSoP u e, MonadSoP u e m) => Constraint u -> m (Set (SoP u >= 0))
+-- addEqConstraint c@(x :==: y) = do
+--  (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <- addEquivSoP x y
+--  addLegalCands equiv_cands
+--  pure extra_inEqZs
+
+-- addEquivSoP ::
+--  (ToSoP u e, MonadSoP u e m) =>
+--  SoP u ->
+--  SoP u ->
+--  m (Set (SoP u >= 0), Set (EquivCand u))
+-- addEquivSoP x y = do
+--  cands <- mkEquivCands $ x .-. y
+--  (ineqss, cands') <- mapAndUnzipM refineEquivCand $ S.toList cands
+--  pure (mconcat ineqss, S.fromList cands')
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
-addEqZeroPEs :: forall u e m. (ToSoP u e, FromSoP u e, MonadSoP u e m) => Set (e == 0) -> m (Set (SoP u >= 0))
-addEqZeroPEs pes = do
+addEqZeros :: forall u e m. (ToSoP u e, MonadSoP u e m) => Set (SoP u == 0) -> m (Set (SoP u >= 0))
+addEqZeros sops = do
   -- Make equivalence candidates along with any extra constraints.
   (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <-
-    mconcat <$> mapM addEquiv2CandSet (S.toList pes)
+    mconcat <$> mapM addEquiv2CandSet (S.toList sops)
   -- Add one-by-one all legal equivalences to the algebraic
   -- environment, i.e., range and equivalence envs are updated
   -- as long as the new substitutions do not introduce cycles.
@@ -133,10 +151,9 @@ refineEquivCand cand@(EquivCand sym sop) = do
 --   * @cands@: set of equivalence candidates.
 addEquiv2CandSet ::
   (ToSoP u e, MonadSoP u e m) =>
-  e == 0 ->
+  SoP u == 0 ->
   m (Set (SoP u >= 0), Set (EquivCand u))
-addEquiv2CandSet pe = do
-  (_, sop) <- toSoPNum pe
+addEquiv2CandSet sop = do
   cands <- mkEquivCands sop
   (ineqss, cands') <- mapAndUnzipM refineEquivCand $ S.toList cands
   pure (mconcat ineqss, S.fromList cands')
@@ -173,15 +190,17 @@ addLegalCands cand_set = do
       let score cand = length $ free (equivCandSoP cand) S.\\ env_syms
        in score cand1 `compare` score cand2
     validCand rs eqs cand =
-      -- Check if a candidate is already present in the
-      -- equivalence environment.
-      equivCandSym cand `elem` M.keysSet eqs
-        -- Detect if an equivalence candidate would introduce
-        -- a cycle into the equivalence environment.
-        && any hasEquivCycle (M.toList eqs)
-        -- Detect if an equivalence candidate would introduce
-        -- a cycle into the range environment.
-        && any hasRangeCycle (M.toList rs)
+      not $
+        -- Check if a candidate is already present in the
+        -- equivalence environment.
+        equivCandSym cand
+          `elem` M.keysSet eqs
+          -- Detect if an equivalence candidate would introduce
+          -- a cycle into the equivalence environment.
+          && any hasEquivCycle (M.toList eqs)
+          -- Detect if an equivalence candidate would introduce
+          -- a cycle into the range environment.
+          && any hasRangeCycle (M.toList rs)
       where
         -- Since the equivalence environment contains the fully
         -- substituted bindings (accounting for predecessor

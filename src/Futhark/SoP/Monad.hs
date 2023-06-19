@@ -249,6 +249,16 @@ instance (Ord u, Ord e) => Semigroup (UntransEnv u e) where
 instance (Ord u, Ord e) => Monoid (UntransEnv u e) where
   mempty = Unknowns mempty mempty
 
+instance (Pretty u, Pretty e) => Pretty (UntransEnv u e) where
+  pretty env =
+    "dir:"
+      <> line
+      <> pretty (M.toList $ dir env)
+      <> line
+      <> "inv:"
+      <> line
+      <> pretty (M.toList $ inv env)
+
 -- | The equivalence environment binds a variable name to
 --   its equivalent 'SoP' representation.
 type EquivEnv u = Map u (SoP u)
@@ -276,6 +286,20 @@ instance (Ord u, Ord e) => Semigroup (AlgEnv u e) where
 
 instance (Ord u, Ord e) => Monoid (AlgEnv u e) where
   mempty = AlgEnv mempty mempty mempty
+
+instance (Pretty u, Pretty e) => Pretty (AlgEnv u e) where
+  pretty (env) =
+    "Untranslatable environment:"
+      <> line
+      <> pretty (untrans env)
+      <> line
+      <> "Equivalence environment:"
+      <> line
+      <> pretty (M.toList $ equivs env)
+      <> line
+      <> "Ranges:"
+      <> line
+      <> pretty (M.toList $ ranges env)
 
 transClosInRanges :: (Ord u) => RangeEnv u -> Set u -> Set u
 transClosInRanges rs syms =

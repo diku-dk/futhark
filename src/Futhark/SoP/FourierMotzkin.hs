@@ -79,9 +79,12 @@ fmSolveGEq0 = fmSolveLEq0 . negSoP
 --      (ii)  `False` if there is an `i` for which the inequality does
 --                    not hold or if the answer is unknown.
 fmSolveLEq0 :: MonadSoP u e m => SoP u -> m Bool
-fmSolveLEq0 sop
-  | Just v <- justConstant sop = pure (v <= 0)
-  | not (null syms) = do
+fmSolveLEq0 sop = do
+  sop' <- substEquivs sop
+  let syms = S.toList $ free sop'
+  case (justConstant sop', not (null syms)) of
+    (Just v, _) -> pure (v <= 0)
+    (_, True) -> do
       rs <- getRanges
       -- step 1: find `i`
       let i =
@@ -89,7 +92,7 @@ fmSolveLEq0 sop
               maximum $
                 map (\s -> (length $ transClosInRanges rs $ S.singleton s, s)) syms
           -- step 2: re-write `sop = a*i + b`
-          (a, b) = factorSoP [i] sop
+          (a, b) = factorSoP [i] sop'
       Range lb k ub <- lookupRange i
       a_leq_0 <- fmSolveLEq0 a
       al_leq_0 <-
@@ -108,9 +111,7 @@ fmSolveLEq0 sop
           )
           (S.toList ub)
       pure (a_leq_0 && al_leq_0 || a_geq_0 && au_leq_0)
-  | otherwise = pure False
-  where
-    syms = S.toList $ free sop
+    _ -> pure False
 
 ($<$) :: MonadSoP u e m => SoP u -> SoP u -> m Bool
 x $<$ y = fmSolveLTh0 $ x .-. y

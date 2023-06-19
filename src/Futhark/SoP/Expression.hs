@@ -6,10 +6,13 @@ module Futhark.SoP.Expression
   )
 where
 
+import Data.List (find)
 import Data.Set (Set)
 import Data.Set qualified as S
 import Futhark.Analysis.PrimExp
 import Futhark.SoP.Util
+import Futhark.Util.Pretty
+import Language.Futhark qualified as E
 import Language.Futhark.Prop
 
 class Expression e where
@@ -35,7 +38,14 @@ class Expression e where
 processExps :: (Ord e, Expression e, Foldable t) => t e -> (Set (e == 0), Set (e >= 0))
 processExps = foldMap processExp
 
-instance Expression Exp
+instance Expression Exp where
+  moduloIsh (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+    | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
+      name <- E.baseString $ E.qualLeaf op,
+      Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp],
+      E.Mod <- bop =
+        Just (e_x, e_y)
+  moduloIsh _ = Nothing
 
 instance Ord u => Expression (PrimExp u) where
   moduloIsh :: PrimExp u -> Maybe (PrimExp u, PrimExp u)

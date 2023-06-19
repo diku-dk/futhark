@@ -10,21 +10,20 @@ import Language.Futhark.Warnings
 import System.IO
 
 data RefineConfig = RefineConfig
-  { refineAll :: Bool,
+  { printSuccesses :: Bool,
     checkWarn :: Bool,
-    printProg :: Bool,
-    printAST :: Bool
+    printAlg :: Bool
   }
 
 newRefineConfig :: RefineConfig
-newRefineConfig = RefineConfig False True False False
+newRefineConfig = RefineConfig False True False
 
 options :: [FunOptDescr RefineConfig]
 options =
   [ Option
       "v"
       []
-      (NoArg $ Right $ \cfg -> cfg {refineAll = True})
+      (NoArg $ Right $ \cfg -> cfg {printSuccesses = True})
       "Print all checks.",
     Option
       "w"
@@ -32,15 +31,10 @@ options =
       (NoArg $ Right $ \cfg -> cfg {checkWarn = False})
       "Disable all typechecker warnings.",
     Option
-      "p"
-      []
-      (NoArg $ Right $ \cfg -> cfg {printProg = True})
-      "Print transformed program.",
-    Option
       "a"
       []
-      (NoArg $ Right $ \opts -> opts {printAST = True})
-      "Output ASTs instead of prettyprinted programs."
+      (NoArg $ Right $ \cfg -> cfg {printAlg = True})
+      "Print the algebraic environment."
   ]
 
 -- | Run @futhark refinement@.
@@ -53,13 +47,12 @@ main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
         liftIO $
           hPutDoc stderr $
             prettyWarnings warnings
-      let (imps', _, ws) = refineProg vns imps
-      liftIO $ mapM_ putStrLn ws
-      when (printProg cfg) $
-        liftIO $
-          forM_ (map snd imps') $ \fm ->
-            putStrLn $
-              if printAST cfg
-                then show $ fileProg fm
-                else prettyString $ fileProg fm
+      let (_, algenv, failed, checked) = refineProg vns imps
+      putStrLn "Failed checks:"
+      liftIO $ mapM_ putStrLn failed
+      when (printSuccesses cfg) $ do
+        putStrLn "Successful checks:"
+        liftIO $ mapM_ putStrLn checked
+      when (printAlg cfg) $ do
+        liftIO $ putStrLn $ prettyString algenv
     _ -> Nothing
