@@ -709,7 +709,6 @@ matchBlocker cond (MatchDec _ ifsort) = do
       -- Hoist things that are free.
       isNotHoistableBnd _ _ (Let _ _ (BasicOp Reshape {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp Rearrange {})) = False
-      isNotHoistableBnd _ _ (Let _ _ (BasicOp Rotate {})) = False
       isNotHoistableBnd _ _ (Let _ _ (BasicOp (Index _ slice))) =
         null $ sliceDims slice
       --

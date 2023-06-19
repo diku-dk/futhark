@@ -141,15 +141,6 @@ diffBasicOp pat aux e m =
           updateAdj arr <=< letExp "adj_rearrange" . BasicOp $
             Rearrange (rearrangeInverse perm) pat_adj
     --
-    Rotate rots arr -> do
-      (_pat_v, pat_adj) <- commonBasicOp pat aux e m
-      returnSweepCode $ do
-        let neg = BasicOp . BinOp (Sub Int64 OverflowWrap) (intConst Int64 0)
-        rots' <- mapM (letSubExp "rot_neg" . neg) rots
-        void $
-          updateAdj arr <=< letExp "adj_rotate" . BasicOp $
-            Rotate rots' pat_adj
-    --
     Replicate (Shape []) (Var se) -> do
       (_pat_v, pat_adj) <- commonBasicOp pat aux e m
       returnSweepCode $ void $ updateAdj se pat_adj

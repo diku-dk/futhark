@@ -297,17 +297,6 @@ ruleBasicOp vtable pat aux (Rearrange perm v)
         letBind pat $
           BasicOp $
             Rearrange (perm `rearrangeCompose` perm2) e
-ruleBasicOp vtable pat aux (Rearrange perm v)
-  | Just (BasicOp (Rotate offsets v2), v_cs) <- ST.lookupExp v vtable,
-    Just (BasicOp (Rearrange perm3 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
-      let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
-      rearrange_rotate <- letExp "rearrange_rotate" $ BasicOp $ Rotate offsets' v3
-      certifying (v_cs <> v2_cs) $
-        auxing aux $
-          letBind pat $
-            BasicOp $
-              Rearrange (perm `rearrangeCompose` perm3) rearrange_rotate
-
 -- Rearranging a replicate where the outer dimension is left untouched.
 ruleBasicOp vtable pat aux (Rearrange perm v1)
   | Just (BasicOp (Replicate dims (Var v2)), v1_cs) <- ST.lookupExp v1 vtable,
@@ -323,34 +312,6 @@ ruleBasicOp vtable pat aux (Rearrange perm v1)
                 BasicOp $
                   Rearrange (map (subtract num_dims) rest_perm) v2
             letBind pat $ BasicOp $ Replicate dims v
-
--- A zero-rotation is identity.
-ruleBasicOp _ pat _ (Rotate offsets v)
-  | all isCt0 offsets = Simplify $ letBind pat $ BasicOp $ SubExp $ Var v
-ruleBasicOp vtable pat aux (Rotate offsets v)
-  | Just (BasicOp (Rearrange perm v2), v_cs) <- ST.lookupExp v vtable,
-    Just (BasicOp (Rotate offsets2 v3), v2_cs) <- ST.lookupExp v2 vtable = Simplify $ do
-      let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
-          addOffsets x y = letSubExp "summed_offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
-      offsets' <- zipWithM addOffsets offsets offsets2'
-      rotate_rearrange <-
-        auxing aux $ letExp "rotate_rearrange" $ BasicOp $ Rearrange perm v3
-      certifying (v_cs <> v2_cs) $
-        letBind pat $
-          BasicOp $
-            Rotate offsets' rotate_rearrange
-
--- Combining Rotates.
-ruleBasicOp vtable pat aux (Rotate offsets1 v)
-  | Just (BasicOp (Rotate offsets2 v2), v_cs) <- ST.lookupExp v vtable = Simplify $ do
-      offsets <- zipWithM add offsets1 offsets2
-      certifying v_cs $
-        auxing aux $
-          letBind pat $
-            BasicOp $
-              Rotate offsets v2
-  where
-    add x y = letSubExp "offset" $ BasicOp $ BinOp (Add Int64 OverflowWrap) x y
 
 -- Simplify away 0<=i when 'i' is from a loop of form 'for i < n'.
 ruleBasicOp vtable pat aux (CmpOp CmpSle {} x y)

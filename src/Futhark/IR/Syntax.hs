@@ -378,10 +378,6 @@ data BasicOp
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
     Rearrange [Int] VName
-  | -- | Rotate the dimensions of the input array.  The list of
-    -- subexpressions specify how much each dimension is rotated.  The
-    -- length of this list must be equal to the rank of the array.
-    Rotate [SubExp] VName
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
     UpdateAcc VName [SubExp] [SubExp]

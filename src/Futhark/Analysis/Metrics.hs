@@ -140,7 +140,6 @@ basicOpMetrics Replicate {} = seen "Replicate"
 basicOpMetrics Scratch {} = seen "Scratch"
 basicOpMetrics Reshape {} = seen "Reshape"
 basicOpMetrics Rearrange {} = seen "Rearrange"
-basicOpMetrics Rotate {} = seen "Rotate"
 basicOpMetrics UpdateAcc {} = seen "UpdateAcc"
 
 -- | Compute metrics for this lambda.

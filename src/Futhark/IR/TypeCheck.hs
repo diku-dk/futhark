@@ -915,18 +915,6 @@ checkBasicOp (Rearrange perm arr) = do
     bad $
       PermutationError perm rank $
         Just arr
-checkBasicOp (Rotate rots arr) = do
-  arrt <- lookupType arr
-  let rank = arrayRank arrt
-  mapM_ (require [Prim int64]) rots
-  when (length rots /= rank) $
-    bad $
-      TypeError $
-        "Cannot rotate "
-          <> prettyText (length rots)
-          <> " dimensions of "
-          <> prettyText rank
-          <> "-dimensional array."
 checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1_dims <- shapeDims . fst <$> checkArrIdent arr1exp
   arr2s_dims <- map (shapeDims . fst) <$> mapM checkArrIdent arr2exps

@@ -606,10 +606,6 @@ maybeDistributeStm stm@(Let _ aux (BasicOp (Reshape k reshape stm_arr))) acc =
   distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
     let reshape' = Shape (kernelNestWidths nest) <> reshape
     pure $ oneStm $ Let outerpat aux $ BasicOp $ Reshape k reshape' arr
-maybeDistributeStm stm@(Let _ aux (BasicOp (Rotate rots stm_arr))) acc =
-  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr -> do
-    let rots' = map (const $ intConst Int64 0) (kernelNestWidths nest) ++ rots
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Rotate rots' arr
 maybeDistributeStm stm@(Let pat aux (BasicOp (Update _ arr slice (Var v)))) acc
   | not $ null $ sliceDims slice =
       distributeSingleStm acc stm >>= \case

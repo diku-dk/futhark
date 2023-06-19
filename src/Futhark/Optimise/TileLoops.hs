@@ -296,7 +296,6 @@ partitionPrelude variance prestms private used_after =
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Iota {}) = True
-    mustBeInlinedExp (BasicOp Rotate {}) = True
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
     mustBeInlinedExp _ = False

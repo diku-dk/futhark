@@ -295,14 +295,6 @@ compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) | ds /= mempty = do
   sOp $ Imp.Barrier Imp.FenceLocal
   where
     dest_t = patElemType dest
-compileGroupExp (Pat [dest]) (BasicOp (Rotate rs arr)) = do
-  ds <- map pe64 . arrayDims <$> lookupType arr
-  groupCoverSpace ds $ \is -> do
-    is' <- sequence $ zipWith3 rotate ds rs is
-    copyDWIMFix (patElemName dest) is (Var arr) is'
-  sOp $ Imp.Barrier Imp.FenceLocal
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex d (pe64 r) i
 compileGroupExp (Pat [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
   e' <- toExp e
