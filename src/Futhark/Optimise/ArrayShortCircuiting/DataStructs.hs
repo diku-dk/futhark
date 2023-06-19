@@ -336,7 +336,6 @@ createsNewArrOK (BasicOp Manifest {}) = True
 createsNewArrOK (BasicOp Concat {}) = True
 createsNewArrOK (BasicOp ArrayLit {}) = True
 createsNewArrOK (BasicOp Scratch {}) = True
-createsNewArrOK (BasicOp Rotate {}) = True
 createsNewArrOK _ = False
 
 -- | Memory-block removal from active-coalescing table

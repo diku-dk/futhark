@@ -51,7 +51,7 @@ import Data.Ord
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Data qualified as V
-import Futhark.Util (chunk, maybeHead, splitFromEnd)
+import Futhark.Util (chunk, maybeHead)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
@@ -1863,18 +1863,6 @@ initialCtx =
               -- Slight hack to work around empty dimensions.
               genericTake m $
                 transpose (map (snd . fromArray) xs') ++ repeat []
-    def "rotate" = Just $
-      fun2 $ \i xs -> do
-        let (shape, xs') = fromArray xs
-        pure $
-          let idx = if null xs' then 0 else rem (asInt i) (length xs')
-           in if idx > 0
-                then
-                  let (bef, aft) = splitAt idx xs'
-                   in toArray shape $ aft ++ bef
-                else
-                  let (bef, aft) = splitFromEnd (-idx) xs'
-                   in toArray shape $ aft ++ bef
     def "flatten" = Just $
       fun1 $ \xs -> do
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
