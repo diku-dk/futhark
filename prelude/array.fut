@@ -90,7 +90,6 @@ def iota (n: i64): *[n]i64 =
 def indices [n] 't (_: [n]t) : *[n]i64 =
   iota n
 
-
 -- | Rotate an array some number of elements to the left.  A negative
 -- rotation amount is also supported.
 --
@@ -140,7 +139,7 @@ def flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): [n*m*l*k]t =
 --
 -- **Complexity:** O(1).
 def unflatten 't [n][m] (xs: [n*m]t): [n][m]t =
-  intrinsics.unflatten n m xs :> [n][m]t
+  intrinsics.unflatten n m xs
 
 -- | Like `unflatten`, but produces three dimensions.
 def unflatten_3d 't [n][m][l] (xs: [n*m*l]t): [n][m][l]t =
