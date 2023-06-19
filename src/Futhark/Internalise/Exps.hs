@@ -1759,13 +1759,6 @@ isIntrinsicFunction qname args loc = do
       let conc xarr yarr =
             I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
       mapM (letSubExp desc) $ zipWith conc xs ys
-    handleRest [offset, e] "rotate" = Just $ \desc -> do
-      offset' <- internaliseExp1 "rotation_offset" offset
-      internaliseOperation desc e $ \v -> do
-        r <- I.arrayRank <$> lookupType v
-        let zero = intConst Int64 0
-            offsets = offset' : replicate (r - 1) zero
-        pure $ I.Rotate offsets v
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v

@@ -58,20 +58,6 @@ substituteIndicesInStm ::
   IndexSubstitutions ->
   Stm (Rep m) ->
   m IndexSubstitutions
--- FIXME: we likely need to do something similar for all expressions
--- that produce aliases.  Ugh.  See issue #1460.  Or maybe we should
--- look at/copy all consumed arrays up front, instead of ad-hoc.
-substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
-  | Just (cs, src, src_t, is) <- lookup v substs,
-    [v'] <- patNames pat = do
-      src' <-
-        letExp (baseString v' <> "_subst") $
-          BasicOp $
-            Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
-      src_t' <- lookupType src'
-      pure $ (v', (cs, src', src_t', is)) : substs
-  where
-    zero = intConst Int64 0
 substituteIndicesInStm substs (Let pat _ (BasicOp (Rearrange perm v)))
   | Just (cs, src, src_t, is) <- lookup v substs,
     [v'] <- patNames pat = do

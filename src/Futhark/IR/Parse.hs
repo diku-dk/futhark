@@ -273,9 +273,6 @@ pBasicOp =
               <* pComma
               <*> pErrorLoc
           ),
-      keyword "rotate"
-        *> parens
-          (Rotate <$> parens (pSubExp `sepBy` pComma) <* pComma <*> pVName),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"

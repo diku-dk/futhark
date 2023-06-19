@@ -155,8 +155,6 @@ mapExpM tv (BasicOp (Reshape kind shape arrexp)) =
         )
 mapExpM tv (BasicOp (Rearrange perm e)) =
   BasicOp <$> (Rearrange perm <$> mapOnVName tv e)
-mapExpM tv (BasicOp (Rotate es e)) =
-  BasicOp <$> (Rotate <$> mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
 mapExpM tv (BasicOp (Concat i (x :| ys) size)) = do
   x' <- mapOnVName tv x
   ys' <- mapM (mapOnVName tv) ys
@@ -331,8 +329,6 @@ walkExpM tv (BasicOp (Reshape _ shape arrexp)) =
   mapM_ (walkOnSubExp tv) shape >> walkOnVName tv arrexp
 walkExpM tv (BasicOp (Rearrange _ e)) =
   walkOnVName tv e
-walkExpM tv (BasicOp (Rotate es e)) =
-  mapM_ (walkOnSubExp tv) es >> walkOnVName tv e
 walkExpM tv (BasicOp (Concat _ (x :| ys) size)) =
   walkOnVName tv x >> mapM_ (walkOnVName tv) ys >> walkOnSubExp tv size
 walkExpM tv (BasicOp (Manifest _ e)) =

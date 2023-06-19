@@ -799,16 +799,6 @@ intrinsics =
                         $ AppRes i64 []
                     ]
               ),
-              ( "rotate",
-                IntrinsicPolyFun
-                  [tp_a, sp_n]
-                  [ (Observe, Scalar $ Prim $ Signed Int64),
-                    (Observe, array_a $ shape [n])
-                  ]
-                  $ RetType []
-                  $ array_a
-                  $ shape [n]
-              ),
               ( "transpose",
                 IntrinsicPolyFun
                   [tp_a, sp_n, sp_m]
