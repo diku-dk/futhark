@@ -34,7 +34,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sRotateKernel,
     sCopy,
 
     -- * Atomics
@@ -1397,28 +1396,6 @@ sCopyKernel pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = d
         tmp <- tvVar <$> dPrim "tmp" pt
         emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
         emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
-
--- | Perform a Rotate with a kernel.
-sRotateKernel :: VName -> [Imp.TExp Int64] -> VName -> CallKernelGen ()
-sRotateKernel dest rs src = do
-  t <- lookupType src
-  let ds = map pe64 $ arrayDims t
-  n <- dPrimVE "rotate_n" $ product ds
-  (virtualise, constants) <- simpleKernelConstants n "rotate"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "rotate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> sWhen (gtid .<. n) $ do
-      is' <- dIndexSpace' "rep_i" ds gtid
-      is'' <- sequence $ zipWith3 rotate ds rs is'
-      copyDWIMFix dest is' (Var src) is''
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 compileThreadResult ::
   SegSpace ->
