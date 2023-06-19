@@ -72,19 +72,6 @@ def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys
 -- | An old-fashioned way of saying `++`.
 def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys
 
--- | Rotate an array some number of elements to the left.  A negative
--- rotation amount is also supported.
---
--- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
---
--- **Work:** O(n).
---
--- **Span:** O(1).
---
--- Note: In most cases, `rotate` will be fused with subsequent
--- operations such as `map`, in which case it is free.
-def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate r xs
-
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
 --
@@ -102,6 +89,21 @@ def iota (n: i64): *[n]i64 =
 -- **Span:** O(1).
 def indices [n] 't (_: [n]t) : *[n]i64 =
   iota n
+
+
+-- | Rotate an array some number of elements to the left.  A negative
+-- rotation amount is also supported.
+--
+-- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+--
+-- Note: In most cases, `rotate` will be fused with subsequent
+-- operations such as `map`, in which case it is free.
+def rotate [n] 't (r: i64) (a: [n]t) =
+  map (\i -> #[unsafe] a[(i+r)%n]) (iota n)
 
 -- | Construct an array of the given length containing the given
 -- value.

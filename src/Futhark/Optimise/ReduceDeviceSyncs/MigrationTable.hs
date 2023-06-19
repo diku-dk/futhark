@@ -473,15 +473,6 @@ graphStm stm = do
     BasicOp (Rearrange _ arr) -> do
       graphInefficientReturn [] e
       one bs `reuses` arr
-    BasicOp (Rotate _ arr) -> do
-      -- Migrating a Rotate leads to a memory allocation error.
-      --
-      -- TODO: Fix Rotate memory allocation error.
-      --
-      -- Can be replaced with 'graphHostOnly e' to disable migration.
-      -- A fix can be verified by enabling tests/migration/reuse7_rotate.fut
-      graphInefficientReturn [] e
-      one bs `reuses` arr
     -- Expressions with a cost linear to the size of their result arrays are
     -- inefficient to migrate into GPUBody kernels as such kernels are single-
     -- threaded. For sufficiently large arrays the cost may exceed what is saved

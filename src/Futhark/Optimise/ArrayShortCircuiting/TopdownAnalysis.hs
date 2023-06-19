@@ -68,10 +68,6 @@ isInScope :: TopdownEnv rep -> VName -> Bool
 isInScope td_env m = m `M.member` scope td_env
 
 -- | Get alias and (direct) index function mapping from expression
---
--- For instance, if the expression is a 'Rotate', returns the value being
--- rotated as well as a function for rotating an index function the appropriate
--- amount.
 getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, id)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, id)
@@ -80,8 +76,6 @@ getDirAliasFromExp (BasicOp (Reshape ReshapeCoerce shp x)) =
 getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
   Just (x, (`IxFun.reshape` shapeDims (fmap pe64 shp)))
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
-  Nothing
-getDirAliasFromExp (BasicOp (Rotate _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Index x slc)) =
   Just (x, (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
@@ -95,7 +89,7 @@ getDirAliasFromExp (BasicOp (FlatUpdate x _ _)) = Just (x, id)
 getDirAliasFromExp _ = Nothing
 
 -- | This was former @createsAliasedArrOK@ from DataStructs
---   While Rearrange and Rotate create aliased arrays, we
+--   While Rearrange creates aliased arrays, we
 --   do not yet support them because it would mean we have
 --   to "reverse" the index function, for example to support
 --   coalescing in the case below,

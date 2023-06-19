@@ -242,9 +242,6 @@ basicFwd pat aux op = do
     Rearrange perm arr -> do
       arr_tan <- tangent arr
       addStm $ Let pat_tan aux $ BasicOp $ Rearrange perm arr_tan
-    Rotate rots arr -> do
-      arr_tan <- tangent arr
-      addStm $ Let pat_tan aux $ BasicOp $ Rotate rots arr_tan
     _ -> error $ "basicFwd: Unsupported op " ++ prettyString op
 
 fwdLambda :: Lambda SOACS -> ADM (Lambda SOACS)
