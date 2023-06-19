@@ -97,15 +97,13 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
       isSize (v, _) = v `M.member` unFV sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
-      free_params =
-        map (mkParam . second (`setUniqueness` Nonunique)) $
-          free_dims ++ free_nondims
+      free_ts = map (second (`setUniqueness` Nonunique)) $ free_dims ++ free_nondims
 
   addValBind $
     ValBind
       { valBindName = fname,
         valBindTypeParams = tparams,
-        valBindParams = free_params ++ params,
+        valBindParams = map mkParam free_ts ++ params,
         valBindRetDecl = Nothing,
         valBindRetType = Info (RetType dims ret),
         valBindBody = funbody,
@@ -117,7 +115,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
 
   pure
     $ apply
-      (Var (qualName fname) (Info (augType $ free_dims ++ free_nondims)) mempty)
+      (Var (qualName fname) (Info (augType free_ts)) mempty)
     $ free_dims ++ free_nondims
   where
     orig_type = funType params $ RetType dims ret
