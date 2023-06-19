@@ -12,6 +12,7 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+    removeRefinement,
 
     -- * Witnesses
     mustBeExplicitInType,
@@ -33,6 +34,15 @@ import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Monad
+
+removeRefinement :: TypeBase dim () -> TypeBase dim ()
+removeRefinement (Array () u shape scal) =
+  let ty' = removeRefinement (Scalar scal)
+   in case ty' of
+        Array () u' shape' scal' -> Array () (u <> u') (shape <> shape') scal'
+        Scalar scal' -> Array () u shape scal'
+removeRefinement (Scalar (Refinement ty _)) = removeRefinement ty
+removeRefinement t = t
 
 mustBeExplicitAux :: StructType -> M.Map VName Bool
 mustBeExplicitAux t =
@@ -101,6 +111,8 @@ returnType _ (Scalar (Arrow old_als v pd t1 (RetType dims t2))) d arg =
     als = old_als <> aliases (maskAliases arg d)
 returnType appres (Scalar (Sum cs)) d arg =
   Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
+returnType appres (Scalar (Refinement ty e)) d arg =
+  Scalar $ Refinement (returnType appres ty d arg) e
 
 -- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
@@ -239,6 +251,7 @@ evalTypeExp (TEUnique t loc) = do
     mayContainArray (Scalar TypeVar {}) = True
     mayContainArray (Scalar Arrow {}) = False
     mayContainArray (Scalar (Sum cs)) = (any . any) mayContainArray cs
+    mayContainArray (Scalar (Refinement ty _)) = mayContainArray ty
 --
 evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', svars1, RetType dims1 st1, _) <- evalTypeExp t1
@@ -379,6 +392,10 @@ evalTypeExp ote@TEApply {} = do
           <+> pretty a
           <+> "not valid for a type parameter"
           <+> pretty p <> "."
+evalTypeExp (TERefine te e loc) = do
+  (te', svars, RetType dims ty, ls) <- evalTypeExp te
+  e' <- checkExpForPred ty e
+  pure (TERefine te' e' loc, svars, RetType dims (Scalar $ Refinement ty e'), ls)
 
 -- | Check a type expression, producing:
 --
@@ -472,6 +489,7 @@ checkForDuplicateNamesInType = check mempty
     check _ TEArray {} = pure ()
     check _ TEVar {} = pure ()
     check seen (TEParens te _) = check seen te
+    check seen (TERefine te _ _) = check seen te
 
 -- | @checkTypeParams ps m@ checks the type parameters @ps@, then
 -- invokes the continuation @m@ with the checked parameters, while
@@ -672,6 +690,8 @@ substTypesRet lookupSubst ot =
       Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
+    onType (Scalar (Refinement ty e)) =
+      Scalar . (`Refinement` applySubst lookupSubst' e) <$> onType ty
 
     onRetType (RetType dims t) = do
       ext <- get

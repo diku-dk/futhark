@@ -27,6 +27,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     newArrayType,
     allDimsFreshInType,
     updateTypes,
+    hasBinding,
 
     -- * Primitive checking
     unifies,
@@ -451,6 +452,18 @@ nameReason loc (NameAppRes fname apploc) =
     <+> dquotes (pretty fname)
     <+> parens ("at" <+> pretty (locStrRel loc apploc))
 
+hasBinding :: Exp -> Bool
+hasBinding Lambda {} = True
+hasBinding (AppExp LetPat {} _) = True
+hasBinding (AppExp LetFun {} _) = True
+hasBinding (AppExp DoLoop {} _) = True
+hasBinding (AppExp LetWith {} _) = True
+hasBinding (AppExp Match {} _) = True
+hasBinding e = isNothing $ astMap m e
+  where
+    m =
+      identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
+
 -- | The state is a set of constraints and a counter for generating
 -- type names.  This is distinct from the usual counter we use for
 -- generating unique names, as these will be user-visible.
@@ -621,6 +634,16 @@ instance MonadTypeChecker TermTypeM where
     e' <- noUnique $ checker e
     let t = toStruct $ typeOf e'
     unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+    when (hasBinding e') $
+      typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
+        "Size expression with binding is forbidden."
+    updateTypes e'
+
+  checkExpForPred t e = do
+    checker <- asks termChecker
+    e' <- noUnique $ checker e
+    let t' = toStruct $ typeOf e'
+    unify (mkUsage e' "Refinement Predicate") t' (Scalar (Arrow () Unnamed Observe t (RetType [] $ Scalar $ Prim Bool)))
     updateTypes e'
 
   warn loc problem = liftTypeM $ warn loc problem

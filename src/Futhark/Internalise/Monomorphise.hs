@@ -476,6 +476,7 @@ transformTypeSizes typ =
         onArg (TypeArgDim dim) = TypeArgDim <$> onDim dim
         onArg (TypeArgType ty) = TypeArgType <$> transformTypeSizes ty
     transformScalarSizes ty@Prim {} = pure ty
+    transformScalarSizes Refinement {} = error "Refinement not implemented in transformTypeSizes"
 
     onDim e
       | e == anySize = pure e
@@ -531,6 +532,7 @@ transformTypeExp (TESum cs loc) =
   TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
 transformTypeExp (TEDim dims te loc) =
   TEDim dims <$> transformTypeExp te <*> pure loc
+transformTypeExp TERefine {} = error "TERefine not implemented in transformTypeExp"
 
 -- This carries out record replacements in the alias information of a type.
 --

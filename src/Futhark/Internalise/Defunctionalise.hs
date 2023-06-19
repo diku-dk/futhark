@@ -173,6 +173,7 @@ replaceStaticValSizes globals orig_substs sv =
       TEParens (onTypeExp substs te) loc
     onTypeExp _ (TEVar v loc) =
       TEVar v loc
+    onTypeExp _ TERefine {} = error "TERefine not implemented in replaceStaticValSizes"
 
     onEnv substs =
       M.fromList
@@ -295,6 +296,7 @@ arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow {}) = mempty
 arraySizes (Scalar (Record fields)) = foldMap arraySizes fields
 arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
+arraySizes (Scalar (Refinement ty _)) = arraySizes ty
 arraySizes (Scalar (TypeVar _ _ _ targs)) =
   mconcat $ map f targs
   where
@@ -722,6 +724,7 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
     defuncScalar (Prim t) = Prim t
     defuncScalar (TypeVar as u tn targs) = TypeVar as u tn targs
+    defuncScalar (Refinement ty e) = Refinement (defuncType ty) e
 defuncExp (Constr name _ (Info t) loc) =
   error $
     "Constructor "

@@ -174,6 +174,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
+      Futhark.Analysis.Refinement
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -203,6 +204,7 @@ library
       Futhark.CLI.PyOpenCL
       Futhark.CLI.Python
       Futhark.CLI.Query
+      Futhark.CLI.Refinement
       Futhark.CLI.REPL
       Futhark.CLI.Run
       Futhark.CLI.Test
@@ -274,6 +276,16 @@ library
       Futhark.Construct
       Futhark.Doc.Generator
       Futhark.Error
+      Futhark.SoP.Convert
+      Futhark.SoP.Constraint
+      Futhark.SoP.Expression
+      Futhark.SoP.Monad
+      Futhark.SoP.Refine
+      Futhark.SoP.RefineEquivs
+      Futhark.SoP.FourierMotzkin
+      Futhark.SoP.RefineRanges
+      Futhark.SoP.SoP
+      Futhark.SoP.Util
       Futhark.FreshNames
       Futhark.IR
       Futhark.IR.Aliases
@@ -517,6 +529,7 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
+    , multiset
 
 executable futhark
   import: common
@@ -544,6 +557,10 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
+      Futhark.SoP.RefineTests
+      Futhark.SoP.FourierMotzkinTests
+      Futhark.SoP.Parse
+      Futhark.SoP.SoPTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests

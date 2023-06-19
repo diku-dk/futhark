@@ -546,6 +546,8 @@ unifyWith onDims usage = subunify False
                 unifySharedConstructors onDims usage bound bcs cs arg_cs
             | otherwise ->
                 unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
+        (Scalar (Refinement ty _), _) -> subunify ord bound bcs ty t2'
+        (_, Scalar (Refinement ty _)) -> subunify ord bound bcs t1' ty
         _
           | t1' == t2' -> pure ()
           | otherwise -> failure
@@ -649,16 +651,17 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
   tp <- normTypeFully tp_unnorm
   occursCheck usage bcs vn tp
   scopeCheck usage bcs vn lvl tp
+  let tp_unrefined = removeRefinement tp
 
   constraints <- getConstraints
-  let link = do
-        let (witnessed, not_witnessed) = determineSizeWitnesses tp
+  let link ty = do
+        let (witnessed, not_witnessed) = determineSizeWitnesses ty
             used v = v `S.member` witnessed || v `S.member` not_witnessed
             ext = filter used bound
         case filter (`notElem` witnessed) ext of
           [] ->
             modifyConstraints $
-              M.insert vn (lvl, Constraint (RetType ext tp) usage)
+              M.insert vn (lvl, Constraint (RetType ext ty) usage)
           problems ->
             unifyError usage mempty bcs . withIndexLink "unify-param-existential" $
               "Parameter(s) "
@@ -677,7 +680,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
 
   case snd <$> M.lookup vn constraints of
     Just (NoConstraint Unlifted unlift_usage) -> do
-      link
+      link tp
 
       arrayElemTypeWith usage (unliftedBcs unlift_usage) tp
       when (any (`elem` bound) (fvVars (freeInType tp))) $
@@ -688,12 +691,12 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
             </> indent 2 (pretty tp)
             </> textwrap "This is usually because the size of an array returned by a higher-order function argument cannot be determined statically.  This can also be due to the return size being a value parameter.  Add type annotation to clarify."
     Just (Equality _) -> do
-      link
+      link tp
       equalityType usage tp
     Just (Overloaded ts old_usage)
-      | tp `notElem` map (Scalar . Prim) ts -> do
-          link
-          case tp of
+      | tp_unrefined `notElem` map (Scalar . Prim) ts -> do
+          link tp_unrefined
+          case tp_unrefined of
             Scalar (TypeVar _ _ (QualName [] v) [])
               | not $ isRigid v constraints ->
                   linkVarToTypes usage v ts
@@ -711,7 +714,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
                   <+> pretty old_usage <> "."
     Just (HasFields l required_fields old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
-      case tp of
+      case tp_unrefined of
         Scalar (Record tp_fields)
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
@@ -729,7 +732,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
             _ -> do
               notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
               noRecordType notes
-          link
+          link tp_unrefined
           modifyConstraints $
             M.insertWith
               combineFields
@@ -754,7 +757,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
     -- See Note [Linking variables to sum types]
     Just (HasConstrs l required_cs old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
-      case tp of
+      case tp_unrefined of
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
@@ -773,7 +776,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
             _ -> do
               notes <- (<>) <$> typeVarNotes vn <*> typeVarNotes v
               noSumType notes
-          link
+          link tp_unrefined
           modifyConstraints $
             M.insertWith
               combineConstrs
@@ -784,7 +787,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
               (lvl, HasConstrs (l1 `min` l2) (M.union cs1 cs2) usage1)
             combineConstrs hasCs _ = hasCs
         _ -> noSumType =<< typeVarNotes vn
-    _ -> link
+    _ -> link tp_unrefined
   where
     unsharedConstructors cs1 cs2 notes =
       unifyError
@@ -855,7 +858,7 @@ mustBeOneOf ts usage t = do
   constraints <- getConstraints
   let isRigid' v = isRigid v constraints
 
-  case t' of
+  case removeRefinement t' of
     Scalar (TypeVar _ _ (QualName [] v) [])
       | not $ isRigid' v -> linkVarToTypes usage v ts
     Scalar (Prim pt) | pt `elem` ts -> pure ()

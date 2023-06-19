@@ -159,7 +159,8 @@ arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
 arrayShape :: TypeBase dim as -> Shape dim
-arrayShape (Array _ _ ds _) = ds
+arrayShape (Array _ _ ds scal) = ds <> arrayShape (Scalar scal)
+arrayShape (Scalar (Refinement t _)) = arrayShape t
 arrayShape _ = mempty
 
 -- | Change the shape of a type to be just the rank.
@@ -195,6 +196,8 @@ traverseDims f = go mempty PosImmediate
       DimPos ->
       TypeBase fdim als' ->
       f (TypeBase tdim als')
+    go bound b t@(Scalar Refinement {}) =
+      bitraverse (f bound b) pure t
     go bound b t@Array {} =
       bitraverse (f bound b) pure t
     go bound b (Scalar (Record fields)) =
@@ -249,6 +252,7 @@ diet (Array _ Nonunique _ _) = Observe
 diet (Scalar (TypeVar _ Unique _ _)) = Consume
 diet (Scalar (TypeVar _ Nonunique _ _)) = Observe
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
+diet (Scalar (Refinement ty _)) = diet ty
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
@@ -427,6 +431,8 @@ setUniqueness (Scalar (Record ets)) u =
   Scalar $ Record $ fmap (`setUniqueness` u) ets
 setUniqueness (Scalar (Sum ets)) u =
   Scalar $ Sum $ fmap (map (`setUniqueness` u)) ets
+setUniqueness (Scalar (Refinement ty e)) u =
+  Scalar $ Refinement (setUniqueness ty u) e
 setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
@@ -582,6 +588,7 @@ typeVars t =
     Scalar (Arrow _ _ _ t1 (RetType _ t2)) -> typeVars t1 <> typeVars t2
     Scalar (Record fields) -> foldMap typeVars fields
     Scalar (Sum cs) -> mconcat $ (foldMap . fmap) typeVars cs
+    Scalar (Refinement ty _) -> typeVars ty
     Array _ _ _ rt -> typeVars $ Scalar rt
   where
     typeArgFree (TypeArgType ta) = typeVars ta
@@ -597,6 +604,7 @@ orderZero (Scalar (Record fs)) = all orderZero $ M.elems fs
 orderZero (Scalar TypeVar {}) = True
 orderZero (Scalar Arrow {}) = False
 orderZero (Scalar (Sum cs)) = all (all orderZero) cs
+orderZero (Scalar (Refinement ty _)) = orderZero ty
 
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.

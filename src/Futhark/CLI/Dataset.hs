@@ -208,6 +208,7 @@ toValueType (TEVar (QualName [] v) _)
     f t = (nameFromText (V.primTypeText t), t)
 toValueType (TEVar v _) =
   Left $ "Unknown type " <> prettyText v
+toValueType TERefine {} = error "TERefine not implemented in toValueType"
 
 -- | Closed interval, as in @System.Random@.
 type Range a = (a, a)

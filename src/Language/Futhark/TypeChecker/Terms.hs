@@ -9,6 +9,7 @@
 module Language.Futhark.TypeChecker.Terms
   ( checkOneExp,
     checkSizeExp,
+    checkPredExp,
     checkFunDef,
   )
 where
@@ -41,18 +42,6 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
-hasBinding :: Exp -> Bool
-hasBinding Lambda {} = True
-hasBinding (AppExp LetPat {} _) = True
-hasBinding (AppExp LetFun {} _) = True
-hasBinding (AppExp DoLoop {} _) = True
-hasBinding (AppExp LetWith {} _) = True
-hasBinding (AppExp Match {} _) = True
-hasBinding e = isNothing $ astMap m e
-  where
-    m =
-      identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
-
 overloadedTypeVars :: Constraints -> Names
 overloadedTypeVars = mconcat . map f . M.elems
   where
@@ -81,11 +70,17 @@ sliceShape ::
   [(DimIndex, Maybe Occurrence)] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-sliceShape r slice t@(Array als u (Shape orig_dims) et) =
-  runStateT (setDims <$> adjustDims slice orig_dims) []
+sliceShape r slice (Array als u (Shape orig_dims) et) = do
+  (ty, (exts, _)) <- runStateT (setDims =<< adjustDims slice orig_dims) ([], (et, als, u))
+  pure (ty, exts)
   where
-    setDims [] = stripArray (length orig_dims) t
-    setDims dims' = Array als u (Shape dims') et
+    setDims :: [Size] -> StateT ([VName], (ScalarTypeBase Size (), as, Uniqueness)) TermTypeM (TypeBase Size as)
+    setDims [] = do
+      (et', als', u') <- gets snd
+      pure $ stripArray 0 $ Array als' u' (Shape []) et'
+    setDims dims' = do
+      (et', als', u') <- gets snd
+      pure $ Array als' u' (Shape dims') et'
 
     -- If the result is supposed to be a nonrigid size variable, then
     -- don't bother trying to create non-existential sizes.  This is
@@ -101,7 +96,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
           (d, ext) <-
             lift . extSize loc $
               SourceSlice orig_d' (bareExp <$> i) (bareExp <$> j) (bareExp <$> stride)
-          modify (maybeToList ext ++)
+          modify $ first (maybeToList ext ++)
           pure d
         Just (loc, Nonrigid) ->
           lift $
@@ -109,7 +104,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
               <$> newFlexibleDim (mkUsage loc "size of slice") "slice_dim"
         Nothing -> do
           v <- lift $ newID "slice_anydim"
-          modify (v :)
+          modify $ first (v :)
           pure $ sizeFromName (qualName v) mempty
       where
         -- The original size does not matter if the slice is fully specified.
@@ -134,6 +129,9 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         (_, False) ->
           pure (size :)
 
+    adjustDims :: [(DimIndex, Maybe Occurrence)] -> [Size] -> StateT ([VName], (ScalarTypeBase Size (), as, Uniqueness)) TermTypeM [Size]
+    adjustDims [] dims =
+      pure dims
     adjustDims ((DimFix {}, _) : idxes') (_ : dims) =
       adjustDims idxes' dims
     -- Pat match some known slices to be non-existential.
@@ -164,8 +162,19 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
     -- existential
     adjustDims ((DimSlice i j stride, _) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
-    adjustDims _ dims =
-      pure dims
+    -- go through Refinement
+    adjustDims idxes [] = do
+      (et', als', u') <- gets snd
+      let throughRefine ty =
+            case ty of
+              Scalar (Refinement ty' _) -> throughRefine ty'
+              _ -> ty
+          underlying = throughRefine $ stripArray 0 $ Array als' u' (Shape []) et'
+      case underlying of
+        Array als'' u'' (Shape dims'') et'' -> do
+          modify $ second $ const (et'', als'', u'')
+          adjustDims idxes dims''
+        _ -> error $ "no more dimension to take from " ++ prettyString et'
 
     sizeMinus j i =
       AppExp
@@ -180,6 +189,7 @@ sliceShape r slice t@(Array als u (Shape orig_dims) et) =
         $ AppRes i64 []
     i64 = Scalar $ Prim $ Signed Int64
     sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
+sliceShape r slice (Scalar (Refinement ty _)) = sliceShape r slice ty
 sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
@@ -314,6 +324,8 @@ sizeFree tloc expKiller orig_t = do
           e' <- replacing e
           local ((e, e') :) m
 
+    onScalar (Refinement ty e) =
+      Refinement <$> onType ty <*> pure e
     onScalar (Record fs) =
       Record <$> traverse onType fs
     onScalar (Sum cs) =
@@ -1108,6 +1120,7 @@ boundInsideType (Scalar (TypeVar _ _ _ targs)) = foldMap f targs
     f TypeArgDim {} = mempty
 boundInsideType (Scalar (Record fs)) = foldMap boundInsideType fs
 boundInsideType (Scalar (Sum cs)) = foldMap (foldMap boundInsideType) cs
+boundInsideType (Scalar (Refinement ty _)) = boundInsideType ty
 boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
   pn' <> boundInsideType t1 <> S.fromList dims <> boundInsideType t2
   where
@@ -1291,6 +1304,15 @@ checkSizeExp e = fmap fst . runTermTypeM checkExp $ do
     typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
       "Size expression with binding is forbidden."
   unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
+  updateTypes e'
+
+-- | Type-check a single predicate expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case it is unified with t -> bool.
+checkPredExp :: StructType -> UncheckedExp -> TypeM Exp
+checkPredExp t e = fmap fst . runTermTypeM checkExp $ do
+  e' <- noUnique $ checkExp e
+  let t' = toStruct $ typeOf e'
+  unify (mkUsage e' "Refinement Predicate") t' (Scalar (Arrow () Unnamed Observe t (RetType [] $ Scalar $ Prim Bool)))
   updateTypes e'
 
 -- Verify that all sum type constructors and empty array literals have
@@ -1660,6 +1682,7 @@ checkReturnAlias loc rettp params =
     consumableParamType (Scalar (TypeVar _ u _ _)) = u == Unique
     consumableParamType (Scalar (Record fs)) = all consumableParamType fs
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
+    consumableParamType (Scalar (Refinement ty _)) = consumableParamType ty
     consumableParamType (Scalar Arrow {}) = False
 
 checkBinding ::
@@ -1793,6 +1816,7 @@ boundArrayAliases (Scalar (TypeVar als _ _ _)) = boundAliases als
 boundArrayAliases (Scalar Arrow {}) = mempty
 boundArrayAliases (Scalar (Sum fs)) =
   mconcat $ concatMap (map boundArrayAliases) $ M.elems fs
+boundArrayAliases (Scalar (Refinement ty _)) = boundArrayAliases ty
 
 nothingMustBeUnique :: SrcLoc -> TypeBase () () -> TermTypeM ()
 nothingMustBeUnique loc = check
@@ -1857,6 +1881,7 @@ injectExt ext ret = RetType ext_here $ deeper ret
     (ext_here, ext_there) = partition (`S.member` immediate) ext
     deeper (Scalar (Prim t)) = Scalar $ Prim t
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
+    deeper (Scalar (Refinement ty e)) = Scalar $ Refinement (deeper ty) e
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
     deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
       Scalar $ Arrow als p d1 t1 $ injectExt (ext_there <> t2_ext) t2

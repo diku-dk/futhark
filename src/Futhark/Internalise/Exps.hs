@@ -2204,6 +2204,7 @@ typeExpForError (E.TESum cs _) = do
     onClause c = do
       c' <- mapM typeExpForError c
       pure $ intercalate [" "] c'
+typeExpForError E.TERefine {} = error "TERefine not implemented in typeExpForError"
 
 sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
 sizeExpForError (SizeExp e _) = do
