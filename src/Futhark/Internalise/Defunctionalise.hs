@@ -560,14 +560,15 @@ defuncExp (AppExp (Range e1 me incl loc) res) = do
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
   case sv of
-    -- If the variable refers to a dynamic function, we return its closure
-    -- representation (i.e., a record expression capturing the free variables
-    -- and a 'LambdaSV' static value) instead of the variable itself.
-    DynamicFun closure _ -> pure closure
+    -- If the variable refers to a dynamic function, we eta-expand it
+    -- so that we do not have to duplicate its definition.
+    DynamicFun {} -> do
+      (params, body, ret) <- etaExpand (RetType [] t) e
+      defuncFun [] params body ret mempty
     -- Intrinsic functions used as variables are eta-expanded, so we
     -- can get rid of them.
     IntrinsicSV -> do
-      (pats, body, tp) <- etaExpand (RetType [] (typeOf e)) e
+      (pats, body, tp) <- etaExpand (RetType [] t) e
       defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
     HoleSV _ hole_loc ->
       pure (Hole (Info t) hole_loc, sv)
@@ -892,7 +893,7 @@ unRetType (RetType ext t) = do
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
-  let (argtypes, _) = unfoldFunType t
+  let (argtypes, rettype) = unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
@@ -900,12 +901,16 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
       | fullyApplied sv num_args -> do
           -- We still need to update the types in case the dynamic
           -- function returns a higher-order term.
-          let (argtypes', rettype) = dynamicFunType sv argtypes
-          pure (Var qn (Info (foldFunType argtypes' $ RetType [] rettype)) loc, sv)
+          let (argtypes', rettype') = dynamicFunType sv argtypes
+          pure (Var qn (Info (foldFunType argtypes' $ RetType [] rettype')) loc, sv)
+      | all (orderZero . snd) argtypes,
+        orderZero rettype -> do
+          (params, body, ret) <- etaExpand (RetType [] t) e
+          defuncFun [] params body ret mempty
       | otherwise -> do
           fname <- newVName $ "dyn_" <> baseString (qualLeaf qn)
           let (pats, e0, sv') = liftDynFun (prettyString qn) sv num_args
-              (argtypes', rettype) = dynamicFunType sv' argtypes
+              (argtypes', rettype') = dynamicFunType sv' argtypes
               dims' = mempty
 
           -- Ensure that no parameter sizes are AnySize.  The internaliser
@@ -915,11 +920,11 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           let bound_sizes = S.fromList dims' <> globals
           pats' <- instAnySizes pats
 
-          liftValDec fname (RetType [] $ toStruct rettype) (dims' ++ unboundSizes bound_sizes pats') pats' e0
+          liftValDec fname (RetType [] $ toStruct rettype') (dims' ++ unboundSizes bound_sizes pats') pats' e0
           pure
             ( Var
                 (qualName fname)
-                (Info (foldFunType argtypes' $ RetType [] $ fromStruct rettype))
+                (Info (foldFunType argtypes' $ RetType [] $ fromStruct rettype'))
                 loc,
               sv'
             )
