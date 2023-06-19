@@ -90,7 +90,6 @@ module Futhark.CodeGen.ImpGen
     dPrimVE,
     dIndexSpace,
     dIndexSpace',
-    rotateIndex,
     sFor,
     sWhile,
     sComment,
@@ -1748,14 +1747,6 @@ inBounds (Slice slice) dims =
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
-
-rotateIndex ::
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64
-rotateIndex _ 0 i = i
-rotateIndex d r i = (i + r) `mod` d
 
 sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
 sFor' i bound body = do

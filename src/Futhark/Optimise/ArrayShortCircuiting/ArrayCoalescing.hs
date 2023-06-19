@@ -1219,7 +1219,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
                   --       @ ... use of b ...  @
                   --       @let c = alias b    @ <- currently fails
                   --       @let y[i] = x       @
-                  -- where @alias@ can be @transpose@, @slice@, @rotate@, @reshape@.
+                  -- where @alias@ can be @transpose@, @slice@, @reshape@.
                   -- We use getTransitiveAlias helper function to track the aliasing
                   --    through the td_env, and to find the updated ixfun of @b@:
                   case getDirAliasedIxfn td_env a_acc b of
