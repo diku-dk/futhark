@@ -728,6 +728,22 @@ intrinsicVar v =
   where
     bad = error $ "findBuiltin: " <> nameToString v
 
+mkBinOp :: Name -> PatType -> Exp -> Exp -> Exp
+mkBinOp op t x y =
+  AppExp
+    ( BinOp
+        (qualName (intrinsicVar op), mempty)
+        (Info t)
+        (x, Info Nothing)
+        (y, Info Nothing)
+        mempty
+    )
+    (Info $ AppRes t [])
+
+mkAdd, mkMul :: Exp -> Exp -> Exp
+mkAdd = mkBinOp "+" $ Scalar $ Prim $ Signed Int64
+mkMul = mkBinOp "*" $ Scalar $ Prim $ Signed Int64
+
 -- | A map of all built-ins.
 intrinsics :: M.Map VName Intrinsic
 intrinsics =
@@ -745,30 +761,18 @@ intrinsics =
                   $ Array
                     ()
                     Nonunique
-                    ( Shape
-                        [ AppExp
-                            ( BinOp
-                                (findOp "*", mempty)
-                                sizeBinOpInfo
-                                (Var (qualName n) (Info i64) mempty, Info Nothing)
-                                (Var (qualName m) (Info i64) mempty, Info Nothing)
-                                mempty
-                            )
-                            $ Info
-                            $ AppRes i64 []
-                        ]
-                    )
+                    (Shape [size n `mkMul` size m])
                     t_a
               ),
               ( "unflatten",
                 IntrinsicPolyFun
-                  [tp_a, sp_n]
+                  [tp_a, sp_n, sp_m]
                   [ (Observe, Scalar $ Prim $ Signed Int64),
                     (Observe, Scalar $ Prim $ Signed Int64),
-                    (Observe, Array () Nonunique (shape [n]) t_a)
+                    (Observe, Array () Nonunique (Shape [size n `mkMul` size m]) t_a)
                   ]
-                  $ RetType [k, m]
-                  $ Array () Nonunique (shape [k, m]) t_a
+                  $ RetType []
+                  $ Array () Nonunique (shape [n, m]) t_a
               ),
               ( "concat",
                 IntrinsicPolyFun
@@ -778,18 +782,7 @@ intrinsics =
                   ]
                   $ RetType []
                   $ uarray_a
-                  $ Shape
-                    [ AppExp
-                        ( BinOp
-                            (findOp "+", mempty)
-                            sizeBinOpInfo
-                            (Var (qualName n) (Info i64) mempty, Info Nothing)
-                            (Var (qualName m) (Info i64) mempty, Info Nothing)
-                            mempty
-                        )
-                        $ Info
-                        $ AppRes i64 []
-                    ]
+                  $ Shape [size n `mkAdd` size m]
               ),
               ( "transpose",
                 IntrinsicPolyFun
@@ -1141,11 +1134,6 @@ intrinsics =
 
     intrinsicStart = 1 + baseTag (fst $ last primOp)
 
-    findOp op =
-      qualName $ maybe bad fst $ find ((op ==) . baseString . fst) primOp
-      where
-        bad = error $ "Intrinsics making, findOp: \"" <> op <> "\""
-
     [a, b, n, m, k, l, p, q] = zipWith VName (map nameFromString ["a", "b", "n", "m", "k", "l", "p", "q"]) [0 ..]
 
     t_a = TypeVar () Nonunique (qualName a) []
@@ -1160,21 +1148,11 @@ intrinsics =
 
     [sp_n, sp_m, sp_k, sp_l, sp_p, sp_q] = map (`TypeParamDim` mempty) [n, m, k, l, p, q]
 
-    shape =
-      Shape
-        . map
-          (flip sizeFromName mempty . qualName)
-
-    i64 = Scalar $ Prim $ Signed Int64
-
-    sizeBinOpInfo = Info $ foldFunType [(Observe, i64), (Observe, i64)] $ RetType [] i64
+    size = flip sizeFromName mempty . qualName
+    shape = Shape . map size
 
     tuple_arr x y s =
-      Array
-        ()
-        Nonunique
-        s
-        (Record (M.fromList $ zip tupleFieldNames [x, y]))
+      Array () Nonunique s (Record (M.fromList $ zip tupleFieldNames [x, y]))
     tuple_uarray x y s = tuple_arr x y s `setUniqueness` Unique
 
     arr x y = Scalar $ Arrow mempty Unnamed Observe x (RetType [] y)
