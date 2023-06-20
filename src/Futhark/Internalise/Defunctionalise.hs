@@ -947,7 +947,7 @@ defuncApplyArg ::
   (Exp, StaticVal) ->
   (((Diet, Maybe VName), Exp), [(Diet, StructType)]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d, argext), arg), _) = do
+defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
@@ -965,13 +965,9 @@ defuncApplyArg fname_s (f', f_sv@(LambdaSV pat lam_e_t lam_e closure_env)) (((d,
   -- of the lifted function, but this is ultimately all a sham
   -- and a hack.  There is some piece we're missing.
   let params = [closure_pat, pat']
-      params_for_rettype = params ++ svParams f_sv ++ svParams arg_sv
-      svParams (LambdaSV sv_pat _ _ _) = [sv_pat]
-      svParams _ = []
       lifted_rettype =
         RetType (retDims lam_e_t) $
-          buildRetType closure_env params_for_rettype (retType lam_e_t) $
-            typeOf lam_e'
+          combineTypeShapes (fromStruct $ retType lam_e_t) (typeOf lam_e')
 
       already_bound =
         globals
@@ -1120,38 +1116,6 @@ buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
           then Wildcard (Info $ typeFromSV sv) mempty
           else Id vn (Info $ typeFromSV sv) mempty
       )
-
--- | Given a closure environment pattern and the type of a term,
--- construct the type of that term, where uniqueness is set to
--- `Nonunique` for those arrays that are bound in the environment or
--- pattern (except if they are unique there).  This ensures that a
--- lifted function can create unique arrays as long as they do not
--- alias any of its parameters.  XXX: it is not clear that this is a
--- sufficient property, unfortunately.
-buildRetType :: Env -> [Pat] -> StructType -> PatType -> PatType
-buildRetType env pats = comb
-  where
-    bound =
-      S.fromList (M.keys env) <> S.map identName (foldMap patIdents pats)
-    boundAsUnique v =
-      maybe False (unique . unInfo . identType) $
-        find ((== v) . identName) $
-          S.toList $
-            foldMap patIdents pats
-    problematic v = (v `S.member` bound) && not (boundAsUnique v)
-    comb (Scalar (Record fs_annot)) (Scalar (Record fs_got)) =
-      Scalar $ Record $ M.intersectionWith comb fs_annot fs_got
-    comb (Scalar (Sum cs_annot)) (Scalar (Sum cs_got)) =
-      Scalar $ Sum $ M.intersectionWith (zipWith comb) cs_annot cs_got
-    comb (Scalar Arrow {}) t =
-      descend t
-    comb got et =
-      descend $ fromStruct got `setAliases` aliases et
-
-    descend t@Array {}
-      | any (problematic . aliasVar) (aliases t) = t `setUniqueness` Nonunique
-    descend (Scalar (Record t)) = Scalar $ Record $ fmap descend t
-    descend t = t
 
 -- | Compute the corresponding type for the *representation* of a
 -- given static value (not the original possibly higher-order value).
