@@ -249,7 +249,7 @@ runTestCase (TestCase mode program testcase progs) = do
           ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      context checkctx $ do
+      unless (mode == Internalise) . context checkctx $ do
         (code, _, err) <-
           liftIO $ readProcessWithExitCode futhark ["check", program] ""
         case code of
