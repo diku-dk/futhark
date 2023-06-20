@@ -53,7 +53,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
     occur,
     observe,
     consume,
-    consuming,
     observation,
     consumption,
     checkIfConsumable,
@@ -214,7 +213,6 @@ data ValBinding
     BoundV Locality [TypeParam] PatType
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
-  | WasConsumed SrcLoc
   deriving (Show)
 
 --- Errors
@@ -669,7 +667,6 @@ instance MonadTypeChecker TermTypeM where
       Nothing ->
         typeError loc mempty $
           "Unknown variable" <+> dquotes (pretty qn) <> "."
-      Just (WasConsumed wloc) -> useAfterConsume name loc wloc
       Just (BoundV _ tparams t)
         | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
         | otherwise -> do
@@ -897,7 +894,6 @@ noUnique m = do
     set (BoundV l tparams t) = BoundV (max l Nonlocal) tparams t
     set (OverloadedF ts pts rt) = OverloadedF ts pts rt
     set EqualityF = EqualityF
-    set (WasConsumed loc) = WasConsumed loc
 
     split = unzip . map (\occ -> (occ {consumed = mempty}, occ {observed = mempty}))
 
@@ -927,18 +923,6 @@ consume :: SrcLoc -> Aliasing -> TermTypeM ()
 consume loc als = do
   checkIfConsumable loc als
   occur [consumption als loc]
-
--- | Proclaim that we have written to the given variable, and mark
--- accesses to it and all of its aliases as invalid inside the given
--- computation.
-consuming :: Ident -> TermTypeM a -> TermTypeM a
-consuming (Ident name (Info t) loc) m = do
-  t' <- normTypeFully t
-  consume loc $ AliasBound name `S.insert` aliases t'
-  localScope consume' m
-  where
-    consume' scope =
-      scope {scopeVtable = M.insert name (WasConsumed loc) $ scopeVtable scope}
 
 -- Running
 
