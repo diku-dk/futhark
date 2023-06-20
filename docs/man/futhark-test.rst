@@ -157,6 +157,10 @@ OPTIONS
 -i
   Test with the interpreter.
 
+-I
+  Pass the program through the compiler frontend, but do not run them.
+  This is only useful for testing the Futhark compiler itself.
+
 -t
   Type-check the programs, but do not run them.
 

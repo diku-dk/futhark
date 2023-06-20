@@ -107,6 +107,8 @@ data TestMode
     TypeCheck
   | -- | Only compile (do not run).
     Compile
+  | -- | Only internalise (do not run).
+    Internalise
   | -- | Test compiled code.
     Compiled
   | -- | Test interpreted code.
@@ -255,15 +257,23 @@ runTestCase (TestCase mode program testcase progs) = do
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure 1 -> throwError $ T.decodeUtf8 err
           ExitFailure _ -> liftExcept $ checkError expected_error $ T.decodeUtf8 err
-    RunCases {} | mode == TypeCheck -> do
-      let options = ["check", program] ++ configExtraCompilerOptions progs
-      context checkctx $ do
-        (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
-
-        case code of
-          ExitSuccess -> pure ()
-          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-          ExitFailure _ -> throwError $ T.decodeUtf8 err
+    RunCases {}
+      | mode == TypeCheck -> do
+          let options = ["check", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
+      | mode == Internalise -> do
+          let options = ["dev", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
@@ -694,12 +704,17 @@ commandLineOptions =
       "c"
       ["compiled"]
       (NoArg $ Right $ \config -> config {configTestMode = Compiled})
-      "Only run compiled code",
+      "Only run compiled code (the default)",
     Option
       "C"
       ["compile"]
       (NoArg $ Right $ \config -> config {configTestMode = Compile})
       "Only compile, do not run.",
+    Option
+      "I"
+      ["internalise"]
+      (NoArg $ Right $ \config -> config {configTestMode = Internalise})
+      "Only run the compiler frontend.",
     Option
       []
       ["no-terminal", "notty"]
