@@ -195,7 +195,6 @@ lexicalClosure params closure = do
         Just OverloadedF {} -> True
         Just (BoundV Local _ _) -> False
         Just (BoundV Nonlocal _ _) -> False
-        Just WasConsumed {} -> False
         Nothing -> False
   pure . S.map AliasBound . S.filter (not . isGlobal) $
     allOccurring closure S.\\ mconcat (map patNames params)
@@ -763,7 +762,8 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) =
         badLetWithValue src ve loc
 
       bindingIdent dest (src_t `setAliases` S.empty) $ \dest' -> do
-        body' <- consuming src' $ checkExp body
+        consume (srclocOf src) $ aliases src_t
+        body' <- checkExp body
         (body_t, ext) <-
           unscopePatType loc (S.singleton (identName dest'))
             =<< expTypeFully body'
