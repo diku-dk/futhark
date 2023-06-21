@@ -46,17 +46,11 @@ shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
 
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
-internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
+internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
         all_params = map pure shapeparams ++ concat params'
-
-    msg <- case retdecl of
-      Just dt ->
-        errorMsg
-          . ("Function return value does not match shape of type " :)
-          <$> typeExpForError dt
-      Nothing -> pure $ errorMsg ["Function return value does not match shape of declared return type."]
+        msg = errorMsg ["Function return value does not match shape of declared return type."]
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
@@ -695,10 +689,10 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       Just ([], [e])
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
-internaliseExp desc (E.Coerce e dt (Info et) loc) = do
+internaliseExp desc (E.Coerce e _ (Info et) loc) = do
   ses <- internaliseExp desc e
   ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
-  dt' <- typeExpForError dt
+  dt' <- typeExpForError $ toStruct et
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts =
@@ -2163,53 +2157,41 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [this_one])
           (resultBodyM [next_one])
 
-typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
-typeExpForError (E.TEVar qn _) =
-  pure [ErrorString $ prettyText qn]
-typeExpForError (E.TEParens te _) = do
-  msg <- typeExpForError te
-  pure $ ["("] <> msg <> [")"]
-typeExpForError (E.TEUnique te _) =
-  ("*" :) <$> typeExpForError te
-typeExpForError (E.TEDim dims te _) =
-  (ErrorString ("?" <> dims' <> ".") :) <$> typeExpForError te
+sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
+sizeExpForError e = do
+  e' <- internaliseExp1 "size" e
+  pure ["[", ErrorVal int64 e', "]"]
+
+typeExpForError :: E.TypeBase Size als -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
+typeExpForError (E.Scalar (E.TypeVar _ _ v args)) = do
+  args' <- concat <$> mapM onArg args
+  pure $ intersperse " " $ ErrorString (prettyText v) : args'
   where
-    dims' = mconcat (map onDim dims)
-    onDim d = "[" <> prettyText d <> "]"
-typeExpForError (E.TEArray d te _) =
-  (<>) <$> sizeExpForError d <*> typeExpForError te
-typeExpForError (E.TETuple tes _) = do
-  tes' <- mapM typeExpForError tes
-  pure $ ["("] ++ intercalate [", "] tes' ++ [")"]
-typeExpForError (E.TERecord fields _) = do
-  fields' <- mapM onField fields
-  pure $ ["{"] ++ intercalate [", "] fields' ++ ["}"]
+    onArg (TypeArgDim d) = sizeExpForError d
+    onArg (TypeArgType t) = typeExpForError t
+typeExpForError (E.Scalar (E.Record fs))
+  | Just ts <- E.areTupleFields fs = do
+      ts' <- mapM typeExpForError ts
+      pure $ ["("] ++ intercalate [", "] ts' ++ [")"]
+  | otherwise = do
+      fs' <- mapM onField $ M.toList fs
+      pure $ ["{"] ++ intercalate [", "] fs' ++ ["}"]
   where
     onField (k, te) =
       (ErrorString (prettyText k <> ": ") :) <$> typeExpForError te
-typeExpForError (E.TEArrow _ t1 t2 _) = do
-  t1' <- typeExpForError t1
-  t2' <- typeExpForError t2
-  pure $ t1' ++ [" -> "] ++ t2'
-typeExpForError (E.TEApply t arg _) = do
-  t' <- typeExpForError t
-  arg' <- case arg of
-    TypeArgExpType argt -> typeExpForError argt
-    TypeArgExpSize d -> sizeExpForError d
-  pure $ t' ++ [" "] ++ arg'
-typeExpForError (E.TESum cs _) = do
-  cs' <- mapM (onClause . snd) cs
+typeExpForError (E.Array _ _ shape et) = do
+  shape' <- mconcat <$> mapM sizeExpForError (E.shapeDims shape)
+  et' <- typeExpForError $ Scalar et
+  pure $ shape' ++ et'
+typeExpForError (E.Scalar (E.Sum cs)) = do
+  cs' <- mapM onConstructor $ M.toList cs
   pure $ intercalate [" | "] cs'
   where
-    onClause c = do
-      c' <- mapM typeExpForError c
-      pure $ intercalate [" "] c'
-
-sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
-sizeExpForError (SizeExp e _) = do
-  e' <- internaliseExp1 "size" e
-  pure ["[", ErrorVal int64 e', "]"]
-sizeExpForError SizeExpAny {} = pure ["[]"]
+    onConstructor (c, ts) = do
+      ts' <- mapM typeExpForError ts
+      pure $ ErrorString ("#" <> prettyText c <> " ") : intercalate [" "] ts'
+typeExpForError (E.Scalar Arrow {}) = pure ["#<fun>"]
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.
