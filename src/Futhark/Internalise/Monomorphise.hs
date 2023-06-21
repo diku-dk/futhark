@@ -488,23 +488,12 @@ transformRetTypeSizes argset (RetType dims ty) = do
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
--- This carries out record replacements in the alias information of a type.
+-- This blanks all alias information from the type, which we should
+-- not need downstream anyway.
 --
 -- It also transforms any size expressions.
 transformType :: PatType -> MonoM PatType
-transformType t = do
-  rrs <- asks envRecordReplacements
-  let replace (AliasBound v)
-        | Just d <- M.lookup v rrs =
-            S.fromList $ map (AliasBound . fst) $ M.elems d
-      replace x = S.singleton x
-  t' <- transformTypeSizes t
-  -- As an attempt at an optimisation, only transform the aliases if
-  -- they refer to a variable we have record-replaced.
-  pure $
-    if any ((`M.member` rrs) . aliasVar) $ aliases t
-      then second (mconcat . map replace . S.toList) t'
-      else t'
+transformType = fmap (`setAliases` mempty) . transformTypeSizes
 
 sizesForPat :: MonadFreshNames m => Pat -> m ([VName], Pat)
 sizesForPat pat = do
