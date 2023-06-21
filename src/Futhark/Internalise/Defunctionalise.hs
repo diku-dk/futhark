@@ -221,7 +221,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     -- forget those return sizes that we forgot to propagate along
     -- the way.  Hopefully the internaliser is conservative and
     -- will insert reshapes...
-    bound_here = S.fromList dims <> S.map identName (foldMap patIdents pats)
+    bound_here = S.fromList dims <> foldMap patNames pats
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
@@ -941,7 +941,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
       already_bound =
         globals
           <> S.fromList dims
-          <> S.map identName (foldMap patIdents params)
+          <> foldMap patNames params
 
       more_dims =
         S.toList $
