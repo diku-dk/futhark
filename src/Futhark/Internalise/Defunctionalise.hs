@@ -133,9 +133,7 @@ replaceStaticValSizes globals orig_substs sv =
         Nothing ->
           Var v (replaceTypeSizes substs <$> t) loc
     onExp substs (Coerce e te t loc) =
-      Coerce (onExp substs e) te' (replaceTypeSizes substs <$> t) loc
-      where
-        te' = onTypeExp substs te
+      Coerce (onExp substs e) te (replaceTypeSizes substs <$> t) loc
     onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
       Lambda
         (map (onAST substs) params)
@@ -144,35 +142,6 @@ replaceStaticValSizes globals orig_substs sv =
         (Info (als, RetType t_dims (replaceTypeSizes substs t)))
         loc
     onExp substs e = onAST substs e
-
-    onTypeExpDim substs (SizeExp e loc) = SizeExp (onExp substs e) loc
-    onTypeExpDim _ (SizeExpAny loc) = SizeExpAny loc
-
-    onTypeArgExp substs (TypeArgExpSize d) =
-      TypeArgExpSize (onTypeExpDim substs d)
-    onTypeArgExp substs (TypeArgExpType te) =
-      TypeArgExpType (onTypeExp substs te)
-
-    onTypeExp substs (TEArray d te loc) =
-      TEArray (onTypeExpDim substs d) (onTypeExp substs te) loc
-    onTypeExp substs (TEUnique t loc) =
-      TEUnique (onTypeExp substs t) loc
-    onTypeExp substs (TEApply t1 t2 loc) =
-      TEApply (onTypeExp substs t1) (onTypeArgExp substs t2) loc
-    onTypeExp substs (TEArrow p t1 t2 loc) =
-      TEArrow p (onTypeExp substs t1) (onTypeExp substs t2) loc
-    onTypeExp substs (TETuple ts loc) =
-      TETuple (map (onTypeExp substs) ts) loc
-    onTypeExp substs (TERecord ts loc) =
-      TERecord (map (fmap $ onTypeExp substs) ts) loc
-    onTypeExp substs (TESum ts loc) =
-      TESum (map (fmap $ map $ onTypeExp substs) ts) loc
-    onTypeExp substs (TEDim dims t loc) =
-      TEDim dims (onTypeExp substs t) loc
-    onTypeExp substs (TEParens te loc) =
-      TEParens (onTypeExp substs te) loc
-    onTypeExp _ (TEVar v loc) =
-      TEVar v loc
 
     onEnv substs =
       M.fromList
