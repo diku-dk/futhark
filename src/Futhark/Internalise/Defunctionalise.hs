@@ -157,31 +157,28 @@ replaceStaticValSizes globals orig_substs sv =
     onAST substs = runIdentity . astMap (tv substs)
 
 -- | Returns the defunctionalization environment restricted
--- to the given set of variable names and types.
+-- to the given set of variable names.
 restrictEnvTo :: FV -> DefM Env
 restrictEnvTo (FV m) = asks restrict
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
         keep k (Binding t sv) = do
-          guard $ not $ k `S.member` globals
-          u <- uniqueness <$> M.lookup k m
-          Just $ Binding t $ restrict' u sv
-    restrict' Nonunique (Dynamic t) =
-      Dynamic $ t `setUniqueness` Nonunique
-    restrict' _ (Dynamic t) =
+          guard $ not (k `S.member` globals) && M.member k m
+          Just $ Binding t $ restrict' sv
+    restrict' (Dynamic t) =
       Dynamic t
-    restrict' u (LambdaSV pat t e env) =
-      LambdaSV pat t e $ M.map (restrict'' u) env
-    restrict' u (RecordSV fields) =
-      RecordSV $ map (fmap $ restrict' u) fields
-    restrict' u (SumSV c svs fields) =
-      SumSV c (map (restrict' u) svs) fields
-    restrict' u (DynamicFun (e, sv1) sv2) =
-      DynamicFun (e, restrict' u sv1) $ restrict' u sv2
-    restrict' _ IntrinsicSV = IntrinsicSV
-    restrict' _ (HoleSV t loc) = HoleSV t loc
-    restrict'' u (Binding t sv) = Binding t $ restrict' u sv
+    restrict' (LambdaSV pat t e env) =
+      LambdaSV pat t e $ M.map restrict'' env
+    restrict' (RecordSV fields) =
+      RecordSV $ map (fmap restrict') fields
+    restrict' (SumSV c svs fields) =
+      SumSV c (map restrict' svs) fields
+    restrict' (DynamicFun (e, sv1) sv2) =
+      DynamicFun (e, restrict' sv1) $ restrict' sv2
+    restrict' IntrinsicSV = IntrinsicSV
+    restrict' (HoleSV t loc) = HoleSV t loc
+    restrict'' (Binding t sv) = Binding t $ restrict' sv
 
 -- | Defunctionalization monad.  The Reader environment tracks both
 -- the current Env as well as the set of globally defined dynamic
