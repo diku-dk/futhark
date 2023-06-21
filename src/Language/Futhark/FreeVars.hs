@@ -5,38 +5,35 @@ module Language.Futhark.FreeVars
     freeInPat,
     freeInType,
     freeWithout,
-    FV (..),
+    FV,
     fvVars,
   )
 where
 
-import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
 
--- | A set of names where we also track their type.
-newtype FV = FV {unFV :: M.Map VName StructType}
+-- | A set of names.
+newtype FV = FV {unFV :: S.Set VName}
   deriving (Show)
 
 -- | The set of names in an 'FV'.
 fvVars :: FV -> S.Set VName
-fvVars = M.keysSet . unFV
+fvVars = unFV
 
 instance Semigroup FV where
-  FV x <> FV y = FV $ M.unionWith max x y
+  FV x <> FV y = FV $ x <> y
 
 instance Monoid FV where
   mempty = FV mempty
 
 -- | Set subtraction.  Do not consider those variables as free.
 freeWithout :: FV -> S.Set VName -> FV
-freeWithout (FV x) y = FV $ M.filterWithKey keep x
-  where
-    keep k _ = k `S.notMember` y
+freeWithout (FV x) y = FV $ x `S.difference` y
 
 ident :: IdentBase Info VName -> FV
-ident v = FV $ M.singleton (identName v) (toStruct $ unInfo (identType v))
+ident = FV . S.singleton . identName
 
 -- | Compute the set of free variables of an expression.
 freeInExp :: ExpBase Info VName -> FV
@@ -57,7 +54,7 @@ freeInExp expr = case expr of
     foldMap freeInExp es <> freeInType (unInfo t)
   AppExp (Range e me incl _) _ ->
     freeInExp e <> foldMap freeInExp me <> foldMap freeInExp incl
-  Var qn (Info t) _ -> FV $ M.singleton (qualLeaf qn) $ toStruct t
+  Var qn _ _ -> FV $ S.singleton $ qualLeaf qn
   Ascript e _ _ -> freeInExp e
   Coerce e _ (Info t) _ ->
     freeInExp e <> freeInType t
@@ -95,8 +92,8 @@ freeInExp expr = case expr of
       formVars (For v e2) = (freeInExp e2, S.singleton $ identName v)
       formVars (ForIn p e2) = (freeInExp e2, patNames p)
       formVars (While e2) = (freeInExp e2, mempty)
-  AppExp (BinOp (qn, _) (Info qn_t) (e1, _) (e2, _) _) _ ->
-    FV (M.singleton (qualLeaf qn) $ toStruct qn_t)
+  AppExp (BinOp (qn, _) _ (e1, _) (e2, _) _) _ ->
+    FV (S.singleton (qualLeaf qn))
       <> freeInExp e1
       <> freeInExp e2
   Project _ e _ _ -> freeInExp e
@@ -148,7 +145,7 @@ freeInType t =
       foldMap (foldMap freeInType) cs
     Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
       FV $
-        M.filterWithKey (\k _ -> notV v k && notElem k dims) $
+        S.filter (\k -> notV v k && notElem k dims) $
           unFV $
             freeInType t1 <> freeInType t2
     Scalar (TypeVar _ _ _ targs) ->
