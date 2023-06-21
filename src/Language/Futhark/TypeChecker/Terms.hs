@@ -1170,7 +1170,7 @@ checkApply
       (argext, parsubst) <-
         case pname of
           Named pname'
-            | M.member pname' (unFV $ freeInType tp2') ->
+            | S.member pname' (fvVars $ freeInType tp2') ->
                 case (isJust (anyConsumption dflow), hasBinding argexp) of
                   (True, _) -> do
                     warn (srclocOf argexp) $
@@ -1303,7 +1303,7 @@ causalityCheck binding_body = do
   let checkCausality what known t loc
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
-              M.keys (unFV $ freeInType $ toStruct t) =
+              S.toList (fvVars $ freeInType $ toStruct t) =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
@@ -1620,7 +1620,7 @@ inferredReturnType loc params t = do
     unscopePatType loc hidden_params $
       inferReturnUniqueness params t
   where
-    hidden_params = M.keysSet $ M.filterWithKey (const . (`S.member` hidden)) $ foldMap patternMap params
+    hidden_params = S.filter (`S.member` hidden) $ foldMap patNames params
     hidden = hiddenParamNames params
 
 checkReturnAlias :: SrcLoc -> TypeBase () () -> [Pat] -> PatType -> TermTypeM ()
@@ -1890,7 +1890,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (M.keys $ unFV $ freeInType ret)) ret
+      injectExt (retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
     )
   where
     -- Diet does not matter here.
@@ -1970,7 +1970,7 @@ letGeneralise defname defloc tparams params rettype =
 
     let used_sizes =
           foldMap freeInType $ rettype'' : map patternStructType params
-    case filter ((`M.notMember` unFV used_sizes) . typeParamName) $
+    case filter ((`S.notMember` fvVars used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
       tp : _ -> unusedSize $ SizeBinder (typeParamName tp) (srclocOf tp)
@@ -2000,10 +2000,7 @@ checkFunBody params body maybe_rettype loc = do
       (body_t', _) <-
         unscopePatType
           loc
-          ( M.keysSet $
-              M.filterWithKey (const . (`S.member` hidden)) $
-                foldMap patternMap params
-          )
+          (S.filter (`S.member` hidden) $ foldMap patNames params)
           body_t
 
       let usage = mkUsage body "return type annotation"

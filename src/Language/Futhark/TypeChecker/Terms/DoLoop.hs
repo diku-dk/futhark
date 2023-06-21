@@ -282,8 +282,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc =
           let onDims _ x y
                 | x == y = pure x
               onDims _ e d = do
-                let vs = M.keys . unFV $ freeInExp e
-                forM_ vs $ \v -> do
+                forM_ (fvVars $ freeInExp e) $ \v -> do
                   case L.find (areSameSize v . fst) new_dims_to_initial_dim of
                     Just (_, e') ->
                       if e' == d

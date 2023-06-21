@@ -636,12 +636,17 @@ patNames PatLit {} = mempty
 patNames (PatConstr _ _ ps _) = mconcat $ map patNames ps
 patNames (PatAttr _ p _) = patNames p
 
--- | A mapping from names bound in a map to their identifier.
-patternMap :: (Functor f) => PatBase f VName -> M.Map VName (IdentBase f VName)
-patternMap pat =
-  M.fromList $ zip (map identName idents) idents
-  where
-    idents = S.toList $ patIdents pat
+-- | Each name bound in a pattern alongside its type.
+patternMap :: PatBase Info VName -> [(VName, PatType)]
+patternMap (Id v (Info t) _) = [(v, t)]
+patternMap (PatParens p _) = patternMap p
+patternMap (TuplePat pats _) = mconcat $ map patternMap pats
+patternMap (RecordPat fs _) = mconcat $ map (patternMap . snd) fs
+patternMap Wildcard {} = mempty
+patternMap (PatAscription p _ _) = patternMap p
+patternMap PatLit {} = mempty
+patternMap (PatConstr _ _ ps _) = mconcat $ map patternMap ps
+patternMap (PatAttr _ p _) = patternMap p
 
 -- | The type of values bound by the pattern.
 patternType :: PatBase Info VName -> PatType

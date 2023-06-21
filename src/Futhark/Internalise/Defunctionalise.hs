@@ -159,12 +159,12 @@ replaceStaticValSizes globals orig_substs sv =
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names.
 restrictEnvTo :: FV -> DefM Env
-restrictEnvTo (FV m) = asks restrict
+restrictEnvTo fv = asks restrict
   where
     restrict (globals, env) = M.mapMaybeWithKey keep env
       where
         keep k (Binding t sv) = do
-          guard $ not (k `S.member` globals) && M.member k m
+          guard $ not (k `S.member` globals) && S.member k (fvVars fv)
           Just $ Binding t $ restrict' sv
     restrict' (Dynamic t) =
       Dynamic t
@@ -222,7 +222,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
-    rettype_st = RetType (mapMaybe mkExt (M.keys $ unFV $ freeInType ret) ++ ret_dims) ret
+    rettype_st = RetType (mapMaybe mkExt (S.toList $ fvVars $ freeInType ret) ++ ret_dims) ret
 
     dec =
       ValBind
@@ -1138,7 +1138,7 @@ matchPatSV (Id vn (Info t) _) sv =
       else dim_env <> M.singleton vn (Binding Nothing sv)
   where
     dim_env =
-      M.map (const i64) $ unFV $ freeInType t
+      M.fromList $ map (,i64) $ S.toList $ fvVars $ freeInType t
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = pure mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv

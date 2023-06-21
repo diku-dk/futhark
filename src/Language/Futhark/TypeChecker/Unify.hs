@@ -261,8 +261,8 @@ typeNotes :: (Located a, MonadUnify m) => a -> StructType -> m Notes
 typeNotes ctx =
   fmap mconcat
     . mapM (dimNotes ctx . flip sizeFromName mempty . qualName)
-    . M.keys
-    . unFV
+    . S.toList
+    . fvVars
     . freeInType
 
 typeVarNotes :: MonadUnify m => VName -> m Notes
@@ -716,7 +716,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
           | all (`M.member` tp_fields) $ M.keys required_fields -> do
               required_fields' <- mapM normTypeFully required_fields
               let tp' = Scalar $ Record $ required_fields <> tp_fields -- Crucially left-biased.
-                  ext = filter (`M.member` (unFV $ freeInType tp')) bound
+                  ext = filter (`S.member` fvVars (freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedFields onDims usage bound bcs required_fields' tp_fields
@@ -758,7 +758,7 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
         Scalar (Sum ts)
           | all (`M.member` ts) $ M.keys required_cs -> do
               let tp' = Scalar $ Sum $ required_cs <> ts -- Crucially left-biased.
-                  ext = filter (`M.member` (unFV $ freeInType tp')) bound
+                  ext = filter (`S.member` fvVars (freeInType tp')) bound
               modifyConstraints $
                 M.insert vn (lvl, Constraint (RetType ext tp') usage)
               unifySharedConstructors onDims usage bound bcs required_cs ts
@@ -816,7 +816,7 @@ linkVarToDim ::
 linkVarToDim usage bcs vn lvl e = do
   constraints <- getConstraints
 
-  mapM_ (checkVar constraints) $ M.keys $ unFV $ freeInExp e
+  mapM_ (checkVar constraints) $ fvVars $ freeInExp e
 
   modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
   where

@@ -194,7 +194,7 @@ resolveTypeParams names orig_t1 orig_t2 =
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
-        not $ any (`elem` bound) $ freeVarsInExp e =
+        not $ any (`elem` bound) $ fvVars $ freeInExp e =
           addDim d1 e
     matchExps bound e1 e2
       | Just es <- similarExps e1 e2 =
@@ -582,9 +582,6 @@ evalIndex loc env is arr = do
             <> "."
   maybe oob pure $ indexArray is arr
 
-freeVarsInExp :: Exp -> [VName]
-freeVarsInExp = M.keys . unFV . freeInExp
-
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
 expandType :: Env -> StructType -> StructType
@@ -607,7 +604,7 @@ expandType env (Scalar (TypeVar () u tn args)) =
           -- has been hidden by a module ascription,
           -- e.g. tests/modules/sizeparams4.fut.
           onDim e
-            | any (`elem` ext) $ freeVarsInExp e = anySize
+            | any (`elem` ext) $ fvVars $ freeInExp e = anySize
           onDim d = d
        in if null ps
             then first onDim t'
@@ -644,7 +641,7 @@ evalType eval' outer_bound t = do
   traverseDims evalDim t
   where
     canBeEvaluated bound e =
-      let free = freeVarsInExp e
+      let free = fvVars $ freeInExp e
        in not $ any (`S.member` bound) free || any (`S.member` outer_bound) free
 
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value

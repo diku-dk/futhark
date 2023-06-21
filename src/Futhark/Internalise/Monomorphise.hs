@@ -1003,7 +1003,7 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
           mapM_ (uncurry $ onExps bound) es
     onExps _ _ _ = pure mempty
 
-    freeVarsInExp = M.keys . unFV . freeInExp
+    freeVarsInExp = fvVars . freeInExp
 
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
 inferSizeArgs tparams bind_t bind_r t = do

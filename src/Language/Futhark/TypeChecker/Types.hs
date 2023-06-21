@@ -44,7 +44,7 @@ mustBeExplicitAux t =
     onDim _ PosImmediate (Var d _ _) =
       modify $ \s -> M.insertWith (&&) (qualLeaf d) False s
     onDim _ _ e =
-      modify $ M.unionWith (&&) (M.map (const True) (unFV $ freeInExp e))
+      modify $ flip (S.foldr (\v -> M.insertWith (&&) v True)) $ fvVars $ freeInExp e
 
 -- | Determine which of the sizes in a type are used as sizes outside
 -- of functions in the type, and which are not.  The former are said
@@ -63,7 +63,7 @@ determineSizeWitnesses t =
 mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
-      alsoRet = M.unionWith (&&) $ M.map (const True) $ unFV $ freeInType ret
+      alsoRet = M.unionWith (&&) $ M.fromList $ zip (S.toList (fvVars (freeInType ret))) (repeat True)
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
