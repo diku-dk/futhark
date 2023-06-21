@@ -488,50 +488,6 @@ transformRetTypeSizes argset (RetType dims ty) = do
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
-transformTypeExp :: TypeExp Info VName -> MonoM (TypeExp Info VName)
-transformTypeExp te@TEVar {} = pure te
-transformTypeExp (TEParens te loc) =
-  TEParens <$> transformTypeExp te <*> pure loc
-transformTypeExp (TETuple tes loc) =
-  TETuple <$> mapM transformTypeExp tes <*> pure loc
-transformTypeExp (TERecord fs loc) =
-  TERecord <$> mapM (traverse transformTypeExp) fs <*> pure loc
-transformTypeExp (TEArray size te loc) =
-  TEArray <$> transformSizeExp size <*> transformTypeExp te <*> pure loc
-  where
-    transformSizeExp (SizeExp e loc') =
-      SizeExp <$> (replaceExp =<< transformExp e) <*> pure loc'
-    transformSizeExp (SizeExpAny loc') =
-      pure $ SizeExpAny loc'
-transformTypeExp (TEUnique te loc) =
-  TEUnique <$> transformTypeExp te <*> pure loc
-transformTypeExp (TEApply te args loc) =
-  TEApply <$> transformTypeExp te <*> transformTypeArg args <*> pure loc
-  where
-    transformTypeArg (TypeArgExpSize size) =
-      TypeArgExpSize <$> transformSizeExp size
-    transformTypeArg (TypeArgExpType arg) =
-      TypeArgExpType <$> transformTypeExp arg
-    transformSizeExp (SizeExp e loc') =
-      SizeExp <$> (replaceExp =<< transformExp e) <*> pure loc'
-    transformSizeExp (SizeExpAny loc') =
-      pure $ SizeExpAny loc'
-transformTypeExp (TEArrow aname ta tr loc) = do
-  tr' <- case aname of
-    Just vn -> do
-      let argset = S.singleton vn
-      ret <- withArgs argset $ transformTypeExp tr
-      dims <- parametrizing argset
-      if null dims
-        then pure ret
-        else pure $ TEDim (map snd dims) ret mempty
-    Nothing -> transformTypeExp tr
-  TEArrow aname <$> transformTypeExp ta <*> pure tr' <*> pure loc
-transformTypeExp (TESum cs loc) =
-  TESum <$> traverse (traverse (traverse transformTypeExp)) cs <*> pure loc
-transformTypeExp (TEDim dims te loc) =
-  TEDim dims <$> transformTypeExp te <*> pure loc
-
 -- This carries out record replacements in the alias information of a type.
 --
 -- It also transforms any size expressions.
@@ -775,8 +731,8 @@ transformExp (Hole t loc) =
   Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
   Ascript <$> transformExp e <*> pure tp <*> pure loc
-transformExp (Coerce e tp t loc) =
-  Coerce <$> transformExp e <*> transformTypeExp tp <*> traverse transformType t <*> pure loc
+transformExp (Coerce e te t loc) =
+  Coerce <$> transformExp e <*> pure te <*> traverse transformType t <*> pure loc
 transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 transformExp (Not e loc) =
