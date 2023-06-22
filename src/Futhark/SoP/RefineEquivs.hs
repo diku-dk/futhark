@@ -3,6 +3,7 @@
 -- | Functionality for refining the equivalence environment
 module Futhark.SoP.RefineEquivs
   ( addEqZeros,
+    addEq,
   )
 where
 
@@ -14,7 +15,6 @@ import Data.Set (Set)
 import Data.Set qualified as S
 import Debug.Trace
 import Futhark.Analysis.PrimExp
-import Futhark.SoP.Constraint
 import Futhark.SoP.Convert
 import Futhark.SoP.Expression
 import Futhark.SoP.FourierMotzkin
@@ -23,21 +23,10 @@ import Futhark.SoP.SoP
 import Futhark.SoP.Util
 import Futhark.Util.Pretty
 
--- addEqConstraint :: forall u e m. (ToSoP u e, MonadSoP u e m) => Constraint u -> m (Set (SoP u >= 0))
--- addEqConstraint c@(x :==: y) = do
---  (extra_inEqZs :: Set (SoP u >= 0), equiv_cands) <- addEquivSoP x y
---  addLegalCands equiv_cands
---  pure extra_inEqZs
-
--- addEquivSoP ::
---  (ToSoP u e, MonadSoP u e m) =>
---  SoP u ->
---  SoP u ->
---  m (Set (SoP u >= 0), Set (EquivCand u))
--- addEquivSoP x y = do
---  cands <- mkEquivCands $ x .-. y
---  (ineqss, cands') <- mapAndUnzipM refineEquivCand $ S.toList cands
---  pure (mconcat ineqss, S.fromList cands')
+addEq :: forall u e m. (ToSoP u e, MonadSoP u e m) => u -> SoP u -> m ()
+addEq sym sop = do
+  -- cands <- mkEquivCands (/= sym) $ sop .-. sym2SoP sym
+  addLegalCands $ S.singleton $ EquivCand sym sop
 
 -- | Refine the environment with a set of 'PrimExp's with the assertion that @pe = 0@
 --   for each 'PrimExp' in the set.
@@ -78,16 +67,20 @@ instance Ord u => Substitute u (SoP u) (EquivCand u) where
 --   ToDo: try to give common factor first, e.g.,
 --         nx - nbq - n = 0 => n*(x-bq-1) = 0 => x = bq+1,
 --         if we can prove that n != 0
-mkEquivCands :: MonadSoP u e m => SoP u -> m (Set (EquivCand u))
-mkEquivCands sop =
-  getTerms <$> substEquivs sop
+mkEquivCands :: MonadSoP u e m => (u -> Bool) -> SoP u -> m (Set (EquivCand u))
+mkEquivCands p sop =
+  pure (getTerms sop)
     >>= M.foldrWithKey mkEquivCand (pure mempty)
   where
+    -- getTerms <$> substEquivs sop
+    --  >>= M.foldrWithKey mkEquivCand (pure mempty)
+
     mkEquivCand (Term term) v mcands
       | abs v == 1,
         [sym] <- MS.toList term,
         sop' <- deleteTerm term sop,
-        sym `notElem` free sop' = do
+        sym `notElem` free sop',
+        p sym = do
           msop <- lookupSoP sym
           case msop of
             Nothing ->
@@ -118,6 +111,8 @@ mkEquivCands sop =
 --
 --   2: TODO: try to give common factors and get simpler.
 refineEquivCand :: forall u e m. (ToSoP u e, MonadSoP u e m) => EquivCand u -> m (Set (SoP u >= 0), EquivCand u)
+-- refineEquivCand cand@(EquivCand sym sop)
+--  | justPositive sop = pure (S.singleton $ sym2SoP sym, cand)
 refineEquivCand cand@(EquivCand sym sop) = do
   mpe <- lookupUntransSym sym
   case mpe of
@@ -141,7 +136,10 @@ refineEquivCand cand@(EquivCand sym sop) = do
                   addUntrans q div_pe
                   pure (pe_ineq, new_cand)
             _ -> pure (mempty, cand)
-    _ -> pure (mempty, cand)
+    _ -> do
+      if (justPositive sop)
+        then pure (S.singleton $ sym2SoP sym, cand)
+        else pure (mempty, cand)
 
 -- | Takes a 'PrimExp' @pe@ with the property that @pe = 0@ and
 --   returns two sets @'addEquiv2CandSet' pe = (ineqs,cand)@:
@@ -154,7 +152,7 @@ addEquiv2CandSet ::
   SoP u == 0 ->
   m (Set (SoP u >= 0), Set (EquivCand u))
 addEquiv2CandSet sop = do
-  cands <- mkEquivCands sop
+  cands <- mkEquivCands (const True) sop
   (ineqss, cands') <- mapAndUnzipM refineEquivCand $ S.toList cands
   pure (mconcat ineqss, S.fromList cands')
 

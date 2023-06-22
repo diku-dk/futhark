@@ -5,6 +5,7 @@ module Futhark.SoP.SoP
     Range (..),
     mapSoP,
     filterSoP,
+    term2SoP,
     sym2SoP,
     int2SoP,
     scaleSoP,
@@ -21,11 +22,13 @@ module Futhark.SoP.SoP
     divSoPInt,
     signumSoP,
     factorSoP,
+    sopFactors,
     numTerms,
     justSym,
     justConstant,
     justAffine,
     justSingleTerm,
+    justPositive,
     deleteTerm,
     insertTerm,
     Free (..),
@@ -34,6 +37,9 @@ module Futhark.SoP.SoP
     sopToList,
     sopToLists,
     termToList,
+    Rel (..),
+    orRel,
+    andRel,
   )
 where
 
@@ -167,6 +173,9 @@ divTerm xt@(Term x) yt@(Term y)
   | yt `isFactorOf` xt = Just $ Term $ x MS.\\ y
   | otherwise = Nothing
 
+termPowers :: Term u -> [(u, Int)]
+termPowers (Term t) = MS.toOccurList t
+
 --------------------------------------------------------------------------------
 -- Basic operations
 --------------------------------------------------------------------------------
@@ -197,6 +206,9 @@ mapSoP f (SoP ts) = SoP $ fmap f ts
 
 sopToList :: SoP u -> [(Term u, Integer)]
 sopToList (SoP ts) = M.toList ts
+
+sopTerms :: SoP u -> [Term u]
+sopTerms = map fst . sopToList
 
 sopToLists :: Ord u => SoP u -> [([u], Integer)]
 sopToLists (SoP ts) = M.toList $ M.mapKeys termToList ts
@@ -274,6 +286,14 @@ factorSoP fact sop = (sopFromList as, sopFromList bs)
     as = mapMaybe (\(t, n) -> (,n) <$> t `divTerm` fact') $ sopToList sop
     bs = filter (not . (fact' `isFactorOf`) . fst) $ sopToList sop
 
+-- | The factors of an 'SoP'.
+sopFactors :: Ord u => SoP u -> [(SoP u, Term u)]
+sopFactors sop =
+  map (\(t, (a, _)) -> (a, t)) $
+    filter ((zeroSoP ==) . snd . snd) $
+      map (\t -> (t, factorSoP t sop)) $
+        sopTerms sop
+
 -- | Division of 'SoP's. Handles the following cases:
 --
 --   1. @(qv + qv_1 * t_1 + ... + qv_n*t_n) / q@ results in
@@ -345,6 +365,14 @@ justSingleTerm sop
   | [t] <- sopToList $ normalize sop = Just t
   | otherwise = Nothing
 
+-- | Can we guarantee the 'SoP' is positive? TODO: This can be more sophisticated.
+justPositive :: Ord u => SoP u -> Bool
+justPositive sop
+  | Just x <- justConstant sop = x > 0
+  | Just (t, a) <- justSingleTerm sop =
+      a > 0 && all (even . snd) (termPowers t)
+  | otherwise = False
+
 --------------------------------------------------------------------------------
 -- Free symbols in SoPs
 --------------------------------------------------------------------------------
@@ -396,3 +424,50 @@ instance Ord u => Substitute u (SoP u) (SoP u) where
 instance Ord u => Substitute u (SoP u) (Range u) where
   substitute subst (Range lb k ub) =
     Range (substitute subst lb) k (substitute subst ub)
+
+data Rel u
+  = (:<:) (SoP u) (SoP u)
+  | (:<=:) (SoP u) (SoP u)
+  | (:>:) (SoP u) (SoP u)
+  | (:>=:) (SoP u) (SoP u)
+  | (:==:) (SoP u) (SoP u)
+  | (:/=:) (SoP u) (SoP u)
+  | (:&&:) (Rel u) (Rel u)
+  | (:||:) (Rel u) (Rel u)
+  deriving (Eq, Ord, Show)
+
+infixr 4 :<:
+
+infixr 4 :<=:
+
+infixr 4 :>:
+
+infixr 4 :>=:
+
+infixr 4 :==:
+
+infixr 4 :/=:
+
+infixr 3 :&&:
+
+infixr 2 :||:
+
+andRel :: [Rel u] -> Rel u
+andRel = foldr1 (:&&:)
+
+orRel :: [Rel u] -> Rel u
+orRel = foldr1 (:||:)
+
+instance Pretty u => Pretty (Rel u) where
+  pretty c =
+    case c of
+      x :<: y -> op "<" x y
+      x :<=: y -> op "<=" x y
+      x :>: y -> op ">" x y
+      x :>=: y -> op ">=" x y
+      x :==: y -> op "==" x y
+      x :/=: y -> op "/=" x y
+      x :&&: y -> op "&&" x y
+      x :||: y -> op "||" x y
+    where
+      op s x y = pretty x <+> s <+> pretty y

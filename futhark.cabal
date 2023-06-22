@@ -277,7 +277,6 @@ library
       Futhark.Doc.Generator
       Futhark.Error
       Futhark.SoP.Convert
-      Futhark.SoP.Constraint
       Futhark.SoP.Expression
       Futhark.SoP.Monad
       Futhark.SoP.Refine

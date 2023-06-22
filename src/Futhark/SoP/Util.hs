@@ -52,9 +52,10 @@ allM p = foldr (\a b -> ifM (p a) b (pure False)) (pure True)
 toMS :: (Ord a, Foldable t) => t a -> MultiSet a
 toMS = MS.fromList . Data.Foldable.toList
 
-localS :: Monad m => StateT s m a -> StateT s m a
-localS m = do
+localS :: MonadState s m => (s -> s) -> m a -> m a
+localS f m = do
   env <- get
+  modify f
   a <- m
   put env
   pure a

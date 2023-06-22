@@ -30,6 +30,8 @@ module Futhark.SoP.Monad
     evalSoPM_,
     MonadSoP (..),
     substEquivs,
+    addEquiv,
+    delFromEnv,
   )
 where
 
@@ -227,6 +229,14 @@ addRange sym r =
   modifyEnv $ \env ->
     env {ranges = M.insertWith (<>) sym r (ranges env)}
 
+-- \| Add equivalent information for a symbol; unsafe and
+-- should only be used for newly introduced variables.
+addEquiv :: MonadSoP u e m => u -> SoP u -> m ()
+addEquiv sym sop = do
+  -- sop' <- substEquivs sop
+  modifyEnv $ \env ->
+    env {equivs = M.insert sym sop (equivs env)}
+
 --------------------------------------------------------------------------------
 -- Environment
 --------------------------------------------------------------------------------
@@ -320,3 +330,19 @@ transClosInRanges rs syms =
 
 substEquivs :: MonadSoP u e m => SoP u -> m (SoP u)
 substEquivs sop = flip substitute sop <$> getEquivs
+
+-- | Removes a symbol from the environment
+delFromEnv :: MonadSoP u e m => u -> m ()
+delFromEnv x =
+  modifyEnv $ \env ->
+    env
+      { untrans = delFromUntrans $ untrans env,
+        equivs = M.delete x $ equivs env,
+        ranges = M.delete x $ ranges env
+      }
+  where
+    delFromUntrans ut =
+      ut
+        { dir = M.delete x $ dir ut,
+          inv = M.filter (/= x) $ inv ut
+        }

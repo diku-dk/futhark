@@ -11,6 +11,7 @@ import Data.Map.Strict qualified as M
 import Data.MultiSet qualified as MS
 import Data.Set (Set)
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.SoP.Convert
@@ -51,11 +52,26 @@ instance Ord u => Free u (RangeCand u) where
 --          @nx - nbq - n = 0@ is equivalent to
 --          @n*(x-bq-1) >= 0@, hence, if we can prove
 --          that @n >= 0@ we can derive @x >= bq+1@.
-mkRangeCands :: MonadSoP u e m => SoP u -> m (Set (RangeCand u))
-mkRangeCands sop =
-  (M.foldrWithKey mkRangeCand mempty . getTerms)
-    <$> substEquivs sop
+mkRangeCands :: MonadSoP u e m => (SoP u >= 0) -> m (Set (RangeCand u))
+mkRangeCands sop = do
+  -- sop' <- substEquivs sop
+  let sop' = sop
+  let singleSymCands = mkSingleSymCands sop'
+  factorCands <- factorCandsM sop'
+  pure $ singleSymCands <> factorCands
   where
+    factorCandsM sop' =
+      mconcat
+        <$> forM
+          (sopFactors sop')
+          ( \(rem, term) -> do
+              ifM
+                (term2SoP term 1 $>=$ zeroSoP)
+                (pure $ mkSingleSymCands rem)
+                (pure mempty)
+          )
+    mkSingleSymCands sop' =
+      M.foldrWithKey mkRangeCand mempty $ getTerms $ sop'
     mkRangeCand (Term term) v cands
       | [sym] <- MS.toList term,
         sop' <- deleteTerm term sop,

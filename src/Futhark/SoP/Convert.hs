@@ -47,23 +47,11 @@ instance Ord u => FromSoP u (PrimExp u) where
 -- | Conversion from some expressions to
 --   'SoP's. Monadic because it may involve look-ups in the
 --   untranslatable expression environment.
---
---   Separating into two functions is to make clearer the fact that
---   'toSoPCmp' returns SoPs @sop@ implicitly in the relation @sop >=
---   0@.  Maybe this should be enforced at the constructor level
---   instead; i.e.  have constructors for numeric SoPs and SoPs in
---   relations.
 class ToSoP u e where
   toSoPNum :: MonadSoP u e m => e -> m (Integer, SoP u)
 
-  -- | Translates a 'PrimExp' containing a (top-level) comparison
-  -- operator into a 'SoP' representation such that @sop >= 0@.
-  toSoPCmp :: MonadSoP u e m => e -> m (Integer, SoP u >= 0)
-
 instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u Integer where
   toSoPNum x = pure (1, int2SoP x)
-
-  toSoPCmp x = pure (1, int2SoP x)
 
 instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u (PrimExp u) where
   toSoPNum primExp = do
@@ -173,25 +161,6 @@ instance (Nameable u, Ord u, Show u, Pretty u) => ToSoP u (PrimExp u) where
         x <- lookupUntransPE pe
         toSoPNum' f $ PE.LeafExp x $ PE.primExpType pe
 
-  toSoPCmp (PE.CmpOpExp (PE.CmpEq ptp) x y)
-    -- x = y => x - y = 0
-    | PE.IntType {} <- ptp = toSoPNum $ x ~-~ y
-  toSoPCmp (PE.CmpOpExp lessop x y)
-    -- x < y => x + 1 <= y => y >= x + 1 => y - (x+1) >= 0
-    | Just itp <- lthishType lessop =
-        toSoPNum $ y ~-~ (x ~+~ PE.ValueExp (PE.IntValue $ PE.intValue itp (1 :: Integer)))
-    -- x <= y => y >= x => y - x >= 0
-    | Just _ <- leqishType lessop =
-        toSoPNum $ y ~-~ x
-    where
-      lthishType (PE.CmpSlt itp) = Just itp
-      lthishType (PE.CmpUlt itp) = Just itp
-      lthishType _ = Nothing
-      leqishType (PE.CmpUle itp) = Just itp
-      leqishType (PE.CmpSle itp) = Just itp
-      leqishType _ = Nothing
-  toSoPCmp pe = error $ "toSoPCmp: not a comparison " <> prettyString pe
-
 instance ToSoP VName Exp where
   toSoPNum (E.Literal v _) =
     (pure . (1,)) $
@@ -201,7 +170,7 @@ instance ToSoP VName Exp where
         _ -> error ""
   toSoPNum (E.IntLit v _ _) = pure (1, int2SoP v)
   toSoPNum (E.Var (E.QualName [] v) _ _) = pure (1, sym2SoP v)
-  toSoPNum (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+  toSoPNum e@(E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
     | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
       name <- E.baseString $ E.qualLeaf op,
       Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
@@ -211,26 +180,11 @@ instance ToSoP VName Exp where
           <$> case bop of
             E.Plus -> pure $ x .+. y
             E.Minus -> pure $ x .-. y
-            E.Times -> pure $ y .-. x
-            bop -> error $ "toSoPNum: " <> prettyString bop
+            E.Times -> pure $ x .*. y
+            _ -> sym2SoP <$> lookupUntransPE e
   toSoPNum e = do
     x <- lookupUntransPE e
     pure (1, sym2SoP x)
-
-  toSoPCmp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
-    | E.baseTag (E.qualLeaf op) <= maxIntrinsicTag,
-      name <- E.baseString $ E.qualLeaf op,
-      Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
-        (_, x) <- toSoPNum e_x
-        (_, y) <- toSoPNum e_y
-        (1,)
-          <$> case bop of
-            E.Equal -> pure $ x .-. y
-            E.Less -> pure $ y .-. (x .+. int2SoP 1)
-            E.Leq -> pure $ y .-. x
-            E.Greater -> pure $ x .-. (y .+. int2SoP 1)
-            E.Geq -> pure $ x .-. y
-            bop -> error $ "toSoPCmp: " <> prettyString bop
 
 --
 -- {--
