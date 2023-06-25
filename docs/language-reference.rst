@@ -576,6 +576,7 @@ in natural text.
   left               ``|>``
   right              ``<|``
   right              ``->``
+  left               ``**``
   left               juxtaposition
   =================  =============
 
