@@ -32,17 +32,17 @@ toSoPCmp_ :: (ToSoP u e, MonadSoP u e m) => e -> m (SoP u >= 0)
 toSoPCmp_ e = snd <$> toSoPNum e
 
 -- | Conversion from 'SoP's to other representations.
-class FromSoP u a where
-  fromSoP :: SoP u -> a
+class FromSoP u e where
+  fromSoP :: MonadSoP u e m => SoP u -> m e
 
-instance Ord u => FromSoP u (PrimExp u) where
-  fromSoP sop =
-    foldr ((~+~) . fromTerm) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 (0 :: Integer)) (sopToLists sop)
-    where
-      fromTerm (term, n) =
-        foldl (~*~) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 n) $
-          map fromSym term
-      fromSym sym = PE.LeafExp sym $ PE.IntType PE.Int64
+-- instance Ord u => FromSoP u (PrimExp u) where
+--  fromSoP sop =
+--    foldr ((~+~) . fromTerm) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 (0 :: Integer)) (sopToLists sop)
+--    where
+--      fromTerm (term, n) =
+--        foldl (~*~) (PE.ValueExp $ PE.IntValue $ PE.intValue PE.Int64 n) $
+--          map fromSym term
+--      fromSym sym = PE.LeafExp sym $ PE.IntType PE.Int64
 
 -- | Conversion from some expressions to
 --   'SoP's. Monadic because it may involve look-ups in the

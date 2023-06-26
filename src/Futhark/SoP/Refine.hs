@@ -25,7 +25,7 @@ import Futhark.SoP.Util
 import Futhark.Util.Pretty
 
 constraintToSoP :: (Ord u, MonadSoP u e m) => Rel u -> m (Set (SoP u == 0), Set (SoP u >= 0))
-constraintToSoP (x :<=: y) = pure (mempty, S.singleton $ x .-. y)
+constraintToSoP (x :<=: y) = pure (mempty, S.singleton $ y .-. x)
 constraintToSoP (x :<: y) = pure (mempty, S.singleton $ y .-. (x .+. int2SoP 1))
 constraintToSoP (x :>: y) = pure (mempty, S.singleton $ x .-. (y .+. int2SoP 1))
 constraintToSoP (x :>=: y) = pure (mempty, S.singleton $ x .-. y)

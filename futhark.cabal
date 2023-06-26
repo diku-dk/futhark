@@ -175,6 +175,16 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.Refinement
+      Futhark.Analysis.Refinement.CNF
+      Futhark.Analysis.Refinement.Forward
+      Futhark.Analysis.Refinement.Prop
+      Futhark.Analysis.Refinement.Rules
+      Futhark.Analysis.Refinement.Match
+      Futhark.Analysis.Refinement.Convert
+      Futhark.Analysis.Refinement.Latex
+      Futhark.Analysis.Refinement.Relations
+      Futhark.Analysis.Refinement.Representation
+      Futhark.Analysis.Refinement.Monad
       Futhark.Analysis.SymbolTable
       Futhark.Analysis.UsageTable
       Futhark.Bench
@@ -529,6 +539,8 @@ library
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
     , multiset
+    , HaTeX
+    , process
 
 executable futhark
   import: common

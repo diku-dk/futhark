@@ -1,7 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
--- | The Futhark Prelude Library embedded embedded as strings read
+-- | The Futhark Prelude Library embedded embedded as strings read .
 -- during compilation of the Futhark compiler.  The advantage is that
 -- the prelude can be accessed without reading it from disk, thus
 -- saving users from include path headaches.
