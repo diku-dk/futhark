@@ -3,8 +3,7 @@
 -- ==
 -- error: .*consumed.*
 
-def main(): i32 =
-  let n = 10
+def main n =
   let a = iota(n)
   let c = if 2==2 then iota(n) else a -- c aliases a.
   let c[0] = 4 in -- Consume c and a.

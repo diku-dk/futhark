@@ -199,7 +199,7 @@ bindingTypeParams tparams = localEnv env
         { envTypeTable =
             M.singleton v $
               TypeAbbr l [] . RetType [] . Scalar $
-                TypeVar () Nonunique (qualName v) []
+                TypeVar mempty (qualName v) []
         }
 
 checkTypeDecl ::
@@ -207,7 +207,7 @@ checkTypeDecl ::
   TypeM ([VName], TypeExp Info VName, StructType, Liftedness)
 checkTypeDecl te = do
   (te', svars, RetType dims st, l) <- checkTypeExp te
-  pure (svars ++ dims, te', st, l)
+  pure (svars ++ dims, te', toStruct st, l)
 
 -- In this function, after the recursion, we add the Env of the
 -- current Spec *after* the one that is returned from the recursive
@@ -264,7 +264,7 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
                 envTypeTable =
                   M.singleton name' $
                     TypeAbbr l ps' . RetType [] . Scalar $
-                      TypeVar () Nonunique (qualName name') $
+                      TypeVar mempty (qualName name') $
                         map typeParamToArg ps'
               }
       (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
@@ -554,7 +554,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
   checkTypeParams tps $ \tps' -> do
     (te', svars, RetType dims t, l') <- bindingTypeParams tps' $ checkTypeExp te
 
-    let (witnessed, _) = determineSizeWitnesses t
+    let (witnessed, _) = determineSizeWitnesses $ toStruct t
     case L.find (`S.notMember` witnessed) svars of
       Just _ ->
         typeError (locOf te) mempty . withIndexLink "anonymous-nonconstructive" $
@@ -562,7 +562,7 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
       Nothing ->
         pure ()
 
-    let elab_t = RetType (svars ++ dims) t
+    let elab_t = RetType (svars ++ dims) $ toStruct t
 
     let used_dims = fvVars $ freeInType t
     case filter ((`S.notMember` used_dims) . typeParamName) $
@@ -603,11 +603,11 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
           TypeBind name' l tps' te' (Info elab_t) doc loc
         )
 
-entryPoint :: [Pat] -> Maybe (TypeExp Info VName) -> StructRetType -> EntryPoint
+entryPoint :: [Pat ParamType] -> Maybe (TypeExp Info VName) -> ResRetType -> EntryPoint
 entryPoint params orig_ret_te (RetType _ret orig_ret) =
   EntryPoint (map patternEntry params ++ more_params) rettype'
   where
-    (more_params, rettype') = onRetType orig_ret_te orig_ret
+    (more_params, rettype') = onRetType orig_ret_te $ toStruct orig_ret
 
     patternEntry (PatParens p _) =
       patternEntry p
@@ -623,10 +623,10 @@ entryPoint params orig_ret_te (RetType _ret orig_ret) =
     pname (Named v) = baseName v
     pname Unnamed = "_"
     onRetType (Just (TEArrow p t1_te t2_te _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
-      let (xs, y) = onRetType (Just t2_te) t2
+      let (xs, y) = onRetType (Just t2_te) $ toStruct t2
        in (EntryParam (maybe "_" baseName p) (EntryType t1 (Just t1_te)) : xs, y)
     onRetType _ (Scalar (Arrow _ p _ t1 (RetType _ t2))) =
-      let (xs, y) = onRetType Nothing t2
+      let (xs, y) = onRetType Nothing $ toStruct t2
        in (EntryParam (pname p) (EntryType t1 Nothing) : xs, y)
     onRetType te t =
       ([], EntryType t te)
@@ -634,9 +634,9 @@ entryPoint params orig_ret_te (RetType _ret orig_ret) =
 checkEntryPoint ::
   SrcLoc ->
   [TypeParam] ->
-  [Pat] ->
+  [Pat ParamType] ->
   Maybe (TypeExp Info VName) ->
-  StructRetType ->
+  ResRetType ->
   TypeM ()
 checkEntryPoint loc tparams params maybe_tdecl rettype
   | any isTypeParam tparams =
@@ -659,7 +659,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
         withIndexLink
           "size-polymorphic-entry"
           "Entry point functions must not be size-polymorphic in their return type."
-  | (constructive, _) <- foldMap determineSizeWitnesses param_ts,
+  | (constructive, _) <- foldMap (determineSizeWitnesses . toStruct) param_ts,
     Just p <- L.find (flip S.notMember constructive . typeParamName) tparams =
       typeError p mempty . withIndexLink "nonconstructive-entry" $
         "Entry point size parameter "
@@ -680,7 +680,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
-    param_ts = map patternStructType params ++ map snd rettype_params
+    param_ts = map patternType params ++ rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc attrs loc) = do
@@ -733,7 +733,7 @@ nastyReturnType te t
     nastyType' (Just te') _ | niceTypeExp te' = False
     nastyType' _ t' = nastyType t'
 
-nastyParameter :: Pat -> Bool
+nastyParameter :: Pat ParamType -> Bool
 nastyParameter p = nastyType (patternType p) && not (ascripted p)
   where
     ascripted (PatAscription _ te _) = niceTypeExp te

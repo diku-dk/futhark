@@ -12,7 +12,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     Locality (..),
     SizeSource (SourceBound, SourceSlice),
     NameReason (..),
-    InferredType (..),
+    Inferred (..),
     Checking (..),
     withEnv,
     localScope,
@@ -27,6 +27,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     newArrayType,
     allDimsFreshInType,
     updateTypes,
+    Names,
 
     -- * Primitive checking
     unifies,
@@ -38,27 +39,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     maybeDimFromExp,
 
     -- * Control flow
-    collectOccurrences,
-    tapOccurrences,
-    alternative,
-    sequentially,
     incLevel,
-
-    -- * Consumption and uniqueness
-    Names,
-    Occurrence (..),
-    Occurrences,
-    noUnique,
-    removeSeminullOccurrences,
-    occur,
-    observe,
-    consume,
-    observation,
-    consumption,
-    checkIfConsumable,
-    seqOccurrences,
-    checkOccurrences,
-    allConsumed,
 
     -- * Errors
     unusedSize,
@@ -113,12 +94,6 @@ data Occurrence = Occurrence
 
 instance Located Occurrence where
   locOf = locOf . location
-
-observation :: Aliasing -> SrcLoc -> Occurrence
-observation = flip Occurrence Nothing . S.map aliasVar
-
-consumption :: Aliasing -> SrcLoc -> Occurrence
-consumption = Occurrence S.empty . Just . S.map aliasVar
 
 -- | A null occurence is one that we can remove without affecting
 -- anything.
@@ -210,7 +185,7 @@ data Locality
 data ValBinding
   = -- | Aliases in parameters indicate the lexical
     -- closure.
-    BoundV Locality [TypeParam] PatType
+    BoundV Locality [TypeParam] StructType
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
   deriving (Show)
@@ -266,17 +241,21 @@ unusedSize p =
 
 --- Scope management
 
-data InferredType
+data Inferred t
   = NoneInferred
-  | Ascribed PatType
+  | Ascribed t
+
+instance Functor Inferred where
+  fmap _ NoneInferred = NoneInferred
+  fmap f (Ascribed t) = Ascribed (f t)
 
 data Checking
   = CheckingApply (Maybe (QualName VName)) Exp StructType StructType
-  | CheckingReturn StructType StructType
+  | CheckingReturn ResType StructType
   | CheckingAscription StructType StructType
   | CheckingLetGeneralise Name
   | CheckingParams (Maybe Name)
-  | CheckingPat UncheckedPat InferredType
+  | CheckingPat (UncheckedPat StructType) (Inferred StructType)
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
@@ -398,16 +377,7 @@ envToTermScope env =
     }
   where
     vtable = M.mapWithKey valBinding $ envVtable env
-    valBinding k (TypeM.BoundV tps v)
-      | not $ any isSizeParam tps =
-          BoundV Global tps $ selfAliasing (S.singleton (AliasBound k)) v
-      | otherwise =
-          BoundV Global tps $ v `setAliases` mempty
-    -- FIXME: hack, #1675
-    selfAliasing als (Scalar (Record ts)) =
-      Scalar $ Record $ M.map (selfAliasing als) ts
-    selfAliasing als t =
-      t `setAliases` (if arrayRank t > 0 then als else mempty)
+    valBinding k (TypeM.BoundV tps v) = BoundV Global tps v
 
 withEnv :: TermEnv -> Env -> TermEnv
 withEnv tenv env = tenv {termScope = termScope tenv <> envToTermScope env}
@@ -455,8 +425,7 @@ nameReason loc (NameAppRes fname apploc) =
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
-    stateNames :: M.Map VName NameReason,
-    stateOccs :: Occurrences
+    stateNames :: M.Map VName NameReason
   }
 
 newtype TermTypeM a
@@ -492,7 +461,7 @@ instance MonadUnify TermTypeM where
     i <- incCounter
     v <- newID $ mkTypeVarName desc i
     constrain v $ NoConstraint Lifted $ mkUsage' loc
-    pure $ Scalar $ TypeVar mempty Nonunique (qualName v) []
+    pure $ Scalar $ TypeVar mempty (qualName v) []
 
   curLevel = asks termLevel
 
@@ -542,8 +511,8 @@ instantiateTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
-  PatType ->
-  TermTypeM ([VName], PatType)
+  StructType ->
+  TermTypeM ([VName], StructType)
 instantiateTypeScheme qn loc tparams t = do
   let tnames = map typeParamName tparams
   (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
@@ -567,7 +536,7 @@ instantiateTypeParam qn loc tparam = do
     TypeParamType x _ _ -> do
       constrain v . NoConstraint x . mkUsage loc . docText $
         "instantiated type parameter of " <> dquotes (pretty qn)
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty Nonunique (qualName v) [])
+      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v) [])
     TypeParamDim {} -> do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
@@ -616,7 +585,7 @@ localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 instance MonadTypeChecker TermTypeM where
   checkExpForSize e = do
     checker <- asks termChecker
-    e' <- noUnique $ checker e
+    e' <- checker e
     let t = toStruct $ typeOf e'
     unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
     updateTypes e'
@@ -637,7 +606,7 @@ instance MonadTypeChecker TermTypeM where
   bindVal v (TypeM.BoundV tps t) = localScope $ \scope ->
     scope {scopeVtable = M.insert v vb $ scopeVtable scope}
     where
-      vb = BoundV Local tps $ fromStruct t
+      vb = BoundV Local tps t
 
   lookupType loc qn = do
     outer_env <- liftTypeM askEnv
@@ -686,10 +655,8 @@ instance MonadTypeChecker TermTypeM where
         argtype <- newTypeVar loc "t"
         mustBeOneOf ts usage argtype
         let (pts', rt') = instOverloaded argtype pts rt
-            arrow xt yt = Scalar $ Arrow mempty Unnamed Observe xt $ RetType [] yt
-        pure $ fromStruct $ foldr arrow rt' pts'
+        pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
 
-    observe $ Ident name (Info t) loc
     pure (qn', t)
     where
       instOverloaded argtype pts rt =
@@ -729,14 +696,14 @@ incLevel = local $ \env -> env {termLevel = termLevel env + 1}
 -- | Get the type of an expression, with top level type variables
 -- substituted.  Never call 'typeOf' directly (except in a few
 -- carefully inspected locations)!
-expType :: Exp -> TermTypeM PatType
-expType = normPatType . typeOf
+expType :: Exp -> TermTypeM StructType
+expType = normType . typeOf
 
 -- | Get the type of an expression, with all type variables
 -- substituted.  Slower than 'expType', but sometimes necessary.
 -- Never call 'typeOf' directly (except in a few carefully inspected
 -- locations)!
-expTypeFully :: Exp -> TermTypeM PatType
+expTypeFully :: Exp -> TermTypeM StructType
 expTypeFully = normTypeFully . typeOf
 
 newArrayType :: Usage -> Name -> Int -> TermTypeM (StructType, StructType)
@@ -744,10 +711,10 @@ newArrayType usage desc r = do
   v <- newTypeName desc
   constrain v $ NoConstraint Unlifted usage
   dims <- replicateM r $ newDimVar usage Nonrigid "dim"
-  let rowt = TypeVar () Nonunique (qualName v) []
+  let rowt = TypeVar mempty (qualName v) []
       mkSize = flip sizeFromName (srclocOf usage) . qualName
   pure
-    ( Array () Nonunique (Shape $ map mkSize dims) rowt,
+    ( Array mempty (Shape $ map mkSize dims) rowt,
       Scalar rowt
     )
 
@@ -775,9 +742,8 @@ updateTypes = astMap tv
         { mapOnExp = astMap tv,
           mapOnName = pure,
           mapOnStructType = normTypeFully,
-          mapOnPatType = normTypeFully,
-          mapOnStructRetType = normTypeFully,
-          mapOnPatRetType = normTypeFully
+          mapOnParamType = normTypeFully,
+          mapOnResRetType = normTypeFully
         }
 
 --- Basic checking
@@ -796,7 +762,7 @@ require why ts e = do
 
 termCheckTypeExp ::
   TypeExp NoInfo Name ->
-  TermTypeM (TypeExp Info VName, [VName], StructRetType)
+  TermTypeM (TypeExp Info VName, [VName], ResRetType)
 termCheckTypeExp te = do
   (te', svars, rettype, _l) <- checkTypeExp te
 
@@ -806,15 +772,9 @@ termCheckTypeExp te = do
   -- where we actually turn these into size variables?
   RetType dims st <- renameRetType rettype
 
-  -- Observe the sizes so we do not get any warnings about them not
-  -- being used.
-  mapM_ observeDim $ fvVars $ freeInType st
   pure (te', svars, RetType dims st)
-  where
-    observeDim v =
-      observe $ Ident v (Info $ Scalar $ Prim $ Signed Int64) mempty
 
-checkTypeExpNonrigid :: TypeExp NoInfo Name -> TermTypeM (TypeExp Info VName, StructType, [VName])
+checkTypeExpNonrigid :: TypeExp NoInfo Name -> TermTypeM (TypeExp Info VName, ResType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
@@ -835,94 +795,6 @@ maybeDimFromExp (Var v typ loc) = Just $ Var v typ loc
 maybeDimFromExp (Parens e _) = maybeDimFromExp e
 maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
 maybeDimFromExp e = flip sizeFromInteger mempty . fromIntegral <$> isInt64 e
-
---- Control flow
-
-tapOccurrences :: TermTypeM a -> TermTypeM (a, Occurrences)
-tapOccurrences m = do
-  (x, occs) <- collectOccurrences m
-  occur occs
-  pure (x, occs)
-
-collectOccurrences :: TermTypeM a -> TermTypeM (a, Occurrences)
-collectOccurrences m = do
-  old <- gets stateOccs
-  modify $ \s -> s {stateOccs = mempty}
-  x <- m
-  new <- gets stateOccs
-  modify $ \s -> s {stateOccs = old}
-  pure (x, new)
-
-alternative :: TermTypeM a -> TermTypeM b -> TermTypeM (a, b)
-alternative m1 m2 = do
-  (x, occurs1) <- collectOccurrences m1
-  (y, occurs2) <- collectOccurrences m2
-  checkOccurrences occurs1
-  checkOccurrences occurs2
-  occur $ occurs1 `altOccurrences` occurs2
-  pure (x, y)
-
-sequentially :: TermTypeM a -> (a -> Occurrences -> TermTypeM b) -> TermTypeM b
-sequentially m1 m2 = do
-  (a, m1flow) <- collectOccurrences m1
-  (b, m2flow) <- collectOccurrences $ m2 a m1flow
-  occur $ m1flow `seqOccurrences` m2flow
-  pure b
-
---- Consumption
-
-occur :: Occurrences -> TermTypeM ()
-occur occs = modify $ \s -> s {stateOccs = stateOccs s <> occs}
-
--- | Proclaim that we have made read-only use of the given variable.
-observe :: Ident -> TermTypeM ()
-observe (Ident nm (Info t) loc) =
-  let als = AliasBound nm `S.insert` aliases t
-   in occur [observation als loc]
-
--- | Enter a context where nothing outside can be consumed (i.e. the
--- body of a function definition).
-noUnique :: TermTypeM a -> TermTypeM a
-noUnique m = do
-  (x, occs) <- collectOccurrences $ localScope f m
-  checkOccurrences occs
-  occur $ fst $ split occs
-  pure x
-  where
-    f scope = scope {scopeVtable = M.map set $ scopeVtable scope}
-
-    set (BoundV l tparams t) = BoundV (max l Nonlocal) tparams t
-    set (OverloadedF ts pts rt) = OverloadedF ts pts rt
-    set EqualityF = EqualityF
-
-    split = unzip . map (\occ -> (occ {consumed = mempty}, occ {observed = mempty}))
-
-removeSeminullOccurrences :: TermTypeM a -> TermTypeM a
-removeSeminullOccurrences m = do
-  (x, occs) <- collectOccurrences m
-  occur $ filter (not . seminullOccurrence) occs
-  pure x
-
-checkIfConsumable :: SrcLoc -> Aliasing -> TermTypeM ()
-checkIfConsumable loc als = do
-  vtable <- asks $ scopeVtable . termScope
-  let boundAlias (AliasBound v) = Just v
-      boundAlias (AliasFree _) = Nothing
-      consumable v = case M.lookup v vtable of
-        Just (BoundV Local _ t)
-          | Scalar Arrow {} <- t -> False
-          | otherwise -> True
-        Just (BoundV l _ _) -> l == Local
-        _ -> False -- Implies name from module.
-  case sort $ filter (not . consumable) $ mapMaybe boundAlias $ S.toList als of
-    v : _ -> notConsumable loc =<< describeVar loc v
-    [] -> pure ()
-
--- | Proclaim that we have written to the given variable.
-consume :: SrcLoc -> Aliasing -> TermTypeM ()
-consume loc als = do
-  checkIfConsumable loc als
-  occur [consumption als loc]
 
 -- Running
 
@@ -951,13 +823,13 @@ initialTermScope =
     addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
       Just
         ( name,
-          BoundV Global tvs $ fromStruct $ foldFunType pts rt
+          BoundV Global tvs $ foldFunType pts rt
         )
     addIntrinsicF (name, IntrinsicEquality) =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: (UncheckedExp -> TermTypeM Exp) -> TermTypeM a -> TypeM (a, Occurrences)
+runTermTypeM :: (UncheckedExp -> TermTypeM Exp) -> TermTypeM a -> TypeM a
 runTermTypeM checker (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   let initial_tenv =
@@ -967,7 +839,4 @@ runTermTypeM checker (TermTypeM m) = do
             termLevel = 0,
             termChecker = checker
           }
-  second stateOccs
-    <$> runStateT
-      (runReaderT m initial_tenv)
-      (TermTypeState mempty 0 mempty mempty)
+  evalStateT (runReaderT m initial_tenv) (TermTypeState mempty 0 mempty)

@@ -138,21 +138,23 @@ newNamesForMTy orig_mty = do
         substituteInTypeParam (TypeParamType l p loc) =
           TypeParamType l (substitute p) loc
 
-        substituteInType :: StructType -> StructType
-        substituteInType (Scalar (TypeVar () u (QualName qs v) targs)) =
-          Scalar $
-            TypeVar () u (QualName (map substitute qs) $ substitute v) $
-              map substituteInTypeArg targs
-        substituteInType (Scalar (Prim t)) =
-          Scalar $ Prim t
-        substituteInType (Scalar (Record ts)) =
-          Scalar $ Record $ fmap substituteInType ts
-        substituteInType (Scalar (Sum ts)) =
-          Scalar $ Sum $ (fmap . fmap) substituteInType ts
-        substituteInType (Array () u shape t) =
-          arrayOf u (substituteInShape shape) (substituteInType $ Scalar t)
-        substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
-          Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
+        substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
+        substituteInScalarType (TypeVar u (QualName qs v) targs) =
+          TypeVar u (QualName (map substitute qs) $ substitute v) $
+            map substituteInTypeArg targs
+        substituteInScalarType (Prim t) =
+          Prim t
+        substituteInScalarType (Record ts) =
+          Record $ fmap substituteInType ts
+        substituteInScalarType (Sum ts) =
+          Sum $ (fmap . fmap) substituteInType ts
+        substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
+          Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
+
+        substituteInType :: TypeBase Size u -> TypeBase Size u
+        substituteInType (Scalar t) = Scalar $ substituteInScalarType t
+        substituteInType (Array u shape t) =
+          Array u (substituteInShape shape) $ substituteInScalarType t
 
         substituteInShape (Shape ds) = Shape $ map (applySubst subst) ds
 
@@ -185,7 +187,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (QualName qs v) _)))) <-
+  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar _ (QualName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps
@@ -361,7 +363,7 @@ mismatchedType loc abs quals name spec_t env_t =
       </> indent 2 (ppTypeAbbr abs (QualName quals name) spec_t)
 
 ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc a
-ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
+ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar _ tn args)))
   | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
       "type" <> pretty l

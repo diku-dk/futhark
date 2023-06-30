@@ -442,6 +442,7 @@ library
       Language.Futhark.Traversals
       Language.Futhark.Tuple
       Language.Futhark.TypeChecker
+      Language.Futhark.TypeChecker.Consumption
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
