@@ -445,7 +445,6 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
-       : | "[" `exp` [".." `exp`] "..." `exp` "]"
        : | "(" `qualbinop` ")"
        : | "(" `exp` `qualbinop` ")"
        : | "(" `qualbinop` `exp` ")"
@@ -1514,7 +1513,7 @@ Module Expressions
 .. productionlist::
    mod_exp:   `qualid`
           : | `mod_exp` ":" `mod_type_exp`
-          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "->" `mod_exp`
+          : | "\" "(" `mod_param`* ")" [":" `mod_type_exp`] "->" `mod_exp`
           : | `mod_exp` `mod_exp`
           : | "(" `mod_exp` ")"
           : | "{" `dec`* "}"
