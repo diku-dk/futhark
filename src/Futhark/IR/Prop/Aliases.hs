@@ -94,20 +94,9 @@ funcallAliases pes args = map onType
     res_als = map (oneName . patElemName) pes
     onType (_t, RetAls pals rals) = getAls arg_als pals <> getAls res_als rals
 
--- | The aliases of an expression, one for each pattern element.
---
--- The pattern is important because some aliasing might be through
--- variables that are no longer in scope (consider the aliases for a
--- body that returns the same value multiple times).
-expAliases :: (Aliased rep) => [PatElem dec] -> Exp rep -> [Names]
-expAliases pes (Match _ cases defbody _) =
-  -- Repeat mempty in case the pattern has more elements (this
-  -- implies a type error).
-  zipWith grow (map patElemName pes) $ als ++ repeat mempty
+mutualAliases :: Names -> [PatElem dec] -> [Names] -> [Names]
+mutualAliases bound pes als = zipWith grow (map patElemName pes) als
   where
-    als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
-    onBody body = (bodyAliases body, consumedInBody body)
-    bound = foldMap boundInBody $ defbody : map caseBody cases
     bound_als = map (`namesIntersection` bound) als
     grow v names = (names <> pe_names) `namesSubtract` bound
       where
@@ -117,14 +106,29 @@ expAliases pes (Match _ cases defbody _) =
             . map (patElemName . fst)
             . filter (namesIntersect names . snd)
             $ zip pes bound_als
+
+-- | The aliases of an expression, one for each pattern element.
+--
+-- The pattern is important because some aliasing might be through
+-- variables that are no longer in scope (consider the aliases for a
+-- body that returns the same value multiple times).
+expAliases :: (Aliased rep) => [PatElem dec] -> Exp rep -> [Names]
+expAliases pes (Match _ cases defbody _) =
+  -- Repeat mempty in case the pattern has more elements (this
+  -- implies a type error).
+  mutualAliases bound pes $ als ++ repeat mempty
+  where
+    als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
+    onBody body = (bodyAliases body, consumedInBody body)
+    bound = foldMap boundInBody $ defbody : map caseBody cases
 expAliases _ (BasicOp op) = basicOpAliases op
-expAliases _ (DoLoop merge _ loopbody) = do
-  (p, als) <-
-    transitive . zip params $ zipWith mappend arg_aliases (bodyAliases loopbody)
-  let als' = als `namesSubtract` param_names
-  if unique $ paramDeclType p
-    then pure mempty
-    else pure $ als' `namesSubtract` bound
+expAliases pes (DoLoop merge _ loopbody) =
+  mutualAliases (bound <> param_names) pes $ do
+    (p, als) <-
+      transitive . zip params $ zipWith (<>) arg_aliases (bodyAliases loopbody)
+    if unique $ paramDeclType p
+      then pure mempty
+      else pure als
   where
     bound = boundInBody loopbody
     arg_aliases = map (subExpAliases . snd) merge
