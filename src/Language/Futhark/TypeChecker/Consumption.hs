@@ -298,25 +298,6 @@ bindingFun :: VName -> TypeAliases -> CheckM a -> CheckM a
 bindingFun v t = local $ \env ->
   env {envVtable = M.insert v (Nonconsumable t) (envVtable env)}
 
-addSelfAliases :: VName -> TypeAliases -> TypeAliases
-addSelfAliases v (Array als shape t) = Array (S.insert (AliasBound v) als) shape t
-addSelfAliases v (Scalar st) = Scalar $ addSelfAliases' st
-  where
-    addSelfAliases' (TypeVar als tn args) = TypeVar (S.insert (AliasBound v) als) tn args
-    addSelfAliases' (Record fs) = Record $ fmap (addSelfAliases v) fs
-    addSelfAliases' (Sum fs) = Sum $ fmap (map (addSelfAliases v)) fs
-    addSelfAliases' t@Arrow {} = t
-    addSelfAliases' t@Prim {} = t
-
-lookupAliases :: VName -> StructType -> CheckM Aliases
-lookupAliases v t =
-  asks $
-    aliases
-      . addSelfAliases v
-      . maybe (second (const mempty) t) entryAliases
-      . M.lookup v
-      . envVtable
-
 checkIfConsumed :: Loc -> Aliases -> CheckM ()
 checkIfConsumed rloc als = do
   cons <- gets stateConsumed
@@ -327,9 +308,6 @@ checkIfConsumed rloc als = do
       "Using"
         <+> v' <> ", but this was consumed at"
         <+> pretty (locStrRel rloc wloc) <> ".  (Possibly through aliases.)"
-
-observeAliases :: Loc -> Aliases -> CheckM ()
-observeAliases = checkIfConsumed
 
 consumed :: Consumed -> CheckM ()
 consumed vs = modify $ \s -> s {stateConsumed = stateConsumed s <> vs}
@@ -356,18 +334,42 @@ consumeAliases loc als = do
 
 consume :: Loc -> VName -> StructType -> CheckM ()
 consume loc v t =
-  consumeAliases loc =<< lookupAliases v t
+  consumeAliases loc . aliases =<< observeVar loc v t
 
 -- | Observe the given name here and return its aliases.
 observeVar :: Loc -> VName -> StructType -> CheckM TypeAliases
 observeVar loc v t = do
   als <-
-    asks $
-      maybe (addSelfAliases v $ second (const mempty) t) entryAliases
-        . M.lookup v
-        . envVtable
-  observeAliases loc (aliases als)
+    asks $ \env ->
+      maybe (isGlobal (envVtable env)) isLocal $
+        M.lookup v (envVtable env)
+  checkIfConsumed loc (aliases als)
   pure als
+  where
+    isLocal = entryAliases
+
+    -- Handling globals is tricky.  For arrays and such, we do want to
+    -- track their aliases.  We do not want to track the aliases of
+    -- functions.  However, array bindings that are *polymorphic*
+    -- should be treated like functions.  However, we do not have
+    -- access to the original binding information here.  To avoid
+    -- having to plumb that all the way here, we infer that an array
+    -- binding is a polymorphic instantiation if its size contains any
+    -- locally bound names.
+    isGlobal vtable
+      | isInstantiation vtable t = second (const mempty) t
+      | otherwise = selfAlias $ second (const mempty) t
+
+    isInstantiation vtable =
+      any (`M.member` vtable) . fvVars . freeInType
+
+    selfAlias (Array als shape et) = Array (S.insert (AliasBound v) als) shape et
+    selfAlias (Scalar st) = Scalar $ selfAlias' st
+    selfAlias' (TypeVar als tn args) = TypeVar als tn args -- #1675 FIXME
+    selfAlias' (Record fs) = Record $ fmap selfAlias fs
+    selfAlias' (Sum fs) = Sum $ fmap (map selfAlias) fs
+    selfAlias' et@Arrow {} = et
+    selfAlias' et@Prim {} = et
 
 -- Capture any newly consumed variables that occur during the provided action.
 contain :: CheckM a -> CheckM (a, Consumed)
@@ -507,6 +509,8 @@ noSelfAliases loc = foldM_ check mempty . aliasParts
       pure $ als <> seen
 
 consumeAsNeeded :: Loc -> ParamType -> TypeAliases -> CheckM ()
+consumeAsNeeded loc (Scalar (Record fs1)) (Scalar (Record fs2)) =
+  sequence_ $ M.elems $ M.intersectionWith (consumeAsNeeded loc) fs1 fs2
 consumeAsNeeded loc pt t =
   when (diet pt == Consume) $ consumeAliases loc $ aliases t
 
@@ -652,10 +656,10 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
+  when False . traceM $ unlines ["checkArg", prettyString param_t, prettyString arg]
   ((arg', arg_als), arg_cons) <- contain $ checkArg param_t arg
   consumed arg_cons
   free_bound <- boundFreeInExp body
-  when False . traceM $ unlines ["checkArg", prettyString param_t, prettyString arg, show arg_als, show free_bound, show arg_cons]
 
   let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
   forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
@@ -829,11 +833,11 @@ checkExp (Update src slice ve loc) = do
 -- Cases that simply propagate aliases directly.
 checkExp (Var v (Info t) loc) = do
   als <- observeVar (locOf loc) (qualLeaf v) t
-  observeAliases (locOf loc) (aliases als)
+  checkIfConsumed (locOf loc) (aliases als)
   pure (Var v (Info t) loc, als)
 checkExp (OpSection v (Info t) loc) = do
   als <- observeVar (locOf loc) (qualLeaf v) t
-  observeAliases (locOf loc) (aliases als)
+  checkIfConsumed (locOf loc) (aliases als)
   pure (OpSection v (Info t) loc, als)
 checkExp (OpSectionLeft op ftype arg arginfo retinfo loc) = do
   let (_, Info (pn, pt2)) = arginfo
