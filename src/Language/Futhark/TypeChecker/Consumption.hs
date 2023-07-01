@@ -85,8 +85,10 @@ instance Functor Entry where
   fmap f (Consumable als) = Consumable $ f als
   fmap f (Nonconsumable als) = Nonconsumable $ f als
 
-newtype CheckEnv = CheckEnv
-  { envVtable :: M.Map VName (Entry TypeAliases)
+data CheckEnv = CheckEnv
+  { envVtable :: M.Map VName (Entry TypeAliases),
+    -- | Location of the definition we are checking.
+    envLoc :: Loc
   }
 
 -- | A description of where an artificial compiler-generated
@@ -124,14 +126,15 @@ newtype CheckM a = CheckM (ReaderT CheckEnv (State CheckState) a)
       MonadState CheckState
     )
 
-runCheckM :: CheckM a -> (a, [TypeError])
-runCheckM (CheckM m) =
+runCheckM :: Loc -> CheckM a -> (a, [TypeError])
+runCheckM loc (CheckM m) =
   let (a, s) = runState (runReaderT m env) initial_state
    in (a, DL.toList (stateErrors s))
   where
     env =
       CheckEnv
-        { envVtable = mempty
+        { envVtable = mempty,
+          envLoc = loc
         }
     initial_state =
       CheckState
@@ -141,8 +144,9 @@ runCheckM (CheckM m) =
           stateCounter = 0
         }
 
-describeVar :: Loc -> VName -> CheckM (Doc a)
-describeVar loc v =
+describeVar :: VName -> CheckM (Doc a)
+describeVar v = do
+  loc <- asks envLoc
   gets $
     maybe ("variable" <+> dquotes (prettyName v)) (nameReason (srclocOf loc))
       . M.lookup v
@@ -290,8 +294,9 @@ bindingLoopForm (ForIn pat _) m = bindingParam pat' m
     pat' = fmap (second (const Observe)) pat
 bindingLoopForm While {} m = m
 
-binding :: VName -> TypeAliases -> CheckM a -> CheckM a
-binding v t = local $ \env -> env {envVtable = M.insert v (Consumable t) (envVtable env)}
+bindingFun :: VName -> TypeAliases -> CheckM a -> CheckM a
+bindingFun v t = local $ \env ->
+  env {envVtable = M.insert v (Nonconsumable t) (envVtable env)}
 
 addSelfAliases :: VName -> TypeAliases -> TypeAliases
 addSelfAliases v (Array als shape t) = Array (S.insert (AliasBound v) als) shape t
@@ -317,7 +322,7 @@ checkIfConsumed rloc als = do
   cons <- gets stateConsumed
   let bad v = fmap (v,) $ v `M.lookup` cons
   forM_ (mapMaybe (bad . aliasVar) $ S.toList als) $ \(v, wloc) -> do
-    v' <- describeVar rloc v
+    v' <- describeVar v
     addError rloc mempty . withIndexLink "use-after-consume" $
       "Using"
         <+> v' <> ", but this was consumed at"
@@ -339,9 +344,9 @@ consumeAliases loc als = do
           Nothing -> True
       checkIfConsumable (AliasBound v)
         | isBad v = do
-            v' <- describeVar loc v
+            v' <- describeVar v
             addError loc mempty . withIndexLink "not-consumable" $
-              "Would consume" <+> v' <> ", which is not consumable."
+              "Consuming" <+> v' <> ", which is not consumable."
       checkIfConsumable _ = pure ()
   mapM_ checkIfConsumable $ S.toList als
   checkIfConsumed loc als
@@ -525,6 +530,13 @@ applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
   returnType closure_als rettype d arg_als
 applyArg t _ = error $ "applyArg: " <> show t
 
+boundFreeInExp :: Exp -> CheckM (M.Map VName TypeAliases)
+boundFreeInExp e = do
+  vtable <- asks envVtable
+  pure $
+    M.mapMaybe (fmap entryAliases) . M.fromSet (`M.lookup` vtable) $
+      fvVars (freeInExp e)
+
 -- Loops are tricky because we want to infer the uniqueness of their
 -- parameters.  This is pretty unusual: we do not do this for ordinary
 -- functions.
@@ -613,7 +625,7 @@ convergeLoopParam loop_loc param body_cons body_als = do
     runStateT (checkMergeReturn param' body_als) (mempty, mempty)
 
   let body_cons' = body_cons <> S.map aliasVar param_cons
-  traceM $
+  when False . traceM $
     unlines
       [ "convergeLoopParam",
         prettyString param,
@@ -640,10 +652,22 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  traceM $ unlines ["checkArg", prettyString param_t, prettyString arg]
-  (arg', arg_als) <- checkArg param_t arg
+  ((arg', arg_als), arg_cons) <- contain $ checkArg param_t arg
+  consumed arg_cons
+  free_bound <- boundFreeInExp body
+  when False . traceM $ unlines ["checkArg", prettyString param_t, prettyString arg, show arg_als, show free_bound, show arg_cons]
+
+  let bad = any (`M.member` arg_cons) . boundAliases . aliases . snd
+  forM_ (filter bad $ M.toList free_bound) $ \(v, _) -> do
+    v' <- describeVar v
+    addError loop_loc mempty $
+      "Loop body uses"
+        <+> v' <> " (or an alias),"
+        </> "but this is consumed by the initial loop argument."
+
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
+
   let loopt =
         funType [param'] (RetType [] $ paramToRes param_t)
           `setAliases` S.singleton (AliasFree v)
@@ -671,9 +695,25 @@ checkExp (AppExp (Apply f args loc) appres) = do
     checkArg' (Info (d, p), e) = do
       (e', e_als) <- checkArg (second (const d) (typeOf e)) e
       pure ((Info (d, p), e'), e_als)
+
+--
+checkExp (AppExp (DoLoop sparams pat args form body loc) appres) = do
+  ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
+  pure
+    ( AppExp (DoLoop sparams pat' args' form' body' loc) appres,
+      als
+    )
+
 --
 checkExp (AppExp (LetPat sizes p e body loc) appres) = do
-  (e', e_als) <- checkExp e
+  ((e', e_als), e_cons) <- contain $ checkExp e
+  consumed e_cons
+  let e_t = typeOf e'
+  when (e_cons /= mempty && not (orderZero e_t)) $
+    addError (locOf e) mempty $
+      "Let-bound expression of higher-order type"
+        </> indent 2 (pretty e_t)
+        </> "contains consumption, which is not allowed."
   bindingPat p e_als $ do
     (body', body_als) <- checkExp body
     pure
@@ -698,7 +738,8 @@ checkExp (AppExp (If cond te fe loc) appres) = do
 --
 checkExp (AppExp (Match cond cs loc) appres) = do
   (cond', cond_als) <- checkExp cond
-  ((cs', cs_als), cs_cons) <- first NE.unzip . NE.unzip <$> mapM (checkCase cond_als) cs
+  ((cs', cs_als), cs_cons) <-
+    first NE.unzip . NE.unzip <$> mapM (checkCase cond_als) cs
   let all_cons = fold cs_cons
       notConsumed = not . (`M.member` all_cons) . aliasVar
       comb_als = second (S.filter notConsumed) $ foldl1 combineAliases cs_als
@@ -715,14 +756,17 @@ checkExp (AppExp (Match cond cs loc) appres) = do
 
 --
 checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), funbody) letbody loc) appres) = do
-  (funbody', funbody_als) <- bindingParams params $ checkExp funbody
+  -- Throw away the consumption - it can refer only to the parameters
+  -- anyway.
+  ((funbody', funbody_als), _body_cons) <-
+    contain $ bindingParams params $ checkExp funbody
   checkReturnAlias loc params ret funbody_als
   checkGlobalAliases loc params funbody_als
+  free_bound <- boundFreeInExp funbody
   let ret' = inferReturnUniqueness params ret funbody_als
-      ftype =
-        funType params (RetType ext ret')
-          `setAliases` S.map AliasBound (fvVars (freeInExp funbody))
-  (letbody', letbody_als) <- binding fname ftype $ checkExp letbody
+      als = foldMap aliases (M.elems free_bound)
+      ftype = funType params (RetType ext ret') `setAliases` als
+  (letbody', letbody_als) <- bindingFun fname ftype $ checkExp letbody
   pure
     ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), funbody') letbody' loc) appres,
       letbody_als
@@ -734,23 +778,33 @@ checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   let at1 : at2 : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg at1 x
   (y', y_als) <- checkArg at2 y
+  when False . traceM $
+    unlines
+      [ prettyString op,
+        show op_als,
+        show x_als,
+        show y_als
+      ]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
-      foldl applyArg op_als [x_als, y_als]
+      op_als `applyArg` x_als `applyArg` y_als
     )
 
 --
 checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) = do
-  (body', body_als) <- bindingParams params $ checkExp body
+  -- Throw away the consumption - it can refer only to the parameters
+  -- anyway.
+  ((body', body_als), _body_cons) <-
+    contain $ bindingParams params $ checkExp body
   checkReturnAlias loc params ret body_als
   checkGlobalAliases loc params body_als
-  vtable <- asks envVtable
-  let free_bound = S.filter (`M.member` vtable) $ fvVars (freeInExp e)
-      ret' = inferReturnUniqueness params ret body_als
-      als = aliases body_als <> S.map AliasBound free_bound
+  free_bound <- boundFreeInExp e
+  let ret' = inferReturnUniqueness params ret body_als
+      als = foldMap aliases (M.elems free_bound)
+      ftype = funType params (RetType ext ret') `setAliases` als
   pure
     ( Lambda params body' te (Info (RetType ext ret')) loc,
-      funType params (RetType ext ret') `setAliases` als
+      ftype
     )
 
 --
@@ -766,8 +820,8 @@ checkExp (AppExp (LetWith dst src slice ve body loc) appres) = do
 --
 checkExp (Update src slice ve loc) = do
   slice' <- checkSubExps slice
-  (src', src_als) <- checkExp src
   (ve', ve_als) <- checkExp ve
+  (src', src_als) <- checkExp src
   overlapCheck (locOf ve) (src', src_als) (ve', ve_als)
   consumeAliases (locOf loc) $ aliases src_als
   pure (Update src' slice' ve' loc, second (const mempty) src_als)
@@ -832,7 +886,13 @@ checkExp (Attr attr e loc) = do
   pure (Attr attr e' loc, e_als)
 checkExp (Project name e t loc) = do
   (e', e_als) <- checkExp e
-  pure (Project name e' t loc, e_als)
+  pure
+    ( Project name e' t loc,
+      case e_als of
+        Scalar (Record fs)
+          | Just name_als <- M.lookup name fs -> name_als
+        _ -> error $ "checkExp Project: bad type " <> prettyString e_als
+    )
 checkExp (TupLit es loc) = do
   (es', es_als) <- mapAndUnzipM checkExp es
   pure (TupLit es' loc, Scalar $ tupleRecord es_als)
@@ -874,12 +934,6 @@ checkExp e@ArrayLit {} = noAliases e
 checkExp e@Negate {} = noAliases e
 checkExp e@Not {} = noAliases e
 checkExp e@Hole {} = noAliases e
-checkExp (AppExp (DoLoop sparams pat args form body loc) appres) = do
-  ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
-  pure
-    ( AppExp (DoLoop sparams pat' args' form' body' loc) appres,
-      als
-    )
 
 checkGlobalAliases :: SrcLoc -> [Pat ParamType] -> TypeAliases -> CheckM ()
 checkGlobalAliases loc params body_t = do
@@ -899,7 +953,7 @@ checkGlobalAliases loc params body_t = do
 checkValDef ::
   (VName, [Pat ParamType], Exp, ResRetType, SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
-checkValDef (_fname, params, body, RetType ext ret, loc) = runCheckM $ do
+checkValDef (_fname, params, body, RetType ext ret, loc) = runCheckM (locOf loc) $ do
   (body', body_als) <- bindingParams params $ checkExp body
   checkReturnAlias loc params ret body_als
   checkGlobalAliases loc params body_als

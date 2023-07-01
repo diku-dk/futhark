@@ -918,7 +918,7 @@ intrinsics =
                   [ array_ka Consume,
                     Scalar (accType mempty (array_ka mempty))
                       `carr` ( Scalar (t_b mempty)
-                                 `arr` Scalar (accType Unique $ array_a mempty $ shape [k])
+                                 `arr` Scalar (accType Nonunique $ array_a mempty $ shape [k])
                              ),
                     array_b Observe $ shape [n]
                   ]
@@ -933,7 +933,7 @@ intrinsics =
                     Scalar $ t_a Observe,
                     Scalar (accType mempty $ array_ka mempty)
                       `carr` ( Scalar (t_b mempty)
-                                 `arr` Scalar (accType Unique $ array_a mempty $ shape [k])
+                                 `arr` Scalar (accType Nonunique $ array_a mempty $ shape [k])
                              ),
                     array_b Observe $ shape [n]
                   ]
