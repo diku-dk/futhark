@@ -32,7 +32,7 @@ import Data.Maybe
 import Futhark.IR.SOACS hiding (Free)
 import Futhark.IR.SOACS qualified as I
 import Futhark.Internalise.Monad
-import Futhark.Util (chunkLike, chunks, nubOrd)
+import Futhark.Util (chunkLike)
 import Language.Futhark qualified as E
 
 internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
@@ -99,14 +99,6 @@ internaliseLoopParamType et ts =
 withOffsets :: Foldable a => [a b] -> [(a b, Int)]
 withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
 
-ensureMutuals :: [[(a, RetAls)]] -> [[(a, RetAls)]]
-ensureMutuals xs = zipWith zip (map (map fst) xs) $ chunks (map length xs) (map check als)
-  where
-    als = zip (concatMap (map snd) xs) [0 ..]
-    check (RetAls pals rals, o) = RetAls pals rals'
-      where
-        rals' = nubOrd $ rals <> map snd (filter (elem o . otherAls . fst) als)
-
 numberFrom :: Int -> Tree a -> Tree (a, Int)
 numberFrom o = flip evalState o . f
   where
@@ -141,7 +133,7 @@ inferAliases ::
   [Tree (I.TypeBase ExtShape Uniqueness)] ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 inferAliases all_param_ts all_res_ts =
-  ensureMutuals $ map onRes all_res_ts
+  map onRes all_res_ts
   where
     all_res_ts' = numberTrees all_res_ts
     all_param_ts' = numberTrees all_param_ts
@@ -206,9 +198,9 @@ internaliseLambdaReturnType et ts =
 
 internaliseType ::
   E.TypeBase E.Size () ->
-  [[I.TypeBase I.ExtShape Uniqueness]]
+  [Tree (I.TypeBase I.ExtShape Uniqueness)]
 internaliseType =
-  map toList . runInternaliseTypeM . internaliseTypeM mempty
+  runInternaliseTypeM . internaliseTypeM mempty
 
 newId :: InternaliseTypeM Int
 newId = do
@@ -250,7 +242,7 @@ internaliseTypeM exts orig_t =
       dims <- internaliseShape shape
       ets <- internaliseTypeM exts (E.Scalar et)
       let f et' = I.arrayOf et' (Shape dims) $ internaliseUniqueness u
-      pure [Free $ map (fmap f) ets]
+      pure [array $ map (fmap f) ets]
     E.Scalar (E.Prim bt) ->
       pure [Pure $ I.Prim $ internalisePrimType bt]
     E.Scalar (E.Record ets)
@@ -281,6 +273,8 @@ internaliseTypeM exts orig_t =
       pure $ Pure (I.Prim (I.IntType I.Int8)) : ts
   where
     internaliseShape = mapM (internaliseDim exts) . E.shapeDims
+    array [Free ts] = Free ts
+    array ts = Free ts
 
     onAccType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseTypeM Acc: " ++ prettyString orig_t
