@@ -585,7 +585,7 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = docText $ "Reached hole of type: " <> align (pretty t)
-      ts = concat $ internaliseType (E.toStruct t)
+      ts = foldMap toList $ internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of
     Nothing ->
@@ -648,7 +648,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      let arr_t_ext = concat $ internaliseType $ E.toStruct arr_t
+      let arr_t_ext = foldMap toList $ internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -2021,7 +2021,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  let ts = concat $ internaliseType $ E.toStruct ret
+  let ts = foldMap toList $ internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =

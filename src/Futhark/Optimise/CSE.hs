@@ -34,7 +34,6 @@ where
 
 import Control.Monad.Reader
 import Data.Map.Strict qualified as M
-import Data.Maybe (isJust)
 import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
@@ -133,16 +132,12 @@ cseInFunDef cse_arrays fundec =
         runReader (cseInBody ds $ funDefBody fundec) $ newCSEState cse_arrays
     }
   where
-    -- XXX: we treat every non-entry result as a consumption here, because we
-    -- our core language is not strong enough to fully capture the
-    -- aliases we want, so we are turning some parts off (see #803,
-    -- #1241, and the related comment in TypeCheck.hs).  This is not a
+    -- XXX: we treat every array result as a consumption here, because
+    -- it is otherwise complicated to ensure we do not introduce more
+    -- aliasing than specified by the return type. This is not a
     -- practical problem while we still perform such aggressive
     -- inlining.
-    ds
-      | isJust $ funDefEntryPoint fundec =
-          map (diet . declExtTypeOf . fst) $ funDefRetType fundec
-      | otherwise = map (retDiet . fst) $ funDefRetType fundec
+    ds = map (retDiet . fst) $ funDefRetType fundec
     retDiet t
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume
@@ -225,7 +220,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patElems pat
+  if not (alreadyAliases e) && any (bad cse_arrays) (patElems pat)
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just (subcs, subpat) -> do
@@ -244,6 +239,9 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
         local (addExpSubst pat' edec cs e') $
           m [Let pat' (StmAux cs attrs edec) e']
   where
+    alreadyAliases (BasicOp Index {}) = True
+    alreadyAliases (BasicOp Reshape {}) = True
+    alreadyAliases _ = False
     bad cse_arrays pe
       | Mem {} <- patElemType pe = True
       | Array {} <- patElemType pe, not cse_arrays = True
