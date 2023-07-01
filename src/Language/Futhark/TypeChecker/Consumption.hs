@@ -17,7 +17,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -629,13 +628,6 @@ convergeLoopParam loop_loc param body_cons body_als = do
     runStateT (checkMergeReturn param' body_als) (mempty, mempty)
 
   let body_cons' = body_cons <> S.map aliasVar param_cons
-  when False . traceM $
-    unlines
-      [ "convergeLoopParam",
-        prettyString param,
-        show body_cons,
-        prettyString body_als
-      ]
   if body_cons' == body_cons && patternType param'' == patternType param
     then pure param'
     else convergeLoopParam loop_loc param'' body_cons' body_als
@@ -656,7 +648,6 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  when False . traceM $ unlines ["checkArg", prettyString param_t, prettyString arg]
   ((arg', arg_als), arg_cons) <- contain $ checkArg param_t arg
   consumed arg_cons
   free_bound <- boundFreeInExp body
@@ -782,13 +773,6 @@ checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   let at1 : at2 : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg at1 x
   (y', y_als) <- checkArg at2 y
-  when False . traceM $
-    unlines
-      [ prettyString op,
-        show op_als,
-        show x_als,
-        show y_als
-      ]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
       op_als `applyArg` x_als `applyArg` y_als
