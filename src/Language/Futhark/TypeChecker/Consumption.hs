@@ -17,6 +17,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -444,7 +445,6 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
 inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
 inferReturnUniqueness params ret ret_als = delve ret ret_als
   where
-    bound = foldMap patNames params
     forbidden = aliasesMultipleTimes ret_als
     consumings = consumingParams params
     delve (Scalar (Record fs1)) (Scalar (Record fs2)) =
@@ -452,8 +452,7 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
     delve (Scalar (Sum cs1)) (Scalar (Sum cs2)) =
       Scalar $ Sum $ M.intersectionWith (zipWith delve) cs1 cs2
     delve t t_als
-      | all (`S.member` consumings) $
-          S.map aliasVar (arrayAliases t_als) `S.intersection` bound,
+      | all (`S.member` consumings) $ boundAliases (arrayAliases t_als),
         not $ any ((`S.member` forbidden) . aliasVar) (aliases t_als) =
           t `setUniqueness` Unique
       | otherwise =
@@ -751,19 +750,20 @@ checkExp (AppExp (Match cond cs loc) appres) = do
 
 --
 checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), funbody) letbody loc) appres) = do
-  -- Throw away the consumption - it can refer only to the parameters
-  -- anyway.
-  ((funbody', funbody_als), _body_cons) <-
-    contain $ bindingParams params $ checkExp funbody
-  checkReturnAlias loc params ret funbody_als
-  checkGlobalAliases loc params funbody_als
-  free_bound <- boundFreeInExp funbody
-  let ret' = inferReturnUniqueness params ret funbody_als
-      als = foldMap aliases (M.elems free_bound)
-      ftype = funType params (RetType ext ret') `setAliases` als
+  ((ret', funbody'), ftype) <- bindingParams params $ do
+    -- Throw away the consumption - it can refer only to the parameters
+    -- anyway.
+    ((funbody', funbody_als), _body_cons) <- contain $ checkExp funbody
+    checkReturnAlias loc params ret funbody_als
+    checkGlobalAliases loc params funbody_als
+    free_bound <- boundFreeInExp funbody
+    let ret' = inferReturnUniqueness params ret funbody_als
+        als = foldMap aliases (M.elems free_bound)
+        ftype = funType params (RetType ext ret') `setAliases` als
+    pure ((ret', funbody'), ftype)
   (letbody', letbody_als) <- bindingFun fname ftype $ checkExp letbody
   pure
-    ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), funbody') letbody' loc) appres,
+    ( AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret'), funbody') letbody' loc) appres,
       letbody_als
     )
 
@@ -779,21 +779,29 @@ checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
     )
 
 --
-checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) = do
-  -- Throw away the consumption - it can refer only to the parameters
-  -- anyway.
-  ((body', body_als), _body_cons) <-
-    contain $ bindingParams params $ checkExp body
-  checkReturnAlias loc params ret body_als
-  checkGlobalAliases loc params body_als
-  free_bound <- boundFreeInExp e
-  let ret' = inferReturnUniqueness params ret body_als
-      als = foldMap aliases (M.elems free_bound)
-      ftype = funType params (RetType ext ret') `setAliases` als
-  pure
-    ( Lambda params body' te (Info (RetType ext ret')) loc,
-      ftype
-    )
+checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
+  bindingParams params $ do
+    -- Throw away the consumption - it can refer only to the parameters
+    -- anyway.
+    ((body', body_als), _body_cons) <- contain $ checkExp body
+    checkReturnAlias loc params ret body_als
+    checkGlobalAliases loc params body_als
+    free_bound <- boundFreeInExp e
+    let ret' = inferReturnUniqueness params ret body_als
+        als = foldMap aliases (M.elems free_bound)
+        ftype = funType params (RetType ext ret') `setAliases` als
+    traceM $
+      unlines
+        [ prettyString e,
+          prettyString params,
+          prettyString ret,
+          prettyString body_als,
+          prettyString ret'
+        ]
+    pure
+      ( Lambda params body' te (Info (RetType ext ret')) loc,
+        ftype
+      )
 
 --
 checkExp (AppExp (LetWith dst src slice ve body loc) appres) = do
@@ -942,10 +950,14 @@ checkValDef ::
   (VName, [Pat ParamType], Exp, ResRetType, SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
 checkValDef (_fname, params, body, RetType ext ret, loc) = runCheckM (locOf loc) $ do
-  (body', body_als) <- bindingParams params $ checkExp body
-  checkReturnAlias loc params ret body_als
-  checkGlobalAliases loc params body_als
-  when (null params && unique ret) $
-    addError loc mempty "A top-level constant cannot have a unique type."
-  pure (body', RetType ext $ inferReturnUniqueness params ret body_als)
+  fmap fst . bindingParams params $ do
+    (body', body_als) <- checkExp body
+    checkReturnAlias loc params ret body_als
+    checkGlobalAliases loc params body_als
+    when (null params && unique ret) $
+      addError loc mempty "A top-level constant cannot have a unique type."
+    pure
+      ( (body', RetType ext $ inferReturnUniqueness params ret body_als),
+        body_als -- Don't matter.
+      )
 {-# NOINLINE checkValDef #-}

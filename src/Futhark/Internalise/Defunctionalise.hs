@@ -13,6 +13,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Futhark.Util (mapAccumLM, nubOrd)
@@ -39,13 +40,13 @@ data StaticVal
   | HoleSV StructType SrcLoc
   deriving (Show)
 
--- | The type is Just if this is a polymorphic binding that must be
--- instantiated.
-data Binding = Binding (Maybe ([VName], StructType)) StaticVal
+data Binding = Binding
+  { -- | Just if this is a polymorphic binding that must be
+    -- instantiated.
+    bindingType :: Maybe ([VName], StructType),
+    bindingSV :: StaticVal
+  }
   deriving (Show)
-
-bindingSV :: Binding -> StaticVal
-bindingSV (Binding _ sv) = sv
 
 -- | Environment mapping variable names to their associated static
 -- value.
@@ -371,7 +372,7 @@ combineTypeShapes (Array u shape1 et1) (Array _ _shape2 et2) =
     u
     shape1
     (combineTypeShapes (setUniqueness (Scalar et1) u) (setUniqueness (Scalar et2) u))
-combineTypeShapes _ new_tp = new_tp
+combineTypeShapes _ t = t
 
 -- When we instantiate a polymorphic StaticVal, we rename all the
 -- sizes to avoid name conflicts later on.  This is a bit of a hack...
@@ -437,7 +438,7 @@ defuncFun tparams pats e0 ret loc = do
   -- The closure parts that are sizes are proactively turned into size
   -- parameters.
   let sizes_of_arrays =
-        foldMap (arraySizes . toStruct . typeFromSV . bindingSV) used_env
+        foldMap (arraySizes . typeFromSV . bindingSV) used_env
           <> patternArraySizes pat
       notSize = not . (`S.member` sizes_of_arrays)
       (fields, env) =
@@ -947,9 +948,10 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
   params' <- instAnySizes params
 
   fname <- newNameFromString fname_s
+  when False . traceM $ unlines [prettyString fname, prettyString lam_e_t, prettyString lifted_rettype]
   liftValDec
     fname
-    (toResRet Nonunique lifted_rettype)
+    lifted_rettype
     (dims ++ more_dims ++ unboundSizes bound_sizes params')
     params'
     lam_e'
@@ -1254,6 +1256,12 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
   globals <- asks fst
   let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
+  traceM $
+    unlines
+      [ prettyString name,
+        prettyString rettype,
+        prettyString $ typeOf body'
+      ]
   let rettype' = combineTypeShapes rettype $ toRes Nonunique $ typeOf body'
       tparams'' = tparams' ++ unboundSizes bound_sizes params''
       ret_dims' = filter (`notElem` bound_sizes) $ S.toList $ fvVars $ freeInType rettype'
