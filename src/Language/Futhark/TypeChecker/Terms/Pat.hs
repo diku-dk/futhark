@@ -17,6 +17,7 @@ import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -52,20 +53,18 @@ binding ::
   [Ident StructType] ->
   TermTypeM a ->
   TermTypeM a
-binding idents = handleVars
+binding idents m =
+  localScope (`bindVars` idents) $ do
+    -- Those identifiers that can potentially also be sizes are
+    -- added as type constraints.  This is necessary so that we
+    -- can properly detect scope violations during unification.
+    -- We do this for *all* identifiers, not just those that are
+    -- integers, because they may become integers later due to
+    -- inference...
+    forM_ idents $ \ident ->
+      constrain (identName ident) $ ParamSize $ srclocOf ident
+    m <* checkIfUsed
   where
-    handleVars m =
-      localScope (`bindVars` idents) $ do
-        -- Those identifiers that can potentially also be sizes are
-        -- added as type constraints.  This is necessary so that we
-        -- can properly detect scope violations during unification.
-        -- We do this for *all* identifiers, not just those that are
-        -- integers, because they may become integers later due to
-        -- inference...
-        forM_ idents $ \ident ->
-          constrain (identName ident) $ ParamSize $ srclocOf ident
-        m
-
     bindVars = foldl bindVar
 
     bindVar scope (Ident name (Info tp) _) =
@@ -73,6 +72,15 @@ binding idents = handleVars
         { scopeVtable =
             M.insert name (BoundV [] tp) $ scopeVtable scope
         }
+
+    checkIfUsed = do
+      used <- gets stateUsed
+      forM_ (filter ((`S.notMember` used) . identName) idents) $ \ident ->
+        unless ("_" `T.isPrefixOf` nameToText (baseName (identName ident))) $
+          warn ident $
+            "Unused variable "
+              <> dquotes (prettyName (identName ident))
+              <> "."
 
 bindingTypes ::
   [Either (VName, TypeBinding) (VName, Constraint)] ->

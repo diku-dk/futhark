@@ -252,7 +252,8 @@ data SizeSource
 -- generating unique names, as these will be user-visible.
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
-    stateCounter :: !Int
+    stateCounter :: !Int,
+    stateUsed :: S.Set VName
   }
 
 newtype TermTypeM a
@@ -482,6 +483,7 @@ instance MonadTypeChecker TermTypeM where
         let (pts', rt') = instOverloaded argtype pts rt
         pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
 
+    modify $ \s -> s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
     pure (qn', t)
     where
       instOverloaded argtype pts rt =
@@ -658,4 +660,4 @@ runTermTypeM checker (TermTypeM m) = do
             termLevel = 0,
             termChecker = checker
           }
-  evalStateT (runReaderT m initial_tenv) (TermTypeState mempty 0)
+  evalStateT (runReaderT m initial_tenv) (TermTypeState mempty 0 mempty)
