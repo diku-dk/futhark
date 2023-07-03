@@ -438,6 +438,7 @@ overlapCheck loc (src, src_als) (ve, ve_als) =
         <+> "to remove aliases from the value."
 
 inferReturnUniqueness :: [Pat ParamType] -> ResType -> TypeAliases -> ResType
+inferReturnUniqueness [] ret _ = ret `setUniqueness` Nonunique
 inferReturnUniqueness params ret ret_als = delve ret ret_als
   where
     forbidden = aliasesMultipleTimes ret_als
@@ -952,17 +953,18 @@ checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (l
     (body', body_als) <- checkExp body
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
-    when (null params && unique ret) $
-      addError loc mempty "A top-level constant cannot have a unique type."
     -- If the user did not provide an annotation (meaning the return
     -- type is fully inferred), we infer the uniqueness.  Otherwise,
     -- we go with whatever they wanted.  This lets the user define
     -- non-unique return types even if the body actually has no
     -- aliases.
-    let ret'
-          | isNothing retdecl =
-              RetType ext $ inferReturnUniqueness params ret body_als
-          | otherwise = RetType ext ret
+    ret' <- case retdecl of
+      Just retdecl' -> do
+        when (null params && unique ret) $
+          addError retdecl' mempty "A top-level constant cannot have a unique type."
+        pure $ RetType ext ret
+      Nothing ->
+        pure $ RetType ext $ inferReturnUniqueness params ret body_als
     pure
       ( (body', ret'),
         body_als -- Don't matter.
