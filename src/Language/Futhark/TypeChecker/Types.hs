@@ -184,7 +184,7 @@ evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
       pure
         ( TEArrow (Just v') t1' t2' loc,
           svars1 ++ dims1 ++ svars2,
-          RetType [] $ Scalar $ Arrow mempty (Named v') (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
+          RetType [] $ Scalar $ Arrow Nonunique (Named v') (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
           Lifted
         )
 --
@@ -195,7 +195,7 @@ evalTypeExp (TEArrow Nothing t1 t2 loc) = do
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
       RetType [] . Scalar $
-        Arrow mempty Unnamed (diet $ resToParam st1) (toStruct st1) $
+        Arrow Nonunique Unnamed (diet $ resToParam st1) (toStruct st1) $
           RetType dims2 st2,
       Lifted
     )
