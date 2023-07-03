@@ -21,7 +21,7 @@ import Futhark.Util (nubOrd)
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
-import Language.Futhark.TypeChecker.Terms.Monad hiding (consumed)
+import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
@@ -285,8 +285,6 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
                 loopbody'
               )
 
-  merge_t' <- expTypeFully mergeexp'
-
   -- dim handling (4)
   wellTypedLoopArg Initial sparams mergepat' mergeexp'
 
@@ -297,16 +295,6 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
       "loop"
       sparams
       (patternType mergepat')
-  -- We set all of the uniqueness to be unique.  This is intentional,
-  -- and matches what happens for function calls.  Those arrays that
-  -- really *cannot* be consumed will alias something unconsumable,
-  -- and will be caught that way.
-  let bound_here = patNames mergepat' <> S.fromList sparams <> form_bound
-      form_bound =
-        case form' of
-          For v _ -> S.singleton $ identName v
-          ForIn forpat _ -> patNames forpat
-          While {} -> mempty
   pure
     ( (sparams, mergepat', mergeexp', form', loopbody'),
       AppRes (toStruct loopt) retext

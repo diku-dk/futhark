@@ -180,15 +180,6 @@ sliceShape _ _ t = pure (t, [])
 
 --- Main checkers
 
-noAliasesIfOverloaded :: StructType -> TermTypeM StructType
-noAliasesIfOverloaded t@(Scalar (TypeVar u tn [])) = do
-  subst <- fmap snd . M.lookup (qualLeaf tn) <$> getConstraints
-  case subst of
-    Just Overloaded {} -> pure $ Scalar $ TypeVar u tn []
-    _ -> pure t
-noAliasesIfOverloaded t =
-  pure t
-
 checkAscript ::
   SrcLoc ->
   UncheckedTypeExp ->
@@ -464,7 +455,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
     UpToExclusive e -> expType e
 
   -- Special case some ranges to give them a known size.
-  let warnIfConsumingOrBinding binds size =
+  let warnIfBinding binds size =
         if binds
           then do
             warn (srclocOf size) $
@@ -478,20 +469,20 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
     case (isInt64 start', isInt64 <$> maybe_step', end') of
       (Just 0, Just (Just 1), UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') end''
+            warnIfBinding (hasBinding end'') end''
       (Just 0, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') end''
+            warnIfBinding (hasBinding end'') end''
       (_, Nothing, UpToExclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinus end'' start'
+            warnIfBinding (hasBinding end'' || hasBinding start') $ sizeMinus end'' start'
       (_, Nothing, ToInclusive end'')
         -- No stride means we assume a stride of one.
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'' || hasBinding start') $ sizeMinusInc end'' start'
+            warnIfBinding (hasBinding end'' || hasBinding start') $ sizeMinusInc end'' start'
       (Just 1, Just (Just 2), ToInclusive end'')
         | Scalar (Prim (Signed Int64)) <- end_t ->
-            warnIfConsumingOrBinding (hasBinding end'') end''
+            warnIfBinding (hasBinding end'') end''
       _ -> do
         d <- newRigidDim loc RigidRange "range_dim"
         pure (sizeFromName (qualName d) mempty, Just d)
@@ -666,8 +657,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
   bindSpaced [(Term, name)] $ do
     name' <- checkName Term name loc
 
-    let ftype = funType params' rettype
-        entry = BoundV Local tparams' ftype
+    let entry = BoundV tparams' $ funType params' rettype
         bindF scope =
           scope
             { scopeVtable =
@@ -735,7 +725,6 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
       (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
       onFailure (CheckingRecordUpdate fields (toStruct src_t') (toStruct ve_t)) $
         unify usage (toStruct src_t') (toStruct ve_t)
-      -- Important that we return ve_t so that we get the right aliases.
       pure ve_t
     updateField (f : fs) ve_t (Scalar (Record m))
       | Just f_t <- M.lookup f m = do
@@ -757,11 +746,7 @@ checkExp (AppExp (Index e slice loc) _) = do
     sliceShape (Just (loc, Rigid (RigidSlice Nothing ""))) slice'
       =<< expTypeFully e'
 
-  -- Remove aliases if the result is an overloaded type, because that
-  -- will certainly not be aliased.
-  t'' <- noAliasesIfOverloaded t'
-
-  pure $ AppExp (Index e' slice' loc) (Info $ AppRes t'' retext)
+  pure $ AppExp (Index e' slice' loc) (Info $ AppRes t' retext)
 checkExp (Assert e1 e2 NoInfo loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
@@ -1099,12 +1084,6 @@ checkApply
                       )
           _ -> pure (Nothing, const Nothing)
 
-      -- In case a function result is not immediately bound to a name,
-      -- we need to invent a name for it so we can track it during
-      -- aliasing (uniqueness-error54.fut, uniqueness-error55.fut,
-      -- uniqueness-error60.fut).
-      v <- newID "internal_app_result"
-      modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
       let tp2'' = applySubst parsubst $ toStruct tp2'
 
       pure (d1, tp1', tp2'', argext, ext)

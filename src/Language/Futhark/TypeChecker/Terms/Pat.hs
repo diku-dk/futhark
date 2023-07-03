@@ -73,7 +73,7 @@ binding idents = handleVars
     bindVar scope (Ident name (Info tp) _) =
       scope
         { scopeVtable =
-            M.insert name (BoundV Local [] tp) $ scopeVtable scope
+            M.insert name (BoundV [] tp) $ scopeVtable scope
         }
 
 bindingTypes ::
