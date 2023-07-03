@@ -65,7 +65,12 @@ runGenOpaque :: GenOpaque a -> (a, I.OpaqueTypes)
 runGenOpaque = flip runState mempty
 
 addType :: Name -> I.OpaqueType -> GenOpaque ()
-addType s t = modify (<> I.OpaqueTypes [(s, t)])
+addType name t = modify $ \(I.OpaqueTypes ts) ->
+  case find ((== name) . fst) ts of
+    Just (_, t')
+      | t /= t' ->
+          error $ "Duplicate definition of entry point type " <> E.prettyString name
+    _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, t)]
 
 isRecord :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name (E.TypeExp E.Info VName))
 isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
