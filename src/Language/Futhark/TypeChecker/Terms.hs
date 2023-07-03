@@ -687,14 +687,11 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
   unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
 
-  -- Need the fully normalised type here to get the proper aliasing information.
-  src_t <- normTypeFully $ unInfo $ identType src'
-
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
   ve' <- unifies "type of target array" (toStruct elemt) =<< checkExp ve
 
-  bindingIdent dest src_t $ \dest' -> do
+  bindingIdent dest (unInfo (identType src')) $ \dest' -> do
     body' <- checkExp body
     (body_t, ext) <-
       unscopeType loc (S.singleton (identName dest'))

@@ -452,20 +452,17 @@ typeParamToArg (TypeParamType _ v _) =
 
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
--- type!).  The latter is used to remove aliases from types that are
--- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | ExpSubst Exp
+-- type!).
+data Subst t = Subst [TypeParam] t | ExpSubst Exp
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
-  pretty PrimSubst = "#<primsubst>"
   pretty (ExpSubst e) = pretty e
 
 instance Functor Subst where
   fmap f (Subst ps t) = Subst ps $ f t
-  fmap _ PrimSubst = PrimSubst
   fmap _ (ExpSubst e) = ExpSubst e
 
 -- | Create a type substitution corresponding to a type binding.
@@ -608,8 +605,6 @@ substTypesRet lookupSubst ot =
           RetType ext t <- freshDims rt
           modify (ext ++)
           pure $ second (<> u) $ applyType ps (second (const u) t) targs'
-        Just PrimSubst ->
-          pure $ Scalar $ TypeVar u v targs'
         _ ->
           pure $ Scalar $ TypeVar u v targs'
     onType (Scalar (Record ts)) =
