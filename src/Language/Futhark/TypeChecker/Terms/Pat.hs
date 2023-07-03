@@ -48,8 +48,6 @@ nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
     onDim d = pure d
 
 -- | Bind these identifiers locally while running the provided action.
--- Checks that the identifiers are used properly within the scope
--- (e.g. consumption).
 binding ::
   [Ident StructType] ->
   TermTypeM a ->
