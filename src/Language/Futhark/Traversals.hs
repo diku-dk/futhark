@@ -28,7 +28,6 @@ where
 
 import Data.Bifunctor
 import Data.List.NonEmpty qualified as NE
-import Data.Set qualified as S
 import Language.Futhark.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element

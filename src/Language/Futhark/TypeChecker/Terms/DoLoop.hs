@@ -144,13 +144,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   -- (4) Similarly to (3), we check that the "function" can be
   -- called with the initial merge values as argument.  The result
   -- of this is the type of the loop as a whole.
-  --
-  -- (There is also a convergence loop for inferring uniqueness, but
-  -- that's orthogonal to the size handling.)
 
-  -- We don't want the loop parameters to alias their initial
-  -- values, so we blank them here.  We will actually check them
-  -- properly later.
   (merge_t, new_dims_map) <-
     -- dim handling (1)
     allDimsFreshInType (mkUsage loc "loop parameter type inference") Nonrigid "loop_d"
@@ -223,13 +217,6 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
 
         pure (nubOrd sparams, mergepat'')
 
-  -- First we do a basic check of the loop body to figure out which of
-  -- the merge parameters are being consumed.  For this, we first need
-  -- to check the merge pattern, which requires the (initial) merge
-  -- expression.
-  --
-  -- Play a little with occurences to ensure it does not look like
-  -- none of the merge variables are being used.
   (sparams, mergepat', form', loopbody') <-
     case form of
       For i uboundexp -> do

@@ -107,7 +107,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Monoid hiding (Sum)
 import Data.Ord
-import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Traversable
 import Futhark.Util.Loc
