@@ -951,7 +951,7 @@ internalisePat desc sizes p e m = do
   ses <- internaliseExp desc' e
   internalisePat' sizes p ses m
   where
-    desc' = case S.toList $ E.patIdents p of
+    desc' = case E.patIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 

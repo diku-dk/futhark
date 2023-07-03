@@ -637,10 +637,11 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   incLevel . bindingSizes sizes $ \sizes' ->
     bindingPat sizes' pat (Ascribed t) $ \pat' -> do
       body' <- checkExp body
-      let (i64, noni64) = S.partition i64Ident $ patIdents pat'
+      let (i64, noni64) = partition i64Ident $ patIdents pat'
       (body_t, retext) <-
-        reboundI64 loc (sizesMap sizes' <> S.map identName i64) =<< expTypeFully body'
-      (body_t', retext') <- unscopeType loc (S.map identName noni64) body_t
+        reboundI64 loc (S.fromList (map sizeName sizes' <> map identName i64))
+          =<< expTypeFully body'
+      (body_t', retext') <- unscopeType loc (S.fromList (map identName noni64)) body_t
 
       pure $
         AppExp
@@ -649,7 +650,6 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   where
     i64Ident (Ident _ ty _) =
       ty == Info (Scalar $ Prim $ Signed Int64)
-    sizesMap = foldMap (S.singleton . sizeName)
 checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) = do
   (tparams', params', maybe_retdecl', rettype, e') <-
     checkBinding (name, maybe_retdecl, tparams, params, e, loc)
@@ -904,10 +904,10 @@ checkCase ::
 checkCase mt (CasePat p e loc) =
   bindingPat [] p (Ascribed mt) $ \p' -> do
     e' <- checkExp e
-    let (i64, noni64) = S.partition i64Ident $ patIdents p'
+    let (i64, noni64) = partition i64Ident $ patIdents p'
     (t, retext) <-
-      reboundI64 loc (S.map identName i64) =<< expTypeFully e'
-    (t', retext') <- unscopeType loc (S.map identName noni64) t
+      reboundI64 loc (S.fromList (map identName i64)) =<< expTypeFully e'
+    (t', retext') <- unscopeType loc (S.fromList (map identName noni64)) t
     pure (CasePat (fmap toStruct p') e' loc, t', retext <> retext')
   where
     i64Ident (Ident _ ty _) =

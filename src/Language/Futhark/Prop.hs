@@ -558,52 +558,29 @@ orderZero (Scalar (Sum cs)) = all (all orderZero) cs
 -- | @patternOrderZero pat@ is 'True' if all of the types in the given pattern
 -- have order 0.
 patternOrderZero :: Pat (TypeBase d u) -> Bool
-patternOrderZero pat = case pat of
-  TuplePat ps _ -> all patternOrderZero ps
-  RecordPat fs _ -> all (patternOrderZero . snd) fs
-  PatParens p _ -> patternOrderZero p
-  Id _ (Info t) _ -> orderZero t
-  Wildcard (Info t) _ -> orderZero t
-  PatAscription p _ _ -> patternOrderZero p
-  PatLit _ (Info t) _ -> orderZero t
-  PatConstr _ _ ps _ -> all patternOrderZero ps
-  PatAttr _ p _ -> patternOrderZero p
+patternOrderZero = orderZero . patternType
 
 -- | The set of identifiers bound in a pattern.
-patIdents :: Pat (TypeBase Size u) -> S.Set (Ident StructType)
-patIdents (Id v t loc) = S.singleton $ Ident v (toStruct <$> t) loc
+patIdents :: Pat t -> [Ident t]
+patIdents (Id v t loc) = [Ident v t loc]
 patIdents (PatParens p _) = patIdents p
-patIdents (TuplePat pats _) = mconcat $ map patIdents pats
-patIdents (RecordPat fs _) = mconcat $ map (patIdents . snd) fs
+patIdents (TuplePat pats _) = foldMap patIdents pats
+patIdents (RecordPat fs _) = foldMap (patIdents . snd) fs
 patIdents Wildcard {} = mempty
 patIdents (PatAscription p _ _) = patIdents p
 patIdents PatLit {} = mempty
-patIdents (PatConstr _ _ ps _) = mconcat $ map patIdents ps
+patIdents (PatConstr _ _ ps _) = foldMap patIdents ps
 patIdents (PatAttr _ p _) = patIdents p
 
 -- | The set of names bound in a pattern.
 patNames :: Pat t -> S.Set VName
-patNames (Id v _ _) = S.singleton v
-patNames (PatParens p _) = patNames p
-patNames (TuplePat pats _) = mconcat $ map patNames pats
-patNames (RecordPat fs _) = mconcat $ map (patNames . snd) fs
-patNames Wildcard {} = mempty
-patNames (PatAscription p _ _) = patNames p
-patNames PatLit {} = mempty
-patNames (PatConstr _ _ ps _) = mconcat $ map patNames ps
-patNames (PatAttr _ p _) = patNames p
+patNames = S.fromList . map fst . patternMap
 
 -- | Each name bound in a pattern alongside its type.
 patternMap :: Pat t -> [(VName, t)]
-patternMap (Id v (Info t) _) = [(v, t)]
-patternMap (PatParens p _) = patternMap p
-patternMap (TuplePat pats _) = mconcat $ map patternMap pats
-patternMap (RecordPat fs _) = mconcat $ map (patternMap . snd) fs
-patternMap Wildcard {} = mempty
-patternMap (PatAscription p _ _) = patternMap p
-patternMap PatLit {} = mempty
-patternMap (PatConstr _ _ ps _) = mconcat $ map patternMap ps
-patternMap (PatAttr _ p _) = patternMap p
+patternMap = map f . patIdents
+  where
+    f (Ident v (Info t) _) = (v, t)
 
 -- | The type of values bound by the pattern.
 patternType :: Pat (TypeBase d u) -> TypeBase d u

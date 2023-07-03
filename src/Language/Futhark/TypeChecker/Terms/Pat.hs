@@ -320,7 +320,7 @@ bindingPat ::
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkPat sizes p t $ \p' -> binding (S.toList $ patIdents (fmap toStruct p')) $ do
+  checkPat sizes p t $ \p' -> binding (patIdents (fmap toStruct p')) $ do
     p'' <- updateTypes p'
 
     let used_sizes = fvVars $ freeInPat p''
@@ -344,7 +344,7 @@ bindingParams tps orig_ps m = do
   checkTypeParams tps $ \tps' -> bindingTypeParams tps' $ do
     let descend ps' (p : ps) =
           checkPat [] p NoneInferred $ \p' ->
-            binding (S.toList $ patIdents $ fmap toStruct p') $ descend (p' : ps') ps
+            binding (patIdents $ fmap toStruct p') $ descend (p' : ps') ps
         descend ps' [] = m tps' $ reverse ps'
 
     descend [] orig_ps
