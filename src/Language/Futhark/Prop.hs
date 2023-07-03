@@ -65,7 +65,6 @@ module Language.Futhark.Prop
     toParam,
     resToParam,
     paramToRes,
-    toStructRet,
     toResRet,
     setUniqueness,
     noSizes,
@@ -265,10 +264,6 @@ toRes u = fmap (const u)
 -- | Convert to 'ResRetType'
 toResRet :: Uniqueness -> RetTypeBase Size u -> ResRetType
 toResRet u = second (const u)
-
--- | Convert to 'StructRetType'
-toStructRet :: RetTypeBase Size u -> StructRetType
-toStructRet = second (const NoUniqueness)
 
 -- | Preserves relation between 'Diet' and 'Uniqueness'.
 resToParam :: ResType -> ParamType

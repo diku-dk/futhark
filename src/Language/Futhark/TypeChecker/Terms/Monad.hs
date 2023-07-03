@@ -34,7 +34,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
 
     -- * Sizes
     isInt64,
-    maybeDimFromExp,
 
     -- * Control flow
     incLevel,
@@ -615,12 +614,6 @@ isInt64 (IntLit k' _ _) = Just $ fromInteger k'
 isInt64 (Negate x _) = negate <$> isInt64 x
 isInt64 (Parens x _) = isInt64 x
 isInt64 _ = Nothing
-
-maybeDimFromExp :: Exp -> Maybe Size
-maybeDimFromExp (Var v typ loc) = Just $ Var v typ loc
-maybeDimFromExp (Parens e _) = maybeDimFromExp e
-maybeDimFromExp (QualParens _ e _) = maybeDimFromExp e
-maybeDimFromExp e = flip sizeFromInteger mempty . fromIntegral <$> isInt64 e
 
 -- Running
 
