@@ -790,7 +790,7 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     let ret' = inferReturnUniqueness params ret body_als
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
-    traceM $
+    when False . traceM $
       unlines
         [ prettyString e,
           prettyString params,
