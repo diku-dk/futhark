@@ -64,8 +64,6 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
 
---- Uniqueness
-
 type Names = S.Set VName
 
 data ValBinding
@@ -74,14 +72,10 @@ data ValBinding
   | EqualityF
   deriving (Show)
 
---- Errors
-
 unusedSize :: (MonadTypeChecker m) => SizeBinder VName -> m a
 unusedSize p =
   typeError p mempty . withIndexLink "unused-size" $
     "Size" <+> pretty p <+> "unused in pattern."
-
---- Scope management
 
 data Inferred t
   = NoneInferred
