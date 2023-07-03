@@ -118,29 +118,45 @@ sliceShape r slice t@(Array u (Shape orig_dims) et) =
           | isJust i, isJust j = Nothing
           | otherwise = Just orig_d
 
+    warnIfBinding binds d i j stride size =
+      if binds
+        then do
+          lift . warn (srclocOf size) $
+            withIndexLink
+              "size-expression-bind"
+              "Size expression with binding is replaced by unknown size."
+          (:) <$> sliceSize d i j stride
+        else pure (size :)
+
     adjustDims (DimFix {} : idxes') (_ : dims) =
       adjustDims idxes' dims
     -- Pat match some known slices to be non-existential.
     adjustDims (DimSlice i j stride : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just 0) . isInt64) i,
-        maybe True ((== Just 1) . isInt64) stride =
-          (fromMaybe d j :) <$> adjustDims idxes' dims
+        maybe True ((== Just 1) . isInt64) stride = do
+          let binds = maybe False hasBinding j
+          warnIfBinding binds d i j stride (fromMaybe d j)
+            <*> adjustDims idxes' dims
     adjustDims ((DimSlice i j stride) : idxes') (d : dims)
       | refine_sizes,
         Just i' <- i, -- if i ~ 0, previous case
-        maybe True ((== Just 1) . isInt64) stride =
+        maybe True ((== Just 1) . isInt64) stride = do
           let j' = fromMaybe d j
-           in (sizeMinus j' i' :) <$> adjustDims idxes' dims
+              binds = hasBinding j' || hasBinding i'
+          warnIfBinding binds d i j stride (sizeMinus j' i')
+            <*> adjustDims idxes' dims
     -- stride == -1
     adjustDims ((DimSlice Nothing Nothing stride) : idxes') (d : dims)
       | refine_sizes,
         maybe True ((== Just (-1)) . isInt64) stride =
           (d :) <$> adjustDims idxes' dims
-    adjustDims ((DimSlice (Just i) (Just j) stride) : idxes') (_d : dims)
+    adjustDims ((DimSlice (Just i) (Just j) stride) : idxes') (d : dims)
       | refine_sizes,
-        maybe True ((== Just (-1)) . isInt64) stride =
-          (sizeMinus i j :) <$> adjustDims idxes' dims
+        maybe True ((== Just (-1)) . isInt64) stride = do
+          let binds = hasBinding i || hasBinding j
+          warnIfBinding binds d (Just i) (Just j) stride (sizeMinus i j)
+            <*> adjustDims idxes' dims
     -- existential
     adjustDims ((DimSlice i j stride) : idxes') (d : dims) =
       (:) <$> sliceSize d i j stride <*> adjustDims idxes' dims
@@ -1399,7 +1415,14 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
           "The" <+> prettyName fname <+> "operator may not be redefined."
 
       let ((body''', updated_ret), errors) =
-            Consumption.checkValDef (fname', params'', body'', RetType dims rettype'', loc)
+            Consumption.checkValDef
+              ( fname',
+                params'',
+                body'',
+                RetType dims rettype'',
+                maybe_retdecl'',
+                loc
+              )
 
       mapM_ throwError errors
 

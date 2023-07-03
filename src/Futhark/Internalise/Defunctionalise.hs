@@ -13,7 +13,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Futhark.Util (mapAccumLM, nubOrd)
@@ -93,7 +92,7 @@ replaceStaticValSizes globals orig_substs sv =
             foldl' (flip M.delete) orig_substs $
               S.fromList (M.keys closure_env)
        in LambdaSV
-            (onAST substs param)
+            (fmap (replaceTypeSizes substs) param)
             (RetType t_dims (replaceTypeSizes substs t))
             (onExp substs e)
             (onEnv orig_substs closure_env) -- intentional
@@ -138,12 +137,12 @@ replaceStaticValSizes globals orig_substs sv =
       Coerce (onExp substs e) te (replaceTypeSizes substs <$> t) loc
     onExp substs (Lambda params e ret (Info (RetType t_dims t)) loc) =
       Lambda
-        (map (onAST substs) params)
+        (map (fmap $ replaceTypeSizes substs) params)
         (onExp substs e)
         ret
         (Info (RetType t_dims (replaceTypeSizes substs t)))
         loc
-    onExp substs e = onAST substs e
+    onExp substs e = runIdentity $ astMap (tv substs) e
 
     onEnv substs =
       M.fromList
@@ -154,9 +153,6 @@ replaceStaticValSizes globals orig_substs sv =
       Binding
         (second (replaceTypeSizes substs) <$> t)
         (replaceStaticValSizes globals substs bsv)
-
-    onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
-    onAST substs = runIdentity . astMap (tv substs)
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names.
@@ -326,10 +322,9 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
+  -- We used to rename parameters here, but I don't understand why
+  -- that was necessary and it caused some problems.
   fvVars (freeInPat param)
-    <> S.fromList (map fst (filter couldBeSize $ patternMap param))
-  where
-    couldBeSize = (Scalar (Prim (Signed Int64)) ==) . snd
 
 -- | Combine the shape information of types as much as possible. The first
 -- argument is the orignal type and the second is the type of the transformed
@@ -388,7 +383,6 @@ instStaticVal globals dims t sv_t sv = do
   fresh_substs <-
     mkSubsts . filter (`S.notMember` globals) . S.toList $
       S.fromList dims <> sizesToRename sv
-
   let dims' = map (onName fresh_substs) dims
       isDim k _ = k `elem` dims'
       dim_substs =
@@ -773,7 +767,7 @@ etaExpand e_t e = do
       let t' = second (const d) t
       x <- case p of
         Named x | x `notElem` prev -> pure x
-        _ -> newNameFromString "x"
+        _ -> newNameFromString "eta_p"
       pure
         ( x : prev,
           ( Id x (Info t') mempty,
@@ -842,10 +836,10 @@ instAnySizes = traverse $ traverse $ bitraverse onDim pure
     onDim d = pure d
 
 unboundSizes :: S.Set VName -> [Pat ParamType] -> [VName]
-unboundSizes bound_sizes params = nubOrd $ execState (mapM (astMap tv) params) []
+unboundSizes bound_sizes params = nubOrd $ execState (f params) []
   where
+    f = traverse $ traverse $ bitraverse onDim pure
     bound = bound_sizes <> foldMap patNames params
-    tv = identityMapper {mapOnStructType = bitraverse onDim pure}
     onDim (Var d typ loc) = do
       unless (qualLeaf d `S.member` bound) $ modify (qualLeaf d :)
       pure $ Var d typ loc
@@ -955,7 +949,6 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
   params' <- instAnySizes params
 
   fname <- newNameFromString fname_s
-  when False . traceM $ unlines [prettyString fname, prettyString params, prettyString params']
   liftValDec
     fname
     lifted_rettype
@@ -1271,13 +1264,6 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
   globals <- asks fst
   let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
-  when False . traceM $
-    unlines
-      [ prettyString name,
-        prettyString rettype,
-        prettyString $ typeOf body',
-        show sv
-      ]
   let rettype' = combineTypeShapes rettype sv_t
       tparams'' = tparams' ++ unboundSizes bound_sizes params''
       ret_dims' = filter (`notElem` bound_sizes) $ S.toList $ fvVars $ freeInType rettype'

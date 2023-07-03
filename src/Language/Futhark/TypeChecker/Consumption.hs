@@ -17,7 +17,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -380,10 +379,6 @@ contain m = do
   modify $ \s -> s {stateConsumed = prev_cons}
   pure (x, new_cons)
 
-maskAliases :: Aliases -> Diet -> Aliases
-maskAliases _ Consume = mempty
-maskAliases als Observe = als
-
 -- | The two types are assumed to be approximately structurally equal,
 -- but not necessarily regarding sizes.  Combines aliases and prefers
 -- other information from first argument.
@@ -458,33 +453,6 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       | otherwise =
           t `setUniqueness` Nonunique
 
--- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
--- an argument the given types to a function with the given return
--- type, consuming the argument with the given diet.
-returnType :: Aliases -> ResType -> Diet -> TypeAliases -> TypeAliases
-returnType _ (Array Unique et shape) _ _ =
-  Array mempty et shape
-returnType appres (Array Nonunique et shape) d arg =
-  Array (appres <> arg_als) et shape
-  where
-    arg_als = maskAliases (aliases arg) d
-returnType appres (Scalar (Record fs)) d arg =
-  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
-returnType _ (Scalar (Prim t)) _ _ =
-  Scalar $ Prim t
-returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
-  Scalar $ TypeVar mempty t targs
-returnType appres (Scalar (TypeVar Nonunique t targs)) d arg =
-  Scalar $ TypeVar (appres <> arg_als) t targs
-  where
-    arg_als = maskAliases (aliases arg) d
-returnType _ (Scalar (Arrow _ v pd t1 (RetType dims t2))) d arg =
-  Scalar $ Arrow als v pd (t1 `setAliases` mempty) $ RetType dims t2
-  where
-    als = maskAliases (aliases arg) d
-returnType appres (Scalar (Sum cs)) d arg =
-  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
-
 checkSubExps :: ASTMappable e => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
 
@@ -526,6 +494,33 @@ checkArg p_t e = do
     noSelfAliases (locOf e) e_als
     consumeAsNeeded (locOf e) p_t e_als
   pure (e', e_als)
+
+-- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
+-- an argument the given types to a function with the given return
+-- type, consuming the argument with the given diet.
+returnType :: Aliases -> ResType -> Diet -> TypeAliases -> TypeAliases
+returnType _ (Array Unique et shape) _ _ =
+  Array mempty et shape
+returnType appres (Array Nonunique et shape) Consume _ =
+  Array appres et shape
+returnType appres (Array Nonunique et shape) Observe arg =
+  Array (appres <> aliases arg) et shape
+returnType _ (Scalar (TypeVar Unique t targs)) _ _ =
+  Scalar $ TypeVar mempty t targs
+returnType appres (Scalar (TypeVar Nonunique t targs)) Consume _ =
+  Scalar $ TypeVar appres t targs
+returnType appres (Scalar (TypeVar Nonunique t targs)) Observe arg =
+  Scalar $ TypeVar (appres <> aliases arg) t targs
+returnType appres (Scalar (Record fs)) d arg =
+  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
+returnType _ (Scalar (Prim t)) _ _ =
+  Scalar $ Prim t
+returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Consume _ =
+  Scalar $ Arrow appres v pd t1 $ RetType dims t2
+returnType appres (Scalar (Arrow _ v pd t1 (RetType dims t2))) Observe arg =
+  Scalar $ Arrow (appres <> aliases arg) v pd t1 $ RetType dims t2
+returnType appres (Scalar (Sum cs)) d arg =
+  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
 
 applyArg :: TypeAliases -> TypeAliases -> TypeAliases
 applyArg (Scalar (Arrow closure_als _ d _ (RetType _ rettype))) arg_als =
@@ -670,6 +665,18 @@ checkLoop loop_loc (param, arg, form, body) = do
       applyArg loopt arg_als `combineAliases` body_als
     )
 
+checkFuncall ::
+  Foldable f =>
+  SrcLoc ->
+  Maybe (QualName VName) ->
+  TypeAliases ->
+  f TypeAliases ->
+  CheckM TypeAliases
+checkFuncall loc fname f_als args_als = do
+  v <- VName "internal_app_result" <$> incCounter
+  modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
+  pure $ foldl applyArg (second (S.insert (AliasFree v)) f_als) args_als
+
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
 
@@ -678,9 +685,7 @@ checkExp (AppExp (Apply f args loc) appres) = do
   -- Note Futhark uses right-to-left evaluation of applications.
   (args', args_als) <- NE.unzip . NE.reverse <$> traverse checkArg' (NE.reverse args)
   (f', f_als) <- checkExp f
-  v <- VName "internal_app_result" <$> incCounter
-  modify $ \s -> s {stateNames = M.insert v (NameAppRes (fname f) loc) $ stateNames s}
-  let res_als = foldl applyArg (second (S.insert (AliasFree v)) f_als) args_als
+  res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
     fname (Var v _ _) = Just v
@@ -773,9 +778,10 @@ checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   let at1 : at2 : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg at1 x
   (y', y_als) <- checkArg at2 y
+  res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,
-      op_als `applyArg` x_als `applyArg` y_als
+      res_als
     )
 
 --
@@ -790,14 +796,6 @@ checkExp e@(Lambda params body te (Info (RetType ext ret)) loc) =
     let ret' = inferReturnUniqueness params ret body_als
         als = foldMap aliases (M.elems free_bound)
         ftype = funType params (RetType ext ret') `setAliases` als
-    when False . traceM $
-      unlines
-        [ prettyString e,
-          prettyString params,
-          prettyString ret,
-          prettyString body_als,
-          prettyString ret'
-        ]
     pure
       ( Lambda params body' te (Info (RetType ext ret')) loc,
         ftype
@@ -947,17 +945,26 @@ checkGlobalAliases loc params body_t = do
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.
 checkValDef ::
-  (VName, [Pat ParamType], Exp, ResRetType, SrcLoc) ->
+  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Info VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
-checkValDef (_fname, params, body, RetType ext ret, loc) = runCheckM (locOf loc) $ do
+checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (locOf loc) $ do
   fmap fst . bindingParams params $ do
     (body', body_als) <- checkExp body
     checkReturnAlias loc params ret body_als
     checkGlobalAliases loc params body_als
     when (null params && unique ret) $
       addError loc mempty "A top-level constant cannot have a unique type."
+    -- If the user did not provide an annotation (meaning the return
+    -- type is fully inferred), we infer the uniqueness.  Otherwise,
+    -- we go with whatever they wanted.  This lets the user define
+    -- non-unique return types even if the body actually has no
+    -- aliases.
+    let ret'
+          | isNothing retdecl =
+              RetType ext $ inferReturnUniqueness params ret body_als
+          | otherwise = RetType ext ret
     pure
-      ( (body', RetType ext $ inferReturnUniqueness params ret body_als),
+      ( (body', ret'),
         body_als -- Don't matter.
       )
 {-# NOINLINE checkValDef #-}

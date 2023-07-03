@@ -487,10 +487,9 @@ transformRetTypeSizes argset (RetType dims ty) = do
 
 sizesForPat :: MonadFreshNames m => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
-  (params', sizes) <- runStateT (astMap tv pat) []
+  (params', sizes) <- runStateT (traverse (bitraverse onDim pure) pat) []
   pure (sizes, params')
   where
-    tv = identityMapper {mapOnStructType = bitraverse onDim pure}
     onDim d
       | d == anySize = do
           v <- lift $ newVName "size"

@@ -1512,7 +1512,7 @@ type Case = CaseBase Info VName
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase (Shape Name) ()
 
--- | An expression with no type annotations.
+-- | An unchecked type expression.
 type UncheckedTypeExp = TypeExp NoInfo Name
 
 -- | An identifier with no type annotations.
