@@ -518,21 +518,21 @@ checkExp (Coerce e te NoInfo loc) = do
   pure $ Coerce e' te' (Info t') loc
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   (op', ftype) <- lookupVar oploc op
-  e1_arg <- checkArg e1
-  e2_arg <- checkArg e2
+  e1' <- checkExp e1
+  e2' <- checkExp e2
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, _, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1_arg
-  (_, _, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2_arg
+  (_, _, rt, p1_ext, _) <- checkApply loc (Just op', 0) ftype e1'
+  (_, _, rt', p2_ext, retext) <- checkApply loc (Just op', 1) rt e2'
 
   pure $
     AppExp
       ( BinOp
           (op', oploc)
           (Info ftype)
-          (argExp e1_arg, Info p1_ext)
-          (argExp e2_arg, Info p2_ext)
+          (e1', Info p1_ext)
+          (e2', Info p2_ext)
           loc
       )
       (Info (AppRes rt' retext))
@@ -612,7 +612,7 @@ checkExp (Not arg loc) = do
   pure $ Not arg' loc
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
   fe' <- checkExp fe
-  args' <- mapM (checkArg . snd) args
+  args' <- mapM (checkExp . snd) args
   t <- expType fe'
   let fname =
         case fe' of
@@ -626,7 +626,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
       (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
       pure
         ( (i + 1, all_exts <> exts, rt),
-          (Info (d1, argext), argExp arg')
+          (Info (d1, argext), arg')
         )
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
@@ -805,15 +805,15 @@ checkExp (OpSection op _ loc) = do
   pure $ OpSection op' (Info ftype) loc
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   (op', ftype) <- lookupVar loc op
-  e_arg <- checkArg e
-  (_, t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e_arg
+  e' <- checkExp e
+  (_, t1, rt, argext, retext) <- checkApply loc (Just op', 0) ftype e'
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 rettype)) ->
       pure $
         OpSectionLeft
           op'
           (Info ftype)
-          (argExp e_arg)
+          e'
           (Info (m1, toParam d1 t1, argext), Info (m2, toParam d2 t2))
           (Info rettype, Info retext)
           loc
@@ -822,7 +822,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
         "Operator section with invalid operator of type" <+> pretty ftype
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   (op', ftype) <- lookupVar loc op
-  e_arg <- checkArg e
+  e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
       (_, t2', arrow', argext, _) <-
@@ -830,14 +830,14 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
           loc
           (Just op', 1)
           (Scalar $ Arrow mempty m2 d2 t2 $ RetType [] $ Scalar $ Arrow Nonunique m1 d1 t1 $ RetType dims2 ret)
-          e_arg
+          e'
       case arrow' of
         Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
           pure $
             OpSectionRight
               op'
               (Info ftype)
-              (argExp e_arg)
+              e'
               (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext))
               (Info $ RetType dims2' ret')
               loc
@@ -963,20 +963,6 @@ checkSlice = mapM checkDimIndex
 sliceDims :: [DimIndex] -> Int
 sliceDims = length
 
-type Arg = (Exp, StructType, SrcLoc)
-
-argExp :: Arg -> Exp
-argExp (e, _, _) = e
-
-argType :: Arg -> StructType
-argType (_, t, _) = t
-
-checkArg :: UncheckedExp -> TermTypeM Arg
-checkArg arg = do
-  arg' <- checkExp arg
-  arg_t <- expType arg'
-  pure (arg', arg_t, srclocOf arg')
-
 instantiateDimsInReturnType ::
   SrcLoc ->
   Maybe (QualName VName) ->
@@ -1029,68 +1015,65 @@ checkApply ::
   SrcLoc ->
   ApplyOp ->
   StructType ->
-  Arg ->
+  Exp ->
   TermTypeM (Diet, StructType, StructType, Maybe VName, [VName])
-checkApply
-  loc
-  (fname, _)
-  (Scalar (Arrow _ pname d1 tp1 tp2))
-  (argexp, argtype, argloc) =
-    onFailure (CheckingApply fname argexp tp1 (toStruct argtype)) $ do
-      unify (mkUsage argloc "use as function argument") (toStruct tp1) (toStruct argtype)
+checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
+  let argtype = typeOf argexp
+  onFailure (CheckingApply fname argexp tp1 argtype) $ do
+    unify (mkUsage argexp "use as function argument") (toStruct tp1) argtype
 
-      -- Perform substitutions of instantiated variables in the types.
-      tp1' <- normTypeFully tp1
-      (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
-      argtype' <- normTypeFully argtype
+    -- Perform substitutions of instantiated variables in the types.
+    tp1' <- normTypeFully tp1
+    (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
+    argtype' <- normTypeFully argtype
 
-      -- Check whether this would produce an impossible return type.
-      let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
-          problematic = S.fromList ext <> boundInsideType argtype'
-      when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
-        typeError loc mempty . withIndexLink "existential-param-ret" $
-          "Existential size would appear in function parameter of return type:"
-            </> indent 2 (pretty (RetType ext tp2'))
-            </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
+    -- Check whether this would produce an impossible return type.
+    let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
+        problematic = S.fromList ext <> boundInsideType argtype'
+    when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
+      typeError loc mempty . withIndexLink "existential-param-ret" $
+        "Existential size would appear in function parameter of return type:"
+          </> indent 2 (pretty (RetType ext tp2'))
+          </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
 
-      (argext, parsubst) <-
-        case pname of
-          Named pname'
-            | S.member pname' (fvVars $ freeInType tp2') ->
-                if hasBinding argexp
-                  then do
-                    warn (srclocOf argexp) $
-                      withIndexLink
-                        "size-expression-bind"
-                        "Size expression with binding is replaced by unknown size."
-                    d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
-                    pure
-                      ( Just d,
-                        (`M.lookup` M.singleton pname' (ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp))
+    (argext, parsubst) <-
+      case pname of
+        Named pname'
+          | S.member pname' (fvVars $ freeInType tp2') ->
+              if hasBinding argexp
+                then do
+                  warn (srclocOf argexp) $
+                    withIndexLink
+                      "size-expression-bind"
+                      "Size expression with binding is replaced by unknown size."
+                  d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
+                  pure
+                    ( Just d,
+                      (`M.lookup` M.singleton pname' (ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp))
+                    )
+                else -- We strip the argument expression to make it
+                -- nicer (in particular, to remove parens).
+
+                  pure
+                    ( Nothing,
+                      ( `M.lookup`
+                          M.singleton
+                            pname'
+                            (ExpSubst (fromMaybe argexp $ stripExp argexp))
                       )
-                  else -- We strip the argument expression to make it
-                  -- nicer (in particular, to remove parens).
+                    )
+        _ -> pure (Nothing, const Nothing)
 
-                    pure
-                      ( Nothing,
-                        ( `M.lookup`
-                            M.singleton
-                              pname'
-                              (ExpSubst (fromMaybe argexp $ stripExp argexp))
-                        )
-                      )
-          _ -> pure (Nothing, const Nothing)
+    let tp2'' = applySubst parsubst $ toStruct tp2'
 
-      let tp2'' = applySubst parsubst $ toStruct tp2'
-
-      pure (d1, tp1', tp2'', argext, ext)
+    pure (d1, tp1', tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") (toStruct tfun) $
-    Scalar (Arrow mempty Unnamed Observe (toStruct (argType arg)) $ RetType [] $ paramToRes tv)
+    Scalar (Arrow mempty Unnamed Observe (toStruct (typeOf arg)) $ RetType [] $ paramToRes tv)
   tfun' <- normType tfun
   checkApply loc fname tfun' arg
-checkApply loc (fname, prev_applied) ftype (argexp, _, _) = do
+checkApply loc (fname, prev_applied) ftype argexp = do
   let fname' = maybe "expression" (dquotes . pretty) fname
 
   typeError loc mempty $
