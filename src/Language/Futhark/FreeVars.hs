@@ -136,10 +136,8 @@ freeInType t =
     Scalar (Sum cs) ->
       foldMap (foldMap freeInType) cs
     Scalar (Arrow _ v _ t1 (RetType dims t2)) ->
-      FV $
-        S.filter (\k -> notV v k && notElem k dims) $
-          unFV $
-            freeInType t1 <> freeInType t2
+      FV . S.filter (\k -> notV v k && notElem k dims) $
+        unFV (freeInType t1 <> freeInType t2)
     Scalar (TypeVar _ _ targs) ->
       foldMap typeArgDims targs
   where
