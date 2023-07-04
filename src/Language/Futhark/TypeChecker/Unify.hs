@@ -423,6 +423,8 @@ unifyWith onDims usage = subunify False
               (applySubst (`lookupSubst` constraints) d2)
 
       case (t1', t2') of
+        (Scalar (Prim pt1), Scalar (Prim pt2))
+          | pt1 == pt2 -> pure ()
         ( Scalar (Record fs),
           Scalar (Record arg_fs)
           )
@@ -535,9 +537,7 @@ unifyWith onDims usage = subunify False
                 unifySharedConstructors onDims usage bound bcs cs arg_cs
             | otherwise ->
                 unifyError usage mempty bcs $ unsharedConstructorsMsg arg_cs cs
-        _
-          | t1' == t2' -> pure ()
-          | otherwise -> failure
+        _ -> failure
 
 anyBound :: [VName] -> ExpBase Info VName -> Bool
 anyBound bound e = any (`S.member` fvVars (freeInExp e)) bound
