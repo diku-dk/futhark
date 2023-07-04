@@ -48,7 +48,6 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bitraversable
 import Data.Char (isAscii)
-import Data.List (isPrefixOf)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -482,7 +481,7 @@ instance MonadTypeChecker TermTypeM where
         typeError loc mempty $
           "Unknown variable" <+> dquotes (pretty qn) <> "."
       Just (BoundV tparams t)
-        | "_" `isPrefixOf` baseString name -> underscoreUse loc qn
+        | T.head (nameToText (baseName name)) == '_' -> underscoreUse loc qn
         | otherwise -> do
             (tnames, t') <- instantiateTypeScheme qn' loc tparams t
             pure $ qualifyTypeVars outer_env tnames qs t'
