@@ -472,7 +472,6 @@ instance MonadTypeChecker TermTypeM where
       Just m -> pure (qn', m)
 
   lookupVar loc qn = do
-    outer_env <- asks termOuterEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
@@ -481,12 +480,15 @@ instance MonadTypeChecker TermTypeM where
         typeError loc mempty $
           "Unknown variable" <+> dquotes (pretty qn) <> "."
       Just (BoundV tparams t) -> do
-        modify $ \s -> s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
-        when (T.head (nameToText (baseName name)) == '_') $ underscoreUse loc qn
-        if null tparams
+        when (null qs) . modify $ \s ->
+          s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
+        when (T.head (nameToText (baseName name)) == '_') $
+          underscoreUse loc qn
+        if null tparams && null qs
           then pure t
           else do
             (tnames, t') <- instantiateTypeScheme qn' loc tparams t
+            outer_env <- asks termOuterEnv
             pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
         argtype <- newTypeVar loc "t"
