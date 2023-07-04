@@ -52,11 +52,11 @@ runInternaliseTypeM' :: [VName] -> InternaliseTypeM a -> a
 runInternaliseTypeM' exts (InternaliseTypeM m) = evalState m $ TypeState (length exts)
 
 internaliseParamTypes ::
-  [E.TypeBase E.Size ()] ->
+  [E.ParamType] ->
   InternaliseM [[Tree (I.TypeBase Shape Uniqueness)]]
 internaliseParamTypes ts =
   mapM (mapM (mapM mkAccCerts)) . runInternaliseTypeM $
-    mapM (fmap (map (fmap onType)) . internaliseTypeM mempty) ts
+    mapM (fmap (map (fmap onType)) . internaliseTypeM mempty . E.paramToRes) ts
   where
     onType = fromMaybe bad . hasStaticShape
     bad = error $ "internaliseParamTypes: " ++ prettyString ts
@@ -88,7 +88,7 @@ mkAccCerts (Acc c shape ts u) =
 mkAccCerts t = pure t
 
 internaliseLoopParamType ::
-  E.TypeBase E.Size () ->
+  E.ParamType ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape Uniqueness]
 internaliseLoopParamType et ts =
@@ -159,7 +159,7 @@ inferAliases all_param_ts all_res_ts =
 
 internaliseReturnType ::
   [Tree (I.TypeBase Shape Uniqueness)] ->
-  E.StructRetType ->
+  E.ResRetType ->
   [TypeBase shape u] ->
   [(I.TypeBase ExtShape Uniqueness, RetAls)]
 internaliseReturnType paramts (E.RetType dims et) ts =
@@ -172,7 +172,7 @@ internaliseReturnType paramts (E.RetType dims et) ts =
 -- tuple type piecemeal.
 internaliseEntryReturnType ::
   [Tree (I.TypeBase Shape Uniqueness)] ->
-  E.StructRetType ->
+  E.ResRetType ->
   [[(I.TypeBase ExtShape Uniqueness, RetAls)]]
 internaliseEntryReturnType paramts (E.RetType dims et) =
   let et' = runInternaliseTypeM' dims . mapM (internaliseTypeM exts) $
@@ -187,20 +187,21 @@ internaliseCoerceType ::
   E.StructType ->
   [TypeBase shape u] ->
   [I.TypeBase ExtShape Uniqueness]
-internaliseCoerceType et ts = map fst $ internaliseReturnType [] (E.RetType [] et) ts
+internaliseCoerceType et ts =
+  map fst $ internaliseReturnType [] (E.RetType [] $ E.toRes E.Nonunique et) ts
 
 internaliseLambdaReturnType ::
-  E.TypeBase E.Size () ->
+  E.ResType ->
   [TypeBase shape u] ->
   InternaliseM [I.TypeBase Shape NoUniqueness]
 internaliseLambdaReturnType et ts =
-  map fromDecl <$> internaliseLoopParamType et ts
+  map fromDecl <$> internaliseLoopParamType (E.resToParam et) ts
 
 internaliseType ::
-  E.TypeBase E.Size () ->
+  E.TypeBase E.Size NoUniqueness ->
   [Tree (I.TypeBase I.ExtShape Uniqueness)]
 internaliseType =
-  runInternaliseTypeM . internaliseTypeM mempty
+  runInternaliseTypeM . internaliseTypeM mempty . E.toRes E.Nonunique
 
 newId :: InternaliseTypeM Int
 newId = do
@@ -234,13 +235,13 @@ type Tree = Free []
 
 internaliseTypeM ::
   M.Map VName Int ->
-  E.StructType ->
+  E.ResType ->
   InternaliseTypeM [Tree (I.TypeBase ExtShape Uniqueness)]
 internaliseTypeM exts orig_t =
   case orig_t of
-    E.Array _ u shape et -> do
+    E.Array u shape et -> do
       dims <- internaliseShape shape
-      ets <- internaliseTypeM exts (E.Scalar et)
+      ets <- internaliseTypeM exts $ E.toRes E.Nonunique $ E.Scalar et
       let f et' = I.arrayOf et' (Shape dims) $ internaliseUniqueness u
       pure [array $ map (fmap f) ets]
     E.Scalar (E.Prim bt) ->
@@ -251,12 +252,12 @@ internaliseTypeM exts orig_t =
       | null ets -> pure [Pure $ I.Prim I.Unit]
       | otherwise ->
           concat <$> mapM (internaliseTypeM exts . snd) (E.sortFields ets)
-    E.Scalar (E.TypeVar _ u tn [E.TypeArgType arr_t])
+    E.Scalar (E.TypeVar u tn [E.TypeArgType arr_t])
       | baseTag (E.qualLeaf tn) <= E.maxIntrinsicTag,
         baseString (E.qualLeaf tn) == "acc" -> do
           ts <-
             foldMap (toList . fmap (fromDecl . onAccType))
-              <$> internaliseTypeM exts arr_t
+              <$> internaliseTypeM exts (E.toRes Nonunique arr_t)
           let acc_param = VName "PLACEHOLDER" 0 -- See mkAccCerts.
               acc_shape = Shape [arraysSize 0 ts]
               u' = internaliseUniqueness u
@@ -315,16 +316,15 @@ internaliseSumType ::
 internaliseSumType cs =
   bitraverse (mapM mkAccCerts . foldMap toList) pure . runInternaliseTypeM $
     internaliseConstructors
-      <$> traverse (fmap concat . mapM (internaliseTypeM mempty)) cs
+      <$> traverse (fmap concat . mapM (internaliseTypeM mempty . E.toRes E.Nonunique)) cs
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?
 internalisedTypeSize :: E.TypeBase E.Size als -> Int
 -- A few special cases for performance.
 internalisedTypeSize (E.Scalar (E.Prim _)) = 1
-internalisedTypeSize (E.Array _ _ _ (E.Prim _)) = 1
-internalisedTypeSize t =
-  sum $ map length $ internaliseType (t `E.setAliases` ())
+internalisedTypeSize (E.Array _ _ (E.Prim _)) = 1
+internalisedTypeSize t = sum $ map length $ internaliseType $ E.toStruct t
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType

@@ -1,5 +1,5 @@
 -- ==
--- error: Consuming "xs"
+-- error: Consuming.*"xs"
 
 def consume (xs: *[]i32) = xs
 

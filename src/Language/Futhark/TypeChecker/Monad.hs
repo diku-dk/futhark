@@ -286,7 +286,7 @@ class Monad m => MonadTypeChecker m where
 
   lookupType :: SrcLoc -> QualName Name -> m (QualName VName, [TypeParam], StructRetType, Liftedness)
   lookupMod :: SrcLoc -> QualName Name -> m (QualName VName, Mod)
-  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, PatType)
+  lookupVar :: SrcLoc -> QualName Name -> m (QualName VName, StructType)
 
   checkExpForSize :: UncheckedExp -> m Exp
 
@@ -367,8 +367,7 @@ instance MonadTypeChecker TypeM where
               Just t' ->
                 pure
                   ( qn',
-                    fromStruct $
-                      qualifyTypeVars outer_env mempty qs t'
+                    qualifyTypeVars outer_env mempty qs t'
                   )
 
   checkExpForSize e = do
@@ -417,14 +416,14 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       S.Set VName ->
       TypeBase Size as ->
       TypeBase Size as
-    onType except (Array as u shape et) =
-      Array as u (fmap (onDim except) shape) (onScalar except et)
+    onType except (Array u shape et) =
+      Array u (fmap (onDim except) shape) (onScalar except et)
     onType except (Scalar t) =
       Scalar $ onScalar except t
 
     onScalar _ (Prim t) = Prim t
-    onScalar except (TypeVar as u qn targs) =
-      TypeVar as u (qual except qn) (map (onTypeArg except) targs)
+    onScalar except (TypeVar u qn targs) =
+      TypeVar u (qual except qn) (map (onTypeArg except) targs)
     onScalar except (Record m) =
       Record $ M.map (onType except) m
     onScalar except (Sum m) =
@@ -460,7 +459,7 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
       name `M.member` envVtable env
         || isJust (find matches $ M.elems (envTypeTable env))
       where
-        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ _ (QualName x_qs name') _)))) =
+        matches (TypeAbbr _ _ (RetType _ (Scalar (TypeVar _ (QualName x_qs name') _)))) =
           null x_qs && name == name'
         matches _ = False
     reachable (q : qs') name env

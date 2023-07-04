@@ -2,8 +2,6 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
-    returnType,
-    addAliasesFromType,
     checkForDuplicateNames,
     checkTypeParams,
     typeParamToArg,
@@ -64,7 +62,7 @@ mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet = M.unionWith (&&) $ M.fromList $ zip (S.toList (fvVars (freeInType ret))) (repeat True)
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map snd ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map toStruct ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 
@@ -74,72 +72,9 @@ mustBeExplicitInBinding bind_t =
 mustBeExplicitInType :: StructType -> S.Set VName
 mustBeExplicitInType = snd . determineSizeWitnesses
 
--- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
--- an argument the given types to a function with the given return
--- type, consuming the argument with the given diet.
-returnType :: Aliasing -> PatType -> Diet -> PatType -> PatType
-returnType _ (Array _ Unique et shape) _ _ =
-  Array mempty Nonunique et shape -- Intentional!
-returnType appres (Array als Nonunique et shape) d arg =
-  Array (appres <> als <> arg_als) Nonunique et shape
-  where
-    arg_als = aliases $ maskAliases arg d
-returnType appres (Scalar (Record fs)) d arg =
-  Scalar $ Record $ fmap (\et -> returnType appres et d arg) fs
-returnType _ (Scalar (Prim t)) _ _ =
-  Scalar $ Prim t
-returnType _ (Scalar (TypeVar _ Unique t targs)) _ _ =
-  Scalar $ TypeVar mempty Nonunique t targs -- Intentional!
-returnType appres (Scalar (TypeVar als Nonunique t targs)) d arg =
-  Scalar $ TypeVar (appres <> als <> arg_als) Unique t targs
-  where
-    arg_als = aliases $ maskAliases arg d
-returnType _ (Scalar (Arrow old_als v pd t1 (RetType dims t2))) d arg =
-  Scalar $ Arrow als v pd (t1 `setAliases` mempty) $ RetType dims $ t2 `setAliases` als
-  where
-    -- Make sure to propagate the aliases of an existing closure.
-    als = old_als <> aliases (maskAliases arg d)
-returnType appres (Scalar (Sum cs)) d arg =
-  Scalar $ Sum $ (fmap . fmap) (\et -> returnType appres et d arg) cs
-
--- @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
--- the parts of @t@ that are denoted as consumed by the 'Diet' @d@.
-maskAliases ::
-  Monoid as =>
-  TypeBase shape as ->
-  Diet ->
-  TypeBase shape as
-maskAliases t Consume = t `setAliases` mempty
-maskAliases t Observe = t
-
--- | The two types are assumed to be approximately structurally equal,
--- but not necessarily regarding sizes.  Combines aliases.
-addAliasesFromType :: PatType -> PatType -> PatType
-addAliasesFromType (Array als1 u1 et1 shape1) t2 =
-  Array (als1 <> aliases t2) u1 et1 shape1
-addAliasesFromType (Scalar (TypeVar als1 u1 tv1 targs1)) t2 =
-  Scalar $ TypeVar (als1 <> aliases t2) u1 tv1 targs1
-addAliasesFromType (Scalar (Record ts1)) (Scalar (Record ts2))
-  | length ts1 == length ts2,
-    sort (M.keys ts1) == sort (M.keys ts2) =
-      Scalar $ Record $ M.intersectionWith addAliasesFromType ts1 ts2
-addAliasesFromType
-  (Scalar (Arrow als1 mn1 d1 pt1 (RetType dims1 rt1)))
-  (Scalar (Arrow als2 _ _ _ (RetType _ rt2))) =
-    Scalar (Arrow (als1 <> als2) mn1 d1 pt1 (RetType dims1 rt1'))
-    where
-      rt1' = addAliasesFromType rt1 rt2
-addAliasesFromType (Scalar (Sum cs1)) (Scalar (Sum cs2))
-  | length cs1 == length cs2,
-    sort (M.keys cs1) == sort (M.keys cs2) =
-      Scalar $ Sum $ M.intersectionWith (zipWith addAliasesFromType) cs1 cs2
-addAliasesFromType (Scalar (Prim t)) _ = Scalar $ Prim t
-addAliasesFromType t1 t2 =
-  error $ "addAliasesFromType invalid args: " ++ show (t1, t2)
-
 -- | Ensure that the dimensions of the RetType are unique by
 -- generating new names for them.  This is to avoid name capture.
-renameRetType :: MonadTypeChecker m => StructRetType -> m StructRetType
+renameRetType :: MonadTypeChecker m => ResRetType -> m ResRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
@@ -153,10 +88,10 @@ renameRetType (RetType dims st)
 evalTypeExp ::
   MonadTypeChecker m =>
   TypeExp NoInfo Name ->
-  m (TypeExp Info VName, [VName], StructRetType, Liftedness)
+  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
 evalTypeExp (TEVar name loc) = do
   (name', ps, t, l) <- lookupType loc name
-  t' <- renameRetType t
+  t' <- renameRetType $ toResRet Nonunique t
   case ps of
     [] -> pure (TEVar name' loc, [], t', l)
     _ ->
@@ -200,7 +135,7 @@ evalTypeExp t@(TERecord fs loc) = do
 evalTypeExp (TEArray d t loc) = do
   (d_svars, d', d'') <- checkSizeExp d
   (t', svars, RetType dims st, l) <- evalTypeExp t
-  case (l, arrayOf Nonunique (Shape [d'']) st) of
+  case (l, arrayOfWithAliases Nonunique (Shape [d'']) st) of
     (Unlifted, st') ->
       pure
         ( TEArray d' t' loc,
@@ -244,12 +179,12 @@ evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
   (t1', svars1, RetType dims1 st1, _) <- evalTypeExp t1
   bindSpaced [(Term, v)] $ do
     v' <- checkName Term v loc
-    bindVal v' (BoundV [] st1) $ do
+    bindVal v' (BoundV [] $ toStruct st1) $ do
       (t2', svars2, RetType dims2 st2, _) <- evalTypeExp t2
       pure
         ( TEArrow (Just v') t1' t2' loc,
           svars1 ++ dims1 ++ svars2,
-          RetType [] $ Scalar $ Arrow mempty (Named v') (diet st1) st1 (RetType dims2 st2),
+          RetType [] $ Scalar $ Arrow Nonunique (Named v') (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
           Lifted
         )
 --
@@ -260,7 +195,7 @@ evalTypeExp (TEArrow Nothing t1 t2 loc) = do
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
       RetType [] . Scalar $
-        Arrow mempty Unnamed (diet st1) (st1 `setUniqueness` Nonunique) $
+        Arrow Nonunique Unnamed (diet $ resToParam st1) (toStruct st1) $
           RetType dims2 st2,
       Lifted
     )
@@ -270,7 +205,7 @@ evalTypeExp (TEDim dims t loc) = do
     dims' <- mapM (flip (checkName Term) loc) dims
     bindDims dims' $ do
       (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      let (witnessed, _) = determineSizeWitnesses st
+      let (witnessed, _) = determineSizeWitnesses $ toStruct st
       case find (`S.notMember` witnessed) dims' of
         Just d ->
           typeError loc mempty . withIndexLink "unused-existential" $
@@ -315,7 +250,7 @@ evalTypeExp t@(TESum cs loc) = do
 evalTypeExp ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
   (tname', ps, tname_t, l) <- lookupType tloc tname
-  RetType t_dims t <- renameRetType tname_t
+  RetType t_dims t <- renameRetType $ toResRet Nonunique tname_t
   if length ps /= length targs
     then
       typeError tloc mempty $
@@ -330,7 +265,8 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
           [],
-          RetType (t_dims ++ mconcat dims) $ applySubst (`M.lookup` mconcat substs) t,
+          RetType (t_dims ++ mconcat dims) $
+            applySubst (`M.lookup` mconcat substs) t,
           l
         )
   where
@@ -371,7 +307,7 @@ evalTypeExp ote@TEApply {} = do
       pure
         ( TypeArgExpType te',
           svars ++ dims,
-          M.singleton pv $ Subst [] $ RetType [] st
+          M.singleton pv $ Subst [] $ RetType [] $ toStruct st
         )
     checkArgApply p a =
       typeError tloc mempty $
@@ -389,14 +325,14 @@ evalTypeExp ote@TEApply {} = do
 checkTypeExp ::
   MonadTypeChecker m =>
   TypeExp NoInfo Name ->
-  m (TypeExp Info VName, [VName], StructRetType, Liftedness)
+  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
 checkTypeExp te = do
   checkForDuplicateNamesInType te
   evalTypeExp te
 
 -- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat] -> m ()
+  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat t] -> m ()
 checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
   mapM_ checkTypeParam tps
   mapM_ checkPat pats
@@ -512,20 +448,22 @@ typeParamToArg :: TypeParam -> StructTypeArg
 typeParamToArg (TypeParamDim v ploc) =
   TypeArgDim $ sizeFromName (qualName v) ploc
 typeParamToArg (TypeParamType _ v _) =
-  TypeArgType $ Scalar $ TypeVar () Nonunique (qualName v) []
+  TypeArgType $ Scalar $ TypeVar mempty (qualName v) []
 
 -- | A type substitution may be a substitution or a yet-unknown
 -- substitution (but which is certainly an overloaded primitive
--- type!).  The latter is used to remove aliases from types that are
--- yet-unknown but that we know cannot carry aliases (see issue #682).
-data Subst t = Subst [TypeParam] t | PrimSubst | ExpSubst Exp
+-- type!).
+data Subst t = Subst [TypeParam] t | ExpSubst Exp
   deriving (Show)
 
 instance Pretty t => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
-  pretty PrimSubst = "#<primsubst>"
   pretty (ExpSubst e) = pretty e
+
+instance Functor Subst where
+  fmap f (Subst ps t) = Subst ps $ f t
+  fmap _ (ExpSubst e) = ExpSubst e
 
 -- | Create a type substitution corresponding to a type binding.
 substFromAbbr :: TypeBinding -> Subst StructRetType
@@ -534,33 +472,31 @@ substFromAbbr (TypeAbbr _ ps rt) = Subst ps rt
 -- | Substitutions to apply in a type.
 type TypeSubs = VName -> Maybe (Subst StructRetType)
 
-instance Functor Subst where
-  fmap f (Subst ps t) = Subst ps $ f t
-  fmap _ PrimSubst = PrimSubst
-  fmap _ (ExpSubst e) = ExpSubst e
-
 -- | Class of types which allow for substitution of types with no
 -- annotations for type variable names.
 class Substitutable a where
   applySubst :: TypeSubs -> a -> a
 
-instance Substitutable (RetTypeBase Size ()) where
-  applySubst f (RetType dims t) =
-    let RetType more_dims t' = substTypesRet f t
-     in RetType (dims ++ more_dims) t'
-
-instance Substitutable (RetTypeBase Size Aliasing) where
+instance Substitutable (RetTypeBase Size Uniqueness) where
   applySubst f (RetType dims t) =
     let RetType more_dims t' = substTypesRet f' t
      in RetType (dims ++ more_dims) t'
     where
       f' = fmap (fmap (second (const mempty))) . f
 
-instance Substitutable (TypeBase Size ()) where
+instance Substitutable (RetTypeBase Size NoUniqueness) where
+  applySubst f (RetType dims t) =
+    let RetType more_dims t' = substTypesRet f t
+     in RetType (dims ++ more_dims) t'
+
+instance Substitutable StructType where
   applySubst = substTypesAny
 
-instance Substitutable (TypeBase Size Aliasing) where
-  applySubst = substTypesAny . (fmap (fmap (second (const mempty))) .)
+instance Substitutable ParamType where
+  applySubst f = substTypesAny $ fmap (fmap $ second $ const Observe) . f
+
+instance Substitutable (TypeBase Size Uniqueness) where
+  applySubst f = substTypesAny $ fmap (fmap $ second $ const Nonunique) . f
 
 instance Substitutable Exp where
   applySubst f = runIdentity . mapOnExp
@@ -574,15 +510,14 @@ instance Substitutable Exp where
           { mapOnExp,
             mapOnName = pure,
             mapOnStructType = pure . applySubst f,
-            mapOnPatType = pure . applySubst f,
-            mapOnStructRetType = pure . applySubst f,
-            mapOnPatRetType = pure . applySubst f
+            mapOnParamType = pure . applySubst f,
+            mapOnResRetType = pure . applySubst f
           }
 
 instance Substitutable d => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
 
-instance Substitutable Pat where
+instance Substitutable (Pat StructType) where
   applySubst f = runIdentity . astMap mapper
     where
       mapper =
@@ -590,9 +525,20 @@ instance Substitutable Pat where
           { mapOnExp = pure . applySubst f,
             mapOnName = pure,
             mapOnStructType = pure . applySubst f,
-            mapOnPatType = pure . applySubst f,
-            mapOnStructRetType = pure . applySubst f,
-            mapOnPatRetType = pure . applySubst f
+            mapOnParamType = pure . applySubst f,
+            mapOnResRetType = pure . applySubst f
+          }
+
+instance Substitutable (Pat ParamType) where
+  applySubst f = runIdentity . astMap mapper
+    where
+      mapper =
+        ASTMapper
+          { mapOnExp = pure . applySubst f,
+            mapOnName = pure,
+            mapOnStructType = pure . applySubst f,
+            mapOnParamType = pure . applySubst f,
+            mapOnResRetType = pure . applySubst f
           }
 
 applyType ::
@@ -648,24 +594,19 @@ substTypesRet lookupSubst ot =
       TypeBase Size as ->
       State [VName] (TypeBase Size as)
 
-    onType (Array als u shape et) = do
-      t <- arrayOf u (applySubst lookupSubst' shape) <$> onType (Scalar et)
-      pure $ t `setAliases` als
+    onType (Array u shape et) =
+      arrayOfWithAliases u (applySubst lookupSubst' shape)
+        <$> onType (second (const mempty) $ Scalar et)
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
-    onType (Scalar (TypeVar als u v targs)) = do
+    onType (Scalar (TypeVar u v targs)) = do
       targs' <- mapM subsTypeArg targs
       case lookupSubst $ qualLeaf v of
         Just (Subst ps rt) -> do
           RetType ext t <- freshDims rt
           modify (ext ++)
-          pure $
-            applyType ps (t `setAliases` mempty) targs'
-              `setUniqueness` u
-              `addAliases` (<> als)
-        Just PrimSubst ->
-          pure $ Scalar $ TypeVar mempty u v targs'
+          pure $ second (<> u) $ applyType ps (second (const u) t) targs'
         _ ->
-          pure $ Scalar $ TypeVar als u v targs'
+          pure $ Scalar $ TypeVar u v targs'
     onType (Scalar (Record ts)) =
       Scalar . Record <$> traverse onType ts
     onType (Scalar (Arrow als v d t1 t2)) =
@@ -691,7 +632,7 @@ substTypesRet lookupSubst ot =
     subsTypeArg (TypeArgDim v) =
       pure $ TypeArgDim $ applySubst lookupSubst' v
 
-    lookupSubst' = fmap (fmap $ second (const ())) . lookupSubst
+    lookupSubst' = fmap (fmap $ second (const NoUniqueness)) . lookupSubst
 
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.

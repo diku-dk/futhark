@@ -1,6 +1,6 @@
 -- Type inference should not eliminate uniqueness checking.
 -- ==
--- error: Consuming "xs"
+-- error: Consuming.*"xs"
 
 def f {xs: []i32} : {xs: []i32} = {xs}
 

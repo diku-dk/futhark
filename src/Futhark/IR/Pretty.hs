@@ -43,9 +43,6 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty NoUniqueness where
-  pretty _ = mempty
-
 instance Pretty Shape where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
