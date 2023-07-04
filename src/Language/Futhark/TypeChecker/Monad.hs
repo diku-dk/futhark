@@ -23,6 +23,7 @@ module Language.Futhark.TypeChecker.Monad
     Notes,
     aNote,
     MonadTypeChecker (..),
+    TypeState (stateNameSource),
     checkName,
     checkAttr,
     badOnLeft,
@@ -274,6 +275,7 @@ incCounter = do
 -- expressions and declarations.
 class Monad m => MonadTypeChecker m where
   warn :: Located loc => loc -> Doc () -> m ()
+  warnings :: Warnings -> m ()
 
   newName :: VName -> m VName
   newID :: Name -> m VName
@@ -306,11 +308,11 @@ bindSpaced names body = do
   bindNameMap mapping body
 
 instance MonadTypeChecker TypeM where
+  warnings ws =
+    modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
+
   warn loc problem =
-    modify $ \s ->
-      s
-        { stateWarnings = stateWarnings s <> singleWarning (srclocOf loc) problem
-        }
+    warnings $ singleWarning (srclocOf loc) problem
 
   newName v = do
     s <- get
