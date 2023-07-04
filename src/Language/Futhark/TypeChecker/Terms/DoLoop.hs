@@ -225,7 +225,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
             =<< checkExp uboundexp
         bound_t <- expTypeFully uboundexp'
         bindingIdent i bound_t $ \i' ->
-          bindingPat [] mergepat (Ascribed merge_t) $
+          bindingPat [] mergepat merge_t $
             \mergepat' -> incLevel $ do
               loopbody' <- checkExp loopbody
               (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
@@ -242,8 +242,8 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
         case t of
           _
             | Just t' <- peelArray 1 t ->
-                bindingPat [] xpat (Ascribed t') $ \xpat' ->
-                  bindingPat [] mergepat (Ascribed merge_t) $
+                bindingPat [] xpat t' $ \xpat' ->
+                  bindingPat [] mergepat merge_t $
                     \mergepat' -> incLevel $ do
                       loopbody' <- checkExp loopbody
                       (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
@@ -258,7 +258,7 @@ checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
                   "Iteratee of a for-in loop must be an array, but expression has type"
                     <+> pretty t
       While cond ->
-        bindingPat [] mergepat (Ascribed merge_t) $ \mergepat' ->
+        bindingPat [] mergepat merge_t $ \mergepat' ->
           incLevel $ do
             cond' <-
               checkExp cond

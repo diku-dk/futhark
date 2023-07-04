@@ -639,7 +639,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   -- exactly the type of 'e'.
   t <- expType e'
   incLevel . bindingSizes sizes $ \sizes' ->
-    bindingPat sizes' pat (Ascribed t) $ \pat' -> do
+    bindingPat sizes' pat t $ \pat' -> do
       body' <- checkExp body
       let (i64, noni64) = partition i64Ident $ patIdents pat'
       (body_t, retext) <-
@@ -906,7 +906,7 @@ checkCase ::
   CaseBase NoInfo Name ->
   TermTypeM (CaseBase Info VName, StructType, [VName])
 checkCase mt (CasePat p e loc) =
-  bindingPat [] p (Ascribed mt) $ \p' -> do
+  bindingPat [] p mt $ \p' -> do
     e' <- checkExp e
     let (i64, noni64) = partition i64Ident $ patIdents p'
     (t, retext) <-

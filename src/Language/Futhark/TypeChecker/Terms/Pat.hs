@@ -316,11 +316,11 @@ checkPat sizes p t m = do
 bindingPat ::
   [SizeBinder VName] ->
   UncheckedPat (TypeBase Size u) ->
-  Inferred StructType ->
+  StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkPat sizes p t $ \p' -> binding (patIdents (fmap toStruct p')) $
+  checkPat sizes p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
     case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
