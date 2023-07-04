@@ -140,8 +140,8 @@ instance Pretty Checking where
     "Invalid pattern" <+> dquotes (pretty pat) <> "."
   pretty (CheckingPat pat (Ascribed t)) =
     "Pattern"
-      <+> dquotes (pretty pat)
-      <+> "cannot match value of type"
+      </> indent 2 (pretty pat)
+      </> "cannot match value of type"
       </> indent 2 (pretty t)
   pretty (CheckingLoopBody expected actual) =
     "Loop body does not have expected type."
