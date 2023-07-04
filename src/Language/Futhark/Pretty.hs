@@ -252,6 +252,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       Coerce {} -> True
       Attr {} -> True
       ArrayLit {} -> False
+      Lambda {} -> True
       _ -> hasArrayLit e
 prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
   "let"
