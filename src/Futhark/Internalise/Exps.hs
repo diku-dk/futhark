@@ -1851,7 +1851,7 @@ isIntrinsicFunction qname args loc = do
           bodyNames = indexName <> valueNames
           bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
 
-      -- This body is prettyString boring right now, as every input is exactly the output.
+      -- This body is boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
       body <- localScope (scopeOfLParams bodyParams) . buildBody_ $ do
         let outs = concat (replicate (length valueNames) indexName) ++ valueNames

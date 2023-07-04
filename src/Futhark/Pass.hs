@@ -49,7 +49,7 @@ data Pass fromrep torep = Pass
     -- name via 'passLongOption'.
     passName :: String,
     -- | A slightly longer description, which will show up in the
-    -- command-line help pretty.
+    -- command-line --help option.
     passDescription :: String,
     passFunction :: Prog fromrep -> PassM (Prog torep)
   }
