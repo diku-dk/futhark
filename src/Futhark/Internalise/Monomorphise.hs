@@ -6,9 +6,6 @@
 --
 -- * Turn operator sections into explicit lambdas.
 --
--- * Converts identifiers of record type into record patterns (and
---   similarly for tuples).
---
 -- * Converts applications of intrinsic SOACs into SOAC AST nodes
 --   (Map, Reduce, etc).
 --
@@ -56,13 +53,8 @@ i64 = Scalar $ Prim $ Signed Int64
 -- The monomorphization monad reads 'PolyBinding's and writes
 -- 'ValBind's.  The 'TypeParam's in the 'ValBind's can only be size
 -- parameters.
---
--- Each 'Polybinding' is also connected with the 'RecordReplacements'
--- that were active when the binding was defined.  This is used only
--- in local functions.
-data PolyBinding
+newtype PolyBinding
   = PolyBinding
-      RecordReplacements
       ( VName,
         [TypeParam],
         [Pat ParamType],
@@ -71,13 +63,6 @@ data PolyBinding
         [AttrInfo VName],
         SrcLoc
       )
-
--- Mapping from record names to the variable names that contain the
--- fields.  This is used because the monomorphiser also expands all
--- record patterns.
-type RecordReplacements = M.Map VName RecordReplacement
-
-type RecordReplacement = M.Map Name (VName, StructType)
 
 -- | To deduplicate size expressions, we want a looser notation of
 -- equality than the strict syntactical equality provided by the Eq
@@ -149,17 +134,16 @@ entryAssert (x : xs) body =
 data Env = Env
   { envPolyBindings :: M.Map VName PolyBinding,
     envTypeBindings :: M.Map VName TypeBinding,
-    envRecordReplacements :: RecordReplacements,
     envScope :: S.Set VName,
     envGlobalScope :: S.Set VName,
     envParametrized :: ExpReplacements
   }
 
 instance Semigroup Env where
-  Env tb1 pb1 rr1 sc1 gs1 pr1 <> Env tb2 pb2 rr2 sc2 gs2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (rr1 <> rr2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
+  Env tb1 pb1 sc1 gs1 pr1 <> Env tb2 pb2 sc2 gs2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty mempty mempty
+  mempty = Env mempty mempty mempty mempty mempty
 
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)
@@ -168,12 +152,6 @@ extendEnv :: VName -> PolyBinding -> MonoM a -> MonoM a
 extendEnv vn binding =
   localEnv
     mempty {envPolyBindings = M.singleton vn binding}
-
-withRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
-withRecordReplacements rr = localEnv mempty {envRecordReplacements = rr}
-
-replaceRecordReplacements :: RecordReplacements -> MonoM a -> MonoM a
-replaceRecordReplacements rr = local $ \env -> env {envRecordReplacements = rr}
 
 isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
@@ -226,9 +204,6 @@ lookupFun vn = do
   case M.lookup vn env of
     Just valbind -> pure $ Just valbind
     Nothing -> pure Nothing
-
-lookupRecordReplacement :: VName -> MonoM (Maybe RecordReplacement)
-lookupRecordReplacement v = asks $ M.lookup v . envRecordReplacements
 
 askScope :: MonoM (S.Set VName)
 askScope = do
@@ -515,19 +490,19 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   let dimArgs' = dimArgs <> implicitDims
       letArgs = patNames pat
       argset = dimArgs' `S.union` letArgs
-  (pat', rr) <- withArgs dimArgs' $ transformPat pat
+  pat' <- withArgs dimArgs' $ transformPat pat
   params <- parametrizing dimArgs'
   let sizes' = sizes <> map (`SizeBinder` mempty) (map snd params <> S.toList implicitDims)
-  body' <- withRecordReplacements rr $ withParams params $ scoping argset $ transformExp body
+  body' <- withParams params $ scoping argset $ transformExp body
   res' <- transformAppRes res
   pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res')
 transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
   | not $ null tparams = do
-      -- Retrieve the lifted monomorphic function bindings that are produced,
-      -- filter those that are monomorphic versions of the current let-bound
-      -- function and insert them at this point, and propagate the rest.
-      rr <- asks envRecordReplacements
-      let funbind = PolyBinding rr (fname, tparams, params, ret, body, mempty, loc)
+      -- Retrieve the lifted monomorphic function bindings that are
+      -- produced, filter those that are monomorphic versions of the
+      -- current let-bound function and insert them at this point, and
+      -- propagate the rest.
+      let funbind = PolyBinding (fname, tparams, params, ret, body, mempty, loc)
       pass $ do
         (e', bs) <- listen $ extendEnv fname funbind $ scoping (S.singleton fname) $ transformExp e
         -- Do not remember this one for next time we monomorphise this
@@ -557,25 +532,24 @@ transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   e1' <- transformExp e1
 
   let dimArgs = S.fromList sparams
-  (pat', rr) <- withArgs dimArgs $ transformPat pat
+  pat' <- withArgs dimArgs $ transformPat pat
   params <- parametrizing dimArgs
   let sparams' = sparams <> map snd params
       mergeArgs = dimArgs `S.union` patNames pat
 
-  (form', rr', formArgs) <- case form of
-    For ident e2 -> (,mempty,S.singleton $ identName ident) . For ident <$> transformExp e2
+  (form', formArgs) <- case form of
+    For ident e2 -> (,S.singleton $ identName ident) . For ident <$> transformExp e2
     ForIn pat2 e2 -> do
-      (pat2', rr') <- transformPat pat2
-      (,rr',patNames pat2) . ForIn pat2' <$> transformExp e2
+      pat2' <- transformPat pat2
+      (,patNames pat2) . ForIn pat2' <$> transformExp e2
     While e2 ->
-      fmap ((,mempty,mempty) . While) $
-        withRecordReplacements rr $
-          withParams params $
-            scoping mergeArgs $
-              transformExp e2
+      fmap ((,mempty) . While) $
+        withParams params $
+          scoping mergeArgs $
+            transformExp e2
   let argset = mergeArgs `S.union` formArgs
 
-  body' <- withRecordReplacements (rr <> rr') $ withParams params $ scoping argset $ transformExp body
+  body' <- withParams params $ scoping argset $ transformExp body
   -- Maybe monomorphisation introduced new arrays to the loop, and
   -- maybe they have AnySize sizes.  This is not allowed.  Invent some
   -- sizes for them.
@@ -693,18 +667,9 @@ transformExp (RecordLit fs loc) =
 transformExp (ArrayLit es t loc) =
   ArrayLit <$> mapM transformExp es <*> traverse transformType t <*> pure loc
 transformExp (AppExp e res) =
-  transformAppExp e (unInfo res) -- =<< transformAppRes (unInfo res)
-transformExp (Var fname (Info t) loc) = do
-  maybe_fs <- lookupRecordReplacement $ qualLeaf fname
-  case maybe_fs of
-    Just fs -> do
-      let toField (f, (f_v, f_t)) = do
-            f_t' <- transformType f_t
-            let f_v' = Var (qualName f_v) (Info f_t') loc
-            pure $ RecordFieldExplicit f f_v' loc
-      RecordLit <$> mapM toField (M.toList fs) <*> pure loc
-    Nothing ->
-      transformFName loc fname (toStruct t)
+  transformAppExp e (unInfo res)
+transformExp (Var fname (Info t) loc) =
+  transformFName loc fname (toStruct t)
 transformExp (Hole t loc) =
   Hole <$> traverse transformType t <*> pure loc
 transformExp (Ascript e tp loc) =
@@ -719,14 +684,13 @@ transformExp (Lambda params e0 decl tp loc) = do
   let patArgs = foldMap patNames params
   dimArgs <- withArgs patArgs $ askIntros (foldMap (fvVars . freeInPat) params)
   let argset = dimArgs `S.union` patArgs
-  (params', rrs) <- mapAndUnzipM transformPat params
+  params' <- mapM transformPat params
   paramed <- parametrizing argset
-  withRecordReplacements (mconcat rrs) $
-    Lambda params'
-      <$> withParams paramed (scoping argset $ transformExp e0)
-      <*> pure decl
-      <*> traverse transformRetType tp
-      <*> pure loc
+  Lambda params'
+    <$> withParams paramed (scoping argset $ transformExp e0)
+    <*> pure decl
+    <*> traverse transformRetType tp
+    <*> pure loc
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
@@ -761,16 +725,8 @@ transformExp (IndexSection idxs (Info t) loc) = do
   desugarIndexSection idxs' t loc
 transformExp (Project n e tp loc) = do
   tp' <- traverse transformType tp
-  maybe_fs <- case e of
-    Var qn _ _ -> lookupRecordReplacement (qualLeaf qn)
-    _ -> pure Nothing
-  case maybe_fs of
-    Just m
-      | Just (v, _) <- M.lookup n m ->
-          pure $ Var (qualName v) tp' loc
-    _ -> do
-      e' <- transformExp e
-      pure $ Project n e' tp' loc
+  e' <- transformExp e
+  pure $ Project n e' tp' loc
 transformExp (Update e1 idxs e2 loc) =
   Update
     <$> transformExp e1
@@ -793,8 +749,8 @@ transformExp (Attr info e loc) =
 
 transformCase :: S.Set VName -> Case -> MonoM Case
 transformCase implicitDims (CasePat p e loc) = do
-  (p', rr) <- transformPat p
-  CasePat p' <$> withRecordReplacements rr (scoping (patNames p `S.union` implicitDims) $ transformExp e) <*> pure loc
+  p' <- transformPat p
+  CasePat p' <$> scoping (patNames p `S.union` implicitDims) (transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
@@ -904,49 +860,8 @@ unfoldLetFuns (ValBind _ fname _ (Info rettype) dim_params params body _ _ loc :
     e' = unfoldLetFuns rest e
     e_t = typeOf e'
 
-transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u), RecordReplacements)
-transformPat (Id v (Info (Scalar (Record fs))) loc) = do
-  let fs' = M.toList fs
-  (fs_ks, fs_ts) <- fmap unzip $
-    forM fs' $ \(f, ft) ->
-      (,) <$> newVName (nameToString f) <*> transformType ft
-  pure
-    ( RecordPat
-        (zip (map fst fs') (zipWith3 Id fs_ks (map Info fs_ts) $ repeat loc))
-        loc,
-      M.singleton v $ M.fromList $ zip (map fst fs') $ zip fs_ks $ map toStruct fs_ts
-    )
-transformPat (Id v t loc) = do
-  t' <- traverse transformType t
-  pure (Id v t' loc, mempty)
-transformPat (TuplePat pats loc) = do
-  (pats', rrs) <- mapAndUnzipM transformPat pats
-  pure (TuplePat pats' loc, mconcat rrs)
-transformPat (RecordPat fields loc) = do
-  let (field_names, field_pats) = unzip fields
-  (field_pats', rrs) <- mapAndUnzipM transformPat field_pats
-  pure (RecordPat (zip field_names field_pats') loc, mconcat rrs)
-transformPat (PatParens pat loc) = do
-  (pat', rr) <- transformPat pat
-  pure (PatParens pat' loc, rr)
-transformPat (PatAttr attr pat loc) = do
-  (pat', rr) <- transformPat pat
-  pure (PatAttr attr pat' loc, rr)
-transformPat (Wildcard (Info t) loc) = do
-  t' <- transformType t
-  pure (wildcard t' loc, mempty)
-transformPat (PatAscription pat _ _) =
-  transformPat pat
-transformPat (PatLit e t loc) = pure (PatLit e t loc, mempty)
-transformPat (PatConstr name t all_ps loc) = do
-  (all_ps', rrs) <- mapAndUnzipM transformPat all_ps
-  pure (PatConstr name t all_ps' loc, mconcat rrs)
-
-wildcard :: TypeBase Size u -> SrcLoc -> Pat (TypeBase Size u)
-wildcard (Scalar (Record fs)) loc =
-  RecordPat (zip (M.keys fs) $ map ((`Wildcard` loc) . Info) $ M.elems fs) loc
-wildcard t loc =
-  Wildcard (Info t) loc
+transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
+transformPat = traverse transformType
 
 type DimInst = M.Map VName Size
 
@@ -1116,7 +1031,7 @@ monomorphiseBinding ::
   PolyBinding ->
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
-monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
+monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
   letFun <- asks $ S.member name . envScope
   let paramGetClean argset =
         if letFun
@@ -1125,7 +1040,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
             ret <- get
             put mempty
             pure ret
-  replaceRecordReplacements rr $ (if letFun then id else isolateNormalisation) $ do
+  (if letFun then id else isolateNormalisation) $ do
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
@@ -1134,7 +1049,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         substStructType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat entry substStructType) params
-    (params'', rrs) <- withArgs shape_names $ mapAndUnzipM transformPat params'
+    params'' <- withArgs shape_names $ mapM transformPat params'
     exp_naming <- paramGetClean shape_names
 
     let args = foldMap patNames params
@@ -1156,7 +1071,7 @@ monomorphiseBinding entry (PolyBinding rr (name, tparams, params, rettype, body,
         bind_t'' = funType params'' rettype''
         bind_r = exp_naming <> extNaming
     body' <- updateExpTypes (`M.lookup` substs') body
-    body'' <- withRecordReplacements (mconcat rrs) $ withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
+    body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
     scope' <- S.union (shape_names <> args) <$> askScope'
     body''' <-
       if letFun
@@ -1303,7 +1218,7 @@ substPat entry f pat = case pat of
 
 toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) =
-  PolyBinding mempty (name, tparams, params, rettype, body, attrs, loc)
+  PolyBinding (name, tparams, params, rettype, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
 removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
