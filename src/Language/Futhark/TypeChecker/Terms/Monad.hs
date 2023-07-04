@@ -480,9 +480,12 @@ instance MonadTypeChecker TermTypeM where
       Nothing ->
         typeError loc mempty $
           "Unknown variable" <+> dquotes (pretty qn) <> "."
-      Just (BoundV tparams t)
-        | T.head (nameToText (baseName name)) == '_' -> underscoreUse loc qn
-        | otherwise -> do
+      Just (BoundV tparams t) -> do
+        modify $ \s -> s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
+        when (T.head (nameToText (baseName name)) == '_') $ underscoreUse loc qn
+        if null tparams
+          then pure t
+          else do
             (tnames, t') <- instantiateTypeScheme qn' loc tparams t
             pure $ qualifyTypeVars outer_env tnames qs t'
       Just EqualityF -> do
@@ -501,7 +504,6 @@ instance MonadTypeChecker TermTypeM where
         let (pts', rt') = instOverloaded argtype pts rt
         pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
 
-    modify $ \s -> s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
     pure (qn', t)
     where
       instOverloaded argtype pts rt =
