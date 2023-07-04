@@ -366,7 +366,8 @@ prettyExp _ (RecordUpdate src fs ve _ _) =
     <+> mconcat (intersperse "." (map pretty fs))
     <+> "="
     <+> align (pretty ve)
-prettyExp _ (Assert e1 e2 _ _) = "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
+prettyExp _ (Assert e1 e2 _ _) =
+  "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
 prettyExp p (Lambda params body rettype _ _) =
   parensIf (p /= -1) $
     "\\" <> hsep (map pretty params) <> ppAscription rettype
