@@ -1,3 +1,5 @@
+{-# LANGUAGE Strict #-}
+
 -- | Facilities for type-checking terms.  Factored out of
 -- "Language.Futhark.TypeChecker.Terms" to prevent the module from
 -- being gigantic.
@@ -45,7 +47,7 @@ where
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.Map.Strict qualified as M
