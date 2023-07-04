@@ -42,7 +42,7 @@ treeLike (Free ls) bs = Free $ zipWith treeLike ls (chunks (map length ls) bs)
 
 bindingFParams ::
   [E.TypeParam] ->
-  [E.Pat] ->
+  [E.Pat E.ParamType] ->
   ([I.FParam I.SOACS] -> [[Tree (I.FParam I.SOACS)]] -> InternaliseM a) ->
   InternaliseM a
 bindingFParams tparams params m = do
@@ -50,7 +50,7 @@ bindingFParams tparams params m = do
   let params_idents = concat flattened_params
   params_ts <-
     internaliseParamTypes $
-      map (flip E.setAliases () . E.unInfo . E.identType . fst) params_idents
+      map (E.unInfo . E.identType . fst) params_idents
   let num_param_idents = map length flattened_params
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
@@ -86,13 +86,13 @@ bindingFParams tparams params m = do
 
 bindingLoopParams ::
   [E.TypeParam] ->
-  E.Pat ->
+  E.Pat E.ParamType ->
   [I.Type] ->
   ([I.FParam I.SOACS] -> [I.FParam I.SOACS] -> InternaliseM a) ->
   InternaliseM a
 bindingLoopParams tparams pat ts m = do
   pat_idents <- flattenPat pat
-  pat_ts <- internaliseLoopParamType (E.patternStructType pat) ts
+  pat_ts <- internaliseLoopParamType (E.patternType pat) ts
 
   let shape_params = [I.Param mempty v $ I.Prim I.int64 | E.TypeParamDim v _ <- tparams]
       shape_subst = M.fromList [(I.paramName p, [I.Var $ I.paramName p]) | p <- shape_params]
@@ -103,7 +103,7 @@ bindingLoopParams tparams pat ts m = do
         m shape_params (concat valueparams)
 
 bindingLambdaParams ::
-  [E.Pat] ->
+  [E.Pat E.ParamType] ->
   [I.Type] ->
   ([I.LParam I.SOACS] -> InternaliseM a) ->
   InternaliseM a
@@ -118,7 +118,7 @@ type Params t = [I.Param t]
 
 processFlatPat ::
   Show t =>
-  [(E.Ident, [E.AttrInfo VName])] ->
+  [(E.Ident ParamType, [E.AttrInfo VName])] ->
   [t] ->
   InternaliseM ([Params t], VarSubsts)
 processFlatPat x y = processFlatPat' [] x y
@@ -142,7 +142,7 @@ processFlatPat x y = processFlatPat' [] x y
     handleMapping _ [] _ =
       error $ "handleMapping: insufficient identifiers in pattern.\n" ++ show (x, y)
 
-    internaliseBindee :: E.Ident -> InternaliseM [VName]
+    internaliseBindee :: E.Ident E.ParamType -> InternaliseM [VName]
     internaliseBindee bindee = do
       let name = E.identName bindee
       case internalisedTypeSize $ E.unInfo $ E.identType bindee of
@@ -151,7 +151,7 @@ processFlatPat x y = processFlatPat' [] x y
 
 bindingFlatPat ::
   Show t =>
-  [(E.Ident, [E.AttrInfo VName])] ->
+  [(E.Ident E.ParamType, [E.AttrInfo VName])] ->
   [t] ->
   ([Params t] -> InternaliseM a) ->
   InternaliseM a
@@ -161,7 +161,7 @@ bindingFlatPat idents ts m = do
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.
-flattenPat :: MonadFreshNames m => E.Pat -> m [(E.Ident, [E.AttrInfo VName])]
+flattenPat :: MonadFreshNames m => E.Pat (TypeBase Size u) -> m [(E.Ident (TypeBase Size u), [E.AttrInfo VName])]
 flattenPat = flattenPat'
   where
     flattenPat' (E.PatParens p _) =
@@ -189,7 +189,7 @@ flattenPat = flattenPat'
       concat <$> mapM flattenPat' ps
 
 stmPat ::
-  E.Pat ->
+  E.Pat E.ParamType ->
   [I.Type] ->
   ([VName] -> InternaliseM a) ->
   InternaliseM a

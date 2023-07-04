@@ -1,6 +1,6 @@
 module Language.Futhark.TypeChecker.TypesTests (tests) where
 
-import Data.Bifunctor (first)
+import Data.Bifunctor
 import Data.List (isInfixOf)
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -16,7 +16,7 @@ import Language.Futhark.TypeChecker.Types
 import Test.Tasty
 import Test.Tasty.HUnit
 
-evalTest :: TypeExp NoInfo Name -> Either String ([VName], StructRetType) -> TestTree
+evalTest :: TypeExp NoInfo Name -> Either String ([VName], ResRetType) -> TestTree
 evalTest te expected =
   testCase (prettyString te) $
     case (fmap (extract . fst) (run (checkTypeExp te)), expected) of

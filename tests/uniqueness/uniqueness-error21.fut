@@ -1,7 +1,7 @@
 -- This benchmark tests whether aliasing is tracked even deep inside
 -- loops.
 -- ==
--- error: "D".*consumed
+-- error: "DT".*consumed
 
 def floydSbsImp(N: i32, D: *[][]i32): [][]i32 =
     let DT = transpose(D) -- DT aliases D.

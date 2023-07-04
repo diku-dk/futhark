@@ -42,8 +42,8 @@ applyModifiers =
 
 -- A binding that occurs in the calculation flow
 data Binding
-  = PatBind [SizeBinder VName] Pat Exp
-  | FunBind VName ([TypeParam], [Pat], Maybe (TypeExp Info VName), Info StructRetType, Exp)
+  = PatBind [SizeBinder VName] (Pat StructType) Exp
+  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Info VName), Info ResRetType, Exp)
 
 type NormState = (([Binding], [BindModifier]), VNameSource)
 
@@ -110,7 +110,7 @@ nameExp False e = do
 
 -- An evocative name to use when naming subexpressions of the
 -- expression bound to this pattern.
-patRepName :: Pat -> String
+patRepName :: Pat t -> String
 patRepName (PatAscription p _ _) = patRepName p
 patRepName (Id v _ _) = baseString v
 patRepName _ = "tmp"
@@ -199,10 +199,12 @@ getOrdering _ (OpSection qn ty loc) =
 getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
   yn <- newNameFromString "y"
-  let y = Var (qualName yn) (Info $ fromStruct yty) mempty
+  let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Observe, xext, x), (Observe, Nothing, y)] $ AppRes ret' exts
-  nameExp final $ Lambda [Id yn (Info $ fromStruct yty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret')) loc
+      body =
+        mkApply (Var op ty mempty) [(Observe, xext, x), (Observe, Nothing, y)] $
+          AppRes (toStruct ret') exts
+  nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
       | Named p <- xp, p == vn = Just $ ExpSubst x
@@ -211,10 +213,10 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (I
 getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (Info (RetType dims ret)) loc) = do
   xn <- newNameFromString "x"
   y <- getOrdering False e
-  let x = Var (qualName xn) (Info $ fromStruct xty) mempty
+  let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Observe, Nothing, x), (Observe, yext, y)] $ AppRes ret' []
-  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret')) loc
+      body = mkApply (Var op ty mempty) [(Observe, Nothing, x), (Observe, yext, y)] $ AppRes (toStruct ret') []
+  nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
       | Named p <- xp, p == vn = Just $ ExpSubst x
@@ -223,11 +225,11 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
 getOrdering final (ProjectSection names (Info ty) loc) = do
   xn <- newNameFromString "x"
   let (xty, RetType dims ret) = case ty of
-        Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+        Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for project section: " ++ prettyString ty
-      x = Var (qualName xn) (Info $ fromStruct xty) mempty
+      x = Var (qualName xn) (Info $ toStruct xty) mempty
       body = foldl project x names
-  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
+  nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
   where
     project e field =
       case typeOf e of
@@ -244,11 +246,11 @@ getOrdering final (IndexSection slice (Info ty) loc) = do
   slice' <- astMap mapper slice
   xn <- newNameFromString "x"
   let (xty, RetType dims ret) = case ty of
-        Scalar (Arrow _ _ _ xty' ret') -> (xty', ret')
+        Scalar (Arrow _ _ d xty' ret') -> (toParam d xty', ret')
         _ -> error $ "not a function type for index section: " ++ prettyString ty
-      x = Var (qualName xn) (Info $ fromStruct xty) mempty
-      body = AppExp (Index x slice' loc) (Info (AppRes ret []))
-  nameExp final $ Lambda [Id xn (Info $ fromStruct xty) mempty] body Nothing (Info (mempty, RetType dims $ toStruct ret)) loc
+      x = Var (qualName xn) (Info $ toStruct xty) mempty
+      body = AppExp (Index x slice' loc) (Info (AppRes (toStruct ret) []))
+  nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret)) loc
   where
     mapper = identityMapper {mapOnExp = getOrdering False}
 getOrdering _ (Ascript e _ _) = getOrdering False e

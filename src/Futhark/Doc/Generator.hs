@@ -6,6 +6,7 @@ import Control.Arrow ((***))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.Writer (Writer, WriterT, runWriter, runWriterT, tell)
+import Data.Bifunctor (second)
 import Data.Char (isAlpha, isSpace, toUpper)
 import Data.List (find, groupBy, inits, intersperse, isPrefixOf, partition, sort, sortOn, tails)
 import Data.Map qualified as M
@@ -417,9 +418,7 @@ valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
   let tparams' = mconcat $ map ((" " <>) . typeParamHtml) tparams
       noLink' =
-        noLink $
-          map typeParamName tparams
-            ++ map identName (S.toList $ mconcat $ map patIdents params)
+        noLink $ map typeParamName tparams ++ S.toList (foldMap patNames params)
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM paramHtml params
   pure
@@ -481,13 +480,13 @@ renderValBind = fmap H.div . synopsisValBindBind
 
 renderTypeBind :: (VName, TypeBinding) -> DocM Html
 renderTypeBind (name, TypeAbbr l tps tp) = do
-  tp' <- retTypeHtml tp
+  tp' <- retTypeHtml $ toResRet Nonunique tp
   pure $ H.div $ typeAbbrevHtml l (vnameHtml name) tps <> " = " <> tp'
 
 synopsisValBindBind :: (VName, BoundV) -> DocM Html
 synopsisValBindBind (name, BoundV tps t) = do
   let tps' = map typeParamHtml tps
-  t' <- typeHtml t
+  t' <- typeHtml $ second (const Nonunique) t
   pure $
     keyword "val "
       <> vnameHtml name
@@ -499,11 +498,11 @@ dietHtml :: Diet -> Html
 dietHtml Consume = "*"
 dietHtml Observe = ""
 
-typeHtml :: StructType -> DocM Html
+typeHtml :: TypeBase Size Uniqueness -> DocM Html
 typeHtml t = case t of
-  Array _ u shape et -> do
+  Array u shape et -> do
     shape' <- prettyShape shape
-    et' <- typeHtml $ Scalar et
+    et' <- typeHtml $ Scalar $ second (const Nonunique) et
     pure $ prettyU u <> shape' <> et'
   Scalar (Prim et) -> pure $ primTypeHtml et
   Scalar (Record fs)
@@ -515,12 +514,12 @@ typeHtml t = case t of
       ppField (name, tp) = do
         tp' <- typeHtml tp
         pure $ toHtml (nameToString name) <> ": " <> tp'
-  Scalar (TypeVar _ u et targs) -> do
+  Scalar (TypeVar u et targs) -> do
     targs' <- mapM typeArgHtml targs
     et' <- qualNameHtml et
     pure $ prettyU u <> et' <> mconcat (map (" " <>) targs')
   Scalar (Arrow _ pname d t1 t2) -> do
-    t1' <- typeHtml t1
+    t1' <- typeHtml $ second (const Nonunique) t1
     t2' <- retTypeHtml t2
     pure $ case pname of
       Named v ->
@@ -532,7 +531,7 @@ typeHtml t = case t of
       ppClause (n, ts) = joinBy " " . (ppConstr n :) <$> mapM typeHtml ts
       ppConstr name = "#" <> toHtml (nameToString name)
 
-retTypeHtml :: StructRetType -> DocM Html
+retTypeHtml :: ResRetType -> DocM Html
 retTypeHtml (RetType [] t) = typeHtml t
 retTypeHtml (RetType dims t) = do
   t' <- typeHtml t
@@ -544,7 +543,7 @@ prettyShape (Shape ds) =
 
 typeArgHtml :: TypeArg Size -> DocM Html
 typeArgHtml (TypeArgDim d) = dimDeclHtml d
-typeArgHtml (TypeArgType t) = typeHtml t
+typeArgHtml (TypeArgType t) = typeHtml $ second (const Nonunique) t
 
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty
@@ -695,10 +694,10 @@ vnameLink' (VName _ tag) current file =
     then "#" ++ show tag
     else relativise file current -<.> ".html#" ++ show tag
 
-paramHtml :: Pat -> DocM Html
+paramHtml :: Pat ParamType -> DocM Html
 paramHtml pat = do
   let (pat_param, d, t) = patternParam pat
-  t' <- typeHtml t
+  t' <- typeHtml $ second (const Nonunique) t
   pure $ case pat_param of
     Named v -> parens (vnameHtml v <> ": " <> dietHtml d <> t')
     Unnamed -> t'

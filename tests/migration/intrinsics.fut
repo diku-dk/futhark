@@ -20,7 +20,7 @@ type~ acc 't = intrinsics.acc t
 
 def scatter_stream [k] 'a 'b
                    (dest: *[k]a)
-                   (f: *acc ([k]a) -> b -> *acc ([k]a))
+                   (f: *acc ([k]a) -> b -> acc ([k]a))
                    (bs: []b)
                  : *[k]a =
   intrinsics.scatter_stream dest f bs :> *[k]a
@@ -29,7 +29,7 @@ def reduce_by_index_stream [k] 'a 'b
                    (dest: *[k]a)
                    (op: a -> a -> a)
                    (ne: a)
-                   (f: *acc ([k]a) -> b -> *acc ([k]a))
+                   (f: *acc ([k]a) -> b -> acc ([k]a))
                    (bs: []b)
                  : *[k]a =
   intrinsics.hist_stream dest op ne f bs :> *[k]a

@@ -32,7 +32,7 @@ instance Monoid FV where
 freeWithout :: FV -> S.Set VName -> FV
 freeWithout (FV x) y = FV $ x `S.difference` y
 
-ident :: IdentBase Info VName -> FV
+ident :: Ident t -> FV
 ident = FV . S.singleton . identName
 
 -- | Compute the set of free variables of an expression.
@@ -74,7 +74,7 @@ freeInExp expr = case expr of
   AppExp (Apply f args _) _ -> freeInExp f <> foldMap (freeInExp . snd) args
   Negate e _ -> freeInExp e
   Not e _ -> freeInExp e
-  Lambda pats e0 _ (Info (_, RetType dims t)) _ ->
+  Lambda pats e0 _ (Info (RetType dims t)) _ ->
     (foldMap freeInPat pats <> freeInExp e0 <> freeInType t)
       `freeWithout` (foldMap patNames pats <> S.fromList dims)
   OpSection {} -> mempty
@@ -120,22 +120,14 @@ freeInDimIndex (DimSlice me1 me2 me3) =
   foldMap (foldMap freeInExp) [me1, me2, me3]
 
 -- | Free variables in pattern (including types of the bound identifiers).
-freeInPat :: PatBase Info VName -> FV
-freeInPat (TuplePat ps _) = foldMap freeInPat ps
-freeInPat (RecordPat fs _) = foldMap (freeInPat . snd) fs
-freeInPat (PatParens p _) = freeInPat p
-freeInPat (Id _ (Info tp) _) = freeInType tp
-freeInPat (Wildcard (Info tp) _) = freeInType tp
-freeInPat (PatAscription p _ _) = freeInPat p
-freeInPat (PatLit _ (Info tp) _) = freeInType tp
-freeInPat (PatConstr _ _ ps _) = foldMap freeInPat ps
-freeInPat (PatAttr _ p _) = freeInPat p
+freeInPat :: Pat (TypeBase Size u) -> FV
+freeInPat = foldMap freeInType
 
 -- | Free variables in the type (meaning those that are used in size expression).
-freeInType :: TypeBase Size as -> FV
+freeInType :: TypeBase Size u -> FV
 freeInType t =
   case t of
-    Array _ _ s a ->
+    Array _ s a ->
       freeInType (Scalar a) <> foldMap freeInExp (shapeDims s)
     Scalar (Record fs) ->
       foldMap freeInType fs
@@ -148,7 +140,7 @@ freeInType t =
         S.filter (\k -> notV v k && notElem k dims) $
           unFV $
             freeInType t1 <> freeInType t2
-    Scalar (TypeVar _ _ _ targs) ->
+    Scalar (TypeVar _ _ targs) ->
       foldMap typeArgDims targs
   where
     typeArgDims (TypeArgDim d) = freeInExp d

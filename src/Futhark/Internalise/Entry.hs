@@ -114,13 +114,13 @@ entryPointType types t ts
   | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t,
     [I.Prim ts0] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Unsigned (I.Rank 0) ts0)
-  | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
+  | E.Array _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
     [I.Array ts0 r _] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Unsigned r ts0)
   | E.Scalar E.Prim {} <- E.entryType t,
     [I.Prim ts0] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Signed (I.Rank 0) ts0)
-  | E.Array _ _ _ E.Prim {} <- E.entryType t,
+  | E.Array _ _ E.Prim {} <- E.entryType t,
     [I.Array ts0 r _] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Signed r ts0)
   | otherwise = do

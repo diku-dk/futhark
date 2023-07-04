@@ -57,7 +57,7 @@ replacing :: VName -> Exp -> LiftM a -> LiftM a
 replacing v e = local $ \env ->
   env {envReplace = M.insert v e $ envReplace env}
 
-bindingParams :: [VName] -> [Pat] -> LiftM a -> LiftM a
+bindingParams :: [VName] -> [Pat ParamType] -> LiftM a -> LiftM a
 bindingParams sizes params = local $ \env ->
   env
     { envVtable =
@@ -67,7 +67,7 @@ bindingParams sizes params = local $ \env ->
   where
     i64 = Scalar $ Prim $ Signed Int64
 
-bindingLetPat :: [VName] -> Pat -> LiftM a -> LiftM a
+bindingLetPat :: [VName] -> Pat StructType -> LiftM a -> LiftM a
 bindingLetPat sizes pat = local $ \env ->
   env
     { envVtable =
@@ -82,7 +82,10 @@ bindingForm (For i _) = bindingLetPat [] (Id (identName i) (identType i) mempty)
 bindingForm (ForIn p _) = bindingLetPat [] p
 bindingForm While {} = id
 
-liftFunction :: VName -> [TypeParam] -> [Pat] -> StructRetType -> Exp -> LiftM Exp
+toRet :: TypeBase Size u -> TypeBase Size Uniqueness
+toRet = second (const Nonunique)
+
+liftFunction :: VName -> [TypeParam] -> [Pat ParamType] -> ResRetType -> Exp -> LiftM Exp
 liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
   vtable <- asks envVtable
@@ -101,7 +104,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
 
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
-        foldMap freeInType (ret : map snd free ++ map patternStructType params)
+        foldMap freeInType (toStruct ret : map snd free ++ map patternStructType params)
       isSize (v, _) = v `S.member` fvVars sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
@@ -127,14 +130,14 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
     $ free_dims ++ free_nondims
   where
     orig_type = funType params $ RetType dims ret
-    mkParam (v, t) = Id v (Info (fromStruct t)) mempty
-    freeVar (v, t) = Var (qualName v) (Info (fromStruct t)) mempty
-    augType rem_free = fromStruct $ funType (map mkParam rem_free) $ RetType [] orig_type
+    mkParam (v, t) = Id v (Info (toParam Observe t)) mempty
+    freeVar (v, t) = Var (qualName v) (Info t) mempty
+    augType rem_free = funType (map mkParam rem_free) $ RetType [] $ toRet orig_type
 
     apply :: Exp -> [(VName, StructType)] -> Exp
     apply f [] = f
     apply f (p : rem_ps) =
-      let inner_ret = AppRes (fromStruct (augType rem_ps)) mempty
+      let inner_ret = AppRes (augType rem_ps) mempty
           inner = mkApply f [(Observe, Nothing, freeVar p)] inner_ret
        in apply inner rem_ps
 
@@ -147,7 +150,7 @@ transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body 
   fname' <- newVName $ "lifted_" ++ baseString fname
   lifted_call <- liftFunction fname' tparams params ret funbody'
   replacing fname lifted_call $ transformExp body
-transformExp (Lambda params body _ (Info (_, ret)) _) = do
+transformExp (Lambda params body _ (Info ret) _) = do
   body' <- bindingParams [] params $ transformExp body
   fname <- newVName "lifted_lambda"
   liftFunction fname [] params ret body'

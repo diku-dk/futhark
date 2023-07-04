@@ -3,6 +3,7 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness (..),
+    NoUniqueness (..),
 
     -- * Location utilities
     SrcLoc,
@@ -70,6 +71,20 @@ instance Monoid Uniqueness where
 instance Pretty Uniqueness where
   pretty Unique = "*"
   pretty Nonunique = mempty
+
+-- | A fancier name for @()@ - encodes no uniqueness information.
+-- Also has a different prettyprinting instance.
+data NoUniqueness = NoUniqueness
+  deriving (Eq, Ord, Show)
+
+instance Semigroup NoUniqueness where
+  NoUniqueness <> NoUniqueness = NoUniqueness
+
+instance Monoid NoUniqueness where
+  mempty = NoUniqueness
+
+instance Pretty NoUniqueness where
+  pretty _ = mempty
 
 -- | The abstract (not really) type representing names in the Futhark
 -- compiler.  'String's, being lists of characters, are very slow,

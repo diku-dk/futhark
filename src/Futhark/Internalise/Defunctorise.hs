@@ -250,9 +250,8 @@ transformNames x = do
           mapOnName = \v ->
             pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
           mapOnStructType = astMap (substituter scope),
-          mapOnPatType = astMap (substituter scope),
-          mapOnStructRetType = astMap (substituter scope),
-          mapOnPatRetType = astMap (substituter scope)
+          mapOnParamType = astMap (substituter scope),
+          mapOnResRetType = astMap (substituter scope)
         }
     onExp scope e =
       -- One expression is tricky, because it interacts with scoping rules.
@@ -269,6 +268,9 @@ transformTypeExp = transformNames
 
 transformStructType :: StructType -> TransformM StructType
 transformStructType = transformNames
+
+transformResType :: ResType -> TransformM ResType
+transformResType = transformNames
 
 transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
@@ -287,7 +289,7 @@ transformValBind (ValBind entry name tdecl (Info (RetType dims t)) tparams param
   entry' <- traverse (traverse transformEntry) entry
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
-  t' <- transformStructType t
+  t' <- transformResType t
   e' <- transformExp e
   tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params

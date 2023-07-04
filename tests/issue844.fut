@@ -1,5 +1,5 @@
 -- ==
--- error: Consuming "xs"
+-- error: Consuming.*"xs"
 
 module type mt = {
   type~ t

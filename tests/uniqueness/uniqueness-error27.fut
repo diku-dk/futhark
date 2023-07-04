@@ -1,7 +1,7 @@
 -- You may not consume a free variable inside of a lambda.
 --
 -- ==
--- error: Would consume variable "a"
+-- error: Consuming variable "a"
 
 def consume(a: *[]i32): []i32 = a
 

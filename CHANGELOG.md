@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   multidimensional variants), as well as `split`, now have more
   precise types.
 
+* Local and anonymous (lambda) functions that *must* return unique
+  results (because they are passed to a higher order function that
+  requires this) must now have an explicit return type ascription that
+  declares this, using `*`.  This is very rare (in practice
+  unobserved) in real programs.
+
 ### Fixed
 
 * `futhark doc` produced some invalid links.

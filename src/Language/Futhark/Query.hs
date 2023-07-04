@@ -46,7 +46,7 @@ sizeDefs :: SizeBinder VName -> Defs
 sizeDefs (SizeBinder v loc) =
   M.singleton v $ DefBound $ BoundTerm (Scalar (Prim (Signed Int64))) (locOf loc)
 
-patternDefs :: Pat -> Defs
+patternDefs :: Pat (TypeBase Size u) -> Defs
 patternDefs (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
 patternDefs (TuplePat pats _) =
@@ -88,7 +88,7 @@ expDefs e =
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
-          let name_t = foldFunTypeFromParams params ret
+          let name_t = funType params ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map patternDefs params)
@@ -111,9 +111,7 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     vbind_t =
-      foldFunTypeFromParams (valBindParams vbind) $
-        unInfo $
-          valBindRetType vbind
+      funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =
@@ -236,7 +234,7 @@ atPosInTypeExp te pos =
     inDim (SizeExp e _) = atPosInExp e pos
     inDim SizeExpAny {} = Nothing
 
-atPosInPat :: Pat -> Pos -> Maybe RawAtPos
+atPosInPat :: Pat (TypeBase Size u) -> Pos -> Maybe RawAtPos
 atPosInPat (Id vn _ loc) pos = do
   guard $ loc `contains` pos
   Just $ RawAtName (qualName vn) $ locOf loc

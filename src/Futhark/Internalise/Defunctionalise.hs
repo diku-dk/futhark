@@ -23,29 +23,29 @@ import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
 -- | A static value stores additional information about the result of
 -- defunctionalization of an expression, aside from the residual expression.
 data StaticVal
-  = Dynamic PatType
+  = Dynamic ParamType
   | -- | The Env is the lexical closure of the lambda.
-    LambdaSV Pat StructRetType Exp Env
+    LambdaSV (Pat ParamType) ResRetType Exp Env
   | RecordSV [(Name, StaticVal)]
   | -- | The constructor that is actually present, plus
     -- the others that are not.
-    SumSV Name [StaticVal] [(Name, [PatType])]
+    SumSV Name [StaticVal] [(Name, [ParamType])]
   | -- | The pair is the StaticVal and residual expression of this
     -- function as a whole, while the second StaticVal is its
     -- body. (Don't trust this too much, my understanding may have
     -- holes.)
     DynamicFun (Exp, StaticVal) StaticVal
   | IntrinsicSV
-  | HoleSV PatType SrcLoc
+  | HoleSV StructType SrcLoc
   deriving (Show)
 
--- | The type is Just if this is a polymorphic binding that must be
--- instantiated.
-data Binding = Binding (Maybe ([VName], StructType)) StaticVal
+data Binding = Binding
+  { -- | Just if this is a polymorphic binding that must be
+    -- instantiated.
+    bindingType :: Maybe ([VName], StructType),
+    bindingSV :: StaticVal
+  }
   deriving (Show)
-
-bindingSV :: Binding -> StaticVal
-bindingSV (Binding _ sv) = sv
 
 -- | Environment mapping variable names to their associated static
 -- value.
@@ -92,7 +92,7 @@ replaceStaticValSizes globals orig_substs sv =
             foldl' (flip M.delete) orig_substs $
               S.fromList (M.keys closure_env)
        in LambdaSV
-            (onAST substs param)
+            (fmap (replaceTypeSizes substs) param)
             (RetType t_dims (replaceTypeSizes substs t))
             (onExp substs e)
             (onEnv orig_substs closure_env) -- intentional
@@ -112,9 +112,10 @@ replaceStaticValSizes globals orig_substs sv =
       HoleSV t loc
   where
     tv substs =
-      identityMapper
-        { mapOnPatType = pure . replaceTypeSizes substs,
-          mapOnStructType = pure . replaceTypeSizes substs,
+      ASTMapper
+        { mapOnStructType = pure . replaceTypeSizes substs,
+          mapOnParamType = pure . replaceTypeSizes substs,
+          mapOnResRetType = pure,
           mapOnExp = pure . onExp substs,
           mapOnName = pure . onName substs
         }
@@ -134,14 +135,14 @@ replaceStaticValSizes globals orig_substs sv =
           Var v (replaceTypeSizes substs <$> t) loc
     onExp substs (Coerce e te t loc) =
       Coerce (onExp substs e) te (replaceTypeSizes substs <$> t) loc
-    onExp substs (Lambda params e ret (Info (als, RetType t_dims t)) loc) =
+    onExp substs (Lambda params e ret (Info (RetType t_dims t)) loc) =
       Lambda
-        (map (onAST substs) params)
+        (map (fmap $ replaceTypeSizes substs) params)
         (onExp substs e)
         ret
-        (Info (als, RetType t_dims (replaceTypeSizes substs t)))
+        (Info (RetType t_dims (replaceTypeSizes substs t)))
         loc
-    onExp substs e = onAST substs e
+    onExp substs e = runIdentity $ astMap (tv substs) e
 
     onEnv substs =
       M.fromList
@@ -152,9 +153,6 @@ replaceStaticValSizes globals orig_substs sv =
       Binding
         (second (replaceTypeSizes substs) <$> t)
         (replaceStaticValSizes globals substs bsv)
-
-    onAST :: ASTMappable x => M.Map VName SizeSubst -> x -> x
-    onAST substs = runIdentity . astMap (tv substs)
 
 -- | Returns the defunctionalization environment restricted
 -- to the given set of variable names.
@@ -210,7 +208,7 @@ addValBind vb = modify $ first (vb :)
 
 -- | Create a new top-level value declaration with the given function name,
 -- return type, list of parameters, and body expression.
-liftValDec :: VName -> StructRetType -> [VName] -> [Pat] -> Exp -> DefM ()
+liftValDec :: VName -> ResRetType -> [VName] -> [Pat ParamType] -> Exp -> DefM ()
 liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
   where
     dims' = map (`TypeParamDim` mempty) dims
@@ -261,21 +259,21 @@ arraySizes :: StructType -> S.Set VName
 arraySizes (Scalar Arrow {}) = mempty
 arraySizes (Scalar (Record fields)) = foldMap arraySizes fields
 arraySizes (Scalar (Sum cs)) = foldMap (foldMap arraySizes) cs
-arraySizes (Scalar (TypeVar _ _ _ targs)) =
+arraySizes (Scalar (TypeVar _ _ targs)) =
   mconcat $ map f targs
   where
     f (TypeArgDim (Var d _ _)) = S.singleton $ qualLeaf d
     f TypeArgDim {} = mempty
     f (TypeArgType t) = arraySizes t
 arraySizes (Scalar Prim {}) = mempty
-arraySizes (Array _ _ shape t) =
+arraySizes (Array _ shape t) =
   arraySizes (Scalar t) <> foldMap dimName (shapeDims shape)
   where
     dimName :: Size -> S.Set VName
     dimName (Var qn _ _) = S.singleton $ qualLeaf qn
     dimName _ = mempty
 
-patternArraySizes :: Pat -> S.Set VName
+patternArraySizes :: Pat ParamType -> S.Set VName
 patternArraySizes = arraySizes . patternStructType
 
 data SizeSubst
@@ -324,11 +322,9 @@ sizesToRename (RecordSV fs) =
 sizesToRename (SumSV _ svs _) =
   foldMap sizesToRename svs
 sizesToRename (LambdaSV param _ _ _) =
+  -- We used to rename parameters here, but I don't understand why
+  -- that was necessary and it caused some problems.
   fvVars (freeInPat param)
-    <> S.map identName (S.filter couldBeSize $ patIdents param)
-  where
-    couldBeSize ident =
-      unInfo (identType ident) == Scalar (Prim (Signed Int64))
 
 -- | Combine the shape information of types as much as possible. The first
 -- argument is the orignal type and the second is the type of the transformed
@@ -361,18 +357,17 @@ combineTypeShapes (Scalar (Arrow als1 p1 d1 a1 (RetType dims1 b1))) (Scalar (Arr
       d1
       (combineTypeShapes a1 a2)
       (RetType dims1 (combineTypeShapes b1 b2))
-combineTypeShapes (Scalar (TypeVar als1 u1 v targs1)) (Scalar (TypeVar als2 _ _ targs2)) =
-  Scalar $ TypeVar (als1 <> als2) u1 v $ zipWith f targs1 targs2
+combineTypeShapes (Scalar (TypeVar u v targs1)) (Scalar (TypeVar _ _ targs2)) =
+  Scalar $ TypeVar u v $ zipWith f targs1 targs2
   where
     f (TypeArgType t1) (TypeArgType t2) = TypeArgType (combineTypeShapes t1 t2)
     f targ _ = targ
-combineTypeShapes (Array als1 u1 shape1 et1) (Array als2 _u2 _shape2 et2) =
+combineTypeShapes (Array u shape1 et1) (Array _ _shape2 et2) =
   arrayOfWithAliases
-    (als1 <> als2)
-    u1
+    u
     shape1
-    (combineTypeShapes (Scalar et1) (Scalar et2) `setAliases` mempty)
-combineTypeShapes _ new_tp = new_tp
+    (combineTypeShapes (setUniqueness (Scalar et1) u) (setUniqueness (Scalar et2) u))
+combineTypeShapes _ t = t
 
 -- When we instantiate a polymorphic StaticVal, we rename all the
 -- sizes to avoid name conflicts later on.  This is a bit of a hack...
@@ -388,7 +383,6 @@ instStaticVal globals dims t sv_t sv = do
   fresh_substs <-
     mkSubsts . filter (`S.notMember` globals) . S.toList $
       S.fromList dims <> sizesToRename sv
-
   let dims' = map (onName fresh_substs) dims
       isDim k _ = k `elem` dims'
       dim_substs =
@@ -410,9 +404,9 @@ instStaticVal globals dims t sv_t sv = do
 
 defuncFun ::
   [VName] ->
-  [Pat] ->
+  [Pat ParamType] ->
   Exp ->
-  StructRetType ->
+  ResRetType ->
   SrcLoc ->
   DefM (Exp, StaticVal)
 defuncFun tparams pats e0 ret loc = do
@@ -423,22 +417,22 @@ defuncFun tparams pats e0 ret loc = do
         [pat'] -> (pat', ret, e0)
         (pat' : pats') ->
           ( pat',
-            RetType [] $ funType pats' ret,
-            Lambda pats' e0 Nothing (Info (mempty, ret)) loc
+            RetType [] $ second (const Nonunique) $ funType pats' ret,
+            Lambda pats' e0 Nothing (Info ret) loc
           )
 
   -- Construct a record literal that closes over the environment of
   -- the lambda.  Closed-over 'DynamicFun's are converted to their
   -- closure representation.
   let used =
-        freeInExp (Lambda pats e0 Nothing (Info (mempty, ret)) loc)
+        freeInExp (Lambda pats e0 Nothing (Info ret) loc)
           `freeWithout` S.fromList tparams
   used_env <- restrictEnvTo used
 
   -- The closure parts that are sizes are proactively turned into size
   -- parameters.
   let sizes_of_arrays =
-        foldMap (arraySizes . toStruct . typeFromSV . bindingSV) used_env
+        foldMap (arraySizes . structTypeFromSV . bindingSV) used_env
           <> patternArraySizes pat
       notSize = not . (`S.member` sizes_of_arrays)
       (fields, env) =
@@ -460,7 +454,7 @@ defuncFun tparams pats e0 ret loc = do
           )
     closureFromDynamicFun (vn, Binding _ sv) =
       let name = nameFromString $ prettyString vn
-          tp' = typeFromSV sv
+          tp' = structTypeFromSV sv
        in ( RecordFieldExplicit
               name
               (Var (qualName vn) (Info tp') mempty)
@@ -472,13 +466,13 @@ defuncFun tparams pats e0 ret loc = do
 -- the associated static value in the defunctionalization monad.
 defuncExp :: Exp -> DefM (Exp, StaticVal)
 defuncExp e@Literal {} =
-  pure (e, Dynamic $ typeOf e)
+  pure (e, Dynamic $ toParam Observe $ typeOf e)
 defuncExp e@IntLit {} =
-  pure (e, Dynamic $ typeOf e)
+  pure (e, Dynamic $ toParam Observe $ typeOf e)
 defuncExp e@FloatLit {} =
-  pure (e, Dynamic $ typeOf e)
+  pure (e, Dynamic $ toParam Observe $ typeOf e)
 defuncExp e@StringLit {} =
-  pure (e, Dynamic $ typeOf e)
+  pure (e, Dynamic $ toParam Observe $ typeOf e)
 defuncExp (Parens e loc) = do
   (e', sv) <- defuncExp e
   pure (Parens e' loc, sv)
@@ -510,18 +504,18 @@ defuncExp (RecordLit fs loc) = do
         -- The field may refer to a functional expression, so we get the
         -- type from the static value and not the one from the AST.
         _ ->
-          let tp = Info $ typeFromSV sv
+          let tp = Info $ structTypeFromSV sv
            in pure (RecordFieldImplicit vn tp loc', (baseName vn, sv))
 defuncExp (ArrayLit es t@(Info t') loc) = do
   es' <- mapM defuncExp' es
-  pure (ArrayLit es' t loc, Dynamic t')
+  pure (ArrayLit es' t loc, Dynamic $ toParam Observe t')
 defuncExp (AppExp (Range e1 me incl loc) res) = do
   e1' <- defuncExp' e1
   me' <- mapM defuncExp' me
   incl' <- mapM defuncExp' incl
   pure
     ( AppExp (Range e1' me' incl' loc) res,
-      Dynamic $ appResType $ unInfo res
+      Dynamic $ toParam Observe $ appResType $ unInfo res
     )
 defuncExp e@(Var qn (Info t) loc) = do
   sv <- lookupVar (toStruct t) (qualLeaf qn)
@@ -529,17 +523,17 @@ defuncExp e@(Var qn (Info t) loc) = do
     -- If the variable refers to a dynamic function, we eta-expand it
     -- so that we do not have to duplicate its definition.
     DynamicFun {} -> do
-      (params, body, ret) <- etaExpand (RetType [] t) e
+      (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
       defuncFun [] params body ret mempty
     -- Intrinsic functions used as variables are eta-expanded, so we
     -- can get rid of them.
     IntrinsicSV -> do
-      (pats, body, tp) <- etaExpand (RetType [] t) e
-      defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
+      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique t) e
+      defuncExp $ Lambda pats body Nothing (Info tp) mempty
     HoleSV _ hole_loc ->
       pure (Hole (Info t) hole_loc, sv)
     _ ->
-      pure (Var qn (Info (typeFromSV sv)) loc, sv)
+      pure (Var qn (Info (structTypeFromSV sv)) loc, sv)
 defuncExp (Hole (Info t) loc) =
   pure (Hole (Info t) loc, HoleSV t loc)
 defuncExp (Ascript e0 tydecl loc)
@@ -554,8 +548,8 @@ defuncExp (Coerce e0 tydecl t loc)
   | otherwise = defuncExp e0
 defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   (e1', sv1) <- defuncExp e1
-  let env = alwaysMatchPatSV pat sv1
-      pat' = updatePat pat sv1
+  let env = alwaysMatchPatSV (fmap (toParam Observe) pat) sv1
+      pat' = updatePat (fmap (toParam Observe) pat) sv1
   (e2', sv2) <- localEnv env $ defuncExp e2
   -- To maintain any sizes going out of scope, we need to compute the
   -- old size substitution induced by retext and also apply it to the
@@ -563,7 +557,7 @@ defuncExp (AppExp (LetPat sizes pat e1 e2 loc) (Info (AppRes t retext))) = do
   let mapping = dimMapping' (typeOf e2) t
       subst v = ExpSubst . flip sizeFromName mempty . qualName <$> M.lookup v mapping
       t' = applySubst subst $ typeOf e2'
-  pure (AppExp (LetPat sizes pat' e1' e2' loc) (Info (AppRes t' retext)), sv2)
+  pure (AppExp (LetPat sizes (fmap toStruct pat') e1' e2' loc) (Info (AppRes t' retext)), sv2)
 defuncExp (AppExp (LetFun vn _ _ _) _) =
   error $ "defuncExp: Unexpected LetFun: " ++ show vn
 defuncExp (AppExp (If e1 e2 e3 loc) res) = do
@@ -579,7 +573,7 @@ defuncExp (Negate e0 loc) = do
 defuncExp (Not e0 loc) = do
   (e0', sv) <- defuncExp e0
   pure (Not e0' loc, sv)
-defuncExp (Lambda pats e0 _ (Info (_, ret)) loc) =
+defuncExp (Lambda pats e0 _ (Info ret) loc) =
   defuncFun [] pats e0 ret loc
 -- Operator sections are expected to be converted to lambda-expressions
 -- by the monomorphizer, so they should no longer occur at this point.
@@ -597,7 +591,7 @@ defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
       pure (For v e2', envFromIdent v)
     ForIn pat2 e2 -> do
       e2' <- defuncExp' e2
-      pure (ForIn pat2 e2', envFromPat pat2)
+      pure (ForIn pat2 e2', envFromPat $ fmap (toParam Observe) pat2)
     While e2 -> do
       e2' <- localEnv env1 $ defuncExp' e2
       pure (While e2', mempty)
@@ -605,22 +599,23 @@ defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
   pure (AppExp (DoLoop sparams pat e1' form' e3' loc) res, sv)
   where
     envFromIdent (Ident vn (Info tp) _) =
-      M.singleton vn $ Binding Nothing $ Dynamic tp
+      M.singleton vn $ Binding Nothing $ Dynamic $ toParam Observe tp
 defuncExp e@(AppExp BinOp {} _) =
   error $ "defuncExp: unexpected binary operator: " ++ prettyString e
 defuncExp (Project vn e0 tp@(Info tp') loc) = do
   (e0', sv0) <- defuncExp e0
   case sv0 of
     RecordSV svs -> case lookup vn svs of
-      Just sv -> pure (Project vn e0' (Info $ typeFromSV sv) loc, sv)
+      Just sv -> pure (Project vn e0' (Info $ structTypeFromSV sv) loc, sv)
       Nothing -> error "Invalid record projection."
-    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic tp')
+    Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toParam Observe tp')
     HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
 defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
   e1' <- defuncExp' e1
   idxs' <- mapM defuncDimIndex idxs
-  let id1_binding = Binding Nothing $ Dynamic $ unInfo $ identType id1
+  let id1_binding =
+        Binding Nothing $ Dynamic $ toParam Observe $ unInfo $ identType id1
   (body', sv) <-
     localEnv (M.singleton (identName id1) id1_binding) $
       defuncExp body
@@ -630,7 +625,7 @@ defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   idxs' <- mapM defuncDimIndex idxs
   pure
     ( AppExp (Index e0' idxs' loc) res,
-      Dynamic $ typeOf expr
+      Dynamic $ toParam Observe $ typeOf expr
     )
 defuncExp (Update e1 idxs e2 loc) = do
   (e1', sv) <- defuncExp e1
@@ -646,7 +641,7 @@ defuncExp (RecordUpdate e1 fs e2 _ loc) = do
   (e2', sv2) <- defuncExp e2
   let sv = staticField sv1 sv2 fs
   pure
-    ( RecordUpdate e1' fs e2' (Info $ typeFromSV sv1) loc,
+    ( RecordUpdate e1' fs e2' (Info $ structTypeFromSV sv1) loc,
       sv
     )
   where
@@ -668,15 +663,15 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
   let sv =
         SumSV name svs $
           M.toList $
-            name `M.delete` M.map (map defuncType) all_fs
-      sum_t' = combineTypeShapes sum_t (typeFromSV sv)
+            name `M.delete` M.map (map (toParam Observe . defuncType)) all_fs
+      sum_t' = combineTypeShapes sum_t (structTypeFromSV sv)
   pure (Constr name es' (Info sum_t') loc, sv)
   where
     defuncType ::
       Monoid als =>
       TypeBase Size als ->
       TypeBase Size als
-    defuncType (Array as u shape t) = Array as u shape (defuncScalar t)
+    defuncType (Array u shape t) = Array u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
@@ -687,7 +682,7 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
     defuncScalar Arrow {} = Record mempty
     defuncScalar (Sum fs) = Sum $ M.map (map defuncType) fs
     defuncScalar (Prim t) = Prim t
-    defuncScalar (TypeVar as u tn targs) = TypeVar as u tn targs
+    defuncScalar (TypeVar u tn targs) = TypeVar u tn targs
 defuncExp (Constr name _ (Info t) loc) =
   error $
     "Constructor "
@@ -715,11 +710,11 @@ defuncExp' = fmap fst . defuncExp
 
 defuncCase :: StaticVal -> Case -> DefM (Maybe (Case, StaticVal))
 defuncCase sv (CasePat p e loc) = do
-  let p' = updatePat p sv
-  case matchPatSV p sv of
+  let p' = updatePat (fmap (toParam Observe) p) sv
+  case matchPatSV (fmap (toParam Observe) p) sv of
     Just env -> do
       (e', sv') <- localEnv env $ defuncExp e
-      pure $ Just (CasePat p' e' loc, sv')
+      pure $ Just (CasePat (fmap toStruct p') e' loc, sv')
     Nothing ->
       pure Nothing
 
@@ -738,17 +733,17 @@ defuncSoacExp (Lambda params e0 decl tp loc) = do
   pure $ Lambda params e0' decl tp loc
 defuncSoacExp e
   | Scalar Arrow {} <- typeOf e = do
-      (pats, body, tp) <- etaExpand (RetType [] (typeOf e)) e
+      (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e) e
       let env = foldMap envFromPat pats
       body' <- localEnv env $ defuncExp' body
-      pure $ Lambda pats body' Nothing (Info (mempty, tp)) mempty
+      pure $ Lambda pats body' Nothing (Info tp) mempty
   | otherwise = defuncExp' e
 
-etaExpand :: PatRetType -> Exp -> DefM ([Pat], Exp, StructRetType)
+etaExpand :: ResRetType -> Exp -> DefM ([Pat ParamType], Exp, ResRetType)
 etaExpand e_t e = do
   let (ps, ret) = getType e_t
   -- Some careful hackery to avoid duplicate names.
-  (_, (pats, vars)) <- second unzip <$> mapAccumLM f [] ps
+  (_, (params, vars)) <- second unzip <$> mapAccumLM f [] ps
   -- Important that we synthesize new existential names and substitute
   -- them into the (body) return type.
   ext' <- mapM newName $ retDims ret
@@ -759,9 +754,9 @@ etaExpand e_t e = do
       e' =
         mkApply
           e
-          (zip3 (map (diet . snd . snd) ps) (repeat Nothing) vars)
-          (AppRes (retType ret') ext')
-  pure (pats, e', second (const ()) ret)
+          (zip3 (map (fst . snd) ps) (repeat Nothing) vars)
+          (AppRes (toStruct $ retType ret') ext')
+  pure (params, e', ret)
   where
     getType (RetType _ (Scalar (Arrow _ p d t1 t2))) =
       let (ps, r) = getType t2
@@ -769,18 +764,14 @@ etaExpand e_t e = do
     getType t = ([], t)
 
     f prev (p, (d, t)) = do
-      let t' =
-            fromStruct t
-              `setUniqueness` case d of
-                Consume -> Unique
-                Observe -> Nonunique
+      let t' = second (const d) t
       x <- case p of
         Named x | x `notElem` prev -> pure x
-        _ -> newNameFromString "x"
+        _ -> newNameFromString "eta_p"
       pure
         ( x : prev,
           ( Id x (Info t') mempty,
-            Var (qualName x) (Info t') mempty
+            Var (qualName x) (Info $ toStruct t') mempty
           )
         )
 
@@ -796,66 +787,72 @@ defuncDimIndex (DimSlice me1 me2 me3) =
 -- that have order 0 types (i.e., non-functional).
 defuncLet ::
   [VName] ->
-  [Pat] ->
+  [Pat ParamType] ->
   Exp ->
-  StructRetType ->
-  DefM ([VName], [Pat], Exp, StaticVal)
+  ResRetType ->
+  DefM ([VName], [Pat ParamType], Exp, StaticVal, ResType)
 defuncLet dims ps@(pat : pats) body (RetType ret_dims rettype)
   | patternOrderZero pat = do
       let bound_by_pat = (`S.member` fvVars (freeInPat pat))
           -- Take care to not include more size parameters than necessary.
           (pat_dims, rest_dims) = partition bound_by_pat dims
           env = envFromPat pat <> envFromDimNames pat_dims
-      (rest_dims', pats', body', sv) <-
+      (rest_dims', pats', body', sv, sv_t) <-
         localEnv env $ defuncLet rest_dims pats body $ RetType ret_dims rettype
       closure <- defuncFun dims ps body (RetType ret_dims rettype) mempty
       pure
         ( pat_dims ++ rest_dims',
           pat : pats',
           body',
-          DynamicFun closure sv
+          DynamicFun closure sv,
+          sv_t
         )
   | otherwise = do
       (e, sv) <- defuncFun dims ps body (RetType ret_dims rettype) mempty
-      pure ([], [], e, sv)
+      pure ([], [], e, sv, resTypeFromSV sv)
 defuncLet _ [] body (RetType _ rettype) = do
   (body', sv) <- defuncExp body
-  pure ([], [], body', imposeType sv rettype)
+  pure
+    ( [],
+      [],
+      body',
+      imposeType sv $ resToParam rettype,
+      resTypeFromSV sv
+    )
   where
     imposeType Dynamic {} t =
-      Dynamic $ fromStruct t
+      Dynamic t
     imposeType (RecordSV fs1) (Scalar (Record fs2)) =
       RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
     imposeType sv _ = sv
 
-instAnySizes :: MonadFreshNames m => [Pat] -> m [Pat]
-instAnySizes = mapM (astMap tv)
+instAnySizes :: MonadFreshNames m => [Pat ParamType] -> m [Pat ParamType]
+instAnySizes = traverse $ traverse $ bitraverse onDim pure
   where
-    tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim d
       | d == anySize = do
           v <- newVName "size"
           pure $ sizeFromName (qualName v) mempty
     onDim d = pure d
 
-unboundSizes :: S.Set VName -> [Pat] -> [VName]
-unboundSizes bound_sizes params = nubOrd $ execState (mapM (astMap tv) params) []
+unboundSizes :: S.Set VName -> [Pat ParamType] -> [VName]
+unboundSizes bound_sizes params = nubOrd $ execState (f params) []
   where
+    f = traverse $ traverse $ bitraverse onDim pure
     bound = bound_sizes <> foldMap patNames params
-    tv = identityMapper {mapOnPatType = bitraverse onDim pure}
     onDim (Var d typ loc) = do
       unless (qualLeaf d `S.member` bound) $ modify (qualLeaf d :)
       pure $ Var d typ loc
     onDim d = pure d
 
-unRetType :: PatRetType -> DefM AppRes
-unRetType (RetType [] t) = pure $ AppRes t []
+unRetType :: ResRetType -> DefM AppRes
+unRetType (RetType [] t) = pure $ AppRes (toStruct t) []
 unRetType (RetType ext t) = do
   ext' <- mapM newName ext
   let extsubst =
         M.fromList . zip ext $
           map (ExpSubst . flip sizeFromName mempty . qualName) ext'
-  pure $ AppRes (applySubst (`M.lookup` extsubst) t) ext'
+  pure $ AppRes (applySubst (`M.lookup` extsubst) $ toStruct t) ext'
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
@@ -869,9 +866,9 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           -- function returns a higher-order term.
           let (argtypes', rettype') = dynamicFunType sv argtypes
           pure (Var qn (Info (foldFunType argtypes' $ RetType [] rettype')) loc, sv)
-      | all (orderZero . snd) argtypes,
+      | all orderZero argtypes,
         orderZero rettype -> do
-          (params, body, ret) <- etaExpand (RetType [] t) e
+          (params, body, ret) <- etaExpand (RetType [] $ toRes Nonunique t) e
           defuncFun [] params body ret mempty
       | otherwise -> do
           fname <- newVName $ "dyn_" <> baseString (qualLeaf qn)
@@ -886,16 +883,16 @@ defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
           let bound_sizes = S.fromList dims' <> globals
           pats' <- instAnySizes pats
 
-          liftValDec fname (RetType [] $ toStruct rettype') (dims' ++ unboundSizes bound_sizes pats') pats' e0
+          liftValDec fname (RetType [] rettype') (dims' ++ unboundSizes bound_sizes pats') pats' e0
           pure
             ( Var
                 (qualName fname)
-                (Info (foldFunType argtypes' $ RetType [] $ fromStruct rettype'))
+                (Info (foldFunType argtypes' $ RetType [] rettype'))
                 loc,
               sv'
             )
     IntrinsicSV -> pure (e, IntrinsicSV)
-    _ -> pure (Var qn (Info (typeFromSV sv)) loc, sv)
+    _ -> pure (Var qn (Info (structTypeFromSV sv)) loc, sv)
 defuncApplyFunction e _ = defuncExp e
 
 -- Embed some information about the original function
@@ -911,7 +908,7 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   String ->
   (Exp, StaticVal) ->
-  (((Diet, Maybe VName), Exp), [(Diet, StructType)]) ->
+  (((Diet, Maybe VName), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
 defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
@@ -933,7 +930,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
   let params = [closure_pat, pat']
       lifted_rettype =
         RetType (retDims lam_e_t) $
-          combineTypeShapes (fromStruct $ retType lam_e_t) (typeOf lam_e')
+          combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
 
       already_bound =
         globals
@@ -954,15 +951,14 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
   fname <- newNameFromString fname_s
   liftValDec
     fname
-    (second (const ()) lifted_rettype)
+    lifted_rettype
     (dims ++ more_dims ++ unboundSizes bound_sizes params')
     params'
     lam_e'
 
   let f_t = toStruct $ typeOf f'
       arg_t = toStruct $ typeOf arg'
-      d1 = Observe
-      fname_t = foldFunType [(d1, f_t), (d, arg_t)] lifted_rettype
+      fname_t = foldFunType [toParam Observe f_t, toParam d arg_t] lifted_rettype
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
   callret <- unRetType lifted_rettype
 
@@ -1020,10 +1016,10 @@ defuncApply f args appres loc = do
       -- immediately any time we encounter a non-fully-applied
       -- intrinsic?
       if null $ fst $ unfoldFunType $ appResType appres
-        then pure (e', Dynamic $ appResType appres)
+        then pure (e', Dynamic $ toParam Observe $ appResType appres)
         else do
-          (pats, body, tp) <- etaExpand (RetType [] (typeOf e')) e'
-          defuncExp $ Lambda pats body Nothing (Info (mempty, tp)) mempty
+          (pats, body, tp) <- etaExpand (RetType [] $ toRes Nonunique $ typeOf e') e'
+          defuncExp $ Lambda pats body Nothing (Info tp) mempty
 
 -- | Check if a 'StaticVal' and a given application depth corresponds
 -- to a fully applied dynamic function.
@@ -1037,7 +1033,7 @@ fullyApplied _ _ = True
 -- dimensions, a list of parameters, a function body, and the
 -- appropriate static value for applying the function at the given
 -- depth of partial application.
-liftDynFun :: String -> StaticVal -> Int -> ([Pat], Exp, StaticVal)
+liftDynFun :: String -> StaticVal -> Int -> ([Pat ParamType], Exp, StaticVal)
 liftDynFun _ (DynamicFun (e, sv) _) 0 = ([], e, sv)
 liftDynFun s (DynamicFun clsr@(_, LambdaSV pat _ _ _) sv) d
   | d > 0 =
@@ -1053,7 +1049,7 @@ liftDynFun s sv d =
 
 -- | Converts a pattern to an environment that binds the individual names of the
 -- pattern to their corresponding types wrapped in a 'Dynamic' static value.
-envFromPat :: Pat -> Env
+envFromPat :: Pat ParamType -> Env
 envFromPat pat = case pat of
   TuplePat ps _ -> foldMap envFromPat ps
   RecordPat fs _ -> foldMap (envFromPat . snd) fs
@@ -1073,19 +1069,19 @@ envFromDimNames = M.fromList . flip zip (repeat d)
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.  Insert wildcard for any patterns
 -- that would otherwise clash with size parameters.
-buildEnvPat :: [VName] -> Env -> Pat
+buildEnvPat :: [VName] -> Env -> Pat ParamType
 buildEnvPat sizes env = RecordPat (map buildField $ M.toList env) mempty
   where
     buildField (vn, Binding _ sv) =
       ( nameFromString (prettyString vn),
         if vn `elem` sizes
-          then Wildcard (Info $ typeFromSV sv) mempty
-          else Id vn (Info $ typeFromSV sv) mempty
+          then Wildcard (Info $ paramTypeFromSV sv) mempty
+          else Id vn (Info $ paramTypeFromSV sv) mempty
       )
 
 -- | Compute the corresponding type for the *representation* of a
 -- given static value (not the original possibly higher-order value).
-typeFromSV :: StaticVal -> PatType
+typeFromSV :: StaticVal -> ParamType
 typeFromSV (Dynamic tp) =
   tp
 typeFromSV (LambdaSV _ _ _ env) =
@@ -1101,24 +1097,33 @@ typeFromSV (SumSV name svs fields) =
   let svs' = map typeFromSV svs
    in Scalar $ Sum $ M.insert name svs' $ M.fromList fields
 typeFromSV (HoleSV t _) =
-  t
+  toParam Observe t
 typeFromSV IntrinsicSV =
   error "Tried to get the type from the static value of an intrinsic."
 
+resTypeFromSV :: StaticVal -> ResType
+resTypeFromSV = paramToRes . typeFromSV
+
+structTypeFromSV :: StaticVal -> StructType
+structTypeFromSV = toStruct . typeFromSV
+
+paramTypeFromSV :: StaticVal -> ParamType
+paramTypeFromSV = typeFromSV
+
 -- | Construct the type for a fully-applied dynamic function from its
 -- static value and the original types of its arguments.
-dynamicFunType :: StaticVal -> [(Diet, StructType)] -> ([(Diet, PatType)], PatType)
+dynamicFunType :: StaticVal -> [ParamType] -> ([ParamType], ResType)
 dynamicFunType (DynamicFun _ sv) (p : ps) =
   let (ps', ret) = dynamicFunType sv ps
-   in (second fromStruct p : ps', ret)
-dynamicFunType sv _ = ([], typeFromSV sv)
+   in (p : ps', ret)
+dynamicFunType sv _ = ([], resTypeFromSV sv)
 
 -- | Match a pattern with its static value. Returns an environment
 -- with the identifier components of the pattern mapped to the
 -- corresponding subcomponents of the static value.  If this function
 -- returns 'Nothing', then it corresponds to an unmatchable case.
 -- These should only occur for 'Match' expressions.
-matchPatSV :: Pat -> StaticVal -> Maybe Env
+matchPatSV :: Pat ParamType -> StaticVal -> Maybe Env
 matchPatSV (TuplePat ps _) (RecordSV ls) =
   mconcat <$> zipWithM (\p (_, sv) -> matchPatSV p sv) ps ls
 matchPatSV (RecordPat ps _) (RecordSV ls)
@@ -1159,7 +1164,7 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
 matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
-matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType t
+matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType $ toParam Observe t
 matchPatSV pat sv =
   error $
     "Tried to match pattern\n"
@@ -1167,14 +1172,14 @@ matchPatSV pat sv =
       ++ "\n with static value\n"
       ++ show sv
 
-alwaysMatchPatSV :: Pat -> StaticVal -> Env
+alwaysMatchPatSV :: Pat ParamType -> StaticVal -> Env
 alwaysMatchPatSV pat sv = fromMaybe bad $ matchPatSV pat sv
   where
     bad = error $ unlines [prettyString pat, "cannot match StaticVal", show sv]
 
 -- | Given a pattern and the static value for the defunctionalized argument,
 -- update the pattern to reflect the changes in the types.
-updatePat :: Pat -> StaticVal -> Pat
+updatePat :: Pat ParamType -> StaticVal -> Pat ParamType
 updatePat (TuplePat ps loc) (RecordSV svs) =
   TuplePat (zipWith updatePat ps $ map snd svs) loc
 updatePat (RecordPat ps loc) (RecordSV svs)
@@ -1188,7 +1193,7 @@ updatePat (PatParens pat loc) sv =
 updatePat (PatAttr attr pat loc) sv =
   PatAttr attr (updatePat pat sv) loc
 updatePat (Id vn (Info tp) loc) sv =
-  Id vn (Info $ comb tp (typeFromSV sv `setUniqueness` Nonunique)) loc
+  Id vn (Info $ comb tp $ paramTypeFromSV sv) loc
   where
     -- Preserve any original zeroth-order types.
     comb (Scalar Arrow {}) t2 = t2
@@ -1199,20 +1204,20 @@ updatePat (Id vn (Info tp) loc) sv =
     comb t1 _ = t1 -- t1 must be array or prim.
 updatePat pat@(Wildcard (Info tp) loc) sv
   | orderZero tp = pat
-  | otherwise = Wildcard (Info $ typeFromSV sv) loc
+  | otherwise = Wildcard (Info $ paramTypeFromSV sv) loc
 updatePat (PatAscription pat _ _) sv =
   updatePat pat sv
 updatePat p@PatLit {} _ = p
 updatePat pat@(PatConstr c1 (Info t) ps loc) sv@(SumSV _ svs _)
   | orderZero t = pat
-  | otherwise = PatConstr c1 (Info t') ps' loc
+  | otherwise = PatConstr c1 (Info $ toParam Observe t') ps' loc
   where
-    t' = typeFromSV sv `setUniqueness` Nonunique
+    t' = resTypeFromSV sv
     ps' = zipWith updatePat ps svs
 updatePat (PatConstr c1 _ ps loc) (Dynamic t) =
-  PatConstr c1 (Info t) ps loc
+  PatConstr c1 (Info $ toParam Observe t) ps loc
 updatePat pat (Dynamic t) = updatePat pat (svFromType t)
-updatePat pat (HoleSV t _) = updatePat pat (svFromType t)
+updatePat pat (HoleSV t _) = updatePat pat (svFromType $ toParam Observe t)
 updatePat pat sv =
   error $
     "Tried to update pattern\n"
@@ -1223,7 +1228,7 @@ updatePat pat sv =
 -- | Convert a record (or tuple) type to a record static value. This
 -- is used for "unwrapping" tuples and records that are nested in
 -- 'Dynamic' static values.
-svFromType :: PatType -> StaticVal
+svFromType :: ParamType -> StaticVal
 svFromType (Scalar (Record fs)) = RecordSV . M.toList $ M.map svFromType fs
 svFromType t = Dynamic t
 
@@ -1254,12 +1259,12 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
       show name
         ++ " has type parameters, "
         ++ "but the defunctionaliser expects a monomorphic input program."
-  (tparams', params', body', sv) <-
+  (tparams', params', body', sv, sv_t) <-
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
   globals <- asks fst
   let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
-  let rettype' = combineTypeShapes rettype $ toStruct $ typeOf body'
+  let rettype' = combineTypeShapes rettype sv_t
       tparams'' = tparams' ++ unboundSizes bound_sizes params''
       ret_dims' = filter (`notElem` bound_sizes) $ S.toList $ fvVars $ freeInType rettype'
 

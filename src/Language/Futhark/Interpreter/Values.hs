@@ -76,8 +76,8 @@ emptyShape :: ValueShape -> Bool
 emptyShape (ShapeDim d s) = d == 0 || emptyShape s
 emptyShape _ = False
 
-typeShape :: TypeBase d () -> Shape d
-typeShape (Array _ _ shape et) =
+typeShape :: TypeBase d u -> Shape d
+typeShape (Array _ shape et) =
   foldr ShapeDim (typeShape (Scalar et)) $ shapeDims shape
 typeShape (Scalar (Record fs)) =
   ShapeRecord $ M.map typeShape fs

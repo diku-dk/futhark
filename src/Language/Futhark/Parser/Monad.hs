@@ -87,7 +87,7 @@ mustBe (L loc _) expected =
     "Only the keyword '" <> expected <> "' may appear here."
 
 mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
-mustBeEmpty _ (Array _ _ (Shape dims) _)
+mustBeEmpty _ (Array _ (Shape dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
   parseErrorAt loc $ Just $ prettyText t <> " is not an empty array."
@@ -156,7 +156,7 @@ applyExp es =
         index = AppExp (Index e (is ++ map DimFix xs) xloc) NoInfo
     op f x = pure $ mkApplyUT f x
 
-patternExp :: UncheckedPat -> ParserMonad UncheckedExp
+patternExp :: UncheckedPat t -> ParserMonad UncheckedExp
 patternExp (Id v _ loc) = pure $ Var (qualName v) NoInfo loc
 patternExp (TuplePat pats loc) = TupLit <$> mapM patternExp pats <*> pure loc
 patternExp (Wildcard _ loc) = parseErrorAt loc $ Just "cannot have wildcard here."
