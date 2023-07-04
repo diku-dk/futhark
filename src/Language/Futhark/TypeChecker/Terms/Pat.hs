@@ -320,12 +320,9 @@ bindingPat ::
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkPat sizes p t $ \p' -> binding (patIdents (fmap toStruct p')) $ do
-    p'' <- updateTypes p'
-
-    let used_sizes = fvVars $ freeInPat p''
-    case filter ((`S.notMember` used_sizes) . sizeName) sizes of
-      [] -> m p''
+  checkPat sizes p t $ \p' -> binding (patIdents (fmap toStruct p')) $
+    case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
+      [] -> m p'
       size : _ -> unusedSize size
 
 patNameMap :: Pat t -> NameMap
