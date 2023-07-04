@@ -465,7 +465,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
 
       ts <- mapM subExpType mergeinit
       bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
-        bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
+        bindingLambdaParams [toParam E.Observe <$> x] (map rowType arr_ts) $ \x_params -> do
           let loopvars = zip x_params arr'
           forLoop mergepat' shapepat mergeinit $
             I.ForLoop i Int64 w loopvars
@@ -551,7 +551,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
             )
 internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
-      src_t = E.fromStruct <$> E.identType src
+      src_t = E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
   internaliseExp desc $
     E.AppExp
@@ -745,7 +745,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
 internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
-  replace (E.typeOf src `setAliases` ()) fields ve' src'
+  replace (E.typeOf src) fields ve' src'
   where
     replace (E.Scalar (E.Record m)) (f : fs) ve' src'
       | Just t <- M.lookup f m = do
@@ -834,12 +834,11 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
 -- overloaded.
 internaliseExp desc (E.Project k e (Info rt) _) = do
   let i' = sum . map internalisedTypeSize $
-        case E.typeOf e `setAliases` () of
+        case E.typeOf e of
           E.Scalar (Record fs) ->
             map snd $ takeWhile ((/= k) . fst) $ sortFields fs
           t -> [t]
-  take (internalisedTypeSize $ rt `setAliases` ()) . drop i'
-    <$> internaliseExp desc e
+  take (internalisedTypeSize rt) . drop i' <$> internaliseExp desc e
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -866,7 +865,7 @@ internaliseArg desc (arg, argdim) = do
         _ -> pure ()
       pure arg'
 
-internalisePatLit :: E.PatLit -> E.PatType -> I.PrimValue
+internalisePatLit :: E.PatLit -> E.StructType -> I.PrimValue
 internalisePatLit (E.PatLitPrim v) _ =
   internalisePrimValue v
 internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Signed it))) =
@@ -879,7 +878,7 @@ internalisePatLit l t =
   error $ "Nonsensical pattern and type: " ++ show (l, t)
 
 generateCond ::
-  E.Pat ->
+  E.Pat StructType ->
   [I.SubExp] ->
   InternaliseM ([Maybe I.PrimValue], [I.SubExp])
 generateCond orig_p orig_ses = do
@@ -944,7 +943,7 @@ generateCond orig_p orig_ses = do
 internalisePat ::
   String ->
   [E.SizeBinder VName] ->
-  E.Pat ->
+  E.Pat StructType ->
   E.Exp ->
   InternaliseM a ->
   InternaliseM a
@@ -952,19 +951,19 @@ internalisePat desc sizes p e m = do
   ses <- internaliseExp desc' e
   internalisePat' sizes p ses m
   where
-    desc' = case S.toList $ E.patIdents p of
+    desc' = case E.patIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 
 internalisePat' ::
   [E.SizeBinder VName] ->
-  E.Pat ->
+  E.Pat StructType ->
   [I.SubExp] ->
   InternaliseM a ->
   InternaliseM a
 internalisePat' sizes p ses m = do
   ses_ts <- mapM subExpType ses
-  stmPat p ses_ts $ \pat_names -> do
+  stmPat (toParam E.Observe <$> p) ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
@@ -1488,7 +1487,7 @@ bodyExtType (Body _ stms res) =
 internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
-internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowtypes =
+internaliseLambda (E.Lambda params body _ (Info (RetType _ rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody "lam" body
     rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
@@ -2162,9 +2161,9 @@ sizeExpForError e = do
   e' <- internaliseExp1 "size" e
   pure ["[", ErrorVal int64 e', "]"]
 
-typeExpForError :: E.TypeBase Size als -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
 typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
-typeExpForError (E.Scalar (E.TypeVar _ _ v args)) = do
+typeExpForError (E.Scalar (E.TypeVar _ v args)) = do
   args' <- concat <$> mapM onArg args
   pure $ intersperse " " $ ErrorString (prettyText v) : args'
   where
@@ -2180,7 +2179,7 @@ typeExpForError (E.Scalar (E.Record fs))
   where
     onField (k, te) =
       (ErrorString (prettyText k <> ": ") :) <$> typeExpForError te
-typeExpForError (E.Array _ _ shape et) = do
+typeExpForError (E.Array _ shape et) = do
   shape' <- mconcat <$> mapM sizeExpForError (E.shapeDims shape)
   et' <- typeExpForError $ Scalar et
   pure $ shape' ++ et'

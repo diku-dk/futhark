@@ -49,7 +49,7 @@ pprMatch _ (MatchConstr (ConstrRecord fs) ps _) =
 instance Pretty (Match t) where
   pretty = pprMatch (-1)
 
-patternToMatch :: Pat -> Match StructType
+patternToMatch :: Pat StructType -> Match StructType
 patternToMatch (Id _ (Info t) _) = MatchWild $ toStruct t
 patternToMatch (Wildcard (Info t) _) = MatchWild $ toStruct t
 patternToMatch (PatParens p _) = patternToMatch p
@@ -174,7 +174,7 @@ findUnmatched _ _ = []
 {-# NOINLINE unmatched #-}
 
 -- | Find the unmatched cases.
-unmatched :: [Pat] -> [Match ()]
+unmatched :: [Pat StructType] -> [Match ()]
 unmatched orig_ps =
   -- The algorithm may find duplicate example, which we filter away
   -- here.
