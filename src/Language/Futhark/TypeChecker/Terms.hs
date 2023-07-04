@@ -970,11 +970,14 @@ sliceDims = length
 instantiateDimsInReturnType ::
   SrcLoc ->
   Maybe (QualName VName) ->
-  RetTypeBase Size als ->
-  TermTypeM (TypeBase Size als, [VName])
-instantiateDimsInReturnType loc fname (RetType dims t) = do
-  dims' <- mapM new dims
-  pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeFromName` loc) . qualName) dims') t, dims')
+  ResRetType ->
+  TermTypeM (ResType, [VName])
+instantiateDimsInReturnType loc fname (RetType dims t)
+  | null dims =
+      pure (t, mempty)
+  | otherwise = do
+      dims' <- mapM new dims
+      pure (first (onDim $ zip dims $ map (ExpSubst . (`sizeFromName` loc) . qualName) dims') t, dims')
   where
     new =
       newRigidDim loc (RigidRet fname)
@@ -1027,20 +1030,20 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
     unify (mkUsage argexp "use as function argument") tp1 argtype
 
     -- Perform substitutions of instantiated variables in the types.
-    tp1' <- normTypeFully tp1
     (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
     argtype' <- normTypeFully argtype
 
     -- Check whether this would produce an impossible return type.
     let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
         problematic = S.fromList ext <> boundInsideType argtype'
-    when (any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)) $ do
+        problem = any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)
+    when (not (S.null problematic) && problem) $ do
       typeError loc mempty . withIndexLink "existential-param-ret" $
         "Existential size would appear in function parameter of return type:"
           </> indent 2 (pretty (RetType ext tp2'))
           </> textwrap "This is usually because a higher-order function is used with functional arguments that return existential sizes or locally named sizes, which are then used as parameters of other function arguments."
 
-    (argext, parsubst) <-
+    (argext, tp2'') <-
       case pname of
         Named pname'
           | S.member pname' (fvVars $ freeInType tp2') ->
@@ -1051,26 +1054,20 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
                       "size-expression-bind"
                       "Size expression with binding is replaced by unknown size."
                   d <- newRigidDim argexp (RigidArg fname $ prettyTextOneLine $ bareExp argexp) "n"
-                  pure
-                    ( Just d,
-                      (`M.lookup` M.singleton pname' (ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp))
-                    )
-                else -- We strip the argument expression to make it
-                -- nicer (in particular, to remove parens).
+                  let parsubst v =
+                        if v == pname'
+                          then Just $ ExpSubst $ sizeFromName (qualName d) $ srclocOf argexp
+                          else Nothing
+                  pure (Just d, applySubst parsubst $ toStruct tp2')
+                else
+                  let parsubst v =
+                        if v == pname'
+                          then Just $ ExpSubst $ fromMaybe argexp $ stripExp argexp
+                          else Nothing
+                   in pure (Nothing, applySubst parsubst $ toStruct tp2')
+        _ -> pure (Nothing, toStruct tp2')
 
-                  pure
-                    ( Nothing,
-                      ( `M.lookup`
-                          M.singleton
-                            pname'
-                            (ExpSubst (fromMaybe argexp $ stripExp argexp))
-                      )
-                    )
-        _ -> pure (Nothing, const Nothing)
-
-    let tp2'' = applySubst parsubst $ toStruct tp2'
-
-    pure (d1, tp1', tp2'', argext, ext)
+    pure (d1, tp1, tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") tfun $
