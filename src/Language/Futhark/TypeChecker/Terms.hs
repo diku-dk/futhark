@@ -575,6 +575,10 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
       env {envNameMap = M.map (qualify' modname') $ envNameMap env}
     qualify' modname' (QualName qs name) =
       QualName (qualQuals modname' ++ [qualLeaf modname'] ++ qs) name
+-- Handle common case specially for efficiency.
+checkExp (Var qn@(QualName [] _) NoInfo loc) = do
+  (qn', t) <- lookupVar loc qn
+  pure $ Var qn' (Info t) loc
 checkExp (Var qn NoInfo loc) = do
   -- The qualifiers of a variable is divided into two parts: first a
   -- possibly-empty sequence of module qualifiers, followed by a
