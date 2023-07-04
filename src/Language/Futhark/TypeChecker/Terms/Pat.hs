@@ -27,7 +27,7 @@ import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
 
 -- | Names that may not be shadowed.
-doNotShadow :: [String]
+doNotShadow :: [Name]
 doNotShadow = ["&&", "||"]
 
 nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
@@ -180,10 +180,8 @@ checkPat' sizes (PatParens p loc) t =
 checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
 checkPat' _ (Id name _ loc) _
-  | name' `elem` doNotShadow =
-      typeError loc mempty $ "The" <+> pretty name' <+> "operator may not be redefined."
-  where
-    name' = nameToString name
+  | name `elem` doNotShadow =
+      typeError loc mempty $ "The" <+> pretty name <+> "operator may not be redefined."
 checkPat' _ (Id name NoInfo loc) (Ascribed t) = do
   name' <- newID name
   pure $ Id name' (Info t) loc

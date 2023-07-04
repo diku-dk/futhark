@@ -1370,7 +1370,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
 
     bindSpaced [(Term, fname)] $ do
       fname' <- checkName Term fname loc
-      when (nameToString fname `elem` doNotShadow) $
+      when (fname `elem` doNotShadow) $
         typeError loc mempty . withIndexLink "may-not-be-redefined" $
           "The" <+> prettyName fname <+> "operator may not be redefined."
 
