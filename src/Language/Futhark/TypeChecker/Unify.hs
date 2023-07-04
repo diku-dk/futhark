@@ -565,11 +565,7 @@ unifySizes usage bcs _ _ e1 e2 = do
 
 -- | Unifies two types.
 unify :: MonadUnify m => Usage -> StructType -> StructType -> m ()
-unify usage t1 t2 = unifyWith (unifySizes usage) usage mempty noBreadCrumbs (toStruct t1) (toStruct t2)
-
--- | @expect super sub@ checks that @sub@ is a subtype of @super@.
-expect :: MonadUnify m => Usage -> StructType -> StructType -> m ()
-expect usage = unifyWith (unifySizes usage) usage mempty noBreadCrumbs
+unify usage = unifyWith (unifySizes usage) usage mempty noBreadCrumbs
 
 occursCheck ::
   MonadUnify m =>
@@ -1108,7 +1104,7 @@ mustHaveFieldWith onDims usage bound bcs l t = do
           pure l_type
     Scalar (Record fields)
       | Just t' <- M.lookup l fields -> do
-          unify usage l_type $ toStruct t'
+          unify usage l_type t'
           pure t'
       | otherwise ->
           unifyError usage mempty bcs $
@@ -1117,7 +1113,7 @@ mustHaveFieldWith onDims usage bound bcs l t = do
               <+> " of value of type"
               <+> pretty (toStructural t) <> "."
     _ -> do
-      unify usage (toStruct t) $ Scalar $ Record $ M.singleton l l_type
+      unify usage t $ Scalar $ Record $ M.singleton l l_type
       pure l_type
 
 -- | Assert that some type must have a field with this name and type.
@@ -1130,16 +1126,16 @@ mustHaveField ::
 mustHaveField usage = mustHaveFieldWith (unifySizes usage) usage mempty noBreadCrumbs
 
 newDimOnMismatch ::
-  (Monoid as, MonadUnify m) =>
+  MonadUnify m =>
   SrcLoc ->
-  TypeBase Size as ->
-  TypeBase Size as ->
-  m (TypeBase Size as, [VName])
+  StructType ->
+  StructType ->
+  m (StructType, [VName])
 newDimOnMismatch loc t1 t2 = do
   (t, seen) <- runStateT (matchDims onDims t1 t2) mempty
   pure (t, M.elems seen)
   where
-    r = RigidCond (toStruct t1) (toStruct t2)
+    r = RigidCond t1 t2
     onDims _ d1 d2
       | d1 == d2 = pure d1
       | otherwise = do
@@ -1165,7 +1161,7 @@ unifyMostCommon usage t1 t2 = do
   -- We are ignoring the dimensions here, because any mismatches
   -- should be turned into fresh size variables.
   let allOK _ _ _ _ _ = pure ()
-  unifyWith allOK usage mempty noBreadCrumbs (toStruct t1) (toStruct t2)
+  unifyWith allOK usage mempty noBreadCrumbs t1 t2
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
   newDimOnMismatch (srclocOf usage) t1' t2'
@@ -1250,7 +1246,7 @@ doUnification ::
   Either TypeError StructType
 doUnification loc rigid_tparams nonrigid_tparams t1 t2 =
   runUnifyM rigid_tparams nonrigid_tparams $ do
-    expect (Usage Nothing (srclocOf loc)) t1 t2
+    unify (Usage Nothing (srclocOf loc)) t1 t2
     normTypeFully t2
 
 -- Note [Linking variables to sum types]

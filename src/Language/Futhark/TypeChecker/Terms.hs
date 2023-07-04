@@ -68,7 +68,7 @@ overloadedTypeVars = mconcat . map f . M.elems
 -- one of them.
 unifyBranchTypes :: SrcLoc -> StructType -> StructType -> TermTypeM (StructType, [VName])
 unifyBranchTypes loc t1 t2 =
-  onFailure (CheckingBranches (toStruct t1) (toStruct t2)) $
+  onFailure (CheckingBranches t1 t2) $
     unifyMostCommon (mkUsage loc "unification of branch results") t1 t2
 
 unifyBranches :: SrcLoc -> Exp -> Exp -> TermTypeM (StructType, [VName])
@@ -188,10 +188,10 @@ checkAscript ::
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
-  e_t <- toStruct <$> expTypeFully e'
+  e_t <- expTypeFully e'
 
   onFailure (CheckingAscription (toStruct decl_t) e_t) $
-    unify (mkUsage loc "type ascription") (toStruct decl_t) (toStruct e_t)
+    unify (mkUsage loc "type ascription") (toStruct decl_t) e_t
 
   pure (te', e')
 
@@ -203,12 +203,12 @@ checkCoerce ::
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpNonrigid te
   e' <- checkExp e
-  e_t <- toStruct <$> expTypeFully e'
+  e_t <- expTypeFully e'
 
-  te_t_nonrigid <- makeNonExtFresh ext te_t
+  te_t_nonrigid <- makeNonExtFresh ext $ toStruct te_t
 
   onFailure (CheckingAscription (toStruct te_t) e_t) $
-    unify (mkUsage loc "size coercion") e_t (toStruct te_t_nonrigid)
+    unify (mkUsage loc "size coercion") e_t te_t_nonrigid
 
   -- If the type expression had any anonymous dimensions, these will
   -- now be in 'ext'.  Those we keep nonrigid and unify with e_t.
@@ -429,13 +429,13 @@ checkExp (ArrayLit all_es _ loc) =
     e : es -> do
       e' <- checkExp e
       et <- expType e'
-      es' <- mapM (unifies "type of first array element" (toStruct et) <=< checkExp) es
+      es' <- mapM (unifies "type of first array element" et <=< checkExp) es
       et' <- normTypeFully et
       t <- arrayOfM loc et' (Shape [sizeFromInteger (genericLength all_es) mempty])
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
-  start_t <- toStruct <$> expTypeFully start'
+  start_t <- expTypeFully start'
   maybe_step' <- case maybe_step of
     Nothing -> pure Nothing
     Just step -> do
@@ -547,7 +547,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e3' <- checkExp e3
 
   let bool = Scalar $ Prim Bool
-  e1_t <- toStruct <$> expType e1'
+  e1_t <- expType e1'
   onFailure (CheckingRequired [bool] e1_t) $
     unify (mkUsage e1' "use as 'if' condition") bool e1_t
 
@@ -556,7 +556,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   zeroOrderType
     (mkUsage loc "returning value of this type from 'if' expression")
     "type returned from branch"
-    (toStruct brancht)
+    brancht
 
   pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes brancht retext)
 checkExp (Parens e loc) =
@@ -689,11 +689,11 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   src' <- checkIdent src
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ toStruct $ unInfo $ identType src'
+  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
 
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
-  ve' <- unifies "type of target array" (toStruct elemt) =<< checkExp ve
+  ve' <- unifies "type of target array" elemt =<< checkExp ve
 
   bindingIdent dest (unInfo (identType src')) $ \dest' -> do
     body' <- checkExp body
@@ -724,8 +724,8 @@ checkExp (RecordUpdate src fields ve NoInfo loc) = do
     usage = mkUsage loc "record update"
     updateField [] ve_t src_t = do
       (src_t', _) <- allDimsFreshInType usage Nonrigid "any" src_t
-      onFailure (CheckingRecordUpdate fields (toStruct src_t') (toStruct ve_t)) $
-        unify usage (toStruct src_t') (toStruct ve_t)
+      onFailure (CheckingRecordUpdate fields src_t' ve_t) $
+        unify usage src_t' ve_t
       pure ve_t
     updateField (f : fs) ve_t (Scalar (Record m))
       | Just f_t <- M.lookup f m = do
@@ -853,7 +853,7 @@ checkExp (ProjectSection fields NoInfo loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
-  let ft = Scalar $ Arrow mempty Unnamed Observe (toStruct a) $ RetType [] $ toRes Nonunique b
+  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ toRes Nonunique b
   pure $ ProjectSection fields (Info ft) loc
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
@@ -872,7 +872,7 @@ checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
   es' <- mapM checkExp es
   ets <- mapM expTypeFully es'
-  mustHaveConstr (mkUsage loc "use of constructor") name t (toStruct <$> ets)
+  mustHaveConstr (mkUsage loc "use of constructor") name t ets
   pure $ Constr name es' (Info t) loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
@@ -881,7 +881,7 @@ checkExp (AppExp (Match e cs loc) _) = do
   zeroOrderType
     (mkUsage loc "being returned 'match'")
     "type returned from pattern match"
-    (toStruct t)
+    t
   pure $ AppExp (Match e' cs' loc) (Info $ AppRes t retext)
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc
@@ -1024,7 +1024,7 @@ checkApply ::
 checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
-    unify (mkUsage argexp "use as function argument") (toStruct tp1) argtype
+    unify (mkUsage argexp "use as function argument") tp1 argtype
 
     -- Perform substitutions of instantiated variables in the types.
     tp1' <- normTypeFully tp1
@@ -1073,8 +1073,8 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
     pure (d1, tp1', tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
-  unify (mkUsage loc "use as function") (toStruct tfun) $
-    Scalar (Arrow mempty Unnamed Observe (toStruct (typeOf arg)) $ RetType [] $ paramToRes tv)
+  unify (mkUsage loc "use as function") tfun $
+    Scalar (Arrow mempty Unnamed Observe (typeOf arg) $ RetType [] $ paramToRes tv)
   tfun' <- normType tfun
   checkApply loc fname tfun' arg
 checkApply loc (fname, prev_applied) ftype argexp = do
@@ -1108,7 +1108,7 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 checkOneExp :: UncheckedExp -> TypeM ([TypeParam], Exp)
 checkOneExp e = runTermTypeM checkExp $ do
   e' <- checkExp e
-  let t = toStruct $ typeOf e'
+  let t = typeOf e'
   (tparams, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
   fixOverloadedTypes $ typeVars t
@@ -1122,7 +1122,7 @@ checkOneExp e = runTermTypeM checkExp $ do
 checkSizeExp :: UncheckedExp -> TypeM Exp
 checkSizeExp e = runTermTypeM checkExp $ do
   e' <- checkExp e
-  let t = toStruct $ typeOf e'
+  let t = typeOf e'
   when (hasBinding e') $
     typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
       "Size expression with binding is forbidden."
@@ -1139,7 +1139,7 @@ causalityCheck binding_body = do
   let checkCausality what known t loc
         | (d, dloc) : _ <-
             mapMaybe (unknown constraints known) $
-              S.toList (fvVars $ freeInType $ toStruct t) =
+              S.toList (fvVars $ freeInType t) =
             Just $ lift $ causality what (locOf loc) d dloc t
         | otherwise = Nothing
 
@@ -1459,7 +1459,7 @@ inferredReturnType loc params t = do
   -- parameter patterns, but which will not be visible in the type.
   -- These we must turn into fresh type variables, which will be
   -- existential in the return type.
-  toStruct . fst <$> unscopeType loc hidden_params t
+  fst <$> unscopeType loc hidden_params t
   where
     hidden_params = S.filter (`S.member` hidden) $ foldMap patNames params
     hidden = hiddenParamNames params
@@ -1728,8 +1728,8 @@ checkFunBody params body maybe_rettype loc = do
           body_t
 
       let usage = mkUsage body "return type annotation"
-      onFailure (CheckingReturn rettype (toStruct body_t')) $
-        unify usage (toStruct rettype) (toStruct body_t')
+      onFailure (CheckingReturn rettype body_t') $
+        unify usage (toStruct rettype) body_t'
     Nothing -> pure ()
 
   pure body'
