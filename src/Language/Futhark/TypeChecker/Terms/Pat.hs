@@ -298,7 +298,7 @@ checkPat ::
 checkPat sizes p t m = do
   checkForDuplicateNames (map sizeBinderToParam sizes) [p]
   p' <-
-    onFailure (CheckingPat (fmap toStruct p) (fmap toStruct t)) $
+    onFailure (CheckingPat (fmap toStruct p) t) $
       checkPat' sizes (fmap (toParam Observe) p) (fmap (toParam Observe) t)
 
   let explicit = mustBeExplicitInType $ patternStructType p'
