@@ -7,7 +7,6 @@
 module Language.Futhark.TypeChecker.Terms.Monad
   ( TermTypeM,
     runTermTypeM,
-    liftTypeM,
     ValBinding (..),
     SizeSource (SourceBound, SourceSlice),
     Inferred (..),
@@ -54,11 +53,13 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Futhark.FreshNames hiding (newName)
+import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
@@ -188,7 +189,9 @@ data TermEnv = TermEnv
   { termScope :: TermScope,
     termChecking :: Maybe Checking,
     termLevel :: Level,
-    termChecker :: UncheckedExp -> TermTypeM Exp
+    termChecker :: UncheckedExp -> TermTypeM Exp,
+    termOuterEnv :: Env,
+    termImportName :: ImportName
   }
 
 data TermScope = TermScope
@@ -247,22 +250,35 @@ data SizeSource
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
-    stateUsed :: S.Set VName
+    stateUsed :: S.Set VName,
+    stateWarnings :: Warnings,
+    stateNameSource :: VNameSource
   }
 
 newtype TermTypeM a
-  = TermTypeM (ReaderT TermEnv (StateT TermTypeState TypeM) a)
+  = TermTypeM
+      ( ReaderT
+          TermEnv
+          (StateT TermTypeState (Except (Warnings, TypeError)))
+          a
+      )
   deriving
     ( Monad,
       Functor,
       Applicative,
       MonadReader TermEnv,
-      MonadState TermTypeState,
-      MonadError TypeError
+      MonadState TermTypeState
     )
 
-liftTypeM :: TypeM a -> TermTypeM a
-liftTypeM = TermTypeM . lift . lift
+instance MonadError TypeError TermTypeM where
+  throwError e = TermTypeM $ do
+    ws <- gets stateWarnings
+    throwError (ws, e)
+
+  catchError (TermTypeM m) f =
+    TermTypeM $ m `catchError` f'
+    where
+      f' (_, e) = let TermTypeM m' = f e in m'
 
 incCounter :: TermTypeM Int
 incCounter = do
@@ -393,7 +409,7 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
 checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
 checkIntrinsic space qn@(QualName _ name) loc
   | Just v <- M.lookup (space, name) intrinsicsNameMap = do
-      me <- liftTypeM askImportName
+      me <- asks termImportName
       unless (isBuiltin (includeToFilePath me)) $
         warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
       scope <- asks termScope
@@ -412,9 +428,18 @@ instance MonadTypeChecker TermTypeM where
     unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
     updateTypes e'
 
-  warn loc problem = liftTypeM $ warn loc problem
-  newName = liftTypeM . newName
-  newID = liftTypeM . newID
+  warnings ws =
+    modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
+
+  warn loc problem = warnings $ singleWarning (srclocOf loc) problem
+
+  newName v = do
+    s <- get
+    let (v', src') = Futhark.FreshNames.newName (stateNameSource s) v
+    put $ s {stateNameSource = src'}
+    pure v'
+
+  newID s = newName $ VName s 0
 
   newTypeName name = do
     i <- incCounter
@@ -429,7 +454,7 @@ instance MonadTypeChecker TermTypeM where
     scope {scopeVtable = M.insert v (BoundV tps t) $ scopeVtable scope}
 
   lookupType loc qn = do
-    outer_env <- liftTypeM askEnv
+    outer_env <- asks termOuterEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
     case M.lookup name $ scopeTypeTable scope of
       Nothing -> unknownType loc qn
@@ -448,7 +473,7 @@ instance MonadTypeChecker TermTypeM where
       Just m -> pure (qn', m)
 
   lookupVar loc qn = do
-    outer_env <- liftTypeM askEnv
+    outer_env <- asks termOuterEnv
     (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
     let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
@@ -647,11 +672,31 @@ initialTermScope =
 runTermTypeM :: (UncheckedExp -> TermTypeM Exp) -> TermTypeM a -> TypeM a
 runTermTypeM checker (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
+  name <- askImportName
+  outer_env <- askEnv
+  src <- gets TypeM.stateNameSource
   let initial_tenv =
         TermEnv
           { termScope = initial_scope,
             termChecking = Nothing,
             termLevel = 0,
-            termChecker = checker
+            termChecker = checker,
+            termImportName = name,
+            termOuterEnv = outer_env
           }
-  evalStateT (runReaderT m initial_tenv) (TermTypeState mempty 0 mempty)
+      initial_state =
+        TermTypeState
+          { stateConstraints = mempty,
+            stateCounter = 0,
+            stateUsed = mempty,
+            stateWarnings = mempty,
+            stateNameSource = src
+          }
+  case runExcept (runStateT (runReaderT m initial_tenv) initial_state) of
+    Left (ws, e) -> do
+      warnings ws
+      throwError e
+    Right (a, TermTypeState {stateNameSource, stateWarnings}) -> do
+      warnings stateWarnings
+      modify $ \s -> s {TypeM.stateNameSource = stateNameSource}
+      pure a
