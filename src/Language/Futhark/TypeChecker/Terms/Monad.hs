@@ -646,7 +646,7 @@ initialTermScope =
   TermScope
     { scopeVtable = initialVtable,
       scopeTypeTable = mempty,
-      scopeNameMap = topLevelNameMap,
+      scopeNameMap = mempty,
       scopeModTable = mempty
     }
   where
