@@ -236,14 +236,14 @@ sizeFree ::
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 sizeFree tloc expKiller orig_t = do
-  runReaderT (to_be_replaced orig_t $ onType orig_t) mempty `runStateT` mempty
+  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
   where
     same_exp e1 e2
       | Just es <- similarExps e1 e2 =
           all (uncurry same_exp) es
       | otherwise = False
 
-    witnessed_exps t = execState (traverseDims onDim t) mempty
+    witnessedExps t = execState (traverseDims onDim t) mempty
       where
         onDim _ PosImmediate e = modify (e :)
         onDim _ _ _ = pure ()
@@ -258,8 +258,7 @@ sizeFree tloc expKiller orig_t = do
               astMap mapper e'
         mapper = identityMapper {mapOnExp}
     depends a b = any (same_exp b) $ subExps a
-    top_wit =
-      topologicalSort depends . witnessed_exps
+    topWit = topologicalSort depends . witnessedExps
 
     lookReplacement e repl = snd <$> find (same_exp e . fst) repl
     expReplace mapping e
@@ -278,8 +277,7 @@ sizeFree tloc expKiller orig_t = do
           modify (vn :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
-    to_be_replaced t m' = do
-      foldl f m' $ top_wit t
+    toBeReplaced t m' = foldl f m' $ topWit t
       where
         f m e = do
           e' <- replacing e
@@ -292,7 +290,7 @@ sizeFree tloc expKiller orig_t = do
     onScalar (Arrow as argName d argT (RetType dims retT)) = do
       argT' <- onType argT
       old_bound <- get
-      retT' <- to_be_replaced retT $ onType retT
+      retT' <- toBeReplaced retT $ onType retT
       rl <- state $ partition (`notElem` old_bound)
       let dims' = dims <> rl
       pure $ Arrow as argName d argT' (RetType dims' retT')
@@ -348,8 +346,10 @@ reboundI64 ::
   [VName] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
-reboundI64 tloc unscoped =
-  fmap (fmap M.elems) . (`runStateT` mempty) . astMap mapper
+reboundI64 tloc unscoped t =
+  if null unscoped
+    then pure (t, [])
+    else second M.elems <$> runStateT (astMap mapper t) mempty
   where
     mapper =
       ASTMapper
