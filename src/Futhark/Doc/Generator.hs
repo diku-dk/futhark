@@ -418,7 +418,7 @@ valBindHtml :: Html -> ValBind -> DocM (Html, Html, Html)
 valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = do
   let tparams' = mconcat $ map ((" " <>) . typeParamHtml) tparams
       noLink' =
-        noLink $ map typeParamName tparams ++ S.toList (foldMap patNames params)
+        noLink $ map typeParamName tparams <> foldMap patNames params
   rettype' <- noLink' $ maybe (retTypeHtml rettype) typeExpHtml retdecl
   params' <- noLink' $ mapM paramHtml params
   pure

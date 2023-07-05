@@ -213,11 +213,11 @@ checkReturnAlias loc params rettp =
     consumableParamType (Scalar (Sum fs)) = all (all consumableParamType) fs
     consumableParamType (Scalar Arrow {}) = False
 
-unscope :: Names -> Aliases -> Aliases
+unscope :: [VName] -> Aliases -> Aliases
 unscope bound = S.map f
   where
     f (AliasFree v) = AliasFree v
-    f (AliasBound v) = if v `S.member` bound then AliasFree v else AliasBound v
+    f (AliasBound v) = if v `elem` bound then AliasFree v else AliasBound v
 
 -- | Figure out the aliases of each bound name in a pattern.
 matchPat :: Pat t -> TypeAliases -> DL.DList (VName, (t, TypeAliases))
@@ -272,7 +272,7 @@ bindingParam p m = do
 
 bindingIdent :: Diet -> Ident StructType -> CheckM (a, TypeAliases) -> CheckM (a, TypeAliases)
 bindingIdent d (Ident v (Info t) _) =
-  fmap (second (second (unscope (S.singleton v)))) . local bind
+  fmap (second (second (unscope [v]))) . local bind
   where
     bind env = env {envVtable = M.insert v t' (envVtable env)}
     d' = case d of
@@ -570,14 +570,14 @@ updateParamDiet cons = recurse
 convergeLoopParam :: Loc -> Pat ParamType -> Names -> TypeAliases -> CheckM (Pat ParamType)
 convergeLoopParam loop_loc param body_cons body_als = do
   let -- Make the pattern Consume where needed.
-      param' = updateParamDiet (patNames param `S.intersection` body_cons) param
+      param' = updateParamDiet (S.filter (`elem` patNames param) body_cons) param
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
   -- returned for a unique merge parameter does not alias anything
   -- else returned.
   let checkMergeReturn (Id pat_v (Info pat_v_t) patloc) t = do
-        let free_als = boundAliases (aliases t) `S.difference` patNames param
+        let free_als = S.filter (`notElem` patNames param) $ boundAliases (aliases t)
         when (diet pat_v_t == Consume) $ forM_ free_als $ \v ->
           lift . addError loop_loc mempty $
             "Return value for consuming loop parameter"

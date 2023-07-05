@@ -216,7 +216,7 @@ liftValDec fname (RetType ret_dims ret) dims pats body = addValBind dec
     -- forget those return sizes that we forgot to propagate along
     -- the way.  Hopefully the internaliser is conservative and
     -- will insert reshapes...
-    bound_here = S.fromList dims <> foldMap patNames pats
+    bound_here = S.fromList $ dims <> foldMap patNames pats
     mkExt v
       | not $ v `S.member` bound_here = Just v
     mkExt _ = Nothing
@@ -839,7 +839,7 @@ unboundSizes :: S.Set VName -> [Pat ParamType] -> [VName]
 unboundSizes bound_sizes params = nubOrd $ execState (f params) []
   where
     f = traverse $ traverse $ bitraverse onDim pure
-    bound = bound_sizes <> foldMap patNames params
+    bound = bound_sizes <> S.fromList (foldMap patNames params)
     onDim (Var d typ loc) = do
       unless (qualLeaf d `S.member` bound) $ modify (qualLeaf d :)
       pure $ Var d typ loc
@@ -933,9 +933,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((d, argext
           combineTypeShapes (retType lam_e_t) (resTypeFromSV sv)
 
       already_bound =
-        globals
-          <> S.fromList dims
-          <> foldMap patNames params
+        globals <> S.fromList (dims <> foldMap patNames params)
 
       more_dims =
         S.toList $
@@ -1262,7 +1260,7 @@ defuncValBind valbind@(ValBind _ name retdecl (Info (RetType ret_dims rettype)) 
   (tparams', params', body', sv, sv_t) <-
     defuncLet (map typeParamName tparams) params body $ RetType ret_dims rettype
   globals <- asks fst
-  let bound_sizes = foldMap patNames params' <> S.fromList tparams' <> globals
+  let bound_sizes = S.fromList (foldMap patNames params') <> S.fromList tparams' <> globals
   params'' <- instAnySizes params'
   let rettype' = combineTypeShapes rettype sv_t
       tparams'' = tparams' ++ unboundSizes bound_sizes params''

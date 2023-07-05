@@ -32,6 +32,10 @@ instance Monoid FV where
 freeWithout :: FV -> S.Set VName -> FV
 freeWithout (FV x) y = FV $ x `S.difference` y
 
+-- | As 'freeWithout', but for lists.
+freeWithoutL :: FV -> [VName] -> FV
+freeWithoutL fv y = fv `freeWithout` S.fromList y
+
 ident :: Ident t -> FV
 ident = FV . S.singleton . identName
 
@@ -61,13 +65,11 @@ freeInExp expr = case expr of
   AppExp (LetPat let_sizes pat e1 e2 _) _ ->
     freeInExp e1
       <> ( (freeInPat pat <> freeInExp e2)
-             `freeWithout` (patNames pat <> S.fromList (map sizeName let_sizes))
+             `freeWithoutL` (patNames pat <> map sizeName let_sizes)
          )
   AppExp (LetFun vn (tparams, pats, _, _, e1) e2 _) _ ->
     ( (freeInExp e1 <> foldMap freeInPat pats)
-        `freeWithout` ( foldMap patNames pats
-                          <> S.fromList (map typeParamName tparams)
-                      )
+        `freeWithoutL` (foldMap patNames pats <> map typeParamName tparams)
     )
       <> (freeInExp e2 `freeWithout` S.singleton vn)
   AppExp (If e1 e2 e3 _) _ -> freeInExp e1 <> freeInExp e2 <> freeInExp e3
@@ -76,7 +78,7 @@ freeInExp expr = case expr of
   Not e _ -> freeInExp e
   Lambda pats e0 _ (Info (RetType dims t)) _ ->
     (foldMap freeInPat pats <> freeInExp e0 <> freeInType t)
-      `freeWithout` (foldMap patNames pats <> S.fromList dims)
+      `freeWithoutL` (foldMap patNames pats <> dims)
   OpSection {} -> mempty
   OpSectionLeft _ _ e _ _ _ -> freeInExp e
   OpSectionRight _ _ e _ _ _ -> freeInExp e
@@ -86,10 +88,10 @@ freeInExp expr = case expr of
     let (e2fv, e2ident) = formVars form
      in freeInExp e1
           <> ( (e2fv <> freeInExp e3)
-                 `freeWithout` (S.fromList sparams <> patNames pat <> e2ident)
+                 `freeWithoutL` (sparams <> patNames pat <> e2ident)
              )
     where
-      formVars (For v e2) = (freeInExp e2, S.singleton $ identName v)
+      formVars (For v e2) = (freeInExp e2, [identName v])
       formVars (ForIn p e2) = (freeInExp e2, patNames p)
       formVars (While e2) = (freeInExp e2, mempty)
   AppExp (BinOp (qn, _) _ (e1, _) (e2, _) _) _ ->
@@ -112,7 +114,7 @@ freeInExp expr = case expr of
     where
       caseFV (CasePat p eCase _) =
         (freeInPat p <> freeInExp eCase)
-          `freeWithout` patNames p
+          `freeWithoutL` patNames p
 
 freeInDimIndex :: DimIndexBase Info VName -> FV
 freeInDimIndex (DimFix e) = freeInExp e

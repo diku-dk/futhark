@@ -488,7 +488,7 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   let dimArgs = S.fromList (map sizeName sizes)
   implicitDims <- withArgs dimArgs $ askIntros $ fvVars $ freeInPat pat
   let dimArgs' = dimArgs <> implicitDims
-      letArgs = patNames pat
+      letArgs = S.fromList $ patNames pat
       argset = dimArgs' `S.union` letArgs
   pat' <- withArgs dimArgs' $ transformPat pat
   params <- parametrizing dimArgs'
@@ -511,8 +511,8 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
-      body' <- scoping (foldMap patNames params) $ transformExp body
-      ret' <- transformRetTypeSizes (foldMap patNames params) ret
+      body' <- scoping (S.fromList (foldMap patNames params)) $ transformExp body
+      ret' <- transformRetTypeSizes (S.fromList (foldMap patNames params)) ret
       AppExp
         <$> ( LetFun fname (tparams, params, retdecl, Info ret', body')
                 <$> scoping (S.singleton fname) (transformExp e)
@@ -535,13 +535,13 @@ transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   pat' <- withArgs dimArgs $ transformPat pat
   params <- parametrizing dimArgs
   let sparams' = sparams <> map snd params
-      mergeArgs = dimArgs `S.union` patNames pat
+      mergeArgs = dimArgs `S.union` S.fromList (patNames pat)
 
   (form', formArgs) <- case form of
     For ident e2 -> (,S.singleton $ identName ident) . For ident <$> transformExp e2
     ForIn pat2 e2 -> do
       pat2' <- transformPat pat2
-      (,patNames pat2) . ForIn pat2' <$> transformExp e2
+      (,S.fromList (patNames pat2)) . ForIn pat2' <$> transformExp e2
     While e2 ->
       fmap ((,mempty) . While) $
         withParams params $
@@ -681,7 +681,7 @@ transformExp (Negate e loc) =
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
 transformExp (Lambda params e0 decl tp loc) = do
-  let patArgs = foldMap patNames params
+  let patArgs = S.fromList $ foldMap patNames params
   dimArgs <- withArgs patArgs $ askIntros (foldMap (fvVars . freeInPat) params)
   let argset = dimArgs `S.union` patArgs
   params' <- mapM transformPat params
@@ -750,7 +750,7 @@ transformExp (Attr info e loc) =
 transformCase :: S.Set VName -> Case -> MonoM Case
 transformCase implicitDims (CasePat p e loc) = do
   p' <- transformPat p
-  CasePat p' <$> scoping (patNames p `S.union` implicitDims) (transformExp e) <*> pure loc
+  CasePat p' <$> scoping (S.fromList (patNames p) `S.union` implicitDims) (transformExp e) <*> pure loc
 
 transformDimIndex :: DimIndexBase Info VName -> MonoM (DimIndexBase Info VName)
 transformDimIndex (DimFix e) = DimFix <$> transformExp e
@@ -1052,7 +1052,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
     params'' <- withArgs shape_names $ mapM transformPat params'
     exp_naming <- paramGetClean shape_names
 
-    let args = foldMap patNames params
+    let args = S.fromList $ foldMap patNames params
         arg_params = map snd exp_naming
 
     rettype' <-

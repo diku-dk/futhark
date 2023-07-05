@@ -324,7 +324,7 @@ bindingPat sizes p t m = do
       size : _ -> unusedSize size
 
 patNameMap :: Pat t -> NameMap
-patNameMap = M.fromList . map asTerm . S.toList . patNames
+patNameMap = M.fromList . map asTerm . patNames
   where
     asTerm v = ((Term, baseName v), qualName v)
 
