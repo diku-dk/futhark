@@ -573,8 +573,8 @@ patIdents (PatConstr _ _ ps _) = foldMap patIdents ps
 patIdents (PatAttr _ p _) = patIdents p
 
 -- | The set of names bound in a pattern.
-patNames :: Pat t -> S.Set VName
-patNames = S.fromList . map fst . patternMap
+patNames :: Pat t -> [VName]
+patNames = map fst . patternMap
 
 -- | Each name bound in a pattern alongside its type.
 patternMap :: Pat t -> [(VName, t)]

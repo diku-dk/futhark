@@ -22,7 +22,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.Either
-import Data.List (find, genericLength, partition)
+import Data.List (delete, find, genericLength, partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -336,16 +336,16 @@ unscopeUnknown t = do
 
 unscopeType ::
   SrcLoc ->
-  S.Set VName ->
+  [VName] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 unscopeType tloc unscoped =
-  sizeFree tloc $ S.lookupMin . S.intersection unscoped . fvVars . freeInExp
+  sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
 
 reboundI64 ::
   ASTMappable (TypeBase Size as) =>
   SrcLoc ->
-  S.Set VName ->
+  [VName] ->
   TypeBase Size as ->
   TermTypeM (TypeBase Size as, [VName])
 reboundI64 tloc unscoped =
@@ -362,7 +362,7 @@ reboundI64 tloc unscoped =
 
     mapOnExp :: Exp -> StateT (M.Map VName VName) TermTypeM Exp
     mapOnExp (Var (QualName _ vn) _ loc)
-      | vn `S.member` unscoped = do
+      | vn `elem` unscoped = do
           prev <- gets $ M.lookup vn
           case prev of
             Just vn' -> pure $ sizeFromName (qualName vn') loc
@@ -643,9 +643,10 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
       body' <- checkExp body
       let (i64, noni64) = partition i64Ident $ patIdents pat'
       (body_t, retext) <-
-        reboundI64 loc (S.fromList (map sizeName sizes' <> map identName i64))
+        reboundI64 loc (map sizeName sizes' <> map identName i64)
           =<< expTypeFully body'
-      (body_t', retext') <- unscopeType loc (S.fromList (map identName noni64)) body_t
+      (body_t', retext') <-
+        unscopeType loc (map identName noni64) body_t
 
       pure $
         AppExp
@@ -672,9 +673,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
             }
     body' <- localScope bindF $ checkExp body
 
-    (body_t, ext) <-
-      unscopeType loc (S.singleton name')
-        =<< expTypeFully body'
+    (body_t, ext) <- unscopeType loc [name'] =<< expTypeFully body'
 
     pure $
       AppExp
@@ -697,9 +696,7 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
 
   bindingIdent dest (unInfo (identType src')) $ \dest' -> do
     body' <- checkExp body
-    (body_t, ext) <-
-      unscopeType loc (S.singleton (identName dest'))
-        =<< expTypeFully body'
+    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
     pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
@@ -777,7 +774,7 @@ checkExp (Lambda params body rettype_te NoInfo loc) = do
 
   verifyFunctionParams Nothing params'
 
-  (ty', dims') <- unscopeType loc (S.fromList dims) ty
+  (ty', dims') <- unscopeType loc dims ty
 
   pure $ Lambda params' body' rettype' (Info (RetType dims' ty')) loc
   where
@@ -910,8 +907,8 @@ checkCase mt (CasePat p e loc) =
     e' <- checkExp e
     let (i64, noni64) = partition i64Ident $ patIdents p'
     (t, retext) <-
-      reboundI64 loc (S.fromList (map identName i64)) =<< expTypeFully e'
-    (t', retext') <- unscopeType loc (S.fromList (map identName noni64)) t
+      reboundI64 loc (map identName i64) =<< expTypeFully e'
+    (t', retext') <- unscopeType loc (map identName noni64) t
     pure (CasePat (fmap toStruct p') e' loc, t', retext <> retext')
   where
     i64Ident (Ident _ ty _) =
@@ -1440,7 +1437,7 @@ fixOverloadedTypes tyvars_at_toplevel =
         "Ambiguous size" <+> dquotes (prettyName v) <+> "arising from" <+> pretty u <> "."
     fixOverloaded _ = pure ()
 
-hiddenParamNames :: [Pat ParamType] -> Names
+hiddenParamNames :: [Pat ParamType] -> [VName]
 hiddenParamNames params = hidden
   where
     param_all_names = mconcat $ map patNames params
@@ -1448,7 +1445,7 @@ hiddenParamNames params = hidden
     named (Unnamed, _, _) = Nothing
     param_names =
       S.fromList $ mapMaybe (named . patternParam) params
-    hidden = param_all_names `S.difference` param_names
+    hidden = filter (`notElem` param_names) param_all_names
 
 inferredReturnType :: SrcLoc -> [Pat ParamType] -> StructType -> TermTypeM StructType
 inferredReturnType loc params t = do
@@ -1458,7 +1455,7 @@ inferredReturnType loc params t = do
   -- existential in the return type.
   fst <$> unscopeType loc hidden_params t
   where
-    hidden_params = S.filter (`S.member` hidden) $ foldMap patNames params
+    hidden_params = filter (`elem` hidden) $ foldMap patNames params
     hidden = hiddenParamNames params
 
 checkBinding ::
@@ -1536,7 +1533,7 @@ verifyFunctionParams fname params =
     verifyParams (foldMap patNames params) =<< mapM updateTypes params
   where
     verifyParams forbidden (p : ps)
-      | d : _ <- S.toList $ fvVars (freeInPat p) `S.intersection` forbidden =
+      | d : _ <- filter (`elem` forbidden) $ S.toList $ fvVars $ freeInPat p =
           typeError p mempty . withIndexLink "inaccessible-size" $
             "Parameter"
               <+> dquotes (pretty p)
@@ -1553,7 +1550,7 @@ verifyFunctionParams fname params =
       where
         forbidden' =
           case patternParam p of
-            (Named v, _, _) -> forbidden `S.difference` S.singleton v
+            (Named v, _, _) -> delete v forbidden
             _ -> forbidden
     verifyParams _ [] = pure ()
 
@@ -1721,7 +1718,7 @@ checkFunBody params body maybe_rettype loc = do
       (body_t', _) <-
         unscopeType
           loc
-          (S.filter (`S.member` hidden) $ foldMap patNames params)
+          (filter (`elem` hidden) $ foldMap patNames params)
           body_t
 
       let usage = mkUsage body "return type annotation"
