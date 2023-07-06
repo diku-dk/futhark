@@ -209,11 +209,11 @@ instance C.ToExp IntValue where
 instance C.ToExp FloatValue where
   toExp (Float16Value x) _
     | isInfinite x =
-        if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]
+        if x > 0 then [C.cexp|(typename f16)INFINITY|] else [C.cexp|(typename f16)-INFINITY|]
     | isNaN x =
-        [C.cexp|NAN|]
+        [C.cexp|(typename f16)NAN|]
     | otherwise =
-        [C.cexp|$float:(fromRational (toRational x))|]
+        [C.cexp|(typename f16)$float:(fromRational (toRational x))|]
   toExp (Float32Value x) _
     | isInfinite x =
         if x > 0 then [C.cexp|INFINITY|] else [C.cexp|-INFINITY|]

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Code generation for `f16` literals in CUDA backend (#1979).
+
 ## [0.25.1]
 
 ### Added
