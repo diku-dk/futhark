@@ -48,7 +48,7 @@ def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 -- | Statically change the size of an array.  Fail at runtime if the
 -- imposed size does not match the actual size.  Essentially syntactic
 -- sugar for a size coercion.
-def resize [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
+def sized [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
 
 -- | Split an array at a given position.
 --
