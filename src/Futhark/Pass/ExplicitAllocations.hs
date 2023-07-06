@@ -293,7 +293,7 @@ summaryForBindage _ t@(Array pt _ _) (Hint ixfun space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
       product
-        [ product $ IxFun.base ixfun,
+        [ product $ IxFun.shape ixfun,
           fromIntegral (primByteSize pt :: Int64)
         ]
   m <- letExp "mem" $ Op $ Alloc bytes space
@@ -346,7 +346,6 @@ ensureRowMajorArray space_ok v = do
   let space = fromMaybe default_space space_ok
   if numLMADs ixfun == 1
     && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
-    && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     && IxFun.contiguous ixfun
     then pure (mem, v)
@@ -720,14 +719,14 @@ ixFunMon :: IxFun -> [IxFun.Monotonicity]
 ixFunMon = map IxFun.ldMon . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
 
 data MemReq
-  = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
+  = MemReq Space [Int] [IxFun.Monotonicity] Bool
   | NeedsLinearisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsLinearisation {} _ = x
 combMemReqs _ y@NeedsLinearisation {} = y
-combMemReqs x@(MemReq x_space _ _ _ _) y@MemReq {} =
+combMemReqs x@(MemReq x_space _ _ _) y@MemReq {} =
   if x == y then x else NeedsLinearisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -738,17 +737,16 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
-  -- Memory + offset + base_rank + (stride,size)*rank.
+contextRets (MemArray _ shape _ (MemReq space _ _ _)) =
+  -- Memory + offset + (stride,size)*rank.
   MemMem space
     : MemPrim int64
-    : replicate base_rank (MemPrim int64)
-    ++ replicate (2 * shapeRank shape) (MemPrim int64)
+    : replicate (2 * shapeRank shape) (MemPrim int64)
 contextRets (MemArray _ shape _ (NeedsLinearisation space)) =
-  -- Memory + offset + (base,stride,size)*rank.
+  -- Memory + offset + (stride,size)*rank.
   MemMem space
     : MemPrim int64
-    : replicate (3 * shapeRank shape) (MemPrim int64)
+    : replicate (2 * shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
 -- Add memory information to the body, but do not return memory/ixfun
@@ -777,7 +775,6 @@ allocInMatchBody rets (Body _ stms res) =
                   space
                   (ixFunPerm ixfun)
                   (ixFunMon ixfun)
-                  (Rank $ length $ IxFun.base ixfun)
                   (IxFun.contiguous ixfun)
               else NeedsLinearisation space
         (_, MemMem space) -> pure $ MemMem space
@@ -801,16 +798,16 @@ mkBranchRet reqs =
       )
 
     arrayInfo rank (NeedsLinearisation space) =
-      (space, [0 .. rank - 1], repeat IxFun.Inc, rank, True)
-    arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
-      (space, perm, mon, base_rank, contig)
+      (space, [0 .. rank - 1], repeat IxFun.Inc, True)
+    arrayInfo _ (MemReq space perm mon contig) =
+      (space, perm, mon, contig)
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
+          (space, perm, mon, contig) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
             convert
-              <$> IxFun.mkExistential base_rank (zip perm mon) contig (ctx_offset + 1)
+              <$> IxFun.mkExistential (zip perm mon) contig (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space

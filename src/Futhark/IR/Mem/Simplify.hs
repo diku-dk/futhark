@@ -171,12 +171,11 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
         Just cases_ses <- mapM (maybeNth j . bodyResult . caseBody) cases,
         Just defbody_se <- maybeNth j $ bodyResult defbody,
         mem `onlyUsedIn` patElemName pat_elem,
-        length (IxFun.base ixfun) == shapeRank shape, -- See #1325
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         any (defbody_se /=) cases_ses =
           let mem_size =
-                untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
+                untyped $ product $ primByteSize pt : map sExt64 (IxFun.shape ixfun)
            in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
           fixable

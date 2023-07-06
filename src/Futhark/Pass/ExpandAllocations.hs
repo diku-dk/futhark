@@ -671,7 +671,7 @@ offsetMemoryInParam fparam = do
 
 offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
 offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
-  new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
+  new_base <- lookupNewBase mem (IxFun.shape ixfun, pt)
   pure . fromMaybe summary $ do
     new_base' <- new_base
     pure $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
@@ -680,7 +680,7 @@ offsetMemoryInMemBound summary = pure summary
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
-      new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
+      new_base <- lookupNewBase mem (IxFun.shape ixfun', pt)
       pure . fromMaybe br $ do
         new_base' <- new_base
         pure . MemArray pt shape u . ReturnsInBlock mem $

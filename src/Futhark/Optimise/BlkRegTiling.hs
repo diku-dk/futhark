@@ -143,7 +143,7 @@ kkLoopBody
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmads _ _) <- ixf_fn =
+          (IxFun.IxFun lmads _) <- ixf_fn =
             all innerHasStride1 $ NE.toList lmads
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"

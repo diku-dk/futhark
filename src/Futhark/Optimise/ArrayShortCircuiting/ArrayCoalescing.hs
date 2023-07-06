@@ -1259,7 +1259,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
                         _ -> (failed, s_acc) -- fail!
 
 ixfunToAccessSummary :: IxFun.IxFun (TPrimExp Int64 VName) -> AccessSummary
-ixfunToAccessSummary (IxFun.IxFun (lmad NE.:| []) _ _) = Set $ S.singleton lmad
+ixfunToAccessSummary (IxFun.IxFun (lmad NE.:| []) _) = Set $ S.singleton lmad
 ixfunToAccessSummary _ = Undeterminable
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
