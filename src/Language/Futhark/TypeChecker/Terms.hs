@@ -238,9 +238,9 @@ sizeFree ::
 sizeFree tloc expKiller orig_t = do
   runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
   where
-    same_exp e1 e2
+    sameExp e1 e2
       | Just es <- similarExps e1 e2 =
-          all (uncurry same_exp) es
+          all (uncurry sameExp) es
       | otherwise = False
 
     witnessedExps t = execState (traverseDims onDim t) mempty
@@ -257,10 +257,10 @@ sizeFree tloc expKiller orig_t = do
               modify (e' :)
               astMap mapper e'
         mapper = identityMapper {mapOnExp}
-    depends a b = any (same_exp b) $ subExps a
+    depends a b = any (sameExp b) $ subExps a
     topWit = topologicalSort depends . witnessedExps
 
-    lookReplacement e repl = snd <$> find (same_exp e . fst) repl
+    lookReplacement e repl = snd <$> find (sameExp e . fst) repl
     expReplace mapping e
       | Just e' <- lookReplacement e mapping = e'
       | otherwise = runIdentity $ astMap mapper e
