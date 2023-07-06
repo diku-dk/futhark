@@ -5,7 +5,7 @@
 type option 'a = #None | #Some a
 
 def gen () : ?[n].[n]i32 =
-  let n = 0
+  let (n,_) = (0,true)
   in replicate n 0i32
 
 entry main b: option ([]i32) =
