@@ -421,8 +421,7 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
                 (aggSummaryMapPartial (scalarTable td_env) $ unSegSpace space0)
                 (S.toList s)
             Undeterminable -> pure Undeterminable
-        let res = noMemOverlap td_env destination_uses source_writes
-        if res
+        if noMemOverlap td_env destination_uses source_writes
           then pure bu_env_f
           else do
             let (ac, inh) = markFailedCoal (activeCoals bu_env_f, inhibit bu_env_f) k
