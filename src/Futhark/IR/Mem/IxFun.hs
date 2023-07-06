@@ -733,8 +733,7 @@ closeEnough ixf1 ixf2 =
     closeEnoughLMADs :: (LMAD num, LMAD num) -> Bool
     closeEnoughLMADs (lmad1, lmad2) =
       length (lmadDims lmad1) == length (lmadDims lmad2)
-        && map ldPerm (lmadDims lmad1)
-          == map ldPerm (lmadDims lmad2)
+        && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
 
 -- | Returns true if two 'IxFun's are equivalent.
 --
@@ -747,9 +746,6 @@ equivalent ixf1 ixf2 =
   where
     equivalentLMADs (lmad1, lmad2) =
       length (lmadDims lmad1) == length (lmadDims lmad2)
-        && map ldPerm (lmadDims lmad1)
-          == map ldPerm (lmadDims lmad2)
-        && lmadOffset lmad1
-          == lmadOffset lmad2
-        && map ldStride (lmadDims lmad1)
-          == map ldStride (lmadDims lmad2)
+        && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
+        && lmadOffset lmad1 == lmadOffset lmad2
+        && map ldStride (lmadDims lmad1) == map ldStride (lmadDims lmad2)
