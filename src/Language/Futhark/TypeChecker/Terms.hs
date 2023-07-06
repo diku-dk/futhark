@@ -230,36 +230,44 @@ checkCoerce loc te e = do
               "a size coercion where the underlying expression size cannot be determined"
           pure $ sizeFromName (qualName v) (srclocOf d)
 
-sizeFree ::
-  SrcLoc ->
-  (Exp -> Maybe VName) ->
-  TypeBase Size as ->
-  TermTypeM (TypeBase Size as, [VName])
-sizeFree tloc expKiller orig_t = do
-  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
-  where
-    sameExp e1 e2
-      | Just es <- similarExps e1 e2 =
-          all (uncurry sameExp) es
-      | otherwise = False
+sameExp :: Exp -> Exp -> Bool
+sameExp e1 e2
+  | Just es <- similarExps e1 e2 =
+      all (uncurry sameExp) es
+  | otherwise = False
 
+-- All non-trivial subexpressions (as by stripExp) of some expression,
+-- not including the expression itself.
+subExps :: Exp -> [Exp]
+subExps e
+  | Just e' <- stripExp e = subExps e'
+  | otherwise = astMap mapper e `execState` mempty
+  where
+    mapOnExp e'
+      | Just e'' <- stripExp e' = mapOnExp e''
+      | otherwise = do
+          modify (e' :)
+          astMap mapper e'
+    mapper = identityMapper {mapOnExp}
+
+-- Expressions witnessed by type, topologically sorted.
+topWit :: TypeBase Exp u -> [Exp]
+topWit = topologicalSort depends . witnessedExps
+  where
     witnessedExps t = execState (traverseDims onDim t) mempty
       where
         onDim _ PosImmediate e = modify (e :)
         onDim _ _ _ = pure ()
-    subExps e
-      | Just e' <- stripExp e = subExps e'
-      | otherwise = astMap mapper e `execState` mempty
-      where
-        mapOnExp e'
-          | Just e'' <- stripExp e' = mapOnExp e''
-          | otherwise = do
-              modify (e' :)
-              astMap mapper e'
-        mapper = identityMapper {mapOnExp}
     depends a b = any (sameExp b) $ subExps a
-    topWit = topologicalSort depends . witnessedExps
 
+sizeFree ::
+  SrcLoc ->
+  (Exp -> Maybe VName) ->
+  TypeBase Size u ->
+  TermTypeM (TypeBase Size u, [VName])
+sizeFree tloc expKiller orig_t = do
+  runReaderT (toBeReplaced orig_t $ onType orig_t) mempty `runStateT` mempty
+  where
     lookReplacement e repl = snd <$> find (sameExp e . fst) repl
     expReplace mapping e
       | Just e' <- lookReplacement e mapping = e'
@@ -267,7 +275,6 @@ sizeFree tloc expKiller orig_t = do
       where
         mapper = identityMapper {mapOnExp = pure . expReplace mapping}
 
-    -- using ReaderT [(Exp, Exp)] (StateT [VName] TermTypeM) a
     replacing e = do
       e' <- asks (`expReplace` e)
       case expKiller e' of
@@ -287,13 +294,13 @@ sizeFree tloc expKiller orig_t = do
       Record <$> traverse onType fs
     onScalar (Sum cs) =
       Sum <$> (traverse . traverse) onType cs
-    onScalar (Arrow as argName d argT (RetType dims retT)) = do
+    onScalar (Arrow as pn d argT (RetType dims retT)) = do
       argT' <- onType argT
       old_bound <- get
       retT' <- toBeReplaced retT $ onType retT
       rl <- state $ partition (`notElem` old_bound)
       let dims' = dims <> rl
-      pure $ Arrow as argName d argT' (RetType dims' retT')
+      pure $ Arrow as pn d argT' (RetType dims' retT')
     onScalar (TypeVar u v args) =
       TypeVar u v <$> mapM onTypeArg args
       where
