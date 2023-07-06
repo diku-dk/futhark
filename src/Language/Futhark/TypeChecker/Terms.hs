@@ -610,7 +610,20 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
     bindingPat sizes' pat t $ \pat' -> do
       body' <- checkExp body
       body_t <- expTypeFully body'
-      (body_t', retext) <- unscopeType loc (patNames pat') body_t
+
+      -- If the bound expression is of type i64, then we replace the
+      -- pattern name with the expression in the type of the body.
+      -- Otherwise, we need to come up with unknown sizes for the
+      -- sizes going out of scope.
+      t' <- normType t -- Might be overloaded integer until now.
+      (body_t', retext) <-
+        case (t', patNames pat') of
+          (Scalar (Prim (Signed Int64)), [v])
+            | not $ hasBinding e' -> do
+                let f x = if x == v then Just (ExpSubst e') else Nothing
+                pure (applySubst f body_t, [])
+          _ ->
+            unscopeType loc (patNames pat') body_t
 
       pure $
         AppExp
