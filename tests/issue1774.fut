@@ -1,9 +1,9 @@
 -- ==
--- structure mc-mem { Alloc 2 }
+-- structure mc-mem { Alloc 3 }
 
 let f [n] [m] [l] (xs: [n]f32) (ys: [m]f32) (zs: *[l]f32) : [n][m]f32 =
   map (\x ->
-	 map (\y -> f32.sum (map (*y) (map (*x) zs)))
+         map (\y -> f32.sum (map (*y) (map (*x) zs)))
              ys)
       xs
 
