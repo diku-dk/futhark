@@ -2,10 +2,12 @@
 -- descriptors (LMAD); see work by Zhu, Hoeflinger and David.
 module Futhark.IR.Mem.LMAD
   ( Shape,
+    Indices,
     LMAD (..),
     LMADDim (..),
     Monotonicity (..),
     Permutation,
+    index,
     lmadShape,
     lmadShapeBase,
     substituteInLMAD,
@@ -46,6 +48,10 @@ import Prelude hiding (gcd, id, mod, (.))
 -- | The shape of an index function.
 type Shape num = [num]
 
+-- | Indices passed to an LMAD.  Must always match the rank of the LMAD.
+type Indices num = [num]
+
+-- | A complete permutation.
 type Permutation = [Int]
 
 -- | The physical element ordering alongside a dimension, i.e. the
@@ -159,6 +165,19 @@ instance Traversable LMAD where
     LMAD <$> f offset <*> traverse f' dims
     where
       f' (LMADDim s n p m) = LMADDim <$> f s <*> f n <*> pure p <*> pure m
+
+index :: (IntegralExp num, Eq num) => LMAD num -> Indices num -> num
+index lmad@(LMAD off dims) inds =
+  off + sum prods
+  where
+    prods =
+      zipWith
+        flatOneDim
+        (map ldStride dims)
+        (permuteInv (lmadPermutation lmad) inds)
+    flatOneDim s i
+      | s == 0 = 0
+      | otherwise = i * s
 
 invertMonotonicity :: Monotonicity -> Monotonicity
 invertMonotonicity Inc = Dec
