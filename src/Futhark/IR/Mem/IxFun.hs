@@ -51,7 +51,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (isJust)
 import Data.Traversable
 import Futhark.Analysis.PrimExp
-import Futhark.IR.Mem.LMAD
+import Futhark.IR.Mem.LMAD hiding (index)
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimIndex (..),
@@ -69,8 +70,6 @@ import Futhark.Transform.Substitute
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 import Prelude hiding (gcd, id, mod, (.))
-
-type Indices num = [num]
 
 -- | An index function is a mapping from a multidimensional array
 -- index space (the domain) to a one-dimensional memory index space.
@@ -177,29 +176,11 @@ index ::
   num
 index = indexFromLMADs . ixfunLMADs
   where
-    indexFromLMADs ::
-      (IntegralExp num, Eq num) =>
-      NonEmpty (LMAD num) ->
-      Indices num ->
-      num
-    indexFromLMADs (lmad :| []) inds = indexLMAD lmad inds
+    indexFromLMADs (lmad :| []) inds = LMAD.index lmad inds
     indexFromLMADs (lmad1 :| lmad2 : lmads) inds =
-      let i_flat = indexLMAD lmad1 inds
+      let i_flat = LMAD.index lmad1 inds
           new_inds = unflattenIndex (permuteFwd (lmadPermutation lmad2) $ lmadShapeBase lmad2) i_flat
        in indexFromLMADs (lmad2 :| lmads) new_inds
-    indexLMAD ::
-      (IntegralExp num, Eq num) =>
-      LMAD num ->
-      Indices num ->
-      num
-    indexLMAD lmad@(LMAD off dims) inds =
-      let prod =
-            sum $
-              zipWith
-                flatOneDim
-                (map ldStride dims)
-                (permuteInv (lmadPermutation lmad) inds)
-       in off + prod
 
 -- | iota with offset.
 iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
