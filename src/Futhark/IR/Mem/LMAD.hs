@@ -219,19 +219,18 @@ slice ::
   (Eq num, IntegralExp num) =>
   LMAD num ->
   Slice num ->
-  Maybe (LMAD num)
-slice lmad@(LMAD _ ldims) (Slice is) = do
+  LMAD num
+slice lmad@(LMAD _ ldims) (Slice is) =
   let perm = lmadPermutation lmad
       is' = permuteInv perm is
-  let lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
+      lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
       -- need to remove the fixed dims from the permutation
       perm' =
         updatePerm perm $
           map fst $
             filter (isJust . dimFix . snd) $
               zip [0 .. length is' - 1] is'
-
-  pure $ setLMADPermutation perm' lmad'
+   in setLMADPermutation perm' lmad'
   where
     updatePerm ps inds = concatMap decrease ps
       where
@@ -244,8 +243,6 @@ slice lmad@(LMAD _ ldims) (Slice is) = do
               d = foldl f 0 inds
            in [p - d | d /= -1]
 
-    -- XXX: TODO: what happens to r on a negative-stride slice; is there
-    -- such a case?
     sliceOne ::
       (Eq num, IntegralExp num) =>
       LMAD num ->

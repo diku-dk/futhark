@@ -277,13 +277,8 @@ slice ::
 slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (Slice is)
   -- Avoid identity slicing.
   | is == map (unitSlice 0) (shape ixfun) = ixfun
-  | Just lmad' <- LMAD.slice lmad (Slice is) =
-      IxFun (lmad' :| lmads) oshp cg'
   | otherwise =
-      case LMAD.slice (LMAD.iota Inc 0 (lmadShape lmad)) (Slice is) of
-        Just lmad' ->
-          IxFun (lmad' :| lmad : lmads) oshp cg'
-        _ -> error "slice: reached impossible case"
+      IxFun (LMAD.slice lmad (Slice is) :| lmads) oshp cg'
   where
     cg' = cg && slicePreservesContiguous lmad (Slice (permuteInv (lmadPermutation lmad) is))
 
