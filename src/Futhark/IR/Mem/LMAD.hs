@@ -31,7 +31,6 @@ module Futhark.IR.Mem.LMAD
     dynamicEqualsLMAD,
     iota,
     mkExistential,
-    invertMonotonicity,
   )
 where
 

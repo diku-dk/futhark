@@ -2,7 +2,7 @@
 --
 -- ==
 -- structure gpu-mem { Alloc 34 }
--- structure seq-mem { Alloc 12 }
+-- structure seq-mem { Alloc 14 }
 
 def block_size: i64 = 32
 

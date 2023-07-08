@@ -30,7 +30,6 @@ import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename (renameStm)
 import Futhark.Transform.Substitute
 import Futhark.Util (mapAccumLM)
-import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
 -- | The memory expansion pass definition.
@@ -538,30 +537,26 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
   pure (slice_stms' <> stmsFromList alloc_stms, mconcat rebases)
   where
-    expand (mem, (offset, total_size, space)) = do
+    expand (mem, (_offset, total_size, space)) = do
       let allocpat = Pat [PatElem mem $ MemMem space]
       pure
         ( Let allocpat (defAux ()) $ Op $ Alloc total_size space,
-          M.singleton mem $ newBase offset
+          M.singleton mem newBase
         )
 
     num_threads' = pe64 num_threads
     gtid = le64 $ segFlat kspace
 
+    untouched d = DimSlice 0 d 1
+
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
-    newBase size_per_thread (old_shape, pt) =
-      let elems_per_thread =
-            pe64 size_per_thread `quot` primByteSize pt
-          root_ixfun = IxFun.iota [elems_per_thread, num_threads']
+    newBase (old_shape, _pt) =
+      let root_ixfun = IxFun.iota $ old_shape ++ [num_threads']
           offset_ixfun =
             IxFun.slice root_ixfun . Slice $
-              [DimSlice 0 num_threads' 1, DimFix gtid]
-       in if length old_shape == 1
-            then IxFun.coerce offset_ixfun old_shape
-            else
-              fromMaybe (error "expandedVariantAllocations") $
-                IxFun.reshape offset_ixfun old_shape
+              map untouched old_shape ++ [DimFix gtid]
+       in offset_ixfun
 
 -- | A map from memory block names to new index function bases.
 type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
