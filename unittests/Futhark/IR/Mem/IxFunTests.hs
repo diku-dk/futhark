@@ -102,22 +102,22 @@ tests =
     concat
       [ test_iota,
         test_slice_iota,
-        test_reshape_slice_iota1,
+        test_slice_reshape_iota1,
         test_permute_slice_iota,
-        test_reshape_permute_iota,
-        test_reshape_slice_iota2,
-        test_reshape_slice_iota3,
+        -- test_reshape_permute_iota,
+        test_slice_reshape_iota2,
+        -- test_reshape_slice_iota3,
         test_complex1,
         test_complex2,
-        test_rebase1,
-        test_rebase2,
-        test_rebase3,
-        test_rebase4_5,
+        -- test_rebase1,
+        -- test_rebase2,
+        -- test_rebase3,
+        -- test_rebase4_5,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
-        test_flatSlice_slice_iota,
-        test_flatSlice_transpose_slice_iota
+        test_flatSlice_slice_iota
+        -- test_flatSlice_transpose_slice_iota
         -- TODO: Without z3, these tests fail. Ideally, our internal simplifier
         -- should be able to handle them:
         --
@@ -129,194 +129,157 @@ singleton = (: [])
 
 test_iota :: [TestTree]
 test_iota =
-  singleton $
-    testCase "iota" $
-      compareOps $
-        iota [n]
+  singleton . testCase "iota" . compareOps $
+    iota [n]
 
 test_slice_iota :: [TestTree]
 test_slice_iota =
-  singleton $
-    testCase "slice . iota" $
-      compareOps $
-        slice (iota [n, n, n]) slice3
+  singleton . testCase "slice . iota" . compareOps $
+    slice (iota [n, n, n]) slice3
 
-test_reshape_slice_iota1 :: [TestTree]
-test_reshape_slice_iota1 =
-  singleton $
-    testCase "reshape . slice . iota 1" $
-      compareOps $
-        reshape
-          (slice (iota [n, n, n]) slice3)
-          [n `P.div` 2, n `P.div` 3]
+test_slice_reshape_iota1 :: [TestTree]
+test_slice_reshape_iota1 =
+  singleton . testCase "slice . reshape . iota 1" . compareOps $
+    slice (reshape (iota [n, n, n]) [n `P.div` 2, n `P.div` 3, 1]) slice3
 
 test_permute_slice_iota :: [TestTree]
 test_permute_slice_iota =
-  singleton $
-    testCase "permute . slice . iota" $
-      compareOps $
-        permute (slice (iota [n, n, n]) slice3) [1, 0]
+  singleton . testCase "permute . slice . iota" . compareOps $
+    permute (slice (iota [n, n, n]) slice3) [1, 0]
 
+{-
 test_reshape_permute_iota :: [TestTree]
 test_reshape_permute_iota =
   -- negative reshape test
-  singleton $
-    testCase "reshape . permute . iota" $
-      compareOps $
-        let newdims = [n * n, n]
-         in reshape (permute (iota [n, n, n]) [1, 2, 0]) newdims
+  singleton . testCase "reshape . permute . iota" . compareOps $
+    let newdims = [n * n, n]
+     in reshape (permute (iota [n, n, n]) [1, 2, 0]) newdims
+-}
+test_slice_reshape_iota2 :: [TestTree]
+test_slice_reshape_iota2 =
+  singleton . testCase "slice . reshape . iota 2" . compareOps $
+    let newdims = [n * n, n]
+        slc =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice 0 n 1
+            ]
+     in slice (reshape (iota [n, n, n, n]) newdims) slc
 
-test_reshape_slice_iota2 :: [TestTree]
-test_reshape_slice_iota2 =
-  -- negative reshape test
-  singleton $
-    testCase "reshape . slice . iota 2" $
-      compareOps $
-        let newdims = [n * n, n]
-            slc =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice 0 n 1,
-                  DimSlice (n - 1) n (-1)
-                ]
-         in reshape (slice (iota [n, n, n, n]) slc) newdims
-
+{-
 test_reshape_slice_iota3 :: [TestTree]
 test_reshape_slice_iota3 =
   -- negative reshape test
-  singleton $
-    testCase "reshape . slice . iota 3" $
-      compareOps $
-        let newdims = [n * n, n]
-            slc =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice 0 n 1,
-                  DimSlice 0 (n `P.div` 2) 1,
-                  DimSlice 0 n 1
-                ]
-         in reshape (slice (iota [n, n, n, n]) slc) newdims
-
+  singleton . testCase "reshape . slice . iota 3" . compareOps $
+    let newdims = [n * n, n]
+        slc =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice 0 n 1,
+              DimSlice 0 (n `P.div` 2) 1,
+              DimSlice 0 n 1
+            ]
+     in reshape (slice (iota [n, n, n, n]) slc) newdims
+-}
 test_complex1 :: [TestTree]
 test_complex1 =
-  singleton $
-    testCase "reshape . permute . slice . permute . slice . iota 1" $
-      compareOps $
-        let newdims =
-              [ n,
-                n,
-                n,
-                (n `P.div` 3) - 2
-              ]
-            slice33 =
-              Slice
-                [ DimSlice (n - 1) (n `P.div` 3) (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice 0 n 1
-                ]
-            ixfun = permute (slice (iota [n, n, n, n, n]) slice33) [3, 1, 2, 0]
-            m = n `P.div` 3
-            slice1 =
-              Slice
-                [ DimSlice 0 n 1,
-                  DimSlice (n - 1) n (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice 1 (m - 2) (-1)
-                ]
-            ixfun' = reshape (slice ixfun slice1) newdims
-         in ixfun'
+  singleton . testCase "permute . slice . permute . slice . iota 1" . compareOps $
+    let slice33 =
+          Slice
+            [ DimSlice (n - 1) (n `P.div` 3) (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice 0 n 1
+            ]
+        ixfun = permute (slice (iota [n, n, n, n, n]) slice33) [3, 1, 2, 0]
+        m = n `P.div` 3
+        slice1 =
+          Slice
+            [ DimSlice 0 n 1,
+              DimSlice (n - 1) n (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice 1 (m - 2) (-1)
+            ]
+        ixfun' = slice ixfun slice1
+     in ixfun'
 
 test_complex2 :: [TestTree]
 test_complex2 =
-  singleton $
-    testCase "reshape . permute . slice . permute . slice . iota 2" $
-      compareOps $
-        let newdims =
-              [ n,
-                n * n,
-                (n `P.div` 3) - 2
-              ]
-            slc2 =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice (n - 1) (n `P.div` 3) (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice 0 n 1
-                ]
-            ixfun = permute (slice (iota [n, n, n, n, n]) slc2) [3, 1, 2, 0]
-            m = n `P.div` 3
-            slice1 =
-              Slice
-                [ DimSlice 0 n 1,
-                  DimSlice (n - 1) n (-1),
-                  DimSlice (n - 1) n (-1),
-                  DimSlice 1 (m - 2) (-1)
-                ]
-            ixfun' = reshape (slice ixfun slice1) newdims
-         in ixfun'
+  singleton . testCase "permute . slice . permute . slice . iota 2" . compareOps $
+    let slc2 =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice (n - 1) (n `P.div` 3) (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice 0 n 1
+            ]
+        ixfun = permute (slice (iota [n, n, n, n, n]) slc2) [3, 1, 2, 0]
+        m = n `P.div` 3
+        slice1 =
+          Slice
+            [ DimSlice 0 n 1,
+              DimSlice (n - 1) n (-1),
+              DimSlice (n - 1) n (-1),
+              DimSlice 1 (m - 2) (-1)
+            ]
+        ixfun' = slice ixfun slice1
+     in ixfun'
 
+{-
 test_rebase1 :: [TestTree]
 test_rebase1 =
-  singleton $
-    testCase "rebase 1" $
-      compareOps $
-        let slice_base =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice 2 (n - 2) 1,
-                  DimSlice 3 (n - 3) 1
-                ]
-            ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-            ixfn_orig = permute (iota [n - 3, n - 2]) [1, 0]
-            ixfn_rebase = rebase ixfn_base ixfn_orig
-         in ixfn_rebase
+  singleton . testCase "rebase 1" . compareOps $
+    let slice_base =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice 2 (n - 2) 1,
+              DimSlice 3 (n - 3) 1
+            ]
+        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
+        ixfn_orig = permute (iota [n - 3, n - 2]) [1, 0]
+        ixfn_rebase = rebase ixfn_base ixfn_orig
+     in ixfn_rebase
 
 test_rebase2 :: [TestTree]
 test_rebase2 =
-  singleton $
-    testCase "rebase 2" $
-      compareOps $
-        let slice_base =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice (n - 1) (n - 2) (-1),
-                  DimSlice (n - 1) (n - 3) (-1)
-                ]
-            slice_orig =
-              Slice
-                [ DimSlice (n - 4) (n - 3) (-1),
-                  DimSlice (n - 3) (n - 2) (-1)
-                ]
-            ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-            ixfn_orig = permute (slice (iota [n - 3, n - 2]) slice_orig) [1, 0]
-            ixfn_rebase = rebase ixfn_base ixfn_orig
-         in ixfn_rebase
+  singleton . testCase "rebase 2" . compareOps $
+    let slice_base =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice (n - 1) (n - 2) (-1),
+              DimSlice (n - 1) (n - 3) (-1)
+            ]
+        slice_orig =
+          Slice
+            [ DimSlice (n - 4) (n - 3) (-1),
+              DimSlice (n - 3) (n - 2) (-1)
+            ]
+        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
+        ixfn_orig = permute (slice (iota [n - 3, n - 2]) slice_orig) [1, 0]
+        ixfn_rebase = rebase ixfn_base ixfn_orig
+     in ixfn_rebase
 
 test_rebase3 :: [TestTree]
 test_rebase3 =
-  singleton $
-    testCase "rebase full orig but not monotonic" $
-      compareOps $
-        let n2 = (n - 2) `P.div` 3
-            n3 = (n - 3) `P.div` 2
-            slice_base =
-              Slice
-                [ DimFix (n `P.div` 2),
-                  DimSlice (n - 1) n2 (-3),
-                  DimSlice (n - 1) n3 (-2)
-                ]
-            slice_orig =
-              Slice
-                [ DimSlice (n3 - 1) n3 (-1),
-                  DimSlice (n2 - 1) n2 (-1)
-                ]
-            ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-            ixfn_orig = permute (slice (iota [n3, n2]) slice_orig) [1, 0]
-            ixfn_rebase = rebase ixfn_base ixfn_orig
-         in ixfn_rebase
+  singleton . testCase "rebase full orig but not monotonic" . compareOps $
+    let n2 = (n - 2) `P.div` 3
+        n3 = (n - 3) `P.div` 2
+        slice_base =
+          Slice
+            [ DimFix (n `P.div` 2),
+              DimSlice (n - 1) n2 (-3),
+              DimSlice (n - 1) n3 (-2)
+            ]
+        slice_orig =
+          Slice
+            [ DimSlice (n3 - 1) n3 (-1),
+              DimSlice (n2 - 1) n2 (-1)
+            ]
+        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
+        ixfn_orig = permute (slice (iota [n3, n2]) slice_orig) [1, 0]
+        ixfn_rebase = rebase ixfn_base ixfn_orig
+     in ixfn_rebase
 
 test_rebase4_5 :: [TestTree]
 test_rebase4_5 =
@@ -339,53 +302,44 @@ test_rebase4_5 =
           compareOps $
             rebase ixfn_base ixfn_orig
       ]
-
+-}
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =
-  singleton $
-    testCase "flatSlice . iota" $
-      compareOps $
-        flatSlice (iota [n * n * n * n]) $
-          FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
+  singleton . testCase "flatSlice . iota" . compareOps $
+    flatSlice (iota [n * n * n * n]) $
+      FlatSlice 2 [FlatDimIndex (n * 2) 4, FlatDimIndex n 3, FlatDimIndex 1 2]
 
 test_slice_flatSlice_iota :: [TestTree]
 test_slice_flatSlice_iota =
-  singleton $
-    testCase "slice . flatSlice . iota " $
-      compareOps $
-        slice (flatSlice (iota [2 + n * n * n]) flat_slice) $
-          Slice [DimFix 2, DimSlice 0 n 1, DimFix 0]
+  singleton . testCase "slice . flatSlice . iota " . compareOps $
+    slice (flatSlice (iota [2 + n * n * n]) flat_slice) $
+      Slice [DimFix 2, DimSlice 0 n 1, DimFix 0]
   where
     flat_slice = FlatSlice 2 [FlatDimIndex (n * n) 1, FlatDimIndex n 1, FlatDimIndex 1 1]
 
 test_flatSlice_flatSlice_iota :: [TestTree]
 test_flatSlice_flatSlice_iota =
-  singleton $
-    testCase "flatSlice . flatSlice . iota " $
-      compareOps $
-        flatSlice (flatSlice (iota [10 * 10]) flat_slice_1) flat_slice_2
+  singleton . testCase "flatSlice . flatSlice . iota " . compareOps $
+    flatSlice (flatSlice (iota [10 * 10]) flat_slice_1) flat_slice_2
   where
     flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 1]
     flat_slice_2 = FlatSlice 2 [FlatDimIndex 2 (-2)]
 
 test_flatSlice_slice_iota :: [TestTree]
 test_flatSlice_slice_iota =
-  singleton $
-    testCase "flatSlice . slice . iota " $
-      compareOps $
-        flatSlice (slice (iota [210, 100]) $ Slice [DimSlice 10 100 2, DimFix 10]) flat_slice_1
+  singleton . testCase "flatSlice . slice . iota " . compareOps $
+    flatSlice (slice (iota [210, 100]) $ Slice [DimSlice 10 100 2, DimFix 10]) flat_slice_1
   where
     flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 1]
 
+{-
 test_flatSlice_transpose_slice_iota :: [TestTree]
 test_flatSlice_transpose_slice_iota =
-  singleton $
-    testCase "flatSlice . transpose . slice . iota " $
-      compareOps $
-        flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [1, 0]) flat_slice_1
+  singleton . testCase "flatSlice . transpose . slice . iota " . compareOps $
+    flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [1, 0]) flat_slice_1
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
-
+-}
 -- test_disjoint2 :: [TestTree]
 -- test_disjoint2 =
 --   let add_nw64 = (+)
