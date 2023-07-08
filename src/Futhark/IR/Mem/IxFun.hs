@@ -19,7 +19,7 @@ module Futhark.IR.Mem.IxFun
     flatSlice,
     rebase,
     shape,
-    lmadShape,
+    permutation,
     rank,
     linearWithOffset,
     rearrangeWithOffset,
@@ -50,7 +50,17 @@ import Data.Map.Strict qualified as M
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Mem.LMAD hiding (flatSlice, index, iota, reshape, slice)
+import Futhark.IR.Mem.LMAD hiding
+  ( flatSlice,
+    index,
+    iota,
+    mkExistential,
+    permutation,
+    permute,
+    reshape,
+    shape,
+    slice,
+  )
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -123,13 +133,6 @@ es ++@ (ne :| nes) = case es of
 (@++@) :: NonEmpty a -> NonEmpty a -> NonEmpty a
 (x :| xs) @++@ (y :| ys) = x :| xs ++ [y] ++ ys
 
-setLMADPermutation :: Permutation -> LMAD num -> LMAD num
-setLMADPermutation perm lmad =
-  lmad {lmadDims = zipWith (\dim p -> dim {ldPerm = p}) (lmadDims lmad) perm}
-
-setLMADShape :: Shape num -> LMAD num -> LMAD num
-setLMADShape shp lmad = lmad {lmadDims = zipWith (\dim s -> dim {ldShape = s}) (lmadDims lmad) shp}
-
 -- | Substitute a name with a PrimExp in an index function.
 substituteInIxFun ::
   Ord a =>
@@ -164,7 +167,7 @@ hasOneLmad _ = False
 -- | Does the index function have an ascending permutation?
 hasContiguousPerm :: IxFun num -> Bool
 hasContiguousPerm (IxFun (lmad :| []) _ _) =
-  let perm = lmadPermutation lmad
+  let perm = LMAD.permutation lmad
    in perm == sort perm
 hasContiguousPerm _ = False
 
@@ -172,7 +175,11 @@ hasContiguousPerm _ = False
 -- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
 shape (IxFun (lmad :| _) _ _) =
-  permuteFwd (lmadPermutation lmad) $ lmadShapeBase lmad
+  permuteFwd (LMAD.permutation lmad) $ LMAD.shapeBase lmad
+
+-- | The permutation of the first LMAD of the index function.
+permutation :: IxFun num -> Permutation
+permutation = map LMAD.ldPerm . LMAD.dims . NE.head . ixfunLMADs
 
 -- | Compute the flat memory index for a complete set @inds@ of array indices
 -- and a certain element size @elem_size@.
@@ -186,7 +193,7 @@ index = indexFromLMADs . ixfunLMADs
     indexFromLMADs (lmad :| []) inds = LMAD.index lmad inds
     indexFromLMADs (lmad1 :| lmad2 : lmads) inds =
       let i_flat = LMAD.index lmad1 inds
-          new_inds = unflattenIndex (permuteFwd (lmadPermutation lmad2) $ lmadShapeBase lmad2) i_flat
+          new_inds = unflattenIndex (permuteFwd (LMAD.permutation lmad2) $ LMAD.shapeBase lmad2) i_flat
        in indexFromLMADs (lmad2 :| lmads) new_inds
 
 -- | iota with offset.
@@ -202,13 +209,10 @@ iota = iotaOffset 0
 -- monotonicity, and contiguousness.
 mkExistential :: Int -> [(Int, Monotonicity)] -> Bool -> Int -> IxFun (Ext a)
 mkExistential basis_rank perm contig start =
-  IxFun (NE.singleton lmad) basis contig
+  IxFun (NE.singleton $ LMAD.mkExistential perm start) basis contig
   where
     basis = take basis_rank $ map Ext [start + 1 + dims_rank * 2 ..]
     dims_rank = length perm
-    lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
-    onDim (p, mon) i =
-      LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2)) p mon
 
 -- | Permute dimensions.
 permute ::
@@ -217,9 +221,7 @@ permute ::
   Permutation ->
   IxFun num
 permute (IxFun (lmad :| lmads) oshp cg) perm_new =
-  let perm_cur = lmadPermutation lmad
-      perm = map (perm_cur !!) perm_new
-   in IxFun (setLMADPermutation perm lmad :| lmads) oshp cg
+  IxFun (LMAD.permute lmad perm_new :| lmads) oshp cg
 
 slicePreservesContiguous ::
   (Eq num, IntegralExp num) =>
@@ -280,7 +282,7 @@ slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (Slice is)
   | otherwise =
       IxFun (LMAD.slice lmad (Slice is) :| lmads) oshp cg'
   where
-    cg' = cg && slicePreservesContiguous lmad (Slice (permuteInv (lmadPermutation lmad) is))
+    cg' = cg && slicePreservesContiguous lmad (Slice (permuteInv (LMAD.permutation lmad) is))
 
 -- | Flat-slice an index function.
 flatSlice ::
@@ -294,7 +296,7 @@ flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _)
   | otherwise =
       IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
   where
-    tail_shapes = tail $ lmadShape lmad
+    tail_shapes = tail $ LMAD.shape lmad
     base_stride = product tail_shapes
     tail_strides = tail $ scanr (*) 1 tail_shapes
     tail_dims = zipWith4 LMADDim tail_strides tail_shapes [length new_shapes ..] (repeat Inc)
@@ -303,6 +305,20 @@ flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _)
     new_dims = zipWith4 LMADDim new_strides new_shapes [0 ..] (repeat Inc)
 
 -- | Reshape an index function.
+--
+-- There are four conditions that all must hold for the result of a reshape
+-- operation to remain in the one-LMAD domain:
+--
+--   (1) the permutation of the underlying LMAD must leave unchanged
+--       the LMAD dimensions that were *not* reshape coercions.
+--   (2) the repetition of dimensions of the underlying LMAD must
+--       refer only to the coerced-dimensions of the reshape operation.
+--   (3) finally, the underlying memory is contiguous (and monotonous).
+--
+-- If any of these conditions do not hold, then the reshape operation
+-- will conservatively add a new LMAD to the list, leading to a
+-- representation that provides less opportunities for further
+-- analysis
 reshape ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
@@ -375,9 +391,9 @@ rebaseNice
   new_base@(IxFun (lmad_base :| lmads_base) _ cg_base)
   ixfun@(IxFun lmads shp cg) = do
     let (lmad :| lmads') = NE.reverse lmads
-        dims = lmadDims lmad
-        perm = lmadPermutation lmad
-        perm_base = lmadPermutation lmad_base
+        dims = LMAD.dims lmad
+        perm = LMAD.permutation lmad
+        perm_base = LMAD.permutation lmad_base
 
     guard $
       -- Core rebase condition.
@@ -411,8 +427,8 @@ rebaseNice
           if hasContiguousPerm ixfun
             then perm_base
             else map (perm !!) perm_base
-        lmad_base' = setLMADPermutation perm_base' lmad_base
-        dims_base = lmadDims lmad_base'
+        lmad_base' = LMAD.setPermutation perm_base' lmad_base
+        dims_base = LMAD.dims lmad_base'
         n_fewer_dims = length dims_base - length dims
         (dims_base', offs_contrib) =
           unzip $
@@ -427,16 +443,16 @@ rebaseNice
               -- @dims_base@.  Drop extraneous outer dimensions.
               (drop n_fewer_dims dims_base)
               dims
-        off_base = lmadOffset lmad_base' + sum offs_contrib
+        off_base = LMAD.offset lmad_base' + sum offs_contrib
         lmad_base''
-          | lmadOffset lmad == 0 = LMAD off_base dims_base'
+          | LMAD.offset lmad == 0 = LMAD off_base dims_base'
           | otherwise =
               -- If the innermost dimension of the ixfun was not full (but still
               -- had a stride of 1), add its offset relative to the new base.
-              setLMADShape
-                (lmadShape lmad)
+              LMAD.setShape
+                (LMAD.shape lmad)
                 ( LMAD
-                    (off_base + ldStride (last dims_base) * lmadOffset lmad)
+                    (off_base + ldStride (last dims_base) * LMAD.offset lmad)
                     dims_base'
                 )
         new_base' = IxFun (lmad_base'' :| lmads_base) shp cg_base
@@ -474,7 +490,7 @@ linearWithOffset ::
   Maybe num
 linearWithOffset ixfun@(IxFun (lmad :| []) _ cg) elem_size
   | hasContiguousPerm ixfun && cg && ixfunMonotonicity ixfun == Inc =
-      Just $ lmadOffset lmad * elem_size
+      Just $ LMAD.offset lmad * elem_size
 linearWithOffset _ _ = Nothing
 
 -- | Similar restrictions to @linearWithOffset@ except for transpositions, which
@@ -488,13 +504,13 @@ rearrangeWithOffset (IxFun (lmad :| []) oshp cg) elem_size = do
   -- Note that @cg@ describes whether the index function is
   -- contiguous, *ignoring permutations*.  This function requires that
   -- functionality.
-  let perm = lmadPermutation lmad
+  let perm = LMAD.permutation lmad
       perm_contig = [0 .. length perm - 1]
   offset <-
     linearWithOffset
-      (IxFun (setLMADPermutation perm_contig lmad :| []) oshp cg)
+      (IxFun (LMAD.setPermutation perm_contig lmad :| []) oshp cg)
       elem_size
-  pure (offset, zip perm (permuteFwd perm (lmadShapeBase lmad)))
+  pure (offset, zip perm (permuteFwd perm (LMAD.shapeBase lmad)))
 rearrangeWithOffset _ _ = Nothing
 
 -- | Is this a row-major array starting at offset zero?
@@ -545,8 +561,8 @@ closeEnough ixf1 ixf2 =
   where
     closeEnoughLMADs :: (LMAD num, LMAD num) -> Bool
     closeEnoughLMADs (lmad1, lmad2) =
-      length (lmadDims lmad1) == length (lmadDims lmad2)
-        && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
+      length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
+        && map ldPerm (LMAD.dims lmad1) == map ldPerm (LMAD.dims lmad2)
 
 -- | Returns true if two 'IxFun's are equivalent.
 --
@@ -558,7 +574,7 @@ equivalent ixf1 ixf2 =
     && all equivalentLMADs (NE.zip (ixfunLMADs ixf1) (ixfunLMADs ixf2))
   where
     equivalentLMADs (lmad1, lmad2) =
-      length (lmadDims lmad1) == length (lmadDims lmad2)
-        && map ldPerm (lmadDims lmad1) == map ldPerm (lmadDims lmad2)
-        && lmadOffset lmad1 == lmadOffset lmad2
-        && map ldStride (lmadDims lmad1) == map ldStride (lmadDims lmad2)
+      length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
+        && map ldPerm (LMAD.dims lmad1) == map ldPerm (LMAD.dims lmad2)
+        && LMAD.offset lmad1 == LMAD.offset lmad2
+        && map ldStride (LMAD.dims lmad1) == map ldStride (LMAD.dims lmad2)
