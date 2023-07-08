@@ -313,14 +313,14 @@ reshape ::
   IxFun num ->
   Shape num ->
   IxFun num
-reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape
+reshape (IxFun (lmad :| lmads) oshp cg) new_shape
   | cg,
-    Just lmad0' <- LMAD.reshape lmad0 new_shape =
-      IxFun (lmad0' :| lmad0s) oshp cg
+    Just lmad' <- LMAD.reshape lmad new_shape =
+      IxFun (lmad' :| lmads) oshp' cg
   | otherwise =
-      case iota new_shape of
-        IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
-        _ -> error "reshape: reached impossible case"
+      IxFun (LMAD.iota Inc 0 new_shape :| lmad : lmads) oshp' cg
+  where
+    oshp' = if null lmads then new_shape else oshp
 
 -- | Coerce an index function to look like it has a new shape.
 -- Dynamically the shape must be the same.
@@ -330,10 +330,11 @@ coerce ::
   Shape num ->
   IxFun num
 coerce (IxFun (lmad :| lmads) oshp cg) new_shape =
-  IxFun (onLMAD lmad :| lmads) oshp cg
+  IxFun (onLMAD lmad :| lmads) oshp' cg
   where
     onLMAD (LMAD offset dims) = LMAD offset $ zipWith onDim dims new_shape
     onDim ld d = ld {ldShape = d}
+    oshp' = if null lmads then new_shape else oshp
 
 -- | The number of dimensions in the domain of the input function.
 rank ::
