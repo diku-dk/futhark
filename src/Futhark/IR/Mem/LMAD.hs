@@ -183,22 +183,11 @@ monotonicity ::
   (Eq num, IntegralExp num) =>
   LMAD num ->
   Monotonicity
-monotonicity = lmadMonotonicityRots
+monotonicity (LMAD _ dims)
+  | all (isMonDim Inc) dims = Inc
+  | all (isMonDim Dec) dims = Dec
+  | otherwise = Unknown
   where
-    lmadMonotonicityRots ::
-      (Eq num, IntegralExp num) =>
-      LMAD num ->
-      Monotonicity
-    lmadMonotonicityRots (LMAD _ dims)
-      | all (isMonDim Inc) dims = Inc
-      | all (isMonDim Dec) dims = Dec
-      | otherwise = Unknown
-
-    isMonDim ::
-      (Eq num, IntegralExp num) =>
-      Monotonicity ->
-      LMADDim num ->
-      Bool
     isMonDim mon (LMADDim s _ _ ldmon) =
       s == 0 || mon == ldmon
 
