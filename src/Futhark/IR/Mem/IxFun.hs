@@ -43,8 +43,7 @@ where
 import Control.Category
 import Control.Monad
 import Control.Monad.State
-import Data.Function (on, (&))
-import Data.List (sort, sortBy, zip4, zipWith4)
+import Data.List (sort, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
@@ -56,7 +55,6 @@ import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimIndex (..),
-    FlatDimIndex (..),
     FlatSlice (..),
     Slice (..),
     flatSliceDims,
@@ -295,20 +293,11 @@ flatSlice ::
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice ixfun@(IxFun (LMAD offset (dim : dims) :| lmads) oshp cg) (FlatSlice new_offset is)
-  | hasContiguousPerm ixfun =
-      let lmad =
-            LMAD
-              (offset + new_offset * ldStride dim)
-              (map (helper $ ldStride dim) is <> dims)
-              & setLMADPermutation [0 ..]
-       in IxFun (lmad :| lmads) oshp cg
-  where
-    helper s0 (FlatDimIndex n s) =
-      let new_mon = if s0 * s == 1 then Inc else Unknown
-       in LMADDim (s0 * s) n 0 new_mon
-flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
-  IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
+flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _)
+  | Just lmad' <- LMAD.flatSlice lmad s =
+      IxFun (lmad' :| lmads) oshp cg
+  | otherwise =
+      IxFun (LMAD (new_offset * base_stride) (new_dims <> tail_dims) :| lmad : lmads) oshp cg
   where
     tail_shapes = tail $ lmadShape lmad
     base_stride = product tail_shapes
@@ -318,91 +307,20 @@ flatSlice (IxFun (lmad :| lmads) oshp cg) s@(FlatSlice new_offset _) =
     new_strides = map (* base_stride) $ flatSliceStrides s
     new_dims = zipWith4 LMADDim new_strides new_shapes [0 ..] (repeat Inc)
 
--- | Handle the case where a reshape operation can stay inside a single LMAD.
---
--- There are four conditions that all must hold for the result of a reshape
--- operation to remain in the one-LMAD domain:
---
---   (1) the permutation of the underlying LMAD must leave unchanged
---       the LMAD dimensions that were *not* reshape coercions.
---   (2) the repetition of dimensions of the underlying LMAD must
---       refer only to the coerced-dimensions of the reshape operation.
---   (3) finally, the underlying memory is contiguous (and monotonous).
---
--- If any of these conditions do not hold, then the reshape operation will
--- conservatively add a new LMAD to the list, leading to a representation that
--- provides less opportunities for further analysis.
-reshapeOneLMAD ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  Shape num ->
-  Maybe (IxFun num)
-reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape = do
-  let perm = lmadPermutation lmad
-      dims_perm = permuteFwd perm dims
-      mid_dims = take (length dims) dims_perm
-      mon = ixfunMonotonicity ixfun
-
-  guard $
-    -- checking conditions (2)
-    all (\(LMADDim s _ _ _) -> s /= 0) mid_dims
-      &&
-      -- checking condition (1)
-      consecutive 0 (map ldPerm mid_dims)
-      &&
-      -- checking condition (3)
-      hasContiguousPerm ixfun
-      && cg
-      && (mon == Inc || mon == Dec)
-
-  -- make new permutation
-  let rsh_len = length newshape
-      diff = length newshape - length dims
-      iota_shape = [0 .. length newshape - 1]
-      perm' =
-        map
-          ( \i ->
-              let ind = i - diff
-               in if (i >= 0) && (i < rsh_len)
-                    then i -- already checked mid_dims not affected
-                    else ldPerm (dims !! ind) + diff
-          )
-          iota_shape
-      -- split the dimensions
-      (support_inds, repeat_inds) =
-        foldl
-          (\(sup, rpt) (shpdim, ip) -> ((ip, shpdim) : sup, rpt))
-          ([], [])
-          $ reverse
-          $ zip newshape perm'
-
-      (sup_inds, support) = unzip $ sortBy (compare `on` fst) support_inds
-      (rpt_inds, repeats) = unzip repeat_inds
-      LMAD off' dims_sup = LMAD.iota mon off support
-      repeats' = map (\n -> LMADDim 0 n 0 Unknown) repeats
-      dims' =
-        map snd $
-          sortBy (compare `on` fst) $
-            zip sup_inds dims_sup ++ zip rpt_inds repeats'
-      lmad' = LMAD off' dims'
-  pure $ IxFun (setLMADPermutation perm' lmad' :| lmads) oldbase cg
-  where
-    consecutive _ [] = True
-    consecutive i [p] = i == p
-    consecutive i ps = and $ zipWith (==) ps [i, i + 1 ..]
-
 -- | Reshape an index function.
 reshape ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   Shape num ->
   IxFun num
-reshape ixfun new_shape
-  | Just ixfun' <- reshapeOneLMAD ixfun new_shape = ixfun'
-reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape =
-  case iota new_shape of
-    IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
-    _ -> error "reshape: reached impossible case"
+reshape (IxFun (lmad0 :| lmad0s) oshp cg) new_shape
+  | cg,
+    Just lmad0' <- LMAD.reshape lmad0 new_shape =
+      IxFun (lmad0' :| lmad0s) oshp cg
+  | otherwise =
+      case iota new_shape of
+        IxFun (lmad :| []) _ _ -> IxFun (lmad :| lmad0 : lmad0s) oshp cg
+        _ -> error "reshape: reached impossible case"
 
 -- | Coerce an index function to look like it has a new shape.
 -- Dynamically the shape must be the same.
