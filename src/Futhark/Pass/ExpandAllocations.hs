@@ -624,11 +624,16 @@ offsetMemoryInBody (Body dec stms res) = do
 offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
   e' <- offsetMemoryInExp e
-  pat' <- offsetMemoryInPat pat =<< expReturns e'
+  pat' <-
+    offsetMemoryInPat pat
+      =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
+      =<< expReturns e'
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
-  rts <- runReaderT (expReturns e') scope
+  rts <-
+    maybe (throwError "offsetMemoryInStm: ill-typed") pure $
+      runReader (expReturns e') scope
   let pat'' = Pat $ zipWith pick (patElems pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope

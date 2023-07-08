@@ -766,7 +766,7 @@ matchPatToExp ::
   TC.TypeM rep ()
 matchPatToExp pat e = do
   scope <- asksScope removeScopeAliases
-  rt <- runReaderT (expReturns $ removeExpAliases e) scope
+  rt <- maybe illformed pure $ runReader (expReturns $ removeExpAliases e) scope
 
   let (ctx_ids, val_ts) = unzip $ bodyReturnsFromPat $ removePatAliases pat
       (ctx_map_ids, ctx_map_exts) = getExtMaps $ zip ctx_ids [0 .. 1]
@@ -780,6 +780,13 @@ matchPatToExp pat e = do
       </> "cannot match pattern type:"
       </> indent 2 (ppTupleLines' $ map pretty val_ts)
   where
+    illformed =
+      TC.bad $
+        TC.TypeError . docText $
+          "Expression"
+            </> indent 2 (pretty e)
+            </> "cannot be assigned an index function."
+
     matches _ _ (MemPrim x) (MemPrim y) = x == y
     matches _ _ (MemMem x_space) (MemMem y_space) =
       x_space == y_space
@@ -1006,49 +1013,55 @@ subExpReturns (Constant v) =
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
+--
+-- This can produce Nothing, which signifies that the result is an
+-- array layout that is not expressible as an index function.
 expReturns ::
   (LocalScope rep m, Mem rep inner) =>
   Exp rep ->
-  m [ExpReturns]
+  m (Maybe [ExpReturns])
 expReturns (BasicOp (SubExp se)) =
-  pure <$> subExpReturns se
+  Just . pure <$> subExpReturns se
 expReturns (BasicOp (Opaque _ (Var v))) =
-  pure <$> varReturns v
+  Just . pure <$> varReturns v
 expReturns (BasicOp (Reshape k newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
-  pure
-    [ MemArray et (fmap Free newshape) NoUniqueness $
-        Just . ReturnsInBlock mem . existentialiseIxFun [] $
-          reshaper k ixfun (map pe64 (shapeDims newshape))
-    ]
+  case reshaper k ixfun $ map pe64 $ shapeDims newshape of
+    Just ixfun' ->
+      pure . Just $
+        [ MemArray et (fmap Free newshape) NoUniqueness . Just $
+            ReturnsInBlock mem (existentialiseIxFun [] ixfun')
+        ]
+    Nothing -> pure Nothing
   where
     reshaper ReshapeArbitrary ixfun =
-      error "expReturns Reshape" . IxFun.reshape ixfun
+      IxFun.reshape ixfun
     reshaper ReshapeCoerce ixfun =
-      IxFun.coerce ixfun
+      Just . IxFun.coerce ixfun
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims' = rearrangeShape perm dims
-  pure
-    [ MemArray et (Shape $ map Free dims') NoUniqueness $
-        Just $
-          ReturnsInBlock mem $
-            existentialiseIxFun [] ixfun'
-    ]
+  pure $
+    Just
+      [ MemArray et (Shape $ map Free dims') NoUniqueness $
+          Just $
+            ReturnsInBlock mem $
+              existentialiseIxFun [] ixfun'
+      ]
 expReturns (BasicOp (Index v slice)) = do
-  pure . varInfoToExpReturns <$> sliceInfo v slice
+  Just . pure . varInfoToExpReturns <$> sliceInfo v slice
 expReturns (BasicOp (Update _ v _ _)) =
-  pure <$> varReturns v
+  Just . pure <$> varReturns v
 expReturns (BasicOp (FlatIndex v slice)) = do
-  pure . varInfoToExpReturns <$> flatSliceInfo v slice
+  Just . pure . varInfoToExpReturns <$> flatSliceInfo v slice
 expReturns (BasicOp (FlatUpdate v _ _)) =
-  pure <$> varReturns v
+  Just . pure <$> varReturns v
 expReturns (BasicOp op) =
-  extReturns . staticShapes <$> basicOpType op
+  Just . extReturns . staticShapes <$> basicOpType op
 expReturns e@(DoLoop merge _ _) = do
   t <- expExtType e
-  zipWithM typeWithDec t $ map fst merge
+  Just <$> zipWithM typeWithDec t (map fst merge)
   where
     typeWithDec t p =
       case (t, paramDec p) of
@@ -1073,18 +1086,20 @@ expReturns e@(DoLoop merge _ _) = do
     isMergeVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
-  pure $ map (funReturnsToExpReturns . fst) ret
+  pure $ Just $ map (funReturnsToExpReturns . fst) ret
 expReturns (Match _ _ _ (MatchDec ret _)) =
-  pure $ map bodyReturnsToExpReturns ret
+  pure $ Just $ map bodyReturnsToExpReturns ret
 expReturns (Op op) =
-  opReturns op
+  Just <$> opReturns op
 expReturns (WithAcc inputs lam) =
-  (<>)
-    <$> (concat <$> mapM inputReturns inputs)
-    <*>
-    -- XXX: this is a bit dubious because it enforces extra copies.  I
-    -- think WithAcc should perhaps have a return annotation like If.
-    pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
+  Just
+    <$> ( (<>)
+            <$> (concat <$> mapM inputReturns inputs)
+            <*>
+            -- XXX: this is a bit dubious because it enforces extra copies.  I
+            -- think WithAcc should perhaps have a return annotation like If.
+            pure (extReturns $ staticShapes $ drop num_accs $ lambdaReturnType lam)
+        )
   where
     inputReturns (_, arrs, _) = mapM varReturns arrs
     num_accs = length inputs

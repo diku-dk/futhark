@@ -186,6 +186,38 @@ allocForArray ::
 allocForArray t space = do
   allocForArray' t space
 
+-- | Repair an expression that cannot be assigned an index function.
+-- There is a simple remedy for this: normalise the input arrays and
+-- try again.
+repairExpression ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep (Exp torep)
+repairExpression (BasicOp (Reshape k shape v)) = do
+  v' <- snd <$> ensureDirectArray Nothing v
+  pure $ BasicOp $ Reshape k shape v'
+repairExpression e =
+  error $ "repairExpression:\n" <> prettyString e
+
+expReturns' ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep ([ExpReturns], Exp torep)
+expReturns' e = do
+  maybe_rts <- expReturns e
+  case maybe_rts of
+    Just rts -> pure (rts, e)
+    Nothing -> do
+      e' <- repairExpression e
+      let bad =
+            error . unlines $
+              [ "expReturns",
+                prettyString e,
+                prettyString e'
+              ]
+      rts <- fromMaybe bad <$> expReturns e'
+      pure (rts, e')
+
 allocsForStm ::
   (Allocable fromrep torep inner) =>
   [Ident] ->
@@ -194,10 +226,10 @@ allocsForStm ::
 allocsForStm idents e = do
   def_space <- askDefaultSpace
   hints <- expHints e
-  rts <- expReturns e
+  (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
-  dec <- mkExpDecM (Pat pes) e
-  pure $ Let (Pat pes) (defAux dec) e
+  dec <- mkExpDecM (Pat pes) e'
+  pure $ Let (Pat pes) (defAux dec) e'
 
 patWithAllocations ::
   (MonadBuilder m, Mem (Rep m) inner) =>
@@ -209,7 +241,7 @@ patWithAllocations ::
 patWithAllocations def_space names e hints = do
   ts' <- instantiateShapes' names <$> expExtType e
   let idents = zipWith Ident names ts'
-  rts <- expReturns e
+  rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
   Pat <$> allocsForPat def_space idents rts hints
 
 mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
@@ -1126,7 +1158,7 @@ simplifiable innerUsage simplifyInnerOp =
       innerUsage inner
 
     simplifyPat (Pat pes) e = do
-      rets <- expReturns e
+      rets <- fromMaybe (error "simplifyPat: ill-typed") <$> expReturns e
       Pat <$> zipWithM update pes rets
       where
         names = map patElemName pes
