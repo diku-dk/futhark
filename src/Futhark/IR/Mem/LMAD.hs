@@ -47,8 +47,6 @@ import Futhark.IR.Syntax
     Slice (..),
     Type,
     dimFix,
-    flatSliceDims,
-    flatSliceStrides,
     unitSlice,
   )
 import Futhark.IR.Syntax.Core (VName (..))
@@ -293,27 +291,19 @@ flatSlice ::
   (Eq num, IntegralExp num) =>
   LMAD num ->
   FlatSlice num ->
-  LMAD num
+  Maybe (LMAD num)
 flatSlice lmad@(LMAD offset (dim : dims)) (FlatSlice new_offset is)
   | hasContiguousPerm lmad =
-      LMAD
-        (offset + new_offset * ldStride dim)
-        (map (helper $ ldStride dim) is <> dims)
-        & setLMADPermutation [0 ..]
+      Just $
+        LMAD
+          (offset + new_offset * ldStride dim)
+          (map (helper $ ldStride dim) is <> dims)
+          & setLMADPermutation [0 ..]
   where
     helper s0 (FlatDimIndex n s) =
       let new_mon = if s0 * s == 1 then Inc else Unknown
        in LMADDim (s0 * s) n 0 new_mon
-flatSlice lmad s@(FlatSlice new_offset _) =
-  LMAD (new_offset * base_stride) (new_dims <> tail_dims)
-  where
-    tail_shapes = tail $ lmadShape lmad
-    base_stride = product tail_shapes
-    tail_strides = tail $ scanr (*) 1 tail_shapes
-    tail_dims = zipWith4 LMADDim tail_strides tail_shapes [length new_shapes ..] (repeat Inc)
-    new_shapes = flatSliceDims s
-    new_strides = map (* base_stride) $ flatSliceStrides s
-    new_dims = zipWith4 LMADDim new_strides new_shapes [0 ..] (repeat Inc)
+flatSlice _ _ = Nothing
 
 -- | Handle the case where a reshape operation can stay inside a
 -- single LMAD.  See "Futhark.IR.Mem.IxFun.reshapeOneLMAD" for
