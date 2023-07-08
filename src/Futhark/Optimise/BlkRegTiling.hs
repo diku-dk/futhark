@@ -25,6 +25,7 @@ import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
@@ -147,7 +148,7 @@ kkLoopBody
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
-        let lmad_dims = IxFun.lmadDims lmad
+        let lmad_dims = LMAD.dims lmad
             q = length lmad_dims
             last_perm = IxFun.ldPerm $ last lmad_dims
             stride = IxFun.ldStride $ last lmad_dims

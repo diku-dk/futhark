@@ -50,6 +50,7 @@ import Futhark.Analysis.SymbolTable (IndexOp)
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
@@ -343,7 +344,7 @@ ensureRowMajorArray space_ok v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
+  if IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
     && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     && IxFun.contiguous ixfun
@@ -708,11 +709,8 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-ixFunPerm :: IxFun -> [Int]
-ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . IxFun.ixfunLMAD
-
 ixFunMon :: IxFun -> [IxFun.Monotonicity]
-ixFunMon = map IxFun.ldMon . IxFun.lmadDims . IxFun.ixfunLMAD
+ixFunMon = map LMAD.ldMon . LMAD.dims . IxFun.ixfunLMAD
 
 data MemReq
   = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
@@ -768,7 +766,7 @@ allocInMatchBody rets (Body _ stms res) =
           pure . MemArray pt shape u $
             MemReq
               space
-              (ixFunPerm ixfun)
+              (IxFun.permutation ixfun)
               (ixFunMon ixfun)
               (Rank $ length $ IxFun.base ixfun)
               (IxFun.contiguous ixfun)

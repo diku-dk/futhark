@@ -12,6 +12,7 @@ module Futhark.IR.Mem.IxFunWrapper
   )
 where
 
+import Data.Maybe (fromMaybe)
 import Futhark.IR.Mem.IxFun qualified as I
 import Futhark.IR.Mem.IxFun.Alg qualified as IA
 import Futhark.IR.Syntax (FlatSlice, Slice)
@@ -41,7 +42,7 @@ reshape ::
   IxFun num ->
   Shape num ->
   IxFun num
-reshape (l, a) x = (I.reshape l x, IA.reshape a x)
+reshape (l, a) x = (fromMaybe (error "reshape") (I.reshape l x), IA.reshape a x)
 
 coerce ::
   (Eq num, IntegralExp num) =>
@@ -62,11 +63,11 @@ flatSlice ::
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice (l, a) x = (I.flatSlice l x, IA.flatSlice a x)
+flatSlice (l, a) x = (fromMaybe (error "flatSlice") (I.flatSlice l x), IA.flatSlice a x)
 
 rebase ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   IxFun num ->
   IxFun num
-rebase (l, a) (l1, a1) = (I.rebase l l1, IA.rebase a a1)
+rebase (l, a) (l1, a1) = (fromMaybe (error "rebase") (I.rebase l l1), IA.rebase a a1)

@@ -485,8 +485,8 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
                     Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) -> pure $
                       case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
                         Just fv_subst ->
-                          if ixfunPermutation ixfn
-                            == ixfunPermutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
+                          if IxFun.permutation ixfn
+                            == IxFun.permutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
                             then
                               let entry =
                                     coal_entry
@@ -506,9 +506,6 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
               _ -> pure bu_env_f
 
   foldM checkMergeeOverlap bu_env''' mergee_writes
-
-ixfunPermutation :: IxFun -> [Int]
-ixfunPermutation = map IxFun.ldPerm . IxFun.lmadDims . IxFun.ixfunLMAD
 
 -- | Given a pattern element and the corresponding kernel result, try to put the
 -- kernel result directly in the memory block of pattern element
