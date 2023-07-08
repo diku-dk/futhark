@@ -1,5 +1,8 @@
 -- | This module contains a representation of linear-memory accessor
 -- descriptors (LMAD); see work by Zhu, Hoeflinger and David.
+--
+-- This module is designed to be used as a qualified import, as the
+-- exported names are quite generic.
 module Futhark.IR.Mem.LMAD
   ( Shape,
     Indices,
@@ -11,9 +14,13 @@ module Futhark.IR.Mem.LMAD
     slice,
     flatSlice,
     reshape,
-    lmadShape,
+    permute,
+    shape,
     monotonicity,
-    lmadShapeBase,
+    permutation,
+    shapeBase,
+    setPermutation,
+    setShape,
     substituteInLMAD,
     permuteInv,
     permuteFwd,
@@ -22,8 +29,8 @@ module Futhark.IR.Mem.LMAD
     disjoint2,
     disjoint3,
     dynamicEqualsLMAD,
-    lmadPermutation,
     iota,
+    mkExistential,
     invertMonotonicity,
   )
 where
@@ -42,6 +49,7 @@ import Futhark.IR.Mem.Interval
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
   ( DimIndex (..),
+    Ext (..),
     FlatDimIndex (..),
     FlatSlice (..),
     Slice (..),
@@ -134,8 +142,8 @@ instance Ord num => Ord (LMADDim num) where
 --    \{ ~ \sigma + i_1 * s_1 + \ldots + i_m * s_m ~ | ~ 0 \leq i_1 < n_1, \ldots, 0 \leq i_m < n_m ~ \}
 -- \]
 data LMAD num = LMAD
-  { lmadOffset :: num,
-    lmadDims :: [LMADDim num]
+  { offset :: num,
+    dims :: [LMADDim num]
   }
   deriving (Show, Eq, Ord)
 
@@ -208,11 +216,11 @@ index lmad@(LMAD off dims) inds =
       zipWith
         flatOneDim
         (map ldStride dims)
-        (permuteInv (lmadPermutation lmad) inds)
+        (permuteInv (permutation lmad) inds)
 
 setLMADPermutation :: Permutation -> LMAD num -> LMAD num
 setLMADPermutation perm lmad =
-  lmad {lmadDims = zipWith (\dim p -> dim {ldPerm = p}) (lmadDims lmad) perm}
+  lmad {dims = zipWith (\dim p -> dim {ldPerm = p}) (dims lmad) perm}
 
 -- | Handle the case where a slice can stay within a single LMAD.
 slice ::
@@ -221,9 +229,9 @@ slice ::
   Slice num ->
   LMAD num
 slice lmad@(LMAD _ ldims) (Slice is) =
-  let perm = lmadPermutation lmad
+  let perm = permutation lmad
       is' = permuteInv perm is
-      lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
+      lmad' = foldl sliceOne (LMAD (offset lmad) []) $ zip is' ldims
       -- need to remove the fixed dims from the permutation
       perm' =
         updatePerm perm $
@@ -270,7 +278,7 @@ slice lmad@(LMAD _ ldims) (Slice is) =
 hasContiguousPerm :: LMAD num -> Bool
 hasContiguousPerm lmad = perm == sort perm
   where
-    perm = lmadPermutation lmad
+    perm = permutation lmad
 
 -- | Flat-slice an LMAD.
 flatSlice ::
@@ -292,7 +300,7 @@ flatSlice lmad@(LMAD offset (dim : dims)) (FlatSlice new_offset is)
 flatSlice _ _ = Nothing
 
 -- | Handle the case where a reshape operation can stay inside a
--- single LMAD.  See "Futhark.IR.Mem.IxFun.reshapeOneLMAD" for
+-- single LMAD.  See "Futhark.IR.Mem.IxFun.reshape" for
 -- conditions.
 reshape ::
   (Eq num, IntegralExp num) =>
@@ -300,7 +308,7 @@ reshape ::
   Shape num ->
   Maybe (LMAD num)
 reshape lmad@(LMAD off dims) newshape = do
-  let perm = lmadPermutation lmad
+  let perm = permutation lmad
       dims_perm = permuteFwd perm dims
       mid_dims = take (length dims) dims_perm
       mon = monotonicity lmad
@@ -357,8 +365,15 @@ invertMonotonicity Inc = Dec
 invertMonotonicity Dec = Inc
 invertMonotonicity Unknown = Unknown
 
-lmadPermutation :: LMAD num -> Permutation
-lmadPermutation = map ldPerm . lmadDims
+permutation :: LMAD num -> Permutation
+permutation = map ldPerm . dims
+
+setPermutation :: Permutation -> LMAD num -> LMAD num
+setPermutation perm lmad =
+  lmad {dims = zipWith (\dim p -> dim {ldPerm = p}) (dims lmad) perm}
+
+setShape :: Shape num -> LMAD num -> LMAD num
+setShape shp lmad = lmad {dims = zipWith (\dim s -> dim {ldShape = s}) (dims lmad) shp}
 
 -- | Substitute a name with a PrimExp in an LMAD.
 substituteInLMAD ::
@@ -384,12 +399,12 @@ substituteInLMAD tab (LMAD offset dims) =
     sub = TPrimExp . substituteInPrimExp tab' . untyped
 
 -- | Shape of an LMAD.
-lmadShape :: LMAD num -> Shape num
-lmadShape lmad = permuteInv (lmadPermutation lmad) $ lmadShapeBase lmad
+shape :: LMAD num -> Shape num
+shape lmad = permuteInv (permutation lmad) $ shapeBase lmad
 
 -- | Shape of an LMAD, ignoring permutations.
-lmadShapeBase :: LMAD num -> Shape num
-lmadShapeBase = map ldShape . lmadDims
+shapeBase :: LMAD num -> Shape num
+shapeBase = map ldShape . dims
 
 permuteFwd :: Permutation -> [a] -> [a]
 permuteFwd ps elems = map (elems !!) ps
@@ -418,6 +433,23 @@ iota mon off ns
           fi = replicate rk mon
        in LMAD off $ zipWith4 LMADDim ss ns ps fi
   | otherwise = error "LMAD.iota: requires Inc or Dec"
+
+-- | Create an LMAD that is existential in everything, with the
+-- provided permutation and monotonicity.
+mkExistential :: [(Int, Monotonicity)] -> Int -> LMAD (Ext a)
+mkExistential perm start =
+  lmad
+  where
+    lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
+    onDim (p, mon) i =
+      LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2)) p mon
+
+-- | Permute dimensions.
+permute :: LMAD num -> Permutation -> LMAD num
+permute lmad perm_new =
+  let perm_cur = permutation lmad
+      perm = map (perm_cur !!) perm_new
+   in setPermutation perm lmad
 
 -- | Computes the maximum span of an 'LMAD'. The result is the lowest and
 -- highest flat values representable by that 'LMAD'.
@@ -632,7 +664,7 @@ splitDim overlapping_dim0 is
 lmadToIntervals :: LMAD (TPrimExp Int64 VName) -> (AlgSimplify.SofP, [Interval])
 lmadToIntervals (LMAD offset []) = (AlgSimplify.simplify0 $ untyped offset, [Interval 0 1 1])
 lmadToIntervals lmad@(LMAD offset dims0) =
-  (offset', map helper $ permuteInv (lmadPermutation lmad) dims0)
+  (offset', map helper $ permuteInv (permutation lmad) dims0)
   where
     offset' = AlgSimplify.simplify0 $ untyped offset
 
@@ -655,8 +687,8 @@ dynamicEqualsLMADDim dim1 dim2 =
 -- True if offset and constituent 'LMADDim' are equal.
 dynamicEqualsLMAD :: Eq num => LMAD (TPrimExp t num) -> LMAD (TPrimExp t num) -> TPrimExp Bool num
 dynamicEqualsLMAD lmad1 lmad2 =
-  lmadOffset lmad1 .==. lmadOffset lmad2
+  offset lmad1 .==. offset lmad2
     .&&. foldr
       ((.&&.) . uncurry dynamicEqualsLMADDim)
       true
-      (zip (lmadDims lmad1) (lmadDims lmad2))
+      (zip (dims lmad1) (dims lmad2))
