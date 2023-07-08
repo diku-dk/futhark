@@ -207,9 +207,9 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
-flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> Maybe MemLoc
 flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape $ IxFun.flatSlice ixfun slice
+  MemLoc mem shape <$> IxFun.flatSlice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -931,7 +931,9 @@ defCompileBasicOp _ FlatIndex {} =
 defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
   v_loc <- entryArrayLoc <$> lookupArray v
-  copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
+  case flatSliceMemLoc pe_loc slice' of
+    Just pe_loc' -> copy (elemType (patElemType pe)) pe_loc' v_loc
+    Nothing -> error "defCompileBasicOp FlatUpdate"
   where
     slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate shape se)

@@ -254,10 +254,7 @@ slice ::
 slice ixfun@(IxFun lmad@(LMAD _ _) oshp cg) (Slice is)
   -- Avoid identity slicing.
   | is == map (unitSlice 0) (shape ixfun) = ixfun
-  | Just lmad' <- LMAD.slice lmad (Slice is) =
-      IxFun lmad' oshp cg'
-  | otherwise =
-      error "IxFun flatSlice: LMAD noncontiguous"
+  | otherwise = IxFun (LMAD.slice lmad (Slice is)) oshp cg'
   where
     cg' = cg && slicePreservesContiguous lmad (Slice (permuteInv (lmadPermutation lmad) is))
 
@@ -266,24 +263,20 @@ flatSlice ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   FlatSlice num ->
-  IxFun num
-flatSlice (IxFun lmad oshp cg) s
-  | Just lmad' <- LMAD.flatSlice lmad s =
-      IxFun lmad' oshp cg
-  | otherwise =
-      error "IxFun flatSlice: LMAD noncontiguous"
+  Maybe (IxFun num)
+flatSlice (IxFun lmad oshp cg) s = do
+  lmad' <- LMAD.flatSlice lmad s
+  Just $ IxFun lmad' oshp cg
 
 -- | Reshape an index function.
 reshape ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   Shape num ->
-  IxFun num
-reshape (IxFun lmad oshp cg) new_shape
-  | Just lmad' <- LMAD.reshape lmad new_shape =
-      IxFun lmad' new_shape cg
-  | otherwise =
-      error "Ixfun reshape: cannot do"
+  Maybe (IxFun num)
+reshape (IxFun lmad oshp cg) new_shape = do
+  lmad' <- LMAD.reshape lmad new_shape
+  Just $ IxFun lmad' new_shape cg
 
 -- | Coerce an index function to look like it has a new shape.
 -- Dynamically the shape must be the same.
@@ -333,12 +326,12 @@ rank (IxFun (LMAD _ sss) _ _) = length sss
 --
 -- because then I can go bottom up and compose with ixfun0 all the index
 -- functions corresponding to the memory block associated with ixfun.
-rebaseNice ::
+rebase ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   IxFun num ->
   Maybe (IxFun num)
-rebaseNice
+rebase
   new_base@(IxFun lmad_base _ cg_base)
   ixfun@(IxFun lmad shp cg) = do
     let dims = lmadDims lmad
@@ -406,19 +399,6 @@ rebaseNice
                     dims_base'
                 )
     pure $ IxFun lmad_base'' shp (cg && cg_base)
-
--- | Rebase an index function on top of a new base.
-rebase ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  IxFun num ->
-  IxFun num
-rebase new_base@(IxFun lmads_base shp_base cg_base) ixfun
-  | Just ixfun' <- rebaseNice new_base ixfun = ixfun'
-  -- In the general case just concatenate LMADs since this refers to index
-  -- function composition, which is always safe.
-  | otherwise =
-      error "IxFun rebase: cannot do"
 
 -- | If the memory support of the index function is contiguous and row-major
 -- (i.e., no transpositions etc.), then this should

@@ -134,12 +134,12 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
         Constant _ -> Just (ws, ws)
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
-  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) =
-      let x_ixfn_slc = IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
-          r1 = (m_b, m_x, x_ixfn_slc)
-       in case getDirAliasedIxfn td_env coal_tab v of
-            Nothing -> Just ([r1], [r1])
-            Just r2 -> Just ([r1], [r1, r2])
+  | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) = do
+      x_ixfn_slc <- IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+      let r1 = (m_b, m_x, x_ixfn_slc)
+      case getDirAliasedIxfn td_env coal_tab v of
+        Nothing -> Just ([r1], [r1])
+        Just r2 -> Just ([r1], [r1, r2])
 -- getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp bop)) =
 --   let wrt = mapMaybe (getDirAliasedIxfn td_env coal_tab . patElemName) ys
 --    in trace ("getUseBla: " <> show bop) $ pure (wrt, wrt)

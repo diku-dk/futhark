@@ -1019,13 +1019,13 @@ expReturns (BasicOp (Reshape k newshape v)) = do
   pure
     [ MemArray et (fmap Free newshape) NoUniqueness $
         Just . ReturnsInBlock mem . existentialiseIxFun [] $
-          reshaper ixfun $
-            map pe64 (shapeDims newshape)
+          reshaper k ixfun (map pe64 (shapeDims newshape))
     ]
   where
-    reshaper = case k of
-      ReshapeArbitrary -> IxFun.reshape
-      ReshapeCoerce -> IxFun.coerce
+    reshaper ReshapeArbitrary ixfun =
+      error "expReturns Reshape" . IxFun.reshape ixfun
+    reshaper ReshapeCoerce ixfun =
+      IxFun.coerce ixfun
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
@@ -1113,6 +1113,7 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
   map (fmap pe64) idxs
     & FlatSlice (pe64 offset)
     & IxFun.flatSlice ixfun
+    & fromMaybe (error "flatSliceInfo: nope")
     & ArrayIn mem
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
     & pure

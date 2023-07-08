@@ -1560,7 +1560,10 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b))
   where
     updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
-      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
+      fromMaybe (error "updateIndFunSlice") $
+        IxFun.flatSlice ind_fun $
+          FlatSlice (pe64 offset) $
+            map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))

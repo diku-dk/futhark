@@ -559,7 +559,9 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
               [DimSlice 0 num_threads' 1, DimFix gtid]
        in if length old_shape == 1
             then IxFun.coerce offset_ixfun old_shape
-            else IxFun.reshape offset_ixfun old_shape
+            else
+              fromMaybe (error "expandedVariantAllocations") $
+                IxFun.reshape offset_ixfun old_shape
 
 -- | A map from memory block names to new index function bases.
 type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
@@ -674,7 +676,8 @@ offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
   pure . fromMaybe summary $ do
     new_base' <- new_base
-    pure $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
+    ixfun' <- IxFun.rebase new_base' ixfun
+    pure $ MemArray pt shape u $ ArrayIn mem ixfun'
 offsetMemoryInMemBound summary = pure summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
@@ -683,8 +686,8 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
       new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
       pure . fromMaybe br $ do
         new_base' <- new_base
-        pure . MemArray pt shape u . ReturnsInBlock mem $
-          IxFun.rebase (fmap (fmap Free) new_base') ixfun
+        ixfun'' <- IxFun.rebase (fmap (fmap Free) new_base') ixfun
+        pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
