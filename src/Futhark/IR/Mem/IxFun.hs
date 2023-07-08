@@ -468,7 +468,7 @@ rebase new_base@(IxFun lmads_base shp_base cg_base) ixfun@(IxFun lmads shp cg)
        in IxFun (lmads @++@ lmads_base') shp_base' (cg && cg_base)
 
 -- | If the memory support of the index function is contiguous and row-major
--- (i.e., no transpositions, repetitions, rotates, etc.), then this should
+-- (i.e., no transpositions etc.), then this should
 -- return the offset from which the memory-support of this index function
 -- starts.
 linearWithOffset ::
@@ -511,27 +511,10 @@ ixfunMonotonicity ::
   IxFun num ->
   Monotonicity
 ixfunMonotonicity (IxFun (lmad :| lmads) _ _) =
-  let mon0 = lmadMonotonicityRots lmad
-   in if all ((== mon0) . lmadMonotonicityRots) lmads
+  let mon0 = LMAD.monotonicity lmad
+   in if all ((== mon0) . LMAD.monotonicity) lmads
         then mon0
         else Unknown
-  where
-    lmadMonotonicityRots ::
-      (Eq num, IntegralExp num) =>
-      LMAD num ->
-      Monotonicity
-    lmadMonotonicityRots (LMAD _ dims)
-      | all (isMonDim Inc) dims = Inc
-      | all (isMonDim Dec) dims = Dec
-      | otherwise = Unknown
-
-    isMonDim ::
-      (Eq num, IntegralExp num) =>
-      Monotonicity ->
-      LMADDim num ->
-      Bool
-    isMonDim mon (LMADDim s _ _ ldmon) =
-      s == 0 || mon == ldmon
 
 -- | Turn all the leaves of the index function into 'Ext's.  We
 --  require that there's only one LMAD, that the index function is
@@ -572,7 +555,7 @@ closeEnough ixf1 ixf2 =
 -- | Returns true if two 'IxFun's are equivalent.
 --
 -- Equivalence in this case is defined as having the same number of LMADs, with
--- each pair of LMADs matching in permutation, offsets, strides and rotations.
+-- each pair of LMADs matching in permutation, offsets, and strides.
 equivalent :: Eq num => IxFun num -> IxFun num -> Bool
 equivalent ixf1 ixf2 =
   NE.length (ixfunLMADs ixf1) == NE.length (ixfunLMADs ixf2)
