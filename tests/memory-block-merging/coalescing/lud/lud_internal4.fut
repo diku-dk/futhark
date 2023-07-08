@@ -1,5 +1,5 @@
 -- ==
--- random input { [16][16][8][8]f32 }
+-- compiled random input { [16][16][8][8]f32 }
 -- auto output
 -- structure gpu-mem { Alloc 3 }
 
