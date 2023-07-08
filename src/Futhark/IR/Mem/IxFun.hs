@@ -48,11 +48,10 @@ import Data.List (sort, sortBy, zip4, zipWith4)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (isJust)
 import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.IR.Mem.LMAD hiding (index)
+import Futhark.IR.Mem.LMAD hiding (flatSlice, index, iota, reshape, slice)
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -60,7 +59,6 @@ import Futhark.IR.Syntax
     FlatDimIndex (..),
     FlatSlice (..),
     Slice (..),
-    dimFix,
     flatSliceDims,
     flatSliceStrides,
     unitSlice,
@@ -195,7 +193,7 @@ index = indexFromLMADs . ixfunLMADs
 
 -- | iota with offset.
 iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
-iotaOffset o ns = IxFun (makeRotIota Inc o ns :| []) ns True
+iotaOffset o ns = IxFun (LMAD.iota Inc o ns :| []) ns True
 
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num
@@ -225,102 +223,45 @@ permute (IxFun (lmad :| lmads) oshp cg) perm_new =
       perm = map (perm_cur !!) perm_new
    in IxFun (setLMADPermutation perm lmad :| lmads) oshp cg
 
--- | Handle the case where a slice can stay within a single LMAD.
-sliceOneLMAD ::
+slicePreservesContiguous ::
   (Eq num, IntegralExp num) =>
-  IxFun num ->
+  LMAD num ->
   Slice num ->
-  Maybe (IxFun num)
-sliceOneLMAD (IxFun (lmad@(LMAD _ ldims) :| lmads) oshp cg) (Slice is) = do
-  let perm = lmadPermutation lmad
-      is' = permuteInv perm is
-      cg' = cg && slicePreservesContiguous lmad (Slice is')
-  let lmad' = foldl sliceOne (LMAD (lmadOffset lmad) []) $ zip is' ldims
-      -- need to remove the fixed dims from the permutation
-      perm' =
-        updatePerm perm $
-          map fst $
-            filter (isJust . dimFix . snd) $
-              zip [0 .. length is' - 1] is'
-
-  pure $ IxFun (setLMADPermutation perm' lmad' :| lmads) oshp cg'
+  Bool
+slicePreservesContiguous (LMAD _ dims) (Slice slc) =
+  -- remove from the slice the LMAD dimensions that have stride 0.
+  -- If the LMAD was contiguous in mem, then these dims will not
+  -- influence the contiguousness of the result.
+  -- Also normalize the input slice, i.e., 0-stride and size-1
+  -- slices are rewritten as DimFixed.
+  let (dims', slc') =
+        unzip $
+          filter ((/= 0) . ldStride . fst) $
+            zip dims $
+              map normIndex slc
+      -- Check that:
+      -- 1. a clean split point exists between Fixed and Sliced dims
+      -- 2. the outermost sliced dim has +/- 1 stride.
+      -- 3. the rest of inner sliced dims are full.
+      (_, success) =
+        foldl
+          ( \(found, res) (slcdim, LMADDim _ n _ _) ->
+              case (slcdim, found) of
+                (DimFix {}, True) -> (found, False)
+                (DimFix {}, False) -> (found, res)
+                (DimSlice _ _ ds, False) ->
+                  -- outermost sliced dim: +/-1 stride
+                  let res' = (ds == 1 || ds == -1)
+                   in (True, res && res')
+                (DimSlice _ ne ds, True) ->
+                  -- inner sliced dim: needs to be full
+                  let res' = (n == ne) && (ds == 1 || ds == -1)
+                   in (found, res && res')
+          )
+          (False, True)
+          $ zip slc' dims'
+   in success
   where
-    updatePerm ps inds = concatMap decrease ps
-      where
-        decrease p =
-          let f n i
-                | i == p = -1
-                | i > p = n
-                | n /= -1 = n + 1
-                | otherwise = n
-              d = foldl f 0 inds
-           in [p - d | d /= -1]
-
-    -- XXX: TODO: what happens to r on a negative-stride slice; is there
-    -- such a case?
-    sliceOne ::
-      (Eq num, IntegralExp num) =>
-      LMAD num ->
-      (DimIndex num, LMADDim num) ->
-      LMAD num
-    sliceOne (LMAD off dims) (DimFix i, LMADDim s _x _ _) =
-      LMAD (off + flatOneDim s i) dims
-    sliceOne (LMAD off dims) (DimSlice _ ne _, LMADDim 0 _ p _) =
-      LMAD off (dims ++ [LMADDim 0 ne p Unknown])
-    sliceOne (LMAD off dims) (dmind, dim@(LMADDim _ n _ _))
-      | dmind == unitSlice 0 n = LMAD off (dims ++ [dim])
-    sliceOne (LMAD off dims) (dmind, LMADDim s n p m)
-      | dmind == DimSlice (n - 1) n (-1) =
-          let off' = off + flatOneDim s (n - 1)
-           in LMAD off' (dims ++ [LMADDim (s * (-1)) n p (invertMonotonicity m)])
-    sliceOne (LMAD off dims) (DimSlice b ne 0, LMADDim s _ p _) =
-      LMAD (off + flatOneDim s b) (dims ++ [LMADDim 0 ne p Unknown])
-    sliceOne (LMAD off dims) (DimSlice bs ns ss, LMADDim s _ p m) =
-      let m' = case sgn ss of
-            Just 1 -> m
-            Just (-1) -> invertMonotonicity m
-            _ -> Unknown
-       in LMAD (off + s * bs) (dims ++ [LMADDim (ss * s) ns p m'])
-
-    slicePreservesContiguous ::
-      (Eq num, IntegralExp num) =>
-      LMAD num ->
-      Slice num ->
-      Bool
-    slicePreservesContiguous (LMAD _ dims) (Slice slc) =
-      -- remove from the slice the LMAD dimensions that have stride 0.
-      -- If the LMAD was contiguous in mem, then these dims will not
-      -- influence the contiguousness of the result.
-      -- Also normalize the input slice, i.e., 0-stride and size-1
-      -- slices are rewritten as DimFixed.
-      let (dims', slc') =
-            unzip $
-              filter ((/= 0) . ldStride . fst) $
-                zip dims $
-                  map normIndex slc
-          -- Check that:
-          -- 1. a clean split point exists between Fixed and Sliced dims
-          -- 2. the outermost sliced dim has +/- 1 stride.
-          -- 3. the rest of inner sliced dims are full.
-          (_, success) =
-            foldl
-              ( \(found, res) (slcdim, LMADDim _ n _ _) ->
-                  case (slcdim, found) of
-                    (DimFix {}, True) -> (found, False)
-                    (DimFix {}, False) -> (found, res)
-                    (DimSlice _ _ ds, False) ->
-                      -- outermost sliced dim: +/-1 stride
-                      let res' = (ds == 1 || ds == -1)
-                       in (True, res && res')
-                    (DimSlice _ ne ds, True) ->
-                      -- inner sliced dim: needs to be full
-                      let res' = (n == ne) && (ds == 1 || ds == -1)
-                       in (found, res && res')
-              )
-              (False, True)
-              $ zip slc' dims'
-       in success
-
     normIndex ::
       (Eq num, IntegralExp num) =>
       DimIndex num ->
@@ -335,15 +276,18 @@ slice ::
   IxFun num ->
   Slice num ->
   IxFun num
-slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) dim_slices
+slice ixfun@(IxFun (lmad@(LMAD _ _) :| lmads) oshp cg) (Slice is)
   -- Avoid identity slicing.
-  | unSlice dim_slices == map (unitSlice 0) (shape ixfun) = ixfun
-  | Just ixfun' <- sliceOneLMAD ixfun dim_slices = ixfun'
+  | is == map (unitSlice 0) (shape ixfun) = ixfun
+  | Just lmad' <- LMAD.slice lmad (Slice is) =
+      IxFun (lmad' :| lmads) oshp cg'
   | otherwise =
-      case sliceOneLMAD (iota (lmadShape lmad)) dim_slices of
-        Just (IxFun (lmad' :| []) _ cg') ->
-          IxFun (lmad' :| lmad : lmads) oshp (cg && cg')
+      case LMAD.slice (LMAD.iota Inc 0 (lmadShape lmad)) (Slice is) of
+        Just lmad' ->
+          IxFun (lmad' :| lmad : lmads) oshp cg'
         _ -> error "slice: reached impossible case"
+  where
+    cg' = cg && slicePreservesContiguous lmad (Slice (permuteInv (lmadPermutation lmad) is))
 
 -- | Flat-slice an index function.
 flatSlice ::
@@ -434,7 +378,7 @@ reshapeOneLMAD ixfun@(IxFun (lmad@(LMAD off dims) :| lmads) oldbase cg) newshape
 
       (sup_inds, support) = unzip $ sortBy (compare `on` fst) support_inds
       (rpt_inds, repeats) = unzip repeat_inds
-      LMAD off' dims_sup = makeRotIota mon off support
+      LMAD off' dims_sup = LMAD.iota mon off support
       repeats' = map (\n -> LMADDim 0 n 0 Unknown) repeats
       dims' =
         map snd $
@@ -642,15 +586,6 @@ rearrangeWithOffset _ _ = Nothing
 -- | Is this a row-major array starting at offset zero?
 isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isLinear = (== Just 0) . flip linearWithOffset 1
-
-flatOneDim ::
-  (Eq num, IntegralExp num) =>
-  num ->
-  num ->
-  num
-flatOneDim s i
-  | s == 0 = 0
-  | otherwise = i * s
 
 -- | Check monotonicity of an index function.
 ixfunMonotonicity ::
