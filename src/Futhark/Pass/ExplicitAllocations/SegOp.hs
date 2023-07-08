@@ -22,16 +22,6 @@ allocInKernelBody (KernelBody () stms res) =
   uncurry (flip (KernelBody ()))
     <$> collectStms (allocInStms stms (pure res))
 
-allocInLambda ::
-  Allocable fromrep torep inner =>
-  [LParam torep] ->
-  Body fromrep ->
-  AllocM fromrep torep (Lambda torep)
-allocInLambda params body =
-  mkLambda params . allocInStms (bodyStms body) $
-    pure $
-      bodyResult body
-
 allocInBinOpParams ::
   Allocable fromrep torep inner =>
   SubExp ->
@@ -90,11 +80,42 @@ allocInBinOpLambda ::
   Lambda fromrep ->
   AllocM fromrep torep (Lambda torep)
 allocInBinOpLambda num_threads (SegSpace flat _) lam = do
-  let (acc_params, arr_params) =
+  let (xs_params, ys_params) =
         splitAt (length (lambdaParams lam) `div` 2) $ lambdaParams lam
       index_x = TPrimExp $ LeafExp flat int64
       index_y = index_x + pe64 num_threads
-  (acc_params', arr_params') <-
-    allocInBinOpParams num_threads index_x index_y acc_params arr_params
 
-  allocInLambda (acc_params' ++ arr_params') (lambdaBody lam)
+  params <-
+    uncurry (++) <$> allocInBinOpParams num_threads index_x index_y xs_params ys_params
+
+  -- FIXME: the index functions we construct for any array-typed
+  -- params are very confusing to the rest of the compiler because
+  -- they are slices of larger allocations, so we copy them into
+  -- distinct memory blocks with a simpler index function and let the
+  -- rest of the function use those instead.  The main problem is the
+  -- unExistentialiseMemory simplification rule, which is necessary to
+  -- make memory expansion work out.  Ultimately memory expansion
+  -- should be completely rethought, and then we can get rid of hacks
+  -- such as these.
+  (params', mk_copies) <- mapAndUnzipM fixupArrParam params
+
+  mkLambda params' $ do
+    sequence_ mk_copies
+    allocInStms (bodyStms (lambdaBody lam)) $ pure $ bodyResult (lambdaBody lam)
+  where
+    fixupArrParam (Param attr v dec@(MemArray pt shape u (ArrayIn mem _))) = do
+      p <- Param attr <$> newVName (baseString v <> "_indirect") <*> pure dec
+      space <- lookupMemSpace mem
+      pure
+        ( p,
+          do
+            let t = typeOf dec
+            mem' <- allocForArray t space
+            let info =
+                  MemArray pt shape u . ArrayIn mem' $
+                    IxFun.iota (map pe64 (arrayDims t))
+            addStm $
+              Let (Pat [PatElem v info]) (defAux ()) $
+                BasicOp (Replicate mempty (Var (paramName p)))
+        )
+    fixupArrParam p = pure (p, pure ())
