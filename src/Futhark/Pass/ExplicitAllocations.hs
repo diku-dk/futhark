@@ -43,7 +43,6 @@ import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
 import Data.List (foldl', transpose, zip4)
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -187,6 +186,40 @@ allocForArray ::
 allocForArray t space = do
   allocForArray' t space
 
+-- | Repair an expression that cannot be assigned an index function.
+-- There is a simple remedy for this: normalise the input arrays and
+-- try again.
+repairExpression ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep (Exp torep)
+repairExpression (BasicOp (Reshape k shape v)) = do
+  v_mem <- fst <$> lookupArraySummary v
+  space <- lookupMemSpace v_mem
+  v' <- snd <$> ensureDirectArray (Just space) v
+  pure $ BasicOp $ Reshape k shape v'
+repairExpression e =
+  error $ "repairExpression:\n" <> prettyString e
+
+expReturns' ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep ([ExpReturns], Exp torep)
+expReturns' e = do
+  maybe_rts <- expReturns e
+  case maybe_rts of
+    Just rts -> pure (rts, e)
+    Nothing -> do
+      e' <- repairExpression e
+      let bad =
+            error . unlines $
+              [ "expReturns': impossible index transformation",
+                prettyString e,
+                prettyString e'
+              ]
+      rts <- fromMaybe bad <$> expReturns e'
+      pure (rts, e')
+
 allocsForStm ::
   (Allocable fromrep torep inner) =>
   [Ident] ->
@@ -195,10 +228,10 @@ allocsForStm ::
 allocsForStm idents e = do
   def_space <- askDefaultSpace
   hints <- expHints e
-  rts <- expReturns e
+  (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
-  dec <- mkExpDecM (Pat pes) e
-  pure $ Let (Pat pes) (defAux dec) e
+  dec <- mkExpDecM (Pat pes) e'
+  pure $ Let (Pat pes) (defAux dec) e'
 
 patWithAllocations ::
   (MonadBuilder m, Mem (Rep m) inner) =>
@@ -210,7 +243,7 @@ patWithAllocations ::
 patWithAllocations def_space names e hints = do
   ts' <- instantiateShapes' names <$> expExtType e
   let idents = zipWith Ident names ts'
-  rts <- expReturns e
+  rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
   Pat <$> allocsForPat def_space idents rts hints
 
 mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
@@ -345,8 +378,7 @@ ensureRowMajorArray space_ok v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if numLMADs ixfun == 1
-    && IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
+  if IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
     && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     && IxFun.contiguous ixfun
@@ -711,11 +743,8 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-numLMADs :: IxFun -> Int
-numLMADs = length . IxFun.ixfunLMADs
-
 ixFunMon :: IxFun -> [IxFun.Monotonicity]
-ixFunMon = map LMAD.ldMon . LMAD.dims . NE.head . IxFun.ixfunLMADs
+ixFunMon = map LMAD.ldMon . LMAD.dims . IxFun.ixfunLMAD
 
 data MemReq
   = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
@@ -769,15 +798,12 @@ allocInMatchBody rets (Body _ stms res) =
         (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
           space <- lookupMemSpace mem
           pure . MemArray pt shape u $
-            if numLMADs ixfun == 1
-              then
-                MemReq
-                  space
-                  (IxFun.permutation ixfun)
-                  (ixFunMon ixfun)
-                  (Rank $ length $ IxFun.base ixfun)
-                  (IxFun.contiguous ixfun)
-              else NeedsLinearisation space
+            MemReq
+              space
+              (IxFun.permutation ixfun)
+              (ixFunMon ixfun)
+              (Rank $ length $ IxFun.base ixfun)
+              (IxFun.contiguous ixfun)
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -1134,7 +1160,7 @@ simplifiable innerUsage simplifyInnerOp =
       innerUsage inner
 
     simplifyPat (Pat pes) e = do
-      rets <- expReturns e
+      rets <- fromMaybe (error "simplifyPat: ill-typed") <$> expReturns e
       Pat <$> zipWithM update pes rets
       where
         names = map patElemName pes

@@ -17,7 +17,6 @@ import Control.Monad.State.Strict
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence (Seq (..))
@@ -533,8 +532,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
       case M.lookup pat_mem active of
         Nothing ->
           -- We are not in a transitive case
-          case ( IxFun.hasOneLmad pat_ixf
-                   && maybe False (pat_mem `nameIn`) (M.lookup return_mem inhb),
+          case ( maybe False (pat_mem `nameIn`) (M.lookup return_mem inhb),
                  Coalesced
                    InPlaceCoal
                    (MemBlock tp return_shp pat_mem $ resultSlice pat_ixf)
@@ -1258,8 +1256,7 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
                         _ -> (failed, s_acc) -- fail!
 
 ixfunToAccessSummary :: IxFun.IxFun (TPrimExp Int64 VName) -> AccessSummary
-ixfunToAccessSummary (IxFun.IxFun (lmad NE.:| []) _ _) = Set $ S.singleton lmad
-ixfunToAccessSummary _ = Undeterminable
+ixfunToAccessSummary (IxFun.IxFun lmad _ _) = Set $ S.singleton lmad
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
 -- called on the pat-elements of loop and if-then-else expressions.
@@ -1364,9 +1361,8 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
                       Nothing ->
                         ind_y
                  in (m_y, alias_fn ind, oneName m_x <> y_al, x_deps0, certs <> certs'')
-          success0 = IxFun.hasOneLmad ind_yx
           m_b_aliased_m_yx = areAnyAliased td_env m_b [m_yx] -- m_b \= m_yx
-       in if success0 && not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
+       in if not m_b_aliased_m_yx && isInScope td_env m_yx -- nameIn m_yx (alloc td_env)
       -- Finally update the @activeCoals@ table with a fresh
       --   binding for @m_b@; if such one exists then overwrite.
       -- Also, add all variables from the alias chain of @b@ to
@@ -1561,7 +1557,10 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b))
   where
     updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
-      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
+      fromMaybe (error "updateIndFunSlice") $
+        IxFun.flatSlice ind_fun $
+          FlatSlice (pe64 offset) $
+            map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
