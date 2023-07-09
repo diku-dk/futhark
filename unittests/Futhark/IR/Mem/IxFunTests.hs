@@ -8,6 +8,7 @@ where
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Text qualified as T
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.IxFun qualified as IxFunLMAD
 import Futhark.IR.Mem.IxFun.Alg qualified as IxFunAlg
@@ -17,7 +18,7 @@ import Futhark.IR.Prop
 import Futhark.IR.Syntax
 import Futhark.IR.Syntax.Core ()
 import Futhark.Util.IntegralExp qualified as IE
-import Futhark.Util.Pretty qualified as PR
+import Futhark.Util.Pretty
 import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude hiding (span)
@@ -47,41 +48,41 @@ allPoints dims =
           ([], x)
           strides
 
-compareIxFuns :: IxFunLMAD.IxFun Int -> IxFunAlg.IxFun Int -> Assertion
-compareIxFuns ixfunLMAD ixfunAlg =
+compareIxFuns :: Maybe (IxFunLMAD.IxFun Int) -> IxFunAlg.IxFun Int -> Assertion
+compareIxFuns (Just ixfunLMAD) ixfunAlg =
   let lmadShape = IxFunLMAD.shape ixfunLMAD
       algShape = IxFunAlg.shape ixfunAlg
       points = allPoints lmadShape
       resLMAD = map (IxFunLMAD.index ixfunLMAD) points
       resAlg = map (IxFunAlg.index ixfunAlg) points
       errorMessage =
-        "lmad ixfun:  "
-          ++ PR.prettyString ixfunLMAD
-          ++ "\n"
-          ++ "alg ixfun:   "
-          ++ PR.prettyString ixfunAlg
-          ++ "\n"
-          ++ "lmad shape:  "
-          ++ show lmadShape
-          ++ "\n"
-          ++ "alg shape:   "
-          ++ show algShape
-          ++ "\n"
-          ++ "lmad points length: "
-          ++ show (length resLMAD)
-          ++ "\n"
-          ++ "alg points length:  "
-          ++ show (length resAlg)
-          ++ "\n"
-          ++ "lmad points: "
-          ++ show resLMAD
-          ++ "\n"
-          ++ "alg points:  "
-          ++ show resAlg
+        T.unpack . docText $
+          "lmad ixfun:  " <> pretty ixfunLMAD
+            </> "alg ixfun:   " <> pretty ixfunAlg
+            </> "lmad shape:  " <> pretty lmadShape
+            </> "alg shape:   " <> pretty algShape
+            </> "lmad points length: " <> pretty (length resLMAD)
+            </> "alg points length:  " <> pretty (length resAlg)
+            </> "lmad points: " <> pretty resLMAD
+            </> "alg points:  " <> pretty resAlg
    in (lmadShape == algShape && resLMAD == resAlg) @? errorMessage
+compareIxFuns Nothing ixfunAlg =
+  assertFailure $
+    unlines
+      [ "lmad ixfun: Nothing",
+        "alg ixfun:  " <> prettyString ixfunAlg
+      ]
 
 compareOps :: IxFunWrap.IxFun Int -> Assertion
 compareOps (ixfunLMAD, ixfunAlg) = compareIxFuns ixfunLMAD ixfunAlg
+
+compareOpsFailure :: IxFunWrap.IxFun Int -> Assertion
+compareOpsFailure (Nothing, _) = pure ()
+compareOpsFailure (Just ixfunLMAD, ixfunAlg) =
+  assertFailure . T.unpack . docText $
+    "Not supposed to be representable as LMAD."
+      </> "lmad ixfun: " <> pretty ixfunLMAD
+      </> "alg ixfun:  " <> pretty ixfunAlg
 
 -- XXX: Clean this up.
 n :: Int
@@ -105,20 +106,20 @@ tests =
         test_slice_reshape_iota1,
         test_permute_slice_iota,
         test_reshape_iota,
-        -- test_reshape_permute_iota,
+        test_reshape_permute_iota,
         test_slice_reshape_iota2,
-        -- test_reshape_slice_iota3,
+        test_reshape_slice_iota3,
         test_complex1,
         test_complex2,
-        -- test_rebase1,
-        -- test_rebase2,
-        -- test_rebase3,
-        -- test_rebase4_5,
+        test_rebase1,
+        test_rebase2,
+        test_rebase3,
+        test_rebase4_5,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
-        test_flatSlice_slice_iota
-        -- test_flatSlice_transpose_slice_iota
+        test_flatSlice_slice_iota,
+        test_flatSlice_transpose_slice_iota
         -- TODO: Without z3, these tests fail. Ideally, our internal simplifier
         -- should be able to handle them:
         --
@@ -155,14 +156,13 @@ test_reshape_iota =
     let s = Slice [DimSlice 0 n 0, DimSlice 0 n 1]
      in reshape (slice (iota [n, n]) s) [1, n, 1, n]
 
-{-
 test_reshape_permute_iota :: [TestTree]
 test_reshape_permute_iota =
   -- negative reshape test
-  singleton . testCase "reshape . permute . iota" . compareOps $
+  singleton . testCase "reshape . permute . iota" . compareOpsFailure $
     let newdims = [n * n, n]
      in reshape (permute (iota [n, n, n]) [1, 2, 0]) newdims
--}
+
 test_slice_reshape_iota2 :: [TestTree]
 test_slice_reshape_iota2 =
   singleton . testCase "slice . reshape . iota 2" . compareOps $
@@ -174,11 +174,10 @@ test_slice_reshape_iota2 =
             ]
      in slice (reshape (iota [n, n, n, n]) newdims) slc
 
-{-
 test_reshape_slice_iota3 :: [TestTree]
 test_reshape_slice_iota3 =
   -- negative reshape test
-  singleton . testCase "reshape . slice . iota 3" . compareOps $
+  singleton . testCase "reshape . slice . iota 3" . compareOpsFailure $
     let newdims = [n * n, n]
         slc =
           Slice
@@ -188,7 +187,7 @@ test_reshape_slice_iota3 =
               DimSlice 0 n 1
             ]
      in reshape (slice (iota [n, n, n, n]) slc) newdims
--}
+
 test_complex1 :: [TestTree]
 test_complex1 =
   singleton . testCase "permute . slice . permute . slice . iota 1" . compareOps $
@@ -234,10 +233,9 @@ test_complex2 =
         ixfun' = slice ixfun slice1
      in ixfun'
 
-{-
 test_rebase1 :: [TestTree]
 test_rebase1 =
-  singleton . testCase "rebase 1" . compareOps $
+  singleton . testCase "rebase 1" . compareOpsFailure $
     let slice_base =
           Slice
             [ DimFix (n `P.div` 2),
@@ -251,7 +249,7 @@ test_rebase1 =
 
 test_rebase2 :: [TestTree]
 test_rebase2 =
-  singleton . testCase "rebase 2" . compareOps $
+  singleton . testCase "rebase 2" . compareOpsFailure $
     let slice_base =
           Slice
             [ DimFix (n `P.div` 2),
@@ -270,7 +268,7 @@ test_rebase2 =
 
 test_rebase3 :: [TestTree]
 test_rebase3 =
-  singleton . testCase "rebase full orig but not monotonic" . compareOps $
+  singleton . testCase "rebase full orig but not monotonic" . compareOpsFailure $
     let n2 = (n - 2) `P.div` 3
         n3 = (n - 3) `P.div` 2
         slice_base =
@@ -306,11 +304,10 @@ test_rebase4_5 =
           ]
       ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
       ixfn_orig = permute (slice (iota [n3, n2]) slice_orig) [1, 0]
-   in [ testCase "rebase mixed monotonicities" $
-          compareOps $
-            rebase ixfn_base ixfn_orig
+   in [ testCase "rebase mixed monotonicities" . compareOpsFailure $
+          rebase ixfn_base ixfn_orig
       ]
--}
+
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =
   singleton . testCase "flatSlice . iota" . compareOps $
@@ -340,14 +337,13 @@ test_flatSlice_slice_iota =
   where
     flat_slice_1 = FlatSlice 17 [FlatDimIndex 3 27, FlatDimIndex 3 10, FlatDimIndex 3 1]
 
-{-
 test_flatSlice_transpose_slice_iota :: [TestTree]
 test_flatSlice_transpose_slice_iota =
-  singleton . testCase "flatSlice . transpose . slice . iota " . compareOps $
+  singleton . testCase "flatSlice . transpose . slice . iota " . compareOpsFailure $
     flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [1, 0]) flat_slice_1
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
--}
+
 -- test_disjoint2 :: [TestTree]
 -- test_disjoint2 =
 --   let add_nw64 = (+)
