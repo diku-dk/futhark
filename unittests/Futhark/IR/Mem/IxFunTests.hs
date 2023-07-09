@@ -104,6 +104,7 @@ tests =
         test_slice_iota,
         test_slice_reshape_iota1,
         test_permute_slice_iota,
+        test_reshape_iota,
         -- test_reshape_permute_iota,
         test_slice_reshape_iota2,
         -- test_reshape_slice_iota3,
@@ -146,6 +147,13 @@ test_permute_slice_iota :: [TestTree]
 test_permute_slice_iota =
   singleton . testCase "permute . slice . iota" . compareOps $
     permute (slice (iota [n, n, n]) slice3) [1, 0]
+
+test_reshape_iota :: [TestTree]
+test_reshape_iota =
+  -- This tests a pattern that occurs with ScalarSpace.
+  singleton . testCase "reshape . zeroslice . iota" . compareOps $
+    let s = Slice [DimSlice 0 n 0, DimSlice 0 n 1]
+     in reshape (slice (iota [n, n]) s) [1, n, 1, n]
 
 {-
 test_reshape_permute_iota :: [TestTree]

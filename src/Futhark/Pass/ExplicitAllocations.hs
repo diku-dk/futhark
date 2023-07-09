@@ -194,7 +194,9 @@ repairExpression ::
   Exp torep ->
   AllocM fromrep torep (Exp torep)
 repairExpression (BasicOp (Reshape k shape v)) = do
-  v' <- snd <$> ensureDirectArray Nothing v
+  v_mem <- fst <$> lookupArraySummary v
+  space <- lookupMemSpace v_mem
+  v' <- snd <$> ensureDirectArray (Just space) v
   pure $ BasicOp $ Reshape k shape v'
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
@@ -211,7 +213,7 @@ expReturns' e = do
       e' <- repairExpression e
       let bad =
             error . unlines $
-              [ "expReturns",
+              [ "expReturns': impossible index transformation",
                 prettyString e,
                 prettyString e'
               ]
