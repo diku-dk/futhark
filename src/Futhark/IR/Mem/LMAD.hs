@@ -31,7 +31,6 @@ module Futhark.IR.Mem.LMAD
     dynamicEqualsLMAD,
     iota,
     mkExistential,
-    invertMonotonicity,
   )
 where
 
@@ -303,10 +302,24 @@ flatSlice _ _ = Nothing
 -- single LMAD.  See "Futhark.IR.Mem.IxFun.reshape" for
 -- conditions.
 reshape ::
-  (Eq num, IntegralExp num) =>
-  LMAD num ->
-  Shape num ->
-  Maybe (LMAD num)
+  (Eq num, IntegralExp num) => LMAD num -> Shape num -> Maybe (LMAD num)
+--
+-- First a special case for when we are merely injecting unit
+-- dimensions into a non-permuted LMAD.
+reshape lmad@(LMAD off dims) newshape
+  | sort (permutation lmad) == permutation lmad,
+    Just dims' <- addingVacuous 0 newshape dims =
+      Just $ LMAD off dims'
+  where
+    addingVacuous i (dnew : dnews) (dold : dolds)
+      | dnew == ldShape dold =
+          (dold {ldPerm = i} :) <$> addingVacuous (i + 1) dnews dolds
+    addingVacuous i (1 : dnews) dolds =
+      (LMADDim 0 1 i Inc :) <$> addingVacuous (i + 1) dnews dolds
+    addingVacuous _ [] [] = Just []
+    addingVacuous _ _ _ = Nothing
+
+-- Then the general case.
 reshape lmad@(LMAD off dims) newshape = do
   let perm = permutation lmad
       dims_perm = permuteFwd perm dims

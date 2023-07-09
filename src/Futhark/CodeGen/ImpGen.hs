@@ -207,9 +207,9 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
-flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> Maybe MemLoc
 flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape $ IxFun.flatSlice ixfun slice
+  MemLoc mem shape <$> IxFun.flatSlice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -931,7 +931,9 @@ defCompileBasicOp _ FlatIndex {} =
 defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
   v_loc <- entryArrayLoc <$> lookupArray v
-  copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
+  case flatSliceMemLoc pe_loc slice' of
+    Just pe_loc' -> copy (elemType (patElemType pe)) pe_loc' v_loc
+    Nothing -> error "defCompileBasicOp FlatUpdate"
   where
     slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate shape se)
@@ -1401,8 +1403,8 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 copy :: CopyCompiler rep r op
 copy
   bt
-  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmads@(dst_lmad :| _) _ _))
-  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _ _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _ _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
     unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
@@ -1410,7 +1412,7 @@ copy
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
       sUnless
-        ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
+        ( fromBool (dst_name == src_name)
             .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
         )
       $ do
