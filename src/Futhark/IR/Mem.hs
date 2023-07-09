@@ -1054,7 +1054,7 @@ expReturns (BasicOp (Index v slice)) = do
 expReturns (BasicOp (Update _ v _ _)) =
   Just . pure <$> varReturns v
 expReturns (BasicOp (FlatIndex v slice)) = do
-  Just . pure . varInfoToExpReturns <$> flatSliceInfo v slice
+  fmap (pure . varInfoToExpReturns) <$> flatSliceInfo v slice
 expReturns (BasicOp (FlatUpdate v _ _)) =
   Just . pure <$> varReturns v
 expReturns (BasicOp op) =
@@ -1122,15 +1122,13 @@ flatSliceInfo ::
   (Monad m, HasScope rep m, Mem rep inner) =>
   VName ->
   FlatSlice SubExp ->
-  m (MemInfo SubExp NoUniqueness MemBind)
+  m (Maybe (MemInfo SubExp NoUniqueness MemBind))
 flatSliceInfo v slice@(FlatSlice offset idxs) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   map (fmap pe64) idxs
     & FlatSlice (pe64 offset)
     & IxFun.flatSlice ixfun
-    & fromMaybe (error "flatSliceInfo: nope")
-    & ArrayIn mem
-    & MemArray et (Shape (flatSliceDims slice)) NoUniqueness
+    & fmap (MemArray et (Shape (flatSliceDims slice)) NoUniqueness . ArrayIn mem)
     & pure
 
 class IsOp op => OpReturns op where
