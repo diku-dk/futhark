@@ -136,6 +136,10 @@ data SimpleOps rep = SimpleOps
     -- actually be used.
     protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
+    simplifyPatFromExpS ::
+      Pat (LetDec rep) ->
+      Exp (Wise rep) ->
+      SimpleM rep (Pat (LetDec rep)),
     simplifyOpS :: SimplifyOp rep (Op (Wise rep))
   }
 
@@ -144,11 +148,12 @@ bindableSimpleOps ::
   SimplifyOp rep (Op (Wise rep)) ->
   SimpleOps rep
 bindableSimpleOps =
-  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
+  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty) simplifyPatFromExp
   where
     mkExpDecS' _ pat e = pure $ mkExpDec pat e
     mkBodyS' _ stms res = pure $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
+    simplifyPatFromExp pat _ = traverse simplify pat
 
 newtype SimpleM rep a
   = SimpleM
@@ -433,8 +438,9 @@ nonrecSimplifyStm ::
   SimpleM rep (Stm (Wise rep))
 nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
-  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
   e' <- simplifyExpBase e
+  simplifyPat <- asks $ simplifyPatFromExpS . fst
+  (pat', pat_cs) <- collectCerts $ simplifyPat (removePatWisdom pat) e'
   let aux' = StmAux (cs' <> pat_cs) attrs dec
   pure $ mkWiseStm pat' aux' e'
 
