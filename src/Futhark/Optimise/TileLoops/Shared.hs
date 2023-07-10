@@ -39,11 +39,7 @@ data TileKind = TilePartial | TileFull
 index :: MonadBuilder m => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
-  let shape = arrayShape arr_t
-      inner_dims = shapeDims $ stripDims (length outer_indices) shape
-      untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
-      inner_slices = map untouched inner_dims
-      slice = Slice $ map (DimFix . Var) outer_indices ++ inner_slices
+  let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
 update :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
