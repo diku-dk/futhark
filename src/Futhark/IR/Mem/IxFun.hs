@@ -415,8 +415,13 @@ linearWithOffset ::
   num ->
   Maybe num
 linearWithOffset ixfun@(IxFun lmad _ cg) elem_size
-  | hasContiguousPerm ixfun && cg =
+  | hasContiguousPerm ixfun,
+    cg,
+    map LMAD.ldStride (LMAD.dims lmad) == ss =
       Just $ LMAD.offset lmad * elem_size
+  where
+    rk = length $ LMAD.shape lmad
+    ss = reverse $ take rk $ scanl (*) 1 $ reverse $ LMAD.shape lmad
 linearWithOffset _ _ = Nothing
 
 -- | Similar restrictions to @linearWithOffset@ except for transpositions, which
