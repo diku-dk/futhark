@@ -76,13 +76,13 @@ type Permutation = [Int]
 -- | The physical element ordering alongside a dimension, i.e. the
 -- sign of the stride.
 data Monotonicity
-  = -- | Increasing.
-    Inc
+  = -- | Unknown.
+    Unknown
   | -- | Decreasing.
     Dec
-  | -- | Unknown.
-    Unknown
-  deriving (Show, Eq)
+  | -- | Increasing.
+    Inc
+  deriving (Show, Eq, Ord)
 
 -- | A single dimension in an 'LMAD'.
 data LMADDim num = LMADDim
@@ -91,25 +91,7 @@ data LMADDim num = LMADDim
     ldPerm :: Int,
     ldMon :: Monotonicity
   }
-  deriving (Show, Eq)
-
-instance Ord Monotonicity where
-  (<=) _ Inc = True
-  (<=) Unknown _ = True
-  (<=) _ Unknown = False
-  (<=) Inc Dec = False
-  (<=) _ Dec = True
-
-instance Ord num => Ord (LMADDim num) where
-  (LMADDim s1 q1 p1 m1) <= (LMADDim s2 q2 p2 m2) =
-    ([q1, s1] < [q2, s2])
-      || ( ([q1, s1] == [q2, s2])
-             && ( (p1 < p2)
-                    || ( (p1 == p2)
-                           && (m1 <= m2)
-                       )
-                )
-         )
+  deriving (Show, Eq, Ord)
 
 -- | LMAD's representation consists of a general offset and for each dimension a
 -- stride, number of elements (or shape), permutation, and
