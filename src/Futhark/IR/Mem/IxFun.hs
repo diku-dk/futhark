@@ -394,17 +394,13 @@ rebase
               (drop n_fewer_dims dims_base)
               dims
         off_base = LMAD.offset lmad_base' + sum offs_contrib
-        lmad_base''
-          | LMAD.offset lmad == 0 = LMAD off_base dims_base'
-          | otherwise =
-              -- If the innermost dimension of the ixfun was not full (but still
-              -- had a stride of 1), add its offset relative to the new base.
-              LMAD.setShape
-                (LMAD.shape lmad)
-                ( LMAD
-                    (off_base + ldStride (last dims_base) * LMAD.offset lmad)
-                    dims_base'
-                )
+        lmad_base'' =
+          LMAD.setShape
+            (LMAD.shape lmad)
+            ( LMAD
+                (off_base + ldStride (last dims_base) * LMAD.offset lmad)
+                dims_base'
+            )
     pure $ IxFun lmad_base'' shp (cg && cg_base)
 
 -- | If the memory support of the index function is contiguous and row-major
