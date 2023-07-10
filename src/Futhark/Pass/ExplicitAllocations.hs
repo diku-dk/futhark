@@ -852,7 +852,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
   pure $ ctx ++ res
   where
     linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
-      SubExpRes cs . Var . snd <$> ensureRowMajorArray (Just space) v
+      SubExpRes cs . Var . snd <$> ensureDirectArray (Just space) v
     linearIfNeeded _ res =
       pure res
 
@@ -1130,7 +1130,7 @@ simplifiable ::
   ) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat (simplifyMemOp simplifyInnerOp)
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage (simplifyMemOp simplifyInnerOp)
   where
     mkExpDecS' _ pat e =
       pure $ Engine.mkWiseExpDec pat () e
@@ -1153,26 +1153,6 @@ simplifiable innerUsage simplifyInnerOp =
       mempty
     opUsage (Inner inner) =
       innerUsage inner
-
-    simplifyPat (Pat pes) e = do
-      rets <- fromMaybe (error "simplifyPat: ill-typed") <$> expReturns e
-      Pat <$> zipWithM update pes rets
-      where
-        names = map patElemName pes
-        update
-          (PatElem pe_v (MemArray pt shape u (ArrayIn mem _)))
-          (MemArray _ _ _ (Just (ReturnsInBlock _ ixfun)))
-            | Just ixfun' <- traverse (traverse inst) ixfun =
-                PatElem pe_v
-                  <$> ( MemArray pt
-                          <$> Engine.simplify shape
-                          <*> pure u
-                          <*> (ArrayIn <$> Engine.simplify mem <*> pure ixfun')
-                      )
-            where
-              inst (Ext i) = maybeNth i names
-              inst (Free v) = Just v
-        update pe _ = traverse Engine.simplify pe
 
 data ExpHint
   = NoHint
