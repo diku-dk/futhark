@@ -362,14 +362,14 @@ rebase
         && (length perm == length perm_base || hasContiguousPerm ixfun)
         -- To not have to worry about ixfun having non-1 strides, we also check that
         -- it is a row-major array (modulo permutation, which is handled
-        -- separately).  Accept a non-full innermost dimension.  XXX: Maybe this can
+        -- separately).  Accept a non-full outermost dimension.  XXX: Maybe this can
         -- be less conservative?
         && and
           ( zipWith3
-              (\sn ld inner -> sn == ldShape ld || (inner && ldStride ld == 1))
+              (\sn ld inner -> inner || sn == ldShape ld)
               shp
               dims
-              (replicate (length dims - 1) False ++ [True])
+              (True : replicate (length dims - 1) False)
           )
 
     -- Compose permutations, reverse strides and adjust offset if necessary.
