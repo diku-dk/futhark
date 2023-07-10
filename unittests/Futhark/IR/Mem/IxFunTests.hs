@@ -115,6 +115,7 @@ tests =
         test_rebase2,
         test_rebase3,
         test_rebase4_5,
+        test_rebase6,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
@@ -307,6 +308,18 @@ test_rebase4_5 =
    in [ testCase "rebase mixed monotonicities" . compareOpsFailure $
           rebase ixfn_base ixfn_orig
       ]
+
+-- Imitates a case from memory expansion.
+test_rebase6 :: [TestTree]
+test_rebase6 =
+  [ testCase "rebase slice" . compareOps $
+      rebase
+        (slice (iota [n, n, n]) (Slice [DimSlice 0 n 1, DimSlice 0 n 1]))
+        ( slice
+            (iota [n, n])
+            (Slice [DimSlice 1 (n - 1) 1, DimSlice 0 n 1])
+        )
+  ]
 
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =

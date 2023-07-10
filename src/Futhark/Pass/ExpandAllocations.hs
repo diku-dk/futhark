@@ -661,33 +661,48 @@ offsetMemoryInPat (Pat pes) rets = do
         pure . PatElem name . MemArray pt shape u . ArrayIn mem $
           fmap (fmap unExt) ixfun
     onPE pe _ = do
-      new_dec <- offsetMemoryInMemBound $ patElemDec pe
+      new_dec <- offsetMemoryInMemBound (patElemName pe) $ patElemDec pe
       pure pe {patElemDec = new_dec}
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
-  fparam' <- offsetMemoryInMemBound $ paramDec fparam
+  fparam' <- offsetMemoryInMemBound (paramName fparam) $ paramDec fparam
   pure fparam {paramDec = fparam'}
 
-offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
-offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
+offsetMemoryInMemBound :: VName -> MemBound u -> OffsetM (MemBound u)
+offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
-  pure . fromMaybe summary $ do
-    new_base' <- new_base
-    ixfun' <- IxFun.rebase new_base' ixfun
-    pure $ MemArray pt shape u $ ArrayIn mem ixfun'
-offsetMemoryInMemBound summary = pure summary
+  case new_base of
+    Nothing -> pure summary
+    Just new_base' -> do
+      let problem =
+            throwError . unlines $
+              [ "offsetMemoryInMemBound",
+                prettyString v,
+                prettyString new_base',
+                prettyString ixfun
+              ]
+      ixfun' <- maybe problem pure $ IxFun.rebase new_base' ixfun
+      pure $ MemArray pt shape u $ ArrayIn mem ixfun'
+offsetMemoryInMemBound _ summary = pure summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
       new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-      pure . fromMaybe br $ do
-        new_base' <- new_base
-        ixfun'' <- IxFun.rebase (fmap (fmap Free) new_base') ixfun
-        pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
+      case new_base of
+        Nothing -> pure br
+        Just new_base' -> do
+          let problem =
+                throwError . unlines $
+                  [ "offsetMemoryInBodyReturns",
+                    prettyString new_base',
+                    prettyString ixfun
+                  ]
+          ixfun'' <- maybe problem pure $ IxFun.rebase (fmap (fmap Free) new_base') ixfun
+          pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
