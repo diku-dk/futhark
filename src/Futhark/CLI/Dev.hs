@@ -29,6 +29,7 @@ import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.ReplaceRecords as ReplaceRecords
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -765,6 +766,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
@@ -774,6 +776,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do

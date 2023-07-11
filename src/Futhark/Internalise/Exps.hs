@@ -46,17 +46,11 @@ shiftRetAls :: Int -> RetAls -> RetAls
 shiftRetAls d (RetAls pals rals) = RetAls pals $ map (+ d) rals
 
 internaliseValBind :: VisibleTypes -> E.ValBind -> InternaliseM ()
-internaliseValBind types fb@(E.ValBind entry fname retdecl (Info rettype) tparams params body _ attrs loc) = do
+internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams params body _ attrs loc) = do
   bindingFParams tparams params $ \shapeparams params' -> do
     let shapenames = map I.paramName shapeparams
         all_params = map pure shapeparams ++ concat params'
-
-    msg <- case retdecl of
-      Just dt ->
-        errorMsg
-          . ("Function return value does not match shape of type " :)
-          <$> typeExpForError dt
-      Nothing -> pure $ errorMsg ["Function return value does not match shape of declared return type."]
+        msg = errorMsg ["Function return value does not match shape of declared return type."]
 
     (body', rettype') <- buildBody $ do
       body_res <- internaliseExp (baseString fname <> "_res") body
@@ -471,7 +465,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
 
       ts <- mapM subExpType mergeinit
       bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
-        bindingLambdaParams [x] (map rowType arr_ts) $ \x_params -> do
+        bindingLambdaParams [toParam E.Observe <$> x] (map rowType arr_ts) $ \x_params -> do
           let loopvars = zip x_params arr'
           forLoop mergepat' shapepat mergeinit $
             I.ForLoop i Int64 w loopvars
@@ -557,7 +551,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
             )
 internaliseAppExp desc _ (E.LetWith name src idxs ve body loc) = do
   let pat = E.Id (E.identName name) (E.identType name) loc
-      src_t = E.fromStruct <$> E.identType src
+      src_t = E.identType src
       e = E.Update (E.Var (E.qualName $ E.identName src) src_t loc) idxs ve loc
   internaliseExp desc $
     E.AppExp
@@ -591,7 +585,7 @@ internaliseExp desc (E.Parens e _) =
   internaliseExp desc e
 internaliseExp desc (E.Hole (Info t) loc) = do
   let msg = docText $ "Reached hole of type: " <> align (pretty t)
-      ts = concat $ internaliseType (E.toStruct t)
+      ts = foldMap toList $ internaliseType (E.toStruct t)
   c <- assert "hole_c" (constant False) (errorMsg [ErrorString msg]) loc
   case mapM hasStaticShape ts of
     Nothing ->
@@ -654,7 +648,7 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
         letSubExp desc $ I.BasicOp $ I.Reshape I.ReshapeArbitrary new_shape' flat_arr
   | otherwise = do
       es' <- mapM (internaliseExp "arr_elem") es
-      let arr_t_ext = concat $ internaliseType $ E.toStruct arr_t
+      let arr_t_ext = foldMap toList $ internaliseType $ E.toStruct arr_t
 
       rowtypes <-
         case mapM (fmap rowType . hasStaticShape . I.fromDecl) arr_t_ext of
@@ -695,10 +689,10 @@ internaliseExp desc (E.ArrayLit es (Info arr_t) loc)
       Just ([], [e])
 internaliseExp desc (E.Ascript e _ _) =
   internaliseExp desc e
-internaliseExp desc (E.Coerce e dt (Info et) loc) = do
+internaliseExp desc (E.Coerce e _ (Info et) loc) = do
   ses <- internaliseExp desc e
   ts <- internaliseCoerceType (E.toStruct et) <$> mapM subExpType ses
-  dt' <- typeExpForError dt
+  dt' <- typeExpForError $ toStruct et
   forM (zip ses ts) $ \(e', t') -> do
     dims <- arrayDims <$> subExpType e'
     let parts =
@@ -751,7 +745,7 @@ internaliseExp desc (E.Update src slice ve loc) = do
 internaliseExp desc (E.RecordUpdate src fields ve _ _) = do
   src' <- internaliseExp desc src
   ve' <- internaliseExp desc ve
-  replace (E.typeOf src `setAliases` ()) fields ve' src'
+  replace (E.typeOf src) fields ve' src'
   where
     replace (E.Scalar (E.Record m)) (f : fs) ve' src'
       | Just t <- M.lookup f m = do
@@ -840,12 +834,11 @@ internaliseExp _ (E.FloatLit v (Info t) _) =
 -- overloaded.
 internaliseExp desc (E.Project k e (Info rt) _) = do
   let i' = sum . map internalisedTypeSize $
-        case E.typeOf e `setAliases` () of
+        case E.typeOf e of
           E.Scalar (Record fs) ->
             map snd $ takeWhile ((/= k) . fst) $ sortFields fs
           t -> [t]
-  take (internalisedTypeSize $ rt `setAliases` ()) . drop i'
-    <$> internaliseExp desc e
+  take (internalisedTypeSize rt) . drop i' <$> internaliseExp desc e
 internaliseExp _ e@E.Lambda {} =
   error $ "internaliseExp: Unexpected lambda at " ++ locStr (srclocOf e)
 internaliseExp _ e@E.OpSection {} =
@@ -872,7 +865,7 @@ internaliseArg desc (arg, argdim) = do
         _ -> pure ()
       pure arg'
 
-internalisePatLit :: E.PatLit -> E.PatType -> I.PrimValue
+internalisePatLit :: E.PatLit -> E.StructType -> I.PrimValue
 internalisePatLit (E.PatLitPrim v) _ =
   internalisePrimValue v
 internalisePatLit (E.PatLitInt x) (E.Scalar (E.Prim (E.Signed it))) =
@@ -885,7 +878,7 @@ internalisePatLit l t =
   error $ "Nonsensical pattern and type: " ++ show (l, t)
 
 generateCond ::
-  E.Pat ->
+  E.Pat StructType ->
   [I.SubExp] ->
   InternaliseM ([Maybe I.PrimValue], [I.SubExp])
 generateCond orig_p orig_ses = do
@@ -950,7 +943,7 @@ generateCond orig_p orig_ses = do
 internalisePat ::
   String ->
   [E.SizeBinder VName] ->
-  E.Pat ->
+  E.Pat StructType ->
   E.Exp ->
   InternaliseM a ->
   InternaliseM a
@@ -958,19 +951,19 @@ internalisePat desc sizes p e m = do
   ses <- internaliseExp desc' e
   internalisePat' sizes p ses m
   where
-    desc' = case S.toList $ E.patIdents p of
+    desc' = case E.patIdents p of
       [v] -> baseString $ E.identName v
       _ -> desc
 
 internalisePat' ::
   [E.SizeBinder VName] ->
-  E.Pat ->
+  E.Pat StructType ->
   [I.SubExp] ->
   InternaliseM a ->
   InternaliseM a
 internalisePat' sizes p ses m = do
   ses_ts <- mapM subExpType ses
-  stmPat p ses_ts $ \pat_names -> do
+  stmPat (toParam E.Observe <$> p) ses_ts $ \pat_names -> do
     bindExtSizes (AppRes (E.patternType p) (map E.sizeName sizes)) ses
     forM_ (zip pat_names ses) $ \(v, se) ->
       letBindNames [v] $ I.BasicOp $ I.SubExp se
@@ -1494,7 +1487,7 @@ bodyExtType (Body _ stms res) =
 internaliseLambda :: InternaliseLambda
 internaliseLambda (E.Parens e _) rowtypes =
   internaliseLambda e rowtypes
-internaliseLambda (E.Lambda params body _ (Info (_, RetType _ rettype)) _) rowtypes =
+internaliseLambda (E.Lambda params body _ (Info (RetType _ rettype)) _) rowtypes =
   bindingLambdaParams params rowtypes $ \params' -> do
     body' <- internaliseBody "lam" body
     rettype' <- internaliseLambdaReturnType rettype =<< bodyExtType body'
@@ -1759,13 +1752,6 @@ isIntrinsicFunction qname args loc = do
       let conc xarr yarr =
             I.BasicOp $ I.Concat 0 (xarr :| [yarr]) ressize
       mapM (letSubExp desc) $ zipWith conc xs ys
-    handleRest [offset, e] "rotate" = Just $ \desc -> do
-      offset' <- internaliseExp1 "rotation_offset" offset
-      internaliseOperation desc e $ \v -> do
-        r <- I.arrayRank <$> lookupType v
-        let zero = intConst Int64 0
-            offsets = offset' : replicate (r - 1) zero
-        pure $ I.Rotate offsets v
     handleRest [e] "transpose" = Just $ \desc ->
       internaliseOperation desc e $ \v -> do
         r <- I.arrayRank <$> lookupType v
@@ -1865,7 +1851,7 @@ isIntrinsicFunction qname args loc = do
           bodyNames = indexName <> valueNames
           bodyParams = zipWith (I.Param mempty) bodyNames paramTypes
 
-      -- This body is prettyString boring right now, as every input is exactly the output.
+      -- This body is boring right now, as every input is exactly the output.
       -- But it can get funky later on if fused with something else.
       body <- localScope (scopeOfLParams bodyParams) . buildBody_ $ do
         let outs = concat (replicate (length valueNames) indexName) ++ valueNames
@@ -2034,7 +2020,7 @@ funcall desc (QualName _ fname) args loc = do
 -- language.
 bindExtSizes :: AppRes -> [SubExp] -> InternaliseM ()
 bindExtSizes (AppRes ret retext) ses = do
-  let ts = concat $ internaliseType $ E.toStruct ret
+  let ts = foldMap toList $ internaliseType $ E.toStruct ret
   ses_ts <- mapM subExpType ses
 
   let combine t1 t2 =
@@ -2170,53 +2156,41 @@ partitionWithSOACS k lam arrs = do
           (resultBodyM [this_one])
           (resultBodyM [next_one])
 
-typeExpForError :: E.TypeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
-typeExpForError (E.TEVar qn _) =
-  pure [ErrorString $ prettyText qn]
-typeExpForError (E.TEParens te _) = do
-  msg <- typeExpForError te
-  pure $ ["("] <> msg <> [")"]
-typeExpForError (E.TEUnique te _) =
-  ("*" :) <$> typeExpForError te
-typeExpForError (E.TEDim dims te _) =
-  (ErrorString ("?" <> dims' <> ".") :) <$> typeExpForError te
+sizeExpForError :: E.Size -> InternaliseM [ErrorMsgPart SubExp]
+sizeExpForError e = do
+  e' <- internaliseExp1 "size" e
+  pure ["[", ErrorVal int64 e', "]"]
+
+typeExpForError :: E.TypeBase Size u -> InternaliseM [ErrorMsgPart SubExp]
+typeExpForError (E.Scalar (E.Prim t)) = pure [ErrorString $ prettyText t]
+typeExpForError (E.Scalar (E.TypeVar _ v args)) = do
+  args' <- concat <$> mapM onArg args
+  pure $ intersperse " " $ ErrorString (prettyText v) : args'
   where
-    dims' = mconcat (map onDim dims)
-    onDim d = "[" <> prettyText d <> "]"
-typeExpForError (E.TEArray d te _) =
-  (<>) <$> sizeExpForError d <*> typeExpForError te
-typeExpForError (E.TETuple tes _) = do
-  tes' <- mapM typeExpForError tes
-  pure $ ["("] ++ intercalate [", "] tes' ++ [")"]
-typeExpForError (E.TERecord fields _) = do
-  fields' <- mapM onField fields
-  pure $ ["{"] ++ intercalate [", "] fields' ++ ["}"]
+    onArg (TypeArgDim d) = sizeExpForError d
+    onArg (TypeArgType t) = typeExpForError t
+typeExpForError (E.Scalar (E.Record fs))
+  | Just ts <- E.areTupleFields fs = do
+      ts' <- mapM typeExpForError ts
+      pure $ ["("] ++ intercalate [", "] ts' ++ [")"]
+  | otherwise = do
+      fs' <- mapM onField $ M.toList fs
+      pure $ ["{"] ++ intercalate [", "] fs' ++ ["}"]
   where
     onField (k, te) =
       (ErrorString (prettyText k <> ": ") :) <$> typeExpForError te
-typeExpForError (E.TEArrow _ t1 t2 _) = do
-  t1' <- typeExpForError t1
-  t2' <- typeExpForError t2
-  pure $ t1' ++ [" -> "] ++ t2'
-typeExpForError (E.TEApply t arg _) = do
-  t' <- typeExpForError t
-  arg' <- case arg of
-    TypeArgExpType argt -> typeExpForError argt
-    TypeArgExpSize d -> sizeExpForError d
-  pure $ t' ++ [" "] ++ arg'
-typeExpForError (E.TESum cs _) = do
-  cs' <- mapM (onClause . snd) cs
+typeExpForError (E.Array _ shape et) = do
+  shape' <- mconcat <$> mapM sizeExpForError (E.shapeDims shape)
+  et' <- typeExpForError $ Scalar et
+  pure $ shape' ++ et'
+typeExpForError (E.Scalar (E.Sum cs)) = do
+  cs' <- mapM onConstructor $ M.toList cs
   pure $ intercalate [" | "] cs'
   where
-    onClause c = do
-      c' <- mapM typeExpForError c
-      pure $ intercalate [" "] c'
-
-sizeExpForError :: E.SizeExp Info VName -> InternaliseM [ErrorMsgPart SubExp]
-sizeExpForError (SizeExp e _) = do
-  e' <- internaliseExp1 "size" e
-  pure ["[", ErrorVal int64 e', "]"]
-sizeExpForError SizeExpAny {} = pure ["[]"]
+    onConstructor (c, ts) = do
+      ts' <- mapM typeExpForError ts
+      pure $ ErrorString ("#" <> prettyText c <> " ") : intercalate [" "] ts'
+typeExpForError (E.Scalar Arrow {}) = pure ["#<fun>"]
 
 -- A smart constructor that compacts neighbouring literals for easier
 -- reading in the IR.

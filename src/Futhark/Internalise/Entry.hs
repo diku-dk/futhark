@@ -65,7 +65,12 @@ runGenOpaque :: GenOpaque a -> (a, I.OpaqueTypes)
 runGenOpaque = flip runState mempty
 
 addType :: Name -> I.OpaqueType -> GenOpaque ()
-addType s t = modify (<> I.OpaqueTypes [(s, t)])
+addType name t = modify $ \(I.OpaqueTypes ts) ->
+  case find ((== name) . fst) ts of
+    Just (_, t')
+      | t /= t' ->
+          error $ "Duplicate definition of entry point type " <> E.prettyString name
+    _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, t)]
 
 isRecord :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name (E.TypeExp E.Info VName))
 isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
@@ -109,13 +114,13 @@ entryPointType types t ts
   | E.Scalar (E.Prim E.Unsigned {}) <- E.entryType t,
     [I.Prim ts0] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Unsigned (I.Rank 0) ts0)
-  | E.Array _ _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
+  | E.Array _ _ (E.Prim E.Unsigned {}) <- E.entryType t,
     [I.Array ts0 r _] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Unsigned r ts0)
   | E.Scalar E.Prim {} <- E.entryType t,
     [I.Prim ts0] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Signed (I.Rank 0) ts0)
-  | E.Array _ _ _ E.Prim {} <- E.entryType t,
+  | E.Array _ _ E.Prim {} <- E.entryType t,
     [I.Array ts0 r _] <- ts =
       pure (u, I.TypeTransparent $ I.ValueType I.Signed r ts0)
   | otherwise = do

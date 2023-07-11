@@ -1,6 +1,6 @@
 module Language.Futhark.TypeChecker.TypesTests (tests) where
 
-import Data.Bifunctor (first)
+import Data.Bifunctor
 import Data.List (isInfixOf)
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -16,7 +16,7 @@ import Language.Futhark.TypeChecker.Types
 import Test.Tasty
 import Test.Tasty.HUnit
 
-evalTest :: TypeExp NoInfo Name -> Either String ([VName], StructRetType) -> TestTree
+evalTest :: TypeExp NoInfo Name -> Either String ([VName], ResRetType) -> TestTree
 evalTest te expected =
   testCase (prettyString te) $
     case (fmap (extract . fst) (run (checkTypeExp te)), expected) of
@@ -34,7 +34,7 @@ evalTest te expected =
     extract (_, svars, t, _) = (svars, t)
     run = snd . runTypeM env mempty (mkInitialImport "") blankNameSource checkSizeExp
     -- We hack up an environment with some predefined type
-    -- abbreviations for testing.  This is all prettyString sensitive to the
+    -- abbreviations for testing.  This is all pretty sensitive to the
     -- specific unique names, so we have to be careful!
     env =
       initialEnv

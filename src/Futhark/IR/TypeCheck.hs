@@ -705,6 +705,8 @@ checkFun' (fname, rettype, params) consumable check = do
 
     checkReturnAlias retals = zipWithM_ checkRet (zip [(0 :: Int) ..] rettype) retals
       where
+        comrades = zip3 [0 ..] retals $ map (otherAls . snd) rettype
+
         checkRet (i, (Array {}, RetAls pals rals)) als
           | als'' <- filter isParam $ namesToList als',
             not $ null als'' =
@@ -712,18 +714,19 @@ checkFun' (fname, rettype, params) consumable check = do
                 [ T.unwords ["Result", prettyText i, "aliases", prettyText als''],
                   T.unwords ["but is only allowed to alias arguments", prettyText allowed_args]
                 ]
-          | ((j, _) : _) <- filter (isProblem i als' rals) (zip [0 ..] retals) =
+          | ((j, _, _) : _) <- filter (isProblem i als' rals) comrades =
               bad . TypeError . T.unlines $
                 [ T.unwords ["Results", prettyText i, "and", prettyText j, "alias each other"],
-                  T.unwords ["but result", prettyText i, "only allowed to alias results", prettyText rals]
+                  T.unwords ["but result", prettyText i, "only allowed to alias results", prettyText rals],
+                  prettyText retals
                 ]
           where
             allowed_args = allowedArgAliases pals
             als' = als `namesSubtract` allowed_args
         checkRet _ _ = pure ()
 
-        isProblem i als rals (j, jals) =
-          i /= j && j `notElem` rals && namesIntersect als jals
+        isProblem i als rals (j, jals, j_rals) =
+          i /= j && j `notElem` rals && i `notElem` j_rals && namesIntersect als jals
 
 checkSubExp :: Checkable rep => SubExp -> TypeM rep Type
 checkSubExp (Constant val) =
@@ -772,9 +775,7 @@ checkFunBody rt (Body (_, rep) stms res) = do
     context "When checking body result" $ checkResult res
     context "When matching declared return type to result of body" $
       matchReturnType (map fst rt) res
-    map (`namesSubtract` bound_here) <$> mapM (subExpAliasesM . resSubExp) res
-  where
-    bound_here = namesFromList $ M.keys $ scopeOf stms
+    mapM (subExpAliasesM . resSubExp) res
 
 checkLambdaBody ::
   Checkable rep =>
@@ -915,18 +916,6 @@ checkBasicOp (Rearrange perm arr) = do
     bad $
       PermutationError perm rank $
         Just arr
-checkBasicOp (Rotate rots arr) = do
-  arrt <- lookupType arr
-  let rank = arrayRank arrt
-  mapM_ (require [Prim int64]) rots
-  when (length rots /= rank) $
-    bad $
-      TypeError $
-        "Cannot rotate "
-          <> prettyText (length rots)
-          <> " dimensions of "
-          <> prettyText rank
-          <> "-dimensional array."
 checkBasicOp (Concat i (arr1exp :| arr2exps) ressize) = do
   arr1_dims <- shapeDims . fst <$> checkArrIdent arr1exp
   arr2s_dims <- map (shapeDims . fst) <$> mapM checkArrIdent arr2exps

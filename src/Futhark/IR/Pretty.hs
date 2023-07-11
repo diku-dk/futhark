@@ -44,9 +44,6 @@ instance Pretty Commutativity where
   pretty Commutative = "commutative"
   pretty Noncommutative = "noncommutative"
 
-instance Pretty NoUniqueness where
-  pretty _ = mempty
-
 instance Pretty Shape where
   pretty = mconcat . map (brackets . pretty) . shapeDims
 
@@ -232,8 +229,6 @@ instance Pretty BasicOp where
     "coerce" <> apply [pretty shape, pretty e]
   pretty (Rearrange perm e) =
     "rearrange" <> apply [apply (map pretty perm), pretty e]
-  pretty (Rotate es e) =
-    "rotate" <> apply [apply (map pretty es), pretty e]
   pretty (Concat i (x :| xs) w) =
     "concat" <> "@" <> pretty i <> apply (pretty w : pretty x : map pretty xs)
   pretty (Manifest perm e) = "manifest" <> apply [apply (map pretty perm), pretty e]

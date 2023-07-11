@@ -39,11 +39,7 @@ data TileKind = TilePartial | TileFull
 index :: MonadBuilder m => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
-  let shape = arrayShape arr_t
-      inner_dims = shapeDims $ stripDims (length outer_indices) shape
-      untouched d = DimSlice (intConst Int64 0) d (intConst Int64 1)
-      inner_slices = map untouched inner_dims
-      slice = Slice $ map (DimFix . Var) outer_indices ++ inner_slices
+  let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
 update :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
@@ -295,23 +291,23 @@ changeWithEnv with_env (WithAcc accum_decs inner_lam) = do
        in (lam_op, ne)
 changeWithEnv with_env _ = pure with_env
 
-composeIxfuns :: IxFnEnv -> VName -> VName -> (IxFun -> IxFun) -> TileM IxFnEnv
+composeIxfuns :: IxFnEnv -> VName -> VName -> (IxFun -> Maybe IxFun) -> TileM IxFnEnv
 composeIxfuns env y x ixf_fun =
-  case M.lookup x env of
-    Just ixf -> pure $ M.insert y (ixf_fun ixf) env
+  case ixf_fun =<< M.lookup x env of
+    Just ixf -> pure $ M.insert y ixf env
     Nothing -> do
       tp <- lookupType x
-      case tp of
-        Array _ptp shp _u -> do
-          let shp' = map ExpMem.pe64 (shapeDims shp)
-          pure $ M.insert y (ixf_fun $ IxFun.iota shp') env
-        _ -> pure env
+      pure $ case tp of
+        Array _ptp shp _u
+          | Just ixf <- ixf_fun $ IxFun.iota $ map ExpMem.pe64 (shapeDims shp) ->
+              M.insert y ixf env
+        _ -> env
 
 changeIxFnEnv :: IxFnEnv -> VName -> Exp GPU -> TileM IxFnEnv
 changeIxFnEnv env y (BasicOp (Reshape ReshapeArbitrary shp_chg x)) =
   composeIxfuns env y x (`IxFun.reshape` fmap ExpMem.pe64 (shapeDims shp_chg))
 changeIxFnEnv env y (BasicOp (Reshape ReshapeCoerce shp_chg x)) =
-  composeIxfuns env y x (`IxFun.coerce` fmap ExpMem.pe64 (shapeDims shp_chg))
+  composeIxfuns env y x (Just . (`IxFun.coerce` fmap ExpMem.pe64 (shapeDims shp_chg)))
 changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
   tp <- lookupType x
   case tp of
@@ -321,9 +317,9 @@ changeIxFnEnv env y (BasicOp (Manifest perm x)) = do
       pure $ M.insert y ixfn env
     _ -> error "In TileLoops/Shared.hs, changeIxFnEnv: manifest applied to a non-array!"
 changeIxFnEnv env y (BasicOp (Rearrange perm x)) =
-  composeIxfuns env y x (`IxFun.permute` perm)
+  composeIxfuns env y x (Just . (`IxFun.permute` perm))
 changeIxFnEnv env y (BasicOp (Index x slc)) =
-  composeIxfuns env y x (`IxFun.slice` (Slice $ map (fmap ExpMem.pe64) $ unSlice slc))
+  composeIxfuns env y x (Just . (`IxFun.slice` Slice (map (fmap ExpMem.pe64) $ unSlice slc)))
 changeIxFnEnv env y (BasicOp (Opaque _ (Var x))) =
-  composeIxfuns env y x id
+  composeIxfuns env y x Just
 changeIxFnEnv env _ _ = pure env

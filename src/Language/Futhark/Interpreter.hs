@@ -33,7 +33,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Trans.Maybe
 import Data.Array
-import Data.Bifunctor (first, second)
+import Data.Bifunctor
 import Data.List
   ( find,
     foldl',
@@ -51,7 +51,7 @@ import Data.Ord
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Data qualified as V
-import Futhark.Util (chunk, maybeHead, splitFromEnd)
+import Futhark.Util (chunk, maybeHead)
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (apply)
 import Language.Futhark hiding (Shape, matchDims)
@@ -162,7 +162,7 @@ resolveTypeParams names orig_t1 orig_t2 =
     addType v t = modify $ first $ L.insertBy (comparing fst) (v, t)
     addDim v e = modify $ second $ L.insertBy (comparing fst) (v, e)
 
-    match bound (Scalar (TypeVar _ _ tn _)) t
+    match bound (Scalar (TypeVar _ tn _)) t
       | qualLeaf tn `elem` names = addType (qualLeaf tn) (bound, t)
     match bound (Scalar (Record poly_fields)) (Scalar (Record fields)) =
       sequence_ . M.elems $
@@ -176,7 +176,7 @@ resolveTypeParams names orig_t1 orig_t2 =
       (Scalar (Arrow _ p2 _ t1 (RetType dims2 t2))) = do
         let bound' = mapMaybe paramName [p1, p2] <> dims1 <> dims2 <> bound
         match bound' poly_t1 t1
-        match bound' poly_t2 t2
+        match bound' (toStruct poly_t2) (toStruct t2)
     match bound poly_t t
       | d1 : _ <- shapeDims (arrayShape poly_t),
         d2 : _ <- shapeDims (arrayShape t) = do
@@ -194,7 +194,7 @@ resolveTypeParams names orig_t1 orig_t2 =
 
     matchExps bound (Var (QualName _ d1) _ _) e
       | d1 `elem` names,
-        not $ any (`elem` bound) $ freeVarsInExp e =
+        not $ any (`elem` bound) $ fvVars $ freeInExp e =
           addDim d1 e
     matchExps bound e1 e2
       | Just es <- similarExps e1 e2 =
@@ -407,14 +407,14 @@ apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
 
-matchPat :: Env -> Pat -> Value -> EvalM Env
+matchPat :: Env -> Pat (TypeBase Size u) -> Value -> EvalM Env
 matchPat env p v = do
   m <- runMaybeT $ patternMatch env p v
   case m of
-    Nothing -> error $ "matchPat: missing case for " <> prettyString p ++ " and " <> show v
+    Nothing -> error $ "matchPat: missing case for " <> prettyString (toStruct <$> p) ++ " and " <> show v
     Just env' -> pure env'
 
-patternMatch :: Env -> Pat -> Value -> MaybeT EvalM Env
+patternMatch :: Env -> Pat (TypeBase Size u) -> Value -> MaybeT EvalM Env
 patternMatch env (Id v (Info t) _) val =
   lift $
     pure $
@@ -432,8 +432,8 @@ patternMatch env (PatAscription p _ _) v =
   patternMatch env p v
 patternMatch env (PatLit l t _) v = do
   l' <- case l of
-    PatLitInt x -> lift $ eval env $ IntLit x t mempty
-    PatLitFloat x -> lift $ eval env $ FloatLit x t mempty
+    PatLitInt x -> lift $ eval env $ IntLit x (toStruct <$> t) mempty
+    PatLitFloat x -> lift $ eval env $ FloatLit x (toStruct <$> t) mempty
     PatLitPrim lv -> pure $ ValuePrim lv
   if v == l'
     then pure env
@@ -582,21 +582,18 @@ evalIndex loc env is arr = do
             <> "."
   maybe oob pure $ indexArray is arr
 
-freeVarsInExp :: Exp -> [VName]
-freeVarsInExp = M.keys . unFV . freeInExp
-
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: Env -> StructType -> StructType
+expandType :: Env -> TypeBase Size u -> TypeBase Size u
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
-expandType env (Scalar (Arrow () p d t1 (RetType dims t2))) =
-  Scalar $ Arrow () p d (expandType env t1) (RetType dims (expandType env t2))
-expandType env t@(Array _ u shape _) =
+expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
+  Scalar $ Arrow u p d (expandType env t1) (RetType dims (expandType env t2))
+expandType env t@(Array u shape _) =
   let et = stripArray (shapeRank shape) t
       et' = expandType env et
-   in arrayOf u shape et'
-expandType env (Scalar (TypeVar () u tn args)) =
+   in second (const u) (arrayOf shape $ toStruct et')
+expandType env (Scalar (TypeVar u tn args)) =
   case lookupType tn env of
     Just (T.TypeAbbr _ ps (RetType ext t')) ->
       let (substs, types) = mconcat $ zipWith matchPtoA ps args
@@ -607,15 +604,15 @@ expandType env (Scalar (TypeVar () u tn args)) =
           -- has been hidden by a module ascription,
           -- e.g. tests/modules/sizeparams4.fut.
           onDim e
-            | any (`elem` ext) $ freeVarsInExp e = anySize
+            | any (`elem` ext) $ fvVars $ freeInExp e = anySize
           onDim d = d
        in if null ps
-            then first onDim t'
-            else expandType (Env mempty types <> env) $ first onDim t'
+            then bimap onDim (const u) t'
+            else expandType (Env mempty types <> env) $ bimap onDim (const u) t'
     Nothing ->
       -- This case only happens for built-in abstract types,
       -- e.g. accumulators.
-      Scalar (TypeVar () u tn $ map expandArg args)
+      Scalar (TypeVar u tn $ map expandArg args)
   where
     matchPtoA (TypeParamDim p _) (TypeArgDim e) =
       (M.singleton p e, mempty)
@@ -644,7 +641,7 @@ evalType eval' outer_bound t = do
   traverseDims evalDim t
   where
     canBeEvaluated bound e =
-      let free = freeVarsInExp e
+      let free = fvVars $ freeInExp e
        in not $ any (`S.member` bound) free || any (`S.member` outer_bound) free
 
 evalTermVar :: Env -> QualName VName -> StructType -> EvalM Value
@@ -673,14 +670,14 @@ typeValueShape env t = do
 -- Sometimes type instantiation is not quite enough - then we connect
 -- up the missing sizes here.  In particular used for eta-expanded
 -- entry points.
-linkMissingSizes :: [VName] -> Pat -> Value -> Env -> Env
+linkMissingSizes :: [VName] -> Pat (TypeBase Size u) -> Value -> Env -> Env
 linkMissingSizes [] _ _ env = env
 linkMissingSizes missing_sizes p v env =
   env <> i64Env (resolveExistentials missing_sizes p_t (valueShape v))
   where
     p_t = expandType env $ patternStructType p
 
-evalFunction :: Env -> [VName] -> [Pat] -> Exp -> StructType -> EvalM Value
+evalFunction :: Env -> [VName] -> [Pat ParamType] -> Exp -> ResType -> EvalM Value
 -- We treat zero-parameter lambdas as simply an expression to
 -- evaluate immediately.  Note that this is *not* the same as a lambda
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
@@ -692,7 +689,7 @@ evalFunction env missing_sizes [] body rettype =
   where
     etaExpand vs env' (Scalar (Arrow _ _ _ p_t (RetType _ rt))) = do
       pure . ValueFun $ \v -> do
-        let p = Wildcard (Info $ fromStruct p_t) noLoc
+        let p = Wildcard (Info p_t) noLoc
         env'' <- linkMissingSizes missing_sizes p v <$> matchPat env' p v
         etaExpand (v : vs) env'' rt
     etaExpand vs env' _ = do
@@ -706,13 +703,12 @@ evalFunction env missing_sizes (p : ps) body rettype =
 evalFunctionBinding ::
   Env ->
   [TypeParam] ->
-  [Pat] ->
-  StructRetType ->
+  [Pat ParamType] ->
+  ResRetType ->
   Exp ->
   EvalM TermBinding
 evalFunctionBinding env tparams ps ret fbody = do
-  let arrow (xp, d, xt) yt = Scalar $ Arrow () xp d xt $ RetType [] yt
-      ftype = foldr (arrow . patternParam) (retType ret) ps
+  let ftype = funType ps ret
       retext = case ps of
         [] -> retDims ret
         _ -> []
@@ -1028,7 +1024,7 @@ eval env (RecordUpdate src all_fs v _ _) =
 -- that takes an empty tuple '()' as argument!  Zero-parameter lambdas
 -- can never occur in a well-formed Futhark program, but they are
 -- convenient in the interpreter.
-eval env (Lambda ps body _ (Info (_, RetType _ rt)) _) =
+eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
@@ -1863,18 +1859,6 @@ initialCtx =
               -- Slight hack to work around empty dimensions.
               genericTake m $
                 transpose (map (snd . fromArray) xs') ++ repeat []
-    def "rotate" = Just $
-      fun2 $ \i xs -> do
-        let (shape, xs') = fromArray xs
-        pure $
-          let idx = if null xs' then 0 else rem (asInt i) (length xs')
-           in if idx > 0
-                then
-                  let (bef, aft) = splitAt idx xs'
-                   in toArray shape $ aft ++ bef
-                else
-                  let (bef, aft) = splitFromEnd (-idx) xs'
-                   in toArray shape $ aft ++ bef
     def "flatten" = Just $
       fun1 $ \xs -> do
         let (ShapeDim n (ShapeDim m shape), xs') = fromArray xs
@@ -1945,7 +1929,7 @@ ctxWithImports envs ctx = ctx {ctxEnv = mconcat (reverse envs) <> ctxEnv ctx}
 valueType :: V.Value -> ValueType
 valueType v =
   let V.ValueType shape pt = V.valueType v
-   in arrayOf mempty (F.Shape (map fromIntegral shape)) (Scalar (Prim (toPrim pt)))
+   in arrayOf (F.Shape (map fromIntegral shape)) (Scalar (Prim (toPrim pt)))
   where
     toPrim V.I8 = Signed Int8
     toPrim V.I16 = Signed Int16
@@ -1962,7 +1946,7 @@ valueType v =
 
 checkEntryArgs :: VName -> [V.Value] -> StructType -> Either T.Text ()
 checkEntryArgs entry args entry_t
-  | args_ts == map snd param_ts =
+  | args_ts == map toStruct param_ts =
       pure ()
   | otherwise =
       Left . docText $
@@ -2006,7 +1990,7 @@ interpretFunction ctx fname vs = do
   where
     updateType (vt : vts) (Scalar (Arrow als pn d pt (RetType dims rt))) = do
       checkInput vt pt
-      Scalar . Arrow als pn d (valueStructType vt) . RetType dims <$> updateType vts rt
+      Scalar . Arrow als pn d (valueStructType vt) . RetType dims . toRes Nonunique <$> updateType vts (toStruct rt)
     updateType _ t =
       Right t
 
@@ -2014,7 +1998,7 @@ interpretFunction ctx fname vs = do
     checkInput :: ValueType -> StructType -> Either T.Text ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
-    checkInput (Array _ _ _ (Prim vt)) (Array _ _ _ (Prim pt))
+    checkInput (Array _ _ (Prim vt)) (Array _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput _ _ =
       Right ()

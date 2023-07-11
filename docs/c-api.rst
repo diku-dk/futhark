@@ -293,7 +293,7 @@ Each instance of a complex type in an entry point (records, nested
 tuples, etc) is represented by an opaque C struct named
 ``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
 of the internal representation.  However, if you insert an explicit
-type annotations in the entry point (and the type name contains only
+type annotation in the entry point (and the type name contains only
 characters valid in C identifiers), that name will be used.  Note that
 arrays contain brackets, which are not valid in identifiers.  Defining
 a type abbreviation is the best way around this.

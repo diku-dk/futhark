@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.25.0]
+## [0.26.0]
+
+### Added
+
+* Flattening/unflattening as the final operation in an entry point no
+  only forces a copy.
+
+### Removed
+
+### Changed
+
+### Fixed
+
+* Code generation for `f16` literals in CUDA backend (#1979).
+
+* Some branches that return arrays differeing in sign of their stride
+  (#1984).
+
+## [0.25.1]
 
 ### Added
 
@@ -24,6 +42,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The prelude functions `flatten` and `unflatten` (and their
   multidimensional variants), as well as `split`, now have more
   precise types.
+
+* Local and anonymous (lambda) functions that *must* return unique
+  results (because they are passed to a higher order function that
+  requires this) must now have an explicit return type ascription that
+  declares this, using `*`.  This is very rare (in practice
+  unobserved) in real programs.
 
 ### Fixed
 
@@ -54,6 +78,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Bug in alias checking for the core language type checker (#1949).
   Actually (finally) a proper fix of #803.
+
+* Defunctionalisation duplicates less code (#1968).
 
 ## [0.24.3]
 

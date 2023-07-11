@@ -48,7 +48,7 @@ def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 -- | Statically change the size of an array.  Fail at runtime if the
 -- imposed size does not match the actual size.  Essentially syntactic
 -- sugar for a size coercion.
-def resize [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
+def sized [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
 
 -- | Split an array at a given position.
 --
@@ -72,19 +72,6 @@ def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys
 -- | An old-fashioned way of saying `++`.
 def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys
 
--- | Rotate an array some number of elements to the left.  A negative
--- rotation amount is also supported.
---
--- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
---
--- **Work:** O(n).
---
--- **Span:** O(1).
---
--- Note: In most cases, `rotate` will be fused with subsequent
--- operations such as `map`, in which case it is free.
-def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate r xs
-
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
 --
@@ -102,6 +89,20 @@ def iota (n: i64): *[n]i64 =
 -- **Span:** O(1).
 def indices [n] 't (_: [n]t) : *[n]i64 =
   iota n
+
+-- | Rotate an array some number of elements to the left.  A negative
+-- rotation amount is also supported.
+--
+-- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+--
+-- Note: In most cases, `rotate` will be fused with subsequent
+-- operations such as `map`, in which case it is free.
+def rotate [n] 't (r: i64) (a: [n]t) =
+  map (\i -> #[unsafe] a[(i+r)%n]) (iota n)
 
 -- | Construct an array of the given length containing the given
 -- value.
@@ -138,7 +139,7 @@ def flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): [n*m*l*k]t =
 --
 -- **Complexity:** O(1).
 def unflatten 't [n][m] (xs: [n*m]t): [n][m]t =
-  intrinsics.unflatten n m xs :> [n][m]t
+  intrinsics.unflatten n m xs
 
 -- | Like `unflatten`, but produces three dimensions.
 def unflatten_3d 't [n][m][l] (xs: [n*m*l]t): [n][m][l]t =

@@ -41,9 +41,10 @@ flattenArray k flat arr = do
   ArrayEntry arr_loc pt <- lookupArray arr
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
   sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
-    IxFun.reshape (memLocIxFun arr_loc) $
-      map pe64 $
-        shapeDims flat_shape
+    fromMaybe (error "flattenArray") $
+      IxFun.reshape (memLocIxFun arr_loc) $
+        map pe64 $
+          shapeDims flat_shape
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
 sliceArray start size arr = do
@@ -295,14 +296,6 @@ compileGroupExp (Pat [dest]) (BasicOp (Replicate ds se)) | ds /= mempty = do
   sOp $ Imp.Barrier Imp.FenceLocal
   where
     dest_t = patElemType dest
-compileGroupExp (Pat [dest]) (BasicOp (Rotate rs arr)) = do
-  ds <- map pe64 . arrayDims <$> lookupType arr
-  groupCoverSpace ds $ \is -> do
-    is' <- sequence $ zipWith3 rotate ds rs is
-    copyDWIMFix (patElemName dest) is (Var arr) is'
-  sOp $ Imp.Barrier Imp.FenceLocal
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex d (pe64 r) i
 compileGroupExp (Pat [dest]) (BasicOp (Iota n e s it)) = do
   n' <- toExp n
   e' <- toExp e

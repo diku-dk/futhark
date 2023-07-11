@@ -30,7 +30,6 @@ import Futhark.Transform.CopyPropagate (copyPropagateInFun)
 import Futhark.Transform.Rename (renameStm)
 import Futhark.Transform.Substitute
 import Futhark.Util (mapAccumLM)
-import Futhark.Util.IntegralExp
 import Prelude hiding (quot)
 
 -- | The memory expansion pass definition.
@@ -538,28 +537,26 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
   pure (slice_stms' <> stmsFromList alloc_stms, mconcat rebases)
   where
-    expand (mem, (offset, total_size, space)) = do
+    expand (mem, (_offset, total_size, space)) = do
       let allocpat = Pat [PatElem mem $ MemMem space]
       pure
         ( Let allocpat (defAux ()) $ Op $ Alloc total_size space,
-          M.singleton mem $ newBase offset
+          M.singleton mem newBase
         )
 
     num_threads' = pe64 num_threads
     gtid = le64 $ segFlat kspace
 
+    untouched d = DimSlice 0 d 1
+
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
-    newBase size_per_thread (old_shape, pt) =
-      let elems_per_thread =
-            pe64 size_per_thread `quot` primByteSize pt
-          root_ixfun = IxFun.iota [elems_per_thread, num_threads']
+    newBase (old_shape, _pt) =
+      let root_ixfun = IxFun.iota $ old_shape ++ [num_threads']
           offset_ixfun =
             IxFun.slice root_ixfun . Slice $
-              [DimSlice 0 num_threads' 1, DimFix gtid]
-       in if length old_shape == 1
-            then IxFun.coerce offset_ixfun old_shape
-            else IxFun.reshape offset_ixfun old_shape
+              map untouched old_shape ++ [DimFix gtid]
+       in offset_ixfun
 
 -- | A map from memory block names to new index function bases.
 type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
@@ -622,11 +619,16 @@ offsetMemoryInBody (Body dec stms res) = do
 offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
 offsetMemoryInStm (Let pat dec e) = do
   e' <- offsetMemoryInExp e
-  pat' <- offsetMemoryInPat pat =<< expReturns e'
+  pat' <-
+    offsetMemoryInPat pat
+      =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
+      =<< expReturns e'
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
-  rts <- runReaderT (expReturns e') scope
+  rts <-
+    maybe (throwError "offsetMemoryInStm: ill-typed") pure $
+      runReader (expReturns e') scope
   let pat'' = Pat $ zipWith pick (patElems pat') rts
       stm = Let pat'' dec e'
   let scope' = scopeOf stm <> scope
@@ -659,32 +661,48 @@ offsetMemoryInPat (Pat pes) rets = do
         pure . PatElem name . MemArray pt shape u . ArrayIn mem $
           fmap (fmap unExt) ixfun
     onPE pe _ = do
-      new_dec <- offsetMemoryInMemBound $ patElemDec pe
+      new_dec <- offsetMemoryInMemBound (patElemName pe) $ patElemDec pe
       pure pe {patElemDec = new_dec}
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
-  fparam' <- offsetMemoryInMemBound $ paramDec fparam
+  fparam' <- offsetMemoryInMemBound (paramName fparam) $ paramDec fparam
   pure fparam {paramDec = fparam'}
 
-offsetMemoryInMemBound :: MemBound u -> OffsetM (MemBound u)
-offsetMemoryInMemBound summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
+offsetMemoryInMemBound :: VName -> MemBound u -> OffsetM (MemBound u)
+offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
-  pure . fromMaybe summary $ do
-    new_base' <- new_base
-    pure $ MemArray pt shape u $ ArrayIn mem $ IxFun.rebase new_base' ixfun
-offsetMemoryInMemBound summary = pure summary
+  case new_base of
+    Nothing -> pure summary
+    Just new_base' -> do
+      let problem =
+            throwError . unlines $
+              [ "offsetMemoryInMemBound",
+                prettyString v,
+                prettyString new_base',
+                prettyString ixfun
+              ]
+      ixfun' <- maybe problem pure $ IxFun.rebase new_base' ixfun
+      pure $ MemArray pt shape u $ ArrayIn mem ixfun'
+offsetMemoryInMemBound _ summary = pure summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
       new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-      pure . fromMaybe br $ do
-        new_base' <- new_base
-        pure . MemArray pt shape u . ReturnsInBlock mem $
-          IxFun.rebase (fmap (fmap Free) new_base') ixfun
+      case new_base of
+        Nothing -> pure br
+        Just new_base' -> do
+          let problem =
+                throwError . unlines $
+                  [ "offsetMemoryInBodyReturns",
+                    prettyString new_base',
+                    prettyString ixfun
+                  ]
+          ixfun'' <- maybe problem pure $ IxFun.rebase (fmap (fmap Free) new_base') ixfun
+          pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)

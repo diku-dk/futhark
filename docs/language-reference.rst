@@ -445,7 +445,6 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
-       : | "[" `exp` [".." `exp`] "..." `exp` "]"
        : | "(" `qualbinop` ")"
        : | "(" `exp` `qualbinop` ")"
        : | "(" `qualbinop` `exp` ")"
@@ -576,6 +575,7 @@ in natural text.
   left               ``|>``
   right              ``<|``
   right              ``->``
+  left               ``**``
   left               juxtaposition
   =================  =============
 
@@ -936,6 +936,10 @@ is optional if ``body`` is a ``let`` expression.  The binding is not
 let-generalised, meaning it has a monomorphic type.  This can be
 significant if ``e`` is of functional type.
 
+If ``e`` is of type ``i64`` and ``pat`` binds only a single name
+``v``, then the type of the overall expression is the type of
+``body``, but with any occurence of ``v`` replaced by ``e``.
+
 ``let [n] pat = e in body``
 ...........................
 
@@ -1156,11 +1160,11 @@ sizes.
 Size going out of scope
 .......................
 
-An unknown size is created when the proper size of an array refers to
-a name that has gone out of scope::
+An unknown size is created in some cases when the a type references a
+name that has gone out of scope::
 
-  let c = a + b
-  in replicate c 0
+  match ...
+  case #some c -> replicate c 0
 
 The type of ``replicate c 0`` is ``[c]i32``, but since ``c`` is
 locally bound, the type of the entire expression is ``[k]i32`` for
@@ -1513,7 +1517,7 @@ Module Expressions
 .. productionlist::
    mod_exp:   `qualid`
           : | `mod_exp` ":" `mod_type_exp`
-          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "->" `mod_exp`
+          : | "\" "(" `mod_param`* ")" [":" `mod_type_exp`] "->" `mod_exp`
           : | `mod_exp` `mod_exp`
           : | "(" `mod_exp` ")"
           : | "{" `dec`* "}"

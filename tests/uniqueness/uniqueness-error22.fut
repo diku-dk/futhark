@@ -1,6 +1,6 @@
 -- Test that we cannot consume anything inside an anonymous function.
 -- ==
--- error: Would consume variable "a"
+-- error: Consuming variable "a"
 
 def f(a: *[]i64) = a[0]
 

@@ -97,7 +97,7 @@ instance Pretty (Shape Int64) where
 instance Pretty (Shape Bool) where
   pretty (Shape ds) = mconcat (map (brackets . pretty) ds)
 
-prettyRetType :: Pretty (Shape dim) => Int -> RetTypeBase dim as -> Doc a
+prettyRetType :: (Pretty (Shape dim), Pretty u) => Int -> RetTypeBase dim u -> Doc a
 prettyRetType p (RetType [] t) =
   prettyType p t
 prettyRetType _ (RetType dims t) =
@@ -106,16 +106,16 @@ prettyRetType _ (RetType dims t) =
     <> "."
     <> pretty t
 
-instance Pretty (Shape dim) => Pretty (RetTypeBase dim as) where
+instance (Pretty (Shape dim), Pretty u) => Pretty (RetTypeBase dim u) where
   pretty = prettyRetType 0
 
 instance Pretty Diet where
   pretty Consume = "*"
   pretty Observe = ""
 
-prettyScalarType :: Pretty (Shape dim) => Int -> ScalarTypeBase dim as -> Doc a
+prettyScalarType :: (Pretty (Shape dim), Pretty u) => Int -> ScalarTypeBase dim u -> Doc a
 prettyScalarType _ (Prim et) = pretty et
-prettyScalarType p (TypeVar _ u v targs) =
+prettyScalarType p (TypeVar u v targs) =
   parensIf (not (null targs) && p > 3) $
     pretty u <> hsep (pretty v : map (prettyTypeArg 3) targs)
 prettyScalarType _ (Record fs)
@@ -143,16 +143,16 @@ prettyScalarType p (Sum cs) =
     ppConstr (name, fs) = sep $ ("#" <> pretty name) : map (prettyType 2) fs
     cs' = map ppConstr $ M.toList cs
 
-instance Pretty (Shape dim) => Pretty (ScalarTypeBase dim as) where
+instance (Pretty (Shape dim), Pretty u) => Pretty (ScalarTypeBase dim u) where
   pretty = prettyScalarType 0
 
-prettyType :: Pretty (Shape dim) => Int -> TypeBase dim as -> Doc a
-prettyType _ (Array _ u shape at) =
+prettyType :: (Pretty (Shape dim), Pretty u) => Int -> TypeBase dim u -> Doc a
+prettyType _ (Array u shape at) =
   pretty u <> pretty shape <> align (prettyScalarType 1 at)
 prettyType p (Scalar t) =
   prettyScalarType p t
 
-instance Pretty (Shape dim) => Pretty (TypeBase dim as) where
+instance (Pretty (Shape dim), Pretty u) => Pretty (TypeBase dim u) where
   pretty = prettyType 0
 
 prettyTypeArg :: Pretty (Shape dim) => Int -> TypeArg dim -> Doc a
@@ -191,7 +191,7 @@ instance IsName vn => Pretty (QualName vn) where
   pretty (QualName names name) =
     mconcat $ punctuate "." $ map prettyName names ++ [prettyName name]
 
-instance IsName vn => Pretty (IdentBase f vn) where
+instance IsName vn => Pretty (IdentBase f vn t) where
   pretty = prettyName . identName
 
 hasArrayLit :: ExpBase ty vn -> Bool
@@ -252,6 +252,7 @@ prettyAppExp p (LetPat sizes pat e body _) =
       Coerce {} -> True
       Attr {} -> True
       ArrayLit {} -> False
+      Lambda {} -> True
       _ -> hasArrayLit e
 prettyAppExp _ (LetFun fname (tparams, params, retdecl, rettype, e) body _) =
   "let"
@@ -304,7 +305,7 @@ prettyAppExp p (Apply f args _) =
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
 
-prettyInst :: Annot f => f PatType -> Doc a
+prettyInst :: (Annot f, Pretty t) => f t -> Doc a
 prettyInst t =
   case unAnnot t of
     Just t'
@@ -365,7 +366,8 @@ prettyExp _ (RecordUpdate src fs ve _ _) =
     <+> mconcat (intersperse "." (map pretty fs))
     <+> "="
     <+> align (pretty ve)
-prettyExp _ (Assert e1 e2 _ _) = "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
+prettyExp _ (Assert e1 e2 _ _) =
+  "assert" <+> prettyExp 10 e1 <+> prettyExp 10 e2
 prettyExp p (Lambda params body rettype _ _) =
   parensIf (p /= -1) $
     "\\" <> hsep (map pretty params) <> ppAscription rettype
@@ -428,7 +430,7 @@ instance Pretty PatLit where
   pretty (PatLitFloat f) = pretty f
   pretty (PatLitPrim v) = pretty v
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (PatBase f vn) where
+instance (Eq vn, IsName vn, Annot f, Pretty t) => Pretty (PatBase f vn t) where
   pretty (PatAscription p t _) = pretty p <> colon <+> align (pretty t)
   pretty (PatParens p _) = parens $ pretty p
   pretty (Id v t _) = case unAnnot t of

@@ -109,8 +109,6 @@ basicOpType (Rearrange perm e) =
   result <$> lookupType e
   where
     result t = [rearrangeType perm t]
-basicOpType (Rotate _ e) =
-  pure <$> lookupType e
 basicOpType (Concat i (x :| _) ressize) =
   result <$> lookupType x
   where

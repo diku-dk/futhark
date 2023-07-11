@@ -7,8 +7,7 @@ def f(x: (i32, i32), t: (i32, i32, []i64)): []i64 =
     let (x, y, a) = t in
     a
 
-def main(): []i32 =
-    let n = 10
+def main n =
     let a = iota(n)
     let t = (3, 4, a)
     let b = f((1,2), t)

@@ -90,7 +90,6 @@ module Futhark.CodeGen.ImpGen
     dPrimVE,
     dIndexSpace,
     dIndexSpace',
-    rotateIndex,
     sFor,
     sWhile,
     sComment,
@@ -208,9 +207,9 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
-flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> Maybe MemLoc
 flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape $ IxFun.flatSlice ixfun slice
+  MemLoc mem shape <$> IxFun.flatSlice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -932,7 +931,9 @@ defCompileBasicOp _ FlatIndex {} =
 defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
   v_loc <- entryArrayLoc <$> lookupArray v
-  copy (elemType (patElemType pe)) (flatSliceMemLoc pe_loc slice') v_loc
+  case flatSliceMemLoc pe_loc slice' of
+    Just pe_loc' -> copy (elemType (patElemType pe)) pe_loc' v_loc
+    Nothing -> error "defCompileBasicOp FlatUpdate"
   where
     slice' = fmap pe64 slice
 defCompileBasicOp (Pat [pe]) (Replicate shape se)
@@ -988,13 +989,6 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
     isLiteral _ = Nothing
 defCompileBasicOp _ Rearrange {} =
   pure ()
-defCompileBasicOp (Pat [pe]) (Rotate rs arr) = do
-  shape <- arrayShape <$> lookupType arr
-  sLoopNest shape $ \is -> do
-    is' <- sequence $ zipWith3 rotate (shapeDims shape) rs is
-    copyDWIMFix (patElemName pe) is (Var arr) is'
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex (pe64 d) (pe64 r) i
 defCompileBasicOp _ Reshape {} =
   pure ()
 defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
@@ -1409,8 +1403,8 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 copy :: CopyCompiler rep r op
 copy
   bt
-  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmads@(dst_lmad :| _) _ _))
-  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmads@(src_lmad :| _) _ _)) = do
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _ _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _ _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
     unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
@@ -1418,7 +1412,7 @@ copy
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
       sUnless
-        ( fromBool (dst_name == src_name && length dst_lmads == 1 && length src_lmads == 1)
+        ( fromBool (dst_name == src_name)
             .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
         )
       $ do
@@ -1755,13 +1749,6 @@ inBounds (Slice slice) dims =
    in foldl1 (.&&.) $ zipWith condInBounds slice dims
 
 --- Building blocks for constructing code.
-
-rotateIndex ::
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64
-rotateIndex d r i = (i + r) `mod` d
 
 sFor' :: VName -> Imp.Exp -> ImpM rep r op () -> ImpM rep r op ()
 sFor' i bound body = do

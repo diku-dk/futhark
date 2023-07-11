@@ -3,7 +3,7 @@
 -- ==
 -- error: "arr" aliases "barr"
 
-def main(): i32 =
+def main(): i64 =
   let arr = copy(iota(10))
   let barr = copy(iota(10)) in
   let arr = loop arr for i < 10 do

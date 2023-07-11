@@ -167,9 +167,9 @@ def matvecmul [n][m] (xss: [n][m]f32) (ys: [m]f32): *[n]f32 =
 
 def dense (in_dim: i64) (out_dim: i64) =
   let init (initfn: (n: i64) -> rng -> (rng, [n]f32)) rng =
-    let (rng, weights) = initfn (in_dim i64.* out_dim) rng
+    let (rng, weights) = initfn (in_dim * out_dim) rng
     let (_, bias) = initfn out_dim rng
-    in (unflatten (resize (out_dim*in_dim) weights), bias)
+    in (unflatten weights, bias)
   let apply (params: ([out_dim][in_dim]f32, [out_dim]f32))
             (xs: [in_dim]f32): [out_dim]f32 =
     let (weightsT, bias) = params
