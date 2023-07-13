@@ -639,7 +639,7 @@ commandLineOptions =
       "GPU"
       GPU
       "Run the default optimised kernels pipeline"
-      kernelsPipeline
+      gpuPipeline
       []
       ["gpu"],
     pipelineOption
@@ -647,7 +647,7 @@ commandLineOptions =
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
-      gpuPipeline
+      gpumemPipeline
       []
       ["gpu-mem"],
     pipelineOption
@@ -655,7 +655,7 @@ commandLineOptions =
       "Seq"
       Seq
       "Run the sequential CPU compilation pipeline"
-      sequentialPipeline
+      seqPipeline
       []
       ["seq"],
     pipelineOption
@@ -663,7 +663,7 @@ commandLineOptions =
       "SeqMem"
       SeqMem
       "Run the sequential CPU+memory compilation pipeline"
-      sequentialCpuPipeline
+      seqmemPipeline
       []
       ["seq-mem"],
     pipelineOption
@@ -679,7 +679,7 @@ commandLineOptions =
       "MCMem"
       MCMem
       "Run the multicore+memory compilation pipeline"
-      multicorePipeline
+      mcmemPipeline
       []
       ["mc-mem"]
   ]
