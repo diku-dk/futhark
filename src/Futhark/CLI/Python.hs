@@ -12,6 +12,6 @@ main = compilerMain
   []
   "Compile sequential Python"
   "Generate sequential Python code from optimised Futhark program."
-  sequentialCpuPipeline
+  seqmemPipeline
   $ \fcfg () mode outpath prog ->
     actionProcedure (compilePythonAction fcfg mode outpath) prog

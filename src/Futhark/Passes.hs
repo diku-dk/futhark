@@ -1,12 +1,12 @@
 -- | Optimisation pipelines.
 module Futhark.Passes
   ( standardPipeline,
-    sequentialPipeline,
-    kernelsPipeline,
-    sequentialCpuPipeline,
+    seqPipeline,
     gpuPipeline,
+    seqmemPipeline,
+    gpumemPipeline,
     mcPipeline,
-    multicorePipeline,
+    mcmemPipeline,
   )
 where
 
@@ -82,8 +82,8 @@ adPipeline =
 
 -- | The pipeline used by the CUDA and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
-kernelsPipeline :: Pipeline SOACS GPU
-kernelsPipeline =
+gpuPipeline :: Pipeline SOACS GPU
+gpuPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
@@ -110,8 +110,8 @@ kernelsPipeline =
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.
-sequentialPipeline :: Pipeline SOACS Seq
-sequentialPipeline =
+seqPipeline :: Pipeline SOACS Seq
+seqPipeline =
   standardPipeline
     >>> onePass firstOrderTransform
     >>> passes
@@ -119,11 +119,11 @@ sequentialPipeline =
         inPlaceLoweringSeq
       ]
 
--- | Run 'sequentialPipeline', then add memory information (and
+-- | Run 'seqPipeline', then add memory information (and
 -- optimise it slightly).
-sequentialCpuPipeline :: Pipeline SOACS SeqMem
-sequentialCpuPipeline =
-  sequentialPipeline
+seqmemPipeline :: Pipeline SOACS SeqMem
+seqmemPipeline =
+  seqPipeline
     >>> onePass Seq.explicitAllocations
     >>> passes
       [ performCSE False,
@@ -140,11 +140,11 @@ sequentialCpuPipeline =
         simplifySeqMem
       ]
 
--- | Run 'kernelsPipeline', then add memory information (and optimise
+-- | Run 'gpuPipeline', then add memory information (and optimise
 -- it a lot).
-gpuPipeline :: Pipeline SOACS GPUMem
-gpuPipeline =
-  kernelsPipeline
+gpumemPipeline :: Pipeline SOACS GPUMem
+gpumemPipeline =
+  gpuPipeline
     >>> onePass GPU.explicitAllocations
     >>> passes
       [ simplifyGPUMem,
@@ -185,8 +185,8 @@ mcPipeline =
       ]
 
 -- | Run 'mcPipeline' and then add memory information.
-multicorePipeline :: Pipeline SOACS MCMem
-multicorePipeline =
+mcmemPipeline :: Pipeline SOACS MCMem
+mcmemPipeline =
   mcPipeline
     >>> onePass MC.explicitAllocations
     >>> passes
