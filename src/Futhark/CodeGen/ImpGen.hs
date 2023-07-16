@@ -1404,8 +1404,8 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 copy :: CopyCompiler rep r op
 copy
   bt
-  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _ _))
-  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _ _)) = do
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
     unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)

@@ -67,9 +67,6 @@ pVName = lexeme $ do
     pTag = "_" *> L.decimal <* notFollowedBy (satisfy constituent)
     exprBox = ("<{" <>) . (<> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
-pBool :: Parser Bool
-pBool = choice [keyword "true" $> True, keyword "false" $> False]
-
 pInt :: Parser Int
 pInt = lexeme L.decimal
 
@@ -974,9 +971,8 @@ pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
 pIxFunBase pNum =
   braces $ do
     base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
-    ct <- pLab "contiguous" $ pBool <* pSemi
     lmad <- pLab "LMAD" pLMAD
-    pure $ IxFun.IxFun lmad base ct
+    pure $ IxFun.IxFun lmad base
   where
     pLab s m = keyword s *> pColon *> m
     pLMAD = braces $ do

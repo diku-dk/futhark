@@ -284,6 +284,9 @@ reshape lmad@(LMAD off dims) newshape = do
       &&
       -- checking condition (3)
       hasContiguousPerm lmad
+      && all
+        (\(ld, se) -> ldStride ld == se)
+        (zip dims (reverse $ scanl (*) 1 (reverse (tail (shape lmad)))))
 
   -- make new permutation
   let rsh_len = length newshape
