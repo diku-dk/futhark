@@ -12,6 +12,8 @@ module Futhark.CodeGen.ImpGen.GPU
 where
 
 import Control.Monad
+import Control.Monad.State
+import Data.Foldable (toList)
 import Data.List (foldl')
 import Data.Map qualified as M
 import Data.Maybe
@@ -19,6 +21,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen qualified
 import Futhark.CodeGen.ImpGen.GPU.Base
+import Futhark.CodeGen.ImpGen.GPU.Copy
 import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
 import Futhark.CodeGen.ImpGen.GPU.SegRed
@@ -27,6 +30,7 @@ import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
 import Prelude hiding (quot, rem)
@@ -231,10 +235,12 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   s' <- toExp s
 
   sIota (patElemName pe) (pe64 n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
+expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
-      sReplicate (patElemName pe) se
+      if shapeRank shape == 0
+        then copyDWIM (patElemName pe) [] se []
+        else sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
@@ -257,39 +263,91 @@ expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ Mat
 expCompiler dest e =
   defCompileExp dest e
 
-callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
-      isMapTransposeCopy bt destloc srcloc = do
-      fname <- mapTransposeForType bt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-  | bt_size <- primByteSize bt,
-    Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-      let num_elems = Imp.elements $ product $ map pe64 srcshape
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      sCopy
-        destmem
-        (sExt64 destoffset)
-        destspace
-        srcmem
-        (sExt64 srcoffset)
-        srcspace
-        num_elems
-        bt
-  | otherwise = sCopyKernel bt destloc srcloc
+gpuCopyForType :: Rank -> PrimType -> CallKernelGen Name
+gpuCopyForType r bt = do
+  let fname = nameFromString $ "builtin#" <> gpuCopyName r bt
+
+  exists <- hasFunction fname
+  unless exists $ emitFunction fname $ gpuCopyFunction r bt
+
+  pure fname
+
+gpuCopyName :: Rank -> PrimType -> String
+gpuCopyName (Rank r) bt = "gpu_copy_" <> show r <> "d_" <> prettyString bt
+
+gpuCopyFunction :: Rank -> PrimType -> Imp.Function Imp.HostOp
+gpuCopyFunction (Rank r) pt = do
+  let tdesc = mconcat (replicate r "[]") <> prettyString pt
+  Imp.Function Nothing [] params $
+    Imp.DebugPrint ("\n# Copy " <> tdesc) Nothing
+      <> copy_code
+      <> Imp.DebugPrint "" Nothing
+  where
+    space = Space "device"
+    memparam v = Imp.MemParam v space
+    intparam v = Imp.ScalarParam v $ IntType Int64
+
+    mkIxFun desc = do
+      let new x = newVName $ desc <> "_" <> x
+          newDim i = LMAD.LMADDim <$> new "stride" <*> new "shape" <*> pure i
+      LMAD.LMAD <$> new "offset" <*> mapM newDim [0 .. r - 1]
+
+    (params, copy_code) = do
+      flip evalState blankNameSource $ do
+        dest_mem <- newVName "destmem"
+        dest_lmad <- mkIxFun "dest"
+
+        src_mem <- newVName "srcmem"
+        src_lmad <- mkIxFun "src"
+
+        group_size <- newVName "group_size"
+        num_groups <- newVName "num_groups"
+
+        let kernel =
+              copyKernel
+                pt
+                (le64 num_groups, Left $ untyped $ le64 group_size)
+                (dest_mem, le64 <$> dest_lmad)
+                (src_mem, le64 <$> src_lmad)
+
+            dest_offset =
+              Imp.elements (le64 (LMAD.offset dest_lmad)) `Imp.withElemType` pt
+
+            src_offset =
+              Imp.elements (le64 (LMAD.offset src_lmad)) `Imp.withElemType` pt
+
+            num_bytes =
+              Imp.elements (product (le64 <$> LMAD.shape src_lmad)) `Imp.withElemType` pt
+
+            do_copy =
+              Imp.Copy
+                pt
+                dest_mem
+                dest_offset
+                (Space "device")
+                src_mem
+                src_offset
+                (Space "device")
+                num_bytes
+
+        pure
+          ( [memparam dest_mem]
+              ++ map intparam (toList dest_lmad)
+              ++ [memparam src_mem]
+              ++ map intparam (toList src_lmad),
+            Imp.DeclareScalar group_size Imp.Nonvolatile int64
+              <> Imp.DeclareScalar num_groups Imp.Nonvolatile int64
+              <> Imp.Op (Imp.GetSize group_size "copy_group_size" Imp.SizeGroup)
+              <> Imp.Op (Imp.GetSize num_groups "copy_num_groups" Imp.SizeNumGroups)
+              <> Imp.If
+                (LMAD.memcpyable (le64 <$> dest_lmad) (le64 <$> src_lmad))
+                ( Imp.DebugPrint "## Simple copy" Nothing
+                    <> do_copy
+                )
+                ( Imp.DebugPrint "## Kernel copy" Nothing
+                    <> Imp.Op (Imp.CallKernel kernel)
+                )
+          )
 
 mapTransposeForType :: PrimType -> CallKernelGen Name
 mapTransposeForType bt = do
@@ -480,3 +538,51 @@ mapTransposeFunction bt =
 -- unfortunate code bloat, and it would be preferable if we could
 -- simply optimise the 64-bit version to make this distinction
 -- unnecessary.  Fortunately these kernels are quite small.
+
+callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
+callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ src_ixfun)
+  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
+      isMapTransposeCopy pt destloc srcloc = do
+      fname <- mapTransposeForType pt
+      sIf
+        is_transpose
+        ( emit . Imp.Call [] fname $
+            [ Imp.MemArg destmem,
+              Imp.ExpArg $ untyped destoffset,
+              Imp.MemArg srcmem,
+              Imp.ExpArg $ untyped srcoffset,
+              Imp.ExpArg $ untyped num_arrays,
+              Imp.ExpArg $ untyped size_x,
+              Imp.ExpArg $ untyped size_y
+            ]
+        )
+        nontranspose
+  | otherwise = nontranspose
+  where
+    nontranspose = do
+      fname <- gpuCopyForType (Rank (IxFun.rank dest_ixfun)) pt
+      dest_space <- entryMemSpace <$> lookupMemory destmem
+      src_space <- entryMemSpace <$> lookupMemory srcmem
+      let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
+          src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
+          num_elems = Imp.elements $ product $ LMAD.shape dest_lmad
+      if dest_space == Space "device" && src_space == Space "device"
+        then
+          emit . Imp.Call [] fname $
+            [Imp.MemArg destmem]
+              ++ map (Imp.ExpArg . untyped) (toList dest_lmad)
+              ++ [Imp.MemArg srcmem]
+              ++ map (Imp.ExpArg . untyped) (toList src_lmad)
+        else -- FIXME: this assumes a linear representation!
+        -- Currently we never generate code where this is not the
+        -- case, but we might in the future.
+
+          sCopy
+            destmem
+            (Imp.elements (LMAD.offset dest_lmad) `Imp.withElemType` pt)
+            dest_space
+            srcmem
+            (Imp.elements (LMAD.offset src_lmad) `Imp.withElemType` pt)
+            src_space
+            num_elems
+            pt

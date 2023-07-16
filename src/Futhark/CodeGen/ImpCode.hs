@@ -602,8 +602,11 @@ instance Pretty op => Pretty (Code op) where
         If {} -> pretty fbranch
         _ ->
           "{" </> indent 2 (pretty fbranch) </> "}"
+  pretty (Call [] fname args) =
+    "call" <+> pretty fname <> parens (commasep $ map pretty args)
   pretty (Call dests fname args) =
-    commasep (map pretty dests)
+    "call"
+      <+> commasep (map pretty dests)
       <+> "<-"
       <+> pretty fname <> parens (commasep $ map pretty args)
   pretty (Comment s code) =

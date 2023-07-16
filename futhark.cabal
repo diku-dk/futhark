@@ -248,6 +248,7 @@ library
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
       Futhark.CodeGen.ImpGen.GPU.Base
+      Futhark.CodeGen.ImpGen.GPU.Copy
       Futhark.CodeGen.ImpGen.GPU.Group
       Futhark.CodeGen.ImpGen.GPU.SegHist
       Futhark.CodeGen.ImpGen.GPU.SegMap

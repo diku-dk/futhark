@@ -584,7 +584,7 @@ matchFunctionReturnType rettype result = do
         MemMem {} -> pure ()
         MemAcc {} -> pure ()
         MemArray _ _ _ (ArrayIn _ ixfun)
-          | IxFun.isLinear ixfun ->
+          | IxFun.isDirect ixfun ->
               pure ()
           | otherwise ->
               TC.bad . TC.TypeError $
