@@ -14,7 +14,7 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc94
+      haskell.compiler.ghc96
       ormolu
       haskell.packages.ghc94.weeder
       #haskell.packages.ghc94.haskell-language-server

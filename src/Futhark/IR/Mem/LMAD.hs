@@ -22,7 +22,6 @@ module Futhark.IR.Mem.LMAD
     substituteInLMAD,
     permuteInv,
     permuteFwd,
-    conservativeFlatten,
     disjoint,
     disjoint2,
     disjoint3,

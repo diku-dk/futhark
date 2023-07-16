@@ -4,6 +4,7 @@
 -- around huge records of which only a tiny part is needed.
 module Futhark.Internalise.ReplaceRecords (transformProg) where
 
+import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Map.Strict qualified as M
