@@ -7,7 +7,6 @@ module Futhark.IR.Mem.IxFun
     Shape,
     LMAD (..),
     LMADDim (..),
-    Monotonicity (..),
     index,
     mkExistential,
     iota,
@@ -140,7 +139,7 @@ isDirect ixfun@(IxFun (LMAD offset dims) oshp True) =
         && length oshp == length dims
         && offset == 0
         && all
-          (\(LMADDim s n p _, m, d, se) -> s == se && n == d && p == m)
+          (\(LMADDim s n p, m, d, se) -> s == se && n == d && p == m)
           (zip4 dims [0 .. length dims - 1] oshp strides_expected)
 isDirect _ = False
 
@@ -171,7 +170,7 @@ index = LMAD.index . ixfunLMAD
 
 -- | iota with offset.
 iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
-iotaOffset o ns = IxFun (LMAD.iota Inc o ns) ns True
+iotaOffset o ns = IxFun (LMAD.iota o ns) ns True
 
 -- | iota.
 iota :: IntegralExp num => Shape num -> IxFun num
@@ -180,7 +179,7 @@ iota = iotaOffset 0
 -- | Create a contiguous single-LMAD index function that is
 -- existential in everything, with the provided permutation,
 -- monotonicity, and contiguousness.
-mkExistential :: Int -> [(Int, Monotonicity)] -> Bool -> Int -> IxFun (Ext a)
+mkExistential :: Int -> [Int] -> Bool -> Int -> IxFun (Ext a)
 mkExistential basis_rank perm contig start =
   IxFun (LMAD.mkExistential perm start) basis contig
   where
@@ -218,7 +217,7 @@ slicePreservesContiguous (LMAD _ dims) (Slice slc) =
       -- 3. the rest of inner sliced dims are full.
       (_, success) =
         foldl
-          ( \(found, res) (slcdim, LMADDim _ n _ _) ->
+          ( \(found, res) (slcdim, LMADDim _ n _) ->
               case (slcdim, found) of
                 (DimFix {}, True) -> (found, False)
                 (DimFix {}, False) -> (found, res)
@@ -349,7 +348,6 @@ rebase
         -- Conservative safety conditions: ixfun is contiguous and has known
         -- monotonicity for all dimensions.
         && cg
-        && all ((/= Unknown) . ldMon) dims
         -- XXX: We should be able to handle some basic cases where both index
         -- functions have non-trivial permutations.
         && (hasContiguousPerm ixfun || hasContiguousPerm new_base)
@@ -381,11 +379,9 @@ rebase
         (dims_base', offs_contrib) =
           unzip $
             zipWith
-              ( \(LMADDim s1 n1 p1 _) (LMADDim _ _ _ m2) ->
-                  let (s', off')
-                        | m2 == Inc = (s1, 0)
-                        | otherwise = (s1 * (-1), s1 * (n1 - 1))
-                   in (LMADDim s' n1 (p1 - n_fewer_dims) Inc, off')
+              ( \(LMADDim s1 n1 p1) (LMADDim {}) ->
+                  let (s', off') = (s1, 0)
+                   in (LMADDim s' n1 (p1 - n_fewer_dims), off')
               )
               -- If @dims@ is morally a slice, it might have fewer dimensions than
               -- @dims_base@.  Drop extraneous outer dimensions.

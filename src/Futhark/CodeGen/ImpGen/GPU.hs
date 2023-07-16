@@ -289,12 +289,7 @@ gpuCopyFunction (Rank r) pt = do
 
     mkIxFun desc = do
       let new x = newVName $ desc <> "_" <> x
-          newDim i =
-            LMAD.LMADDim
-              <$> new "stride"
-              <*> new "shape"
-              <*> pure i
-              <*> pure LMAD.Inc
+          newDim i = LMAD.LMADDim <$> new "stride" <*> new "shape" <*> pure i
       LMAD.LMAD <$> new "offset" <*> mapM newDim [0 .. r - 1]
 
     (params, copy_code) = do

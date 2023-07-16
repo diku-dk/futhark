@@ -458,7 +458,7 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
             IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride spn 0 IxFun.Inc : map incPerm dims0
+              IxFun.LMADDim new_stride spn 0 : map incPerm dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad
