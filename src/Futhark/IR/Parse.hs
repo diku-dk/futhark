@@ -17,7 +17,7 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (singleton, zipWith4)
+import Data.List (singleton)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe
 import Data.Set qualified as S
@@ -66,9 +66,6 @@ pVName = lexeme $ do
   where
     pTag = "_" *> L.decimal <* notFollowedBy (satisfy constituent)
     exprBox = ("<{" <>) . (<> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
-
-pBool :: Parser Bool
-pBool = choice [keyword "true" $> True, keyword "false" $> False]
 
 pInt :: Parser Int
 pInt = lexeme L.decimal
@@ -974,24 +971,16 @@ pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
 pIxFunBase pNum =
   braces $ do
     base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
-    ct <- pLab "contiguous" $ pBool <* pSemi
     lmad <- pLab "LMAD" pLMAD
-    pure $ IxFun.IxFun lmad base ct
+    pure $ IxFun.IxFun lmad base
   where
     pLab s m = keyword s *> pColon *> m
-    pMon =
-      choice
-        [ "Inc" $> IxFun.Inc,
-          "Dec" $> IxFun.Dec,
-          "Unknown" $> IxFun.Unknown
-        ]
     pLMAD = braces $ do
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
       shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
-      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
-      mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith4 IxFun.LMADDim strides shape perm mon
+      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma)
+      pure $ IxFun.LMAD offset $ zipWith3 IxFun.LMADDim strides shape perm
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName

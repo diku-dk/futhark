@@ -19,7 +19,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     sKernelThread,
     KernelAttrs (..),
     defKernelAttrs,
-    sCopyKernel,
     lvlKernelAttrs,
     allocLocal,
     kernelAlloc,
@@ -1258,7 +1257,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isLinear arr_ixfun -> pure $
+      | IxFun.isDirect arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1360,7 +1359,7 @@ sIota ::
   CallKernelGen ()
 sIota arr n x s et = do
   ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if IxFun.isLinear arr_ixfun
+  if IxFun.isDirect arr_ixfun
     then do
       fname <- iotaForType et
       emit $
@@ -1369,33 +1368,6 @@ sIota arr n x s et = do
           fname
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
     else sIotaKernel arr n x s et
-
-sCopyKernel :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopyKernel pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
-  -- Note that the shape of the destination and the source are
-  -- necessarily the same.
-  let shape = map pe64 srcdims
-      kernel_size = product shape
-
-  (virtualise, constants) <- simpleKernelConstants kernel_size "copy"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> do
-      is <- dIndexSpace' "copy_i" shape gtid
-
-      (_, destspace, destidx) <- fullyIndexArray' destloc is
-      (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-
-      sWhen (gtid .<. kernel_size) $ do
-        tmp <- tvVar <$> dPrim "tmp" pt
-        emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
-        emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
 
 compileThreadResult ::
   SegSpace ->

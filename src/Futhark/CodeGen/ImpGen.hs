@@ -146,6 +146,7 @@ import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
@@ -1403,8 +1404,8 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 copy :: CopyCompiler rep r op
 copy
   bt
-  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _ _))
-  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _ _)) = do
+  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _))
+  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _)) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
     unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
@@ -1420,44 +1421,54 @@ copy
         cc <- asks envCopyCompiler
         cc bt dst src
 
--- | Is this copy really a mapping with transpose?
+-- | Is this copy really a mapping with transpose?  Produce an
+-- expression that is true if so, as well as other expressions that
+-- contain information about the transpose in that case (don't trust
+-- these if the boolean is false).
 isMapTransposeCopy ::
   PrimType ->
   MemLoc ->
   MemLoc ->
   Maybe
-    ( Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64
+    ( Imp.TExp Bool,
+      ( Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64
+      )
     )
-isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
-  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
-    (perm, destshape) <- unzip perm_and_destshape,
-    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
+  | perm <- LMAD.permutation dest_lmad,
+    LMAD.permutation src_lmad == [0 .. rank - 1],
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk destshape swap r1 r2 dest_offset src_offset
-  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
-    (perm, srcshape) <- unzip perm_and_srcshape,
+      isOk (IxFun.shape destIxFun) swap r1 r2
+  | perm <- LMAD.permutation src_lmad,
+    LMAD.permutation dest_lmad == [0 .. rank - 1],
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk srcshape id r1 r2 dest_offset src_offset
+      isOk (IxFun.shape srcIxFun) id r1 r2
   | otherwise =
       Nothing
   where
-    bt_size = primByteSize bt
+    rank = IxFun.rank destIxFun
     swap (x, y) = (y, x)
+    dest_lmad = IxFun.ixfunLMAD destIxFun
+    src_lmad = IxFun.ixfunLMAD srcIxFun
+    dest_offset = LMAD.offset dest_lmad
+    src_offset = LMAD.offset src_lmad
 
-    isOk shape f r1 r2 dest_offset src_offset = do
+    isOk shape f r1 r2 =
       let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-      pure
-        ( dest_offset,
-          src_offset,
-          num_arrays,
-          size_x,
-          size_y
-        )
+       in Just
+            ( LMAD.contiguous dest_lmad
+                .&&. LMAD.contiguous src_lmad,
+              ( dest_offset * primByteSize pt,
+                src_offset * primByteSize pt,
+                num_arrays,
+                size_x,
+                size_y
+              )
+            )
 
     getSizes shape f r1 r2 =
       let (mapped, notmapped) = splitAt r1 shape
@@ -1479,35 +1490,25 @@ mapTransposeForType bt = do
 -- | Use 'sCopy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
 defaultCopy pt dest src
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
       isMapTransposeCopy pt dest src = do
       fname <- mapTransposeForType pt
-      emit
-        $ Imp.Call
-          []
-          fname
-        $ transposeArgs
-          pt
-          destmem
-          (bytes destoffset)
-          srcmem
-          (bytes srcoffset)
-          num_arrays
-          size_x
-          size_y
-  | Just destoffset <-
-      IxFun.linearWithOffset dest_ixfun pt_size,
-    Just srcoffset <-
-      IxFun.linearWithOffset src_ixfun pt_size = do
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      if isScalarSpace srcspace || isScalarSpace destspace
-        then copyElementWise pt dest src
-        else sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt
-  | otherwise =
-      copyElementWise pt dest src
+      sIf
+        is_transpose
+        ( emit . Imp.Call [] fname $
+            transposeArgs
+              pt
+              destmem
+              (bytes destoffset)
+              srcmem
+              (bytes srcoffset)
+              num_arrays
+              size_x
+              size_y
+        )
+        nontranspose
+  | otherwise = nontranspose
   where
-    pt_size = primByteSize pt
     num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
 
     MemLoc destmem _ dest_ixfun = dest
@@ -1515,6 +1516,21 @@ defaultCopy pt dest src
 
     isScalarSpace ScalarSpace {} = True
     isScalarSpace _ = False
+
+    nontranspose = do
+      srcspace <- entryMemSpace <$> lookupMemory srcmem
+      destspace <- entryMemSpace <$> lookupMemory destmem
+      if isScalarSpace srcspace || isScalarSpace destspace
+        then copyElementWise pt dest src
+        else do
+          let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
+              src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
+              destoffset = elements (LMAD.offset dest_lmad) `withElemType` pt
+              srcoffset = elements (LMAD.offset src_lmad) `withElemType` pt
+          sIf
+            (LMAD.memcpyable dest_lmad src_lmad)
+            (sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt)
+            (copyElementWise pt dest src)
 
 copyElementWise :: CopyCompiler rep r op
 copyElementWise bt dest src = do
@@ -1891,17 +1907,17 @@ sLoopNest = sLoopSpace . map pe64 . shapeDims
 
 sCopy ::
   VName ->
-  Imp.TExp Int64 ->
+  Count Bytes (Imp.TExp Int64) ->
   Space ->
   VName ->
-  Imp.TExp Int64 ->
+  Count Bytes (Imp.TExp Int64) ->
   Space ->
   Count Elements (Imp.TExp Int64) ->
   PrimType ->
   ImpM rep r op ()
 sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
   if destmem == srcmem
-    then sUnless (destoffset .==. srcoffset) the_copy
+    then sUnless (Imp.unCount destoffset .==. Imp.unCount srcoffset) the_copy
     else the_copy
   where
     the_copy =
@@ -1909,10 +1925,10 @@ sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
         $ Imp.Copy
           pt
           destmem
-          (bytes destoffset)
+          destoffset
           destspace
           srcmem
-          (bytes srcoffset)
+          srcoffset
           srcspace
         $ num_elems `withElemType` pt
 
