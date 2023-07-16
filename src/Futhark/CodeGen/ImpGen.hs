@@ -146,6 +146,7 @@ import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
 import Futhark.Util.IntegralExp
@@ -1495,19 +1496,21 @@ defaultCopy pt dest src
           num_arrays
           size_x
           size_y
-  | Just destoffset <-
-      IxFun.linearWithOffset dest_ixfun pt_size,
-    Just srcoffset <-
-      IxFun.linearWithOffset src_ixfun pt_size = do
+  | otherwise = do
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       if isScalarSpace srcspace || isScalarSpace destspace
         then copyElementWise pt dest src
-        else sCopy destmem (bytes destoffset) destspace srcmem (bytes srcoffset) srcspace num_elems pt
-  | otherwise =
-      copyElementWise pt dest src
+        else do
+          let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
+              src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
+              destoffset = elements (LMAD.offset dest_lmad) `withElemType` pt
+              srcoffset = elements (LMAD.offset src_lmad) `withElemType` pt
+          sIf
+            (LMAD.memcpyable dest_lmad src_lmad)
+            (sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt)
+            (copyElementWise pt dest src)
   where
-    pt_size = primByteSize pt
     num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
 
     MemLoc destmem _ dest_ixfun = dest

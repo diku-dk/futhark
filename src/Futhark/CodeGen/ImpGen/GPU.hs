@@ -275,22 +275,6 @@ gpuCopyForType r bt = do
 gpuCopyName :: Rank -> PrimType -> String
 gpuCopyName (Rank r) bt = "gpu_copy_" <> show r <> "d_" <> prettyString bt
 
--- | True if these LMADs represent the same function (ignoring
--- offset).
-lmadCompatible :: LMAD.LMAD (Imp.TExp Int64) -> LMAD.LMAD (Imp.TExp Int64) -> Imp.TExp Bool
-lmadCompatible x y = LMAD.dynamicEqualsLMAD x' y'
-  where
-    x' = x {LMAD.offset = 0}
-    y' = y {LMAD.offset = 0}
-
--- | True if this LMAD corresponds to an array without "holes".  This
--- implies it can be copied with a memcpy()-like operation.
-lmadContiguous :: LMAD.LMAD (Imp.TExp Int64) -> Imp.TExp Bool
-lmadContiguous lmad =
-  foldl1 (.&&.) $ zipWith (.==.) (toList lmad) lmad'
-  where
-    lmad' = toList (LMAD.iota LMAD.Inc (LMAD.offset lmad) (LMAD.shape lmad))
-
 gpuCopyFunction :: Rank -> PrimType -> Imp.Function Imp.HostOp
 gpuCopyFunction (Rank r) pt = do
   let tdesc = mconcat (replicate r "[]") <> prettyString pt
@@ -351,10 +335,6 @@ gpuCopyFunction (Rank r) pt = do
                 (Space "device")
                 num_bytes
 
-            use_copy =
-              lmadContiguous (le64 <$> dest_lmad)
-                .&&. lmadCompatible (le64 <$> dest_lmad) (le64 <$> src_lmad)
-
         pure
           ( [memparam dest_mem]
               ++ map intparam (toList dest_lmad)
@@ -365,7 +345,7 @@ gpuCopyFunction (Rank r) pt = do
               <> Imp.Op (Imp.GetSize group_size "copy_group_size" Imp.SizeGroup)
               <> Imp.Op (Imp.GetSize num_groups "copy_num_groups" Imp.SizeNumGroups)
               <> Imp.If
-                use_copy
+                (LMAD.memcpyable (le64 <$> dest_lmad) (le64 <$> src_lmad))
                 ( Imp.DebugPrint "## Simple copy" Nothing
                     <> do_copy
                 )
@@ -564,12 +544,6 @@ mapTransposeFunction bt =
 -- simply optimise the 64-bit version to make this distinction
 -- unnecessary.  Fortunately these kernels are quite small.
 
--- | Remove the permutation of an LMAD by actually applying it to the
--- dimensions.
-noPermLMAD :: LMAD.LMAD t -> LMAD.LMAD t
-noPermLMAD lmad =
-  lmad {LMAD.dims = rearrangeShape (LMAD.permutation lmad) $ LMAD.dims lmad}
-
 callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ src_ixfun)
   | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
@@ -591,8 +565,8 @@ callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ 
       fname <- gpuCopyForType (Rank (IxFun.rank dest_ixfun)) pt
       dest_space <- entryMemSpace <$> lookupMemory destmem
       src_space <- entryMemSpace <$> lookupMemory srcmem
-      let dest_lmad = noPermLMAD $ IxFun.ixfunLMAD dest_ixfun
-          src_lmad = noPermLMAD $ IxFun.ixfunLMAD src_ixfun
+      let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
+          src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
           num_elems = Imp.elements $ product $ LMAD.shape dest_lmad
       if dest_space == Space "device" && src_space == Space "device"
         then
