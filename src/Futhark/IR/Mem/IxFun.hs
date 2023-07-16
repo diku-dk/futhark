@@ -22,7 +22,6 @@ module Futhark.IR.Mem.IxFun
     permutation,
     rank,
     isDirect,
-    isLinear,
     substituteInIxFun,
     substituteInLMAD,
     existentialize,
@@ -401,31 +400,6 @@ rebase
                 dims_base'
             )
     pure $ IxFun lmad_base'' shp (cg && cg_base)
-
--- | If the memory support of the index function is contiguous and row-major
--- (i.e., no transpositions etc.), then this should
--- return the offset from which the memory-support of this index function
--- starts.
-linearWithOffset ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  num ->
-  Maybe num
-linearWithOffset ixfun@(IxFun lmad _ cg) elem_size
-  | hasContiguousPerm ixfun && cg && ixfunMonotonicity ixfun == Inc =
-      Just $ LMAD.offset lmad * elem_size
-linearWithOffset _ _ = Nothing
-
--- | Is this a row-major array starting at offset zero?
-isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
-isLinear = (== Just 0) . flip linearWithOffset 1
-
--- | Check monotonicity of an index function.
-ixfunMonotonicity ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  Monotonicity
-ixfunMonotonicity = LMAD.monotonicity . ixfunLMAD
 
 -- | Turn all the leaves of the index function into 'Ext's.  We
 --  require that there's only one LMAD, that the index function is
