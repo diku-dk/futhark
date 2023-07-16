@@ -21,8 +21,6 @@ module Futhark.IR.Mem.IxFun
     shape,
     permutation,
     rank,
-    linearWithOffset,
-    rearrangeWithOffset,
     isDirect,
     isLinear,
     substituteInIxFun,
@@ -48,7 +46,8 @@ import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.LMAD hiding
-  ( flatSlice,
+  ( contiguous,
+    flatSlice,
     index,
     iota,
     mkExistential,
@@ -417,25 +416,6 @@ linearWithOffset ixfun@(IxFun lmad _ cg) elem_size
       Just $ LMAD.offset lmad * elem_size
 linearWithOffset _ _ = Nothing
 
--- | Similar restrictions to @linearWithOffset@ except for transpositions, which
--- are returned together with the offset.
-rearrangeWithOffset ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  num ->
-  Maybe (num, [(Int, num)])
-rearrangeWithOffset (IxFun lmad oshp cg) elem_size = do
-  -- Note that @cg@ describes whether the index function is
-  -- contiguous, *ignoring permutations*.  This function requires that
-  -- functionality.
-  let perm = LMAD.permutation lmad
-      perm_contig = [0 .. length perm - 1]
-  offset <-
-    linearWithOffset
-      (IxFun (LMAD.setPermutation perm_contig lmad) oshp cg)
-      elem_size
-  pure (offset, zip perm (permuteFwd perm (LMAD.shapeBase lmad)))
-
 -- | Is this a row-major array starting at offset zero?
 isLinear :: (Eq num, IntegralExp num) => IxFun num -> Bool
 isLinear = (== Just 0) . flip linearWithOffset 1
@@ -474,8 +454,6 @@ closeEnough :: IxFun num -> IxFun num -> Bool
 closeEnough ixf1 ixf2 =
   (length (base ixf1) == length (base ixf2))
     && closeEnoughLMADs (ixfunLMAD ixf1) (ixfunLMAD ixf2)
-    -- This treats ixf1 as the "declared type" that we are matching against.
-    && (contiguous ixf1 <= contiguous ixf2)
   where
     closeEnoughLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)

@@ -1421,44 +1421,54 @@ copy
         cc <- asks envCopyCompiler
         cc bt dst src
 
--- | Is this copy really a mapping with transpose?
+-- | Is this copy really a mapping with transpose?  Produce an
+-- expression that is true if so, as well as other expressions that
+-- contain information about the transpose in that case (don't trust
+-- these if the boolean is false).
 isMapTransposeCopy ::
   PrimType ->
   MemLoc ->
   MemLoc ->
   Maybe
-    ( Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64,
-      Imp.TExp Int64
+    ( Imp.TExp Bool,
+      ( Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64,
+        Imp.TExp Int64
+      )
     )
-isMapTransposeCopy bt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
-  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
-    (perm, destshape) <- unzip perm_and_destshape,
-    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
+  | perm <- LMAD.permutation dest_lmad,
+    LMAD.permutation src_lmad == [0 .. rank - 1],
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk destshape swap r1 r2 dest_offset src_offset
-  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
-    (perm, srcshape) <- unzip perm_and_srcshape,
+      isOk (IxFun.shape destIxFun) swap r1 r2
+  | perm <- LMAD.permutation src_lmad,
+    LMAD.permutation dest_lmad == [0 .. rank - 1],
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk srcshape id r1 r2 dest_offset src_offset
+      isOk (IxFun.shape srcIxFun) id r1 r2
   | otherwise =
       Nothing
   where
-    bt_size = primByteSize bt
+    rank = IxFun.rank destIxFun
     swap (x, y) = (y, x)
+    dest_lmad = IxFun.ixfunLMAD destIxFun
+    src_lmad = IxFun.ixfunLMAD srcIxFun
+    dest_offset = LMAD.offset dest_lmad
+    src_offset = LMAD.offset src_lmad
 
-    isOk shape f r1 r2 dest_offset src_offset = do
+    isOk shape f r1 r2 =
       let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-      pure
-        ( dest_offset,
-          src_offset,
-          num_arrays,
-          size_x,
-          size_y
-        )
+       in Just
+            ( LMAD.contiguous dest_lmad
+                .&&. LMAD.contiguous src_lmad,
+              ( dest_offset * primByteSize pt,
+                src_offset * primByteSize pt,
+                num_arrays,
+                size_x,
+                size_y
+              )
+            )
 
     getSizes shape f r1 r2 =
       let (mapped, notmapped) = splitAt r1 shape
@@ -1480,23 +1490,34 @@ mapTransposeForType bt = do
 -- | Use 'sCopy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler rep r op
 defaultCopy pt dest src
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
       isMapTransposeCopy pt dest src = do
       fname <- mapTransposeForType pt
-      emit
-        $ Imp.Call
-          []
-          fname
-        $ transposeArgs
-          pt
-          destmem
-          (bytes destoffset)
-          srcmem
-          (bytes srcoffset)
-          num_arrays
-          size_x
-          size_y
-  | otherwise = do
+      sIf
+        is_transpose
+        ( emit . Imp.Call [] fname $
+            transposeArgs
+              pt
+              destmem
+              (bytes destoffset)
+              srcmem
+              (bytes srcoffset)
+              num_arrays
+              size_x
+              size_y
+        )
+        nontranspose
+  | otherwise = nontranspose
+  where
+    num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
+
+    MemLoc destmem _ dest_ixfun = dest
+    MemLoc srcmem _ src_ixfun = src
+
+    isScalarSpace ScalarSpace {} = True
+    isScalarSpace _ = False
+
+    nontranspose = do
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       if isScalarSpace srcspace || isScalarSpace destspace
@@ -1510,14 +1531,6 @@ defaultCopy pt dest src
             (LMAD.memcpyable dest_lmad src_lmad)
             (sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt)
             (copyElementWise pt dest src)
-  where
-    num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
-
-    MemLoc destmem _ dest_ixfun = dest
-    MemLoc srcmem _ src_ixfun = src
-
-    isScalarSpace ScalarSpace {} = True
-    isScalarSpace _ = False
 
 copyElementWise :: CopyCompiler rep r op
 copyElementWise bt dest src = do

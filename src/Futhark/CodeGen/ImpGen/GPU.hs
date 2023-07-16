@@ -546,22 +546,25 @@ mapTransposeFunction bt =
 
 callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
 callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ src_ixfun)
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
+  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
       isMapTransposeCopy pt destloc srcloc = do
       fname <- mapTransposeForType pt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-  | otherwise = do
+      sIf
+        is_transpose
+        ( emit . Imp.Call [] fname $
+            [ Imp.MemArg destmem,
+              Imp.ExpArg $ untyped destoffset,
+              Imp.MemArg srcmem,
+              Imp.ExpArg $ untyped srcoffset,
+              Imp.ExpArg $ untyped num_arrays,
+              Imp.ExpArg $ untyped size_x,
+              Imp.ExpArg $ untyped size_y
+            ]
+        )
+        nontranspose
+  | otherwise = nontranspose
+  where
+    nontranspose = do
       fname <- gpuCopyForType (Rank (IxFun.rank dest_ixfun)) pt
       dest_space <- entryMemSpace <$> lookupMemory destmem
       src_space <- entryMemSpace <$> lookupMemory srcmem

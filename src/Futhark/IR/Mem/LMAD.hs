@@ -29,6 +29,7 @@ module Futhark.IR.Mem.LMAD
     disjoint2,
     disjoint3,
     dynamicEqualsLMAD,
+    contiguous,
     memcpyable,
     noPermutation,
     iota,
@@ -693,27 +694,27 @@ dynamicEqualsLMAD lmad1 lmad2 =
 
 -- | True if these LMADs represent the same function (ignoring
 -- offset).
-lmadCompatible ::
+compatible ::
   Eq num =>
   LMAD (TPrimExp Int64 num) ->
   LMAD (TPrimExp Int64 num) ->
   TPrimExp Bool num
-lmadCompatible x y =
+compatible x y =
   foldl1 (.&&.) $ zipWith dynamicEqualsLMADDim (dims x) (dims y)
 
 -- | True if this LMAD corresponds to an array without "holes".  This
 -- implies it can be copied with a memcpy()-like operation.
-lmadContiguous ::
+contiguous ::
   (Pretty num, Eq num) =>
   LMAD (TPrimExp Int64 num) ->
   TPrimExp Bool num
-lmadContiguous lmad =
+contiguous lmad =
   foldl1 (.&&.) $ zipWith (.==.) (toList lmad) lmad'
   where
-    lmad' = toList (iota Inc (offset lmad) (shape lmad))
+    lmad' = toList (iota Inc (offset lmad) $ map ldShape $ dims lmad)
 
 -- | True if these LMADs have the same contiguous representation, such
--- that one can be copied copied to the other with a @memcpy()@-like
+-- that one can be copied to the other with a @memcpy()@-like
 -- operation.
 memcpyable ::
   (Pretty num, Eq num) =>
@@ -721,7 +722,7 @@ memcpyable ::
   LMAD (TPrimExp Int64 num) ->
   TPrimExp Bool num
 memcpyable dest_lmad src_lmad =
-  lmadContiguous dest_lmad .&&. lmadCompatible dest_lmad src_lmad
+  contiguous dest_lmad .&&. compatible dest_lmad src_lmad
 
 -- | Remove the permutation of an LMAD by actually applying it to the
 -- dimensions.
