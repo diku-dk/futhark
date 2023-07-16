@@ -1503,7 +1503,7 @@ defaultCopy pt dest src
       destspace <- entryMemSpace <$> lookupMemory destmem
       if isScalarSpace srcspace || isScalarSpace destspace
         then copyElementWise pt dest src
-        else sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt
+        else sCopy destmem (bytes destoffset) destspace srcmem (bytes srcoffset) srcspace num_elems pt
   | otherwise =
       copyElementWise pt dest src
   where
@@ -1891,17 +1891,17 @@ sLoopNest = sLoopSpace . map pe64 . shapeDims
 
 sCopy ::
   VName ->
-  Imp.TExp Int64 ->
+  Count Bytes (Imp.TExp Int64) ->
   Space ->
   VName ->
-  Imp.TExp Int64 ->
+  Count Bytes (Imp.TExp Int64) ->
   Space ->
   Count Elements (Imp.TExp Int64) ->
   PrimType ->
   ImpM rep r op ()
 sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
   if destmem == srcmem
-    then sUnless (destoffset .==. srcoffset) the_copy
+    then sUnless (Imp.unCount destoffset .==. Imp.unCount srcoffset) the_copy
     else the_copy
   where
     the_copy =
@@ -1909,10 +1909,10 @@ sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
         $ Imp.Copy
           pt
           destmem
-          (bytes destoffset)
+          destoffset
           destspace
           srcmem
-          (bytes srcoffset)
+          srcoffset
           srcspace
         $ num_elems `withElemType` pt
 
