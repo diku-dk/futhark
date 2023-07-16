@@ -979,7 +979,7 @@ pIxFunBase pNum =
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
       shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
-      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
+      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma)
       pure $ IxFun.LMAD offset $ zipWith3 IxFun.LMADDim strides shape perm
 
 pPrimExpLeaf :: Parser VName
