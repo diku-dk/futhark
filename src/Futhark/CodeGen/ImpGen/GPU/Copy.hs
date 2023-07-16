@@ -4,6 +4,7 @@
 -- Written in ImpCode so we can compile it to both CUDA and OpenCL.
 module Futhark.CodeGen.ImpGen.GPU.Copy (copyKernel) where
 
+import Control.Monad
 import Control.Monad.State
 import Data.Foldable (toList)
 import Futhark.CodeGen.ImpCode.GPU

@@ -27,7 +27,6 @@ module Futhark.IR.Mem.IxFun
     closeEnough,
     equivalent,
     permuteInv,
-    conservativeFlatten,
     disjoint,
     disjoint2,
     disjoint3,
