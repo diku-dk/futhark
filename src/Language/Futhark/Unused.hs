@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use record patterns" #-}
 module Language.Futhark.Unused (findUnused) where
 
@@ -6,7 +7,7 @@ import Data.Bifunctor qualified as BI
 import Data.Foldable (Foldable (foldl'))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, maybeToList, mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe, maybeToList)
 import Data.Set qualified as S
 import Language.Futhark
 import Language.Futhark.Semantic (FileModule (FileModule), includeToFilePath)
@@ -37,7 +38,9 @@ findUnused fp fml = do
       ( \(x, y) ->
           ( x,
             map (\a -> (a, locs M.! a)) $
-              filter (\nm -> nm `M.member` locs && nm `S.notMember` used) $ map fst $ M.toList y 
+              filter (\nm -> nm `M.member` locs && nm `S.notMember` used) $
+                map fst $
+                  M.toList y
           )
       )
       rf
@@ -71,7 +74,6 @@ funcsInDec (SigDec _) = M.empty
 funcsInDec (LocalDec _ _) = M.empty
 funcsInDec (OpenDec _ _) = M.empty
 funcsInDec (ImportDec _ _ _) = M.empty
-
 
 -- current expression, current function being traversed, map of functions seen so far.
 funcsInExp :: ExpBase Info VName -> VName -> VMap -> VMap
@@ -132,7 +134,6 @@ funcsInModExp (ModLambda _ Nothing mex _) = funcsInModExp mex
 funcsInModExp (ModVar (QualName _ _) _) = M.empty
 funcsInModExp (ModImport _ _ _loc) = M.empty
 
-
 locsInFMod :: FileModule -> LocMap
 locsInFMod (FileModule _ _ (Prog _ decs) _) = M.unions $ map locsInDec decs
 
@@ -190,7 +191,6 @@ locsInExp (OpSection _ _ _l) = M.empty
 locsInExp (ProjectSection _ _ _l) = M.empty
 locsInExp (IndexSection _ _ _l) = M.empty
 
-
 locsInModExp :: ModExpBase Info VName -> LocMap
 locsInModExp (ModParens mex _) = locsInModExp mex
 locsInModExp (ModDecs dbs _) = M.unions $ map locsInDec dbs
@@ -199,7 +199,6 @@ locsInModExp (ModAscript mex _ _ _) = locsInModExp mex
 locsInModExp (ModLambda _ _ mex _) = locsInModExp mex
 locsInModExp (ModVar _ _src) = M.empty
 locsInModExp (ModImport _ _ _src) = M.empty
-
 
 fromInc :: Inclusiveness (ExpBase Info VName) -> ExpBase Info VName
 fromInc (DownToExclusive x) = x
