@@ -482,9 +482,9 @@ against the OpenCL library when linking the final binary::
 When using the OpenCL backend, extra API functions are provided for
 directly accessing or providing the OpenCL objects used by Futhark.
 Take care when using these functions.  In particular, a Futhark
-context can now be provided with the command queue to use::
+context can now be configured with the command queue to use::
 
-  struct futhark_context *futhark_context_new_with_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
+  void futhark_context_config_set_command_queue(struct futhark_context_config *cfg, cl_command_queue queue);
 
 As a ``cl_command_queue`` specifies an OpenCL device, this is also how
 manual platform and device selection is possible.  A function is also
