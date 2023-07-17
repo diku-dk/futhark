@@ -1,5 +1,30 @@
 // Start of atomics.h
 
+inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_xchg_i32_local(volatile __local int32_t *p, int32_t x);
+inline int32_t atomic_cmpxchg_i32_global(volatile __global int32_t *p,
+                                         int32_t cmp, int32_t val);
+inline int32_t atomic_cmpxchg_i32_local(volatile __local int32_t *p,
+                                        int32_t cmp, int32_t val);
+inline int32_t atomic_add_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_add_i32_local(volatile __local int32_t *p, int32_t x);
+inline float atomic_fadd_f32_global(volatile __global float *p, float x);
+inline float atomic_fadd_f32_local(volatile __local float *p, float x);
+inline int32_t atomic_smax_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_smax_i32_local(volatile __local int32_t *p, int32_t x);
+inline int32_t atomic_smin_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_smin_i32_local(volatile __local int32_t *p, int32_t x);
+inline uint32_t atomic_umax_i32_global(volatile __global uint32_t *p, uint32_t x);
+inline uint32_t atomic_umax_i32_local(volatile __local uint32_t *p, uint32_t x);
+inline uint32_t atomic_umin_i32_global(volatile __global uint32_t *p, uint32_t x);
+inline uint32_t atomic_umin_i32_local(volatile __local uint32_t *p, uint32_t x);
+inline int32_t atomic_and_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_and_i32_local(volatile __local int32_t *p, int32_t x);
+inline int32_t atomic_or_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_or_i32_local(volatile __local int32_t *p, int32_t x);
+inline int32_t atomic_xor_i32_global(volatile __global int32_t *p, int32_t x);
+inline int32_t atomic_xor_i32_local(volatile __local int32_t *p, int32_t x);
+
 inline int32_t atomic_xchg_i32_global(volatile __global int32_t *p, int32_t x) {
 #ifdef FUTHARK_CUDA
   return atomicExch((int32_t*)p, x);
@@ -195,6 +220,36 @@ inline int32_t atomic_xor_i32_local(volatile __local int32_t *p, int32_t x) {
 }
 
 // Start of 64 bit atomics
+
+#if defined(FUTHARK_CUDA) || defined(cl_khr_int64_base_atomics) && defined(cl_khr_int64_extended_atomics)
+
+inline int64_t atomic_xchg_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_xchg_i64_local(volatile __local int64_t *p, int64_t x);
+inline int64_t atomic_cmpxchg_i64_global(volatile __global int64_t *p,
+                                         int64_t cmp, int64_t val);
+inline int64_t atomic_cmpxchg_i64_local(volatile __local int64_t *p,
+                                        int64_t cmp, int64_t val);
+inline int64_t atomic_add_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_add_i64_local(volatile __local int64_t *p, int64_t x);
+inline int64_t atomic_smax_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_smax_i64_local(volatile __local int64_t *p, int64_t x);
+inline int64_t atomic_smin_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_smin_i64_local(volatile __local int64_t *p, int64_t x);
+inline uint64_t atomic_umax_i64_global(volatile __global uint64_t *p, uint64_t x);
+inline uint64_t atomic_umax_i64_local(volatile __local uint64_t *p, uint64_t x);
+inline uint64_t atomic_umin_i64_global(volatile __global uint64_t *p, uint64_t x);
+uint64_t atomic_umin_i64_local(volatile __local uint64_t *p, uint64_t x);
+inline int64_t atomic_and_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_and_i64_local(volatile __local int64_t *p, int64_t x);
+inline int64_t atomic_or_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_or_i64_local(volatile __local int64_t *p, int64_t x);
+inline int64_t atomic_xor_i64_global(volatile __global int64_t *p, int64_t x);
+inline int64_t atomic_xor_i64_local(volatile __local int64_t *p, int64_t x);
+
+#ifdef FUTHARK_F64_ENABLED
+inline double atomic_fadd_f64_global(volatile __global double *p, double x);
+inline double atomic_fadd_f64_local(volatile __local double *p, double x);
+#endif
 
 inline int64_t atomic_xchg_i64_global(volatile __global int64_t *p, int64_t x) {
 #ifdef FUTHARK_CUDA
@@ -393,5 +448,7 @@ inline int64_t atomic_xor_i64_local(volatile __local int64_t *p, int64_t x) {
   return atom_xor(p, x);
 #endif
 }
+
+#endif // defined(FUTHARK_CUDA) || defined(cl_khr_int64_base_atomics) && defined(cl_khr_int64_extended_atomics)
 
 // End of atomics.h
