@@ -251,10 +251,10 @@ struct futhark_context {
   lock_t error_lock;
   FILE *log;
   struct constants *constants;
-  struct free_list cu_free_list;
+  struct free_list free_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
-  // Uniform above
+  // Uniform fields above.
 
   CUdeviceptr global_failure;
   CUdeviceptr global_failure_args;
@@ -271,7 +271,7 @@ struct futhark_context {
   CUcontext cu_ctx;
   CUmodule module;
 
-  struct free_list free_list;
+  struct free_list cu_free_list;
 
   size_t max_block_size;
   size_t max_grid_size;
