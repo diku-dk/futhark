@@ -270,6 +270,7 @@ struct futhark_context {
   CUdevice dev;
   CUcontext cu_ctx;
   CUmodule module;
+  CUstream stream;
 
   struct free_list cu_free_list;
 
@@ -307,8 +308,8 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
   char name[256];
   int count, chosen = -1, best_cc = -1;
-  int cc_major_best, cc_minor_best;
-  int cc_major, cc_minor;
+  int cc_major_best = 0, cc_minor_best = 0;
+  int cc_major = 0, cc_minor = 0;
   CUdevice dev;
 
   CUDA_SUCCEED_FATAL(cuDeviceGetCount(&count));
@@ -385,11 +386,11 @@ static char *concat_fragments(const char *src_fragments[]) {
 }
 
 static const char *cuda_nvrtc_get_arch(CUdevice dev) {
-  struct {
+  static struct {
     int major;
     int minor;
     const char *arch_str;
-  } static const x[] = {
+  } const x[] = {
     { 3, 0, "compute_30" },
     { 3, 2, "compute_32" },
     { 3, 5, "compute_35" },
@@ -730,38 +731,15 @@ static char* cuda_module_setup(struct futhark_context *ctx,
   return NULL;
 }
 
-static char* cuda_setup(struct futhark_context *ctx, const char *src_fragments[],
-                        const char *extra_opts[], const char* cache_fname) {
-  CUDA_SUCCEED_FATAL(cuInit(0));
-
-  if (cuda_device_setup(ctx) != 0) {
-    futhark_panic(-1, "No suitable CUDA device found.\n");
-  }
-  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
-
-  free_list_init(&ctx->cu_free_list);
-
-  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
-  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
-  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
-  ctx->max_tile_size = sqrt(ctx->max_block_size);
-  ctx->max_threshold = 0;
-  ctx->max_bespoke = 0;
-  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
-
-  cuda_size_setup(ctx);
-  return cuda_module_setup(ctx, src_fragments, extra_opts, cache_fname);
-}
-
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
-  cudaError_t err;
+static CUresult cuda_tally_profiling_records(struct futhark_context *ctx) {
+  CUresult err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
 
     float ms;
-    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != cudaSuccess) {
+    if ((err = cuEventElapsedTime(&ms, record.events[0], record.events[1])) != CUDA_SUCCESS) {
       return err;
     }
 
@@ -769,10 +747,10 @@ static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
     *record.runs += 1;
     *record.runtime += ms*1000;
 
-    if ((err = cudaEventDestroy(record.events[0])) != cudaSuccess) {
+    if ((err = cuEventDestroy(record.events[0])) != CUDA_SUCCESS) {
       return err;
     }
-    if ((err = cudaEventDestroy(record.events[1])) != cudaSuccess) {
+    if ((err = cuEventDestroy(record.events[1])) != CUDA_SUCCESS) {
       return err;
     }
 
@@ -781,7 +759,7 @@ static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
 
   ctx->profiling_records_used = 0;
 
-  return cudaSuccess;
+  return CUDA_SUCCESS;
 }
 
 // Returns pointer to two events.
@@ -918,10 +896,28 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
 
-  ctx->error = cuda_setup(ctx, cuda_program, ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
+  CUDA_SUCCEED_FATAL(cuInit(0));
+  if (cuda_device_setup(ctx) != 0) {
+    futhark_panic(-1, "No suitable CUDA device found.\n");
+  }
+  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+
+  free_list_init(&ctx->cu_free_list);
+
+  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
+  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
+  ctx->max_tile_size = sqrt(ctx->max_block_size);
+  ctx->max_threshold = 0;
+  ctx->max_bespoke = 0;
+  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
+  CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
+  cuda_size_setup(ctx);
+  ctx->error = cuda_module_setup(ctx, cuda_program,
+                                 ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
-    futhark_panic(1, "%s\n", ctx->error);
+    futhark_panic(1, "During CUDA initialisation:\n%s\n", ctx->error);
   }
 
   int32_t no_error = -1;
@@ -938,6 +934,7 @@ void backend_context_teardown(struct futhark_context* ctx) {
   CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
   (void)cuda_tally_profiling_records(ctx);
   free(ctx->profiling_records);
+  CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
 }

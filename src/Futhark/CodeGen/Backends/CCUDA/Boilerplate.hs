@@ -37,17 +37,17 @@ errorMsgNumArgs = length . errorMsgArgTypes
 profilingEnclosure :: Name -> ([C.BlockItem], [C.BlockItem])
 profilingEnclosure name =
   ( [C.citems|
-      typename cudaEvent_t *pevents = NULL;
+      typename CUevent *pevents = NULL;
       if (ctx->profiling && !ctx->profiling_paused) {
         pevents = cuda_get_events(ctx,
                                   &ctx->program->$id:(kernelRuns name),
                                   &ctx->program->$id:(kernelRuntime name));
-        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[0], 0));
+        CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
       }
       |],
     [C.citems|
       if (pevents != NULL) {
-        CUDA_SUCCEED_FATAL(cudaEventRecord(pevents[1], 0));
+        CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
       }
       |]
   )
