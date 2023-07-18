@@ -8,7 +8,6 @@ module Futhark.IR.Mem.LMAD
     Indices,
     LMAD (..),
     LMADDim (..),
-    Monotonicity (..),
     Permutation,
     index,
     slice,
@@ -16,7 +15,6 @@ module Futhark.IR.Mem.LMAD
     reshape,
     permute,
     shape,
-    monotonicity,
     permutation,
     shapeBase,
     setPermutation,
@@ -24,11 +22,13 @@ module Futhark.IR.Mem.LMAD
     substituteInLMAD,
     permuteInv,
     permuteFwd,
-    conservativeFlatten,
     disjoint,
     disjoint2,
     disjoint3,
     dynamicEqualsLMAD,
+    contiguous,
+    memcpyable,
+    noPermutation,
     iota,
     mkExistential,
   )
@@ -36,8 +36,9 @@ where
 
 import Control.Category
 import Control.Monad
+import Data.Foldable (toList)
 import Data.Function (on, (&))
-import Data.List (elemIndex, partition, sort, sortBy, zipWith4)
+import Data.List (elemIndex, partition, sort, sortBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Traversable
@@ -73,31 +74,20 @@ type Indices num = [num]
 -- | A complete permutation.
 type Permutation = [Int]
 
--- | The physical element ordering alongside a dimension, i.e. the
--- sign of the stride.
-data Monotonicity
-  = -- | Unknown.
-    Unknown
-  | -- | Decreasing.
-    Dec
-  | -- | Increasing.
-    Inc
-  deriving (Show, Eq, Ord)
-
 -- | A single dimension in an 'LMAD'.
 data LMADDim num = LMADDim
   { ldStride :: num,
     ldShape :: num,
-    ldPerm :: Int,
-    ldMon :: Monotonicity
+    ldPerm :: Int
   }
   deriving (Show, Eq, Ord)
 
--- | LMAD's representation consists of a general offset and for each dimension a
--- stride, number of elements (or shape), permutation, and
--- monotonicity. Note that the permutation is not strictly necessary in that the
--- permutation can be performed directly on LMAD dimensions, but then it is
--- difficult to extract the permutation back from an LMAD.
+-- | LMAD's representation consists of a general offset and for each
+-- dimension a stride, number of elements (or shape), and
+-- permutation. Note that the permutation is not strictly necessary in
+-- that the permutation can be performed directly on LMAD dimensions,
+-- but then it is difficult to extract the permutation back from an
+-- LMAD.
 --
 -- LMAD algebra is closed under composition w.r.t. operators such as
 -- permute, index and slice.  However, other operations, such as
@@ -128,17 +118,13 @@ data LMAD num = LMAD
   }
   deriving (Show, Eq, Ord)
 
-instance Pretty Monotonicity where
-  pretty = pretty . show
-
 instance Pretty num => Pretty (LMAD num) where
   pretty (LMAD offset dims) =
     braces . semistack $
       [ "offset:" <+> group (pretty offset),
         "strides:" <+> p ldStride,
         "shape:" <+> p ldShape,
-        "permutation:" <+> p ldPerm,
-        "monotonicity:" <+> p ldMon
+        "permutation:" <+> p ldPerm
       ]
     where
       p f = group $ brackets $ align $ commasep $ map (pretty . f) dims
@@ -153,7 +139,7 @@ instance FreeIn num => FreeIn (LMAD num) where
   freeIn' = foldMap freeIn'
 
 instance FreeIn num => FreeIn (LMADDim num) where
-  freeIn' (LMADDim s n _ _) = freeIn' s <> freeIn' n
+  freeIn' (LMADDim s n _) = freeIn' s <> freeIn' n
 
 instance Functor LMAD where
   fmap = fmapDefault
@@ -165,20 +151,7 @@ instance Traversable LMAD where
   traverse f (LMAD offset dims) =
     LMAD <$> f offset <*> traverse f' dims
     where
-      f' (LMADDim s n p m) = LMADDim <$> f s <*> f n <*> pure p <*> pure m
-
--- | Monotonicity of LMAD.
-monotonicity ::
-  (Eq num, IntegralExp num) =>
-  LMAD num ->
-  Monotonicity
-monotonicity (LMAD _ dims)
-  | all (isMonDim Inc) dims = Inc
-  | all (isMonDim Dec) dims = Dec
-  | otherwise = Unknown
-  where
-    isMonDim mon (LMADDim s _ _ ldmon) =
-      s == 0 || mon == ldmon
+      f' (LMADDim s n p) = LMADDim <$> f s <*> f n <*> pure p
 
 flatOneDim ::
   (Eq num, IntegralExp num) =>
@@ -237,24 +210,20 @@ slice lmad@(LMAD _ ldims) (Slice is) =
       LMAD num ->
       (DimIndex num, LMADDim num) ->
       LMAD num
-    sliceOne (LMAD off dims) (DimFix i, LMADDim s _x _ _) =
+    sliceOne (LMAD off dims) (DimFix i, LMADDim s _x _) =
       LMAD (off + flatOneDim s i) dims
-    sliceOne (LMAD off dims) (DimSlice _ ne _, LMADDim 0 _ p _) =
-      LMAD off (dims ++ [LMADDim 0 ne p Unknown])
-    sliceOne (LMAD off dims) (dmind, dim@(LMADDim _ n _ _))
+    sliceOne (LMAD off dims) (DimSlice _ ne _, LMADDim 0 _ p) =
+      LMAD off (dims ++ [LMADDim 0 ne p])
+    sliceOne (LMAD off dims) (dmind, dim@(LMADDim _ n _))
       | dmind == unitSlice 0 n = LMAD off (dims ++ [dim])
-    sliceOne (LMAD off dims) (dmind, LMADDim s n p m)
+    sliceOne (LMAD off dims) (dmind, LMADDim s n p)
       | dmind == DimSlice (n - 1) n (-1) =
           let off' = off + flatOneDim s (n - 1)
-           in LMAD off' (dims ++ [LMADDim (s * (-1)) n p (invertMonotonicity m)])
-    sliceOne (LMAD off dims) (DimSlice b ne 0, LMADDim s _ p _) =
-      LMAD (off + flatOneDim s b) (dims ++ [LMADDim 0 ne p Unknown])
-    sliceOne (LMAD off dims) (DimSlice bs ns ss, LMADDim s _ p m) =
-      let m' = case sgn ss of
-            Just 1 -> m
-            Just (-1) -> invertMonotonicity m
-            _ -> Unknown
-       in LMAD (off + s * bs) (dims ++ [LMADDim (ss * s) ns p m'])
+           in LMAD off' (dims ++ [LMADDim (s * (-1)) n p])
+    sliceOne (LMAD off dims) (DimSlice b ne 0, LMADDim s _ p) =
+      LMAD (off + flatOneDim s b) (dims ++ [LMADDim 0 ne p])
+    sliceOne (LMAD off dims) (DimSlice bs ns ss, LMADDim s _ p) =
+      LMAD (off + s * bs) (dims ++ [LMADDim (ss * s) ns p])
 
 hasContiguousPerm :: LMAD num -> Bool
 hasContiguousPerm lmad = perm == sort perm
@@ -263,7 +232,7 @@ hasContiguousPerm lmad = perm == sort perm
 
 -- | Flat-slice an LMAD.
 flatSlice ::
-  (Eq num, IntegralExp num) =>
+  (IntegralExp num) =>
   LMAD num ->
   FlatSlice num ->
   Maybe (LMAD num)
@@ -275,9 +244,7 @@ flatSlice lmad@(LMAD offset (dim : dims)) (FlatSlice new_offset is)
           (map (helper $ ldStride dim) is <> dims)
           & setLMADPermutation [0 ..]
   where
-    helper s0 (FlatDimIndex n s) =
-      let new_mon = if s0 * s == 1 then Inc else Unknown
-       in LMADDim (s0 * s) n 0 new_mon
+    helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) n 0
 flatSlice _ _ = Nothing
 
 -- | Handle the case where a reshape operation can stay inside a
@@ -297,7 +264,7 @@ reshape lmad@(LMAD off dims) newshape
       | dnew == ldShape dold =
           (dold {ldPerm = i} :) <$> addingVacuous (i + 1) dnews dolds
     addingVacuous i (1 : dnews) dolds =
-      (LMADDim 0 1 i Inc :) <$> addingVacuous (i + 1) dnews dolds
+      (LMADDim 0 1 i :) <$> addingVacuous (i + 1) dnews dolds
     addingVacuous _ [] [] = Just []
     addingVacuous _ _ _ = Nothing
 
@@ -306,18 +273,19 @@ reshape lmad@(LMAD off dims) newshape = do
   let perm = permutation lmad
       dims_perm = permuteFwd perm dims
       mid_dims = take (length dims) dims_perm
-      mon = monotonicity lmad
 
   guard $
     -- checking conditions (2)
-    all (\(LMADDim s _ _ _) -> s /= 0) mid_dims
+    all (\(LMADDim s _ _) -> s /= 0) mid_dims
       &&
       -- checking condition (1)
       consecutive 0 (map ldPerm mid_dims)
       &&
       -- checking condition (3)
       hasContiguousPerm lmad
-      && (mon == Inc || mon == Dec)
+      && all
+        (\(ld, se) -> ldStride ld == se)
+        (zip dims (reverse $ scanl (*) 1 (reverse (tail (shape lmad)))))
 
   -- make new permutation
   let rsh_len = length newshape
@@ -342,8 +310,8 @@ reshape lmad@(LMAD off dims) newshape = do
 
       (sup_inds, support) = unzip $ sortBy (compare `on` fst) support_inds
       (rpt_inds, repeats) = unzip repeat_inds
-      LMAD off' dims_sup = iota mon off support
-      repeats' = map (\n -> LMADDim 0 n 0 Unknown) repeats
+      LMAD off' dims_sup = iota off support
+      repeats' = map (\n -> LMADDim 0 n 0) repeats
       dims' =
         map snd $
           sortBy (compare `on` fst) $
@@ -354,11 +322,6 @@ reshape lmad@(LMAD off dims) newshape = do
     consecutive _ [] = True
     consecutive i [p] = i == p
     consecutive i ps = and $ zipWith (==) ps [i, i + 1 ..]
-
-invertMonotonicity :: Monotonicity -> Monotonicity
-invertMonotonicity Inc = Dec
-invertMonotonicity Dec = Inc
-invertMonotonicity Unknown = Unknown
 
 permutation :: LMAD num -> Permutation
 permutation = map ldPerm . dims
@@ -377,18 +340,8 @@ substituteInLMAD ::
   LMAD (TPrimExp t a) ->
   LMAD (TPrimExp t a)
 substituteInLMAD tab (LMAD offset dims) =
-  let offset' = sub offset
-      dims' =
-        map
-          ( \(LMADDim s n p m) ->
-              LMADDim
-                (sub s)
-                (sub n)
-                p
-                m
-          )
-          dims
-   in LMAD offset' dims'
+  LMAD (sub offset) $
+    map (\(LMADDim s n p) -> LMADDim (sub s) (sub n) p) dims
   where
     tab' = fmap untyped tab
     sub = TPrimExp . substituteInPrimExp tab' . untyped
@@ -410,34 +363,26 @@ permuteInv ps elems = map snd $ sortBy (compare `on` fst) $ zip ps elems
 -- | Generalised iota with user-specified offset.
 iota ::
   IntegralExp num =>
-  Monotonicity ->
   -- | Offset
   num ->
   -- | Shape
   [num] ->
   LMAD num
-iota mon off ns
-  | mon == Inc || mon == Dec =
-      let rk = length ns
-          ss0 = reverse $ take rk $ scanl (*) 1 $ reverse ns
-          ss =
-            if mon == Inc
-              then ss0
-              else map (* (-1)) ss0
-          ps = map fromIntegral [0 .. rk - 1]
-          fi = replicate rk mon
-       in LMAD off $ zipWith4 LMADDim ss ns ps fi
-  | otherwise = error "LMAD.iota: requires Inc or Dec"
+iota off ns =
+  let rk = length ns
+      ss = reverse $ take rk $ scanl (*) 1 $ reverse ns
+      ps = map fromIntegral [0 .. rk - 1]
+   in LMAD off $ zipWith3 LMADDim ss ns ps
 
 -- | Create an LMAD that is existential in everything, with the
--- provided permutation and monotonicity.
-mkExistential :: [(Int, Monotonicity)] -> Int -> LMAD (Ext a)
+-- provided permutation.
+mkExistential :: [Int] -> Int -> LMAD (Ext a)
 mkExistential perm start =
   lmad
   where
     lmad = LMAD (Ext start) $ zipWith onDim perm [0 ..]
-    onDim (p, mon) i =
-      LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2)) p mon
+    onDim p i =
+      LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2)) p
 
 -- | Permute dimensions.
 permute :: LMAD num -> Permutation -> LMAD num
@@ -467,7 +412,7 @@ flatSpan (LMAD _ dims) =
 -- conservativeFlatten :: (IntegralExp e, Ord e, Pretty e) => LMAD e -> LMAD e
 conservativeFlatten :: LMAD (TPrimExp Int64 VName) -> Maybe (LMAD (TPrimExp Int64 VName))
 conservativeFlatten (LMAD offset []) =
-  pure $ LMAD offset [LMADDim 1 1 0 Inc]
+  pure $ LMAD offset [LMADDim 1 1 0]
 conservativeFlatten l@(LMAD _ [_]) =
   pure l
 conservativeFlatten l@(LMAD offset dims) = do
@@ -476,7 +421,7 @@ conservativeFlatten l@(LMAD offset dims) = do
       gcd
       (ldStride $ head dims)
       $ map ldStride dims
-  pure $ LMAD offset [LMADDim strd (shp + 1) 0 Unknown]
+  pure $ LMAD offset [LMADDim strd (shp + 1) 0]
   where
     shp = flatSpan l
 
@@ -664,7 +609,7 @@ lmadToIntervals lmad@(LMAD offset dims0) =
     offset' = AlgSimplify.simplify0 $ untyped offset
 
     helper :: LMADDim (TPrimExp Int64 VName) -> Interval
-    helper (LMADDim strd shp _ _) = do
+    helper (LMADDim strd shp _) = do
       Interval 0 (AlgSimplify.simplify' shp) (AlgSimplify.simplify' strd)
 
 -- | Dynamically determine if two 'LMADDim' are equal.
@@ -675,7 +620,6 @@ dynamicEqualsLMADDim dim1 dim2 =
   ldStride dim1 .==. ldStride dim2
     .&&. ldShape dim1 .==. ldShape dim2
     .&&. fromBool (ldPerm dim1 == ldPerm dim2)
-    .&&. fromBool (ldMon dim1 == ldMon dim2)
 
 -- | Dynamically determine if two 'LMAD' are equal.
 --
@@ -687,3 +631,41 @@ dynamicEqualsLMAD lmad1 lmad2 =
       ((.&&.) . uncurry dynamicEqualsLMADDim)
       true
       (zip (dims lmad1) (dims lmad2))
+
+-- | True if these LMADs represent the same function (ignoring
+-- offset).
+compatible ::
+  Eq num =>
+  LMAD (TPrimExp Int64 num) ->
+  LMAD (TPrimExp Int64 num) ->
+  TPrimExp Bool num
+compatible x y =
+  foldl1 (.&&.) $ zipWith dynamicEqualsLMADDim (dims x) (dims y)
+
+-- | True if this LMAD corresponds to an array without "holes".  This
+-- implies it can be copied with a memcpy()-like operation.
+contiguous ::
+  (Pretty num, Eq num) =>
+  LMAD (TPrimExp Int64 num) ->
+  TPrimExp Bool num
+contiguous lmad =
+  foldl1 (.&&.) $ zipWith (.==.) (toList lmad) lmad'
+  where
+    lmad' = toList (iota (offset lmad) $ map ldShape $ dims lmad)
+
+-- | True if these LMADs have the same contiguous representation, such
+-- that one can be copied to the other with a @memcpy()@-like
+-- operation.
+memcpyable ::
+  (Pretty num, Eq num) =>
+  LMAD (TPrimExp Int64 num) ->
+  LMAD (TPrimExp Int64 num) ->
+  TPrimExp Bool num
+memcpyable dest_lmad src_lmad =
+  contiguous dest_lmad .&&. compatible dest_lmad src_lmad
+
+-- | Remove the permutation of an LMAD by actually applying it to the
+-- dimensions.
+noPermutation :: LMAD t -> LMAD t
+noPermutation lmad =
+  lmad {dims = rearrangeShape (permutation lmad) $ dims lmad}

@@ -21,6 +21,7 @@ module Futhark.Internalise.TypesValues
   )
 where
 
+import Control.Monad
 import Control.Monad.Free (Free (..))
 import Control.Monad.State
 import Data.Bitraversable (bitraverse)

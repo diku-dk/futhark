@@ -251,7 +251,7 @@ recordMemRefUses td_env bu_env stm =
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
       | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun lmad _ _) <- IxFun.substituteInIxFun subs indfun =
+        (IxFun.IxFun lmad _) <- IxFun.substituteInIxFun subs indfun =
           Just lmad
     mbLmad _ = Nothing
     addLmads wrts uses etry =
@@ -458,7 +458,7 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
             IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride spn 0 IxFun.Inc : map incPerm dims0
+              IxFun.LMADDim new_stride spn 0 : map incPerm dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad

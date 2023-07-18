@@ -50,7 +50,6 @@ import Futhark.Analysis.SymbolTable (IndexOp)
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
-import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
@@ -381,7 +380,6 @@ ensureRowMajorArray space_ok v = do
   if IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
     && length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
-    && IxFun.contiguous ixfun
     then pure (mem, v)
     else allocLinearArray space (baseString v) v
 
@@ -743,18 +741,15 @@ allocInLambda ::
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-ixFunMon :: IxFun -> [IxFun.Monotonicity]
-ixFunMon = map LMAD.ldMon . LMAD.dims . IxFun.ixfunLMAD
-
 data MemReq
-  = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
+  = MemReq Space [Int] Rank
   | NeedsLinearisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsLinearisation {} _ = x
 combMemReqs _ y@NeedsLinearisation {} = y
-combMemReqs x@(MemReq x_space _ _ _ _) y@MemReq {} =
+combMemReqs x@(MemReq x_space _ _) y@MemReq {} =
   if x == y then x else NeedsLinearisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -765,7 +760,7 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
+contextRets (MemArray _ shape _ (MemReq space _ (Rank base_rank))) =
   -- Memory + offset + base_rank + (stride,size)*rank.
   MemMem space
     : MemPrim int64
@@ -801,9 +796,7 @@ allocInMatchBody rets (Body _ stms res) =
             MemReq
               space
               (IxFun.permutation ixfun)
-              (ixFunMon ixfun)
               (Rank $ length $ IxFun.base ixfun)
-              (IxFun.contiguous ixfun)
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -825,16 +818,15 @@ mkBranchRet reqs =
       )
 
     arrayInfo rank (NeedsLinearisation space) =
-      (space, [0 .. rank - 1], repeat IxFun.Inc, rank, True)
-    arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
-      (space, perm, mon, base_rank, contig)
+      (space, [0 .. rank - 1], rank)
+    arrayInfo _ (MemReq space perm (Rank base_rank)) =
+      (space, perm, base_rank)
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
+          (space, perm, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert
-              <$> IxFun.mkExistential base_rank (zip perm mon) contig (ctx_offset + 1)
+            convert <$> IxFun.mkExistential base_rank perm (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
