@@ -558,6 +558,22 @@ allocPermArray space perm s v = do
     _ ->
       error $ "allocPermArray: " ++ prettyString t
 
+ensurePermArray ::
+  (Allocable fromrep torep inner) =>
+  Maybe Space ->
+  [Int] ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+ensurePermArray space_ok perm v = do
+  (mem, ixfun) <- lookupArraySummary v
+  mem_space <- lookupMemSpace mem
+  default_space <- askDefaultSpace
+  if length (IxFun.base ixfun) == length (IxFun.shape ixfun)
+    && IxFun.permutation ixfun == perm
+    && maybe True (== mem_space) space_ok
+    then pure (mem, v)
+    else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
+
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
   Space ->
@@ -743,14 +759,14 @@ allocInLambda params body =
 
 data MemReq
   = MemReq Space [Int] Rank
-  | NeedsLinearisation Space
+  | NeedsNormalisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
-combMemReqs x@NeedsLinearisation {} _ = x
-combMemReqs _ y@NeedsLinearisation {} = y
+combMemReqs x@NeedsNormalisation {} _ = x
+combMemReqs _ y@NeedsNormalisation {} = y
 combMemReqs x@(MemReq x_space _ _) y@MemReq {} =
-  if x == y then x else NeedsLinearisation x_space
+  if x == y then x else NeedsNormalisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
 
@@ -766,7 +782,7 @@ contextRets (MemArray _ shape _ (MemReq space _ (Rank base_rank))) =
     : MemPrim int64
     : replicate base_rank (MemPrim int64)
     ++ replicate (2 * shapeRank shape) (MemPrim int64)
-contextRets (MemArray _ shape _ (NeedsLinearisation space)) =
+contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
   -- Memory + offset + (base,stride,size)*rank.
   MemMem space
     : MemPrim int64
@@ -817,7 +833,7 @@ mkBranchRet reqs =
         res_rets_acc ++ [inspect ctx_offset req]
       )
 
-    arrayInfo rank (NeedsLinearisation space) =
+    arrayInfo rank (NeedsNormalisation space) =
       (space, [0 .. rank - 1], rank)
     arrayInfo _ (MemReq space perm (Rank base_rank)) =
       (space, perm, base_rank)
@@ -844,13 +860,14 @@ addCtxToMatchBody ::
   Body torep ->
   AllocM fromrep torep (Body torep)
 addCtxToMatchBody reqs body = buildBody_ $ do
-  res <- zipWithM linearIfNeeded reqs =<< bodyBind body
+  res <- zipWithM normaliseIfNeeded reqs =<< bodyBind body
   ctx <- concat <$> mapM resCtx res
   pure $ ctx ++ res
   where
-    linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
-      SubExpRes cs . Var . snd <$> ensureDirectArray (Just space) v
-    linearIfNeeded _ res =
+    normaliseIfNeeded (MemArray _ shape _ (NeedsNormalisation space)) (SubExpRes cs (Var v)) =
+      SubExpRes cs . Var . snd
+        <$> ensurePermArray (Just space) [0 .. shapeRank shape - 1] v
+    normaliseIfNeeded _ res =
       pure res
 
     resCtx (SubExpRes _ Constant {}) =
