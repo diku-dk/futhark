@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Code generation for `f16` literals in CUDA backend (#1979).
 
-* Some branches that return arrays differeing in sign of their stride
+* Branches that return arrays differing in sign of their stride
   (#1984).
 
 ## [0.25.1]
