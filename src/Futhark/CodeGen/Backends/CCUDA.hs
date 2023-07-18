@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.CCUDA
 where
 
 import Control.Monad
+import Data.List (unzip4)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
@@ -274,86 +275,30 @@ callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
-  args_arr <- newVName "kernel_args"
-  time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
-  (args', shared_vars) <- mapAndUnzipM mkArgs args
+  (arg_params, arg_params_inits, call_args, shared_vars) <-
+    unzip4 <$> zipWithM mkArgs [(0 :: Int) ..] args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc
-      shared_tot = last shared_offsets_sc
+      shared_bytes = last shared_offsets_sc
   forM_ shared_args $ \(arg, offset) ->
     GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM compileGroupDim block_size
-  let perm_args
-        | length num_blocks == 3 = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
-        | otherwise = []
-      failure_args =
-        take
-          (numFailureParams safety)
-          [ [C.cinit|&ctx->global_failure|],
-            [C.cinit|&ctx->failure_is_an_option|],
-            [C.cinit|&ctx->global_failure_args|]
-          ]
-      args'' = perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
-      sizes_nonzero =
-        expsNotZero
-          [ grid_x,
-            grid_y,
-            grid_z,
-            block_x,
-            block_y,
-            block_z
-          ]
-      (bef, aft) = profilingEnclosure kernel_name
+
+  let need_perm = length num_blocks == 3
+  kernel_fname <- genKernelFunction kernel_name safety need_perm arg_params arg_params_inits
 
   GC.stm
-    [C.cstm|
-    if ($exp:sizes_nonzero) {
-      int perm[3] = { 0, 1, 2 };
-
-      if ($exp:grid_y >= (1<<16)) {
-        perm[1] = perm[0];
-        perm[0] = 1;
-      }
-
-      if ($exp:grid_z >= (1<<16)) {
-        perm[2] = perm[0];
-        perm[0] = 2;
-      }
-
-      size_t grid[3];
-      grid[perm[0]] = $exp:grid_x;
-      grid[perm[1]] = $exp:grid_y;
-      grid[perm[2]] = $exp:grid_z;
-
-      void *$id:args_arr[] = { $inits:args'' };
-      typename int64_t $id:time_start = 0, $id:time_end = 0;
-      if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size [%ld, %ld, %ld] and block size [%ld, %ld, %ld]; shared memory: %d bytes.\n",
-                $string:(prettyString kernel_name),
-                (long int)$exp:grid_x, (long int)$exp:grid_y, (long int)$exp:grid_z,
-                (long int)$exp:block_x, (long int)$exp:block_y, (long int)$exp:block_z,
-                (int)$exp:shared_tot);
-        $id:time_start = get_wall_time();
-      }
-      $items:bef
-      CUDA_SUCCEED_OR_RETURN(
-        cuLaunchKernel(ctx->program->$id:kernel_name,
-                       grid[0], grid[1], grid[2],
-                       $exp:block_x, $exp:block_y, $exp:block_z,
-                       $exp:shared_tot, ctx->stream,
-                       $id:args_arr, NULL));
-      $items:aft
-      if (ctx->debugging) {
-        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-        $id:time_end = get_wall_time();
-        fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
-                $string:(prettyString kernel_name), $id:time_end - $id:time_start);
-      }
-    }|]
+    [C.cstm|{
+           err = $id:kernel_fname(ctx,
+                                  $exp:grid_x,$exp:grid_y,$exp:grid_z,
+                                  $exp:block_x, $exp:block_y, $exp:block_z,
+                                  $exp:shared_bytes,
+                                  $args:call_args);
+           if (err != FUTHARK_SUCCESS) { goto cleanup; }
+           }|]
 
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
@@ -365,24 +310,104 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     addExp x y = [C.cexp|$exp:x + $exp:y|]
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
     mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
-    expNotZero e = [C.cexp|$exp:e != 0|]
-    expAnd a b = [C.cexp|$exp:a && $exp:b|]
-    expsNotZero = foldl expAnd [C.cexp|1|] . map expNotZero
-    mkArgs (ValueKArg e t@(FloatType Float16)) = do
-      arg <- newVName "kernel_arg"
+    mkArgs i (ValueKArg e t) = do
       e' <- GC.compileExp e
-      GC.item [C.citem|$ty:(primStorageType t) $id:arg = $exp:(toStorage t e');|]
-      pure (arg, Nothing)
-    mkArgs (ValueKArg e t) =
-      (,Nothing) <$> GC.compileExpToName "kernel_arg" t e
-    mkArgs (MemKArg v) = do
+      pure
+        ( [C.cparam|$ty:(primStorageType t) $id:("arg" <> show i)|],
+          [C.cinit|&$id:("arg" <> show i)|],
+          toStorage t e',
+          Nothing
+        )
+    mkArgs i (MemKArg v) = do
       v' <- GC.rawMem v
-      arg <- newVName "kernel_arg"
-      GC.decl [C.cdecl|typename CUdeviceptr $id:arg = $exp:v';|]
-      pure (arg, Nothing)
-    mkArgs (SharedMemoryKArg (Count c)) = do
+      pure
+        ( [C.cparam|typename CUdeviceptr $id:("arg" <> show i)|],
+          [C.cinit|&$id:("arg" <> show i)|],
+          v',
+          Nothing
+        )
+    mkArgs i (SharedMemoryKArg (Count c)) = do
       num_bytes <- GC.compileExp c
       size <- newVName "shared_size"
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
-      pure (offset, Just (size, offset))
+      pure
+        ( [C.cparam|unsigned int $id:("arg" <> show i)|],
+          [C.cinit|&$id:("arg" <> show i)|],
+          [C.cexp|$id:offset|],
+          Just (size, offset)
+        )
+
+genKernelFunction ::
+  KernelName ->
+  KernelSafety ->
+  Bool ->
+  [C.Param] ->
+  [C.Initializer] ->
+  GC.CompilerM op s Name
+genKernelFunction kernel_name safety need_perm arg_params arg_params_inits = do
+  let kernel_fname = "gpu_kernel_" <> kernel_name
+      (bef, aft) = profilingEnclosure kernel_name
+      perm_args
+        | need_perm = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
+        | otherwise = []
+      failure_args =
+        take
+          (numFailureParams safety)
+          [ [C.cinit|&ctx->global_failure|],
+            [C.cinit|&ctx->failure_is_an_option|],
+            [C.cinit|&ctx->global_failure_args|]
+          ]
+
+  GC.libDecl
+    [C.cedecl|static int $id:kernel_fname(
+                struct futhark_context* ctx, unsigned int grid_x, unsigned int grid_y, unsigned int grid_z,
+                unsigned int block_x, unsigned int block_y, unsigned int block_z,
+                unsigned int shared_bytes, $params:arg_params) {
+    if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
+      int perm[3] = { 0, 1, 2 };
+
+      if (grid_y >= (1<<16)) {
+        perm[1] = perm[0];
+        perm[0] = 1;
+      }
+
+      if (grid_z >= (1<<16)) {
+        perm[2] = perm[0];
+        perm[0] = 2;
+      }
+
+      size_t grid[3];
+      grid[perm[0]] = grid_x;
+      grid[perm[1]] = grid_y;
+      grid[perm[2]] = grid_z;
+
+      void *all_args[] = { $inits:(perm_args ++ failure_args ++ arg_params_inits) };
+      typename int64_t time_start = 0, time_end = 0;
+      if (ctx->debugging) {
+        fprintf(ctx->log, "Launching %s with grid size [%d, %d, %d] and block size [%d, %d, %d]; shared memory: %d bytes.\n",
+                $string:(prettyString kernel_name),
+                grid_x, grid_y, grid_z,
+                block_x, block_y, block_z,
+                shared_bytes);
+        time_start = get_wall_time();
+      }
+      $items:bef
+      CUDA_SUCCEED_OR_RETURN(
+        cuLaunchKernel(ctx->program->$id:kernel_name,
+                       grid[0], grid[1], grid[2],
+                       block_x, block_y, block_z,
+                       shared_bytes, ctx->stream,
+                       all_args, NULL));
+      $items:aft
+      if (ctx->debugging) {
+        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+        time_end = get_wall_time();
+        fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
+                $string:(prettyString kernel_name), time_end - time_start);
+      }
+    }
+    return FUTHARK_SUCCESS;
+  }|]
+
+  pure kernel_fname

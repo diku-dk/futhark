@@ -11,7 +11,6 @@ module Futhark.CodeGen.Backends.COpenCL
 where
 
 import Control.Monad hiding (mapM)
-import Data.List (intercalate)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -320,111 +319,107 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
                                               &ctx->failure_is_an_option));
     |]
 
-  zipWithM_ setKernelArg [numFailureParams safety ..] args
+  (arg_params, arg_set, call_args) <-
+    unzip3 <$> zipWithM onArg [(0 :: Int) ..] args
+
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM compileGroupDim workgroup_size
   local_bytes <- foldM localBytes [C.cexp|0|] args
 
-  launchKernel name num_workgroups' workgroup_size' local_bytes
+  kernel_fname <- genKernelFunction name safety arg_params arg_set
+
+  let grid_x : grid_y : grid_z : _ = num_workgroups' ++ repeat [C.cexp|1|]
+      group_x : group_y : group_z : _ = workgroup_size' ++ repeat [C.cexp|1|]
+
+  GC.stm
+    [C.cstm|{
+           err = $id:kernel_fname(ctx,
+                                  $exp:grid_x,$exp:grid_y,$exp:grid_z,
+                                  $exp:group_x, $exp:group_y, $exp:group_z,
+                                  $exp:local_bytes,
+                                  $args:call_args);
+           if (err != FUTHARK_SUCCESS) { goto cleanup; }
+           }|]
 
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
   where
-    setKernelArg i (ValueKArg e pt) = do
-      v <- case pt of
-        -- We always transfer f16 values to the kernel as 16 bits, but
-        -- the actual host type may be typedef'd to a 32-bit float.
-        -- This requires some care.
-        FloatType Float16 -> do
-          v <- newVName "kernel_arg"
-          e' <- toStorage pt <$> GC.compileExp e
-          GC.decl [C.cdecl|$ty:(primStorageType pt) $id:v = $e';|]
-          pure v
-        _ -> GC.compileExpToName "kernel_arg" pt e
-      GC.stm
-        [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($id:v), &$id:v));
-          |]
-    setKernelArg i (MemKArg v) = do
-      v' <- GC.rawMem v
-      GC.stm
-        [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, sizeof($exp:v'), &$exp:v'));
-          |]
-    setKernelArg i (SharedMemoryKArg num_bytes) = do
-      num_bytes' <- GC.compileExp $ unCount num_bytes
-      GC.stm
-        [C.cstm|
-            OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, $int:i, (size_t)$exp:num_bytes', NULL));
-            |]
-
     localBytes cur (SharedMemoryKArg num_bytes) = do
       num_bytes' <- GC.compileExp $ unCount num_bytes
       pure [C.cexp|$exp:cur + $exp:num_bytes'|]
     localBytes cur _ = pure cur
 
-launchKernel ::
-  C.ToExp a =>
+    onArg i (ValueKArg e t) = do
+      let arg = "arg" <> show i
+      e' <- GC.compileExp e
+      pure
+        ( [C.cparam|$ty:(primStorageType t) $id:arg|],
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
+          toStorage t e'
+        )
+    onArg i (MemKArg v) = do
+      let arg = "arg" <> show i
+      v' <- GC.rawMem v
+      pure
+        ( [C.cparam|typename cl_mem $id:arg|],
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
+          v'
+        )
+    onArg i (SharedMemoryKArg (Count c)) = do
+      let arg = "arg" <> show i
+      num_bytes <- GC.compileExp c
+      pure
+        ( [C.cparam|unsigned int $id:arg|],
+          ([C.cexp|$id:arg|], [C.cexp|NULL|]),
+          num_bytes
+        )
+
+genKernelFunction ::
   KernelName ->
-  [a] ->
-  [a] ->
-  a ->
-  GC.CompilerM op s ()
-launchKernel kernel_name num_workgroups workgroup_dims local_bytes = do
-  global_work_size <- newVName "global_work_size"
-  time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
-  time_diff <- newVName "time_diff"
-  local_work_size <- newVName "local_work_size"
-
-  let (debug_str, debug_args) = debugPrint global_work_size local_work_size
-
-  GC.stm
-    [C.cstm|
-    if ($exp:total_elements != 0) {
-      const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
-      const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
-      typename int64_t $id:time_start = 0, $id:time_end = 0;
+  KernelSafety ->
+  [C.Param] ->
+  [(C.Exp, C.Exp)] ->
+  GC.CompilerM op s Name
+genKernelFunction kernel_name safety arg_params arg_set = do
+  let kernel_fname = "gpu_kernel_" <> kernel_name
+  GC.libDecl
+    [C.cedecl|static int $id:kernel_fname(
+                struct futhark_context* ctx,
+                unsigned int grid_x, unsigned int grid_y, unsigned int grid_z,
+                unsigned int block_x, unsigned int block_y, unsigned int block_z,
+                unsigned int local_bytes, $params:arg_params) {
+    (void)local_bytes;
+    if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
+      const size_t global_work_size[3] = {grid_x*block_x, grid_y*block_y, grid_z*block_z};
+      const size_t local_work_size[3] = {block_x, block_y, block_z};
+      typename int64_t time_start = 0, time_end = 0;
+      $stms:set_args
       if (ctx->debugging) {
-        fprintf(ctx->log, $string:debug_str, $args:debug_args);
-        $id:time_start = get_wall_time();
+        fprintf(ctx->log, "Launching %s with grid size [%d, %d, %d] and group size [%d, %d, %d]; local memory: %d bytes.\n",
+                $string:(prettyString kernel_name),
+                grid_x, grid_y, grid_z,
+                block_x, block_y, block_z,
+                local_bytes);
+        time_start = get_wall_time();
       }
       typename cl_event *pevent = $exp:(profilingEvent kernel_name);
       OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueNDRangeKernel(ctx->queue, ctx->program->$id:kernel_name, $int:kernel_rank, NULL,
-                               $id:global_work_size, $id:local_work_size,
+        clEnqueueNDRangeKernel(ctx->queue, ctx->program->$id:kernel_name, 3, NULL,
+                               global_work_size, local_work_size,
                                0, NULL, pevent));
       if (ctx->debugging) {
         OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
-        $id:time_end = get_wall_time();
-        long int $id:time_diff = $id:time_end - $id:time_start;
+        time_end = get_wall_time();
+        long int time_diff = time_end - time_start;
         fprintf(ctx->log, "kernel %s runtime: %ldus\n",
-                $string:(prettyString kernel_name), $id:time_diff);
+                $string:(prettyString kernel_name), time_diff);
       }
-    }|]
+    }
+    return FUTHARK_SUCCESS;
+  }|]
+
+  pure kernel_fname
   where
-    kernel_rank = length kernel_dims
-    kernel_dims = zipWith multExp (map toSize num_workgroups) (map toSize workgroup_dims)
-    kernel_dims' = map toInit kernel_dims
-    workgroup_dims' = map (toInit . toSize) workgroup_dims
-    total_elements = foldl multExp [C.cexp|1|] kernel_dims
-
-    toInit e = [C.cinit|$exp:e|]
-    multExp x y = [C.cexp|$exp:x * $exp:y|]
-    toSize e = [C.cexp|(size_t)$exp:e|]
-
-    debugPrint :: VName -> VName -> (String, [C.Exp])
-    debugPrint global_work_size local_work_size =
-      ( "Launching %s with global work size "
-          ++ dims
-          ++ " and local work size "
-          ++ dims
-          ++ "; local memory: %d bytes.\n",
-        [C.cexp|$string:(prettyString kernel_name)|]
-          : map (kernelDim global_work_size) [0 .. kernel_rank - 1]
-          ++ map (kernelDim local_work_size) [0 .. kernel_rank - 1]
-          ++ [[C.cexp|(int)$exp:local_bytes|]]
-      )
-      where
-        dims = "[" ++ intercalate ", " (replicate kernel_rank "%zu") ++ "]"
-        kernelDim arr i = [C.cexp|$id:arr[$int:i]|]
+    set_args = zipWith setKernelArg [numFailureParams safety ..] arg_set
+    setKernelArg i (size, e) =
+      [C.cstm|OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:kernel_name, $int:i, $exp:size, $exp:e));|]
