@@ -308,8 +308,8 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
   char name[256];
   int count, chosen = -1, best_cc = -1;
-  int cc_major_best, cc_minor_best;
-  int cc_major, cc_minor;
+  int cc_major_best = 0, cc_minor_best = 0;
+  int cc_major = 0, cc_minor = 0;
   CUdevice dev;
 
   CUDA_SUCCEED_FATAL(cuDeviceGetCount(&count));
