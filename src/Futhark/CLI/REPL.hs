@@ -20,7 +20,7 @@ import Futhark.Compiler
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal)
 import Futhark.Util.Options
-import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
+import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, italicized, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Interpreter qualified as I
@@ -396,10 +396,13 @@ genTypeCommand f g h e = do
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  oneLine (pretty e)
-    <> foldMap ((" " <>) . pretty) ps
-    <> " : "
-    <> oneLine (pretty (typeOf e))
+  oneLine (pretty (typeOf e))
+    <> if not (null ps)
+      then
+        annotate italicized $
+          "\n\nPolymorphic in"
+            <+> mconcat (intersperse " " $ map pretty ps) <> "."
+      else mempty
 
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst

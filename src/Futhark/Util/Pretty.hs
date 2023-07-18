@@ -46,7 +46,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Numeric.Half
 import Prettyprinter
-import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull)
+import Prettyprinter.Render.Terminal (AnsiStyle, Color (..), bgColor, bgColorDull, bold, color, colorDull, italicized, underlined)
 import Prettyprinter.Render.Terminal qualified
 import Prettyprinter.Render.Text qualified
 import Prettyprinter.Symbols.Ascii
