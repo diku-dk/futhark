@@ -8,7 +8,6 @@ module Language.Futhark.Parser.Lexer.Tokens
     fromRoman,
     symbol,
     mkQualId,
-    tokenM,
     tokenC,
     tokenS,
     suffZero,
@@ -41,7 +40,6 @@ import Language.Futhark.Core
     Word64,
     Word8,
   )
-import Language.Futhark.Parser.Lexer.Wrapper
 import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp, nameFromText, nameToText)
 import Numeric.Half
@@ -133,33 +131,29 @@ data Token
   | HOLE
   deriving (Show, Eq, Ord)
 
-mkQualId :: T.Text -> Alex ([Name], Name)
+mkQualId :: T.Text -> ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
   [] -> error "mkQualId: no components"
-  k : qs -> pure (map nameFromText (reverse qs), nameFromText k)
+  k : qs -> (map nameFromText (reverse qs), nameFromText k)
 
 -- | Suffix a zero if the last character is dot.
 suffZero :: T.Text -> T.Text
 suffZero s = if T.last s == '.' then s <> "0" else s
 
-tryRead :: Read a => String -> T.Text -> Alex a
+tryRead :: Read a => String -> T.Text -> a
 tryRead desc s = case reads s' of
-  [(x, "")] -> pure x
+  [(x, "")] -> x
   _ -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
   where
     s' = T.unpack s
 
 {-# INLINE tokenC #-}
-tokenC :: a -> BS.ByteString -> Alex a
-tokenC v _ = pure v
-
-{-# INLINE tokenS #-}
-tokenS :: (T.Text -> a) -> BS.ByteString -> Alex a
-tokenS f = tokenM $ pure . f
+tokenC :: a -> BS.ByteString -> a
+tokenC v _ = v
 
 {-# INLINE decToken #-}
-decToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
-decToken f = pure . f . BS.foldl' digit 0
+decToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+decToken f = f . BS.foldl' digit 0
   where
     digit x c =
       if c >= 48 && c <= 57
@@ -167,8 +161,8 @@ decToken f = pure . f . BS.foldl' digit 0
         else x
 
 {-# INLINE binToken #-}
-binToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
-binToken f = pure . f . BS.foldl' digit 0
+binToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+binToken f = f . BS.foldl' digit 0
   where
     digit x c =
       if c >= 48 && c <= 49
@@ -176,8 +170,8 @@ binToken f = pure . f . BS.foldl' digit 0
         else x
 
 {-# INLINE hexToken #-}
-hexToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
-hexToken f = pure . f . BS.foldl' digit 0
+hexToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+hexToken f = f . BS.foldl' digit 0
   where
     digit x c
       | c >= 48 && c <= 57 =
@@ -190,12 +184,12 @@ hexToken f = pure . f . BS.foldl' digit 0
           x
 
 {-# INLINE romToken #-}
-romToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
-romToken f = tokenM $ pure . f . fromRoman
+romToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+romToken f = tokenS $ f . fromRoman
 
-{-# INLINE tokenM #-}
-tokenM :: (T.Text -> Alex a) -> BS.ByteString -> Alex a
-tokenM f = f . T.decodeUtf8 . BS.toStrict
+{-# INLINE tokenS #-}
+tokenS :: (T.Text -> a) -> BS.ByteString -> a
+tokenS f = f . T.decodeUtf8 . BS.toStrict
 
 advance :: Pos -> BS.ByteString -> Pos
 advance orig_pos = BS.foldl' advance' orig_pos . BS.init
@@ -239,7 +233,7 @@ fromRoman s =
     Nothing -> 0
     Just (d, n) -> n + fromRoman (T.drop (T.length d) s)
 
-readHexRealLit :: RealFloat a => T.Text -> Alex a
+readHexRealLit :: RealFloat a => T.Text -> a
 readHexRealLit s =
   let num = T.drop 2 s
    in -- extract number into integer, fractional and (optional) exponent
@@ -254,5 +248,5 @@ readHexRealLit s =
                   fracLen = fromIntegral $ T.length f
                   fracVal = fracPart / (16.0 ** fracLen)
                   totalVal = (intPart + fracVal) * (2.0 ** exponent)
-               in pure totalVal
+               in totalVal
             _ -> error "bad hex real literal"
