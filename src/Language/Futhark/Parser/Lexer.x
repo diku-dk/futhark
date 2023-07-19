@@ -12,7 +12,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Read as T
-import Data.Char (ord, toLower, digitToInt)
+import Data.Char (chr, ord, toLower)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8)
 import Data.Loc (Loc (..), L(..), Pos(..))
@@ -20,7 +20,7 @@ import Data.Function (fix)
 
 import Language.Futhark.Core (Int8, Int16, Int32, Int64,
                               Word8, Word16, Word32, Word64,
-                              Name, nameFromText, nameToText)
+                              Name, nameFromText, nameToText, nameFromString)
 import Language.Futhark.Prop (leadingOperator)
 import Language.Futhark.Syntax (BinOp(..))
 import Language.Futhark.Parser.Lexer.Wrapper
@@ -34,7 +34,6 @@ import Language.Futhark.Parser.Lexer.Tokens
 @declit = [0-9][0-9_]*
 @binlit = 0[bB][01][01_]*
 @romlit = 0[rR][IVXLCDM][IVXLCDM_]*
-@intlit = @hexlit|@binlit|@declit|@romlit
 @reallit = (([0-9][0-9_]*("."[0-9][0-9_]*)?))([eE][\+\-]?[0-9]+)?
 @hexreallit = 0[xX][0-9a-fA-F][0-9a-fA-F_]*"."[0-9a-fA-F][0-9a-fA-F_]*([pP][\+\-]?[0-9_]+)
 
@@ -91,21 +90,57 @@ tokens :-
   "$"                      { tokenC DOLLAR }
   "???"                    { tokenC HOLE }
 
-  @declit                  { tokenS $ \s -> NATLIT (nameFromText s) (readIntegral s) }
-  @intlit i8               { tokenM $ pure . I8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i16              { tokenM $ pure . I16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i32              { tokenM $ pure . I32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit i64              { tokenM $ pure . I64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='i') }
-  @intlit u8               { tokenM $ pure . U8LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u16              { tokenM $ pure . U16LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u32              { tokenM $ pure . U32LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit u64              { tokenM $ pure . U64LIT . readIntegral . T.filter (/= '_') . T.takeWhile (/='u') }
-  @intlit                  { tokenM $ pure . INTLIT . readIntegral . T.filter (/= '_') }
+  @declit                  { \s -> decToken (NATLIT (nameFromBS s)) s }
 
-  [\n[^\.]] ^ @reallit f16     { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit f32     { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit f64     { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit         { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @declit i8               { decToken I8LIT . BS.dropEnd 2 }
+  @binlit i8               { binToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
+  @hexlit i8               { hexToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
+  @romlit i8               { romToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
+
+  @declit i16              { decToken I16LIT . BS.dropEnd 3 }
+  @binlit i16              { binToken I16LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit i16              { hexToken I16LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit i16              { romToken I16LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit i32              { decToken I32LIT . BS.dropEnd 3 }
+  @binlit i32              { binToken I32LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit i32              { hexToken I32LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit i32              { romToken I32LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit i64              { decToken I64LIT . BS.dropEnd 3 }
+  @binlit i64              { binToken I64LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit i64              { hexToken I64LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit i64              { romToken I64LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit u8               { decToken U8LIT . BS.dropEnd 2 }
+  @binlit u8               { binToken U8LIT . BS.drop 2 . BS.dropEnd 2 }
+  @hexlit u8               { hexToken U8LIT . BS.drop 2 . BS.dropEnd 2 }
+  @romlit u8               { romToken U8LIT . BS.drop 2 . BS.dropEnd 2 }
+
+  @declit u16              { decToken U16LIT . BS.dropEnd 3 }
+  @binlit u16              { binToken U16LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit u16              { hexToken U16LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit u16              { romToken U16LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit u32              { decToken U32LIT . BS.dropEnd 3 }
+  @binlit u32              { binToken U32LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit u32              { hexToken U32LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit u32              { romToken U32LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit u64              { decToken U64LIT . BS.dropEnd 3 }
+  @binlit u64              { binToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
+  @hexlit u64              { hexToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
+  @romlit u64              { romToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
+
+  @declit                  { decToken INTLIT }
+  @binlit                  { binToken INTLIT . BS.drop 2 }
+  @hexlit                  { hexToken INTLIT . BS.drop 2 }
+  @romlit                  { romToken INTLIT . BS.drop 2 }
+
+  [\n[^\.]] ^ @reallit f16 { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f32 { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f64 { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit     { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
   @hexreallit f16          { tokenM $ fmap F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
   @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
@@ -113,16 +148,19 @@ tokens :-
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
-  @identifier              { tokenS keyword }
+  @identifier              { pure . keyword }
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
   @binop                   { tokenM $ pure . symbol [] . nameFromText }
   @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; pure (symbol qs k) }
 {
 
-getToken :: Alex (Lexeme Token)
+nameFromBS :: BS.ByteString -> Name
+nameFromBS = nameFromString . map (chr . fromIntegral) . BS.unpack
+
+getToken :: Alex (Pos, Pos, Token)
 getToken = do
-  inp@(_,_,_,n) <- alexGetInput
+  inp@(pos,_,s,n) <- alexGetInput
   sc <- alexGetStartCode
   case alexScan inp sc of
     AlexEOF -> do pos <- alexGetPos
@@ -132,9 +170,10 @@ getToken = do
     AlexSkip  inp' _len -> do
       alexSetInput inp'
       getToken
-    AlexToken inp'@(_,_,_,n') _ action -> let len = n'-n in do
+    AlexToken inp'@(pos',_,_,n') _ action -> do
       alexSetInput inp'
-      action inp len
+      x <- action (BS.take (n'-n) s)
+      pure (pos, pos', x)
 
 scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
 scanTokens pos str =
