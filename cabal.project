@@ -1,5 +1,5 @@
 packages: futhark.cabal
-index-state: 2023-06-16T15:10:26Z
+index-state: 2023-07-19T16:12:41Z
 
 allow-newer: vector-binary-instances:base, co-log-core:base
 
