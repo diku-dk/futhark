@@ -209,8 +209,11 @@ Dec :: { UncheckedDec }
     | Doc Dec_          { addDoc $1 $2 }
 
 Decs :: { [UncheckedDec] }
-      :          { [] }
-      | Dec Decs { $1 : $2 }
+      : Decs_     { reverse $1 }
+
+Decs_ :: { [UncheckedDec] }
+      :           { [] }
+      | Decs_ Dec { $2 : $1 }
 
 Dec_ :: { UncheckedDec }
     : Val               { ValDec $1 }
@@ -317,8 +320,11 @@ Spec :: { SpecBase NoInfo Name }
         { addAttrSpec $2 $4 }
 
 Specs :: { [SpecBase NoInfo Name] }
-       : Spec Specs { $1 : $2 }
-       |            { [] }
+       : Specs_      { reverse $1 }
+
+Specs_ :: { [SpecBase NoInfo Name] }
+       : Specs_ Spec { $2 : $1 }
+       |             { [] }
 
 SizeBinder :: { SizeBinder Name }
             : '[' id ']'  { let L _ (ID name) = $2 in SizeBinder name (srcspan $1 $>) }
@@ -597,9 +603,9 @@ Atom : PrimLit        { Literal (fst $1) (srclocOf (snd $1)) }
                         StringLit (BS.unpack (T.encodeUtf8 s)) (srclocOf loc) }
      | hole           { Hole NoInfo (srclocOf $1) }
      | '(' Exp ')'            { Parens $2 (srcspan $1 $>) }
-     | '(' Exp ',' Exps1 ')'  { TupLit ($2 : fst $4 : snd $4) (srcspan $1 $>) }
+     | '(' Exp ',' Exps1 ')'  { TupLit ($2 : $4) (srcspan $1 $>) }
      | '('      ')'           { TupLit [] (srcspan $1 $>) }
-     | '[' Exps1 ']'          { ArrayLit (fst $2:snd $2) NoInfo (srcspan $1 $>) }
+     | '[' Exps1 ']'          { ArrayLit $2 NoInfo (srcspan $1 $>) }
      | '['       ']'          { ArrayLit [] NoInfo (srcspan $1 $>) }
 
      | id { let L loc (ID v)  = $1 in Var (QualName [] v) NoInfo (srclocOf loc) }
@@ -648,14 +654,12 @@ PrimLit :: { (PrimValue, Loc) }
         | false  { (BoolValue False, $1) }
         | NumLit { $1 }
 
-Exps1 :: { (UncheckedExp, [UncheckedExp]) }
-       : Exps1_ { case reverse (snd $1 : fst $1) of
-                    []   -> (snd $1, [])
-                    y:ys -> (y, ys) }
+Exps1 :: { [UncheckedExp] }
+       : Exps1_ { reverse $1 }
 
-Exps1_ :: { ([UncheckedExp], UncheckedExp) }
-        : Exps1_ ',' Exp { (snd $1 : fst $1, $3) }
-        | Exp            { ([], $1) }
+Exps1_ :: { [UncheckedExp] }
+        : Exps1_ ',' Exp { $3 : $1 }
+        | Exp            { [$1] }
 
 FieldAccesses :: { [(Name, Loc)] }
                : '.' FieldId FieldAccesses { $2 : $3 }
