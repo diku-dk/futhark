@@ -3,7 +3,7 @@
 -- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
   ( Token(..)
-  , scanTokens
+  , getToken
   , scanTokensText
   ) where
 
@@ -184,34 +184,36 @@ tokens :-
 nameFromBS :: BS.ByteString -> Name
 nameFromBS = nameFromString . map (chr . fromIntegral) . BS.unpack
 
-getToken :: Alex (Pos, Pos, Token)
-getToken = do
-  inp@(pos,_,s,n) <- alexGetInput
-  sc <- alexGetStartCode
-  case alexScan inp sc of
-    AlexEOF -> do pos <- alexGetPos
-                  pure (pos, pos, EOF)
-    AlexError (pos,_,_,_) ->
-      alexError (Loc pos pos) "Invalid lexical syntax."
-    AlexSkip  inp' _len -> do
-      alexSetInput inp'
-      getToken
-    AlexToken inp'@(pos',_,_,n') _ action -> do
-      alexSetInput inp'
-      x <- action (BS.take (n'-n) s)
-      pure (pos, pos', x)
+getToken :: LexerState -> Either LexerError (LexerState, (Pos, Pos, Token))
+getToken state = unAlex m state
+  where
+   m = do
+    inp@(pos,_,s,n) <- alexGetInput
+    sc <- alexGetStartCode
+    case alexScan inp sc of
+      AlexEOF -> do pos <- alexGetPos
+                    pure (pos, pos, EOF)
+      AlexError (pos,_,_,_) ->
+        alexError (Loc pos pos) "Invalid lexical syntax."
+      AlexSkip  inp' _len -> do
+        alexSetInput inp'
+        m
+      AlexToken inp'@(pos',_,_,n') _ action -> do
+        alexSetInput inp'
+        x <- action (BS.take (n'-n) s)
+        pure (pos, pos', x)
 
 scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
-scanTokens pos str =
-  runAlex pos str $ do
-  fix $ \loop -> do
-    tok <- getToken
-    case tok of
-      (start, end, EOF) ->
-        pure ([], end)
-      (start, end, t) -> do
-        (rest, endpos) <- loop
-        pure (L (Loc start end) t : rest, endpos)
+scanTokens pos str = loop $ initialLexerState pos str
+  where
+   loop s = do
+     (s', tok) <- getToken s
+     case tok of
+       (start, end, EOF) ->
+         pure ([], end)
+       (start, end, t) -> do
+         (rest, endpos) <- loop s'
+         pure (L (Loc start end) t : rest, endpos)
 
 -- | Given a starting position, produce tokens from the given text (or
 -- a lexer error).  Returns the final position.

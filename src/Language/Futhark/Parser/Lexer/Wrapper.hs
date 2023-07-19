@@ -7,7 +7,9 @@
 -- other Alex lexer wrappers.
 module Language.Futhark.Parser.Lexer.Wrapper
   ( runAlex,
-    Alex,
+    initialLexerState,
+    LexerState,
+    Alex (..),
     AlexInput,
     alexInputPrevChar,
     Byte,
@@ -70,7 +72,7 @@ alexMove (Pos !f !l !c !a) '\t' = Pos f l (c + tabSize - ((c - 1) `mod` tabSize)
 alexMove (Pos !f !l _ !a) '\n' = Pos f (l + 1) 1 (a + 1)
 alexMove (Pos !f !l !c !a) _ = Pos f l (c + 1) (a + 1)
 
-data AlexState = AlexState
+data LexerState = LexerState
   { alex_pos :: !Pos, -- position at current input location
     alex_bpos :: !Int64, -- bytes consumed so far
     alex_inp :: BS.ByteString, -- the current input
@@ -78,21 +80,23 @@ data AlexState = AlexState
     alex_scd :: !Int -- the current startcode
   }
 
+initialLexerState :: Pos -> BS.ByteString -> LexerState
+initialLexerState start_pos input =
+  LexerState
+    { alex_pos = start_pos,
+      alex_bpos = 0,
+      alex_inp = input,
+      alex_chr = '\n',
+      alex_scd = 0
+    }
+
 runAlex :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
 runAlex start_pos input (Alex f) =
-  case f
-    ( AlexState
-        { alex_pos = start_pos,
-          alex_bpos = 0,
-          alex_inp = input,
-          alex_chr = '\n',
-          alex_scd = 0
-        }
-    ) of
+  case f $ initialLexerState start_pos input of
     Left msg -> Left msg
     Right (_, a) -> Right a
 
-newtype Alex a = Alex {unAlex :: AlexState -> Either LexerError (AlexState, a)}
+newtype Alex a = Alex {unAlex :: LexerState -> Either LexerError (LexerState, a)}
 
 data LexerError = LexerError Loc T.Text
 
@@ -117,7 +121,7 @@ instance Monad Alex where
 
 alexGetInput :: Alex AlexInput
 alexGetInput =
-  Alex $ \s@AlexState {alex_pos = pos, alex_bpos = bpos, alex_chr = c, alex_inp = inp} ->
+  Alex $ \s@LexerState {alex_pos = pos, alex_bpos = bpos, alex_chr = c, alex_inp = inp} ->
     Right (s, (pos, c, inp, bpos))
 
 alexSetInput :: AlexInput -> Alex ()
@@ -128,13 +132,13 @@ alexSetInput (pos, c, inp, bpos) =
       alex_chr = c,
       alex_inp = inp
     } of
-    state@AlexState {} -> Right (state, ())
+    state@LexerState {} -> Right (state, ())
 
 alexError :: Loc -> T.Text -> Alex a
 alexError loc message = Alex $ const $ Left $ LexerError loc message
 
 alexGetStartCode :: Alex Int
-alexGetStartCode = Alex $ \s@AlexState {alex_scd = sc} -> Right (s, sc)
+alexGetStartCode = Alex $ \s@LexerState {alex_scd = sc} -> Right (s, sc)
 
 alexGetPos :: Alex Pos
 alexGetPos = Alex $ \s -> Right (s, alex_pos s)
