@@ -89,8 +89,8 @@ onWorkspaceDidChangeConfiguration _state_mvar =
 -- | Given an 'IORef' tracking the state, produce a set of handlers.
 -- When we want to add more features to the language server, this is
 -- the thing to change.
-handlers :: IORef State -> Handlers (LspM ())
-handlers state_mvar =
+handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
+handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
       onDocumentOpenHandler state_mvar,
