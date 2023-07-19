@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   not support 64-bit integer atomics, although it will still fail if
   the program needs them.
 
+* Various performance improvements to the compiler itself;
+  particularly the frontend.  It should be moderately faster.
+
 ### Removed
 
 ### Changed

@@ -10,7 +10,6 @@ module Language.Futhark.Parser.Lexer.Tokens
     mkQualId,
     tokenM,
     tokenC,
-    keyword,
     tokenS,
     suffZero,
     tryRead,
@@ -133,35 +132,6 @@ data Token
   | EOF
   | HOLE
   deriving (Show, Eq, Ord)
-
-keyword :: BS.ByteString -> Token
-keyword s =
-  case s of
-    "true" -> TRUE
-    "false" -> FALSE
-    "if" -> IF
-    "then" -> THEN
-    "else" -> ELSE
-    "def" -> DEF
-    "let" -> LET
-    "loop" -> LOOP
-    "in" -> IN
-    "val" -> VAL
-    "for" -> FOR
-    "do" -> DO
-    "with" -> WITH
-    "local" -> LOCAL
-    "open" -> OPEN
-    "include" -> INCLUDE
-    "import" -> IMPORT
-    "type" -> TYPE
-    "entry" -> ENTRY
-    "module" -> MODULE
-    "while" -> WHILE
-    "assert" -> ASSERT
-    "match" -> MATCH
-    "case" -> CASE
-    _ -> ID $ nameFromText $ T.decodeUtf8 $ BS.toStrict s
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
