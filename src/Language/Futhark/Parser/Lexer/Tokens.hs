@@ -5,28 +5,29 @@
 -- Also defines other useful building blocks for constructing tokens.
 module Language.Futhark.Parser.Lexer.Tokens
   ( Token (..),
-    Lexeme,
     fromRoman,
     symbol,
     mkQualId,
-    tokenPosM,
     tokenM,
     tokenC,
     keyword,
     tokenS,
-    indexing,
     suffZero,
     tryRead,
-    readIntegral,
+    decToken,
+    binToken,
+    hexToken,
+    romToken,
+    advance,
     readHexRealLit,
   )
 where
 
 import Data.ByteString.Lazy qualified as BS
-import Data.Char (digitToInt, ord)
+import Data.Char (ord)
 import Data.Either
-import Data.List (find, foldl')
-import Data.Loc (Loc (..), Pos (..))
+import Data.List (find)
+import Data.Loc (Pos (..))
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
 import Data.Text.Read qualified as T
@@ -133,7 +134,7 @@ data Token
   | HOLE
   deriving (Show, Eq, Ord)
 
-keyword :: T.Text -> Token
+keyword :: BS.ByteString -> Token
 keyword s =
   case s of
     "true" -> TRUE
@@ -160,12 +161,7 @@ keyword s =
     "assert" -> ASSERT
     "match" -> MATCH
     "case" -> CASE
-    _ -> ID $ nameFromText s
-
-indexing :: (Loc, T.Text) -> Alex Name
-indexing (loc, s) = case keyword s of
-  ID v -> pure v
-  _ -> alexError loc $ "Cannot index keyword '" <> s <> "'."
+    _ -> ID $ nameFromText $ T.decodeUtf8 $ BS.toStrict s
 
 mkQualId :: T.Text -> Alex ([Name], Name)
 mkQualId s = case reverse $ T.splitOn "." s of
@@ -183,44 +179,56 @@ tryRead desc s = case reads s' of
   where
     s' = T.unpack s
 
-readIntegral :: Integral a => T.Text -> a
-readIntegral s
-  | "0x" `T.isPrefixOf` s || "0X" `T.isPrefixOf` s = parseBase 16 (T.drop 2 s)
-  | "0b" `T.isPrefixOf` s || "0B" `T.isPrefixOf` s = parseBase 2 (T.drop 2 s)
-  | "0r" `T.isPrefixOf` s || "0R" `T.isPrefixOf` s = fromRoman (T.drop 2 s)
-  | otherwise = parseBase 10 s
-  where
-    parseBase base = T.foldl (\acc c -> acc * base + fromIntegral (digitToInt c)) 0
+{-# INLINE tokenC #-}
+tokenC :: a -> BS.ByteString -> Alex a
+tokenC v _ = pure v
 
-tokenC :: a -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
-tokenC v = tokenS $ const v
-
-tokenS :: (T.Text -> a) -> (Pos, Char, BS.ByteString, Int64) -> Int64 -> Alex (Lexeme a)
+{-# INLINE tokenS #-}
+tokenS :: (T.Text -> a) -> BS.ByteString -> Alex a
 tokenS f = tokenM $ pure . f
 
-type Lexeme a = (Pos, Pos, a)
-
-tokenM ::
-  (T.Text -> Alex a) ->
-  (Pos, Char, BS.ByteString, Int64) ->
-  Int64 ->
-  Alex (Lexeme a)
-tokenM f = tokenPosM (f . snd)
-
-tokenPosM ::
-  ((Loc, T.Text) -> Alex a) ->
-  (Pos, Char, BS.ByteString, Int64) ->
-  Int64 ->
-  Alex (Lexeme a)
-tokenPosM f (pos, _, s, _) len = do
-  x <- f (Loc pos pos', T.decodeUtf8 $ BS.toStrict s')
-  pure (pos, pos', x)
+{-# INLINE decToken #-}
+decToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
+decToken f = pure . f . BS.foldl' digit 0
   where
-    pos' = advance pos s'
-    s' = BS.take len s
+    digit x c =
+      if c >= 48 && c <= 57
+        then x * 10 + fromIntegral (c - 48)
+        else x
+
+{-# INLINE binToken #-}
+binToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
+binToken f = pure . f . BS.foldl' digit 0
+  where
+    digit x c =
+      if c >= 48 && c <= 49
+        then x * 2 + fromIntegral (c - 48)
+        else x
+
+{-# INLINE hexToken #-}
+hexToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
+hexToken f = pure . f . BS.foldl' digit 0
+  where
+    digit x c
+      | c >= 48 && c <= 57 =
+          x * 16 + fromIntegral (c - 48)
+      | c >= 65 && c <= 70 =
+          x * 16 + fromIntegral (c - 65)
+      | c >= 97 && c <= 102 =
+          x * 16 + fromIntegral (c - 97)
+      | otherwise =
+          x
+
+{-# INLINE romToken #-}
+romToken :: Integral a => (a -> Token) -> BS.ByteString -> Alex Token
+romToken f = tokenM $ pure . f . fromRoman
+
+{-# INLINE tokenM #-}
+tokenM :: (T.Text -> Alex a) -> BS.ByteString -> Alex a
+tokenM f = f . T.decodeUtf8 . BS.toStrict
 
 advance :: Pos -> BS.ByteString -> Pos
-advance orig_pos = foldl' advance' orig_pos . init . BS.unpack
+advance orig_pos = BS.foldl' advance' orig_pos . BS.init
   where
     advance' (Pos f !line !col !addr) c
       | c == nl = Pos f (line + 1) 1 (addr + 1)
