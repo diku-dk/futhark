@@ -257,7 +257,7 @@ parseError (L loc DOC {}, _) =
 parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
-      tok_src = T.take (end - beg + 1) $ T.drop beg input
+      tok_src = T.take (end - beg) $ T.drop beg input
   parseErrorAt loc . Just . T.unlines $
     [ "Unexpected token: '" <> tok_src <> "'",
       "Expected one of the following: " <> T.unwords (map T.pack expected)

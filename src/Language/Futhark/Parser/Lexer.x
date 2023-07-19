@@ -148,7 +148,33 @@ tokens :-
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
 
-  @identifier              { pure . keyword }
+  "true"                   { tokenC TRUE }
+  "false"                  { tokenC FALSE }
+  "if"                     { tokenC IF }
+  "then"                   { tokenC THEN }
+  "else"                   { tokenC ELSE }
+  "def"                    { tokenC DEF }
+  "let"                    { tokenC LET }
+  "loop"                   { tokenC LOOP }
+  "in"                     { tokenC IN }
+  "val"                    { tokenC VAL }
+  "for"                    { tokenC FOR }
+  "do"                     { tokenC DO }
+  "with"                   { tokenC WITH }
+  "local"                  { tokenC LOCAL }
+  "open"                   { tokenC OPEN }
+  "include"                { tokenC INCLUDE }
+  "import"                 { tokenC IMPORT }
+  "type"                   { tokenC TYPE }
+  "entry"                  { tokenC ENTRY }
+  "module"                 { tokenC MODULE }
+  "while"                  { tokenC WHILE }
+  "assert"                 { tokenC ASSERT }
+  "match"                  { tokenC MATCH }
+  "case"                   { tokenC CASE }
+
+  @identifier              { tokenS $ ID . nameFromText }
+
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
   @binop                   { tokenM $ pure . symbol [] . nameFromText }
