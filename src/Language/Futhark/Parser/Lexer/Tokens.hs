@@ -183,9 +183,9 @@ hexToken f = pure . f . BS.foldl' digit 0
       | c >= 48 && c <= 57 =
           x * 16 + fromIntegral (c - 48)
       | c >= 65 && c <= 70 =
-          x * 16 + fromIntegral (c - 65)
+          x * 16 + fromIntegral (10 + c - 65)
       | c >= 97 && c <= 102 =
-          x * 16 + fromIntegral (c - 97)
+          x * 16 + fromIntegral (10 + c - 97)
       | otherwise =
           x
 
