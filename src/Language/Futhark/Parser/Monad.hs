@@ -48,7 +48,7 @@ import Data.Text.Encoding qualified as T
 import Futhark.Util.Loc
 import Futhark.Util.Pretty hiding (line, line')
 import Language.Futhark.Parser.Lexer
-import Language.Futhark.Parser.Lexer.Wrapper (LexerError (..), LexerState, initialLexerState)
+import Language.Futhark.Parser.Lexer.Wrapper (AlexInput, LexerError (..), initialLexerState)
 import Language.Futhark.Pretty ()
 import Language.Futhark.Prop
 import Language.Futhark.Syntax
@@ -103,7 +103,7 @@ data ParserState = ParserState
     parserInput :: T.Text,
     -- | Note: reverse order.
     parserComments :: [Comment],
-    parserLexerState :: LexerState
+    parserLexerState :: AlexInput
   }
 
 type ParserMonad = ExceptT SyntaxError (State ParserState)

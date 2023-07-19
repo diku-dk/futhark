@@ -53,7 +53,7 @@ $opchar = [\+\-\*\/\%\=\!\>\<\|\&\^\.]
 tokens :-
 
   $white+                               ;
-  @doc                     { tokenM $ pure . DOC . T.intercalate "\n" .
+  @doc                     { tokenS $ DOC . T.intercalate "\n" .
                                       map (T.drop 3 . T.stripStart) .
                                            T.split (== '\n') . ("--"<>) .
                                            T.drop 4 }
@@ -137,16 +137,16 @@ tokens :-
   @hexlit                  { hexToken INTLIT . BS.drop 2 }
   @romlit                  { romToken INTLIT . BS.drop 2 }
 
-  [\n[^\.]] ^ @reallit f16 { tokenM $ fmap F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit f32 { tokenM $ fmap F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit f64 { tokenM $ fmap F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
-  [\n[^\.]] ^ @reallit     { tokenM $ fmap FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
-  @hexreallit f16          { tokenM $ fmap F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
-  @hexreallit f32          { tokenM $ fmap F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
-  @hexreallit f64          { tokenM $ fmap F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
-  @hexreallit              { tokenM $ fmap FLOATLIT . readHexRealLit . T.filter (/= '_') }
-  "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
-  \" @stringcharlit* \"    { tokenM $ fmap (STRINGLIT . T.pack) . tryRead "string"  }
+  [\n[^\.]] ^ @reallit f16 { tokenS $ F16LIT . tryRead "f16" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f32 { tokenS $ F32LIT . tryRead "f32" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit f64 { tokenS $ F64LIT . tryRead "f64" . suffZero . T.filter (/= '_') . T.takeWhile (/='f') }
+  [\n[^\.]] ^ @reallit     { tokenS $ FLOATLIT . tryRead "f64" . suffZero . T.filter (/= '_') }
+  @hexreallit f16          { tokenS $ F16LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit f32          { tokenS $ F32LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit f64          { tokenS $ F64LIT . readHexRealLit . T.filter (/= '_') . T.dropEnd 3 }
+  @hexreallit              { tokenS $ FLOATLIT . readHexRealLit . T.filter (/= '_') }
+  "'" @charlit "'"         { tokenS $ CHARLIT . tryRead "char" }
+  \" @stringcharlit* \"    { tokenS $ STRINGLIT . T.pack . tryRead "string"  }
 
   "true"                   { tokenC TRUE }
   "false"                  { tokenC FALSE }
@@ -177,31 +177,24 @@ tokens :-
 
   "#" @identifier          { tokenS $ CONSTRUCTOR . nameFromText . T.drop 1 }
 
-  @binop                   { tokenM $ pure . symbol [] . nameFromText }
-  @qualbinop               { tokenM $ \s -> do (qs,k) <- mkQualId s; pure (symbol qs k) }
+  @binop                   { tokenS $ symbol [] . nameFromText }
+  @qualbinop               { tokenS $ uncurry symbol . mkQualId }
 {
 
 nameFromBS :: BS.ByteString -> Name
 nameFromBS = nameFromString . map (chr . fromIntegral) . BS.unpack
 
-getToken :: LexerState -> Either LexerError (LexerState, (Pos, Pos, Token))
-getToken state = unAlex m state
-  where
-   m = do
-    inp@(pos,_,s,n) <- alexGetInput
-    sc <- alexGetStartCode
-    case alexScan inp sc of
-      AlexEOF -> do pos <- alexGetPos
-                    pure (pos, pos, EOF)
-      AlexError (pos,_,_,_) ->
-        alexError (Loc pos pos) "Invalid lexical syntax."
-      AlexSkip  inp' _len -> do
-        alexSetInput inp'
-        m
-      AlexToken inp'@(pos',_,_,n') _ action -> do
-        alexSetInput inp'
-        x <- action (BS.take (n'-n) s)
-        pure (pos, pos', x)
+getToken :: AlexInput -> Either LexerError (AlexInput, (Pos, Pos, Token))
+getToken state@(pos,c,s,n) =
+  case alexScan state 0 of
+    AlexEOF -> Right (state, (pos, pos, EOF))
+    AlexError (pos,_,_,_) ->
+      Left $ LexerError (Loc pos pos) "Invalid lexical syntax."
+    AlexSkip state' _len ->
+      getToken state'
+    AlexToken state'@(pos',_,_,n') _ action -> do
+      let x = action (BS.take (n'-n) s)
+      x `seq` Right (state', (pos, pos', x))
 
 scanTokens :: Pos -> BS.ByteString -> Either LexerError ([L Token], Pos)
 scanTokens pos str = loop $ initialLexerState pos str
