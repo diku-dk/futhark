@@ -8,9 +8,6 @@ module Language.Futhark.Parser.Parser
   , futharkType
   , parse
   , parseWithComments
-  , ReadLineMonad (..)
-  , getLinesFromM
-  , parseInMonad
   , SyntaxError(..)
   , Comment(..)
   )
