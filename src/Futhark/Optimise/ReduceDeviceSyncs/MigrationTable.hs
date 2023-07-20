@@ -64,7 +64,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Sequence qualified as SQ
 import Data.Set (Set, (\\))
 import Data.Set qualified as S
@@ -700,7 +700,7 @@ graphLoop (b : bs) params lform body = do
   unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
     WhileLoop n
-      | (_, p, _, res) <- loopValueFor n -> do
+      | Just (_, p, _, res) <- loopValueFor n -> do
           connectToSink p
           case res of
             Var v -> connectToSink (nameToId v)
@@ -741,8 +741,9 @@ graphLoop (b : bs) params lform body = do
     ForLoop _ _ n _ ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
-      | (_, _, arg, _) <- loopValueFor n ->
+      | Just (_, _, arg, _) <- loopValueFor n ->
           onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
+    _ -> pure ()
   where
     subgraphId :: Id
     subgraphId = fst b
@@ -759,9 +760,8 @@ graphLoop (b : bs) params lform body = do
     bindings :: IdSet
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
-    loopValueFor :: VName -> LoopValue
     loopValueFor n =
-      fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
+      find (\(_, p, _, _) -> p == nameToId n) loopValues
 
     graphTheLoop :: Grapher ()
     graphTheLoop = do
