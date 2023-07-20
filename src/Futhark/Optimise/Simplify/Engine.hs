@@ -433,8 +433,8 @@ nonrecSimplifyStm ::
   SimpleM rep (Stm (Wise rep))
 nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
-  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
   e' <- simplifyExpBase e
+  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
   let aux' = StmAux (cs' <> pat_cs) attrs dec
   pure $ mkWiseStm pat' aux' e'
 
