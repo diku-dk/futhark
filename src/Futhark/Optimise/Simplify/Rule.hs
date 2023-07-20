@@ -16,6 +16,8 @@ module Futhark.Optimise.Simplify.Rule
     RuleM,
     cannotSimplify,
     liftMaybe,
+    SubSimplify,
+    subSimplify,
 
     -- * Rule definition
     Rule (..),
@@ -53,19 +55,26 @@ module Futhark.Optimise.Simplify.Rule
   )
 where
 
+import Control.Monad.Reader
 import Control.Monad.State
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Builder
 import Futhark.IR
 
+-- | An action for recursively simplifying a body.
+type SubSimplify rep = Body rep -> RuleM rep (Body rep)
+
+newtype RuleEnv rep = RuleEnv {envSubSimplify :: SubSimplify rep}
+
 -- | The monad in which simplification rules are evaluated.
-newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource Maybe) a)
+newtype RuleM rep a = RuleM (BuilderT rep (StateT VNameSource (ReaderT (RuleEnv rep) Maybe)) a)
   deriving
     ( Functor,
       Applicative,
       Monad,
       MonadFreshNames,
+      MonadReader (RuleEnv rep),
       HasScope rep,
       LocalScope rep
     )
@@ -84,18 +93,28 @@ instance (BuilderOps rep) => MonadBuilder (RuleM rep) where
 simplify ::
   Scope rep ->
   VNameSource ->
+  RuleEnv rep ->
   Rule rep ->
   Maybe (Stms rep, VNameSource)
-simplify _ _ Skip = Nothing
-simplify scope src (Simplify (RuleM m)) =
-  runStateT (runBuilderT_ m scope) src
+simplify _ _ _ Skip = Nothing
+simplify scope src env (Simplify (RuleM m)) =
+  runReaderT (runStateT (runBuilderT_ m scope) src) env
 
+-- | Abort the current attempt at simplification.
 cannotSimplify :: RuleM rep a
-cannotSimplify = RuleM $ lift $ lift Nothing
+cannotSimplify = RuleM $ lift $ lift $ lift Nothing
 
 liftMaybe :: Maybe a -> RuleM rep a
 liftMaybe Nothing = cannotSimplify
 liftMaybe (Just x) = pure x
+
+-- | Recursively apply the simplifier on this body, using the current
+-- rulebook.  This can be quite costly, so think carefully before
+-- doing this.
+subSimplify :: SubSimplify rep
+subSimplify body = do
+  s <- asks envSubSimplify
+  s body
 
 -- | An efficient way of encoding whether a simplification rule should even be attempted.
 data Rule rep
@@ -252,31 +271,6 @@ ruleBook topdowns bottomups =
     forOp RuleGeneric {} = True
     forOp _ = False
 
--- | @simplifyStm lookup stm@ performs simplification of the
--- binding @stm@.  If simplification is possible, a replacement list
--- of bindings is returned, that bind at least the same names as the
--- original binding (and possibly more, for intermediate results).
-topDownSimplifyStm ::
-  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
-  RuleBook rep ->
-  ST.SymbolTable rep ->
-  Stm rep ->
-  m (Maybe (Stms rep))
-topDownSimplifyStm = applyRules . bookTopDownRules
-
--- | @simplifyStm uses stm@ performs simplification of the binding
--- @stm@.  If simplification is possible, a replacement list of
--- bindings is returned, that bind at least the same names as the
--- original binding (and possibly more, for intermediate results).
--- The first argument is the set of names used after this binding.
-bottomUpSimplifyStm ::
-  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
-  RuleBook rep ->
-  (ST.SymbolTable rep, UT.UsageTable) ->
-  Stm rep ->
-  m (Maybe (Stms rep))
-bottomUpSimplifyStm = applyRules . bookBottomUpRules
-
 rulesForStm :: Stm rep -> Rules rep a -> [SimplificationRule rep a]
 rulesForStm stm = case stmExp stm of
   BasicOp {} -> rulesBasicOp
@@ -299,19 +293,47 @@ applyRule _ _ _ =
 
 applyRules ::
   (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
+  SubSimplify rep ->
   Rules rep a ->
   a ->
   Stm rep ->
   m (Maybe (Stms rep))
-applyRules all_rules context stm = do
+applyRules ss all_rules context stm = do
   scope <- askScope
-
+  let env = RuleEnv ss
   modifyNameSource $ \src ->
     let applyRules' [] = Nothing
         applyRules' (rule : rules) =
-          case simplify scope src (applyRule rule context stm) of
+          case simplify scope src env (applyRule rule context stm) of
             Just x -> Just x
             Nothing -> applyRules' rules
      in case applyRules' $ rulesForStm stm all_rules of
           Just (stms, src') -> (Just stms, src')
           Nothing -> (Nothing, src)
+
+-- | @simplifyStm lookup stm@ performs simplification of the
+-- binding @stm@.  If simplification is possible, a replacement list
+-- of bindings is returned, that bind at least the same names as the
+-- original binding (and possibly more, for intermediate results).
+topDownSimplifyStm ::
+  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
+  SubSimplify rep ->
+  RuleBook rep ->
+  ST.SymbolTable rep ->
+  Stm rep ->
+  m (Maybe (Stms rep))
+topDownSimplifyStm ss = applyRules ss . bookTopDownRules
+
+-- | @simplifyStm uses stm@ performs simplification of the binding
+-- @stm@.  If simplification is possible, a replacement list of
+-- bindings is returned, that bind at least the same names as the
+-- original binding (and possibly more, for intermediate results).
+-- The first argument is the set of names used after this binding.
+bottomUpSimplifyStm ::
+  (MonadFreshNames m, HasScope rep m, PrettyRep rep) =>
+  SubSimplify rep ->
+  RuleBook rep ->
+  (ST.SymbolTable rep, UT.UsageTable) ->
+  Stm rep ->
+  m (Maybe (Stms rep))
+bottomUpSimplifyStm ss = applyRules ss . bookBottomUpRules

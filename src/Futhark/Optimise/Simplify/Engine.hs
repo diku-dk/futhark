@@ -54,7 +54,6 @@ module Futhark.Optimise.Simplify.Engine
     bindLParams,
     simplifyBody,
     ST.SymbolTable,
-    hoistStms,
     blockIf,
     blockMigrated,
     enterLoop,
@@ -205,6 +204,18 @@ asksEngineEnv f = f <$> askEngineEnv
 
 askVtable :: SimpleM rep (ST.SymbolTable (Wise rep))
 askVtable = asksEngineEnv envVtable
+
+mkSubSimplify :: SimplifiableRep rep => SimpleM rep (SubSimplify (Wise rep))
+mkSubSimplify = do
+  (ops, env) <- ask
+  pure $ \body -> do
+    scope <- askScope
+    let env' = env {envVtable = ST.fromScope scope}
+    (x, _) <- modifyNameSource $ runSimpleM (f body) ops env'
+    pure x
+  where
+    f body =
+      simplifyBodyNoHoisting mempty (map (const mempty) (bodyResult body)) body
 
 localVtable ::
   (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
@@ -486,7 +497,8 @@ hoistStms rules block orig_stms final = do
 
     process usageInStm stm stms usage x = do
       vtable <- askVtable
-      res <- bottomUpSimplifyStm rules (vtable, usage) stm
+      ss <- mkSubSimplify
+      res <- bottomUpSimplifyStm ss rules (vtable, usage) stm
       case res of
         Nothing -- Nothing to optimise - see if hoistable.
           | block vtable usage stm ->
@@ -517,7 +529,8 @@ hoistStms rules block orig_stms final = do
           stms_h' <- nonrecSimplifyStm stms_h
 
           vtable <- askVtable
-          simplified <- topDownSimplifyStm rules vtable stms_h'
+          ss <- mkSubSimplify
+          simplified <- topDownSimplifyStm ss rules vtable stms_h'
 
           case simplified of
             Just newstms -> do
