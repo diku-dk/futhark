@@ -1102,9 +1102,8 @@ checkExp (DoLoop merge form loopbody) = do
                 <> prettyText (paramType condparam)
                 <> "."
         Nothing ->
-          bad $
-            TypeError $
-              "Conditional '" <> prettyText cond <> "' of while-loop is not a merge variable."
+          -- Implies infinite loop, but that's OK.
+          pure ()
       let mergepat = map fst merge
           funparams = mergepat
           paramts = map paramDeclType funparams

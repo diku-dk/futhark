@@ -118,8 +118,6 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (pat_name, (mergeParam, mergeInit), resExp)
       (invariant, explpat', merge', resExps)
         | isInvariant,
-          -- Also do not remove the condition in a while-loop.
-          paramName mergeParam `notNameIn` freeIn form,
           -- Certificates must be available.
           all (`ST.elem` vtable) $ unCerts $ resCerts resExp =
             let (stm, explpat'') =
