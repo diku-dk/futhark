@@ -63,7 +63,7 @@ flatSlice ::
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice (l, a) x = (join (I.flatSlice <$> l <*> pure x), IA.flatSlice a x)
+flatSlice (l, a) x = (I.flatSlice <$> l <*> pure x, IA.flatSlice a x)
 
 rebase ::
   (Eq num, IntegralExp num) =>

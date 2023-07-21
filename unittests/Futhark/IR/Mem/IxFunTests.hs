@@ -365,7 +365,7 @@ test_flatSlice_slice_iota =
 
 test_flatSlice_transpose_slice_iota :: [TestTree]
 test_flatSlice_transpose_slice_iota =
-  singleton . testCase "flatSlice . transpose . slice . iota " . compareOpsFailure $
+  singleton . testCase "flatSlice . transpose . slice . iota " . compareOps $
     flatSlice (permute (slice (iota [20, 20]) $ Slice [DimSlice 1 5 2, DimSlice 0 5 2]) [1, 0]) flat_slice_1
   where
     flat_slice_1 = FlatSlice 1 [FlatDimIndex 2 2]
@@ -464,37 +464,37 @@ _test_disjoint3 =
               lm1 =
                 IxFunLMAD.LMAD
                   (add_nw64 (mul64 block_size_12121 i_12214) (mul_nw64 (add_nw64 gtid_12553 1) (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (add64 1 i_12214) gtid_12553) 1) 0,
-                    IxFunLMAD.LMADDim 1 (block_size_12121 + 1) 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (add64 1 i_12214) gtid_12553) 1),
+                    IxFunLMAD.LMADDim 1 (block_size_12121 + 1)
                   ]
 
               lm2 =
                 IxFunLMAD.LMAD
                   (block_size_12121 * i_12214)
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) gtid_12553 0,
-                    IxFunLMAD.LMADDim 1 (1 + block_size_12121) 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) gtid_12553,
+                    IxFunLMAD.LMADDim 1 (1 + block_size_12121)
                   ]
 
               lm_w =
                 IxFunLMAD.LMAD
                   (add_nw64 (add64 (add64 1 n_blab) (mul64 block_size_12121 i_12214)) (mul_nw64 gtid_12553 (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
-                  [ IxFunLMAD.LMADDim n_blab block_size_12121 0,
-                    IxFunLMAD.LMADDim 1 block_size_12121 1
+                  [ IxFunLMAD.LMADDim n_blab block_size_12121,
+                    IxFunLMAD.LMADDim 1 block_size_12121
                   ]
 
               lm_blocks =
                 IxFunLMAD.LMAD
                   (block_size_12121 * i_12214 + n_blab + 1)
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (i_12214 + 1) 0,
-                    IxFunLMAD.LMADDim n_blab block_size_12121 1,
-                    IxFunLMAD.LMADDim 1 block_size_12121 2
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (i_12214 + 1),
+                    IxFunLMAD.LMADDim n_blab block_size_12121,
+                    IxFunLMAD.LMADDim 1 block_size_12121
                   ]
 
               lm_lower_per =
                 IxFunLMAD.LMAD
                   (block_size_12121 * i_12214)
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (i_12214 + 1) 0,
-                    IxFunLMAD.LMADDim 1 (block_size_12121 + 1) 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (i_12214 + 1),
+                    IxFunLMAD.LMADDim 1 (block_size_12121 + 1)
                   ]
 
               res1 = disjointTester asserts lessthans lm1 lm_w
@@ -523,36 +523,40 @@ _test_disjoint3 =
               lm1 =
                 IxFunLMAD.LMAD
                   (add_nw64 (add64 n_blab (sub64 (sub64 (mul64 n_blab (add64 1 (mul64 block_size_12121 (add64 1 i_12214)))) block_size_12121) 1)) (mul_nw64 (add_nw64 gtid_12553 1) (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab 1) block_size_12121) i_12214) 1) gtid_12553) 1) 0,
-                    IxFunLMAD.LMADDim n_blab block_size_12121 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab 1) block_size_12121) i_12214) 1) gtid_12553) 1),
+                    IxFunLMAD.LMADDim n_blab block_size_12121
                   ]
 
               lm2 =
                 IxFunLMAD.LMAD
                   (add_nw64 (sub64 (sub64 (mul64 n_blab (add64 1 (mul64 block_size_12121 (add64 1 i_12214)))) block_size_12121) 1) (mul_nw64 (add_nw64 gtid_12553 1) (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab 1) block_size_12121) i_12214) 1) gtid_12553) 1) 0,
-                    IxFunLMAD.LMADDim 1 (1 + block_size_12121) 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) (sub_nw64 (sub_nw64 (sub64 (sub64 (sdiv64 (sub64 n_blab 1) block_size_12121) i_12214) 1) gtid_12553) 1),
+                    IxFunLMAD.LMADDim 1 (1 + block_size_12121)
                   ]
 
               lm3 =
                 IxFunLMAD.LMAD
                   (add64 n_blab (sub64 (sub64 (mul64 n_blab (add64 1 (mul64 block_size_12121 (add64 1 i_12214)))) block_size_12121) 1))
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) gtid_12553 0,
-                    IxFunLMAD.LMADDim n_blab block_size_12121 1
+                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) gtid_12553,
+                    IxFunLMAD.LMADDim n_blab block_size_12121
                   ]
 
               lm4 =
                 IxFunLMAD.LMAD
                   (sub64 (sub64 (mul64 n_blab (add64 1 (mul64 block_size_12121 (add64 1 i_12214)))) block_size_12121) 1)
-                  [ IxFunLMAD.LMADDim (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121)) gtid_12553 0,
-                    IxFunLMAD.LMADDim 1 (1 + block_size_12121) 1
+                  [ IxFunLMAD.LMADDim
+                      (add_nw64 (mul_nw64 block_size_12121 n_blab) (mul_nw64 (-1) block_size_12121))
+                      gtid_12553,
+                    IxFunLMAD.LMADDim
+                      1
+                      (1 + block_size_12121)
                   ]
 
               lm_w =
                 IxFunLMAD.LMAD
                   (add_nw64 (sub64 (mul64 n_blab (add64 2 (mul64 block_size_12121 (add64 1 i_12214)))) block_size_12121) (mul_nw64 gtid_12553 (sub64 (mul64 block_size_12121 n_blab) block_size_12121)))
-                  [ IxFunLMAD.LMADDim n_blab block_size_12121 0,
-                    IxFunLMAD.LMADDim 1 block_size_12121 1
+                  [ IxFunLMAD.LMADDim n_blab block_size_12121,
+                    IxFunLMAD.LMADDim 1 block_size_12121
                   ]
 
               res1 = disjointTester asserts lessthans lm1 lm_w
@@ -573,29 +577,29 @@ _test_disjoint3 =
               lm1 =
                 IxFunLMAD.LMAD
                   (1024 * num_blocks * (1 + step) + 1024 * step)
-                  [ IxFunLMAD.LMADDim (1024 * num_blocks) (num_blocks - step - 1) 0,
-                    IxFunLMAD.LMADDim 32 32 1,
-                    IxFunLMAD.LMADDim 1 32 2
+                  [ IxFunLMAD.LMADDim (1024 * num_blocks) (num_blocks - step - 1),
+                    IxFunLMAD.LMADDim 32 32,
+                    IxFunLMAD.LMADDim 1 32
                   ]
 
               lm_w1 =
                 IxFunLMAD.LMAD
                   (1024 * num_blocks * step + 1024 * step)
-                  [ IxFunLMAD.LMADDim 32 32 0,
-                    IxFunLMAD.LMADDim 1 32 1
+                  [ IxFunLMAD.LMADDim 32 32,
+                    IxFunLMAD.LMADDim 1 32
                   ]
 
               lm_w2 =
                 IxFunLMAD.LMAD
                   ((1 + step) * 1024 * num_blocks + (1 + step) * 1024)
-                  [ IxFunLMAD.LMADDim (1024 * num_blocks) (num_blocks - step - 1) 0,
-                    IxFunLMAD.LMADDim 1024 (num_blocks - step - 1) 1,
-                    IxFunLMAD.LMADDim 1024 1 2,
-                    IxFunLMAD.LMADDim 32 1 3,
-                    IxFunLMAD.LMADDim 128 8 4,
-                    IxFunLMAD.LMADDim 4 8 5,
-                    IxFunLMAD.LMADDim 32 4 6,
-                    IxFunLMAD.LMADDim 1 4 7
+                  [ IxFunLMAD.LMADDim (1024 * num_blocks) (num_blocks - step - 1),
+                    IxFunLMAD.LMADDim 1024 (num_blocks - step - 1),
+                    IxFunLMAD.LMADDim 1024 1,
+                    IxFunLMAD.LMADDim 32 1,
+                    IxFunLMAD.LMADDim 128 8,
+                    IxFunLMAD.LMADDim 4 8,
+                    IxFunLMAD.LMADDim 32 4,
+                    IxFunLMAD.LMADDim 1 4
                   ]
 
               asserts =
