@@ -1438,10 +1438,7 @@ isMapTransposeCopy ::
 isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
   | Just perm <- IxFun.base destIxFun `isPermutationOf` IxFun.base srcIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (IxFun.shape destIxFun) swap r1 r2
-  | Just perm <- IxFun.base srcIxFun `isPermutationOf` IxFun.base destIxFun,
-    Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (IxFun.shape srcIxFun) id r1 r2
+      isOk (rearrangeShape perm $ IxFun.base destIxFun) swap r1 r2
   | otherwise =
       Nothing
   where
@@ -1467,6 +1464,7 @@ isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
       let (mapped, notmapped) = splitAt r1 shape
           (pretrans, posttrans) = f $ splitAt r2 notmapped
        in (product mapped, product pretrans, product posttrans)
+{-# NOINLINE isMapTransposeCopy #-}
 
 mapTransposeName :: PrimType -> String
 mapTransposeName bt = "map_transpose_" ++ prettyString bt
