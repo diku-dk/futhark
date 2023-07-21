@@ -485,21 +485,17 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
                     Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) -> pure $
                       case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
                         Just fv_subst ->
-                          if IxFun.permutation ixfn
-                            == IxFun.permutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
-                            then
-                              let entry =
-                                    coal_entry
-                                      { vartab =
-                                          M.insert
-                                            (patElemName p)
-                                            (Coalesced knd mbd fv_subst)
-                                            (vartab coal_entry)
-                                      }
-                                  (ac, suc) =
-                                    markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
-                               in bu_env_f {activeCoals = ac, successCoals = suc}
-                            else fail_res
+                          let entry =
+                                coal_entry
+                                  { vartab =
+                                      M.insert
+                                        (patElemName p)
+                                        (Coalesced knd mbd fv_subst)
+                                        (vartab coal_entry)
+                                  }
+                              (ac, suc) =
+                                markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                           in bu_env_f {activeCoals = ac, successCoals = suc}
                         Nothing ->
                           fail_res
                   else pure fail_res
@@ -1557,10 +1553,7 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b))
   where
     updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
-      fromMaybe (error "updateIndFunSlice") $
-        IxFun.flatSlice ind_fun $
-          FlatSlice (pe64 offset) $
-            map (fmap pe64) dims
+      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))

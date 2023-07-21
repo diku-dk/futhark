@@ -83,7 +83,7 @@ getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, Just)
 getDirAliasFromExp (BasicOp (FlatIndex x (FlatSlice offset idxs))) =
   Just
     ( x,
-      (`IxFun.flatSlice` FlatSlice (pe64 offset) (map (fmap pe64) idxs))
+      Just . (`IxFun.flatSlice` FlatSlice (pe64 offset) (map (fmap pe64) idxs))
     )
 getDirAliasFromExp (BasicOp (FlatUpdate x _ _)) = Just (x, Just)
 getDirAliasFromExp _ = Nothing

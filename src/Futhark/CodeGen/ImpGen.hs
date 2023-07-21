@@ -208,9 +208,9 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
-flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> Maybe MemLoc
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
 flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape <$> IxFun.flatSlice ixfun slice
+  MemLoc mem shape $ IxFun.flatSlice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -932,11 +932,8 @@ defCompileBasicOp _ FlatIndex {} =
 defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
   v_loc <- entryArrayLoc <$> lookupArray v
-  case flatSliceMemLoc pe_loc slice' of
-    Just pe_loc' -> copy (elemType (patElemType pe)) pe_loc' v_loc
-    Nothing -> error "defCompileBasicOp FlatUpdate"
-  where
-    slice' = fmap pe64 slice
+  let pe_loc' = flatSliceMemLoc pe_loc $ fmap pe64 slice
+  copy (elemType (patElemType pe)) pe_loc' v_loc
 defCompileBasicOp (Pat [pe]) (Replicate shape se)
   | Acc {} <- patElemType pe = pure ()
   | shape == mempty =
@@ -1439,18 +1436,15 @@ isMapTransposeCopy ::
       )
     )
 isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
-  | perm <- LMAD.permutation dest_lmad,
-    LMAD.permutation src_lmad == [0 .. rank - 1],
+  | Just perm <- IxFun.base destIxFun `isPermutationOf` IxFun.base srcIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (IxFun.shape destIxFun) swap r1 r2
-  | perm <- LMAD.permutation src_lmad,
-    LMAD.permutation dest_lmad == [0 .. rank - 1],
+  | Just perm <- IxFun.base srcIxFun `isPermutationOf` IxFun.base destIxFun,
     Just (r1, r2, _) <- isMapTranspose perm =
       isOk (IxFun.shape srcIxFun) id r1 r2
   | otherwise =
       Nothing
   where
-    rank = IxFun.rank destIxFun
     swap (x, y) = (y, x)
     dest_lmad = IxFun.ixfunLMAD destIxFun
     src_lmad = IxFun.ixfunLMAD srcIxFun
@@ -1460,8 +1454,7 @@ isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
     isOk shape f r1 r2 =
       let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
        in Just
-            ( LMAD.contiguous dest_lmad
-                .&&. LMAD.contiguous src_lmad,
+            ( LMAD.contiguous dest_lmad .&&. LMAD.contiguous src_lmad,
               ( dest_offset * primByteSize pt,
                 src_offset * primByteSize pt,
                 num_arrays,
@@ -1523,8 +1516,8 @@ defaultCopy pt dest src
       if isScalarSpace srcspace || isScalarSpace destspace
         then copyElementWise pt dest src
         else do
-          let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
-              src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
+          let dest_lmad = IxFun.ixfunLMAD dest_ixfun
+              src_lmad = IxFun.ixfunLMAD src_ixfun
               destoffset = elements (LMAD.offset dest_lmad) `withElemType` pt
               srcoffset = elements (LMAD.offset src_lmad) `withElemType` pt
           sIf

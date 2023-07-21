@@ -289,8 +289,8 @@ gpuCopyFunction (Rank r) pt = do
 
     mkIxFun desc = do
       let new x = newVName $ desc <> "_" <> x
-          newDim i = LMAD.LMADDim <$> new "stride" <*> new "shape" <*> pure i
-      LMAD.LMAD <$> new "offset" <*> mapM newDim [0 .. r - 1]
+          newDim = LMAD.LMADDim <$> new "stride" <*> new "shape"
+      LMAD.LMAD <$> new "offset" <*> replicateM r newDim
 
     (params, copy_code) = do
       flip evalState blankNameSource $ do
@@ -563,8 +563,8 @@ callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ 
       fname <- gpuCopyForType (Rank (IxFun.rank dest_ixfun)) pt
       dest_space <- entryMemSpace <$> lookupMemory destmem
       src_space <- entryMemSpace <$> lookupMemory srcmem
-      let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
-          src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
+      let dest_lmad = IxFun.ixfunLMAD dest_ixfun
+          src_lmad = IxFun.ixfunLMAD src_ixfun
           num_elems = Imp.elements $ product $ LMAD.shape dest_lmad
       if dest_space == Space "device" && src_space == Space "device"
         then
