@@ -1435,21 +1435,22 @@ isMapTransposeCopy ::
         Imp.TExp Int64
       )
     )
-isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
-  | Just perm <- IxFun.base destIxFun `isPermutationOf` IxFun.base srcIxFun,
+isMapTransposeCopy pt (MemLoc _ _ dest_ixfun) (MemLoc _ _ src_ixfun)
+  | length (IxFun.base dest_ixfun) == IxFun.rank dest_ixfun,
+    length (IxFun.base src_ixfun) == IxFun.rank src_ixfun,
+    Just perm <- IxFun.base dest_ixfun `isPermutationOf` IxFun.base src_ixfun,
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (rearrangeShape perm $ IxFun.base destIxFun) swap r1 r2
+      isOk (IxFun.base dest_ixfun) r1 r2
   | otherwise =
       Nothing
   where
-    swap (x, y) = (y, x)
-    dest_lmad = IxFun.ixfunLMAD destIxFun
-    src_lmad = IxFun.ixfunLMAD srcIxFun
+    dest_lmad = IxFun.ixfunLMAD dest_ixfun
+    src_lmad = IxFun.ixfunLMAD src_ixfun
     dest_offset = LMAD.offset dest_lmad
     src_offset = LMAD.offset src_lmad
 
-    isOk shape f r1 r2 =
-      let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
+    isOk shape r1 r2 =
+      let (num_arrays, size_x, size_y) = getSizes shape r1 r2
        in Just
             ( LMAD.contiguous dest_lmad .&&. LMAD.contiguous src_lmad,
               ( dest_offset * primByteSize pt,
@@ -1460,9 +1461,9 @@ isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
               )
             )
 
-    getSizes shape f r1 r2 =
+    getSizes shape r1 r2 =
       let (mapped, notmapped) = splitAt r1 shape
-          (pretrans, posttrans) = f $ splitAt r2 notmapped
+          (pretrans, posttrans) = splitAt r2 notmapped
        in (product mapped, product pretrans, product posttrans)
 {-# NOINLINE isMapTransposeCopy #-}
 
