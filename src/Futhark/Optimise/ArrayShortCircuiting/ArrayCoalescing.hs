@@ -1000,6 +1000,9 @@ mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
       | b <- patElemName patel,
         (_, MemArray _ _ _ (ArrayIn m_b _)) <- patElemDec patel,
         a <- paramName arg,
+        -- Not safe to short-circuit if the index function of this
+        -- parameter is variant to the loop.
+        not $ any ((`nameIn` freeIn (paramDec arg)) . paramName . fst) arginis,
         Var a0 <- ini,
         Var r <- bdyres,
         Just coal_etry <- M.lookup m_b actv0,
