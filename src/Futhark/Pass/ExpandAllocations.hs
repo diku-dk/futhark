@@ -707,9 +707,10 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
-offsetMemoryInLambda lam = inScopeOf lam $ do
-  body <- offsetMemoryInBody $ lambdaBody lam
-  pure $ lam {lambdaBody = body}
+offsetMemoryInLambda lam = do
+  body <- inScopeOf lam $ offsetMemoryInBody $ lambdaBody lam
+  params <- mapM offsetMemoryInParam $ lambdaParams lam
+  pure $ lam {lambdaBody = body, lambdaParams = params}
 
 -- A loop may have memory parameters, and those memory blocks may
 -- be expanded.  We assume (but do not check - FIXME) that if the
