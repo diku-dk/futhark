@@ -434,8 +434,11 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
-        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-          copyDWIMFix (patElemName pe) [] (Var arr) [sExt64 chunk_start]
+        sComment "Save result of reduction." $
+          forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+            copyDWIMFix (patElemName pe) [] (Var arr) [sExt64 chunk_start]
+
+    --
     virtCase dims' tmps_for_ops = do
       dims_flat <- dPrimV "dims_flat" $ product dims'
       let segment_size = last dims'
@@ -452,29 +455,31 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIM
-          (patElemName pe)
-          []
-          (Var arr)
-          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIM
+            (patElemName pe)
+            []
+            (Var arr)
+            (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
+    -- Nonsegmented case (or rather, a single segment) - this we can
+    -- handle directly with a group-level reduction.
     nonvirtCase [dim'] tmps_for_ops = do
-      -- Nonsegmented case (or rather, a single segment) - this we can
-      -- handle directly with a group-level reduction.
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce (sExt32 dim') (segBinOpLambda op) tmps
       sOp $ Imp.ErrorSync Imp.FenceLocal
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIMFix (patElemName pe) [] (Var arr) [0]
-    --
-    nonvirtCase dims' tmps_for_ops = do
-      -- Segmented intra-group reductions are turned into (regular)
-      -- segmented scans.  It is possible that this can be done
-      -- better, but at least this approach is simple.
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIMFix (patElemName pe) [] (Var arr) [0]
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
+    -- Segmented intra-group reductions are turned into (regular)
+    -- segmented scans.  It is possible that this can be done
+    -- better, but at least this approach is simple.
+    nonvirtCase dims' tmps_for_ops = do
       -- groupScan operates on flattened arrays.  This does not
       -- involve copying anything; merely playing with the index
       -- function.
@@ -494,12 +499,13 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIM
-          (patElemName pe)
-          []
-          (Var arr)
-          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIM
+            (patElemName pe)
+            []
+            (Var arr)
+            (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
