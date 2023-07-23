@@ -548,7 +548,8 @@ groupReduceWithOffset offset w lam arrs = do
         | otherwise =
             pure ()
 
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
+  let (reduce_acc_params, reduce_arr_params) =
+        splitAt (length arrs) $ lambdaParams lam
 
   skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
   dLParams $ lambdaParams lam
@@ -556,7 +557,7 @@ groupReduceWithOffset offset w lam arrs = do
   offset <-- (0 :: Imp.TExp Int32)
 
   comment "participating threads read initial accumulator" $
-    sWhen (local_tid .<. w) $
+    localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
   let do_reduce = do
