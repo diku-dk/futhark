@@ -106,7 +106,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
       addStms w_stms
       read_input_stms <- runBuilder_ $ mapM readGroupKernelInput used_inps
-      space <- mkSegSpace ispace
+      space <- SegSpace <$> newVName "phys_group_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
   let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
