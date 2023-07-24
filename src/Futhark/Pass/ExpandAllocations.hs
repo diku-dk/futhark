@@ -470,14 +470,10 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
 
     newBaseThread user (old_shape, _) =
       let (users_shape, user_ids) = getNumUsers user
-          num_dims = length old_shape
-          perm = [num_dims .. num_dims + shapeRank users_shape - 1] ++ [0 .. num_dims - 1]
-          root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
-          permuted_ixfun = IxFun.permute root_ixfun perm
+          root_ixfun = IxFun.iota $ old_shape ++ map pe64 (shapeDims users_shape)
           offset_ixfun =
-            IxFun.slice permuted_ixfun $
-              Slice $
-                map DimFix user_ids ++ map untouched old_shape
+            IxFun.slice root_ixfun . Slice $
+              map untouched old_shape ++ map DimFix user_ids
        in offset_ixfun
 
     newBase user@(SegThreadInGroup {}, _) = newBaseThread user
