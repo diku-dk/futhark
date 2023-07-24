@@ -584,7 +584,7 @@ evalIndex loc env is arr = do
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: Env -> TypeBase Size u -> TypeBase Size u
+expandType :: Pretty u => Env -> TypeBase Size u -> TypeBase Size u
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
 expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
@@ -1118,8 +1118,14 @@ evalModuleVar env qv =
     Just (TermModule m) -> pure m
     _ -> error $ prettyString qv <> " is not bound to a module."
 
-evalModExp :: Env -> ModExp -> EvalM Module
-evalModExp _ (ModImport _ (Info f) _) = do
+-- We also return a new Env here, because we want the definitions
+-- inside any constructed modules to also be in scope at the top
+-- level. This is because types may contain un-qualified references to
+-- definitions in modules, and sometimes those definitions may not
+-- actually *have* any qualified name!  See tests/modules/sizes7.fut.
+-- This occurs solely because of evalType.
+evalModExp :: Env -> ModExp -> EvalM (Env, Module)
+evalModExp env (ModImport _ (Info f) _) = do
   f' <- lookupImport f
   known <- asks snd
   case f' of
@@ -1129,33 +1135,38 @@ evalModExp _ (ModImport _ (Info f) _) = do
           [ "Unknown interpreter import: " ++ show f,
             "Known: " ++ show (M.keys known)
           ]
-    Just m -> pure $ Module m
+    Just m -> pure (env, Module m)
 evalModExp env (ModDecs ds _) = do
   Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
-  pure $
-    Module $
-      Env
-        (terms `M.difference` envTerm env)
-        (types `M.difference` envType env)
+  pure
+    ( Env terms types <> env,
+      Module $
+        Env
+          (terms `M.difference` envTerm env)
+          (types `M.difference` envType env)
+    )
 evalModExp env (ModVar qv _) =
-  evalModuleVar env qv
+  (env,) <$> evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
-  substituteInModule substs <$> evalModExp env me
-evalModExp env (ModParens me _) = evalModExp env me
+  second (substituteInModule substs) <$> evalModExp env me
+evalModExp env (ModParens me _) =
+  evalModExp env me
 evalModExp env (ModLambda p ret e loc) =
-  pure $
-    ModuleFun $ \am -> do
-      let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
-      evalModExp env' $ case ret of
-        Nothing -> e
-        Just (se, rsubsts) -> ModAscript e se rsubsts loc
+  pure
+    ( env,
+      ModuleFun $ \am -> do
+        let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
+        fmap snd . evalModExp env' $ case ret of
+          Nothing -> e
+          Just (se, rsubsts) -> ModAscript e se rsubsts loc
+    )
 evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
-  f' <- evalModExp env f
+  (env', f') <- evalModExp env f
+  (env'', e') <- evalModExp env' e
   case f' of
-    ModuleFun f'' -> do
-      e' <- evalModExp env e
-      substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+    ModuleFun f'' ->
+      (env'',) . substituteInModule rsubst <$> f'' (substituteInModule psubst e')
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
@@ -1165,9 +1176,9 @@ evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localEx
   pure $
     env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
-  me' <- evalModExp env me
+  (env', me') <- evalModExp env me
   case me' of
-    Module me'' -> pure $ me'' <> env
+    Module me'' -> pure $ me'' <> env'
     _ -> error "Expected Module"
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
@@ -1177,8 +1188,8 @@ evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
   let abbr = T.TypeAbbr l ps . RetType dims $ expandType env t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
-  mod <- evalModExp env $ wrapInLambda ps
-  pure $ modEnv (M.singleton v mod) <> env
+  (env', mod) <- evalModExp env $ wrapInLambda ps
+  pure $ modEnv (M.singleton v mod) <> env'
   where
     wrapInLambda [] = case ret of
       Just (se, substs) -> ModAscript body se substs loc
