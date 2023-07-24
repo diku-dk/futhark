@@ -463,21 +463,31 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
   pretty (LocalDec dec _) = "local" <+> pretty dec
   pretty (ImportDec x _ _) = "import" <+> pretty x
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
-  pretty (ModVar v _) = pretty v
-  pretty (ModParens e _) = parens $ pretty e
-  pretty (ModImport v _ _) = "import" <+> pretty (show v)
-  pretty (ModDecs ds _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ds)
-  pretty (ModApply f a _ _ _) = parens $ pretty f <+> parens (pretty a)
-  pretty (ModAscript me se _ _) = pretty me <> colon <+> pretty se
-  pretty (ModLambda param maybe_sig body _) =
+prettyModExp :: (Eq vn, IsName vn, Annot f) => Int -> ModExpBase f vn -> Doc a
+prettyModExp _ (ModVar v _) =
+  pretty v
+prettyModExp _ (ModParens e _) =
+  align $ parens $ pretty e
+prettyModExp _ (ModImport v _ _) =
+  "import" <+> pretty (show v)
+prettyModExp _ (ModDecs ds _) =
+  nestedBlock "{" "}" $ stack $ punctuate line $ map pretty ds
+prettyModExp p (ModApply f a _ _ _) =
+  parensIf (p >= 10) $ prettyModExp 0 f <+> prettyModExp 10 a
+prettyModExp p (ModAscript me se _ _) =
+  parensIf (p /= -1) $ pretty me <> colon <+> pretty se
+prettyModExp p (ModLambda param maybe_sig body _) =
+  parensIf (p /= -1) $
     "\\" <> pretty param <> maybe_sig'
       <+> "->"
       </> indent 2 (pretty body)
-    where
-      maybe_sig' = case maybe_sig of
-        Nothing -> mempty
-        Just (sig, _) -> colon <+> pretty sig
+  where
+    maybe_sig' = case maybe_sig of
+      Nothing -> mempty
+      Just (sig, _) -> colon <+> pretty sig
+
+instance (Eq vn, IsName vn, Annot f) => Pretty (ModExpBase f vn) where
+  pretty = prettyModExp (-1)
 
 instance Pretty Liftedness where
   pretty Unlifted = ""
