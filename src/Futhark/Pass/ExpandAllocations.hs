@@ -658,14 +658,18 @@ offsetMemoryInPat (Pat pes) rets = do
   where
     onPE
       (PatElem name (MemArray pt shape u (ArrayIn mem _)))
-      (MemArray _ _ _ (Just (ReturnsNewBlock _ _ ixfun))) =
-        pure . PatElem name . MemArray pt shape u . ArrayIn mem $
-          fmap (fmap unExt) ixfun
+      (MemArray _ _ _ info)
+        | Just ixfun <- getIxFun info =
+            pure . PatElem name . MemArray pt shape u . ArrayIn mem $
+              fmap (fmap unExt) ixfun
     onPE pe _ = do
       new_dec <- offsetMemoryInMemBound (patElemName pe) $ patElemDec pe
       pure pe {patElemDec = new_dec}
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
+    getIxFun (Just (ReturnsNewBlock _ _ ixfun)) = Just ixfun
+    getIxFun (Just (ReturnsInBlock _ ixfun)) = Just ixfun
+    getIxFun _ = Nothing
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
