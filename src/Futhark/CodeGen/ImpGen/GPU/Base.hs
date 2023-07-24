@@ -528,19 +528,14 @@ groupReduceWithOffset offset w lam arrs = do
   constants <- kernelConstants <$> askEnv
 
   let local_tid = kernelLocalThreadId constants
-      global_tid = kernelGlobalThreadId constants
 
       barrier
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
-      readReduceArgument param arr
-        | Prim _ <- paramType param = do
-            let i = local_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
-        | otherwise = do
-            let i = global_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+      readReduceArgument param arr = do
+        let i = local_tid + tvExp offset
+        copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
       writeReduceOpResult param arr
         | Prim _ <- paramType param =
@@ -548,7 +543,14 @@ groupReduceWithOffset offset w lam arrs = do
         | otherwise =
             pure ()
 
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
+      writeArrayOpResult param arr
+        | Prim _ <- paramType param =
+            pure ()
+        | otherwise =
+            copyDWIMFix arr [0] (Var $ paramName param) []
+
+  let (reduce_acc_params, reduce_arr_params) =
+        splitAt (length arrs) $ lambdaParams lam
 
   skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
   dLParams $ lambdaParams lam
@@ -556,10 +558,10 @@ groupReduceWithOffset offset w lam arrs = do
   offset <-- (0 :: Imp.TExp Int32)
 
   comment "participating threads read initial accumulator" $
-    sWhen (local_tid .<. w) $
+    localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
-  let do_reduce = do
+  let do_reduce = localOps threadOperations $ do
         comment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
         comment "apply reduction operation" $
@@ -600,13 +602,17 @@ groupReduceWithOffset offset w lam arrs = do
         sWhile doing_cross_wave_reductions $ do
           barrier
           offset <-- tvExp skip_waves * wave_size
-          sWhen
-            apply_in_cross_wave_iteration
-            do_reduce
+          sWhen apply_in_cross_wave_iteration do_reduce
           skip_waves <-- tvExp skip_waves * 2
 
   in_wave_reductions
   cross_wave_reductions
+
+  sComment "Copy array-typed operands to result array" $ do
+    barrier
+    sWhen (local_tid .==. 0) $
+      localOps threadOperations $
+        zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =

@@ -219,7 +219,8 @@ transformScanRed lvl space ops kbody = do
   let user = (lvl, [le64 $ segFlat space])
       (kbody', kbody_allocs) =
         extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
-      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
+      (ops', ops_allocs) =
+        unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
       variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
@@ -247,10 +248,11 @@ transformScanRed lvl space ops kbody = do
     then pure (mempty, (lvl, ops, kbody))
     else do
       (lvl_stms, lvl', grid) <- ensureGridKnown lvl
-      allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $ \alloc_stms kbody'' -> do
-        ops'' <- forM ops' $ \op' ->
-          localScope (scopeOf op') $ offsetMemoryInLambda op'
-        pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
+      allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $
+        \alloc_stms kbody'' -> do
+          ops'' <- forM ops' $ \op' ->
+            localScope (scopeOf op') $ offsetMemoryInLambda op'
+          pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
   where
     bound_in_kernel =
       namesFromList (M.keys $ scopeOfSegSpace space)
@@ -356,9 +358,12 @@ extractLambdaAllocations ::
   Names ->
   Lambda GPUMem ->
   (Lambda GPUMem, Extraction)
-extractLambdaAllocations user bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
+extractLambdaAllocations user bound_outside bound_kernel lam =
+  (lam {lambdaBody = body'}, allocs)
   where
-    (body', allocs) = extractBodyAllocations user bound_outside bound_kernel $ lambdaBody lam
+    (body', allocs) =
+      extractBodyAllocations user bound_outside bound_kernel $
+        lambdaBody lam
 
 extractGenericBodyAllocations ::
   User ->
@@ -373,11 +378,9 @@ extractGenericBodyAllocations ::
 extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms body =
   let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
       (stms, allocs) =
-        runWriter $
-          fmap catMaybes $
-            mapM (extractStmAllocations user bound_outside bound_kernel') $
-              stmsToList $
-                get_stms body
+        runWriter . fmap catMaybes $
+          mapM (extractStmAllocations user bound_outside bound_kernel') $
+            stmsToList (get_stms body)
    in (set_stms (stmsFromList stms) body, allocs)
 
 expandable, notScalar :: Space -> Bool
@@ -436,7 +439,8 @@ extractStmAllocations user bound_outside bound_kernel stm = do
         }
 
     onKernelBody user' body = do
-      let (body', allocs) = extractKernelBodyAllocations user' bound_outside bound_kernel body
+      let (body', allocs) =
+            extractKernelBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       pure body'
 
@@ -524,10 +528,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
   let variant_allocs' :: [(VName, (SubExp, SubExp, Space))]
       variant_allocs' =
         concat $
-          zipWith
-            memInfo
-            (map snd sizes_to_blocks)
-            (zip offsets size_sums)
+          zipWith memInfo (map snd sizes_to_blocks) (zip offsets size_sums)
       memInfo blocks (offset, total_size) =
         [(mem, (Var offset, Var total_size, space)) | (mem, space) <- blocks]
 
@@ -706,9 +707,10 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
-offsetMemoryInLambda lam = inScopeOf lam $ do
-  body <- offsetMemoryInBody $ lambdaBody lam
-  pure $ lam {lambdaBody = body}
+offsetMemoryInLambda lam = do
+  body <- inScopeOf lam $ offsetMemoryInBody $ lambdaBody lam
+  params <- mapM offsetMemoryInParam $ lambdaParams lam
+  pure $ lam {lambdaBody = body, lambdaParams = params}
 
 -- A loop may have memory parameters, and those memory blocks may
 -- be expanded.  We assume (but do not check - FIXME) that if the
