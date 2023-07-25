@@ -16,7 +16,6 @@ module Futhark.IR.Mem.IxFun
     coerce,
     slice,
     flatSlice,
-    rebase,
     embed,
     shape,
     rank,
@@ -231,73 +230,8 @@ coerce (IxFun lmad _) new_shape =
 rank :: IntegralExp num => IxFun num -> Int
 rank (IxFun (LMAD _ sss) _) = length sss
 
--- | Essentially @rebase new_base ixfun = ixfun o new_base@
--- Core soundness condition: @base ixfun == shape new_base@
--- Handles the case where a rebase operation can stay within m + n - 1 LMADs,
--- where m is the number of LMADs in the index function, and n is the number of
--- LMADs in the new base.  If both index function have only on LMAD, this means
--- that we stay within the single-LMAD domain.
---
--- We can often stay in that domain if the original ixfun is essentially a
--- slice, e.g. `x[i, (k1,m,s1), (k2,n,s2)] = orig`.
---
--- However, I strongly suspect that for in-place update what we need is actually
--- the INVERSE of the rebase function, i.e., given an index function new-base
--- and another one orig, compute the index function ixfun0 such that:
---
---   new-base == rebase ixfun0 ixfun, or equivalently:
---   new-base == ixfun o ixfun0
---
--- because then I can go bottom up and compose with ixfun0 all the index
--- functions corresponding to the memory block associated with ixfun.
-rebase ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  IxFun num ->
-  Maybe (IxFun num)
-rebase new_base@(IxFun lmad_base _) ixfun@(IxFun lmad shp) = do
-  let dims = LMAD.dims lmad
-
-  guard $
-    -- Core rebase condition.
-    base ixfun == shape new_base
-      -- To not have to worry about ixfun having non-1 strides, we also check that
-      -- it is a row-major array (modulo permutation, which is handled
-      -- separately).  Accept a non-full outermost dimension.  XXX: Maybe this can
-      -- be less conservative?
-      && and
-        ( zipWith3
-            (\sn ld inner -> inner || sn == ldShape ld)
-            shp
-            dims
-            (True : replicate (length dims - 1) False)
-        )
-
-  -- Reverse strides and adjust offset if necessary.
-  let lmad_base' = lmad_base
-      dims_base = LMAD.dims lmad_base'
-      n_fewer_dims = length dims_base - length dims
-      (dims_base', offs_contrib) =
-        unzip $
-          zipWith
-            ( \(LMADDim s1 n1) (LMADDim {}) ->
-                let (s', off') = (s1, 0)
-                 in (LMADDim s' n1, off')
-            )
-            -- If @dims@ is morally a slice, it might have fewer dimensions than
-            -- @dims_base@.  Drop extraneous outer dimensions.
-            (drop n_fewer_dims dims_base)
-            dims
-      off_base = LMAD.offset lmad_base' + sum offs_contrib
-      lmad_base'' =
-        LMAD.setShape
-          (LMAD.shape lmad)
-          ( LMAD
-              (off_base + ldStride (last dims_base) * LMAD.offset lmad)
-              dims_base'
-          )
-  pure $ IxFun lmad_base'' shp
-
+-- | Conceptually embed another index function in another by tweaking
+-- the offset and strides.  Used for memory expansion.
 embed ::
   (Eq num, IntegralExp num) => num -> num -> num -> IxFun num -> Maybe (IxFun num)
 embed o op p (IxFun lmad base) =

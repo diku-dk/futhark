@@ -9,7 +9,6 @@ module Futhark.IR.Mem.IxFun.Alg
     coerce,
     slice,
     flatSlice,
-    rebase,
     embed,
     shape,
     index,
@@ -48,7 +47,6 @@ data IxFun num
   | Reshape (IxFun num) (Shape num)
   | Coerce (IxFun num) (Shape num)
   | OffsetIndex (IxFun num) num
-  | Rebase (IxFun num) (IxFun num)
   | Embed num num num (IxFun num)
   deriving (Eq, Show)
 
@@ -68,8 +66,6 @@ instance Pretty num => Pretty (IxFun num) where
       <> parens (pretty oldshape)
   pretty (OffsetIndex fun i) =
     pretty fun <> "->offset_index" <> parens (pretty i)
-  pretty (Rebase new_base fun) =
-    "rebase(" <> pretty new_base <> ", " <> pretty fun <> ")"
   pretty (Embed a b ps fun) =
     "embed(" <> pretty a <> "," <+> pretty b <> "," <+> pretty ps <> "," <+> pretty fun <> ")"
 
@@ -87,9 +83,6 @@ slice = Index
 
 flatSlice :: IxFun num -> FlatSlice num -> IxFun num
 flatSlice = FlatIndex
-
-rebase :: IxFun num -> IxFun num -> IxFun num
-rebase = Rebase
 
 embed :: num -> num -> num -> IxFun num -> IxFun num
 embed = Embed
@@ -117,8 +110,6 @@ shape (Reshape _ dims) =
 shape (Coerce _ dims) =
   dims
 shape (OffsetIndex ixfun _) =
-  shape ixfun
-shape (Rebase _ ixfun) =
   shape ixfun
 shape (Embed _ _ _ ixfun) =
   shape ixfun
@@ -156,28 +147,6 @@ index (OffsetIndex fun i) is =
     d : ds ->
       index (Index fun (Slice (DimSlice i (d - i) 1 : map (unitSlice 0) ds))) is
     [] -> error "index: OffsetIndex: underlying index function has rank zero"
-index (Rebase new_base fun) is =
-  let fun' = case fun of
-        Direct old_shape ->
-          if old_shape == shape new_base
-            then new_base
-            else reshape new_base old_shape
-        Permute ixfun perm ->
-          permute (rebase new_base ixfun) perm
-        Index ixfun iis ->
-          slice (rebase new_base ixfun) iis
-        FlatIndex ixfun iis ->
-          flatSlice (rebase new_base ixfun) iis
-        Reshape ixfun new_shape ->
-          reshape (rebase new_base ixfun) new_shape
-        Coerce ixfun new_shape ->
-          coerce (rebase new_base ixfun) new_shape
-        OffsetIndex ixfun s ->
-          offsetIndex (rebase new_base ixfun) s
-        r@Rebase {} ->
-          r
-        Embed {} -> undefined
-   in index fun' is
 index (Embed a _b ps ixfun) is =
   a + ps * index ixfun is
 

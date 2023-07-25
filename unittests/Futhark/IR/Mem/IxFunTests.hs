@@ -115,10 +115,6 @@ tests =
         test_embed2,
         test_embed3,
         test_embed4,
-        test_rebase1,
-        test_rebase2,
-        test_rebase3,
-        test_rebase4_5,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
@@ -274,81 +270,6 @@ test_embed4 =
   where
     t = 3
     nt = 7
-
-test_rebase1 :: [TestTree]
-test_rebase1 =
-  singleton . testCase "rebase 1" . compareOpsFailure $
-    let slice_base =
-          Slice
-            [ DimFix (n `P.div` 2),
-              DimSlice 2 (n - 2) 1,
-              DimSlice 3 (n - 3) 1
-            ]
-        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-        ixfn_orig = permute (iota [n - 3, n - 2]) [1, 0]
-        ixfn_rebase = rebase ixfn_base ixfn_orig
-     in ixfn_rebase
-
-test_rebase2 :: [TestTree]
-test_rebase2 =
-  singleton . testCase "rebase 2" . compareOpsFailure $
-    let slice_base =
-          Slice
-            [ DimFix (n `P.div` 2),
-              DimSlice (n - 1) (n - 2) (-1),
-              DimSlice (n - 1) (n - 3) (-1)
-            ]
-        slice_orig =
-          Slice
-            [ DimSlice (n - 4) (n - 3) (-1),
-              DimSlice (n - 3) (n - 2) (-1)
-            ]
-        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-        ixfn_orig = permute (slice (iota [n - 3, n - 2]) slice_orig) [1, 0]
-        ixfn_rebase = rebase ixfn_base ixfn_orig
-     in ixfn_rebase
-
-test_rebase3 :: [TestTree]
-test_rebase3 =
-  singleton . testCase "rebase full orig but not monotonic" . compareOpsFailure $
-    let n2 = (n - 2) `P.div` 3
-        n3 = (n - 3) `P.div` 2
-        slice_base =
-          Slice
-            [ DimFix (n `P.div` 2),
-              DimSlice (n - 1) n2 (-3),
-              DimSlice (n - 1) n3 (-2)
-            ]
-        slice_orig =
-          Slice
-            [ DimSlice (n3 - 1) n3 (-1),
-              DimSlice (n2 - 1) n2 (-1)
-            ]
-        ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-        ixfn_orig = permute (slice (iota [n3, n2]) slice_orig) [1, 0]
-        ixfn_rebase = rebase ixfn_base ixfn_orig
-     in ixfn_rebase
-
-test_rebase4_5 :: [TestTree]
-test_rebase4_5 =
-  let n2 = (n - 2) `P.div` 3
-      n3 = (n - 3) `P.div` 2
-      slice_base =
-        Slice
-          [ DimFix (n `P.div` 2),
-            DimSlice (n - 1) n2 (-3),
-            DimSlice 3 n3 2
-          ]
-      slice_orig =
-        Slice
-          [ DimSlice (n3 - 1) n3 (-1),
-            DimSlice 0 n2 1
-          ]
-      ixfn_base = permute (slice (iota [n, n, n]) slice_base) [1, 0]
-      ixfn_orig = permute (slice (iota [n3, n2]) slice_orig) [1, 0]
-   in [ testCase "rebase mixed monotonicities" . compareOpsFailure $
-          rebase ixfn_base ixfn_orig
-      ]
 
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =
