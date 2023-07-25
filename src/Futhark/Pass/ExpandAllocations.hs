@@ -698,7 +698,9 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
                     prettyString (o, ps),
                     prettyString ixfun
                   ]
-          ixfun'' <- maybe problem pure $ IxFun.embed (Free <$> o) (Free <$> nt) (fmap Free ps) ixfun
+          ixfun'' <-
+            maybe problem pure $
+              IxFun.embed (Free <$> o) (Free <$> nt) (fmap Free ps) ixfun
           pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 
