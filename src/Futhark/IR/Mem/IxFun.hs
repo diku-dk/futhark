@@ -17,6 +17,7 @@ module Futhark.IR.Mem.IxFun
     slice,
     flatSlice,
     rebase,
+    embed,
     shape,
     rank,
     isDirect,
@@ -296,6 +297,17 @@ rebase new_base@(IxFun lmad_base _) ixfun@(IxFun lmad shp) = do
               dims_base'
           )
   pure $ IxFun lmad_base'' shp
+
+embed ::
+  (Eq num, IntegralExp num) => num -> num -> [num] -> IxFun num -> Maybe (IxFun num)
+embed o op ps (IxFun lmad base) = do
+  guard $ length ps == LMAD.rank lmad
+  let onDim p ld = ld {LMAD.ldStride = LMAD.ldStride ld * p}
+      lmad' =
+        LMAD
+          (o + op * LMAD.offset lmad)
+          (zipWith onDim ps (LMAD.dims lmad))
+  pure $ IxFun lmad' base
 
 -- | Turn all the leaves of the index function into 'Ext's.  We
 --  require that there's only one LMAD, that the index function is
