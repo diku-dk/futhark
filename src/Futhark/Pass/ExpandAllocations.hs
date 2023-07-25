@@ -477,10 +477,10 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
 
     newBase user@(SegThreadInGroup {}, _) = newBaseThread user
     newBase user@(SegThread {}, _) = newBaseThread user
-    newBase user@(SegGroup {}, _) = \old_shape ->
+    newBase user@(SegGroup {}, _) = \_old_shape ->
       let (users_shape, user_ids) = getNumUsers user
           dims = map pe64 (shapeDims users_shape)
-       in ( flattenIndex dims user_ids * product old_shape,
+       in ( flattenIndex dims user_ids,
             product dims
           )
 
