@@ -468,12 +468,12 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
       letBind allocpat $ Op $ Alloc (Var total_size) space
       pure $ M.singleton mem $ newBase user
 
-    newBaseThread user old_shape =
+    newBaseThread user _old_shape =
       let (users_shape, user_ids) = getNumUsers user
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids,
             product dims,
-            map (const (product dims)) old_shape
+            product dims
           )
 
     newBase user@(SegThreadInGroup {}, _) = newBaseThread user
@@ -483,7 +483,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids * product old_shape,
             product dims,
-            map (const 1) old_shape
+            1
           )
 
 expandedInvariantAllocations ::
@@ -546,10 +546,10 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
 
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
-    newBase old_shape =
-      (gtid, num_threads', map (const num_threads') old_shape)
+    newBase _old_shape =
+      (gtid, num_threads', num_threads')
 
-type Embedding = (Exp64, Exp64, [Exp64])
+type Embedding = (Exp64, Exp64, Exp64)
 
 -- | A map from memory block names to index function embeddings..
 type RebaseMap = M.Map VName ([Exp64] -> Embedding)
@@ -698,7 +698,7 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
                     prettyString (o, ps),
                     prettyString ixfun
                   ]
-          ixfun'' <- maybe problem pure $ IxFun.embed (Free <$> o) (Free <$> nt) (fmap (fmap Free) ps) ixfun
+          ixfun'' <- maybe problem pure $ IxFun.embed (Free <$> o) (Free <$> nt) (fmap Free ps) ixfun
           pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 

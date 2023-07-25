@@ -10,6 +10,7 @@ module Futhark.IR.Mem.IxFun.Alg
     slice,
     flatSlice,
     rebase,
+    embed,
     shape,
     index,
     disjoint,
@@ -48,6 +49,7 @@ data IxFun num
   | Coerce (IxFun num) (Shape num)
   | OffsetIndex (IxFun num) num
   | Rebase (IxFun num) (IxFun num)
+  | Embed num num num (IxFun num)
   deriving (Eq, Show)
 
 instance Pretty num => Pretty (IxFun num) where
@@ -68,6 +70,8 @@ instance Pretty num => Pretty (IxFun num) where
     pretty fun <> "->offset_index" <> parens (pretty i)
   pretty (Rebase new_base fun) =
     "rebase(" <> pretty new_base <> ", " <> pretty fun <> ")"
+  pretty (Embed a b ps fun) =
+    "embed(" <> pretty a <> "," <+> pretty b <> "," <+> pretty ps <> "," <+> pretty fun <> ")"
 
 iota :: Shape num -> IxFun num
 iota = Direct
@@ -86,6 +90,9 @@ flatSlice = FlatIndex
 
 rebase :: IxFun num -> IxFun num -> IxFun num
 rebase = Rebase
+
+embed :: num -> num -> num -> IxFun num -> IxFun num
+embed = Embed
 
 reshape :: IxFun num -> Shape num -> IxFun num
 reshape = Reshape
@@ -112,6 +119,8 @@ shape (Coerce _ dims) =
 shape (OffsetIndex ixfun _) =
   shape ixfun
 shape (Rebase _ ixfun) =
+  shape ixfun
+shape (Embed _ _ _ ixfun) =
   shape ixfun
 
 index ::
@@ -167,7 +176,10 @@ index (Rebase new_base fun) is =
           offsetIndex (rebase new_base ixfun) s
         r@Rebase {} ->
           r
+        Embed {} -> undefined
    in index fun' is
+index (Embed a _b ps ixfun) is =
+  a + ps * index ixfun is
 
 allPoints :: (IntegralExp num, Enum num) => [num] -> [[num]]
 allPoints dims =

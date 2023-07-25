@@ -111,12 +111,14 @@ tests =
         test_reshape_slice_iota3,
         test_complex1,
         test_complex2,
+        test_embed1,
+        test_embed2,
+        test_embed3,
+        test_embed4,
         test_rebase1,
         test_rebase2,
         test_rebase3,
         test_rebase4_5,
-        test_rebase6,
-        test_rebase7,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
@@ -235,6 +237,44 @@ test_complex2 =
         ixfun' = slice ixfun slice1
      in ixfun'
 
+-- Imitates a case from memory expansion.
+test_embed1 :: [TestTree]
+test_embed1 =
+  [ testCase "embed . iota1d" . compareOps $
+      embed t nt nt (iota [n])
+  ]
+  where
+    t = 3
+    nt = 7
+
+-- Imitates another case from memory expansion.
+test_embed2 :: [TestTree]
+test_embed2 =
+  [ testCase "embed . iota2d" . compareOps $
+      embed t nt nt (iota [n, n])
+  ]
+  where
+    t = 3
+    nt = 7
+
+test_embed3 :: [TestTree]
+test_embed3 =
+  [ testCase "embed . permute . iota2d" . compareOps $
+      embed t nt nt (permute (iota [n, n `div` 2]) [1, 0])
+  ]
+  where
+    t = 3
+    nt = 7
+
+test_embed4 :: [TestTree]
+test_embed4 =
+  [ testCase "embed . slice . iota1d" . compareOps $
+      embed t nt nt (slice (iota [n]) (Slice [DimSlice (n `div` 2) (n `div` 2) 1]))
+  ]
+  where
+    t = 3
+    nt = 7
+
 test_rebase1 :: [TestTree]
 test_rebase1 =
   singleton . testCase "rebase 1" . compareOpsFailure $
@@ -309,30 +349,6 @@ test_rebase4_5 =
    in [ testCase "rebase mixed monotonicities" . compareOpsFailure $
           rebase ixfn_base ixfn_orig
       ]
-
--- Imitates a case from memory expansion.
-test_rebase6 :: [TestTree]
-test_rebase6 =
-  [ testCase "rebase . slice1 . iota" . compareOps $
-      rebase
-        (slice (iota [n, n, n]) (Slice [DimSlice 0 n 1, DimSlice 0 n 1]))
-        ( slice
-            (iota [n, n])
-            (Slice [DimSlice 1 (n - 1) 1, DimSlice 0 n 1])
-        )
-  ]
-
--- Imitates another case from memory expansion.
-test_rebase7 :: [TestTree]
-test_rebase7 =
-  [ testCase "rebase . slice2 . iota" . compareOps $
-      rebase
-        (slice (iota [n, n, n]) (Slice [DimSlice 0 n 1, DimSlice 0 n 1]))
-        ( slice
-            (iota [n, n])
-            (Slice [DimSlice 0 (n - 1) 1, DimSlice 0 n 1])
-        )
-  ]
 
 test_flatSlice_iota :: [TestTree]
 test_flatSlice_iota =

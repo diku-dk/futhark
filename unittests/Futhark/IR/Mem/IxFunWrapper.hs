@@ -9,6 +9,7 @@ module Futhark.IR.Mem.IxFunWrapper
     slice,
     flatSlice,
     rebase,
+    embed,
   )
 where
 
@@ -71,3 +72,12 @@ rebase ::
   IxFun num ->
   IxFun num
 rebase (l, a) (l1, a1) = (join (I.rebase <$> l <*> l1), IA.rebase a a1)
+
+embed ::
+  (Eq num, IntegralExp num) =>
+  num ->
+  num ->
+  num ->
+  IxFun num ->
+  IxFun num
+embed a b ps (lf, af) = (I.embed a b ps =<< lf, IA.embed a b ps af)
