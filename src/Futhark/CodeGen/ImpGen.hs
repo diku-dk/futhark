@@ -1440,7 +1440,7 @@ isMapTransposeCopy pt (MemLoc _ _ dest_ixfun) (MemLoc _ _ src_ixfun)
     length (IxFun.base src_ixfun) == IxFun.rank src_ixfun,
     Just perm <- IxFun.base dest_ixfun `isPermutationOf` IxFun.base src_ixfun,
     Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (IxFun.base dest_ixfun) r1 r2
+      isOk perm (IxFun.base dest_ixfun) r1 r2
   | otherwise =
       Nothing
   where
@@ -1449,10 +1449,20 @@ isMapTransposeCopy pt (MemLoc _ _ dest_ixfun) (MemLoc _ _ src_ixfun)
     dest_offset = LMAD.offset dest_lmad
     src_offset = LMAD.offset src_lmad
 
-    isOk shape r1 r2 =
+    strides = map LMAD.ldStride . LMAD.dims
+
+    hasPermutation perm ixfun =
+      foldl1 (.&&.) $
+        zipWith
+          (.==.)
+          (rearrangeShape perm $ strides $ IxFun.ixfunLMAD ixfun)
+          (reverse $ scanl (*) 1 $ reverse $ tail $ IxFun.base ixfun)
+
+    isOk perm shape r1 r2 =
       let (num_arrays, size_x, size_y) = getSizes shape r1 r2
        in Just
-            ( LMAD.contiguous dest_lmad .&&. LMAD.contiguous src_lmad,
+            ( LMAD.contiguous dest_lmad
+                .&&. hasPermutation (rearrangeInverse perm) src_ixfun,
               ( dest_offset * primByteSize pt,
                 src_offset * primByteSize pt,
                 num_arrays,
