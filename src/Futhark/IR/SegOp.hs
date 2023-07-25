@@ -1358,13 +1358,13 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
     space = segSpace segop
 
     sliceWithGtidsFixed stm
-      | Let _ _ (BasicOp (Index arr slice)) <- stm,
+      | Let _ aux (BasicOp (Index arr slice)) <- stm,
         space_slice <- map (DimFix . Var . fst) $ unSegSpace space,
         space_slice `isPrefixOf` unSlice slice,
         remaining_slice <- Slice $ drop (length space_slice) (unSlice slice),
         all (isJust . flip ST.lookup vtable) $
           namesToList $
-            freeIn arr <> freeIn remaining_slice =
+            freeIn arr <> freeIn remaining_slice <> freeIn (stmAuxCerts aux) =
           Just (remaining_slice, arr)
       | otherwise =
           Nothing
@@ -1376,20 +1376,15 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
           let outer_slice =
                 map
                   ( \d ->
-                      DimSlice
-                        (constant (0 :: Int64))
-                        d
-                        (constant (1 :: Int64))
+                      DimSlice (constant (0 :: Int64)) d (constant (1 :: Int64))
                   )
                   $ segSpaceDims space
               index kpe' =
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $
                     outer_slice <> remaining_slice
-          if patElemName kpe
-            `UT.isConsumed` used
-            || arr
-            `nameIn` consumed_in_segop
+          if (patElemName kpe `UT.isConsumed` used)
+            || (arr `nameIn` consumed_in_segop)
             then do
               precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
               index kpe {patElemName = precopy}
