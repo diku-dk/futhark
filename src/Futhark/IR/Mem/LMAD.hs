@@ -15,6 +15,7 @@ module Futhark.IR.Mem.LMAD
     reshape,
     permute,
     shape,
+    rank,
     setShape,
     substituteInLMAD,
     permuteInv,
@@ -256,6 +257,10 @@ substituteInLMAD tab (LMAD offset dims) =
 shape :: LMAD num -> Shape num
 shape = map ldShape . dims
 
+-- | Rank of an LMAD.
+rank :: LMAD num -> Int
+rank = length . shape
+
 permuteFwd :: Permutation -> [a] -> [a]
 permuteFwd ps elems = map (elems !!) ps
 
@@ -277,7 +282,7 @@ iota off ns =
 
 -- | Create an LMAD that is existential in everything.
 mkExistential :: Int -> Int -> LMAD (Ext a)
-mkExistential rank start = LMAD (Ext start) $ map onDim [0 .. rank - 1]
+mkExistential r start = LMAD (Ext start) $ map onDim [0 .. r - 1]
   where
     onDim i = LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2))
 

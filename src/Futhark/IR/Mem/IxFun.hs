@@ -46,6 +46,7 @@ import Futhark.IR.Mem.LMAD hiding
     iota,
     mkExistential,
     permute,
+    rank,
     reshape,
     shape,
     slice,
