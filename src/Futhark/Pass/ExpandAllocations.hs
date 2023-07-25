@@ -472,7 +472,6 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
       let (users_shape, user_ids) = getNumUsers user
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids,
-            product dims,
             product dims
           )
 
@@ -482,8 +481,7 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
       let (users_shape, user_ids) = getNumUsers user
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids * product old_shape,
-            product dims,
-            1
+            product dims
           )
 
 expandedInvariantAllocations ::
@@ -547,12 +545,12 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
     newBase _old_shape =
-      (gtid, num_threads', num_threads')
+      (gtid, num_threads')
 
-type Embedding = (Exp64, Exp64, Exp64)
+type Expansion = (Exp64, Exp64)
 
 -- | A map from memory block names to index function embeddings..
-type RebaseMap = M.Map VName ([Exp64] -> Embedding)
+type RebaseMap = M.Map VName ([Exp64] -> Expansion)
 
 newtype OffsetM a
   = OffsetM
@@ -582,7 +580,7 @@ localRebaseMap f (OffsetM m) = OffsetM $ do
   scope <- ask
   lift $ local f $ runReaderT m scope
 
-lookupNewBase :: VName -> [Exp64] -> OffsetM (Maybe Embedding)
+lookupNewBase :: VName -> [Exp64] -> OffsetM (Maybe Expansion)
 lookupNewBase name x = do
   offsets <- askRebaseMap
   pure $ ($ x) <$> M.lookup name offsets
@@ -673,15 +671,15 @@ offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
   embedding <- lookupNewBase mem $ IxFun.shape ixfun
   case embedding of
     Nothing -> pure summary
-    Just (o, nt, ps) -> do
+    Just (o, p) -> do
       let problem =
             throwError . unlines $
               [ "offsetMemoryInMemBound",
                 prettyString v,
-                prettyString (o, ps),
+                prettyString (o, p),
                 prettyString ixfun
               ]
-      ixfun' <- maybe problem pure $ IxFun.embed o nt ps ixfun
+      ixfun' <- maybe problem pure $ IxFun.expand o p ixfun
       pure $ MemArray pt shape u $ ArrayIn mem ixfun'
 offsetMemoryInMemBound _ summary = pure summary
 
@@ -691,16 +689,16 @@ offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
       embedding <- lookupNewBase mem $ IxFun.shape ixfun'
       case embedding of
         Nothing -> pure br
-        Just (o, nt, ps) -> do
+        Just (o, p) -> do
           let problem =
                 throwError . unlines $
                   [ "offsetMemoryInBodyReturns",
-                    prettyString (o, ps),
+                    prettyString (o, p),
                     prettyString ixfun
                   ]
           ixfun'' <-
             maybe problem pure $
-              IxFun.embed (Free <$> o) (Free <$> nt) (fmap Free ps) ixfun
+              IxFun.expand (Free <$> o) (fmap Free p) ixfun
           pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 

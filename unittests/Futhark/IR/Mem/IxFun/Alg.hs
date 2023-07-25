@@ -9,7 +9,7 @@ module Futhark.IR.Mem.IxFun.Alg
     coerce,
     slice,
     flatSlice,
-    embed,
+    expand,
     shape,
     index,
     disjoint,
@@ -47,7 +47,7 @@ data IxFun num
   | Reshape (IxFun num) (Shape num)
   | Coerce (IxFun num) (Shape num)
   | OffsetIndex (IxFun num) num
-  | Embed num num num (IxFun num)
+  | Expand num num (IxFun num)
   deriving (Eq, Show)
 
 instance Pretty num => Pretty (IxFun num) where
@@ -66,8 +66,8 @@ instance Pretty num => Pretty (IxFun num) where
       <> parens (pretty oldshape)
   pretty (OffsetIndex fun i) =
     pretty fun <> "->offset_index" <> parens (pretty i)
-  pretty (Embed a b ps fun) =
-    "embed(" <> pretty a <> "," <+> pretty b <> "," <+> pretty ps <> "," <+> pretty fun <> ")"
+  pretty (Expand o p fun) =
+    "expand(" <> pretty o <> "," <+> pretty p <> "," <+> pretty fun <> ")"
 
 iota :: Shape num -> IxFun num
 iota = Direct
@@ -84,8 +84,8 @@ slice = Index
 flatSlice :: IxFun num -> FlatSlice num -> IxFun num
 flatSlice = FlatIndex
 
-embed :: num -> num -> num -> IxFun num -> IxFun num
-embed = Embed
+expand :: num -> num -> IxFun num -> IxFun num
+expand = Expand
 
 reshape :: IxFun num -> Shape num -> IxFun num
 reshape = Reshape
@@ -111,7 +111,7 @@ shape (Coerce _ dims) =
   dims
 shape (OffsetIndex ixfun _) =
   shape ixfun
-shape (Embed _ _ _ ixfun) =
+shape (Expand _ _ ixfun) =
   shape ixfun
 
 index ::
@@ -147,8 +147,8 @@ index (OffsetIndex fun i) is =
     d : ds ->
       index (Index fun (Slice (DimSlice i (d - i) 1 : map (unitSlice 0) ds))) is
     [] -> error "index: OffsetIndex: underlying index function has rank zero"
-index (Embed a _b ps ixfun) is =
-  a + ps * index ixfun is
+index (Expand o p ixfun) is =
+  o + p * index ixfun is
 
 allPoints :: (IntegralExp num, Enum num) => [num] -> [[num]]
 allPoints dims =

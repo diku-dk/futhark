@@ -111,10 +111,10 @@ tests =
         test_reshape_slice_iota3,
         test_complex1,
         test_complex2,
-        test_embed1,
-        test_embed2,
-        test_embed3,
-        test_embed4,
+        test_expand1,
+        test_expand2,
+        test_expand3,
+        test_expand4,
         test_flatSlice_iota,
         test_slice_flatSlice_iota,
         test_flatSlice_flatSlice_iota,
@@ -234,38 +234,38 @@ test_complex2 =
      in ixfun'
 
 -- Imitates a case from memory expansion.
-test_embed1 :: [TestTree]
-test_embed1 =
-  [ testCase "embed . iota1d" . compareOps $
-      embed t nt nt (iota [n])
+test_expand1 :: [TestTree]
+test_expand1 =
+  [ testCase "expand . iota1d" . compareOps $
+      expand t nt (iota [n])
   ]
   where
     t = 3
     nt = 7
 
 -- Imitates another case from memory expansion.
-test_embed2 :: [TestTree]
-test_embed2 =
-  [ testCase "embed . iota2d" . compareOps $
-      embed t nt nt (iota [n, n])
+test_expand2 :: [TestTree]
+test_expand2 =
+  [ testCase "expand . iota2d" . compareOps $
+      expand t nt (iota [n, n])
   ]
   where
     t = 3
     nt = 7
 
-test_embed3 :: [TestTree]
-test_embed3 =
-  [ testCase "embed . permute . iota2d" . compareOps $
-      embed t nt nt (permute (iota [n, n `div` 2]) [1, 0])
+test_expand3 :: [TestTree]
+test_expand3 =
+  [ testCase "expand . permute . iota2d" . compareOps $
+      expand t nt (permute (iota [n, n `div` 2]) [1, 0])
   ]
   where
     t = 3
     nt = 7
 
-test_embed4 :: [TestTree]
-test_embed4 =
-  [ testCase "embed . slice . iota1d" . compareOps $
-      embed t nt nt (slice (iota [n]) (Slice [DimSlice (n `div` 2) (n `div` 2) 1]))
+test_expand4 :: [TestTree]
+test_expand4 =
+  [ testCase "expand . slice . iota1d" . compareOps $
+      expand t nt (slice (iota [n]) (Slice [DimSlice (n `div` 2) (n `div` 2) 1]))
   ]
   where
     t = 3

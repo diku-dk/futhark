@@ -8,7 +8,7 @@ module Futhark.IR.Mem.IxFunWrapper
     coerce,
     slice,
     flatSlice,
-    embed,
+    expand,
   )
 where
 
@@ -65,11 +65,10 @@ flatSlice ::
   IxFun num
 flatSlice (l, a) x = (I.flatSlice <$> l <*> pure x, IA.flatSlice a x)
 
-embed ::
+expand ::
   (Eq num, IntegralExp num) =>
-  num ->
   num ->
   num ->
   IxFun num ->
   IxFun num
-embed a b ps (lf, af) = (I.embed a b ps =<< lf, IA.embed a b ps af)
+expand o p (lf, af) = (I.expand o p =<< lf, IA.expand o p af)

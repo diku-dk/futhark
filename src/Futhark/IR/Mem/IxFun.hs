@@ -16,7 +16,7 @@ module Futhark.IR.Mem.IxFun
     coerce,
     slice,
     flatSlice,
-    embed,
+    expand,
     shape,
     rank,
     isDirect,
@@ -230,15 +230,16 @@ coerce (IxFun lmad _) new_shape =
 rank :: IntegralExp num => IxFun num -> Int
 rank (IxFun (LMAD _ sss) _) = length sss
 
--- | Conceptually embed another index function in another by tweaking
--- the offset and strides.  Used for memory expansion.
-embed ::
-  (Eq num, IntegralExp num) => num -> num -> num -> IxFun num -> Maybe (IxFun num)
-embed o op p (IxFun lmad base) =
+-- | Conceptually expand index function to be a particular slice of
+-- another by adjusting the offset and strides.  Used for memory
+-- expansion.
+expand ::
+  (Eq num, IntegralExp num) => num -> num -> IxFun num -> Maybe (IxFun num)
+expand o p (IxFun lmad base) =
   let onDim ld = ld {LMAD.ldStride = LMAD.ldStride ld * p}
       lmad' =
         LMAD
-          (o + op * LMAD.offset lmad)
+          (o + p * LMAD.offset lmad)
           (map onDim (LMAD.dims lmad))
    in Just $ IxFun lmad' base
 
