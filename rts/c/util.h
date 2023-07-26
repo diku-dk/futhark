@@ -148,4 +148,93 @@ static char *strclone(const char *str) {
   return copy;
 }
 
+// check whether strides can be seen as a colmajor 2D-array.  This is
+// done by checking every possible splitting point.
+static bool is_colmajor(int64_t *n_out, int64_t *m_out,
+                        int r,
+                        const int64_t strides[r],
+                        const int64_t shape[r]) {
+  for (int i = 1; i < r; i++) {
+    int n = 1, m = 1;
+    bool ok = true;
+    int64_t expected = 1;
+    // Check strides before 'i'.
+    for (int j = i-1; j >= 0; j--) {
+      ok = ok && strides[j] == expected;
+      expected *= shape[j];
+      n *= shape[j];
+    }
+    // Check strides after 'i'.
+    for (int j = r-1; j >= i; j--) {
+      ok = ok && strides[j] == expected;
+      expected *= shape[j];
+      m *= shape[j];
+    }
+    if (ok) {
+      *n_out = n;
+      *m_out = m;
+      return true;
+    }
+  }
+  return false;
+}
+
+// This function determines whether the a 'dst' LMAD is row-major and
+// 'src' LMAD is column-major.  Both LMADs are for arrays of the same
+// shape.  Both LMADs are allowed to have additional dimensions "on
+// top".  Essentially, this function determines whether a copy from
+// 'src' to 'dst' is a "map(transpose)" that we know how to implement
+// efficiently.  The LMADs can have arbitrary rank, and the main
+// challenge here is checking whether the src LMAD actually
+// corresponds to a 2D column-major layout by morally collapsing
+// dimensions.  There is a lot of looping here, but the actual trip
+// count is going to be very low in practice.
+//
+// Returns true if this is indeed a map(transpose), and writes the
+// number of arrays, and moral array size to appropriate output
+// parameters.
+static bool is_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
+                      int r,
+                      const int64_t dst_strides[r],
+                      const int64_t src_strides[r],
+                      const int64_t shape[r]) {
+  int64_t rowmajor_strides[r];
+  rowmajor_strides[r-1] = 1;
+
+  for (int i = r-2; i >= 0; i--) {
+    rowmajor_strides[i] = rowmajor_strides[i+1] * shape[i+1];
+  }
+
+  // map_r will be the number of mapped dimensions on top.
+  int map_r = 0;
+  int64_t num_arrays = 1;
+  for (int i = 0; i < r; i++) {
+    if (dst_strides[i] != rowmajor_strides[i] ||
+        src_strides[i] != rowmajor_strides[i]) {
+      break;
+    } else {
+      num_arrays *= shape[i];
+      map_r++;
+    }
+  }
+
+  *num_arrays_out = num_arrays;
+
+  if (memcmp(&rowmajor_strides[map_r],
+             &dst_strides[map_r],
+             sizeof(int64_t)*(r-map_r)) == 0) {
+    if (is_colmajor(n_out, m_out, r-map_r, src_strides+map_r, shape+map_r)) {
+      return true;
+    }
+  } else if (memcmp(&rowmajor_strides[map_r],
+                    &src_strides[map_r],
+                    sizeof(int64_t)*(r-map_r)) == 0) {
+    if (is_colmajor(n_out, m_out, r-map_r, dst_strides+map_r, shape+map_r)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // End of util.h.
