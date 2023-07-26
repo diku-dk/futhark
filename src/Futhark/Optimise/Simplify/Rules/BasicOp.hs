@@ -330,6 +330,11 @@ ruleBasicOp vtable pat aux (CmpOp CmpSlt {} (Var x) y)
   | isCt0 y,
     maybe False ST.entryIsSize $ ST.lookup x vtable =
       Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant False
+-- Simplify away 0<=y when 'y' has been used as array size.
+ruleBasicOp vtable pat aux (CmpOp CmpSle {} x (Var y))
+  | isCt0 x,
+    maybe False ST.entryIsSize $ ST.lookup y vtable =
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ SubExp $ constant True
 -- Remove certificates for variables whose definition already contain
 -- that certificate.
 ruleBasicOp vtable pat aux (SubExp (Var v))
