@@ -291,6 +291,18 @@ data Code a
       (Count Bytes (TExp Int64))
       Space
       (Count Bytes (TExp Int64))
+  | -- | @LMADcopy pt dest dest_lmad src src_lmad shape@
+    LMADCopy
+      PrimType
+      [Count Elements (TExp Int64)]
+      (VName, Space)
+      ( Count Elements (TExp Int64),
+        [Count Elements (TExp Int64)]
+      )
+      (VName, Space)
+      ( Count Elements (TExp Int64),
+        [Count Elements (TExp Int64)]
+      )
   | -- | @Write mem i t space vol v@ writes the value @v@ to
     -- @mem@ offset by @i@ elements of type @t@.  The
     -- 'Space' argument is the memory space of @mem@
@@ -592,6 +604,17 @@ instance Pretty op => Pretty (Code op) where
     where
       ppMemLoc base offset =
         pretty base <+> "+" <+> pretty offset
+  pretty (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+    ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
+      <> (parens . align)
+        ( foldMap (brackets . pretty) shape <> ","
+            </> p dst dstspace dstoffset dststrides <> ","
+            </> p src srcspace srcoffset srcstrides
+        )
+    where
+      p mem space offset strides =
+        pretty mem <> pretty space <> "+" <> pretty offset
+          <+> foldMap (brackets . pretty) strides
   pretty (If cond tbranch fbranch) =
     "if"
       <+> pretty cond
@@ -675,6 +698,8 @@ instance Traversable Code where
     pure $ Free name space
   traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
     pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
+  traverse _ (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+    pure $ LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -749,6 +774,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name
   freeIn' (Copy _ dest x _ src y _ n) =
     freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
+  freeIn' (LMADCopy _ shape (dst, _) (dstoffset, dststrides) (src, _) (srcoffset, srcstrides)) =
+    freeIn' shape <> freeIn' dst <> freeIn' dstoffset <> freeIn' dststrides <> freeIn' src <> freeIn' srcoffset <> freeIn' srcstrides
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
   freeIn' (Write v i _ _ _ e) =

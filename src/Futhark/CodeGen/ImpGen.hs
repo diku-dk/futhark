@@ -70,7 +70,7 @@ module Futhark.CodeGen.ImpGen
     copy,
     copyDWIM,
     copyDWIMFix,
-    copyElementWise,
+    lmadCopy,
     typeSize,
     inBounds,
     isMapTransposeCopy,
@@ -137,7 +137,6 @@ import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
     Elements,
-    bytes,
     elements,
     withElemType,
   )
@@ -192,7 +191,7 @@ defaultOperations opc =
     { opsExpCompiler = defCompileExp,
       opsOpCompiler = opc,
       opsStmsCompiler = defCompileStms,
-      opsCopyCompiler = defaultCopy,
+      opsCopyCompiler = lmadCopy,
       opsAllocCompilers = mempty
     }
 
@@ -1489,67 +1488,26 @@ mapTransposeForType bt = do
 
   pure fname
 
--- | Use 'sCopy' if possible, otherwise 'copyElementWise'.
-defaultCopy :: CopyCompiler rep r op
-defaultCopy pt dest src
-  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
-      isMapTransposeCopy pt dest src = do
-      fname <- mapTransposeForType pt
-      sIf
-        is_transpose
-        ( emit . Imp.Call [] fname $
-            transposeArgs
-              pt
-              destmem
-              (bytes destoffset)
-              srcmem
-              (bytes srcoffset)
-              num_arrays
-              size_x
-              size_y
-        )
-        nontranspose
-  | otherwise = nontranspose
-  where
-    num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
-
-    MemLoc destmem _ dest_ixfun = dest
-    MemLoc srcmem _ src_ixfun = src
-
-    isScalarSpace ScalarSpace {} = True
-    isScalarSpace _ = False
-
-    nontranspose = do
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      if isScalarSpace srcspace || isScalarSpace destspace
-        then copyElementWise pt dest src
-        else do
-          let dest_lmad = IxFun.ixfunLMAD dest_ixfun
-              src_lmad = IxFun.ixfunLMAD src_ixfun
-              destoffset = elements (LMAD.offset dest_lmad) `withElemType` pt
-              srcoffset = elements (LMAD.offset src_lmad) `withElemType` pt
-          sIf
-            (LMAD.memcpyable dest_lmad src_lmad)
-            (sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt)
-            (copyElementWise pt dest src)
-
-copyElementWise :: CopyCompiler rep r op
-copyElementWise bt dest src = do
-  let bounds = IxFun.shape $ memLocIxFun src
-  is <- replicateM (length bounds) (newVName "i")
-  let ivars = map Imp.le64 is
-  (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
-  (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
-  vol <- asks envVolatility
-  tmp <- newVName "tmp"
+lmadCopy :: CopyCompiler rep r op
+lmadCopy t dstloc srcloc = do
+  let dstmem = memLocName dstloc
+      srcmem = memLocName srcloc
+      dstlmad = IxFun.ixfunLMAD $ memLocIxFun dstloc
+      srclmad = IxFun.ixfunLMAD $ memLocIxFun srcloc
+  srcspace <- entryMemSpace <$> lookupMemory dstmem
+  dstspace <- entryMemSpace <$> lookupMemory srcmem
   emit $
-    foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
-      mconcat
-        [ Imp.DeclareScalar tmp vol bt,
-          Imp.Read tmp srcmem srcidx bt srcspace vol,
-          Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
-        ]
+    Imp.LMADCopy
+      t
+      (elements <$> LMAD.shape dstlmad)
+      (dstmem, dstspace)
+      ( LMAD.offset $ elements <$> dstlmad,
+        map LMAD.ldStride $ LMAD.dims $ elements <$> dstlmad
+      )
+      (srcmem, srcspace)
+      ( LMAD.offset $ elements <$> srclmad,
+        map LMAD.ldStride $ LMAD.dims $ elements <$> srclmad
+      )
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.

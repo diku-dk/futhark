@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.GenericC.Code
     compileCode,
     compileDest,
     compileArg,
+    compileLMADCopy,
     errorMsgString,
     linearCode,
   )
@@ -133,6 +134,50 @@ assignmentOperator Sub {} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
 assignmentOperator Mul {} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
 assignmentOperator _ = Nothing
 
+generateRead ::
+  C.Exp ->
+  C.Exp ->
+  PrimType ->
+  Space ->
+  Volatility ->
+  CompilerM op s C.Exp
+generateRead _ _ Unit _ _ =
+  pure [C.cexp|$exp:(UnitValue)|]
+generateRead src iexp _ ScalarSpace {} _ =
+  pure [C.cexp|$exp:src[$exp:iexp]|]
+generateRead src iexp restype DefaultSpace vol =
+  pure . fromStorage restype $
+    derefPointer
+      src
+      iexp
+      [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
+generateRead src iexp restype (Space space) vol = do
+  reader <- asks (opsReadScalar . envOperations)
+  fromStorage restype <$> reader src iexp (primStorageType restype) space vol
+
+generateWrite ::
+  C.Exp ->
+  C.Exp ->
+  PrimType ->
+  Space ->
+  Volatility ->
+  C.Exp ->
+  CompilerM op s ()
+generateWrite _ _ Unit _ _ _ = pure ()
+generateWrite dest idx _ ScalarSpace {} _ elemexp = do
+  stm [C.cstm|$exp:dest[$exp:idx] = $exp:elemexp;|]
+generateWrite dest idx elemtype DefaultSpace vol elemexp = do
+  let deref =
+        derefPointer
+          dest
+          idx
+          [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
+      elemexp' = toStorage elemtype elemexp
+  stm [C.cstm|$exp:deref = $exp:elemexp';|]
+generateWrite dest idx elemtype (Space space) vol elemexp = do
+  writer <- asks (opsWriteScalar . envOperations)
+  writer dest idx (primStorageType elemtype) space vol (toStorage elemtype elemexp)
+
 compileRead ::
   VName ->
   Count u (TPrimExp t VName) ->
@@ -140,25 +185,10 @@ compileRead ::
   Space ->
   Volatility ->
   CompilerM op s C.Exp
-compileRead _ _ Unit _ _ =
-  pure [C.cexp|$exp:(UnitValue)|]
-compileRead src (Count iexp) restype DefaultSpace vol = do
+compileRead src (Count iexp) restype space vol = do
   src' <- rawMem src
-  fmap (fromStorage restype) $
-    derefPointer src'
-      <$> compileExp (untyped iexp)
-      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType restype)*|]
-compileRead src (Count iexp) restype (Space space) vol =
-  fmap (fromStorage restype) . join $
-    asks (opsReadScalar . envOperations)
-      <*> rawMem src
-      <*> compileExp (untyped iexp)
-      <*> pure (primStorageType restype)
-      <*> pure space
-      <*> pure vol
-compileRead src (Count iexp) _ ScalarSpace {} _ = do
-  iexp' <- compileExp $ untyped iexp
-  pure [C.cexp|$id:src[$exp:iexp']|]
+  iexp' <- compileExp (untyped iexp)
+  generateRead src' iexp' restype space vol
 
 memNeedsWrapping :: VName -> CompilerM op s Bool
 memNeedsWrapping v = do
@@ -304,6 +334,8 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if ($exp:cond') { $items:tbranch' } else $stm:x|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
+compileCode (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+  compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
 compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $
     copyMemoryDefaultSpace
@@ -324,27 +356,11 @@ compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcs
       <*> pure srcspace
       <*> compileExp (untyped size)
 compileCode (Write _ _ Unit _ _ _) = pure ()
-compileCode (Write dest (Count idx) elemtype DefaultSpace vol elemexp) = do
-  dest' <- rawMem dest
-  deref <-
-    derefPointer dest'
-      <$> compileExp (untyped idx)
-      <*> pure [C.cty|$tyquals:(volQuals vol) $ty:(primStorageType elemtype)*|]
-  elemexp' <- toStorage elemtype <$> compileExp elemexp
-  stm [C.cstm|$exp:deref = $exp:elemexp';|]
-compileCode (Write dest (Count idx) _ ScalarSpace {} _ elemexp) = do
+compileCode (Write dst (Count idx) elemtype space vol elemexp) = do
+  dst' <- rawMem dst
   idx' <- compileExp (untyped idx)
   elemexp' <- compileExp elemexp
-  stm [C.cstm|$id:dest[$exp:idx'] = $exp:elemexp';|]
-compileCode (Write dest (Count idx) elemtype (Space space) vol elemexp) =
-  join $
-    asks (opsWriteScalar . envOperations)
-      <*> rawMem dest
-      <*> compileExp (untyped idx)
-      <*> pure (primStorageType elemtype)
-      <*> pure space
-      <*> pure vol
-      <*> (toStorage elemtype <$> compileExp elemexp)
+  generateWrite dst' idx' elemtype space vol elemexp'
 compileCode (Read x src i restype space vol) = do
   e <- compileRead src i restype space vol
   stm [C.cstm|$id:x = $exp:e;|]
@@ -394,3 +410,44 @@ compileCode (Call dests fname args) = do
       <*> pure fname
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
+
+-- | Compile an 'LMADCopy' using sequential nested loops and
+-- 'Read'/'Write' of individual scalars.  This always works, but can
+-- be pretty slow if those reads and writes are costly.
+compileLMADCopy ::
+  PrimType ->
+  [Count Elements (TExp Int64)] ->
+  (VName, Space) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  (VName, Space) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  CompilerM op s ()
+compileLMADCopy
+  t
+  shape
+  (dst, dstspace)
+  (dstoffset, dststrides)
+  (src, srcspace)
+  (srcoffset, srcstrides) = do
+    shape' <- mapM (compileExp . untyped . unCount) shape
+    dst_i <- compileExp $ untyped $ unCount $ dstoffset + sum (zipWith (*) is' dststrides)
+    src_i <- compileExp $ untyped $ unCount $ srcoffset + sum (zipWith (*) is' srcstrides)
+    body <- collect $ do
+      src' <- rawMem src
+      dst' <- rawMem dst
+      generateWrite dst' dst_i t dstspace Nonvolatile
+        =<< generateRead src' src_i t srcspace Nonvolatile
+    items $ loops (zip is shape') body
+    where
+      r = length shape
+      is = map (VName "i") [0 .. r - 1]
+      is' :: [Count Elements (TExp Int64)]
+      is' = map (elements . le64) is
+      loops [] body = body
+      loops ((i, n) : ins) body =
+        [C.citems|for (typename int64_t $id:i = 0; $id:i < $exp:n; $id:i++)
+                  { $items:(loops ins body) }|]

@@ -39,7 +39,7 @@ callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations
     { opsExpCompiler = expCompiler,
-      opsCopyCompiler = callKernelCopy,
+      opsCopyCompiler = lmadCopy,
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
       opsAllocCompilers = mempty
@@ -538,51 +538,3 @@ mapTransposeFunction bt =
 -- unfortunate code bloat, and it would be preferable if we could
 -- simply optimise the 64-bit version to make this distinction
 -- unnecessary.  Fortunately these kernels are quite small.
-
-callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy pt destloc@(MemLoc destmem _ dest_ixfun) srcloc@(MemLoc srcmem _ src_ixfun)
-  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
-      isMapTransposeCopy pt destloc srcloc = do
-      fname <- mapTransposeForType pt
-      sIf
-        is_transpose
-        ( emit . Imp.Call [] fname $
-            [ Imp.MemArg destmem,
-              Imp.ExpArg $ untyped destoffset,
-              Imp.MemArg srcmem,
-              Imp.ExpArg $ untyped srcoffset,
-              Imp.ExpArg $ untyped num_arrays,
-              Imp.ExpArg $ untyped size_x,
-              Imp.ExpArg $ untyped size_y
-            ]
-        )
-        nontranspose
-  | otherwise = nontranspose
-  where
-    nontranspose = do
-      fname <- gpuCopyForType (Rank (IxFun.rank dest_ixfun)) pt
-      dest_space <- entryMemSpace <$> lookupMemory destmem
-      src_space <- entryMemSpace <$> lookupMemory srcmem
-      let dest_lmad = IxFun.ixfunLMAD dest_ixfun
-          src_lmad = IxFun.ixfunLMAD src_ixfun
-          num_elems = Imp.elements $ product $ LMAD.shape dest_lmad
-      if dest_space == Space "device" && src_space == Space "device"
-        then
-          emit . Imp.Call [] fname $
-            [Imp.MemArg destmem]
-              ++ map (Imp.ExpArg . untyped) (toList dest_lmad)
-              ++ [Imp.MemArg srcmem]
-              ++ map (Imp.ExpArg . untyped) (toList src_lmad)
-        else -- FIXME: this assumes a linear representation!
-        -- Currently we never generate code where this is not the
-        -- case, but we might in the future.
-
-          sCopy
-            destmem
-            (Imp.elements (LMAD.offset dest_lmad) `Imp.withElemType` pt)
-            dest_space
-            srcmem
-            (Imp.elements (LMAD.offset src_lmad) `Imp.withElemType` pt)
-            src_space
-            num_elems
-            pt

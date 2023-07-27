@@ -1227,4 +1227,34 @@ cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) 
   return ctx->queue;
 }
 
+int opencl_scalar_to_device(struct futhark_context* ctx,
+                            cl_mem dst, size_t offset, size_t size,
+                            void *src,
+                            int* runs, int64_t* total_runtime) {
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, runs, total_runtime);
+  }
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueWriteBuffer
+     (ctx->queue, dst, CL_TRUE,
+      offset, size, src, 0, NULL, event));
+  return 0;
+}
+
+int opencl_scalar_from_device(struct futhark_context* ctx,
+                              void *dst,
+                              cl_mem src, size_t offset, size_t size,
+                              int* runs, int64_t* total_runtime) {
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, runs, total_runtime);
+  }
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueReadBuffer
+     (ctx->queue, src, ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
+      offset, size, dst, 0, NULL, event));
+  return 0;
+}
+
 // End of backends/opencl.h
