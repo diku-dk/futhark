@@ -16,6 +16,7 @@ where
 
 import Control.Monad
 import Control.Monad.Reader (asks)
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC.Monad
@@ -334,8 +335,20 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if ($exp:cond') { $items:tbranch' } else $stm:x|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
-  compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+compileCode (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
+  cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
+  case cp of
+    Nothing ->
+      compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+    Just cp' -> do
+      shape' <- traverse (traverse (compileExp . untyped)) shape
+      dst' <- rawMem dst
+      src' <- rawMem src
+      dstoffset' <- traverse (compileExp . untyped) dstoffset
+      dststrides' <- traverse (traverse (compileExp . untyped)) dststrides
+      srcoffset' <- traverse (compileExp . untyped) srcoffset
+      srcstrides' <- traverse (traverse (compileExp . untyped)) srcstrides
+      cp' CopyBarrier t shape' dst' (dstoffset', dststrides') src' (srcoffset', srcstrides')
 compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
   join $
     copyMemoryDefaultSpace

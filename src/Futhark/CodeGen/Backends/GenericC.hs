@@ -61,6 +61,30 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
+lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let fname :: String
+      (fname, t') =
+        case primByteSize t :: Int of
+          1 -> ("lmad_copy_1b", [C.cty|typename uint8_t|])
+          2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
+          4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
+          8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
+          k -> error $ "lmadcopyCPU: " <> error (show k)
+      r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  stm
+    [C.cstm|{
+         $id:fname($int:r,
+                   ($ty:t'*)$exp:dst+$exp:(unCount dstoffset),
+                   (typename int64_t[]){ $inits:dststride_inits },
+                   ($ty:t'*)$exp:src+$exp:(unCount srcoffset),
+                   (typename int64_t[]){ $inits:srcstride_inits },
+                   (typename int64_t[]){ $inits:shape_inits });
+     }|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -72,6 +96,7 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
+      opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,

@@ -733,6 +733,7 @@ inKernelOperations env mode body =
       GC.opsAllocate = cannotAllocate,
       GC.opsDeallocate = cannotDeallocate,
       GC.opsCopy = copyInKernel,
+      GC.opsCopies = mempty,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
