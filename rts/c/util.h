@@ -282,8 +282,26 @@ static bool lmad_is_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_o
   return false;
 }
 
-static bool lmad_contiguous(int r, int64_t strides[r]) {
-  return true;
+// Does this LMAD correspond to an array with positive strides and no
+// holes?
+static bool lmad_contiguous(int r, int64_t strides[r], int64_t shape[r]) {
+  bool used[r];
+  int checked = 0;
+  int64_t expected = 1;
+  for (int i = 0; i < r; i++) {
+    used[i] = false;
+  }
+  for (int i = 0; i < r; i++) {
+    for (int j = 0; j < r; j++) {
+      if (!used[j] && strides[j] == expected && shape[j] >= 0) {
+        used[j] = true;
+        expected *= shape[j];
+        checked++;
+        break;
+      }
+    }
+  }
+  return checked == r;
 }
 
 #define GEN_LMAD_COPY(NAME, ELEM_TYPE)                                  \
@@ -297,8 +315,8 @@ static bool lmad_contiguous(int r, int64_t strides[r]) {
                        r, dst_strides, src_strides, shape)) {           \
       map_transpose_##NAME(dst, src, k, n, m, 0, n, 0, m);              \
     } else {                                                            \
-      if (0 &&lmad_contiguous(r, dst_strides) &&                            \
-          lmad_contiguous(r, src_strides)) {                            \
+      if (lmad_contiguous(r, dst_strides, shape) &&                     \
+          memcmp(src_strides, dst_strides, r*sizeof(*src_strides)) == 0) { \
         int64_t n = 1;                                                  \
         for (int i = 0; i < r; i++) { n *= shape[i]; }                  \
         memcpy(dst, src, n*sizeof(*dst));                               \
