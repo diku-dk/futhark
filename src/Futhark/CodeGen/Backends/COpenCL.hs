@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.COpenCL
 where
 
 import Control.Monad hiding (mapM)
+import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -77,6 +78,9 @@ compileProg version prog = do
           GC.opsAllocate = allocateOpenCLBuffer,
           GC.opsDeallocate = deallocateOpenCLBuffer,
           GC.opsCopy = copyOpenCLMemory,
+          GC.opsCopies =
+            M.insert (Space "device", Space "device") copygpu2gpu $
+              GC.opsCopies GC.defaultOperations,
           GC.opsMemoryType = openclMemoryType,
           GC.opsFatMemory = True
         }

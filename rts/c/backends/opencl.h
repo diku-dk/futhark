@@ -1257,4 +1257,63 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
   return 0;
 }
 
+#define GEN_MAP_TRANSPOSE_GPU2GPU(NAME, ELEM_TYPE)                      \
+  static int map_transpose_gpu2gpu_##NAME                               \
+  (struct futhark_context* ctx,                                         \
+   cl_mem dst, int64_t dst_offset,                                      \
+   cl_mem src, int64_t src_offset,                                      \
+   int64_t k, int64_t m, int64_t n)                                     \
+  {                                                                     \
+    set_error(ctx, "gpu2gpu transpose not implemented yet\n");            \
+    return 1;                                                           \
+  }
+
+#define GEN_LMAD_COPY_ELEMENTS_GPU2GPU(NAME, ELEM_TYPE)                 \
+  static int lmad_copy_elements_gpu2gpu_##NAME                          \
+  (struct futhark_context* ctx,                                         \
+   int r,                                                               \
+   cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],              \
+   cl_mem src, int64_t src_offset, int64_t src_strides[r],              \
+   int64_t shape[r]) {                                                  \
+    set_error(ctx, "gpu2gpu lmad copy not implemented yet\n");            \
+    return 1;                                                           \
+  }                                                                     \
+
+#define GEN_LMAD_COPY_GPU2GPU(NAME, ELEM_TYPE)                          \
+  static int lmad_copy_gpu2gpu_##NAME                                   \
+  (struct futhark_context* ctx,                                         \
+   int r,                                                               \
+   cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],               \
+   cl_mem src, int64_t src_offset, int64_t src_strides[r],               \
+   int64_t shape[r]) {                                                  \
+  int64_t k, n, m;                                                      \
+  if (lmad_is_map_tr(&k, &n, &m,                                        \
+                     r, dst_strides, src_strides, shape)) {             \
+    return map_transpose_gpu2gpu_##NAME(ctx, dst, dst_offset, src, src_offset, k, n, m); \
+  } else if (lmad_contiguous(r, dst_strides, shape) &&                  \
+             memcmp(src_strides, dst_strides, r*sizeof(*src_strides)) == 0) { \
+  int64_t n = 1;                                                        \
+  for (int i = 0; i < r; i++) { n *= shape[i]; }                        \
+  OPENCL_SUCCEED_OR_RETURN(clEnqueueCopyBuffer(ctx->queue, src, dst, src_offset, dst_offset, n * sizeof(ELEM_TYPE), 0, NULL, NULL)); \
+  } else {                                                              \
+    return lmad_copy_elements_gpu2gpu_##NAME(ctx, r, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape); \
+  }                                                                     \
+}
+
+GEN_MAP_TRANSPOSE_GPU2GPU(1b, uint8_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(2b, uint16_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(4b, uint32_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(8b, uint64_t)
+
+GEN_LMAD_COPY_ELEMENTS_GPU2GPU(1b, uint8_t)
+GEN_LMAD_COPY_ELEMENTS_GPU2GPU(2b, uint16_t)
+GEN_LMAD_COPY_ELEMENTS_GPU2GPU(4b, uint32_t)
+GEN_LMAD_COPY_ELEMENTS_GPU2GPU(8b, uint64_t)
+
+GEN_LMAD_COPY_GPU2GPU(1b, uint8_t)
+GEN_LMAD_COPY_GPU2GPU(2b, uint16_t)
+GEN_LMAD_COPY_GPU2GPU(4b, uint32_t)
+GEN_LMAD_COPY_GPU2GPU(8b, uint64_t)
+
+
 // End of backends/opencl.h

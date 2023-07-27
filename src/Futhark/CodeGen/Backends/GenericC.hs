@@ -76,14 +76,13 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
   stm
-    [C.cstm|{
+    [C.cstm|
          $id:fname($int:r,
                    ($ty:t'*)$exp:dst+$exp:(unCount dstoffset),
                    (typename int64_t[]){ $inits:dststride_inits },
                    ($ty:t'*)$exp:src+$exp:(unCount srcoffset),
                    (typename int64_t[]){ $inits:srcstride_inits },
-                   (typename int64_t[]){ $inits:shape_inits });
-     }|]
+                   (typename int64_t[]){ $inits:shape_inits });|]
 
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for

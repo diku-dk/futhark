@@ -12,10 +12,11 @@ where
 
 import Control.Monad
 import Data.List (unzip4)
+import Data.Map qualified as M
 import Data.Maybe (catMaybes)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, sizeLoggingCode)
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions, copygpu2gpu, sizeLoggingCode)
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
@@ -70,6 +71,9 @@ compileProg version prog = do
           GC.opsAllocate = allocateCUDABuffer,
           GC.opsDeallocate = deallocateCUDABuffer,
           GC.opsCopy = copyCUDAMemory,
+          GC.opsCopies =
+            M.insert (Space "device", Space "device") copygpu2gpu $
+              GC.opsCopies GC.defaultOperations,
           GC.opsMemoryType = cudaMemoryType,
           GC.opsCompiler = callKernel,
           GC.opsFatMemory = True,
