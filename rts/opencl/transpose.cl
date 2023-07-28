@@ -1,3 +1,5 @@
+// Start of transpose.cl
+
 __attribute__((reqd_work_group_size(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)))
 __kernel void map_transpose_4b(__global uint32_t *dstmem,
                                int64_t dstoffset,
@@ -25,7 +27,7 @@ __kernel void map_transpose_4b(__global uint32_t *dstmem,
       }
     }
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier_local();
   x_index = get_group_id(1) * TR_TILE_DIM + get_local_id(0);
   y_index = get_group_id(0) * TR_TILE_DIM + get_local_id(1);
   if (x_index < y_elems) {
@@ -64,7 +66,7 @@ __kernel void map_transpose_4b_low_height(__global uint32_t *dstmem,
     block[get_local_id(1) * (TR_BLOCK_DIM+1) + get_local_id(0)] =
       srcmem[idata_offset + index_in];
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier_local();
   x_index = get_group_id(1) * TR_BLOCK_DIM + get_local_id(0)/mulx;
   y_index = get_group_id(0) * TR_BLOCK_DIM * mulx + get_local_id(1) + (get_local_id(0)%mulx) * TR_BLOCK_DIM;
 
@@ -100,7 +102,7 @@ __kernel void map_transpose_4b_low_width(__global uint32_t *destmem,
     block[get_local_id(1) * (TR_BLOCK_DIM+1) + get_local_id(0)] =
       srcmem[idata_offset + index_in];
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier_local();
   x_index = get_group_id(1) * TR_BLOCK_DIM * muly + get_local_id(0) + (get_local_id(1)%muly) * TR_BLOCK_DIM;
   y_index = get_group_id(0) * TR_BLOCK_DIM + get_local_id(1)/muly;
 
@@ -164,7 +166,7 @@ __kernel void map_transpose_4b_large(__global uint32_t *dstmem,
       }
     }
   }
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier_local();
   x_index = get_group_id(1) * TR_TILE_DIM + get_local_id(0);
   y_index = get_group_id(0) * TR_TILE_DIM + get_local_id(1);
   if (x_index < y_elems) {
@@ -178,3 +180,5 @@ __kernel void map_transpose_4b_large(__global uint32_t *dstmem,
     }
   }
 }
+
+// End of transpose.cl

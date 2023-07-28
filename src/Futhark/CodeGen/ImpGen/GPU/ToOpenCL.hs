@@ -26,7 +26,8 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
-import Futhark.CodeGen.RTS.OpenCL (transposeCL)
+import Futhark.CodeGen.RTS.CUDA (preludeCU)
+import Futhark.CodeGen.RTS.OpenCL (preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeText)
@@ -532,42 +533,8 @@ constDef _ = Nothing
 
 genOpenClPrelude :: S.Set PrimType -> T.Text
 genOpenClPrelude ts =
-  [untrimming|
-// Clang-based OpenCL implementations need this for 'static' to work.
-#ifdef cl_clang_storage_class_specifiers
-#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable
-#endif
-#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-$enable_f64
-
-#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
-#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
-
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long int64_t;
-
-typedef uchar uint8_t;
-typedef ushort uint16_t;
-typedef uint uint32_t;
-typedef ulong uint64_t;
-
-// NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
-// use inline assembly if we detect we are on an NVIDIA GPU.
-#ifdef cl_nv_pragma_unroll
-static inline void mem_fence_global() {
-  asm("membar.gl;");
-}
-#else
-static inline void mem_fence_global() {
-  mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
-}
-#endif
-static inline void mem_fence_local() {
-  mem_fence(CLK_LOCAL_MEM_FENCE);
-}
-|]
+  enable_f64
+    <> preludeCL
     <> halfH
     <> cScalarDefs
     <> atomicsH
@@ -575,102 +542,12 @@ static inline void mem_fence_local() {
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
-          [untrimming|
-         #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-         #define FUTHARK_F64_ENABLED
-         |]
+          [untrimming|#define FUTHARK_F64_ENABLED|]
       | otherwise = mempty
 
 genCUDAPrelude :: T.Text
 genCUDAPrelude =
-  [untrimming|
-#define FUTHARK_CUDA
-#define FUTHARK_F64_ENABLED
-
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long long int64_t;
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-typedef uint8_t uchar;
-typedef uint16_t ushort;
-typedef uint32_t uint;
-typedef uint64_t ulong;
-#define __kernel extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
-#define __global
-#define __local
-#define __private
-#define __constant
-#define __write_only
-#define __read_only
-
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
-  switch (d) {
-    case 0: return blockIdx.x;
-    case 1: return blockIdx.y;
-    case 2: return blockIdx.z;
-    default: return 0;
-  }
-}
-#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
-  switch(d) {
-    case 0: return gridDim.x;
-    case 1: return gridDim.y;
-    case 2: return gridDim.z;
-    default: return 0;
-  }
-}
-#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_local_id(int d) {
-  switch (d) {
-    case 0: return threadIdx.x;
-    case 1: return threadIdx.y;
-    case 2: return threadIdx.z;
-    default: return 0;
-  }
-}
-
-static inline int get_local_size(int d) {
-  switch (d) {
-    case 0: return blockDim.x;
-    case 1: return blockDim.y;
-    case 2: return blockDim.z;
-    default: return 0;
-  }
-}
-
-#define CLK_LOCAL_MEM_FENCE 1
-#define CLK_GLOBAL_MEM_FENCE 2
-static inline void barrier(int x) {
-  __syncthreads();
-}
-static inline void mem_fence_local() {
-  __threadfence_block();
-}
-static inline void mem_fence_global() {
-  __threadfence();
-}
-
-#define NAN (0.0/0.0)
-#define INFINITY (1.0/0.0)
-extern volatile __shared__ unsigned char shared_mem[];
-|]
+  preludeCU
     <> halfH
     <> cScalarDefs
     <> atomicsH
