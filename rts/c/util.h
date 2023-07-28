@@ -407,17 +407,19 @@ static bool lmad_memcpyable(int r,
    ELEM_TYPE* dst, int64_t dst_strides[r],                              \
    ELEM_TYPE *src, int64_t src_strides[r],                              \
    int64_t shape[r]) {                                                  \
-    int64_t k, n, m;                                                    \
-    if (lmad_is_map_tr(&k, &n, &m,                                      \
-                       r, dst_strides, src_strides, shape)) {           \
-      map_transpose_##NAME(dst, src, k, n, m, 0, n, 0, m);              \
-    } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
-        int64_t n = 1;                                                  \
-        for (int i = 0; i < r; i++) { n *= shape[i]; }                  \
-        memcpy(dst, src, n*sizeof(*dst));                               \
-    } else {                                                          \
-      lmad_copy_elements_##NAME(r, dst, dst_strides, src, src_strides, shape); \
-    }                                                                 \
+  int64_t size = 1;                                                     \
+  for (int i = 0; i < r; i++) { size *= shape[i]; }                     \
+  if (size == 0) { return; }                                            \
+  int64_t k, n, m;                                                      \
+  if (lmad_is_map_tr(&k, &n, &m,                                        \
+                     r, dst_strides, src_strides, shape)) {             \
+    map_transpose_##NAME(dst, src, k, n, m, 0, n, 0, m);                \
+  } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {     \
+    memcpy(dst, src, size*sizeof(*dst));                                \
+  } else {                                                              \
+    lmad_copy_elements_##NAME                                           \
+      (r, dst, dst_strides, src, src_strides, shape);                   \
+  }                                                                     \
   }
 
 GEN_MAP_TRANSPOSE(1b, uint8_t)
