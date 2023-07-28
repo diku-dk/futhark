@@ -1227,11 +1227,10 @@ cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) 
 
 int opencl_scalar_to_device(struct futhark_context* ctx,
                             cl_mem dst, size_t offset, size_t size,
-                            void *src,
-                            int* runs, int64_t* total_runtime) {
+                            void *src) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, runs, total_runtime);
+    event = opencl_get_event(ctx, "copy_scalar_to_dev");
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueWriteBuffer
@@ -1242,11 +1241,10 @@ int opencl_scalar_to_device(struct futhark_context* ctx,
 
 int opencl_scalar_from_device(struct futhark_context* ctx,
                               void *dst,
-                              cl_mem src, size_t offset, size_t size,
-                              int* runs, int64_t* total_runtime) {
+                              cl_mem src, size_t offset, size_t size) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, runs, total_runtime);
+    event = opencl_get_event(ctx, "copy_scalar_from_dev");
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueReadBuffer
@@ -1292,7 +1290,11 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
              memcmp(src_strides, dst_strides, r*sizeof(*src_strides)) == 0) { \
   int64_t n = 1;                                                        \
   for (int i = 0; i < r; i++) { n *= shape[i]; }                        \
-  OPENCL_SUCCEED_OR_RETURN(clEnqueueCopyBuffer(ctx->queue, src, dst, src_offset, dst_offset, n * sizeof(ELEM_TYPE), 0, NULL, NULL)); \
+  cl_event* event = NULL;                                               \
+  if (ctx->profiling && !ctx->profiling_paused) {                       \
+    event = opencl_get_event(ctx, "copy_dev_to_dev");                   \
+  }                                                                     \
+  OPENCL_SUCCEED_OR_RETURN(clEnqueueCopyBuffer(ctx->queue, src, dst, src_offset, dst_offset, n * sizeof(ELEM_TYPE), 0, NULL, event)); \
   } else {                                                              \
     return lmad_copy_elements_gpu2gpu_##NAME(ctx, r, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape); \
   }                                                                     \

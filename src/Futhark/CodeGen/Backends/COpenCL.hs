@@ -174,7 +174,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
   GC.stm
-    [C.cstm|if ((err = opencl_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val', &ctx->program->copy_scalar_to_dev_runs, &ctx->program->copy_scalar_to_dev_total_runtime)) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = opencl_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
 writeOpenCLScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
@@ -187,7 +187,7 @@ readOpenCLScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm
-    [C.cstm|if ((err = opencl_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &ctx->program->copy_scalar_from_dev_runs, &ctx->program->copy_scalar_from_dev_total_runtime)) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = opencl_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
             { err = 1; goto cleanup; }|]
