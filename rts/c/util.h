@@ -348,7 +348,7 @@ static bool lmad_is_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_o
   } else if (memcmp(&rowmajor_strides[map_r],
                     &src_strides[map_r],
                     sizeof(int64_t)*(r-map_r)) == 0) {
-    return lmad_is_colmajor(n_out, m_out, r-map_r, dst_strides+map_r, shape+map_r);
+    return lmad_is_colmajor(m_out, n_out, r-map_r, dst_strides+map_r, shape+map_r);
   }
   return false;
 }
