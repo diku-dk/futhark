@@ -147,26 +147,6 @@ sharedDef s f = do
   GC.earlyDecl =<< f s'
   pure s'
 
--- | Copy memory where one of the operands is using an AoS layout.
-copyMemoryAOS ::
-  PrimType ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  C.Exp ->
-  GC.CompilerM op s ()
-copyMemoryAOS pt destmem destidx srcmem srcidx nbytes =
-  GC.stm
-    [C.cstm|if ($exp:nbytes > 0) {
-              $id:overload($exp:destmem + $exp:destidx,
-                      $exp:srcmem + $exp:srcidx,
-                      extract($exp:nbytes, 0));
-            }|]
-  where
-    size = show (8 * primByteSize pt :: Integer)
-    overload = "memmove_" <> size
-
 -- | ISPC has no string literals, so this makes one in C and exposes it via an
 -- external function, returning the name.
 makeStringLiteral :: String -> ISPCCompilerM Name
@@ -580,19 +560,6 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode code@(Copy pt dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
-  dm <- isJust <$> GC.cacheMem dest
-  sm <- isJust <$> GC.cacheMem src
-  if dm || sm
-    then
-      join $
-        copyMemoryAOS pt
-          <$> GC.rawMem dest
-          <*> compileExp (untyped destoffset)
-          <*> GC.rawMem src
-          <*> compileExp (untyped srcoffset)
-          <*> compileExp (untyped size)
-    else GC.compileCode code
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space

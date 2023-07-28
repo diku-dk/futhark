@@ -107,7 +107,6 @@ module Futhark.CodeGen.ImpGen
     sWrite,
     sUpdate,
     sLoopNest,
-    sCopy,
     sLoopSpace,
     (<--),
     (<~~),
@@ -1791,33 +1790,6 @@ sLoopNest ::
   ([Imp.TExp Int64] -> ImpM rep r op ()) ->
   ImpM rep r op ()
 sLoopNest = sLoopSpace . map pe64 . shapeDims
-
-sCopy ::
-  VName ->
-  Count Bytes (Imp.TExp Int64) ->
-  Space ->
-  VName ->
-  Count Bytes (Imp.TExp Int64) ->
-  Space ->
-  Count Elements (Imp.TExp Int64) ->
-  PrimType ->
-  ImpM rep r op ()
-sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
-  if destmem == srcmem
-    then sUnless (Imp.unCount destoffset .==. Imp.unCount srcoffset) the_copy
-    else the_copy
-  where
-    the_copy =
-      emit
-        $ Imp.Copy
-          pt
-          destmem
-          destoffset
-          destspace
-          srcmem
-          srcoffset
-          srcspace
-        $ num_elems `withElemType` pt
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()

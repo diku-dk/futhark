@@ -33,7 +33,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sCopy,
 
     -- * Atomics
     AtomicBinOp,

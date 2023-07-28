@@ -349,25 +349,6 @@ compileCode (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcs
       srcoffset' <- traverse (compileExp . untyped) srcoffset
       srcstrides' <- traverse (traverse (compileExp . untyped)) srcstrides
       cp' CopyBarrier t shape' dst' (dstoffset', dststrides') src' (srcoffset', srcstrides')
-compileCode (Copy _ dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) =
-  join $
-    copyMemoryDefaultSpace
-      <$> rawMem dest
-      <*> compileExp (untyped destoffset)
-      <*> rawMem src
-      <*> compileExp (untyped srcoffset)
-      <*> compileExp (untyped size)
-compileCode (Copy _ dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
-  copy <- asks $ opsCopy . envOperations
-  join $
-    copy CopyBarrier
-      <$> rawMem dest
-      <*> compileExp (untyped destoffset)
-      <*> pure destspace
-      <*> rawMem src
-      <*> compileExp (untyped srcoffset)
-      <*> pure srcspace
-      <*> compileExp (untyped size)
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dst (Count idx) elemtype space vol elemexp) = do
   dst' <- rawMem dst

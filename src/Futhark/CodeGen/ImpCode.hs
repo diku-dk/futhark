@@ -279,18 +279,6 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | Element type being copied, destination, offset in
-    -- destination, destination space, source, offset in source,
-    -- offset space, number of bytes.
-    Copy
-      PrimType
-      VName
-      (Count Bytes (TExp Int64))
-      Space
-      VName
-      (Count Bytes (TExp Int64))
-      Space
-      (Count Bytes (TExp Int64))
   | -- | @LMADcopy pt dest dest_lmad src src_lmad shape@
     LMADCopy
       PrimType
@@ -593,17 +581,6 @@ instance Pretty op => Pretty (Code op) where
     pretty dest <+> "<-" <+> pretty from <+> "@" <> pretty space
   pretty (Assert e msg _) =
     "assert" <> parens (commasep [pretty msg, pretty e])
-  pretty (Copy t dest destoffset destspace src srcoffset srcspace size) =
-    "copy"
-      <> (parens . align)
-        ( pretty t <> comma
-            </> ppMemLoc dest destoffset <> pretty destspace <> comma
-            </> ppMemLoc src srcoffset <> pretty srcspace <> comma
-            </> pretty size
-        )
-    where
-      ppMemLoc base offset =
-        pretty base <+> "+" <+> pretty offset
   pretty (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
     ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
       <> (parens . align)
@@ -696,8 +673,6 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
-    pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
   traverse _ (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
     pure $ LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
   traverse _ (Write name i bt val space vol) =
@@ -772,8 +747,6 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy _ dest x _ src y _ n) =
-    freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
   freeIn' (LMADCopy _ shape (dst, _) (dstoffset, dststrides) (src, _) (srcoffset, srcstrides)) =
     freeIn' shape <> freeIn' dst <> freeIn' dstoffset <> freeIn' dststrides <> freeIn' src <> freeIn' srcoffset <> freeIn' srcstrides
   freeIn' (SetMem x y _) =

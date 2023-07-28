@@ -814,8 +814,6 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
-  typesInExp e1 <> typesInExp e2 <> typesInExp e3
 typesInCode (LMADCopy _ shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
   foldMap (typesInExp . untyped . unCount) shape
     <> typesInExp dstoffset
