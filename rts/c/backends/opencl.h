@@ -1517,7 +1517,7 @@ static int opencl_map_transpose(struct futhark_context* ctx,
       OPENCL_SUCCEED_OR_RETURN                                          \
         (clEnqueueCopyBuffer(ctx->queue,                                \
                              src, dst,                                  \
-                             src_offset, dst_offset,                    \
+                             src_offset, dst_offset*sizeof(ELEM_TYPE),  \
                              size * sizeof(ELEM_TYPE),                  \
                              0, NULL, event));                          \
       return FUTHARK_SUCCESS;                                           \
