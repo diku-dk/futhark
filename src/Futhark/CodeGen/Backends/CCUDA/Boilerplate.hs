@@ -17,7 +17,6 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyHostToDev,
     copyScalarFromDev,
     copyScalarToDev,
-    costCentreReport,
     failureMsgFunction,
     kernelRuns,
     kernelRuntime,
@@ -39,9 +38,7 @@ profilingEnclosure name =
   ( [C.citems|
       typename CUevent *pevents = NULL;
       if (ctx->profiling && !ctx->profiling_paused) {
-        pevents = cuda_get_events(ctx,
-                                  &ctx->program->$id:(kernelRuns name),
-                                  &ctx->program->$id:(kernelRuntime name));
+        pevents = cuda_get_events(ctx, $string:(nameToString name));
         CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
       }
       |],
@@ -53,33 +50,18 @@ profilingEnclosure name =
   )
 
 generateCUDADecls ::
-  [Name] ->
   M.Map KernelName KernelSafety ->
   GC.CompilerM op s ()
-generateCUDADecls cost_centres kernels = do
-  let forCostCentre name = do
-        GC.contextField
-          (C.toIdent (kernelRuntime name) mempty)
-          [C.cty|typename int64_t|]
-          (Just [C.cexp|0|])
-        GC.contextField
-          (C.toIdent (kernelRuns name) mempty)
-          [C.cty|int|]
-          (Just [C.cexp|0|])
-
-  forM_ (M.keys kernels) $ \name -> do
-    GC.contextFieldDyn
-      (C.toIdent name mempty)
-      [C.cty|typename CUfunction|]
-      [C.cstm|
+generateCUDADecls kernels = forM_ (M.keys kernels) $ \name ->
+  GC.contextFieldDyn
+    (C.toIdent name mempty)
+    [C.cty|typename CUfunction|]
+    [C.cstm|
              CUDA_SUCCEED_FATAL(cuModuleGetFunction(
                                      &ctx->program->$id:name,
                                      ctx->module,
                                      $string:(T.unpack (idText (C.toIdent name mempty)))));|]
-      [C.cstm|{}|]
-    forCostCentre name
-
-  mapM_ forCostCentre cost_centres
+    [C.cstm|{}|]
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
@@ -106,7 +88,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
             |]
   GC.earlyDecl $ failureMsgFunction failures
 
-  generateCUDADecls cost_centres kernels
+  generateCUDADecls kernels
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char* opt);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
@@ -127,6 +109,14 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
                CUDA_SUCCEED_NONFATAL(cuda_free_all(ctx));
              }|]
 
-  GC.profileReport [C.citem|CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(ctx));|]
-  mapM_ GC.profileReport $ costCentreReport $ cost_centres ++ M.keys kernels
+  GC.profileReport
+    [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
+              $stms:(map initCostCentre (cost_centres <> M.keys kernels))
+              CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(ctx, ccs));
+              cost_centre_report(ccs, &builder);
+              cost_centres_free(ccs);
+              }|]
+  where
+    initCostCentre v =
+      [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
 {-# NOINLINE generateBoilerplate #-}
