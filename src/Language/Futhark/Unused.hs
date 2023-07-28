@@ -95,11 +95,11 @@ funcsInExp (OpSectionLeft (QualName _ vn) _ ex _ _ _) n vm = funcsInExp ex n $ M
 funcsInExp (OpSectionRight (QualName _ vn) _ ex _ _ _) n vm = funcsInExp ex n $ M.adjust (S.insert vn) n vm
 funcsInExp (Ascript ex _ _) n vm = funcsInExp ex n vm
 funcsInExp (Var (QualName _ vn) _ _) n vm = M.adjust (S.insert vn) n vm
+funcsInExp (Coerce ex _ _ _) n vm = funcsInExp ex n vm
 funcsInExp (AppExp app _) n vm =
   case app of
     Apply ex1 lst _ ->
       foldl' (\mp (_, ex) -> funcsInExp ex n mp) (funcsInExp ex1 n vm) lst
-    Coerce ex _ _ -> funcsInExp ex n vm
     Range ex1 mb_ex inc_ex _ -> foldl' (\x y -> funcsInExp y n x) vm (ex1 : fromInc inc_ex : maybeToList mb_ex)
     LetPat _ _ ex1 ex2 _ -> funcsInExp ex2 n (funcsInExp ex1 n vm)
     LetFun vn (_, _, _, _, ex1) ex2 _ ->
@@ -119,6 +119,7 @@ funcsInExp (Hole _ _) _ vm = vm
 funcsInExp (Negate _ _) _ vm = vm
 funcsInExp (ProjectSection _ _ _) _ vm = vm
 funcsInExp (IndexSection _ _ _) _ vm = vm
+
 
 -- funcs inside a module expression. also tracks functions that have different VNames inside and outside the module.
 -- ModVar omitted
@@ -165,11 +166,11 @@ locsInExp (Lambda _ ex _ _ _) = locsInExp ex
 locsInExp (OpSectionLeft _ _ ex _ _ _) = locsInExp ex
 locsInExp (OpSectionRight _ _ ex _ _ _) = locsInExp ex
 locsInExp (Ascript ex _ _) = locsInExp ex
+locsInExp (Coerce ex _ _ _) = locsInExp ex
 locsInExp (AppExp app _) =
   case app of
     Apply ex1 lst _ ->
       M.unions (NE.toList $ NE.map (locsInExp . snd) lst) `M.union` locsInExp ex1
-    Coerce ex _ _ -> locsInExp ex
     Range ex1 mb_ex inc_ex _ -> M.unions $ map locsInExp (ex1 : fromInc inc_ex : maybeToList mb_ex)
     LetPat _ _ ex1 ex2 _ -> locsInExp ex2 `M.union` locsInExp ex1
     LetFun vn (_, _, _, _, ex1) ex2 loc -> M.insert vn loc $ locsInExp ex2 `M.union` locsInExp ex1 -- Important case! function defn
