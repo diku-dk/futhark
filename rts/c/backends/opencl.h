@@ -465,8 +465,7 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
 // A record of something that happened.
 struct profiling_record {
   cl_event *event;
-  int *runs;
-  int64_t *runtime;
+  const char* name;
 };
 
 struct futhark_context {
@@ -600,49 +599,49 @@ static char* mk_compile_opts(struct futhark_context *ctx,
   return compile_opts;
 }
 
+
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static cl_int opencl_tally_profiling_records(struct futhark_context *ctx) {
+static void opencl_tally_profiling_records(struct futhark_context *ctx,
+                                           struct cost_centres* ccs) {
   cl_int err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
 
     cl_ulong start_t, end_t;
 
-    if ((err = clGetEventProfilingInfo(*record.event,
-                                       CL_PROFILING_COMMAND_START,
-                                       sizeof(start_t),
-                                       &start_t,
-                                       NULL)) != CL_SUCCESS) {
-      return err;
+    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
+                                                 CL_PROFILING_COMMAND_START,
+                                                 sizeof(start_t),
+                                                 &start_t,
+                                                 NULL));
+
+    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
+                                                 CL_PROFILING_COMMAND_END,
+                                                 sizeof(end_t),
+                                                 &end_t,
+                                                 NULL));
+
+    if (ccs) {
+      // Note that OpenCL provides nanosecond resolution, but we want
+      // microseconds.
+      struct cost_centre c = {
+        .name = record.name,
+        .runs = 1,
+        .runtime = (end_t - start_t)/1000
+      };
+      cost_centres_add(ccs, c);
     }
 
-    if ((err = clGetEventProfilingInfo(*record.event,
-                                       CL_PROFILING_COMMAND_END,
-                                       sizeof(end_t),
-                                       &end_t,
-                                       NULL)) != CL_SUCCESS) {
-      return err;
-    }
-
-    // OpenCL provides nanosecond resolution, but we want
-    // microseconds.
-    *record.runs += 1;
-    *record.runtime += (end_t - start_t)/1000;
-
-    if ((err = clReleaseEvent(*record.event)) != CL_SUCCESS) {
-      return err;
-    }
+    OPENCL_SUCCEED_FATAL(clReleaseEvent(*record.event));
     free(record.event);
   }
 
   ctx->profiling_records_used = 0;
-
-  return CL_SUCCESS;
 }
 
 // If profiling, produce an event associated with a profiling record.
-static cl_event* opencl_get_event(struct futhark_context *ctx, int *runs, int64_t *runtime) {
+static cl_event* opencl_get_event(struct futhark_context *ctx, const char *name) {
   if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
     ctx->profiling_records_capacity *= 2;
     ctx->profiling_records =
@@ -652,8 +651,7 @@ static cl_event* opencl_get_event(struct futhark_context *ctx, int *runs, int64_
   }
   cl_event *event = malloc(sizeof(cl_event));
   ctx->profiling_records[ctx->profiling_records_used].event = event;
-  ctx->profiling_records[ctx->profiling_records_used].runs = runs;
-  ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
+  ctx->profiling_records[ctx->profiling_records_used].name = name;
   ctx->profiling_records_used++;
   return event;
 }
@@ -1215,7 +1213,7 @@ int backend_context_setup(struct futhark_context* ctx) {
 void backend_context_teardown(struct futhark_context* ctx) {
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)opencl_tally_profiling_records(ctx);
+  (void)opencl_tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
   (void)opencl_free_all(ctx);
   (void)clReleaseProgram(ctx->clprogram);
