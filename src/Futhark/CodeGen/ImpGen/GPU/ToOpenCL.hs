@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
 import Futhark.CodeGen.RTS.CUDA (preludeCU)
-import Futhark.CodeGen.RTS.OpenCL (preludeCL, transposeCL)
+import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeText)
@@ -539,6 +539,7 @@ genOpenClPrelude ts =
     <> cScalarDefs
     <> atomicsH
     <> transposeCL
+    <> copyCL
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
@@ -551,6 +552,8 @@ genCUDAPrelude =
     <> halfH
     <> cScalarDefs
     <> atomicsH
+    <> transposeCL
+    <> copyCL
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e

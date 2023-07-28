@@ -63,6 +63,7 @@ extra-source-files:
     rts/javascript/server.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
+    rts/opencl/copy.cl
     rts/opencl/prelude.cl
     rts/opencl/transpose.cl
     rts/python/tuning.py

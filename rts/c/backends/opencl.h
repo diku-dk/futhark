@@ -556,6 +556,12 @@ struct futhark_context {
     cl_kernel map_transpose_8b_low_width;
     cl_kernel map_transpose_8b_small;
     cl_kernel map_transpose_8b_large;
+
+    // And a few ways of copying.
+    cl_kernel lmad_copy_1b;
+    cl_kernel lmad_copy_2b;
+    cl_kernel lmad_copy_4b;
+    cl_kernel lmad_copy_8b;
   } kernels;
 };
 
@@ -1285,6 +1291,20 @@ int backend_context_setup(struct futhark_context* ctx) {
   /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width"); */
   /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small"); */
 
+  create_kernel(ctx, &ctx->kernels.lmad_copy_4b, "lmad_copy_4b");
+  // OpenCL requires that all kernel arguments have been set at least
+  // once, but we might not ever actually need all of the ones for
+  // lmad_copy_4b, so set them all to dummy values here.
+  for (int i = 0; i < 8; i++) {
+    int64_t zero;
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+1, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+2, sizeof(zero), &zero));
+  }
+
   return 0;
 }
 
@@ -1342,7 +1362,7 @@ static int opencl_map_transpose(struct futhark_context* ctx,
                                 cl_mem src, int64_t src_offset,
                                 int64_t k, int64_t n, int64_t m) {
   if (ctx->logging) {
-    fprintf(ctx->log, "\n# Transpose i32\n");
+    fprintf(ctx->log, "\n# Transpose\n");
     fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
     fprintf(ctx->log, "X elements : %ld\n", (long int)m);
     fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
@@ -1480,6 +1500,73 @@ static int opencl_map_transpose(struct futhark_context* ctx,
        k, n, m);                                                        \
 }
 
+static int opencl_lmad_copy(struct futhark_context* ctx,
+                            cl_kernel kernel, int r,
+                            cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],
+                            cl_mem src, int64_t src_offset, int64_t src_strides[r],
+                            int64_t shape[r]) {
+  if (r > 8) {
+    set_error(ctx, strdup("Futhark runtime limitation:\nCannot copy array of greater than rank 8.\n"));
+    return 1;
+  }
+
+  int64_t n = 1;
+  for (int i = 0; i < r; i++) { n *= shape[i]; }
+
+  if (ctx->logging) {
+    fprintf(ctx->log, "\n# LMAD copy\n");
+    fprintf(ctx->log, "Shape: ");
+    for (int i = 0; i < r; i++) { fprintf(ctx->log, "[%ld]", (long int)shape[i]); }
+    fprintf(ctx->log, "\n");
+    fprintf(ctx->log, "Dst offset: %ld\n", dst_offset);
+    fprintf(ctx->log, "Dst strides:");
+    for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)dst_strides[i]); }
+    fprintf(ctx->log, "\n");
+    fprintf(ctx->log, "Src offset: %ld\n", src_offset);
+    fprintf(ctx->log, "Src strides:");
+    for (int i = 0; i < r; i++) { fprintf(ctx->log, " %ld", (long int)src_strides[i]); }
+    fprintf(ctx->log, "\n");
+ }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 0, sizeof(dst), &dst));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 1, sizeof(dst_offset), &dst_offset));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 2, sizeof(src), &src));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 3, sizeof(src_offset), &src_offset));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 4, sizeof(n), &n));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 5, sizeof(r), &r));
+  for (int i = 0; i < r; i++) {
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 6+i*3, sizeof(shape[i]), &shape[i]));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 6+i*3+1, sizeof(dst_strides[i]), &dst_strides[i]));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 6+i*3+2, sizeof(src_strides[i]), &src_strides[i]));
+  }
+  const size_t w = 256;
+  const size_t local_work_size[1] = {w};
+  const size_t global_work_size[1] = {(n+w-1)/w*w};
+
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, "copy_lmad_dev_to_dev");
+  }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueNDRangeKernel(ctx->queue,
+                            kernel,
+                            1, NULL, global_work_size, local_work_size,
+                            0, NULL, event));
+
+  if (ctx->logging) { fprintf(ctx->log, "\n"); }
+  return FUTHARK_SUCCESS;
+}
+
 #define GEN_LMAD_COPY_ELEMENTS_GPU2GPU(NAME, ELEM_TYPE)                 \
   static int lmad_copy_elements_gpu2gpu_##NAME                          \
   (struct futhark_context* ctx,                                         \
@@ -1487,11 +1574,10 @@ static int opencl_map_transpose(struct futhark_context* ctx,
    cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],              \
    cl_mem src, int64_t src_offset, int64_t src_strides[r],              \
    int64_t shape[r]) {                                                  \
-    (void)r; (void)dst; (void)dst_offset; (void)dst_strides;            \
-    (void)src; (void)src_offset; (void)src_strides;                     \
-    (void)shape;                                                        \
-    set_error(ctx, strdup("gpu2gpu lmad copy not implemented yet\n"));  \
-    return 1;                                                           \
+    return opencl_lmad_copy(ctx, ctx->kernels.lmad_copy_##NAME, r,      \
+                            dst, dst_offset, dst_strides,               \
+                            src, src_offset, src_strides,               \
+                            shape);                                     \
   }                                                                     \
 
 #define GEN_LMAD_COPY_GPU2GPU(NAME, ELEM_TYPE)                          \
@@ -1515,7 +1601,7 @@ static int opencl_map_transpose(struct futhark_context* ctx,
         event = opencl_get_event(ctx, "copy_dev_to_dev");               \
       }                                                                 \
       OPENCL_SUCCEED_OR_RETURN                                          \
-        (clEnqueueCopyBuffer \
+        (clEnqueueCopyBuffer                                            \
          (ctx->queue,                                                   \
           src, dst,                                                     \
           src_offset*sizeof(ELEM_TYPE),                                 \
