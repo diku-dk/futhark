@@ -1299,6 +1299,7 @@ compileCode (Imp.Copy pt dest (Imp.Count destoffset) destspace src (Imp.Count sr
       <*> pure srcspace
       <*> compileExp (Imp.untyped size)
       <*> pure pt
+compileCode Imp.LMADCopy {} = error "GenericPython LMADCopy"
 compileCode (Imp.Write _ _ Unit _ _ _) = pure ()
 compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) _ elemexp) =
   join $
