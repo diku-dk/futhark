@@ -31,25 +31,25 @@ __kernel void lmad_copy_4b(__global uint32_t *dst_mem,
     int64_t i = remainder % shape1;
     dst_offset += i * dst_stride1;
     src_offset += i * src_stride1;
-    remainder /= shape5;
+    remainder /= shape1;
   }
   if (r > 2) {
     int64_t i = remainder % shape2;
     dst_offset += i * dst_stride2;
     src_offset += i * src_stride2;
-    remainder /= shape5;
+    remainder /= shape2;
   }
   if (r > 3) {
     int64_t i = remainder % shape3;
     dst_offset += i * dst_stride3;
     src_offset += i * src_stride3;
-    remainder /= shape5;
+    remainder /= shape3;
   }
   if (r > 4) {
     int64_t i = remainder % shape4;
     dst_offset += i * dst_stride4;
     src_offset += i * src_stride4;
-    remainder /= shape5;
+    remainder /= shape4;
   }
   if (r > 5) {
     int64_t i = remainder % shape5;
