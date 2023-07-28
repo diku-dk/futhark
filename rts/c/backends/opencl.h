@@ -1274,7 +1274,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small"); */
 
   create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large"); */
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large");
   create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
   create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
   create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
