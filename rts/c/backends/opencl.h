@@ -1515,11 +1515,13 @@ static int opencl_map_transpose(struct futhark_context* ctx,
         event = opencl_get_event(ctx, "copy_dev_to_dev");               \
       }                                                                 \
       OPENCL_SUCCEED_OR_RETURN                                          \
-        (clEnqueueCopyBuffer(ctx->queue,                                \
-                             src, dst,                                  \
-                             src_offset, dst_offset*sizeof(ELEM_TYPE),  \
-                             size * sizeof(ELEM_TYPE),                  \
-                             0, NULL, event));                          \
+        (clEnqueueCopyBuffer \
+         (ctx->queue,                                                   \
+          src, dst,                                                     \
+          src_offset*sizeof(ELEM_TYPE),                                 \
+          dst_offset*sizeof(ELEM_TYPE),                                 \
+          size * sizeof(ELEM_TYPE),                                     \
+          0, NULL, event));                                             \
       return FUTHARK_SUCCESS;                                           \
     } else {                                                            \
       return lmad_copy_elements_gpu2gpu_##NAME                          \
