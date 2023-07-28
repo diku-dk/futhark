@@ -1,5 +1,18 @@
 // Start of backends/opencl.h
 
+// Note [32-bit transpositions]
+//
+// Transposition kernels are much slower when they have to use 64-bit
+// arithmetic.  I observed about 0.67x slowdown on an A100 GPU when
+// transposing four-byte elements (much less when transposing 8-byte
+// elements).  Unfortunately, 64-bit arithmetic is a requirement for
+// large arrays (see #1953 for what happens otherwise).  We generate
+// both 32- and 64-bit index arithmetic versions of transpositions,
+// and dynamically pick between them at runtime.  This is an
+// unfortunate code bloat, and it would be preferable if we could
+// simply optimise the 64-bit version to make this distinction
+// unnecessary.  Fortunately these kernels are quite small.
+
 // Forward declarations.
 struct opencl_device_option;
 // Invoked by setup_opencl() after the platform and device has been
@@ -141,6 +154,11 @@ struct futhark_context_config {
   cl_command_queue queue;
   int queue_set;
 };
+
+// Constants used for transpositions.  In principle these should be configurable.
+#define TR_BLOCK_DIM 16
+#define TR_TILE_DIM (TR_BLOCK_DIM*2)
+#define TR_ELEMS_PER_THREAD 8
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
   cfg->num_build_opts = 0;
@@ -516,6 +534,29 @@ struct futhark_context {
   int profiling_records_capacity;
   int profiling_records_used;
 
+  struct {
+    // We have a lot of ways to transpose arrays.
+    cl_kernel map_transpose_1b;
+    cl_kernel map_transpose_1b_low_height;
+    cl_kernel map_transpose_1b_low_width;
+    cl_kernel map_transpose_1b_small;
+    cl_kernel map_transpose_1b_large;
+    cl_kernel map_transpose_2b;
+    cl_kernel map_transpose_2b_low_height;
+    cl_kernel map_transpose_2b_low_width;
+    cl_kernel map_transpose_2b_small;
+    cl_kernel map_transpose_2b_large;
+    cl_kernel map_transpose_4b;
+    cl_kernel map_transpose_4b_low_height;
+    cl_kernel map_transpose_4b_low_width;
+    cl_kernel map_transpose_4b_small;
+    cl_kernel map_transpose_4b_large;
+    cl_kernel map_transpose_8b;
+    cl_kernel map_transpose_8b_low_height;
+    cl_kernel map_transpose_8b_low_width;
+    cl_kernel map_transpose_8b_small;
+    cl_kernel map_transpose_8b_large;
+  } kernels;
 };
 
 static cl_build_status build_opencl_program(cl_program program, cl_device_id device, const char* options) {
@@ -589,6 +630,10 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "%s ", extra_build_opts[i]);
   }
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-DTR_BLOCK_DIM=%d -DTR_TILE_DIM=%d -DTR_ELEMS_PER_THREAD=%d ",
+                TR_BLOCK_DIM, TR_TILE_DIM, TR_ELEMS_PER_THREAD);
 
   // Oclgrind claims to support cl_khr_fp16, but this is not actually
   // the case.
@@ -1174,6 +1219,14 @@ static void setup_opencl(struct futhark_context *ctx,
   setup_opencl_with_command_queue(ctx, queue, srcs, extra_build_opts, cache_fname);
 }
 
+void create_kernel(struct futhark_context* ctx, cl_kernel* kernel, const char* name) {
+  if (ctx->debugging)
+    fprintf(ctx->log, "Creating kernel %s.\n", name);
+  cl_int error;
+  *kernel = clCreateKernel(ctx->clprogram, name, &error);
+  OPENCL_SUCCEED_FATAL(error);
+}
+
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
   ctx->profiling_records_capacity = 200;
@@ -1207,6 +1260,31 @@ int backend_context_setup(struct futhark_context* ctx) {
                    CL_MEM_READ_WRITE,
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
+
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b, "map_transpose_1b"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_large, "map_transpose_1b_large"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_height, "map_transpose_1b_low_height"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_width, "map_transpose_1b_low_width"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_small, "map_transpose_1b_small"); */
+
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b, "map_transpose_2b"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_large, "map_transpose_2b_large"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_height, "map_transpose_2b_low_height"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_width, "map_transpose_2b_low_width"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small"); */
+
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large"); */
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
+
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b, "map_transpose_8b"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_large, "map_transpose_8b_large"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_height, "map_transpose_8b_low_height"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width"); */
+  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small"); */
+
   return 0;
 }
 
@@ -1253,16 +1331,154 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
   return 0;
 }
 
-#define GEN_MAP_TRANSPOSE_GPU2GPU(NAME, ELEM_TYPE)                      \
+static int opencl_map_transpose(struct futhark_context* ctx,
+                                cl_kernel kernel_default,
+                                cl_kernel kernel_low_height,
+                                cl_kernel kernel_low_width,
+                                cl_kernel kernel_small,
+                                cl_kernel kernel_large,
+                                const char *name,
+                                cl_mem dst, int64_t dst_offset,
+                                cl_mem src, int64_t src_offset,
+                                int64_t k, int64_t n, int64_t m) {
+  if (ctx->logging) {
+    fprintf(ctx->log, "\n# Transpose i32\n");
+    fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
+    fprintf(ctx->log, "X elements : %ld\n", (long int)m);
+    fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
+    fprintf(ctx->log, "Dst offset : %ld\n", (long int)dst_offset);
+    fprintf(ctx->log, "Src offset : %ld\n", (long int)src_offset);
+  }
+
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, name);
+  }
+
+  int64_t mulx = TR_BLOCK_DIM / n;
+  int64_t muly = TR_BLOCK_DIM / m;
+  cl_kernel kernel = kernel_default;
+  size_t grid[3];
+  size_t block[3];
+  if (dst_offset + k * n * m <= 2147483647L &&
+      src_offset + k * n * m <= 2147483647L) {
+    if (m <= TR_BLOCK_DIM/2 && n <= TR_BLOCK_DIM/2) {
+      if (ctx->logging) { fprintf(ctx->log, "Using small kernel\n"); }
+      kernel = kernel_small;
+      grid[0] = ((k * n * m) + (TR_BLOCK_DIM*TR_BLOCK_DIM) - 1) / (TR_BLOCK_DIM*TR_BLOCK_DIM);
+      grid[1] = 1;
+      grid[2] = 1;
+      block[0] = TR_BLOCK_DIM*TR_BLOCK_DIM;
+      block[1] = 1;
+      block[2] = 1;
+    } else if (m <= TR_BLOCK_DIM/2 && TR_BLOCK_DIM < n) {
+      if (ctx->logging) { fprintf(ctx->log, "Using low-width kernel\n"); }
+      kernel = kernel_low_width;
+      int64_t x_elems = m;
+      int64_t y_elems = (n + muly - 1) / muly;
+      grid[0] = (x_elems + TR_BLOCK_DIM - 1) / TR_BLOCK_DIM;
+      grid[1] = (y_elems + TR_BLOCK_DIM - 1) / TR_BLOCK_DIM;
+      grid[2] = k;
+      block[0] = TR_BLOCK_DIM;
+      block[1] = TR_BLOCK_DIM;
+      block[2] = 1;
+    } else if (n <= TR_BLOCK_DIM/2 && TR_BLOCK_DIM < m) {
+      if (ctx->logging) { fprintf(ctx->log, "Using low-height kernel\n"); }
+      kernel = kernel_low_height;
+      int64_t x_elems = (m + mulx - 1) / mulx;
+      int64_t y_elems = n;
+      grid[0] = (x_elems + TR_BLOCK_DIM - 1) / TR_BLOCK_DIM;
+      grid[1] = (y_elems + TR_BLOCK_DIM - 1) / TR_BLOCK_DIM;
+      grid[2] = k;
+      block[0] = TR_BLOCK_DIM;
+      block[1] = TR_BLOCK_DIM;
+      block[2] = 1;
+    } else {
+      if (ctx->logging) { fprintf(ctx->log, "Using default kernel\n"); }
+      kernel = kernel_default;
+      grid[0] = (m+TR_TILE_DIM-1)/TR_TILE_DIM;
+      grid[1] = (n+TR_TILE_DIM-1)/TR_TILE_DIM;
+      grid[2] = k;
+      block[0] = TR_TILE_DIM;
+      block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
+      block[2] = 1;
+    }
+    int32_t k32 = k;
+    int32_t n32 = n;
+    int32_t m32 = m;
+    int32_t mulx32 = mulx;
+    int32_t muly32 = muly;
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 4, sizeof(k32), &k32));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 5, sizeof(k32), &m32));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 6, sizeof(m32), &n32));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 7, sizeof(mulx32), &mulx32));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 8, sizeof(muly32), &muly32));
+  } else {
+    if (ctx->logging) { fprintf(ctx->log, "Using large kernel\n"); }
+    kernel = kernel_large;
+    grid[0] = (m+TR_TILE_DIM-1)/TR_TILE_DIM;
+    grid[1] = (n+TR_TILE_DIM-1)/TR_TILE_DIM;
+    grid[2] = k;
+    block[0] = TR_TILE_DIM;
+    block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
+    block[2] = 1;
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 4, sizeof(k), &k));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 5, sizeof(n), &m));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 6, sizeof(m), &n));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 7, sizeof(mulx), &mulx));
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, 8, sizeof(muly), &muly));
+  }
+  if (ctx->logging) { fprintf(ctx->log, "\n"); }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 0, sizeof(dst), &dst));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 1, sizeof(dst_offset), &dst_offset));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 2, sizeof(src), &src));
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 3, sizeof(src_offset), &src_offset));
+
+  const size_t global_work_size[3] = {grid[0] * block[0], grid[1] * block[1], grid[2] * block[2]};
+  const size_t local_work_size[3] = {block[0], block[1], block[2]};
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueNDRangeKernel(ctx->queue,
+                            kernel,
+                            3, NULL, global_work_size, local_work_size,
+                            0, NULL, event));
+  return 0;
+}
+
+#define GEN_MAP_TRANSPOSE_GPU2GPU(NAME)                                 \
   static int map_transpose_gpu2gpu_##NAME                               \
   (struct futhark_context* ctx,                                         \
    cl_mem dst, int64_t dst_offset,                                      \
    cl_mem src, int64_t src_offset,                                      \
    int64_t k, int64_t m, int64_t n)                                     \
   {                                                                     \
-    set_error(ctx, "gpu2gpu transpose not implemented yet\n");            \
-    return 1;                                                           \
-  }
+    return                                                              \
+      opencl_map_transpose                                              \
+      (ctx,                                                             \
+       ctx->kernels.map_transpose_##NAME,                               \
+       ctx->kernels.map_transpose_##NAME##_low_height,                  \
+       ctx->kernels.map_transpose_##NAME##_low_width,                   \
+       ctx->kernels.map_transpose_##NAME##_small,                       \
+       ctx->kernels.map_transpose_##NAME##_large,                       \
+       "map_transpose_" #NAME,                                          \
+       dst, dst_offset, src, src_offset,                                \
+       k, n, m);                                                        \
+}
 
 #define GEN_LMAD_COPY_ELEMENTS_GPU2GPU(NAME, ELEM_TYPE)                 \
   static int lmad_copy_elements_gpu2gpu_##NAME                          \
@@ -1271,7 +1487,10 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
    cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],              \
    cl_mem src, int64_t src_offset, int64_t src_strides[r],              \
    int64_t shape[r]) {                                                  \
-    set_error(ctx, "gpu2gpu lmad copy not implemented yet\n");            \
+    (void)r; (void)dst; (void)dst_offset; (void)dst_strides;            \
+    (void)src; (void)src_offset; (void)src_strides;                     \
+    (void)shape;                                                        \
+    set_error(ctx, strdup("gpu2gpu lmad copy not implemented yet\n"));  \
     return 1;                                                           \
   }                                                                     \
 
@@ -1279,31 +1498,42 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
   static int lmad_copy_gpu2gpu_##NAME                                   \
   (struct futhark_context* ctx,                                         \
    int r,                                                               \
-   cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],               \
-   cl_mem src, int64_t src_offset, int64_t src_strides[r],               \
+   cl_mem dst, int64_t dst_offset, int64_t dst_strides[r],              \
+   cl_mem src, int64_t src_offset, int64_t src_strides[r],              \
    int64_t shape[r]) {                                                  \
-  int64_t k, n, m;                                                      \
-  if (lmad_is_map_tr(&k, &n, &m,                                        \
-                     r, dst_strides, src_strides, shape)) {             \
-    return map_transpose_gpu2gpu_##NAME(ctx, dst, dst_offset, src, src_offset, k, n, m); \
-  } else if (lmad_contiguous(r, dst_strides, shape) &&                  \
-             memcmp(src_strides, dst_strides, r*sizeof(*src_strides)) == 0) { \
-  int64_t n = 1;                                                        \
-  for (int i = 0; i < r; i++) { n *= shape[i]; }                        \
-  cl_event* event = NULL;                                               \
-  if (ctx->profiling && !ctx->profiling_paused) {                       \
-    event = opencl_get_event(ctx, "copy_dev_to_dev");                   \
-  }                                                                     \
-  OPENCL_SUCCEED_OR_RETURN(clEnqueueCopyBuffer(ctx->queue, src, dst, src_offset, dst_offset, n * sizeof(ELEM_TYPE), 0, NULL, event)); \
-  } else {                                                              \
-    return lmad_copy_elements_gpu2gpu_##NAME(ctx, r, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape); \
-  }                                                                     \
-}
+    int64_t size = 1;                                                   \
+    for (int i = 0; i < r; i++) { size *= shape[i]; }                   \
+    if (size == 0) { return FUTHARK_SUCCESS; }                          \
+    int64_t k, n, m;                                                    \
+    if (lmad_is_map_tr(&k, &n, &m,                                      \
+                       r, dst_strides, src_strides, shape)) {           \
+      return map_transpose_gpu2gpu_##NAME                               \
+        (ctx, dst, dst_offset, src, src_offset, k, n, m);               \
+    } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
+      cl_event* event = NULL;                                           \
+      if (ctx->profiling && !ctx->profiling_paused) {                   \
+        event = opencl_get_event(ctx, "copy_dev_to_dev");               \
+      }                                                                 \
+      OPENCL_SUCCEED_OR_RETURN                                          \
+        (clEnqueueCopyBuffer(ctx->queue,                                \
+                             src, dst,                                  \
+                             src_offset, dst_offset,                    \
+                             size * sizeof(ELEM_TYPE),                  \
+                             0, NULL, event));                          \
+      return FUTHARK_SUCCESS;                                           \
+    } else {                                                            \
+      return lmad_copy_elements_gpu2gpu_##NAME                          \
+        (ctx, r,                                                        \
+         dst, dst_offset, dst_strides,                                  \
+         src, src_offset, src_strides,                                  \
+         shape);                                                        \
+    }                                                                   \
+  }
 
-GEN_MAP_TRANSPOSE_GPU2GPU(1b, uint8_t)
-GEN_MAP_TRANSPOSE_GPU2GPU(2b, uint16_t)
-GEN_MAP_TRANSPOSE_GPU2GPU(4b, uint32_t)
-GEN_MAP_TRANSPOSE_GPU2GPU(8b, uint64_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(1b)
+GEN_MAP_TRANSPOSE_GPU2GPU(2b)
+GEN_MAP_TRANSPOSE_GPU2GPU(4b)
+GEN_MAP_TRANSPOSE_GPU2GPU(8b)
 
 GEN_LMAD_COPY_ELEMENTS_GPU2GPU(1b, uint8_t)
 GEN_LMAD_COPY_ELEMENTS_GPU2GPU(2b, uint16_t)
@@ -1314,6 +1544,5 @@ GEN_LMAD_COPY_GPU2GPU(1b, uint8_t)
 GEN_LMAD_COPY_GPU2GPU(2b, uint16_t)
 GEN_LMAD_COPY_GPU2GPU(4b, uint32_t)
 GEN_LMAD_COPY_GPU2GPU(8b, uint64_t)
-
 
 // End of backends/opencl.h

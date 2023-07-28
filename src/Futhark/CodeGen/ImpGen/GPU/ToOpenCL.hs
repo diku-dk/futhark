@@ -26,6 +26,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
+import Futhark.CodeGen.RTS.OpenCL (transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
 import Futhark.Util (zEncodeText)
@@ -538,13 +539,6 @@ genOpenClPrelude ts =
 #endif
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 $enable_f64
-// Some OpenCL programs dislike empty progams, or programs with no kernels.
-// Declare a dummy kernel to ensure they remain our friends.
-__kernel void dummy_kernel(__global unsigned char *dummy, int n)
-{
-    const int thread_gid = get_global_id(0);
-    if (thread_gid >= n) return;
-}
 
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 #pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
@@ -577,6 +571,7 @@ static inline void mem_fence_local() {
     <> halfH
     <> cScalarDefs
     <> atomicsH
+    <> transposeCL
   where
     enable_f64
       | FloatType Float64 `S.member` ts =

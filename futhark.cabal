@@ -62,6 +62,7 @@ extra-source-files:
     rts/javascript/server.js
     rts/javascript/values.js
     rts/javascript/wrapperclasses.js
+    rts/opencl/transpose.cl
     rts/python/tuning.py
     rts/python/panic.py
     rts/python/memory.py
@@ -237,6 +238,7 @@ library
       Futhark.CodeGen.Backends.SequentialWASM
       Futhark.CodeGen.Backends.SimpleRep
       Futhark.CodeGen.RTS.C
+      Futhark.CodeGen.RTS.OpenCL
       Futhark.CodeGen.RTS.Python
       Futhark.CodeGen.RTS.JavaScript
       Futhark.CodeGen.ImpCode

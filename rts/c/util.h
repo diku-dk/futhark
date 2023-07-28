@@ -236,11 +236,11 @@ static char *strclone(const char *str) {
         }                                                               \
       }                                                                 \
     } else if (c <= r) {                                                \
-      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb, rb + r/2);        \
-      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb + r/2, re);        \
+      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb, rb + r/2);    \
+      map_transpose_##NAME(dst, src, k, m, n, cb, ce, rb + r/2, re);    \
     } else {                                                            \
-      map_transpose_##NAME(dst, src, k, m, n, cb, cb + c/2, rb, re);        \
-      map_transpose_##NAME(dst, src, k, m, n, cb + c/2, ce, rb, re);        \
+      map_transpose_##NAME(dst, src, k, m, n, cb, cb + c/2, rb, re);    \
+      map_transpose_##NAME(dst, src, k, m, n, cb + c/2, ce, rb, re);    \
     }                                                                   \
   } else {                                                              \
   for (int64_t i = 0; i < k; i++) {                                     \
@@ -353,26 +353,52 @@ static bool lmad_is_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_o
   return false;
 }
 
+// Check if the strides correspond to row-major strides of *any*
+// permutation of the shape.  This is done by recursive search with
+// backtracking.  This is worst-case exponential, but hopefully the
+// arrays we encounter do not have that many dimensions.
+static bool lmad_contiguous_search(int checked, int64_t expected,
+                                   int r,
+                                   int64_t strides[r], int64_t shape[r], bool used[r]) {
+  for (int i = 0; i < r; i++) {
+    for (int j = 0; j < r; j++) {
+      if (!used[j] && strides[j] == expected && strides[j] >= 0) {
+        used[j] = true;
+        if (checked+1 == r ||
+            lmad_contiguous_search(checked+1, expected * shape[j], r, strides, shape, used)) {
+          return true;
+        }
+        used[j] = false;
+      }
+    }
+  }
+  return false;
+}
+
 // Does this LMAD correspond to an array with positive strides and no
 // holes?
 static bool lmad_contiguous(int r, int64_t strides[r], int64_t shape[r]) {
   bool used[r];
-  int checked = 0;
-  int64_t expected = 1;
   for (int i = 0; i < r; i++) {
     used[i] = false;
   }
+  return lmad_contiguous_search(0, 1, r, strides, shape, used);
+}
+
+// Does this copy correspond to something that could be done with a
+// memcpy()-like operation?  I.e. do the LMADs actually represent the
+// same in-memory layout and are they contiguous?
+static bool lmad_memcpyable(int r,
+                            int64_t dst_strides[r], int64_t src_strides[r], int64_t shape[r]) {
+  if (!lmad_contiguous(r, dst_strides, shape)) {
+    return false;
+  }
   for (int i = 0; i < r; i++) {
-    for (int j = 0; j < r; j++) {
-      if (!used[j] && strides[j] == expected && shape[j] >= 0) {
-        used[j] = true;
-        expected *= shape[j];
-        checked++;
-        break;
-      }
+    if (dst_strides[i] != src_strides[i] && shape[i] != 1) {
+      return false;
     }
   }
-  return checked == r;
+  return true;
 }
 
 #define GEN_LMAD_COPY(NAME, ELEM_TYPE)                                  \
@@ -385,16 +411,13 @@ static bool lmad_contiguous(int r, int64_t strides[r], int64_t shape[r]) {
     if (lmad_is_map_tr(&k, &n, &m,                                      \
                        r, dst_strides, src_strides, shape)) {           \
       map_transpose_##NAME(dst, src, k, n, m, 0, n, 0, m);              \
-    } else {                                                            \
-      if (lmad_contiguous(r, dst_strides, shape) &&                     \
-          memcmp(src_strides, dst_strides, r*sizeof(*src_strides)) == 0) { \
+    } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
         int64_t n = 1;                                                  \
         for (int i = 0; i < r; i++) { n *= shape[i]; }                  \
         memcpy(dst, src, n*sizeof(*dst));                               \
-      } else {                                                          \
-        lmad_copy_elements_##NAME(r, dst, dst_strides, src, src_strides, shape); \
-      }                                                                 \
-    }                                                                   \
+    } else {                                                          \
+      lmad_copy_elements_##NAME(r, dst, dst_strides, src, src_strides, shape); \
+    }                                                                 \
   }
 
 GEN_MAP_TRANSPOSE(1b, uint8_t)
