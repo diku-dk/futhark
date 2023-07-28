@@ -73,7 +73,6 @@ module Futhark.CodeGen.ImpGen
     lmadCopy,
     typeSize,
     inBounds,
-    isMapTransposeCopy,
     caseMatch,
 
     -- * Constructing code.
@@ -141,7 +140,6 @@ import Futhark.CodeGen.ImpCode
     withElemType,
   )
 import Futhark.CodeGen.ImpCode qualified as Imp
-import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
@@ -1416,77 +1414,6 @@ copy
         -- If none of the above is true, actually do the copy
         cc <- asks envCopyCompiler
         cc bt dst src
-
--- | Is this copy really a mapping with transpose?  Produce an
--- expression that is true if so, as well as other expressions that
--- contain information about the transpose in that case (don't trust
--- these if the boolean is false).
-isMapTransposeCopy ::
-  PrimType ->
-  MemLoc ->
-  MemLoc ->
-  Maybe
-    ( Imp.TExp Bool,
-      ( Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64
-      )
-    )
-isMapTransposeCopy pt (MemLoc _ _ dest_ixfun) (MemLoc _ _ src_ixfun)
-  | length (IxFun.base dest_ixfun) == IxFun.rank dest_ixfun,
-    length (IxFun.base src_ixfun) == IxFun.rank src_ixfun,
-    Just perm <- IxFun.base dest_ixfun `isPermutationOf` IxFun.base src_ixfun,
-    Just (r1, r2, _) <- isMapTranspose perm =
-      isOk perm (IxFun.base dest_ixfun) r1 r2
-  | otherwise =
-      Nothing
-  where
-    dest_lmad = IxFun.ixfunLMAD dest_ixfun
-    src_lmad = IxFun.ixfunLMAD src_ixfun
-    dest_offset = LMAD.offset dest_lmad
-    src_offset = LMAD.offset src_lmad
-
-    strides = map LMAD.ldStride . LMAD.dims
-
-    hasPermutation perm ixfun =
-      foldl1 (.&&.) $
-        zipWith
-          (.==.)
-          (rearrangeShape perm $ strides $ IxFun.ixfunLMAD ixfun)
-          (reverse $ scanl (*) 1 $ reverse $ tail $ IxFun.base ixfun)
-
-    isOk perm shape r1 r2 =
-      let (num_arrays, size_x, size_y) = getSizes shape r1 r2
-       in Just
-            ( LMAD.contiguous dest_lmad
-                .&&. hasPermutation (rearrangeInverse perm) src_ixfun,
-              ( dest_offset * primByteSize pt,
-                src_offset * primByteSize pt,
-                num_arrays,
-                size_x,
-                size_y
-              )
-            )
-
-    getSizes shape r1 r2 =
-      let (mapped, notmapped) = splitAt r1 shape
-          (pretrans, posttrans) = splitAt r2 notmapped
-       in (product mapped, product pretrans, product posttrans)
-{-# NOINLINE isMapTransposeCopy #-}
-
-mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ prettyString bt
-
-mapTransposeForType :: PrimType -> ImpM rep r op Name
-mapTransposeForType bt = do
-  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
-
-  exists <- hasFunction fname
-  unless exists $ emitFunction fname $ mapTransposeFunction fname bt
-
-  pure fname
 
 lmadCopy :: CopyCompiler rep r op
 lmadCopy t dstloc srcloc = do
