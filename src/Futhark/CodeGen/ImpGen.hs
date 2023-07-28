@@ -136,7 +136,6 @@ import Futhark.CodeGen.ImpCode
     Count,
     Elements,
     elements,
-    withElemType,
   )
 import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.Construct hiding (ToExp (..))
@@ -1420,8 +1419,8 @@ lmadCopy t dstloc srcloc = do
       srcmem = memLocName srcloc
       dstlmad = IxFun.ixfunLMAD $ memLocIxFun dstloc
       srclmad = IxFun.ixfunLMAD $ memLocIxFun srcloc
-  srcspace <- entryMemSpace <$> lookupMemory dstmem
-  dstspace <- entryMemSpace <$> lookupMemory srcmem
+  srcspace <- entryMemSpace <$> lookupMemory srcmem
+  dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
     Imp.LMADCopy
       t
