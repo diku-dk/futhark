@@ -61,7 +61,7 @@ static bool lmad_is_colmajor(int64_t *n_out, int64_t *m_out,
     bool ok = true;
     int64_t expected = 1;
     // Check strides before 'i'.
-    for (int j = i-1; j >= 0; j--) {
+    for (int j = 0; j < i; j++) {
       ok = ok && strides[j] == expected;
       expected *= shape[j];
       n *= shape[j];
@@ -96,10 +96,10 @@ static bool lmad_is_colmajor(int64_t *n_out, int64_t *m_out,
 // number of arrays, and moral array size to appropriate output
 // parameters.
 static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
-                           int r,
-                           const int64_t dst_strides[r],
-                           const int64_t src_strides[r],
-                           const int64_t shape[r]) {
+                        int r,
+                        const int64_t dst_strides[r],
+                        const int64_t src_strides[r],
+                        const int64_t shape[r]) {
   int64_t rowmajor_strides[r];
   rowmajor_strides[r-1] = 1;
 
