@@ -31,9 +31,8 @@ import Futhark.CLI.Query qualified as Query
 import Futhark.CLI.REPL qualified as REPL
 import Futhark.CLI.Run qualified as Run
 import Futhark.CLI.Test qualified as Test
-import Futhark.CLI.WASM qualified as WASM
 import Futhark.CLI.Unused qualified as Unused
-
+import Futhark.CLI.WASM qualified as WASM
 import Futhark.Error
 import Futhark.Util (maxinum, showText)
 import Futhark.Util.Options
