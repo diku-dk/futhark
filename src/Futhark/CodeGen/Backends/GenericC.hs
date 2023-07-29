@@ -37,7 +37,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
@@ -64,12 +64,12 @@ defError msg stacktrace = do
 lmadcopyCPU :: DoLMADCopy op s
 lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname :: String
-      (fname, t') =
+      fname =
         case primByteSize t :: Int of
-          1 -> ("lmad_copy_1b", [C.cty|typename uint8_t|])
-          2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
-          4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
-          8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
+          1 -> "lmad_copy_1b"
+          2 -> "lmad_copy_2b"
+          4 -> "lmad_copy_4b"
+          8 -> "lmad_copy_8b"
           k -> error $ "lmadcopyCPU: " <> error (show k)
       r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -77,10 +77,10 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
       shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
   stm
     [C.cstm|
-         $id:fname($int:r,
-                   ($ty:t'*)$exp:dst+$exp:(unCount dstoffset),
+         $id:fname(ctx, $int:r,
+                   $exp:dst, $exp:(unCount dstoffset),
                    (typename int64_t[]){ $inits:dststride_inits },
-                   ($ty:t'*)$exp:src+$exp:(unCount srcoffset),
+                   $exp:src, $exp:(unCount srcoffset),
                    (typename int64_t[]){ $inits:srcstride_inits },
                    (typename int64_t[]){ $inits:shape_inits });|]
 
@@ -462,6 +462,8 @@ $contextPrototypesH
 $early_decls
 
 $contextH
+
+$copyH
 
 $prototypes
 

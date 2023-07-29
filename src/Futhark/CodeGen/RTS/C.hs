@@ -5,6 +5,7 @@ module Futhark.CodeGen.RTS.C
   ( atomicsH,
     contextH,
     contextPrototypesH,
+    copyH,
     freeListH,
     halfH,
     lockH,
@@ -142,3 +143,8 @@ backendsCH = $(embedStringFile "rts/c/backends/c.h")
 backendsMulticoreH :: T.Text
 backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
 {-# NOINLINE backendsMulticoreH #-}
+
+-- | @rts/c/copy.h@
+copyH :: T.Text
+copyH = $(embedStringFile "rts/c/copy.h")
+{-# NOINLINE copyH #-}
