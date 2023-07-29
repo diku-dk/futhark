@@ -44,6 +44,7 @@ extra-source-files:
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
     rts/c/lock.h
+    rts/c/copy.h
     rts/c/timing.h
     rts/c/errors.h
     rts/c/free_list.h
