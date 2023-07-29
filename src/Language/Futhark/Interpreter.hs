@@ -1152,8 +1152,7 @@ evalModExp env (ModAscript me _ (Info substs) _) =
   bimap substituteInEnv (substituteInModule substs) <$> evalModExp env me
   where
     substituteInEnv env' =
-      let Module env'' = substituteInModule substs (Module env')
-       in env''
+      let Module env'' = substituteInModule substs (Module env') in env''
 evalModExp env (ModParens me _) =
   evalModExp env me
 evalModExp env (ModLambda p ret e loc) =
@@ -1169,8 +1168,12 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
   (f_env, f') <- evalModExp env f
   (e_env, e') <- evalModExp env e
   case f' of
-    ModuleFun f'' ->
-      (f_env <> e_env,) . substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+    ModuleFun f'' -> do
+      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+      let res_env = case res_mod of
+            Module x -> x
+            _ -> mempty
+      pure (f_env <> e_env <> res_env, res_mod)
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
