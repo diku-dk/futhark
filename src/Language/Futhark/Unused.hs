@@ -120,7 +120,6 @@ funcsInExp (Negate _ _) _ vm = vm
 funcsInExp (ProjectSection _ _ _) _ vm = vm
 funcsInExp (IndexSection _ _ _) _ vm = vm
 
-
 -- funcs inside a module expression. also tracks functions that have different VNames inside and outside the module.
 -- ModVar omitted
 -- ModImport omitted since it is already recognized by readprogramfiles.
