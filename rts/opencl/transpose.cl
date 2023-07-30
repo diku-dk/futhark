@@ -2,7 +2,8 @@
 
 #define GEN_TRANSPOSE_KERNELS(NAME, ELEM_TYPE)                          \
 __attribute__((reqd_work_group_size(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1))) \
-__kernel void map_transpose_##NAME(__global ELEM_TYPE *dst_mem,       \
+__kernel void map_transpose_##NAME(__local void* unused,                \
+                                   __global ELEM_TYPE *dst_mem,         \
                                    int64_t dst_offset,                  \
                                    __global ELEM_TYPE *src_mem,         \
                                    int64_t src_offset,                  \
@@ -43,8 +44,9 @@ __kernel void map_transpose_##NAME(__global ELEM_TYPE *dst_mem,       \
   }                                                                     \
 }                                                                       \
                                                                         \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))  \
-__kernel void map_transpose_##NAME##_low_height(__global ELEM_TYPE *dst_mem, \
+__attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))   \
+__kernel void map_transpose_##NAME##_low_height(__local void* unused,   \
+                                                __global ELEM_TYPE *dst_mem, \
                                                 int64_t dst_offset,     \
                                                 __global ELEM_TYPE *src_mem, \
                                                 int64_t src_offset,     \
@@ -84,16 +86,17 @@ __kernel void map_transpose_##NAME##_low_height(__global ELEM_TYPE *dst_mem, \
   }                                                                     \
 }                                                                       \
                                                                         \
-  __attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))  \
-  __kernel void map_transpose_##NAME##_low_width(__global ELEM_TYPE *dst_mem, \
-                                                 int64_t dst_offset,    \
-                                                 __global ELEM_TYPE *src_mem, \
-                                                 int64_t src_offset,    \
-                                                 int32_t num_arrays,    \
-                                                 int32_t x_elems,       \
-                                                 int32_t y_elems,       \
-                                                 int32_t mulx,          \
-                                                 int32_t muly)          \
+__attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))  \
+__kernel void map_transpose_##NAME##_low_width(__local void* unused,    \
+                                               __global ELEM_TYPE *dst_mem, \
+                                               int64_t dst_offset,      \
+                                               __global ELEM_TYPE *src_mem, \
+                                               int64_t src_offset,      \
+                                               int32_t num_arrays,    \
+                                               int32_t x_elems,       \
+                                               int32_t y_elems,       \
+                                               int32_t mulx,          \
+                                               int32_t muly)          \
   {                                                                     \
     __local ELEM_TYPE block[TR_BLOCK_DIM*(TR_BLOCK_DIM+1)];             \
                                                                         \
@@ -124,7 +127,8 @@ __kernel void map_transpose_##NAME##_low_height(__global ELEM_TYPE *dst_mem, \
   }                                                                     \
                                                                         \
 __attribute__((reqd_work_group_size(TR_BLOCK_DIM*TR_BLOCK_DIM, 1, 1))) \
-__kernel void map_transpose_##NAME##_small(__global ELEM_TYPE *dst_mem, \
+__kernel void map_transpose_##NAME##_small(__local void* unused,        \
+                                           __global ELEM_TYPE *dst_mem, \
                                            int64_t dst_offset,          \
                                            __global ELEM_TYPE *src_mem, \
                                            int64_t src_offset,          \
@@ -148,15 +152,16 @@ __kernel void map_transpose_##NAME##_small(__global ELEM_TYPE *dst_mem, \
   }                                                                     \
                                                                         \
 __attribute__((reqd_work_group_size(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1))) \
- __kernel void map_transpose_##NAME##_large(__global ELEM_TYPE *dst_mem,  \
-                                            int64_t dst_offset,         \
-                                            __global ELEM_TYPE *src_mem, \
-                                            int64_t src_offset,         \
-                                            int64_t num_arrays,         \
-                                            int64_t x_elems,            \
-                                            int64_t y_elems,            \
-                                            int64_t mulx,               \
-                                            int64_t muly) {             \
+__kernel void map_transpose_##NAME##_large(__local void* unused,        \
+                                           __global ELEM_TYPE *dst_mem, \
+                                           int64_t dst_offset,         \
+                                           __global ELEM_TYPE *src_mem, \
+                                           int64_t src_offset,         \
+                                           int64_t num_arrays,         \
+                                           int64_t x_elems,            \
+                                           int64_t y_elems,            \
+                                           int64_t mulx,               \
+                                           int64_t muly) {             \
   (void)mulx; (void)muly;                                               \
   __local ELEM_TYPE block[TR_TILE_DIM*(TR_TILE_DIM+1)];                 \
   int64_t our_array_offset = get_group_id(2) * x_elems * y_elems;       \

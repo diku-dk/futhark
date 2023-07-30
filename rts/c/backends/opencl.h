@@ -1297,7 +1297,7 @@ void gpu_create_kernel(struct futhark_context *ctx,
 }
 
 int gpu_scalar_to_device(struct futhark_context* ctx,
-                         cl_mem dst, size_t offset, size_t size,
+                         gpu_mem dst, size_t offset, size_t size,
                          void *src) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
@@ -1312,7 +1312,7 @@ int gpu_scalar_to_device(struct futhark_context* ctx,
 
 int gpu_scalar_from_device(struct futhark_context* ctx,
                            void *dst,
-                           cl_mem src, size_t offset, size_t size) {
+                           gpu_mem src, size_t offset, size_t size) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     event = opencl_get_event(ctx, "copy_scalar_from_dev");
@@ -1325,8 +1325,8 @@ int gpu_scalar_from_device(struct futhark_context* ctx,
 }
 
 int gpu_memcpy(struct futhark_context* ctx,
-               cl_mem dst, int64_t dst_offset,
-               cl_mem src, int64_t src_offset,
+               gpu_mem dst, int64_t dst_offset,
+               gpu_mem src, int64_t src_offset,
                int64_t nbytes) {
   if (nbytes > 0) {
     cl_event* event = NULL;
@@ -1343,6 +1343,40 @@ int gpu_memcpy(struct futhark_context* ctx,
       OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
     }
   }
+  return FUTHARK_SUCCESS;
+}
+
+int gpu_launch_kernel(struct futhark_context* ctx,
+                      cl_kernel kernel, const char *name,
+                      const int32_t grid[3],
+                      const int32_t block[3],
+                      unsigned int local_mem_bytes,
+                      int num_args,
+                      const void* args[num_args],
+                      const size_t args_sizes[num_args]) {
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 0, sizeof(local_mem_bytes), NULL));
+  for (int i = 0; i < num_args; i++) {
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, i+1, args_sizes[i], args[i]));
+  }
+
+  const size_t global_work_size[3] =
+    {grid[0]*block[0], grid[1]*block[1], grid[2]*block[2]};
+  const size_t local_work_size[3] =
+    {block[0], block[1], block[2]};
+
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, name);
+  }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueNDRangeKernel(ctx->queue,
+                            kernel,
+                            3, NULL, global_work_size, local_work_size,
+                            0, NULL, event));
+  return FUTHARK_SUCCESS;
 }
 
 // GENERIC FUNCTIONS USING GPU ABSTRACTION LAYER
@@ -1379,26 +1413,46 @@ int init_builtin_kernels(struct futhark_context* ctx) {
   return FUTHARK_SUCCESS;
 }
 
-static int opencl_map_transpose(struct futhark_context* ctx,
-                                gpu_kernel kernel_default,
-                                gpu_kernel kernel_low_height,
-                                gpu_kernel kernel_low_width,
-                                gpu_kernel kernel_small,
-                                gpu_kernel kernel_large,
-                                const char *name,
-                                cl_mem dst, int64_t dst_offset,
-                                cl_mem src, int64_t src_offset,
-                                int64_t k, int64_t n, int64_t m) {
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, name);
-  }
-
+static int gpu_map_transpose(struct futhark_context* ctx,
+                             gpu_kernel kernel_default,
+                             gpu_kernel kernel_low_height,
+                             gpu_kernel kernel_low_width,
+                             gpu_kernel kernel_small,
+                             gpu_kernel kernel_large,
+                             const char *name,
+                             gpu_mem dst, int64_t dst_offset,
+                             gpu_mem src, int64_t src_offset,
+                             int64_t k, int64_t n, int64_t m) {
   int64_t mulx = TR_BLOCK_DIM / n;
   int64_t muly = TR_BLOCK_DIM / m;
+  int32_t mulx32 = mulx;
+  int32_t muly32 = muly;
+  int32_t k32 = k;
+  int32_t n32 = n;
+  int32_t m32 = m;
+
   gpu_kernel kernel = kernel_default;
-  size_t grid[3];
-  size_t block[3];
+  int32_t grid[3];
+  int32_t block[3];
+
+  const void* args[9];
+  size_t args_sizes[9] = {
+    sizeof(gpu_mem), sizeof(int64_t),
+    sizeof(gpu_mem), sizeof(int64_t),
+    sizeof(int32_t),
+    sizeof(int32_t),
+    sizeof(int32_t),
+    sizeof(int32_t),
+    sizeof(int32_t)
+  };
+
+  args[0] = &dst;
+  args[1] = &dst_offset;
+  args[2] = &src;
+  args[3] = &src_offset;
+  args[7] = &mulx;
+  args[8] = &muly;
+
   if (dst_offset + k * n * m <= 2147483647L &&
       src_offset + k * n * m <= 2147483647L) {
     if (m <= TR_BLOCK_DIM/2 && n <= TR_BLOCK_DIM/2) {
@@ -1442,21 +1496,11 @@ static int opencl_map_transpose(struct futhark_context* ctx,
       block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
       block[2] = 1;
     }
-    int32_t k32 = k;
-    int32_t n32 = n;
-    int32_t m32 = m;
-    int32_t mulx32 = mulx;
-    int32_t muly32 = muly;
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 4, sizeof(k32), &k32));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 5, sizeof(k32), &m32));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 6, sizeof(m32), &n32));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 7, sizeof(mulx32), &mulx32));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 8, sizeof(muly32), &muly32));
+    args[4] = &k32;
+    args[5] = &m32;
+    args[6] = &n32;
+    args[7] = &mulx32;
+    args[8] = &muly32;
   } else {
     if (ctx->logging) { fprintf(ctx->log, "Using large kernel\n"); }
     kernel = kernel_large;
@@ -1466,48 +1510,31 @@ static int opencl_map_transpose(struct futhark_context* ctx,
     block[0] = TR_TILE_DIM;
     block[1] = TR_TILE_DIM/TR_ELEMS_PER_THREAD;
     block[2] = 1;
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 4, sizeof(k), &k));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 5, sizeof(n), &m));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 6, sizeof(m), &n));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 7, sizeof(mulx), &mulx));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 8, sizeof(muly), &muly));
+    args[4] = &k;
+    args[5] = &m;
+    args[6] = &n;
+    args[7] = &mulx;
+    args[8] = &muly;
+    args_sizes[4] = sizeof(int64_t);
+    args_sizes[5] = sizeof(int64_t);
+    args_sizes[6] = sizeof(int64_t);
+    args_sizes[7] = sizeof(int64_t);
+    args_sizes[8] = sizeof(int64_t);
   }
   if (ctx->logging) { fprintf(ctx->log, "\n"); }
 
-  OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 0, sizeof(dst), &dst));
-  OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 1, sizeof(dst_offset), &dst_offset));
-  OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 2, sizeof(src), &src));
-  OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 3, sizeof(src_offset), &src_offset));
-
-  const size_t global_work_size[3] = {grid[0] * block[0], grid[1] * block[1], grid[2] * block[2]};
-  const size_t local_work_size[3] = {block[0], block[1], block[2]};
-
-  OPENCL_SUCCEED_OR_RETURN
-    (clEnqueueNDRangeKernel(ctx->queue,
-                            kernel,
-                            3, NULL, global_work_size, local_work_size,
-                            0, NULL, event));
-  return 0;
+  return gpu_launch_kernel(ctx, kernel, name, grid, block, 0, 9, args, args_sizes);
 }
 
 #define GEN_MAP_TRANSPOSE_GPU2GPU(NAME)                                 \
   static int map_transpose_gpu2gpu_##NAME                               \
   (struct futhark_context* ctx,                                         \
-   cl_mem dst, int64_t dst_offset,                                      \
-   cl_mem src, int64_t src_offset,                                      \
+   gpu_mem dst, int64_t dst_offset,                                      \
+   gpu_mem src, int64_t src_offset,                                      \
    int64_t k, int64_t m, int64_t n)                                     \
   {                                                                     \
     return                                                              \
-      opencl_map_transpose                                              \
+      gpu_map_transpose                                                 \
       (ctx,                                                             \
        ctx->kernels.map_transpose_##NAME,                               \
        ctx->kernels.map_transpose_##NAME##_low_height,                  \
@@ -1517,7 +1544,7 @@ static int opencl_map_transpose(struct futhark_context* ctx,
        "map_transpose_" #NAME,                                          \
        dst, dst_offset, src, src_offset,                                \
        k, n, m);                                                        \
-}
+  }
 
 static int opencl_lmad_copy(struct futhark_context* ctx,
                             cl_kernel kernel, int r,
