@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Interpreter issue related to sizes in modules (#1992, #1993).
 
+* Incorrect handling of `match` in lambda lifting (#2000).
+
 ## [0.25.2]
 
 ### Added
