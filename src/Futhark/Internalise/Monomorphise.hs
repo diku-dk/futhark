@@ -899,7 +899,7 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
 inferSizeArgs tparams bind_t bind_r t = do
-  r <- get
+  r <- gets (<>) <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
   where
