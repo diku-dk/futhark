@@ -1233,6 +1233,70 @@ void create_kernel(struct futhark_context* ctx, cl_kernel* kernel, const char* n
   OPENCL_SUCCEED_FATAL(error);
 }
 
+int init_builtin_kernels(struct futhark_context* ctx) {
+  create_kernel(ctx, &ctx->kernels.map_transpose_1b, "map_transpose_1b");
+  create_kernel(ctx, &ctx->kernels.map_transpose_1b_large, "map_transpose_1b_large");
+  create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_height, "map_transpose_1b_low_height");
+  create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_width, "map_transpose_1b_low_width");
+  create_kernel(ctx, &ctx->kernels.map_transpose_1b_small, "map_transpose_1b_small");
+
+  create_kernel(ctx, &ctx->kernels.map_transpose_2b, "map_transpose_2b");
+  create_kernel(ctx, &ctx->kernels.map_transpose_2b_large, "map_transpose_2b_large");
+  create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_height, "map_transpose_2b_low_height");
+  create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_width, "map_transpose_2b_low_width");
+  create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small");
+
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
+  create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
+
+  create_kernel(ctx, &ctx->kernels.map_transpose_8b, "map_transpose_8b");
+  create_kernel(ctx, &ctx->kernels.map_transpose_8b_large, "map_transpose_8b_large");
+  create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_height, "map_transpose_8b_low_height");
+  create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width");
+  create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small");
+
+  create_kernel(ctx, &ctx->kernels.lmad_copy_1b, "lmad_copy_1b");
+  create_kernel(ctx, &ctx->kernels.lmad_copy_2b, "lmad_copy_2b");
+  create_kernel(ctx, &ctx->kernels.lmad_copy_4b, "lmad_copy_4b");
+  create_kernel(ctx, &ctx->kernels.lmad_copy_8b, "lmad_copy_8b");
+
+  // OpenCL requires that all kernel arguments have been set at least
+  // once, but we might not ever actually need all of the ones for
+  // lmad_copy_4b, so set them all to dummy values here.
+  for (int i = 0; i < 8; i++) {
+    int64_t zero;
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3+1, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3+2, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3+1, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3+2, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+1, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+2, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3+1, sizeof(zero), &zero));
+    OPENCL_SUCCEED_FATAL
+      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3+2, sizeof(zero), &zero));
+  }
+
+  return FUTHARK_SUCCESS;
+}
+
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
   ctx->profiling_records_capacity = 200;
@@ -1267,45 +1331,7 @@ int backend_context_setup(struct futhark_context* ctx) {
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
 
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b, "map_transpose_1b"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_large, "map_transpose_1b_large"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_height, "map_transpose_1b_low_height"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_width, "map_transpose_1b_low_width"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_1b_small, "map_transpose_1b_small"); */
-
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b, "map_transpose_2b"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_large, "map_transpose_2b_large"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_height, "map_transpose_2b_low_height"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_width, "map_transpose_2b_low_width"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small"); */
-
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
-
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b, "map_transpose_8b"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_large, "map_transpose_8b_large"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_height, "map_transpose_8b_low_height"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width"); */
-  /* create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small"); */
-
-  create_kernel(ctx, &ctx->kernels.lmad_copy_4b, "lmad_copy_4b");
-  // OpenCL requires that all kernel arguments have been set at least
-  // once, but we might not ever actually need all of the ones for
-  // lmad_copy_4b, so set them all to dummy values here.
-  for (int i = 0; i < 8; i++) {
-    int64_t zero;
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+1, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+2, sizeof(zero), &zero));
-  }
-
-  return 0;
+  return init_builtin_kernels(ctx);
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
