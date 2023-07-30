@@ -50,12 +50,12 @@
     }                                                                   \
   }                                                                     \
 
-// check whether strides can be seen as a colmajor 2D-array.  This is
-// done by checking every possible splitting point.
-static bool lmad_is_colmajor(int64_t *n_out, int64_t *m_out,
-                             int r,
-                             const int64_t strides[r],
-                             const int64_t shape[r]) {
+// Check whether this LMAD can be seen as a transposed 2D array.  This
+// is done by checking every possible splitting point.
+static bool lmad_is_tr(int64_t *n_out, int64_t *m_out,
+                       int r,
+                       const int64_t strides[r],
+                       const int64_t shape[r]) {
   for (int i = 1; i < r; i++) {
     int n = 1, m = 1;
     bool ok = true;
@@ -125,11 +125,11 @@ static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
   if (memcmp(&rowmajor_strides[map_r],
              &dst_strides[map_r],
              sizeof(int64_t)*(r-map_r)) == 0) {
-    return lmad_is_colmajor(n_out, m_out, r-map_r, src_strides+map_r, shape+map_r);
+    return lmad_is_tr(n_out, m_out, r-map_r, src_strides+map_r, shape+map_r);
   } else if (memcmp(&rowmajor_strides[map_r],
                     &src_strides[map_r],
                     sizeof(int64_t)*(r-map_r)) == 0) {
-    return lmad_is_colmajor(m_out, n_out, r-map_r, dst_strides+map_r, shape+map_r);
+    return lmad_is_tr(m_out, n_out, r-map_r, dst_strides+map_r, shape+map_r);
   }
   return false;
 }
