@@ -1225,77 +1225,7 @@ static void setup_opencl(struct futhark_context *ctx,
   setup_opencl_with_command_queue(ctx, queue, srcs, extra_build_opts, cache_fname);
 }
 
-void create_kernel(struct futhark_context* ctx, cl_kernel* kernel, const char* name) {
-  if (ctx->debugging)
-    fprintf(ctx->log, "Creating kernel %s.\n", name);
-  cl_int error;
-  *kernel = clCreateKernel(ctx->clprogram, name, &error);
-  OPENCL_SUCCEED_FATAL(error);
-}
-
-int init_builtin_kernels(struct futhark_context* ctx) {
-  create_kernel(ctx, &ctx->kernels.map_transpose_1b, "map_transpose_1b");
-  create_kernel(ctx, &ctx->kernels.map_transpose_1b_large, "map_transpose_1b_large");
-  create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_height, "map_transpose_1b_low_height");
-  create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_width, "map_transpose_1b_low_width");
-  create_kernel(ctx, &ctx->kernels.map_transpose_1b_small, "map_transpose_1b_small");
-
-  create_kernel(ctx, &ctx->kernels.map_transpose_2b, "map_transpose_2b");
-  create_kernel(ctx, &ctx->kernels.map_transpose_2b_large, "map_transpose_2b_large");
-  create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_height, "map_transpose_2b_low_height");
-  create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_width, "map_transpose_2b_low_width");
-  create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small");
-
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
-  create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
-
-  create_kernel(ctx, &ctx->kernels.map_transpose_8b, "map_transpose_8b");
-  create_kernel(ctx, &ctx->kernels.map_transpose_8b_large, "map_transpose_8b_large");
-  create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_height, "map_transpose_8b_low_height");
-  create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width");
-  create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small");
-
-  create_kernel(ctx, &ctx->kernels.lmad_copy_1b, "lmad_copy_1b");
-  create_kernel(ctx, &ctx->kernels.lmad_copy_2b, "lmad_copy_2b");
-  create_kernel(ctx, &ctx->kernels.lmad_copy_4b, "lmad_copy_4b");
-  create_kernel(ctx, &ctx->kernels.lmad_copy_8b, "lmad_copy_8b");
-
-  // OpenCL requires that all kernel arguments have been set at least
-  // once, but we might not ever actually need all of the ones for
-  // lmad_copy_4b, so set them all to dummy values here.
-  for (int i = 0; i < 8; i++) {
-    int64_t zero;
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3+1, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_1b, 6+i*3+2, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3+1, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_2b, 6+i*3+2, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+1, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_4b, 6+i*3+2, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3+1, sizeof(zero), &zero));
-    OPENCL_SUCCEED_FATAL
-      (clSetKernelArg(ctx->kernels.lmad_copy_8b, 6+i*3+2, sizeof(zero), &zero));
-  }
-
-  return FUTHARK_SUCCESS;
-}
+int init_builtin_kernels(struct futhark_context* ctx);
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
@@ -1349,9 +1279,26 @@ cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) 
   return ctx->queue;
 }
 
-int opencl_scalar_to_device(struct futhark_context* ctx,
-                            cl_mem dst, size_t offset, size_t size,
-                            void *src) {
+// GPU ABSTRACTION LAYER
+
+// Types.
+
+typedef cl_kernel gpu_kernel;
+typedef cl_mem gpu_mem;
+
+void gpu_create_kernel(struct futhark_context *ctx,
+                       gpu_kernel* kernel,
+                       const char* name) {
+  if (ctx->debugging)
+    fprintf(ctx->log, "Creating kernel %s.\n", name);
+  cl_int error;
+  *kernel = clCreateKernel(ctx->clprogram, name, &error);
+  OPENCL_SUCCEED_FATAL(error);
+}
+
+int gpu_scalar_to_device(struct futhark_context* ctx,
+                         cl_mem dst, size_t offset, size_t size,
+                         void *src) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     event = opencl_get_event(ctx, "copy_scalar_to_dev");
@@ -1363,9 +1310,9 @@ int opencl_scalar_to_device(struct futhark_context* ctx,
   return 0;
 }
 
-int opencl_scalar_from_device(struct futhark_context* ctx,
-                              void *dst,
-                              cl_mem src, size_t offset, size_t size) {
+int gpu_scalar_from_device(struct futhark_context* ctx,
+                           void *dst,
+                           cl_mem src, size_t offset, size_t size) {
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     event = opencl_get_event(ctx, "copy_scalar_from_dev");
@@ -1377,12 +1324,67 @@ int opencl_scalar_from_device(struct futhark_context* ctx,
   return 0;
 }
 
+int gpu_memcpy(struct futhark_context* ctx,
+               cl_mem dst, int64_t dst_offset,
+               cl_mem src, int64_t src_offset,
+               int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_dev_to_dev");
+    }
+    // OpenCL swaps the usual order of operands for memcpy()-like
+    // functions.  The order below is not a typo.
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueCopyBuffer
+       (ctx->queue, src, dst, src_offset, dst_offset, nbytes,
+        0, NULL, event));
+    if (ctx->debugging) {
+      OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    }
+  }
+}
+
+// GENERIC FUNCTIONS USING GPU ABSTRACTION LAYER
+
+int init_builtin_kernels(struct futhark_context* ctx) {
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_1b, "map_transpose_1b");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_1b_large, "map_transpose_1b_large");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_height, "map_transpose_1b_low_height");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_1b_low_width, "map_transpose_1b_low_width");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_1b_small, "map_transpose_1b_small");
+
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_2b, "map_transpose_2b");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_2b_large, "map_transpose_2b_large");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_height, "map_transpose_2b_low_height");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_2b_low_width, "map_transpose_2b_low_width");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_2b_small, "map_transpose_2b_small");
+
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_4b, "map_transpose_4b");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_4b_large, "map_transpose_4b_large");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_height, "map_transpose_4b_low_height");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_4b_low_width, "map_transpose_4b_low_width");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_4b_small, "map_transpose_4b_small");
+
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_8b, "map_transpose_8b");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_8b_large, "map_transpose_8b_large");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_height, "map_transpose_8b_low_height");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_8b_low_width, "map_transpose_8b_low_width");
+  gpu_create_kernel(ctx, &ctx->kernels.map_transpose_8b_small, "map_transpose_8b_small");
+
+  gpu_create_kernel(ctx, &ctx->kernels.lmad_copy_1b, "lmad_copy_1b");
+  gpu_create_kernel(ctx, &ctx->kernels.lmad_copy_2b, "lmad_copy_2b");
+  gpu_create_kernel(ctx, &ctx->kernels.lmad_copy_4b, "lmad_copy_4b");
+  gpu_create_kernel(ctx, &ctx->kernels.lmad_copy_8b, "lmad_copy_8b");
+  return FUTHARK_SUCCESS;
+}
+
 static int opencl_map_transpose(struct futhark_context* ctx,
-                                cl_kernel kernel_default,
-                                cl_kernel kernel_low_height,
-                                cl_kernel kernel_low_width,
-                                cl_kernel kernel_small,
-                                cl_kernel kernel_large,
+                                gpu_kernel kernel_default,
+                                gpu_kernel kernel_low_height,
+                                gpu_kernel kernel_low_width,
+                                gpu_kernel kernel_small,
+                                gpu_kernel kernel_large,
                                 const char *name,
                                 cl_mem dst, int64_t dst_offset,
                                 cl_mem src, int64_t src_offset,
@@ -1394,7 +1396,7 @@ static int opencl_map_transpose(struct futhark_context* ctx,
 
   int64_t mulx = TR_BLOCK_DIM / n;
   int64_t muly = TR_BLOCK_DIM / m;
-  cl_kernel kernel = kernel_default;
+  gpu_kernel kernel = kernel_default;
   size_t grid[3];
   size_t block[3];
   if (dst_offset + k * n * m <= 2147483647L &&
@@ -1542,13 +1544,24 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
     (clSetKernelArg(kernel, 4, sizeof(n), &n));
   OPENCL_SUCCEED_OR_RETURN
     (clSetKernelArg(kernel, 5, sizeof(r), &r));
-  for (int i = 0; i < r; i++) {
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 6+i*3, sizeof(shape[i]), &shape[i]));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 6+i*3+1, sizeof(dst_strides[i]), &dst_strides[i]));
-    OPENCL_SUCCEED_OR_RETURN
-      (clSetKernelArg(kernel, 6+i*3+2, sizeof(src_strides[i]), &src_strides[i]));
+
+  int64_t zero = 0;
+  for (int i = 0; i < 8; i++) {
+    if (i < r) {
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3, sizeof(int64_t), &shape[i]));
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3+1, sizeof(int64_t), &dst_strides[i]));
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3+2, sizeof(int64_t), &src_strides[i]));
+    } else {
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3, sizeof(int64_t), &zero));
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3+1, sizeof(int64_t), &zero));
+      OPENCL_SUCCEED_OR_RETURN
+        (clSetKernelArg(kernel, 6+i*3+2, sizeof(int64_t), &zero));
+    }
   }
   const size_t w = 256;
   const size_t local_work_size[1] = {w};
@@ -1606,15 +1619,10 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
       if (ctx->profiling && !ctx->profiling_paused) {                   \
         event = opencl_get_event(ctx, "copy_dev_to_dev");               \
       }                                                                 \
-      OPENCL_SUCCEED_OR_RETURN                                          \
-        (clEnqueueCopyBuffer                                            \
-         (ctx->queue,                                                   \
-          src, dst,                                                     \
-          src_offset*sizeof(ELEM_TYPE),                                 \
-          dst_offset*sizeof(ELEM_TYPE),                                 \
-          size * sizeof(ELEM_TYPE),                                     \
-          0, NULL, event));                                             \
-      return FUTHARK_SUCCESS;                                           \
+      return gpu_memcpy(ctx,                                            \
+                        dst, dst_offset*sizeof(ELEM_TYPE),              \
+                        src, src_offset*sizeof(ELEM_TYPE),              \
+                        size * sizeof(ELEM_TYPE));                      \
     } else {                                                            \
       if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}     \
       return lmad_copy_elements_gpu2gpu_##NAME                          \

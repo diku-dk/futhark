@@ -174,7 +174,7 @@ writeOpenCLScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
   GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
   GC.stm
-    [C.cstm|if ((err = opencl_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
 writeOpenCLScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
@@ -187,7 +187,7 @@ readOpenCLScalar mem i t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
   GC.stm
-    [C.cstm|if ((err = opencl_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
+    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
             { err = 1; goto cleanup; }|]
@@ -246,23 +246,9 @@ copyOpenCLMemory b destmem destidx (Space "device") srcmem srcidx DefaultSpace n
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
     }
   |]
-copyOpenCLMemory _ destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
-  -- Be aware that OpenCL swaps the usual order of operands for
-  -- memcpy()-like functions.  The order below is not a typo.
+copyOpenCLMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
   GC.stm
-    [C.cstm|{
-    if ($exp:nbytes > 0) {
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueCopyBuffer(ctx->queue,
-                            $exp:srcmem, $exp:destmem,
-                            (size_t)$exp:srcidx, (size_t)$exp:destidx,
-                            (size_t)$exp:nbytes,
-                            0, NULL, $exp:(profilingEvent copyDevToDev)));
-      if (ctx->debugging) {
-        OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
-      }
-    }
-  }|]
+    [C.cstm|gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyOpenCLMemory _ destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
   GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ _ destspace _ _ srcspace _ =

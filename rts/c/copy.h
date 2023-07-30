@@ -211,7 +211,7 @@ static void log_transpose(struct futhark_context* ctx,
     fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
     fprintf(ctx->log, "X elements : %ld\n", (long int)m);
     fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
-    fprintf(ctx->log, "\n", (long int)n);
+    fprintf(ctx->log, "\n");
   }
 }
 
