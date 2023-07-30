@@ -61,7 +61,7 @@ static bool lmad_is_colmajor(int64_t *n_out, int64_t *m_out,
     bool ok = true;
     int64_t expected = 1;
     // Check strides before 'i'.
-    for (int j = 0; j < i; j++) {
+    for (int j = i-1; j >= 0; j--) {
       ok = ok && strides[j] == expected;
       expected *= shape[j];
       n *= shape[j];
@@ -211,6 +211,7 @@ static void log_transpose(struct futhark_context* ctx,
     fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
     fprintf(ctx->log, "X elements : %ld\n", (long int)m);
     fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
+    fprintf(ctx->log, "\n", (long int)n);
   }
 }
 
@@ -232,10 +233,10 @@ static void log_transpose(struct futhark_context* ctx,
       map_transpose_##NAME                                              \
         (dst+dst_offset, src+src_offset, k, n, m, 0, n, 0, m);          \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
-      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n");}          \
+      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}          \
       memcpy(dst+dst_offset, src+src_offset, size*sizeof(*dst));        \
     } else {                                                            \
-      if (ctx->logging) {fprintf(ctx->log, "## General copy\n");}       \
+      if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}       \
       lmad_copy_elements_##NAME                                         \
         (r,                                                             \
          dst+dst_offset, dst_strides,                                   \

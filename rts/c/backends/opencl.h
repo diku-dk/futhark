@@ -1575,7 +1575,7 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
       return map_transpose_gpu2gpu_##NAME                               \
         (ctx, dst, dst_offset, src, src_offset, k, n, m);               \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
-      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n");}          \
+      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}        \
       cl_event* event = NULL;                                           \
       if (ctx->profiling && !ctx->profiling_paused) {                   \
         event = opencl_get_event(ctx, "copy_dev_to_dev");               \
@@ -1590,7 +1590,7 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
           0, NULL, event));                                             \
       return FUTHARK_SUCCESS;                                           \
     } else {                                                            \
-      if (ctx->logging) {fprintf(ctx->log, "## General copy\n");}       \
+      if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}     \
       return lmad_copy_elements_gpu2gpu_##NAME                          \
         (ctx, r,                                                        \
          dst, dst_offset, dst_strides,                                  \
