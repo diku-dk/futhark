@@ -58,7 +58,10 @@ __kernel void map_transpose_4b_low_height(__global uint32_t *dst_mem,
   int32_t our_array_offset = get_group_id(2) * x_elems * y_elems;
   int32_t odata_offset = dst_offset + our_array_offset;
   int32_t idata_offset = src_offset + our_array_offset;
-  int32_t x_index = get_group_id(0) * TR_BLOCK_DIM * mulx + get_local_id(0) + get_local_id(1)%mulx * TR_BLOCK_DIM;
+  int32_t x_index =
+    get_group_id(0) * TR_BLOCK_DIM * mulx +
+    get_local_id(0) +
+    get_local_id(1)%mulx * TR_BLOCK_DIM;
   int32_t y_index = get_group_id(1) * TR_BLOCK_DIM + get_local_id(1)/mulx;
   int32_t index_in = y_index * x_elems + x_index;
 
@@ -68,7 +71,10 @@ __kernel void map_transpose_4b_low_height(__global uint32_t *dst_mem,
   }
   barrier_local();
   x_index = get_group_id(1) * TR_BLOCK_DIM + get_local_id(0)/mulx;
-  y_index = get_group_id(0) * TR_BLOCK_DIM * mulx + get_local_id(1) + (get_local_id(0)%mulx) * TR_BLOCK_DIM;
+  y_index =
+    get_group_id(0) * TR_BLOCK_DIM * mulx +
+    get_local_id(1) +
+    (get_local_id(0)%mulx) * TR_BLOCK_DIM;
 
   int32_t index_out = y_index * y_elems + x_index;
 
@@ -95,7 +101,9 @@ __kernel void map_transpose_4b_low_width(__global uint32_t *dst_mem,
   int32_t odata_offset = dst_offset + our_array_offset;
   int32_t idata_offset = src_offset + our_array_offset;
   int32_t x_index = get_group_id(0) * TR_BLOCK_DIM + get_local_id(0)/muly;
-  int32_t y_index = get_group_id(1) * TR_BLOCK_DIM * muly + get_local_id(1) + (get_local_id(0)%(muly)) * TR_BLOCK_DIM;
+  int32_t y_index =
+    get_group_id(1) * TR_BLOCK_DIM * muly +
+    get_local_id(1) + (get_local_id(0)%(muly)) * TR_BLOCK_DIM;
   int32_t index_in = y_index * x_elems + x_index;
 
   if (x_index < x_elems && y_index < y_elems) {
@@ -103,7 +111,8 @@ __kernel void map_transpose_4b_low_width(__global uint32_t *dst_mem,
       src_mem[idata_offset + index_in];
   }
   barrier_local();
-  x_index = get_group_id(1) * TR_BLOCK_DIM * muly + get_local_id(0) + (get_local_id(1)%muly) * TR_BLOCK_DIM;
+  x_index = get_group_id(1) * TR_BLOCK_DIM * muly +
+    get_local_id(0) + (get_local_id(1)%muly) * TR_BLOCK_DIM;
   y_index = get_group_id(0) * TR_BLOCK_DIM + get_local_id(1)/muly;
 
   int32_t index_out = y_index * y_elems + x_index;
