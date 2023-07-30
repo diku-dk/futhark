@@ -1361,15 +1361,6 @@ static int opencl_map_transpose(struct futhark_context* ctx,
                                 cl_mem dst, int64_t dst_offset,
                                 cl_mem src, int64_t src_offset,
                                 int64_t k, int64_t n, int64_t m) {
-  if (ctx->logging) {
-    fprintf(ctx->log, "## Transpose\n");
-    fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
-    fprintf(ctx->log, "X elements : %ld\n", (long int)m);
-    fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
-    fprintf(ctx->log, "Dst offset : %ld\n", (long int)dst_offset);
-    fprintf(ctx->log, "Src offset : %ld\n", (long int)src_offset);
-  }
-
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     event = opencl_get_event(ctx, name);
@@ -1580,11 +1571,11 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
     int64_t k, n, m;                                                    \
     if (lmad_map_tr(&k, &n, &m,                                         \
                        r, dst_strides, src_strides, shape)) {           \
-      if (ctx->logging) {fprintf(ctx->log, "Transposition copy.\n");}   \
+      log_transpose(ctx, k, n, m);                                      \
       return map_transpose_gpu2gpu_##NAME                               \
         (ctx, dst, dst_offset, src, src_offset, k, n, m);               \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
-      if (ctx->logging) {fprintf(ctx->log, "Flat copy\n");}             \
+      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n");}          \
       cl_event* event = NULL;                                           \
       if (ctx->profiling && !ctx->profiling_paused) {                   \
         event = opencl_get_event(ctx, "copy_dev_to_dev");               \
@@ -1599,7 +1590,7 @@ static int opencl_lmad_copy(struct futhark_context* ctx,
           0, NULL, event));                                             \
       return FUTHARK_SUCCESS;                                           \
     } else {                                                            \
-      if (ctx->logging) {fprintf(ctx->log, "General copy\n");}          \
+      if (ctx->logging) {fprintf(ctx->log, "## General copy\n");}       \
       return lmad_copy_elements_gpu2gpu_##NAME                          \
         (ctx, r,                                                        \
          dst, dst_offset, dst_strides,                                  \

@@ -27,6 +27,9 @@ static void log_copy(struct futhark_context* ctx,
                      int64_t src_offset, int64_t src_strides[r],
                      int64_t shape[r]);
 
+static void log_transpose(struct futhark_context* ctx,
+                          int64_t k, int64_t m, int64_t n);
+
 static bool lmad_map_tr(int64_t *num_arrays_out, int64_t *n_out, int64_t *m_out,
                         int r,
                         const int64_t dst_strides[r],

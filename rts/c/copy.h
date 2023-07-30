@@ -204,6 +204,16 @@ static void log_copy(struct futhark_context* ctx,
   }
 }
 
+static void log_transpose(struct futhark_context* ctx,
+                          int64_t k, int64_t n, int64_t m) {
+  if (ctx->logging) {
+    fprintf(ctx->log, "## Transpose\n");
+    fprintf(ctx->log, "Arrays     : %ld\n", (long int)k);
+    fprintf(ctx->log, "X elements : %ld\n", (long int)m);
+    fprintf(ctx->log, "Y elements : %ld\n", (long int)n);
+  }
+}
+
 #define GEN_LMAD_COPY(NAME, ELEM_TYPE)                                  \
   static void lmad_copy_##NAME                                          \
   (struct futhark_context *ctx, int r,                                  \
@@ -217,15 +227,15 @@ static void log_copy(struct futhark_context* ctx,
     if (size == 0) { return; }                                          \
     int64_t k, n, m;                                                    \
     if (lmad_map_tr(&k, &n, &m,                                         \
-                       r, dst_strides, src_strides, shape)) {           \
-      if (ctx->logging) {fprintf(ctx->log, "Transposition copy.\n");}   \
+                    r, dst_strides, src_strides, shape)) {              \
+      log_transpose(ctx, k, n, m);                                      \
       map_transpose_##NAME                                              \
         (dst+dst_offset, src+src_offset, k, n, m, 0, n, 0, m);          \
     } else if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {   \
-      if (ctx->logging) {fprintf(ctx->log, "Flat copy\n");}             \
+      if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n");}          \
       memcpy(dst+dst_offset, src+src_offset, size*sizeof(*dst));        \
     } else {                                                            \
-      if (ctx->logging) {fprintf(ctx->log, "General copy\n");}          \
+      if (ctx->logging) {fprintf(ctx->log, "## General copy\n");}       \
       lmad_copy_elements_##NAME                                         \
         (r,                                                             \
          dst+dst_offset, dst_strides,                                   \
