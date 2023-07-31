@@ -367,7 +367,7 @@ genKernelFunction kernel_name safety arg_params arg_set = do
                 unsigned int block_x, unsigned int block_y, unsigned int block_z,
                 unsigned int shared_bytes, $params:arg_params) {
     if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
-      const void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
+      void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
       size_t args_sizes[$int:num_args] = { $inits:(failure_sizes<>args_sizes) };
       return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
                                $string:(prettyString kernel_name),

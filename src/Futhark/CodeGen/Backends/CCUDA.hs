@@ -160,41 +160,23 @@ writeCUDAScalar mem idx t "device" _ val@C.Const {} = do
                                   ctx->stream));
               $items:aft
              }|]
-writeCUDAScalar mem idx t "device" _ val = do
+writeCUDAScalar mem i t "device" _ val = do
   val' <- newVName "write_tmp"
-  let (bef, aft) = profilingEnclosure copyScalarToDev
-  GC.item
-    [C.citem|{$ty:t $id:val' = $exp:val;
-                  $items:bef
-                  CUDA_SUCCEED_OR_RETURN(
-                    cuMemcpyHtoD($exp:mem + $exp:idx * sizeof($ty:t),
-                                 &$id:val',
-                                 sizeof($ty:t)));
-                  $items:aft
-                 }|]
+  GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
+  GC.stm
+    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
 writeCUDAScalar _ _ _ space _ _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
 readCUDAScalar :: GC.ReadScalar OpenCL ()
-readCUDAScalar mem idx t "device" _ = do
+readCUDAScalar mem i t "device" _ = do
   val <- newVName "read_res"
-  let (bef, aft) = profilingEnclosure copyScalarFromDev
-  mapM_
-    GC.item
-    [C.citems|
-       $ty:t $id:val;
-       {
-       $items:bef
-       CUDA_SUCCEED_OR_RETURN(
-          cuMemcpyDtoH(&$id:val,
-                       $exp:mem + $exp:idx * sizeof($ty:t),
-                       sizeof($ty:t)));
-       $items:aft
-       }
-       |]
+  GC.decl [C.cdecl|$ty:t $id:val;|]
+  GC.stm
+    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
   GC.stm
     [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
-            { return 1; }|]
+            { err = 1; goto cleanup; }|]
   pure [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
@@ -216,6 +198,8 @@ deallocateCUDABuffer _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
+copyCUDAMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do
+  GC.stm [C.cstm|gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   let (copy, prof) = memcpyFun b dstSpace srcSpace
       (bef, aft) = profilingEnclosure prof
@@ -228,8 +212,6 @@ copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
       ([C.cexp|cuMemcpyDtoH($exp:dst, $exp:src, $exp:nbytes)|], copyDevToHost)
     memcpyFun GC.CopyBarrier (Space "device") DefaultSpace =
       ([C.cexp|cuMemcpyHtoD($exp:dst, $exp:src, $exp:nbytes)|], copyHostToDev)
-    memcpyFun _ (Space "device") (Space "device") =
-      ([C.cexp|cuMemcpy($exp:dst, $exp:src, $exp:nbytes)|], copyDevToDev)
     memcpyFun GC.CopyNoBarrier DefaultSpace (Space "device") =
       ([C.cexp|cuMemcpyDtoHAsync($exp:dst, $exp:src, $exp:nbytes, ctx->stream)|], copyDevToHost)
     memcpyFun GC.CopyNoBarrier (Space "device") DefaultSpace =

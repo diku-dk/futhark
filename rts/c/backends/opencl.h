@@ -1269,8 +1269,9 @@ typedef cl_mem gpu_mem;
 void gpu_create_kernel(struct futhark_context *ctx,
                        gpu_kernel* kernel,
                        const char* name) {
-  if (ctx->debugging)
+  if (ctx->debugging) {
     fprintf(ctx->log, "Creating kernel %s.\n", name);
+  }
   cl_int error;
   *kernel = clCreateKernel(ctx->clprogram, name, &error);
   OPENCL_SUCCEED_FATAL(error);
@@ -1333,13 +1334,13 @@ int gpu_memcpy(struct futhark_context* ctx,
 }
 
 int gpu_launch_kernel(struct futhark_context* ctx,
-                      cl_kernel kernel, const char *name,
+                      gpu_kernel kernel, const char *name,
                       const int32_t grid[3],
                       const int32_t block[3],
                       unsigned int local_mem_bytes,
                       int num_args,
-                      const void* args[num_args],
-                      const size_t args_sizes[num_args]) {
+                      void* args[num_args],
+                      size_t args_sizes[num_args]) {
   int64_t time_start = 0, time_end = 0;
   if (ctx->logging) {
     fprintf(ctx->log,

@@ -285,6 +285,8 @@ struct futhark_context {
   struct profiling_record *profiling_records;
   int profiling_records_capacity;
   int profiling_records_used;
+
+  struct builtin_kernels* kernels;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -940,6 +942,124 @@ void backend_context_teardown(struct futhark_context* ctx) {
   CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+}
+
+// GPU ABSTRACTION LAYER
+
+// Types.
+
+typedef CUfunction gpu_kernel;
+typedef CUdeviceptr gpu_mem;
+
+void gpu_create_kernel(struct futhark_context *ctx,
+                       gpu_kernel* kernel,
+                       const char* name) {
+  if (ctx->debugging) {
+    fprintf(ctx->log, "Creating kernel %s.\n", name);
+  }
+  CUDA_SUCCEED_FATAL(cuModuleGetFunction(kernel, ctx->module, name));
+}
+
+void gpu_free_kernel(struct futhark_context *ctx,
+                     gpu_kernel kernel) {
+  (void)ctx;
+  (void)kernel;
+}
+
+int gpu_scalar_to_device(struct futhark_context* ctx,
+                         gpu_mem dst, size_t offset, size_t size,
+                         void *src) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_scalar_to_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyHtoD(dst + offset, src, size));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+int gpu_scalar_from_device(struct futhark_context* ctx,
+                           void *dst,
+                           gpu_mem src, size_t offset, size_t size) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_scalar_from_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyDtoH(dst, src + offset, size));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+int gpu_memcpy(struct futhark_context* ctx,
+               gpu_mem dst, int64_t dst_offset,
+               gpu_mem src, int64_t src_offset,
+               int64_t nbytes) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_dev_to_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst*dst_offset, src+src_offset, nbytes));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+int gpu_launch_kernel(struct futhark_context* ctx,
+                      gpu_kernel kernel, const char *name,
+                      const int32_t grid[3],
+                      const int32_t block[3],
+                      unsigned int local_mem_bytes,
+                      int num_args,
+                      void* args[num_args],
+                      size_t args_sizes[num_args]) {
+  (void) args_sizes;
+  int64_t time_start = 0, time_end = 0;
+  if (ctx->logging) {
+    fprintf(ctx->log,
+            "Launching kernel %s with\n"
+            "  grid=(%d,%d,%d)\n"
+            "  block=(%d,%d,%d)\n"
+            "  local memory=%d\n",
+            name,
+            grid[0], grid[1], grid[2],
+            block[0], block[1], block[2],
+            local_mem_bytes);
+    time_start = get_wall_time();
+  }
+
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, name);
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+
+  CUDA_SUCCEED_OR_RETURN
+    (cuLaunchKernel(kernel,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    local_mem_bytes, ctx->stream,
+                    args, NULL));
+
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+
+  if (ctx->debugging) {
+    CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+    time_end = get_wall_time();
+    long int time_diff = time_end - time_start;
+    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+  }
+
+  return FUTHARK_SUCCESS;
 }
 
 // End of backends/cuda.h.

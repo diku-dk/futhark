@@ -122,7 +122,7 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   int32_t grid[3];
   int32_t block[3];
 
-  const void* args[9];
+  void* args[9];
   size_t args_sizes[9] = {
     sizeof(gpu_mem), sizeof(int64_t),
     sizeof(gpu_mem), sizeof(int64_t),
@@ -248,7 +248,7 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
   int64_t n = 1;
   for (int i = 0; i < r; i++) { n *= shape[i]; }
 
-  const void* args[6+(8*3)];
+  void* args[6+(8*3)];
   size_t args_sizes[6+(8*3)];
 
   args[0] = &dst;
