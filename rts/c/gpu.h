@@ -106,7 +106,7 @@ static int gpu_map_transpose(struct futhark_context* ctx,
                              gpu_kernel kernel_low_width,
                              gpu_kernel kernel_small,
                              gpu_kernel kernel_large,
-                             const char *name,
+                             const char *name, size_t elem_size,
                              gpu_mem dst, int64_t dst_offset,
                              gpu_mem src, int64_t src_offset,
                              int64_t k, int64_t n, int64_t m) {
@@ -210,10 +210,12 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   }
   if (ctx->logging) { fprintf(ctx->log, "\n"); }
 
-  return gpu_launch_kernel(ctx, kernel, name, grid, block, 0, 9, args, args_sizes);
+  return gpu_launch_kernel(ctx, kernel, name, grid, block,
+                           TR_TILE_DIM*(TR_TILE_DIM+1)*elem_size,
+                           9, args, args_sizes);
 }
 
-#define GEN_MAP_TRANSPOSE_GPU2GPU(NAME)                                 \
+#define GEN_MAP_TRANSPOSE_GPU2GPU(NAME, ELEM_TYPE)                      \
   static int map_transpose_gpu2gpu_##NAME                               \
   (struct futhark_context* ctx,                                         \
    gpu_mem dst, int64_t dst_offset,                                     \
@@ -228,7 +230,7 @@ static int gpu_map_transpose(struct futhark_context* ctx,
        ctx->kernels->map_transpose_##NAME##_low_width,                  \
        ctx->kernels->map_transpose_##NAME##_small,                      \
        ctx->kernels->map_transpose_##NAME##_large,                      \
-       "map_transpose_" #NAME,                                          \
+       "map_transpose_" #NAME, sizeof(ELEM_TYPE),                       \
        dst, dst_offset, src, src_offset,                                \
        k, n, m);                                                        \
   }
@@ -333,10 +335,10 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
     }                                                                   \
   }
 
-GEN_MAP_TRANSPOSE_GPU2GPU(1b)
-GEN_MAP_TRANSPOSE_GPU2GPU(2b)
-GEN_MAP_TRANSPOSE_GPU2GPU(4b)
-GEN_MAP_TRANSPOSE_GPU2GPU(8b)
+GEN_MAP_TRANSPOSE_GPU2GPU(1b, uint8_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(2b, uint16_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(4b, uint32_t)
+GEN_MAP_TRANSPOSE_GPU2GPU(8b, uint64_t)
 
 GEN_LMAD_COPY_ELEMENTS_GPU2GPU(1b, uint8_t)
 GEN_LMAD_COPY_ELEMENTS_GPU2GPU(2b, uint16_t)
