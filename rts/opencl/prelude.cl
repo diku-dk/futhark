@@ -44,5 +44,6 @@ static inline void barrier_local() {
 }
 
 #define LOCAL_MEM_PARAM __local void* local_mem,
+#define REQD_GROUP_SIZE(a,b,c) __attribute__((reqd_work_group_size(a, b, c)))
 
 // End of prelude.cl

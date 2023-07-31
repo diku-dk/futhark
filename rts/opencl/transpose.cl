@@ -1,7 +1,7 @@
 // Start of transpose.cl
 
 #define GEN_TRANSPOSE_KERNELS(NAME, ELEM_TYPE)                          \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1))) \
+REQD_GROUP_SIZE(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)     \
 __kernel void map_transpose_##NAME(LOCAL_MEM_PARAM                      \
                                    __global ELEM_TYPE *dst_mem,         \
                                    int64_t dst_offset,                  \
@@ -85,7 +85,7 @@ __kernel void map_transpose_##NAME##_low_height(LOCAL_MEM_PARAM        \
   }                                                                     \
 }                                                                       \
                                                                         \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))  \
+REQD_GROUP_SIZE(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)  \
 __kernel void map_transpose_##NAME##_low_width(LOCAL_MEM_PARAM \
                                                __global ELEM_TYPE *dst_mem, \
                                                int64_t dst_offset,      \
@@ -123,7 +123,7 @@ __kernel void map_transpose_##NAME##_low_width(LOCAL_MEM_PARAM \
   }                                                                     \
 }                                                                       \
                                                                         \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM*TR_BLOCK_DIM, 1, 1))) \
+REQD_GROUP_SIZE(TR_BLOCK_DIM*TR_BLOCK_DIM, 1, 1)                       \
 __kernel void map_transpose_##NAME##_small(LOCAL_MEM_PARAM    \
                                            __global ELEM_TYPE *dst_mem, \
                                            int64_t dst_offset,          \
@@ -149,7 +149,7 @@ __kernel void map_transpose_##NAME##_small(LOCAL_MEM_PARAM    \
   }                                                                     \
 }                                                                       \
                                                                         \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1))) \
+REQD_GROUP_SIZE(TR_BLOCK_DIM*2, TR_TILE_DIM/TR_ELEMS_PER_THREAD, 1)     \
 __kernel void map_transpose_##NAME##_large(LOCAL_MEM_PARAM   \
                                            __global ELEM_TYPE *dst_mem, \
                                            int64_t dst_offset,         \
