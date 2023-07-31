@@ -3,6 +3,9 @@
 // Generic functions that use our tiny GPU abstraction layer.  The
 // entire context must be defined before this header is included.
 
+// Max number of groups we allow along a dimension for transpositions.
+#define MAX_TR_GROUPS 1024
+
 struct builtin_kernels {
   // We have a lot of ways to transpose arrays.
   gpu_kernel map_transpose_1b;
@@ -122,8 +125,8 @@ static int gpu_map_transpose(struct futhark_context* ctx,
   int32_t grid[3];
   int32_t block[3];
 
-  void* args[9];
-  size_t args_sizes[9] = {
+  void* args[12];
+  size_t args_sizes[12] = {
     sizeof(gpu_mem), sizeof(int64_t),
     sizeof(gpu_mem), sizeof(int64_t),
     sizeof(int32_t),
@@ -208,11 +211,29 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     args_sizes[7] = sizeof(int64_t);
     args_sizes[8] = sizeof(int64_t);
   }
-  if (ctx->logging) { fprintf(ctx->log, "\n"); }
+
+  // Cap the number of groups we launch and figure out how many
+  // repeats we need alongside each dimension.
+  int32_t repeat_0 = grid[0] / MAX_TR_GROUPS;
+  int32_t repeat_1 = grid[1] / MAX_TR_GROUPS;
+  int32_t repeat_2 = grid[2] / MAX_TR_GROUPS;
+  grid[0] = repeat_0 > 0 ? MAX_TR_GROUPS : grid[0];
+  grid[1] = repeat_1 > 0 ? MAX_TR_GROUPS : grid[1];
+  grid[2] = repeat_2 > 0 ? MAX_TR_GROUPS : grid[2];
+  args[9] = &repeat_0;
+  args[10] = &repeat_1;
+  args[11] = &repeat_2;
+  args_sizes[9] = sizeof(repeat_0);
+  args_sizes[10] = sizeof(repeat_1);
+  args_sizes[11] = sizeof(repeat_2);
+
+  if (ctx->logging) {
+    fprintf(ctx->log, "  repeats: %d %d %d\n", repeat_0, repeat_1, repeat_2);
+    fprintf(ctx->log, "\n"); }
 
   return gpu_launch_kernel(ctx, kernel, name, grid, block,
                            TR_TILE_DIM*(TR_TILE_DIM+1)*elem_size,
-                           9, args, args_sizes);
+                           sizeof(args)/sizeof(args[0]), args, args_sizes);
 }
 
 #define GEN_MAP_TRANSPOSE_GPU2GPU(NAME, ELEM_TYPE)                      \
