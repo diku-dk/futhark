@@ -43,5 +43,6 @@ static inline void barrier_local() {
   barrier(CLK_LOCAL_MEM_FENCE);
 }
 
+#define LOCAL_MEM_PARAM __local void* local_mem,
 
 // End of prelude.cl

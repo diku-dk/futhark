@@ -88,4 +88,6 @@ static inline void barrier_local() {
 #define INFINITY (1.0/0.0)
 extern volatile __shared__ unsigned char local_mem[];
 
+#define LOCAL_MEM_PARAM
+
 // End of prelude.cu
