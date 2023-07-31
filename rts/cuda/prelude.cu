@@ -68,6 +68,16 @@ static inline int get_local_size(int d) {
   }
 }
 
+static inline int get_global_size(int d) {
+  switch (d) {
+    case 0: return gridDim.x * blockDim.x;
+    case 1: return gridDim.y * blockDim.y;
+    case 2: return gridDim.z * blockDim.z;
+    default: return 0;
+  }
+}
+
+
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
 static inline void barrier(int x) {
