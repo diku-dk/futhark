@@ -110,6 +110,11 @@ struct futhark_context_config {
   int default_tile_size_changed;
 };
 
+// Constants used for transpositions.  In principle these should be configurable.
+#define TR_BLOCK_DIM 16
+#define TR_TILE_DIM (TR_BLOCK_DIM*2)
+#define TR_ELEMS_PER_THREAD 8
+
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_nvrtc_opts = 0;
   cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
@@ -492,6 +497,10 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   for (int j = 0; extra_opts[j] != NULL; j++) {
     opts[i++] = strdup(extra_opts[j]);
   }
+
+  opts[i++] = msgprintf("-DTR_BLOCK_DIM=%d", TR_BLOCK_DIM);
+  opts[i++] = msgprintf("-DTR_TILE_DIM=%d", TR_TILE_DIM);
+  opts[i++] = msgprintf("-DTR_ELEMS_PER_THREAD=%d", TR_ELEMS_PER_THREAD);
 
   *n_opts = i;
   *opts_out = opts;
