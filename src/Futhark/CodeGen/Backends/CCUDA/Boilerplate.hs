@@ -24,7 +24,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.RTS.C (backendsCudaH)
+import Futhark.CodeGen.RTS.C (backendsCudaH, gpuH)
 import Futhark.Util (chunk)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -85,6 +85,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
              static const char *cuda_program[] = {$inits:program_fragments, NULL};
              $esc:(T.unpack backendsCudaH)
+             $esc:(T.unpack gpuH)
             |]
   GC.earlyDecl $ failureMsgFunction failures
 
