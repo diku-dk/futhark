@@ -1366,9 +1366,13 @@ int gpu_launch_kernel(struct futhark_context* ctx,
   }
 
   const size_t global_work_size[3] =
-    {grid[0]*block[0], grid[1]*block[1], grid[2]*block[2]};
+    {(size_t)grid[0]*block[0],
+     (size_t)grid[1]*block[1],
+     (size_t)grid[2]*block[2]};
   const size_t local_work_size[3] =
-    {block[0], block[1], block[2]};
+    {block[0],
+     block[1],
+     block[2]};
 
   cl_event* event = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
