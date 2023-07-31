@@ -23,35 +23,32 @@ typedef uint64_t ulong;
 #define __write_only
 #define __read_only
 
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
+static inline int get_group_id(int d) {
   switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
-  switch (d) {
-    case 0: return blockIdx.x;
-    case 1: return blockIdx.y;
-    case 2: return blockIdx.z;
-    default: return 0;
+  case 0: return blockIdx.x;
+  case 1: return blockIdx.y;
+  case 2: return blockIdx.z;
+  default: return 0;
   }
 }
-#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
 
-static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
+static inline int get_num_groups(int d) {
   switch(d) {
-    case 0: return gridDim.x;
-    case 1: return gridDim.y;
-    case 2: return gridDim.z;
+  case 0: return gridDim.x;
+  case 1: return gridDim.y;
+  case 2: return gridDim.z;
+  default: return 0;
+  }
+}
+
+static inline int get_global_id(int d) {
+  switch (d) {
+    case 0: return threadIdx.x + blockIdx.x * gridDim.x;
+    case 1: return threadIdx.y + blockIdx.y * gridDim.y;
+    case 2: return threadIdx.z + blockIdx.z * gridDim.z;
     default: return 0;
   }
 }
-#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)
 
 static inline int get_local_id(int d) {
   switch (d) {

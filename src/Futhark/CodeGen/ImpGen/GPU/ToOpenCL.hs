@@ -350,33 +350,6 @@ onKernel target kernel = do
         unzip3 . flip evalState (blankNameSource :: VNameSource) $
           mapM prepareLocalMemory (kernelLocalMemory kstate)
 
-      -- CUDA has very strict restrictions on the number of blocks
-      -- permitted along the 'y' and 'z' dimensions of the grid
-      -- (1<<16).  To work around this, we are going to dynamically
-      -- permute the block dimensions to move the largest one to the
-      -- 'x' dimension, which has a higher limit (1<<31).  This means
-      -- we need to extend the kernel with extra parameters that
-      -- contain information about this permutation, but we only do
-      -- this for multidimensional kernels (at the time of this
-      -- writing, only transposes).  The corresponding arguments are
-      -- added automatically in CCUDA.hs.
-      (perm_params, block_dim_init) =
-        case (target, num_groups) of
-          (TargetCUDA, [_, _, _]) ->
-            ( [ [C.cparam|const int block_dim0|],
-                [C.cparam|const int block_dim1|],
-                [C.cparam|const int block_dim2|]
-              ],
-              mempty
-            )
-          _ ->
-            ( mempty,
-              [ [C.citem|const int block_dim0 = 0;|],
-                [C.citem|const int block_dim1 = 1;|],
-                [C.citem|const int block_dim2 = 2;|]
-              ]
-            )
-
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
 
   let (use_params, unpack_params) =
@@ -438,7 +411,6 @@ onKernel target kernel = do
 
       params =
         local_memory_param
-          ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
           ++ use_params
@@ -459,7 +431,6 @@ onKernel target kernel = do
             [C.cfun|__kernel void $id:name ($params:params) {
                     $items:(mconcat unpack_params)
                     $items:const_defs
-                    $items:block_dim_init
                     $items:local_memory_init
                     $items:error_init
                     $items:kernel_body

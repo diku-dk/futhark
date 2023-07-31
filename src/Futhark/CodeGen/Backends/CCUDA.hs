@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.CCUDA
 where
 
 import Control.Monad
+import Data.Bifunctor (bimap)
 import Data.List (unzip4)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes)
@@ -260,7 +261,7 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
-callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
+callKernel (LaunchKernel safety kernel_name args num_groups group_size) = do
   (arg_params, arg_params_inits, call_args, shared_vars) <-
     unzip4 <$> zipWithM mkArgs [(0 :: Int) ..] args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
@@ -270,17 +271,16 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
   forM_ shared_args $ \(arg, offset) ->
     GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
-  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
-  (block_x, block_y, block_z) <- mkDims <$> mapM compileGroupDim block_size
+  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_groups
+  (group_x, group_y, group_z) <- mkDims <$> mapM compileGroupDim group_size
 
-  let need_perm = length num_blocks == 3
-  kernel_fname <- genKernelFunction kernel_name safety need_perm arg_params arg_params_inits
+  kernel_fname <- genKernelFunction kernel_name safety arg_params arg_params_inits
 
   GC.stm
     [C.cstm|{
            err = $id:kernel_fname(ctx,
                                   $exp:grid_x, $exp:grid_y, $exp:grid_z,
-                                  $exp:block_x, $exp:block_y, $exp:block_z,
+                                  $exp:group_x, $exp:group_y, $exp:group_z,
                                   $exp:shared_bytes,
                                   $args:call_args);
            if (err != FUTHARK_SUCCESS) { goto cleanup; }
@@ -301,7 +301,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       e' <- GC.compileExp e
       pure
         ( [C.cparam|$ty:(primStorageType t) $id:arg|],
-          [C.cinit|&$id:arg|],
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
           toStorage t e',
           Nothing
         )
@@ -310,7 +310,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       v' <- GC.rawMem v
       pure
         ( [C.cparam|typename CUdeviceptr $id:arg|],
-          [C.cinit|&$id:arg|],
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
           v',
           Nothing
         )
@@ -322,7 +322,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       pure
         ( [C.cparam|unsigned int $id:arg|],
-          [C.cinit|&$id:arg|],
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
           [C.cexp|$id:offset|],
           Just (size, offset)
         )
@@ -330,73 +330,38 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
 genKernelFunction ::
   KernelName ->
   KernelSafety ->
-  Bool ->
   [C.Param] ->
-  [C.Initializer] ->
+  [(C.Exp, C.Exp)] ->
   GC.CompilerM op s Name
-genKernelFunction kernel_name safety need_perm arg_params arg_params_inits = do
+genKernelFunction kernel_name safety arg_params arg_set = do
   let kernel_fname = "gpu_kernel_" <> kernel_name
-      (bef, aft) = profilingEnclosure kernel_name
-      perm_args
-        | need_perm = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
-        | otherwise = []
-      failure_args =
-        take
-          (numFailureParams safety)
-          [ [C.cinit|&ctx->global_failure|],
-            [C.cinit|&ctx->failure_is_an_option|],
-            [C.cinit|&ctx->global_failure_args|]
-          ]
-
   GC.libDecl
-    [C.cedecl|static int $id:kernel_fname(
-                struct futhark_context* ctx, unsigned int grid_x, unsigned int grid_y, unsigned int grid_z,
+    [C.cedecl|static int $id:kernel_fname
+               (struct futhark_context* ctx,
+                unsigned int grid_x, unsigned int grid_y, unsigned int grid_z,
                 unsigned int block_x, unsigned int block_y, unsigned int block_z,
                 unsigned int shared_bytes, $params:arg_params) {
     if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
-      int perm[3] = { 0, 1, 2 };
-
-      if (grid_y >= (1<<16)) {
-        perm[1] = perm[0];
-        perm[0] = 1;
-      }
-
-      if (grid_z >= (1<<16)) {
-        perm[2] = perm[0];
-        perm[0] = 2;
-      }
-
-      size_t grid[3];
-      grid[perm[0]] = grid_x;
-      grid[perm[1]] = grid_y;
-      grid[perm[2]] = grid_z;
-
-      void *all_args[] = { $inits:(perm_args ++ failure_args ++ arg_params_inits) };
-      typename int64_t time_start = 0, time_end = 0;
-      if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size [%d, %d, %d] and block size [%d, %d, %d]; shared memory: %d bytes.\n",
-                $string:(prettyString kernel_name),
-                grid_x, grid_y, grid_z,
-                block_x, block_y, block_z,
-                shared_bytes);
-        time_start = get_wall_time();
-      }
-      $items:bef
-      CUDA_SUCCEED_OR_RETURN(
-        cuLaunchKernel(ctx->program->$id:kernel_name,
-                       grid[0], grid[1], grid[2],
-                       block_x, block_y, block_z,
-                       shared_bytes, ctx->stream,
-                       all_args, NULL));
-      $items:aft
-      if (ctx->debugging) {
-        CUDA_SUCCEED_FATAL(cuCtxSynchronize());
-        time_end = get_wall_time();
-        fprintf(ctx->log, "Kernel %s runtime: %ldus\n",
-                $string:(prettyString kernel_name), time_end - time_start);
-      }
+      void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
+      size_t args_sizes[$int:num_args] = { $inits:(failure_sizes<>args_sizes) };
+      return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
+                               $string:(prettyString kernel_name),
+                               (const typename int32_t[]){grid_x, grid_y, grid_z},
+                               (const typename int32_t[]){block_x, block_y, block_z},
+                               shared_bytes,
+                               $int:num_args, args, args_sizes);
     }
     return FUTHARK_SUCCESS;
   }|]
 
   pure kernel_fname
+  where
+    num_args = numFailureParams safety + length arg_set
+    expToInit e = [C.cinit|$exp:e|]
+    (args_sizes, args_inits) = bimap (map expToInit) (map expToInit) $ unzip arg_set
+    (failure_inits, failure_sizes) =
+      unzip . take (numFailureParams safety) $
+        [ ([C.cinit|&ctx->global_failure|], [C.cinit|sizeof(ctx->global_failure)|]),
+          ([C.cinit|&ctx->failure_is_an_option|], [C.cinit|sizeof(ctx->failure_is_an_option)|]),
+          ([C.cinit|&ctx->global_failure_args|], [C.cinit|sizeof(ctx->global_failure_args)|])
+        ]

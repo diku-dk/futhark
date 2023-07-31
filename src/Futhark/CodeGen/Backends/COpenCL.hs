@@ -286,7 +286,7 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
-callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
+callKernel (LaunchKernel safety name args num_groups group_size) = do
   (arg_params, arg_set, call_args, shared_vars) <-
     unzip4 <$> zipWithM mkArgs [(0 :: Int) ..] args
   let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
@@ -296,13 +296,10 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   forM_ shared_args $ \(arg, offset) ->
     GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
-  num_workgroups' <- mapM GC.compileExp num_workgroups
-  workgroup_size' <- mapM compileGroupDim workgroup_size
+  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_groups
+  (group_x, group_y, group_z) <- mkDims <$> mapM compileGroupDim group_size
 
   kernel_fname <- genKernelFunction name safety arg_params arg_set
-
-  let grid_x : grid_y : grid_z : _ = num_workgroups' ++ repeat [C.cexp|1|]
-      group_x : group_y : group_z : _ = workgroup_size' ++ repeat [C.cexp|1|]
 
   GC.stm
     [C.cstm|{
@@ -317,6 +314,10 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
   where
+    mkDims [] = ([C.cexp|0|], [C.cexp|0|], [C.cexp|0|])
+    mkDims [x] = (x, [C.cexp|1|], [C.cexp|1|])
+    mkDims [x, y] = (x, y, [C.cexp|1|])
+    mkDims (x : y : z : _) = (x, y, z)
     addExp x y = [C.cexp|$exp:x + $exp:y|]
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
     mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
