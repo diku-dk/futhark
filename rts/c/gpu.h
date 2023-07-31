@@ -308,7 +308,7 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
    gpu_mem dst, int64_t dst_offset, int64_t dst_strides[r],             \
    gpu_mem src, int64_t src_offset, int64_t src_strides[r],             \
    int64_t shape[r]) {                                                  \
-    log_copy(ctx, "CPU to CPU", r, dst_offset, dst_strides,             \
+    log_copy(ctx, "GPU to GPU", r, dst_offset, dst_strides,             \
              src_offset, src_strides, shape);                           \
     int64_t size = 1;                                                   \
     for (int i = 0; i < r; i++) { size *= shape[i]; }                   \
