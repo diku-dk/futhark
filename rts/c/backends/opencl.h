@@ -1385,7 +1385,10 @@ int gpu_launch_kernel(struct futhark_context* ctx,
     OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
     time_end = get_wall_time();
     long int time_diff = time_end - time_start;
-    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+    fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
+  }
+  if (ctx->logging) {
+    printf("\n");
   }
 
   return FUTHARK_SUCCESS;
