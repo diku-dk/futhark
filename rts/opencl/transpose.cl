@@ -13,7 +13,7 @@ __kernel void map_transpose_##NAME(LOCAL_MEM_PARAM                      \
                                    int32_t mulx,                        \
                                    int32_t muly) {                      \
   (void)mulx; (void)muly;                                               \
-  __local ELEM_TYPE* block = local_mem;                                 \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)local_mem;             \
   int32_t our_array_offset = get_group_id(2) * x_elems * y_elems;       \
   int32_t odata_offset = dst_offset + our_array_offset;                 \
   int32_t idata_offset = src_offset + our_array_offset;                 \
@@ -55,7 +55,7 @@ __kernel void map_transpose_##NAME##_low_height(LOCAL_MEM_PARAM        \
                                                 int32_t y_elems,        \
                                                 int32_t mulx,           \
                                                 int32_t muly) {         \
-  __local ELEM_TYPE* block = local_mem;                                 \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)local_mem;             \
   int32_t our_array_offset = get_group_id(2) * x_elems * y_elems;       \
   int32_t odata_offset = dst_offset + our_array_offset;                 \
   int32_t idata_offset = src_offset + our_array_offset;                 \
@@ -96,7 +96,7 @@ __kernel void map_transpose_##NAME##_low_width(LOCAL_MEM_PARAM \
                                                int32_t y_elems,       \
                                                int32_t mulx,          \
                                                int32_t muly) {          \
-  __local ELEM_TYPE* block = local_mem;                                 \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)local_mem;             \
   int32_t our_array_offset = get_group_id(2) * x_elems * y_elems;       \
   int32_t odata_offset = dst_offset + our_array_offset;                 \
   int32_t idata_offset = src_offset + our_array_offset;                 \
@@ -135,7 +135,7 @@ __kernel void map_transpose_##NAME##_small(LOCAL_MEM_PARAM    \
                                            int32_t mulx,                \
                                            int32_t muly) {              \
   (void)mulx; (void)muly;                                               \
-  __local ELEM_TYPE* block = local_mem;                                 \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)local_mem;             \
   int32_t our_array_offset = get_global_id(0)/(y_elems * x_elems) * y_elems * x_elems; \
   int32_t x_index = (get_global_id(0) % (y_elems * x_elems))/y_elems;   \
   int32_t y_index = get_global_id(0)%y_elems;                           \
@@ -161,7 +161,7 @@ __kernel void map_transpose_##NAME##_large(LOCAL_MEM_PARAM   \
                                            int64_t mulx,               \
                                            int64_t muly) {             \
   (void)mulx; (void)muly;                                               \
-  __local ELEM_TYPE* block = local_mem;                                 \
+  __local ELEM_TYPE* block = (__local ELEM_TYPE*)local_mem;             \
   int64_t our_array_offset = get_group_id(2) * x_elems * y_elems;       \
   int64_t odata_offset = dst_offset + our_array_offset;                 \
   int64_t idata_offset = src_offset + our_array_offset;                 \
