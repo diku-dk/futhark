@@ -297,7 +297,7 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
   GC.stm
     [C.cstm|{
            err = $id:kernel_fname(ctx,
-                                  $exp:grid_x,$exp:grid_y,$exp:grid_z,
+                                  $exp:grid_x, $exp:grid_y, $exp:grid_z,
                                   $exp:block_x, $exp:block_y, $exp:block_z,
                                   $exp:shared_bytes,
                                   $args:call_args);
@@ -315,29 +315,32 @@ callKernel (LaunchKernel safety kernel_name args num_blocks block_size) = do
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
     mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
     mkArgs i (ValueKArg e t) = do
+      let arg = "arg" <> show i
       e' <- GC.compileExp e
       pure
-        ( [C.cparam|$ty:(primStorageType t) $id:("arg" <> show i)|],
-          [C.cinit|&$id:("arg" <> show i)|],
+        ( [C.cparam|$ty:(primStorageType t) $id:arg|],
+          [C.cinit|&$id:arg|],
           toStorage t e',
           Nothing
         )
     mkArgs i (MemKArg v) = do
+      let arg = "arg" <> show i
       v' <- GC.rawMem v
       pure
-        ( [C.cparam|typename CUdeviceptr $id:("arg" <> show i)|],
-          [C.cinit|&$id:("arg" <> show i)|],
+        ( [C.cparam|typename CUdeviceptr $id:arg|],
+          [C.cinit|&$id:arg|],
           v',
           Nothing
         )
     mkArgs i (SharedMemoryKArg (Count c)) = do
+      let arg = "arg" <> show i
       num_bytes <- GC.compileExp c
       size <- newVName "shared_size"
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       pure
-        ( [C.cparam|unsigned int $id:("arg" <> show i)|],
-          [C.cinit|&$id:("arg" <> show i)|],
+        ( [C.cparam|unsigned int $id:arg|],
+          [C.cinit|&$id:arg|],
           [C.cexp|$id:offset|],
           Just (size, offset)
         )

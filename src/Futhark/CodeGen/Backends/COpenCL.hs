@@ -11,7 +11,9 @@ module Futhark.CodeGen.Backends.COpenCL
 where
 
 import Control.Monad hiding (mapM)
+import Data.List (unzip4)
 import Data.Map qualified as M
+import Data.Maybe (catMaybes)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GenericC qualified as GC
@@ -284,22 +286,17 @@ callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
 callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
-  -- The other failure args are set automatically when the kernel is
-  -- first created.
-  when (safety == SafetyFull) $
-    GC.stm
-      [C.cstm|
-      OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:name, 1,
-                                              sizeof(ctx->failure_is_an_option),
-                                              &ctx->failure_is_an_option));
-    |]
-
-  (arg_params, arg_set, call_args) <-
-    unzip3 <$> zipWithM onArg [(0 :: Int) ..] args
+  (arg_params, arg_set, call_args, shared_vars) <-
+    unzip4 <$> zipWithM mkArgs [(0 :: Int) ..] args
+  let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
+      shared_offsets_sc = mkOffsets shared_sizes
+      shared_args = zip shared_offsets shared_offsets_sc
+      shared_bytes = last shared_offsets_sc
+  forM_ shared_args $ \(arg, offset) ->
+    GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
 
   num_workgroups' <- mapM GC.compileExp num_workgroups
   workgroup_size' <- mapM compileGroupDim workgroup_size
-  local_bytes <- foldM localBytes [C.cexp|0|] args
 
   kernel_fname <- genKernelFunction name safety arg_params arg_set
 
@@ -309,9 +306,9 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   GC.stm
     [C.cstm|{
            err = $id:kernel_fname(ctx,
-                                  $exp:grid_x,$exp:grid_y,$exp:grid_z,
+                                  $exp:grid_x, $exp:grid_y, $exp:grid_z,
                                   $exp:group_x, $exp:group_y, $exp:group_z,
-                                  $exp:local_bytes,
+                                  $exp:shared_bytes,
                                   $args:call_args);
            if (err != FUTHARK_SUCCESS) { goto cleanup; }
            }|]
@@ -319,34 +316,39 @@ callKernel (LaunchKernel safety name args num_workgroups workgroup_size) = do
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
   where
-    localBytes cur (SharedMemoryKArg num_bytes) = do
-      num_bytes' <- GC.compileExp $ unCount num_bytes
-      pure [C.cexp|$exp:cur + $exp:num_bytes'|]
-    localBytes cur _ = pure cur
+    addExp x y = [C.cexp|$exp:x + $exp:y|]
+    alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
+    mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
 
-    onArg i (ValueKArg e t) = do
+    mkArgs i (ValueKArg e t) = do
       let arg = "arg" <> show i
       e' <- GC.compileExp e
       pure
         ( [C.cparam|$ty:(primStorageType t) $id:arg|],
           ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
-          toStorage t e'
+          toStorage t e',
+          Nothing
         )
-    onArg i (MemKArg v) = do
+    mkArgs i (MemKArg v) = do
       let arg = "arg" <> show i
       v' <- GC.rawMem v
       pure
         ( [C.cparam|typename cl_mem $id:arg|],
           ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
-          v'
+          v',
+          Nothing
         )
-    onArg i (SharedMemoryKArg (Count c)) = do
+    mkArgs i (SharedMemoryKArg (Count c)) = do
       let arg = "arg" <> show i
       num_bytes <- GC.compileExp c
+      size <- newVName "shared_size"
+      offset <- newVName "shared_offset"
+      GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       pure
         ( [C.cparam|unsigned int $id:arg|],
-          ([C.cexp|$id:arg|], [C.cexp|NULL|]),
-          num_bytes
+          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
+          [C.cexp|$id:offset|],
+          Just (size, offset)
         )
 
 genKernelFunction ::
@@ -358,43 +360,43 @@ genKernelFunction ::
 genKernelFunction kernel_name safety arg_params arg_set = do
   let kernel_fname = "gpu_kernel_" <> kernel_name
   GC.libDecl
-    [C.cedecl|static int $id:kernel_fname(
-                struct futhark_context* ctx,
+    [C.cedecl|static int $id:kernel_fname
+               (struct futhark_context* ctx,
                 unsigned int grid_x, unsigned int grid_y, unsigned int grid_z,
                 unsigned int block_x, unsigned int block_y, unsigned int block_z,
-                unsigned int local_bytes, $params:arg_params) {
-    (void)local_bytes;
+                unsigned int shared_bytes, $params:arg_params) {
     if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
-      const size_t global_work_size[3] = {grid_x*block_x, grid_y*block_y, grid_z*block_z};
-      const size_t local_work_size[3] = {block_x, block_y, block_z};
-      typename int64_t time_start = 0, time_end = 0;
+      const void* args[$int:num_args];
+      size_t args_sizes[$int:num_args];
+      $stm:set_failure_args
       $stms:set_args
-      if (ctx->debugging) {
-        fprintf(ctx->log, "Launching %s with grid size [%d, %d, %d] and group size [%d, %d, %d]; local memory: %d bytes.\n",
-                $string:(prettyString kernel_name),
-                grid_x, grid_y, grid_z,
-                block_x, block_y, block_z,
-                local_bytes);
-        time_start = get_wall_time();
-      }
-      typename cl_event *pevent = $exp:(profilingEvent kernel_name);
-      OPENCL_SUCCEED_OR_RETURN(
-        clEnqueueNDRangeKernel(ctx->queue, ctx->program->$id:kernel_name, 3, NULL,
-                               global_work_size, local_work_size,
-                               0, NULL, pevent));
-      if (ctx->debugging) {
-        OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
-        time_end = get_wall_time();
-        long int time_diff = time_end - time_start;
-        fprintf(ctx->log, "kernel %s runtime: %ldus\n",
-                $string:(prettyString kernel_name), time_diff);
-      }
+      return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
+                               $string:(prettyString kernel_name),
+                               (const typename int32_t[]){grid_x, grid_y, grid_z},
+                               (const typename int32_t[]){block_x, block_y, block_z},
+                               shared_bytes,
+                               $int:num_args, args, args_sizes);
     }
     return FUTHARK_SUCCESS;
   }|]
 
   pure kernel_fname
   where
+    num_args = numFailureParams safety + length arg_set
     set_args = zipWith setKernelArg [numFailureParams safety ..] arg_set
     setKernelArg i (size, e) =
-      [C.cstm|OPENCL_SUCCEED_OR_RETURN(clSetKernelArg(ctx->program->$id:kernel_name, $int:i, $exp:size, $exp:e));|]
+      [C.cstm|{args[$int:i] = $exp:e; args_sizes[$int:i] = $exp:size;}|]
+    set_failure_args =
+      case safety of
+        SafetyFull ->
+          [C.cstm|{args[0] = &ctx->global_failure;
+                   args_sizes[0] = sizeof(ctx->global_failure);
+                   args[1] = &ctx->failure_is_an_option;
+                   args_sizes[1] = sizeof(ctx->failure_is_an_option);
+                   args[2] = &ctx->global_failure_args;
+                   args_sizes[2] = sizeof(ctx->global_failure_args);}|]
+        SafetyCheap ->
+          [C.cstm|{args[0] = &ctx->global_failure;
+                   args_sizes[0] = sizeof(ctx->global_failure);}|]
+        SafetyNone ->
+          [C.cstm|{}|]

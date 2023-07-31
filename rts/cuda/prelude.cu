@@ -89,7 +89,6 @@ static inline void barrier_local() {
 
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
-extern volatile __shared__ unsigned char shared_mem[];
-
+extern volatile __shared__ unsigned char local_mem[];
 
 // End of prelude.cu

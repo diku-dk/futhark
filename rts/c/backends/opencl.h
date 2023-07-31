@@ -1340,20 +1340,27 @@ int gpu_launch_kernel(struct futhark_context* ctx,
                       int num_args,
                       const void* args[num_args],
                       const size_t args_sizes[num_args]) {
+  int64_t time_start = 0, time_end = 0;
   if (ctx->logging) {
     fprintf(ctx->log,
             "Launching kernel %s with\n"
             "  grid=(%d,%d,%d)\n"
             "  block=(%d,%d,%d)\n"
-            "  local memory=%d\n\n",
+            "  local memory=%d\n",
             name,
             grid[0], grid[1], grid[2],
             block[0], block[1], block[2],
             local_mem_bytes);
+    time_start = get_wall_time();
+  }
+
+  // Some implementations do not work with 0-byte local memory.
+  if (local_mem_bytes == 0) {
+    local_mem_bytes = 4;
   }
 
   OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 0, sizeof(local_mem_bytes), NULL));
+    (clSetKernelArg(kernel, 0, local_mem_bytes, NULL));
   for (int i = 0; i < num_args; i++) {
     OPENCL_SUCCEED_OR_RETURN
       (clSetKernelArg(kernel, i+1, args_sizes[i], args[i]));
@@ -1374,6 +1381,14 @@ int gpu_launch_kernel(struct futhark_context* ctx,
                             kernel,
                             3, NULL, global_work_size, local_work_size,
                             0, NULL, event));
+
+  if (ctx->debugging) {
+    OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    time_end = get_wall_time();
+    long int time_diff = time_end - time_start;
+    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+  }
+
   return FUTHARK_SUCCESS;
 }
 

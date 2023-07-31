@@ -110,11 +110,11 @@ loadKernel (name, safety) =
   where
     set_global_failure =
       [C.citem|OPENCL_SUCCEED_FATAL(
-                     clSetKernelArg(ctx->program->$id:name, 0, sizeof(typename cl_mem),
+                     clSetKernelArg(ctx->program->$id:name, 1, sizeof(typename cl_mem),
                                     &ctx->global_failure));|]
     set_global_failure_args =
       [C.citem|OPENCL_SUCCEED_FATAL(
-                     clSetKernelArg(ctx->program->$id:name, 2, sizeof(typename cl_mem),
+                     clSetKernelArg(ctx->program->$id:name, 3, sizeof(typename cl_mem),
                                     &ctx->global_failure_args));|]
     set_args = case safety of
       SafetyNone -> []

@@ -348,8 +348,7 @@ onKernel target kernel = do
 
       (local_memory_args, local_memory_params, local_memory_init) =
         unzip3 . flip evalState (blankNameSource :: VNameSource) $
-          mapM (prepareLocalMemory target) $
-            kernelLocalMemory kstate
+          mapM prepareLocalMemory (kernelLocalMemory kstate)
 
       -- CUDA has very strict restrictions on the number of blocks
       -- permitted along the 'y' and 'z' dimensions of the grid
@@ -432,8 +431,14 @@ onKernel target kernel = do
           [C.cparam|__global typename int64_t *global_failure_args|]
         ]
 
+      local_memory_param =
+        case target of
+          TargetOpenCL -> [[C.cparam|__local void* local_mem|]]
+          TargetCUDA -> mempty
+
       params =
-        perm_params
+        local_memory_param
+          ++ perm_params
           ++ take (numFailureParams safety) failure_params
           ++ catMaybes local_memory_params
           ++ use_params
@@ -480,19 +485,12 @@ onKernel target kernel = do
     num_groups = kernelNumGroups kernel
     group_size = kernelGroupSize kernel
 
-    prepareLocalMemory TargetOpenCL (mem, size) = do
-      mem_aligned <- newVName $ baseString mem ++ "_aligned"
-      pure
-        ( Just $ SharedMemoryKArg size,
-          Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-          [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
-        )
-    prepareLocalMemory TargetCUDA (mem, size) = do
+    prepareLocalMemory (mem, size) = do
       param <- newVName $ baseString mem ++ "_offset"
       pure
         ( Just $ SharedMemoryKArg size,
           Just [C.cparam|uint $id:param|],
-          [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
+          [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &local_mem[$id:param];|]
         )
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
