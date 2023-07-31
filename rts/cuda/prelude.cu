@@ -43,9 +43,9 @@ static inline int get_num_groups(int d) {
 
 static inline int get_global_id(int d) {
   switch (d) {
-    case 0: return threadIdx.x + blockIdx.x * gridDim.x;
-    case 1: return threadIdx.y + blockIdx.y * gridDim.y;
-    case 2: return threadIdx.z + blockIdx.z * gridDim.z;
+    case 0: return threadIdx.x + blockIdx.x * blockDim.x;
+    case 1: return threadIdx.y + blockIdx.y * blockDim.y;
+    case 2: return threadIdx.z + blockIdx.z * blockDim.z;
     default: return 0;
   }
 }
