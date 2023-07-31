@@ -1026,7 +1026,7 @@ int gpu_memcpy(struct futhark_context* ctx,
     pevents = cuda_get_events(ctx, "copy_dev_to_dev");
     CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
   }
-  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst*dst_offset, src+src_offset, nbytes));
+  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst+dst_offset, src+src_offset, nbytes));
   if (pevents != NULL) {
     CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
   }
