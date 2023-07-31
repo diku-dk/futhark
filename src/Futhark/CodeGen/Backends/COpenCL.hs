@@ -11,6 +11,7 @@ module Futhark.CodeGen.Backends.COpenCL
 where
 
 import Control.Monad hiding (mapM)
+import Data.Bifunctor (bimap)
 import Data.List (unzip4)
 import Data.Map qualified as M
 import Data.Maybe (catMaybes)
@@ -366,10 +367,8 @@ genKernelFunction kernel_name safety arg_params arg_set = do
                 unsigned int block_x, unsigned int block_y, unsigned int block_z,
                 unsigned int shared_bytes, $params:arg_params) {
     if (grid_x * grid_y * grid_z * block_x * block_y * block_z != 0) {
-      const void* args[$int:num_args];
-      size_t args_sizes[$int:num_args];
-      $stm:set_failure_args
-      $stms:set_args
+      const void* args[$int:num_args] = { $inits:(failure_inits<>args_inits) };
+      size_t args_sizes[$int:num_args] = { $inits:(failure_sizes<>args_sizes) };
       return gpu_launch_kernel(ctx, ctx->program->$id:kernel_name,
                                $string:(prettyString kernel_name),
                                (const typename int32_t[]){grid_x, grid_y, grid_z},
@@ -383,20 +382,11 @@ genKernelFunction kernel_name safety arg_params arg_set = do
   pure kernel_fname
   where
     num_args = numFailureParams safety + length arg_set
-    set_args = zipWith setKernelArg [numFailureParams safety ..] arg_set
-    setKernelArg i (size, e) =
-      [C.cstm|{args[$int:i] = $exp:e; args_sizes[$int:i] = $exp:size;}|]
-    set_failure_args =
-      case safety of
-        SafetyFull ->
-          [C.cstm|{args[0] = &ctx->global_failure;
-                   args_sizes[0] = sizeof(ctx->global_failure);
-                   args[1] = &ctx->failure_is_an_option;
-                   args_sizes[1] = sizeof(ctx->failure_is_an_option);
-                   args[2] = &ctx->global_failure_args;
-                   args_sizes[2] = sizeof(ctx->global_failure_args);}|]
-        SafetyCheap ->
-          [C.cstm|{args[0] = &ctx->global_failure;
-                   args_sizes[0] = sizeof(ctx->global_failure);}|]
-        SafetyNone ->
-          [C.cstm|{}|]
+    expToInit e = [C.cinit|$exp:e|]
+    (args_sizes, args_inits) = bimap (map expToInit) (map expToInit) $ unzip arg_set
+    (failure_inits, failure_sizes) =
+      unzip . take (numFailureParams safety) $
+        [ ([C.cinit|&ctx->global_failure|], [C.cinit|sizeof(ctx->global_failure)|]),
+          ([C.cinit|&ctx->failure_is_an_option|], [C.cinit|sizeof(ctx->failure_is_an_option)|]),
+          ([C.cinit|&ctx->global_failure_args|], [C.cinit|sizeof(ctx->global_failure_args)|])
+        ]
