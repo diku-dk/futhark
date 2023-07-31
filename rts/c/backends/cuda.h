@@ -896,9 +896,13 @@ int futhark_context_sync(struct futhark_context* ctx) {
       return FUTHARK_PROGRAM_ERROR;
     }
   }
+
   CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cu_ctx));
   return 0;
 }
+
+struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
+void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->profiling_records_capacity = 200;
@@ -941,10 +945,16 @@ int backend_context_setup(struct futhark_context* ctx) {
   CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
   // The +1 is to avoid zero-byte allocations.
   CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
+
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+    return 1;
+  }
+
   return 0;
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
+  free_builtin_kernels(ctx, ctx->kernels);
   cuMemFree(ctx->global_failure);
   cuMemFree(ctx->global_failure_args);
   CUDA_SUCCEED_FATAL(cuda_free_all(ctx));

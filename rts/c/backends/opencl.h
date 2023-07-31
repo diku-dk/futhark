@@ -1234,9 +1234,7 @@ int backend_context_setup(struct futhark_context* ctx) {
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
 
-  ctx->kernels = init_builtin_kernels(ctx);
-
-  if (ctx->kernels == NULL) {
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
     return 1;
   }
 
