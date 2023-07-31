@@ -26,7 +26,7 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
-import Futhark.CodeGen.RTS.C (backendsOpenclH)
+import Futhark.CodeGen.RTS.C (backendsOpenclH, gpuH)
 import Futhark.Util (chunk)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
@@ -164,6 +164,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types fai
              static const int f64_required = $exp:f64_required;
              static const char *opencl_program[] = {$inits:program_fragments};
              $esc:(T.unpack backendsOpenclH)
+             $esc:(T.unpack gpuH)
             |]
   GC.earlyDecl $ failureMsgFunction failures
 
