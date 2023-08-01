@@ -282,7 +282,7 @@ struct futhark_context {
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_shared_memory;
+  size_t max_local_memory;
   size_t max_bespoke;
 
   size_t lockstep_width;
@@ -924,7 +924,7 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   free_list_init(&ctx->cu_free_list);
 
-  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
   ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_block_size);
