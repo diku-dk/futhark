@@ -231,6 +231,7 @@ library
       Futhark.CodeGen.Backends.GenericPython.AST
       Futhark.CodeGen.Backends.GenericPython.Options
       Futhark.CodeGen.Backends.GenericWASM
+      Futhark.CodeGen.Backends.GPU
       Futhark.CodeGen.Backends.MulticoreC
       Futhark.CodeGen.Backends.MulticoreC.Boilerplate
       Futhark.CodeGen.Backends.MulticoreISPC

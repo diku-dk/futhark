@@ -13,7 +13,6 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     kernelRuntime,
     kernelRuns,
     sizeLoggingCode,
-    copygpu2gpu,
   )
 where
 
@@ -31,33 +30,6 @@ import Futhark.Util (chunk)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
-
-copygpu2gpu :: GC.DoLMADCopy op s
-copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
-  let fname :: String
-      fname =
-        case primByteSize t :: Int of
-          1 -> "lmad_copy_gpu2gpu_1b"
-          2 -> "lmad_copy_gpu2gpu_2b"
-          4 -> "lmad_copy_gpu2gpu_4b"
-          8 -> "lmad_copy_gpu2gpu_8b"
-          k -> error $ "copygpu2gpu: " <> error (show k)
-      r = length shape
-      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
-      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
-      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
-  GC.stm
-    [C.cstm|
-         if ((err =
-                $id:fname(ctx, $int:r,
-                          $exp:dst, $exp:(unCount dstoffset),
-                          (typename int64_t[]){ $inits:dststride_inits },
-                          $exp:src, $exp:(unCount srcoffset),
-                          (typename int64_t[]){ $inits:srcstride_inits },
-                          (typename int64_t[]){ $inits:shape_inits })) != 0) {
-           goto cleanup;
-         }
-     |]
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
