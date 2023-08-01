@@ -63,7 +63,7 @@ compileProg version prog = do
           opencl_code
           opencl_prelude
           cost_centres
-          kernels
+          (M.keys kernels)
           types
           failures
       )

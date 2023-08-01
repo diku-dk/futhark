@@ -94,43 +94,22 @@ profilingEvent name =
   [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
           : opencl_get_event(ctx, $string:(nameToString name))|]
 
-releaseKernel :: (KernelName, KernelSafety) -> C.Stm
-releaseKernel (name, _) = [C.cstm|OPENCL_SUCCEED_FATAL(clReleaseKernel(ctx->program->$id:name));|]
+releaseKernel :: KernelName -> C.Stm
+releaseKernel name = [C.cstm|gpu_free_kernel(ctx, ctx->program->$id:name);|]
 
-loadKernel :: (KernelName, KernelSafety) -> C.Stm
-loadKernel (name, safety) =
-  [C.cstm|{
-  ctx->program->$id:name = clCreateKernel(ctx->clprogram, $string:(T.unpack (idText (C.toIdent name mempty))), &error);
-  OPENCL_SUCCEED_FATAL(error);
-  $items:set_args
-  if (ctx->debugging) {
-    fprintf(ctx->log, "Created kernel %s.\n", $string:(prettyString name));
-  }
-  }|]
-  where
-    set_global_failure =
-      [C.citem|OPENCL_SUCCEED_FATAL(
-                     clSetKernelArg(ctx->program->$id:name, 1, sizeof(typename cl_mem),
-                                    &ctx->global_failure));|]
-    set_global_failure_args =
-      [C.citem|OPENCL_SUCCEED_FATAL(
-                     clSetKernelArg(ctx->program->$id:name, 3, sizeof(typename cl_mem),
-                                    &ctx->global_failure_args));|]
-    set_args = case safety of
-      SafetyNone -> []
-      SafetyCheap -> [set_global_failure]
-      SafetyFull -> [set_global_failure, set_global_failure_args]
+loadKernel :: KernelName -> C.Stm
+loadKernel name =
+  [C.cstm|gpu_create_kernel(ctx, &ctx->program->$id:name, $string:(T.unpack (idText (C.toIdent name mempty))));|]
 
 generateOpenCLDecls ::
-  M.Map KernelName KernelSafety ->
-  GC.CompilerM op s ()
+  [KernelName] -> GC.CompilerM op s ()
 generateOpenCLDecls kernels = do
-  forM_ (M.toList kernels) $ \(name, safety) ->
+  forM_ kernels $ \name ->
     GC.contextFieldDyn
       (C.toIdent name mempty)
-      [C.cty|typename cl_kernel|]
-      (loadKernel (name, safety))
-      (releaseKernel (name, safety))
+      [C.cty|typename gpu_kernel|]
+      (loadKernel name)
+      (releaseKernel name)
   GC.earlyDecl
     [C.cedecl|
 void post_opencl_setup(struct futhark_context *ctx, struct opencl_device_option *option) {
@@ -143,7 +122,7 @@ generateBoilerplate ::
   T.Text ->
   T.Text ->
   [Name] ->
-  M.Map KernelName KernelSafety ->
+  [KernelName] ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
@@ -194,7 +173,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types fai
 
   GC.profileReport
     [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
-              $stms:(map initCostCentre (cost_centres <> M.keys kernels))
+              $stms:(map initCostCentre (cost_centres <> kernels))
               opencl_tally_profiling_records(ctx, ccs);
               cost_centre_report(ccs, &builder);
               cost_centres_free(ccs);
