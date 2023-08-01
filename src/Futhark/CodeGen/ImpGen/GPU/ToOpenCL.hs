@@ -406,7 +406,7 @@ onKernel target kernel = do
 
       local_memory_param =
         case target of
-          TargetOpenCL -> [[C.cparam|__local void* local_mem|]]
+          TargetOpenCL -> [[C.cparam|__local typename int64_t* local_mem_aligned|]]
           TargetCUDA -> mempty
 
       params =
@@ -429,6 +429,7 @@ onKernel target kernel = do
         attribute
           <> funcText
             [C.cfun|__kernel void $id:name ($params:params) {
+                    __local unsigned char* local_mem = local_mem_aligned;
                     $items:(mconcat unpack_params)
                     $items:const_defs
                     $items:local_memory_init
