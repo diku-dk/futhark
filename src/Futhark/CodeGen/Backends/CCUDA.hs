@@ -34,14 +34,7 @@ compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings,
 compileProg version prog = do
   (ws, Program cuda_code cuda_prelude kernels _ params failures prog') <-
     ImpGen.compileProg prog
-  let cost_centres =
-        [ copyDevToDev,
-          copyDevToHost,
-          copyHostToDev,
-          copyScalarToDev,
-          copyScalarFromDev
-        ]
-          <> M.keys kernels
+  let cost_centres = M.keys kernels
       extra = do
         createKernels (M.keys kernels)
         generateBoilerplate

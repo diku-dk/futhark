@@ -8,10 +8,9 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     copyHostToDev,
     copyScalarToDev,
     copyScalarFromDev,
+    genProfileReport,
     commonOptions,
     failureMsgFunction,
-    kernelRuntime,
-    kernelRuns,
     sizeLoggingCode,
   )
 where
@@ -48,6 +47,7 @@ failureMsgFunction failures =
       failure_cases =
         zipWith onFailure [(0 :: Int) ..] failures
    in [C.cedecl|static char* get_failure_msg(int failure_idx, typename int64_t args[]) {
+                  (void)args;
                   switch (failure_idx) { $stms:failure_cases }
                   return strdup("Unknown error.  This is a compiler bug.");
                 }|]
@@ -121,22 +121,27 @@ generateBoilerplate opencl_program opencl_prelude cost_centres types failures = 
   GC.onClear
     [C.citem|if (ctx->error == NULL) { ctx->error = OPENCL_SUCCEED_NONFATAL(opencl_free_all(ctx)); }|]
 
+  genProfileReport cost_centres
+
+genProfileReport :: [Name] -> GC.CompilerM op s ()
+genProfileReport cost_centres =
   GC.profileReport
     [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
-              $stms:(map initCostCentre cost_centres)
-              opencl_tally_profiling_records(ctx, ccs);
+              $stms:(map initCostCentre (def_cost_centres<>cost_centres))
+              tally_profiling_records(ctx, ccs);
               cost_centre_report(ccs, &builder);
               cost_centres_free(ccs);
               }|]
   where
+    def_cost_centres =
+      [ copyDevToDev,
+        copyDevToHost,
+        copyHostToDev,
+        copyScalarToDev,
+        copyScalarFromDev
+      ]
     initCostCentre v =
       [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
-
-kernelRuntime :: KernelName -> Name
-kernelRuntime = (<> "_total_runtime")
-
-kernelRuns :: KernelName -> Name
-kernelRuns = (<> "_runs")
 
 sizeHeuristicsCode :: SizeHeuristic -> C.Stm
 sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what)) =

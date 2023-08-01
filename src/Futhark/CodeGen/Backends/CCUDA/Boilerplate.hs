@@ -10,14 +10,12 @@ where
 
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
-  ( copyDevToDev,
-    copyDevToHost,
+  ( copyDevToHost,
     copyHostToDev,
     copyScalarFromDev,
     copyScalarToDev,
     failureMsgFunction,
-    kernelRuns,
-    kernelRuntime,
+    genProfileReport,
   )
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.ImpCode.OpenCL
@@ -90,14 +88,5 @@ generateBoilerplate cuda_program cuda_prelude cost_centres failures = do
                CUDA_SUCCEED_NONFATAL(cuda_free_all(ctx));
              }|]
 
-  GC.profileReport
-    [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
-              $stms:(map initCostCentre cost_centres)
-              CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(ctx, ccs));
-              cost_centre_report(ccs, &builder);
-              cost_centres_free(ccs);
-              }|]
-  where
-    initCostCentre v =
-      [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
+  genProfileReport cost_centres
 {-# NOINLINE generateBoilerplate #-}

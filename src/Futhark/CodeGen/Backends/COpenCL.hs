@@ -43,13 +43,7 @@ compileProg version prog = do
     ) <-
     ImpGen.compileProg prog
   let cost_centres =
-        [ copyDevToDev,
-          copyDevToHost,
-          copyHostToDev,
-          copyScalarToDev,
-          copyScalarFromDev
-        ]
-          <> M.keys kernels
+        M.keys kernels
       extra = do
         createKernels (M.keys kernels)
         generateBoilerplate

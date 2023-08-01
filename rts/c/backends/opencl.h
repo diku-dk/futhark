@@ -625,8 +625,8 @@ static char* mk_compile_opts(struct futhark_context *ctx,
 
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static void opencl_tally_profiling_records(struct futhark_context *ctx,
-                                           struct cost_centres* ccs) {
+static void tally_profiling_records(struct futhark_context *ctx,
+                                    struct cost_centres* ccs) {
   cl_int err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
@@ -1245,7 +1245,7 @@ void backend_context_teardown(struct futhark_context* ctx) {
   free_builtin_kernels(ctx, ctx->kernels);
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)opencl_tally_profiling_records(ctx, NULL);
+  (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
   (void)opencl_free_all(ctx);
   (void)clReleaseProgram(ctx->clprogram);

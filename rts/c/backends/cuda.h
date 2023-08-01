@@ -743,8 +743,8 @@ static char* cuda_module_setup(struct futhark_context *ctx,
 
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static CUresult cuda_tally_profiling_records(struct futhark_context *ctx,
-                                             struct cost_centres* ccs) {
+static CUresult tally_profiling_records(struct futhark_context *ctx,
+                                        struct cost_centres* ccs) {
   CUresult err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
@@ -958,7 +958,7 @@ void backend_context_teardown(struct futhark_context* ctx) {
   cuMemFree(ctx->global_failure);
   cuMemFree(ctx->global_failure_args);
   CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
-  (void)cuda_tally_profiling_records(ctx, NULL);
+  (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
   CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
