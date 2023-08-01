@@ -404,10 +404,13 @@ onKernel target kernel = do
           [C.cparam|__global typename int64_t *global_failure_args|]
         ]
 
-      local_memory_param =
+      (local_memory_param, prepare_local_memory) =
         case target of
-          TargetOpenCL -> [[C.cparam|__local typename int64_t* local_mem_aligned|]]
-          TargetCUDA -> mempty
+          TargetOpenCL ->
+            ( [[C.cparam|__local typename uint64_t* local_mem_aligned|]],
+              [C.citems|__local unsigned char* local_mem = local_mem_aligned;|]
+            )
+          TargetCUDA -> (mempty, mempty)
 
       params =
         local_memory_param
@@ -429,9 +432,9 @@ onKernel target kernel = do
         attribute
           <> funcText
             [C.cfun|__kernel void $id:name ($params:params) {
-                    __local unsigned char* local_mem = local_mem_aligned;
                     $items:(mconcat unpack_params)
                     $items:const_defs
+                    $items:prepare_local_memory
                     $items:local_memory_init
                     $items:error_init
                     $items:kernel_body
