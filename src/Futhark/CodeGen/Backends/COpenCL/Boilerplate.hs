@@ -71,13 +71,13 @@ generateBoilerplate ::
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_program opencl_prelude cost_centres types failures = do
-  let opencl_program_fragments =
+generateBoilerplate gpu_program opencl_prelude cost_centres types failures = do
+  let gpu_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
         -- concatenate it again at runtime.
-        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ opencl_prelude <> opencl_program]
-      program_fragments = opencl_program_fragments ++ [[C.cinit|NULL|]]
+        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ opencl_prelude <> gpu_program]
+      program_fragments = gpu_program_fragments ++ [[C.cinit|NULL|]]
       f64_required
         | FloatType Float64 `elem` types = [C.cexp|1|]
         | otherwise = [C.cexp|0|]
@@ -86,7 +86,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres types failures = 
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
              static const int f64_required = $exp:f64_required;
-             static const char *opencl_program[] = {$inits:program_fragments};
+             static const char *gpu_program[] = {$inits:program_fragments};
              $esc:(T.unpack backendsOpenclH)
              $esc:(T.unpack gpuH)
             |]

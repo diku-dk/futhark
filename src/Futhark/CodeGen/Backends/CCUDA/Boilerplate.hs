@@ -52,18 +52,18 @@ generateBoilerplate ::
   [Name] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate cuda_program cuda_prelude cost_centres failures = do
-  let cuda_program_fragments =
+generateBoilerplate gpu_program cuda_prelude cost_centres failures = do
+  let gpu_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
         -- concatenate it again at runtime.
-        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ cuda_prelude <> cuda_program]
-      program_fragments = cuda_program_fragments ++ [[C.cinit|NULL|]]
+        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ cuda_prelude <> gpu_program]
+      program_fragments = gpu_program_fragments ++ [[C.cinit|NULL|]]
   let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
   mapM_
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
-             static const char *cuda_program[] = {$inits:program_fragments, NULL};
+             static const char *gpu_program[] = {$inits:program_fragments, NULL};
              $esc:(T.unpack backendsCudaH)
              $esc:(T.unpack gpuH)
             |]

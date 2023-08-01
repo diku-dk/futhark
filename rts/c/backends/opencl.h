@@ -537,7 +537,7 @@ struct futhark_context {
   struct builtin_kernels* kernels;
 };
 
-static cl_build_status build_opencl_program(cl_program program, cl_device_id device, const char* options) {
+static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options) {
   cl_int clBuildProgram_error = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
@@ -1098,7 +1098,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
-  OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
+  OPENCL_SUCCEED_FATAL(build_gpu_program(prog, device_option.device, compile_opts));
 
   free(compile_opts);
   free(fut_opencl_src);
@@ -1214,9 +1214,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->cur_mem_usage_device = 0;
 
   if (ctx->cfg->queue_set) {
-    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, gpu_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
-    setup_opencl(ctx, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl(ctx, gpu_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   }
 
   cl_int error;

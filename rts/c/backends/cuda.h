@@ -933,7 +933,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
-  ctx->error = cuda_module_setup(ctx, cuda_program,
+  ctx->error = cuda_module_setup(ctx, gpu_program,
                                  ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
