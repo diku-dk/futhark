@@ -7,6 +7,7 @@
 module Futhark.CodeGen.Backends.GPU
   ( callKernel,
     copygpu2gpu,
+    createKernels,
   )
 where
 
@@ -14,8 +15,10 @@ import Control.Monad
 import Data.Bifunctor (bimap)
 import Data.List (unzip4)
 import Data.Maybe (catMaybes)
+import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate (sizeLoggingCode)
 import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.MonadFreshNames
@@ -188,3 +191,11 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
            goto cleanup;
          }
      |]
+
+createKernels :: [KernelName] -> GC.CompilerM op s ()
+createKernels kernels = forM_ kernels $ \name ->
+  GC.contextFieldDyn
+    (C.toIdent name mempty)
+    [C.cty|typename gpu_kernel|]
+    [C.cstm|gpu_create_kernel(ctx, &ctx->program->$id:name, $string:(T.unpack (idText (C.toIdent name mempty))));|]
+    [C.cstm|gpu_free_kernel(ctx, ctx->program->$id:name);|]

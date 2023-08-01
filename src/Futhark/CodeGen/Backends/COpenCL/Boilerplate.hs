@@ -16,13 +16,11 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   )
 where
 
-import Control.Monad
 import Control.Monad.State
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (backendsOpenclH, gpuH)
@@ -66,39 +64,16 @@ profilingEvent name =
   [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
           : opencl_get_event(ctx, $string:(nameToString name))|]
 
-releaseKernel :: KernelName -> C.Stm
-releaseKernel name = [C.cstm|gpu_free_kernel(ctx, ctx->program->$id:name);|]
-
-loadKernel :: KernelName -> C.Stm
-loadKernel name =
-  [C.cstm|gpu_create_kernel(ctx, &ctx->program->$id:name, $string:(T.unpack (idText (C.toIdent name mempty))));|]
-
-generateOpenCLDecls ::
-  [KernelName] -> GC.CompilerM op s ()
-generateOpenCLDecls kernels = do
-  forM_ kernels $ \name ->
-    GC.contextFieldDyn
-      (C.toIdent name mempty)
-      [C.cty|typename gpu_kernel|]
-      (loadKernel name)
-      (releaseKernel name)
-  GC.earlyDecl
-    [C.cedecl|
-void post_opencl_setup(struct futhark_context *ctx, struct opencl_device_option *option) {
-  $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
-}|]
-
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateBoilerplate ::
   T.Text ->
   T.Text ->
   [Name] ->
-  [KernelName] ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate opencl_program opencl_prelude cost_centres kernels types failures = do
+generateBoilerplate opencl_program opencl_prelude cost_centres types failures = do
   let opencl_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
@@ -119,7 +94,10 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types fai
             |]
   GC.earlyDecl $ failureMsgFunction failures
 
-  generateOpenCLDecls kernels
+  GC.earlyDecl
+    [C.cedecl|void post_opencl_setup(struct futhark_context *ctx, struct opencl_device_option *option) {
+             $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
+             }|]
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char* opt);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
@@ -145,7 +123,7 @@ generateBoilerplate opencl_program opencl_prelude cost_centres kernels types fai
 
   GC.profileReport
     [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
-              $stms:(map initCostCentre (cost_centres <> kernels))
+              $stms:(map initCostCentre cost_centres)
               opencl_tally_profiling_records(ctx, ccs);
               cost_centre_report(ccs, &builder);
               cost_centres_free(ccs);

@@ -49,20 +49,22 @@ compileProg version prog = do
           copyScalarToDev,
           copyScalarFromDev
         ]
+          <> M.keys kernels
+      extra = do
+        createKernels (M.keys kernels)
+        generateBoilerplate
+          opencl_code
+          opencl_prelude
+          cost_centres
+          types
+          failures
   (ws,)
     <$> GC.compileProg
       "opencl"
       version
       params
       operations
-      ( generateBoilerplate
-          opencl_code
-          opencl_prelude
-          cost_centres
-          (M.keys kernels)
-          types
-          failures
-      )
+      extra
       include_opencl_h
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

@@ -41,12 +41,13 @@ compileProg version prog = do
           copyScalarToDev,
           copyScalarFromDev
         ]
-      extra =
+          <> M.keys kernels
+      extra = do
+        createKernels (M.keys kernels)
         generateBoilerplate
           cuda_code
           cuda_prelude
           cost_centres
-          (M.keys kernels)
           failures
   (ws,)
     <$> GC.compileProg
