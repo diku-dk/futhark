@@ -50,7 +50,7 @@ compileProg version prog = do
           cuda_code
           cuda_prelude
           cost_centres
-          kernels
+          (M.keys kernels)
           failures
   (ws,)
     <$> GC.compileProg

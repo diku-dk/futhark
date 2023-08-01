@@ -9,7 +9,6 @@ module Futhark.CodeGen.Backends.CCUDA.Boilerplate
 where
 
 import Control.Monad
-import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( copyDevToDev,
@@ -49,19 +48,13 @@ profilingEnclosure name =
       |]
   )
 
-generateCUDADecls ::
-  M.Map KernelName KernelSafety ->
-  GC.CompilerM op s ()
-generateCUDADecls kernels = forM_ (M.keys kernels) $ \name ->
+generateCUDADecls :: [KernelName] -> GC.CompilerM op s ()
+generateCUDADecls kernels = forM_ kernels $ \name ->
   GC.contextFieldDyn
     (C.toIdent name mempty)
     [C.cty|typename CUfunction|]
-    [C.cstm|
-             CUDA_SUCCEED_FATAL(cuModuleGetFunction(
-                                     &ctx->program->$id:name,
-                                     ctx->module,
-                                     $string:(T.unpack (idText (C.toIdent name mempty)))));|]
-    [C.cstm|{}|]
+    [C.cstm|gpu_create_kernel(ctx, &ctx->program->$id:name, $string:(T.unpack (idText (C.toIdent name mempty))));|]
+    [C.cstm|gpu_free_kernel(ctx, ctx->program->$id:name);|]
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
@@ -69,7 +62,7 @@ generateBoilerplate ::
   T.Text ->
   T.Text ->
   [Name] ->
-  M.Map KernelName KernelSafety ->
+  [KernelName] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
 generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
@@ -112,7 +105,7 @@ generateBoilerplate cuda_program cuda_prelude cost_centres kernels failures = do
 
   GC.profileReport
     [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
-              $stms:(map initCostCentre (cost_centres <> M.keys kernels))
+              $stms:(map initCostCentre (cost_centres <> kernels))
               CUDA_SUCCEED_FATAL(cuda_tally_profiling_records(ctx, ccs));
               cost_centre_report(ccs, &builder);
               cost_centres_free(ccs);
