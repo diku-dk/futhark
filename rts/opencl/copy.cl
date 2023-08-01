@@ -16,7 +16,6 @@ __kernel void lmad_copy_##NAME(LOCAL_MEM_PARAM                          \
                                int64_t shape5, int64_t dst_stride5, int64_t src_stride5, \
                                int64_t shape6, int64_t dst_stride6, int64_t src_stride6, \
                                int64_t shape7, int64_t dst_stride7, int64_t src_stride7) { \
-  (void)unused;                                                         \
   int64_t gtid = get_global_id(0);                                      \
   int64_t remainder = gtid;                                             \
                                                                         \
