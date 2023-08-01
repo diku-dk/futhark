@@ -764,6 +764,8 @@ static CUresult cuda_tally_profiling_records(struct futhark_context *ctx,
   }
 
   ctx->profiling_records_used = 0;
+
+  return CUDA_SUCCESS;
 }
 
 // Returns pointer to two events.
