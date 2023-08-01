@@ -278,7 +278,7 @@ struct futhark_context {
 
   struct free_list cu_free_list;
 
-  size_t max_block_size;
+  size_t max_group_size;
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
@@ -473,13 +473,13 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   }
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
-                        (int)ctx->max_block_size);
+                        (int)ctx->max_group_size);
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
-  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
+  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_group_size);
 
   // Time for the best lines of the code in the entire compiler.
   if (getenv("CUDA_HOME") != NULL) {
@@ -567,13 +567,13 @@ static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
 static void cuda_size_setup(struct futhark_context *ctx)
 {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_block_size) {
+  if (cfg->default_block_size > ctx->max_group_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_block_size, cfg->default_block_size);
+              ctx->max_group_size, cfg->default_block_size);
     }
-    cfg->default_block_size = ctx->max_block_size;
+    cfg->default_block_size = ctx->max_group_size;
   }
   if (cfg->default_grid_size > ctx->max_grid_size) {
     if (cfg->default_grid_size_changed) {
@@ -606,7 +606,7 @@ static void cuda_size_setup(struct futhark_context *ctx)
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "group_size") == size_class) {
-      max_value = ctx->max_block_size;
+      max_value = ctx->max_group_size;
       default_value = cfg->default_block_size;
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
@@ -925,9 +925,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   free_list_init(&ctx->cu_free_list);
 
   ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
-  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
+  ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
-  ctx->max_tile_size = sqrt(ctx->max_block_size);
+  ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
