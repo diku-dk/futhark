@@ -96,7 +96,7 @@ static inline void barrier_local() {
 
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
-extern volatile __shared__ uint64_t local_mem[];
+extern volatile __shared__ unsigned char local_mem[];
 
 #define LOCAL_MEM_PARAM
 #define REQD_GROUP_SIZE(a,b,c)
