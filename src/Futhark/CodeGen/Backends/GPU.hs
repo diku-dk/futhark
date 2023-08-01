@@ -16,12 +16,12 @@ import Data.Bifunctor (bimap)
 import Data.List (unzip4)
 import Data.Maybe (catMaybes)
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (sizeLoggingCode)
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -158,7 +158,13 @@ callKernel (CmpSizeLe v key x) = do
   let e = kernelConstToExp $ SizeConst key
   x' <- GC.compileExp x
   GC.stm [C.cstm|$id:v = $exp:e <= $exp:x';|]
-  sizeLoggingCode v key x'
+  -- Output size information if logging is enabled.  The autotuner
+  -- depends on the format of this output, so use caution if changing
+  -- it.
+  GC.stm
+    [C.cstm|if (ctx->logging) {
+    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(T.unpack (prettyTextOneLine key)), (long)$exp:x', $id:v ? "true" : "false");
+    }|]
 callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]

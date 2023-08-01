@@ -11,7 +11,6 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
     genProfileReport,
     commonOptions,
     failureMsgFunction,
-    sizeLoggingCode,
   )
 where
 
@@ -24,7 +23,6 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.RTS.C (backendsOpenclH, gpuH)
 import Futhark.Util (chunk)
-import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 
@@ -187,17 +185,6 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
         Just _ -> pure ()
 
       pure [C.cexp|$id:v|]
-
--- Output size information if logging is enabled.
---
--- The autotuner depends on the format of this output, so use caution if
--- changing it.
-sizeLoggingCode :: VName -> Name -> C.Exp -> GC.CompilerM op () ()
-sizeLoggingCode v key x' = do
-  GC.stm
-    [C.cstm|if (ctx->logging) {
-    fprintf(ctx->log, "Compared %s <= %ld: %s.\n", $string:(T.unpack (prettyTextOneLine key)), (long)$exp:x', $id:v ? "true" : "false");
-    }|]
 
 -- Options that are common to multiple GPU-like backends.
 commonOptions :: [Option]
