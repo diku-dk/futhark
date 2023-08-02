@@ -52,6 +52,7 @@ where
 
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
@@ -65,6 +66,7 @@ import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
+import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Paths_futhark qualified
 import Prelude hiding (mapM, mod)
@@ -442,8 +444,9 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t) =
       TypeArgType $ onType except t
 
-    onDim except (Var qn typ loc) = Var (qual except qn) typ loc
-    onDim _ d = d
+    onDim except e = runIdentity $ onDimM except e
+    onDimM except (Var qn typ loc) = pure $ Var (qual except qn) typ loc
+    onDimM except e = astMap (identityMapper {mapOnExp = onDimM except}) e
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =
