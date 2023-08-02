@@ -247,8 +247,7 @@ transformNames x = do
     substituter scope =
       ASTMapper
         { mapOnExp = onExp scope,
-          mapOnName = \v ->
-            pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
+          mapOnName = \v -> pure $ fst $ lookupSubstInScope v {qualQuals = []} scope,
           mapOnStructType = astMap (substituter scope),
           mapOnParamType = astMap (substituter scope),
           mapOnResRetType = astMap (substituter scope)

@@ -35,7 +35,7 @@ import Language.Futhark.Syntax
 -- given child.
 data ASTMapper m = ASTMapper
   { mapOnExp :: ExpBase Info VName -> m (ExpBase Info VName),
-    mapOnName :: VName -> m VName,
+    mapOnName :: QualName VName -> m (QualName VName),
     mapOnStructType :: StructType -> m StructType,
     mapOnParamType :: ParamType -> m ParamType,
     mapOnResRetType :: ResRetType -> m ResRetType
@@ -59,9 +59,6 @@ class ASTMappable x where
   -- the object itself, and the mapping does not descend recursively
   -- into subexpressions.  The mapping is done left-to-right.
   astMap :: Monad m => ASTMapper m -> x -> m x
-
-instance ASTMappable (QualName VName) where
-  astMap tv = traverse (mapOnName tv)
 
 instance ASTMappable (AppExpBase Info VName) where
   astMap tv (Range start next end loc) =
@@ -106,7 +103,7 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> pure loc
   astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
     BinOp
-      <$> ((,) <$> astMap tv fname <*> pure fname_loc)
+      <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
       <*> traverse (mapOnStructType tv) t
       <*> ((,) <$> mapOnExp tv x <*> pure xext)
       <*> ((,) <$> mapOnExp tv y <*> pure yext)
@@ -124,7 +121,7 @@ instance ASTMappable (AppExpBase Info VName) where
 instance ASTMappable (ExpBase Info VName) where
   astMap tv (Var name t loc) =
     Var
-      <$> astMap tv name
+      <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
   astMap tv (Hole t loc) =
@@ -141,7 +138,7 @@ instance ASTMappable (ExpBase Info VName) where
     Parens <$> mapOnExp tv e <*> pure loc
   astMap tv (QualParens (name, nameloc) e loc) =
     QualParens
-      <$> ((,) <$> astMap tv name <*> pure nameloc)
+      <$> ((,) <$> mapOnName tv name <*> pure nameloc)
       <*> mapOnExp tv e
       <*> pure loc
   astMap tv (TupLit els loc) =
@@ -184,12 +181,12 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (OpSection name t loc) =
     OpSection
-      <$> astMap tv name
+      <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
   astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext), Info (pb, t1b)) (ret, retext) loc) =
     OpSectionLeft
-      <$> astMap tv name
+      <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
@@ -200,7 +197,7 @@ instance ASTMappable (ExpBase Info VName) where
       <*> pure loc
   astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
     OpSectionRight
-      <$> astMap tv name
+      <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
@@ -230,7 +227,7 @@ instance ASTMappable (LoopFormBase Info VName) where
 
 instance ASTMappable (TypeExp Info VName) where
   astMap tv (TEVar qn loc) =
-    TEVar <$> astMap tv qn <*> pure loc
+    TEVar <$> mapOnName tv qn <*> pure loc
   astMap tv (TEParens te loc) =
     TEParens <$> astMap tv te <*> pure loc
   astMap tv (TETuple ts loc) =
@@ -312,13 +309,13 @@ traverseTypeArg f g (TypeArgType t) =
   TypeArgType <$> traverseType f g pure t
 
 instance ASTMappable StructType where
-  astMap tv = traverseType (astMap tv) (mapOnExp tv) pure
+  astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
 instance ASTMappable ParamType where
-  astMap tv = traverseType (astMap tv) (mapOnExp tv) pure
+  astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
 instance ASTMappable (TypeBase Size Uniqueness) where
-  astMap tv = traverseType (astMap tv) (mapOnExp tv) pure
+  astMap tv = traverseType (mapOnName tv) (mapOnExp tv) pure
 
 instance ASTMappable ResRetType where
   astMap tv (RetType ext t) = RetType ext <$> astMap tv t
@@ -358,7 +355,7 @@ instance ASTMappable (FieldBase Info VName) where
     RecordFieldExplicit name <$> mapOnExp tv e <*> pure loc
   astMap tv (RecordFieldImplicit name t loc) =
     RecordFieldImplicit
-      <$> mapOnName tv name
+      <$> (qualLeaf <$> mapOnName tv (QualName [] name))
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
 
