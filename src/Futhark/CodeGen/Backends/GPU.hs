@@ -8,6 +8,8 @@ module Futhark.CodeGen.Backends.GPU
   ( callKernel,
     copygpu2gpu,
     createKernels,
+    allocateGPU,
+    deallocateGPU,
   )
 where
 
@@ -205,3 +207,18 @@ createKernels kernels = forM_ kernels $ \name ->
     [C.cty|typename gpu_kernel|]
     [C.cstm|gpu_create_kernel(ctx, &ctx->program->$id:name, $string:(T.unpack (idText (C.toIdent name mempty))));|]
     [C.cstm|gpu_free_kernel(ctx, ctx->program->$id:name);|]
+
+allocateGPU :: GC.Allocate op ()
+allocateGPU mem size tag "device" =
+  GC.stm
+    [C.cstm|(void)gpu_alloc(ctx, ctx->log,
+                            (size_t)$exp:size, $exp:tag,
+                            &$exp:mem, (size_t*)&$exp:size);|]
+allocateGPU _ _ _ space =
+  error $ "Cannot allocate in '" ++ space ++ "' memory space."
+
+deallocateGPU :: GC.Deallocate op ()
+deallocateGPU mem size tag "device" =
+  GC.stm [C.cstm|(void)gpu_free(ctx, $exp:mem, $exp:size, $exp:tag);|]
+deallocateGPU _ _ _ space =
+  error $ "Cannot deallocate in '" ++ space ++ "' space"

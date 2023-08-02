@@ -70,8 +70,8 @@ compileProg version prog = do
         { GC.opsCompiler = callKernel,
           GC.opsWriteScalar = writeOpenCLScalar,
           GC.opsReadScalar = readOpenCLScalar,
-          GC.opsAllocate = allocateOpenCLBuffer,
-          GC.opsDeallocate = deallocateOpenCLBuffer,
+          GC.opsAllocate = allocateGPU,
+          GC.opsDeallocate = deallocateGPU,
           GC.opsCopy = copyOpenCLMemory,
           GC.opsCopies =
             M.insert (Space "device", Space "device") copygpu2gpu $
@@ -189,22 +189,6 @@ readOpenCLScalar mem i t "device" _ = do
   pure [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space _ =
   error $ "Cannot read from '" ++ space ++ "' memory space."
-
-allocateOpenCLBuffer :: GC.Allocate OpenCL ()
-allocateOpenCLBuffer mem size tag "device" =
-  GC.stm
-    [C.cstm|ctx->error =
-     OPENCL_SUCCEED_NONFATAL(gpu_alloc(ctx, ctx->log,
-                                       (size_t)$exp:size, $exp:tag,
-                                       &$exp:mem, (size_t*)&$exp:size));|]
-allocateOpenCLBuffer _ _ _ space =
-  error $ "Cannot allocate in '" ++ space ++ "' memory space."
-
-deallocateOpenCLBuffer :: GC.Deallocate OpenCL ()
-deallocateOpenCLBuffer mem size tag "device" =
-  GC.stm [C.cstm|OPENCL_SUCCEED_OR_RETURN(gpu_free(ctx, $exp:mem, $exp:size, $exp:tag));|]
-deallocateOpenCLBuffer _ _ _ space =
-  error $ "Cannot deallocate in '" ++ space ++ "' space"
 
 syncArg :: GC.CopyBarrier -> C.Exp
 syncArg GC.CopyBarrier = [C.cexp|CL_TRUE|]

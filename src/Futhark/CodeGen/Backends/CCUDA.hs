@@ -59,8 +59,8 @@ compileProg version prog = do
       GC.defaultOperations
         { GC.opsWriteScalar = writeCUDAScalar,
           GC.opsReadScalar = readCUDAScalar,
-          GC.opsAllocate = allocateCUDABuffer,
-          GC.opsDeallocate = deallocateCUDABuffer,
+          GC.opsAllocate = allocateGPU,
+          GC.opsDeallocate = deallocateGPU,
           GC.opsCopy = copyCUDAMemory,
           GC.opsCopies =
             M.insert (Space "device", Space "device") copygpu2gpu $
@@ -171,22 +171,6 @@ readCUDAScalar mem i t "device" _ = do
   pure [C.cexp|$id:val|]
 readCUDAScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
-
-allocateCUDABuffer :: GC.Allocate OpenCL ()
-allocateCUDABuffer mem size tag "device" =
-  GC.stm
-    [C.cstm|ctx->error =
-     CUDA_SUCCEED_NONFATAL(gpu_alloc(ctx, ctx->log,
-                                     (size_t)$exp:size, $exp:tag,
-                                     &$exp:mem, (size_t*)&$exp:size));|]
-allocateCUDABuffer _ _ _ space =
-  error $ "Cannot allocate in '" ++ space ++ "' memory space."
-
-deallocateCUDABuffer :: GC.Deallocate OpenCL ()
-deallocateCUDABuffer mem size tag "device" =
-  GC.stm [C.cstm|CUDA_SUCCEED_OR_RETURN(gpu_free(ctx, $exp:mem, $exp:size, $exp:tag));|]
-deallocateCUDABuffer _ _ _ space =
-  error $ "Cannot deallocate in '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do
