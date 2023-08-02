@@ -552,16 +552,20 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace _ elemexp)
       dest' <- GC.rawMem dest
       idxexp <- compileExp $ constFoldPrimExp $ untyped idx
       deref <-
-        GC.derefPointer dest' [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
+        GC.derefPointer
+          dest'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
           <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   | otherwise = do
       dest' <- GC.rawMem dest
+      idxexp <- compileExp $ untyped idx
       deref <-
-        GC.derefPointer dest'
-          <$> compileExp (untyped idx)
-          <*> getMemType dest elemtype
+        GC.derefPointer
+          dest'
+          [C.cexp|($tyquals:([varying]) typename int64_t)$exp:idxexp|]
+          <$> getMemType dest elemtype
       elemexp' <- toStorage elemtype <$> compileExp elemexp
       GC.stm [C.cstm|$exp:deref = $exp:elemexp';|]
   where
