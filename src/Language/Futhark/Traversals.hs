@@ -85,13 +85,11 @@ instance ASTMappable (AppExpBase Info VName) where
       _ ->
         Apply f' args' loc
   astMap tv (LetPat sizes pat e body loc) =
-    LetPat <$> astMap tv sizes <*> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
-  astMap tv (LetFun name (fparams, params, ret, t, e) body loc) =
-    LetFun
-      <$> mapOnName tv name
-      <*> ( (,,,,)
-              <$> mapM (astMap tv) fparams
-              <*> mapM (astMap tv) params
+    LetPat sizes <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
+  astMap tv (LetFun name (tparams, params, ret, t, e) body loc) =
+    LetFun name
+      <$> ( (tparams,,,,)
+              <$> mapM (astMap tv) params
               <*> traverse (astMap tv) ret
               <*> traverse (mapOnResRetType tv) t
               <*> mapOnExp tv e
@@ -114,9 +112,8 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> ((,) <$> mapOnExp tv y <*> pure yext)
       <*> pure loc
   astMap tv (DoLoop sparams mergepat mergeexp form loopbody loc) =
-    DoLoop
-      <$> mapM (mapOnName tv) sparams
-      <*> astMap tv mergepat
+    DoLoop sparams
+      <$> astMap tv mergepat
       <*> mapOnExp tv mergeexp
       <*> astMap tv form
       <*> mapOnExp tv loopbody
@@ -199,7 +196,7 @@ instance ASTMappable (ExpBase Info VName) where
               <$> (Info <$> ((pa,,) <$> mapOnParamType tv t1a <*> pure argext))
               <*> (Info <$> ((pb,) <$> mapOnParamType tv t1b))
           )
-      <*> ((,) <$> traverse (mapOnResRetType tv) ret <*> traverse (mapM (mapOnName tv)) retext)
+      <*> ((,) <$> traverse (mapOnResRetType tv) ret <*> pure retext)
       <*> pure loc
   astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
     OpSectionRight
@@ -260,9 +257,6 @@ instance ASTMappable (TypeArgExp Info VName) where
 instance ASTMappable (SizeExp Info VName) where
   astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
-
-instance ASTMappable (TypeParamBase VName) where
-  astMap = traverse . mapOnName
 
 instance ASTMappable (DimIndexBase Info VName) where
   astMap tv (DimFix j) = DimFix <$> mapOnExp tv j
@@ -331,11 +325,7 @@ instance ASTMappable ResRetType where
 
 instance ASTMappable (IdentBase Info VName StructType) where
   astMap tv (Ident name (Info t) loc) =
-    Ident <$> mapOnName tv name <*> (Info <$> mapOnStructType tv t) <*> pure loc
-
-instance ASTMappable (SizeBinder VName) where
-  astMap tv (SizeBinder name loc) =
-    SizeBinder <$> mapOnName tv name <*> pure loc
+    Ident name <$> (Info <$> mapOnStructType tv t) <*> pure loc
 
 traversePat :: Monad m => (t1 -> m t2) -> PatBase Info VName t1 -> m (PatBase Info VName t2)
 traversePat f (Id name (Info t) loc) =
