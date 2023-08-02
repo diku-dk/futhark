@@ -26,7 +26,6 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C
-import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
 -- | Compile the program to C with calls to CUDA.
@@ -57,8 +56,8 @@ compileProg version prog = do
     operations :: GC.Operations OpenCL ()
     operations =
       GC.defaultOperations
-        { GC.opsWriteScalar = writeCUDAScalar,
-          GC.opsReadScalar = readCUDAScalar,
+        { GC.opsWriteScalar = writeScalarGPU,
+          GC.opsReadScalar = readScalarGPU,
           GC.opsAllocate = allocateGPU,
           GC.opsDeallocate = deallocateGPU,
           GC.opsCopy = copyCUDAMemory,
@@ -130,47 +129,6 @@ cliOptions =
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
-
--- We detect the special case of writing a constant and turn it into a
--- non-blocking write.  This may be slightly faster, as it prevents
--- unnecessary synchronisation of the context, and writing a constant
--- is fairly common.  This is only possible because we can give the
--- constant infinite lifetime (with 'static'), which is not the case
--- for ordinary variables.
-writeCUDAScalar :: GC.WriteScalar OpenCL ()
-writeCUDAScalar mem idx t "device" _ val@C.Const {} = do
-  val' <- newVName "write_static"
-  let (bef, aft) = profilingEnclosure copyScalarToDev
-  GC.item
-    [C.citem|{static $ty:t $id:val' = $exp:val;
-              $items:bef
-              CUDA_SUCCEED_OR_RETURN(
-                cuMemcpyHtoDAsync($exp:mem + $exp:idx * sizeof($ty:t),
-                                  &$id:val',
-                                  sizeof($ty:t),
-                                  ctx->stream));
-              $items:aft
-             }|]
-writeCUDAScalar mem i t "device" _ val = do
-  val' <- newVName "write_tmp"
-  GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
-  GC.stm
-    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
-writeCUDAScalar _ _ _ space _ _ =
-  error $ "Cannot write to '" ++ space ++ "' memory space."
-
-readCUDAScalar :: GC.ReadScalar OpenCL ()
-readCUDAScalar mem i t "device" _ = do
-  val <- newVName "read_res"
-  GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm
-    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
-  GC.stm
-    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
-            { err = 1; goto cleanup; }|]
-  pure [C.cexp|$id:val|]
-readCUDAScalar _ _ _ space _ =
-  error $ "Cannot write to '" ++ space ++ "' memory space."
 
 copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do

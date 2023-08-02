@@ -68,8 +68,8 @@ compileProg version prog = do
     operations =
       GC.defaultOperations
         { GC.opsCompiler = callKernel,
-          GC.opsWriteScalar = writeOpenCLScalar,
-          GC.opsReadScalar = readOpenCLScalar,
+          GC.opsWriteScalar = writeScalarGPU,
+          GC.opsReadScalar = readScalarGPU,
           GC.opsAllocate = allocateGPU,
           GC.opsDeallocate = deallocateGPU,
           GC.opsCopy = copyOpenCLMemory,
@@ -157,38 +157,6 @@ cliOptions =
                         entry_point = NULL;}|]
            }
        ]
-
--- We detect the special case of writing a constant and turn it into a
--- non-blocking write.  This may be slightly faster, as it prevents
--- unnecessary synchronisation of the OpenCL command queue, and
--- writing a constant is fairly common.  This is only possible because
--- we can give the constant infinite lifetime (with 'static'), which
--- is not the case for ordinary variables.
-writeOpenCLScalar :: GC.WriteScalar OpenCL ()
-writeOpenCLScalar mem i t "device" _ val = do
-  val' <- newVName "write_tmp"
-  GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
-  GC.stm
-    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
-writeOpenCLScalar _ _ _ space _ _ =
-  error $ "Cannot write to '" ++ space ++ "' memory space."
-
--- It is often faster to do a blocking clEnqueueReadBuffer() than to
--- do an async clEnqueueReadBuffer() followed by a clFinish(), even
--- with an in-order command queue.  This is safe if and only if there
--- are no possible outstanding failures.
-readOpenCLScalar :: GC.ReadScalar OpenCL ()
-readOpenCLScalar mem i t "device" _ = do
-  val <- newVName "read_res"
-  GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm
-    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
-  GC.stm
-    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
-            { err = 1; goto cleanup; }|]
-  pure [C.cexp|$id:val|]
-readOpenCLScalar _ _ _ space _ =
-  error $ "Cannot read from '" ++ space ++ "' memory space."
 
 syncArg :: GC.CopyBarrier -> C.Exp
 syncArg GC.CopyBarrier = [C.cexp|CL_TRUE|]

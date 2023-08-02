@@ -10,6 +10,8 @@ module Futhark.CodeGen.Backends.GPU
     createKernels,
     allocateGPU,
     deallocateGPU,
+    readScalarGPU,
+    writeScalarGPU,
   )
 where
 
@@ -222,3 +224,31 @@ deallocateGPU mem size tag "device" =
   GC.stm [C.cstm|(void)gpu_free(ctx, $exp:mem, $exp:size, $exp:tag);|]
 deallocateGPU _ _ _ space =
   error $ "Cannot deallocate in '" ++ space ++ "' space"
+
+-- It is often faster to do a blocking clEnqueueReadBuffer() than to
+-- do an async clEnqueueReadBuffer() followed by a clFinish(), even
+-- with an in-order command queue.  This is safe if and only if there
+-- are no possible outstanding failures.
+readScalarGPU :: GC.ReadScalar op ()
+readScalarGPU mem i t "device" _ = do
+  val <- newVName "read_res"
+  GC.decl [C.cdecl|$ty:t $id:val;|]
+  GC.stm
+    [C.cstm|if ((err = gpu_scalar_from_device(ctx, &$id:val, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t))) != 0) { goto cleanup; }|]
+  GC.stm
+    [C.cstm|if (ctx->failure_is_an_option && futhark_context_sync(ctx) != 0)
+            { err = 1; goto cleanup; }|]
+  pure [C.cexp|$id:val|]
+readScalarGPU _ _ _ space _ =
+  error $ "Cannot read from '" ++ space ++ "' memory space."
+
+-- TODO: Optimised special case when the scalar is a constant, in
+-- which case we can do the write asynchronously.
+writeScalarGPU :: GC.WriteScalar op ()
+writeScalarGPU mem i t "device" _ val = do
+  val' <- newVName "write_tmp"
+  GC.item [C.citem|$ty:t $id:val' = $exp:val;|]
+  GC.stm
+    [C.cstm|if ((err = gpu_scalar_to_device(ctx, $exp:mem, $exp:i * sizeof($ty:t), sizeof($ty:t), &$id:val')) != 0) { goto cleanup; }|]
+writeScalarGPU _ _ _ space _ _ =
+  error $ "Cannot write to '" ++ space ++ "' memory space."
