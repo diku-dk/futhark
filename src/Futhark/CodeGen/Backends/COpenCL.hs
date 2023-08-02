@@ -163,6 +163,9 @@ syncArg GC.CopyBarrier = [C.cexp|CL_TRUE|]
 syncArg GC.CopyNoBarrier = [C.cexp|CL_FALSE|]
 
 copyOpenCLMemory :: GC.Copy OpenCL ()
+copyOpenCLMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
+  GC.stm
+    [C.cstm|gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 -- The read/write/copy-buffer functions fail if the given offset is
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
@@ -193,11 +196,6 @@ copyOpenCLMemory b destmem destidx (Space "device") srcmem srcidx DefaultSpace n
                              0, NULL, $exp:(profilingEvent copyDevToHost)));
     }
   |]
-copyOpenCLMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
-  GC.stm
-    [C.cstm|gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyOpenCLMemory _ destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes =
-  GC.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
