@@ -49,6 +49,7 @@ extra-source-files:
     rts/c/errors.h
     rts/c/free_list.h
     rts/c/gpu.h
+    rts/c/gpu_prototypes.h
     rts/c/tuning.h
     rts/c/values.h
     rts/c/half.h

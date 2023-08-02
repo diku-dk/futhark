@@ -520,7 +520,7 @@ struct futhark_context {
   cl_command_queue queue;
   cl_program clprogram;
 
-  struct free_list cl_free_list;
+  struct free_list gpu_free_list;
 
   size_t max_group_size;
   size_t max_num_groups;
@@ -679,124 +679,6 @@ static cl_event* opencl_get_event(struct futhark_context *ctx, const char *name)
   return event;
 }
 
-// Allocate memory from driver. The problem is that OpenCL may perform
-// lazy allocation, so we cannot know whether an allocation succeeded
-// until the first time we try to use it.  Hence we immediately
-// perform a write to see if the allocation succeeded.  This is slow,
-// but the assumption is that this operation will be rare (most things
-// will go through the free list).
-static int opencl_alloc_actual(struct futhark_context *ctx, size_t size, cl_mem *mem_out) {
-  int error;
-  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
-
-  if (error != CL_SUCCESS) {
-    return error;
-  }
-
-  int x = 2;
-  error = clEnqueueWriteBuffer(ctx->queue, *mem_out,
-                               CL_TRUE,
-                               0, sizeof(x), &x,
-                               0, NULL, NULL);
-
-  // No need to wait for completion here. clWaitForEvents() cannot
-  // return mem object allocation failures. This implies that the
-  // buffer is faulted onto the device on enqueue. (Observation by
-  // Andreas Kloeckner.)
-
-  return error;
-}
-
-static int opencl_alloc(struct futhark_context *ctx, FILE *log,
-                        size_t min_size, const char *tag,
-                        cl_mem *mem_out, size_t *size_out) {
-  (void)tag;
-  if (min_size < sizeof(int)) {
-    min_size = sizeof(int);
-  }
-
-  cl_mem* memptr;
-  if (free_list_find(&ctx->cl_free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
-    // Successfully found a free block.  Is it big enough?
-    if (*size_out >= min_size) {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "No need to allocate: Found a block in the free list.\n");
-      }
-      *mem_out = *memptr;
-      free(memptr);
-      return CL_SUCCESS;
-    } else {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "Found a free block, but it was too small.\n");
-      }
-      int error = clReleaseMemObject(*memptr);
-      free(*memptr);
-      if (error != CL_SUCCESS) {
-        return error;
-      }
-    }
-  }
-
-  *size_out = min_size;
-
-  // We have to allocate a new block from the driver.  If the
-  // allocation does not succeed, then we might be in an out-of-memory
-  // situation.  We now start freeing things from the free list until
-  // we think we have freed enough that the allocation will succeed.
-  // Since we don't know how far the allocation is from fitting, we
-  // have to check after every deallocation.  This might be pretty
-  // expensive.  Let's hope that this case is hit rarely.
-
-  if (ctx->cfg->debugging) {
-    fprintf(log, "Actually allocating the desired block.\n");
-  }
-
-  int error = opencl_alloc_actual(ctx, min_size, mem_out);
-
-  while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
-    if (ctx->cfg->debugging) {
-      fprintf(log, "Out of OpenCL memory: releasing entry from the free list...\n");
-    }
-    cl_mem* memptr;
-    if (free_list_first(&ctx->cl_free_list, (fl_mem*)&memptr) == 0) {
-      cl_mem mem = *memptr;
-      free(memptr);
-      error = clReleaseMemObject(mem);
-      if (error != CL_SUCCESS) {
-        return error;
-      }
-    } else {
-      break;
-    }
-    error = opencl_alloc_actual(ctx, min_size, mem_out);
-  }
-
-  return error;
-}
-
-static int opencl_free(struct futhark_context *ctx,
-                       cl_mem mem, size_t size, const char *tag) {
-  cl_mem* memptr = malloc(sizeof(cl_mem));
-  *memptr = mem;
-  free_list_insert(&ctx->cl_free_list, size, (fl_mem)memptr, tag);
-  return CL_SUCCESS;
-}
-
-static int opencl_free_all(struct futhark_context *ctx) {
-  free_list_pack(&ctx->cl_free_list);
-  cl_mem* memptr;
-  while (free_list_first(&ctx->cl_free_list, (fl_mem*)&memptr) == 0) {
-    cl_mem mem = *memptr;
-    free(memptr);
-    int error = clReleaseMemObject(mem);
-    if (error != CL_SUCCESS) {
-      return error;
-    }
-  }
-
-  return CL_SUCCESS;
-}
-
 int futhark_context_sync(struct futhark_context* ctx) {
   // Check for any delayed error.
   cl_int failure_idx = -1;
@@ -848,7 +730,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
                                             const char* cache_fname) {
   int error;
 
-  free_list_init(&ctx->cl_free_list);
+  free_list_init(&ctx->gpu_free_list);
   ctx->queue = queue;
 
   OPENCL_SUCCEED_FATAL(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
@@ -1241,13 +1123,15 @@ int backend_context_setup(struct futhark_context* ctx) {
   return FUTHARK_SUCCESS;
 }
 
+static int gpu_free_all(struct futhark_context *ctx);
+
 void backend_context_teardown(struct futhark_context* ctx) {
   free_builtin_kernels(ctx, ctx->kernels);
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
   (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
-  (void)opencl_free_all(ctx);
+  (void)gpu_free_all(ctx);
   (void)clReleaseProgram(ctx->clprogram);
   (void)clReleaseCommandQueue(ctx->queue);
   (void)clReleaseContext(ctx->ctx);
@@ -1395,6 +1279,42 @@ int gpu_launch_kernel(struct futhark_context* ctx,
     printf("\n");
   }
 
+  return FUTHARK_SUCCESS;
+}
+
+// Allocate memory from driver. The problem is that OpenCL may perform
+// lazy allocation, so we cannot know whether an allocation succeeded
+// until the first time we try to use it.  Hence we immediately
+// perform a write to see if the allocation succeeded.  This is slow,
+// but the assumption is that this operation will be rare (most things
+// will go through the free list).
+static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
+  int error;
+  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
+
+  OPENCL_SUCCEED_OR_RETURN(error);
+
+  int x = 2;
+  error = clEnqueueWriteBuffer(ctx->queue, *mem_out,
+                               CL_TRUE,
+                               0, sizeof(x), &x,
+                               0, NULL, NULL);
+
+  // No need to wait for completion here. clWaitForEvents() cannot
+  // return mem object allocation failures. This implies that the
+  // buffer is faulted onto the device on enqueue. (Observation by
+  // Andreas Kloeckner.)
+
+  if (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
+    return FUTHARK_OUT_OF_MEMORY;
+  }
+  OPENCL_SUCCEED_OR_RETURN(error);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  OPENCL_SUCCEED_OR_RETURN(clReleaseMemObject(mem));
   return FUTHARK_SUCCESS;
 }
 

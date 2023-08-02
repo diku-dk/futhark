@@ -19,7 +19,7 @@ import Futhark.CodeGen.Backends.COpenCL.Boilerplate
   )
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.RTS.C (backendsCudaH, gpuH)
+import Futhark.CodeGen.RTS.C (backendsCudaH, gpuH, gpuPrototypesH)
 import Futhark.Util (chunk)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -64,6 +64,7 @@ generateBoilerplate gpu_program cuda_prelude cost_centres failures = do
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
              static const char *gpu_program[] = {$inits:program_fragments, NULL};
+             $esc:(T.unpack gpuPrototypesH)
              $esc:(T.unpack backendsCudaH)
              $esc:(T.unpack gpuH)
             |]
@@ -85,7 +86,7 @@ generateBoilerplate gpu_program cuda_prelude cost_centres failures = do
 
   GC.onClear
     [C.citem|if (ctx->error == NULL) {
-               CUDA_SUCCEED_NONFATAL(cuda_free_all(ctx));
+               CUDA_SUCCEED_NONFATAL(gpu_free_all(ctx));
              }|]
 
   genProfileReport cost_centres

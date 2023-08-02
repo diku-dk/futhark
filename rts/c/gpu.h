@@ -1,7 +1,32 @@
 // Start of gpu.h
 
 // Generic functions that use our tiny GPU abstraction layer.  The
-// entire context must be defined before this header is included.
+// entire context must be defined before this header is included.  In
+// particular we expect the following functions to be available:
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem);
+static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out);
+int gpu_launch_kernel(struct futhark_context* ctx,
+                      gpu_kernel kernel, const char *name,
+                      const int32_t grid[3],
+                      const int32_t block[3],
+                      unsigned int local_mem_bytes,
+                      int num_args,
+                      void* args[num_args],
+                      size_t args_sizes[num_args]);
+int gpu_memcpy(struct futhark_context* ctx,
+               gpu_mem dst, int64_t dst_offset,
+               gpu_mem src, int64_t src_offset,
+               int64_t nbytes);
+int gpu_scalar_from_device(struct futhark_context* ctx,
+                           void *dst,
+                           gpu_mem src, size_t offset, size_t size);
+int gpu_scalar_to_device(struct futhark_context* ctx,
+                         gpu_mem dst, size_t offset, size_t size,
+                         void *src);
+void gpu_create_kernel(struct futhark_context *ctx,
+                       gpu_kernel* kernel,
+                       const char* name);
 
 // Max number of groups we allow along the second or third dimension
 // for transpositions.
@@ -102,6 +127,95 @@ void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* k
   gpu_free_kernel(ctx, kernels->lmad_copy_8b);
 
   free(kernels);
+}
+
+static int gpu_alloc(struct futhark_context *ctx, FILE *log,
+                     size_t min_size, const char *tag,
+                     gpu_mem *mem_out, size_t *size_out) {
+  if (min_size < sizeof(int)) {
+    min_size = sizeof(int);
+  }
+
+  gpu_mem* memptr;
+  if (free_list_find(&ctx->gpu_free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
+    // Successfully found a free block.  Is it big enough?
+    if (*size_out >= min_size) {
+      if (ctx->cfg->debugging) {
+        fprintf(log, "No need to allocate: Found a block in the free list.\n");
+      }
+      *mem_out = *memptr;
+      free(memptr);
+      return FUTHARK_SUCCESS;
+    } else {
+      if (ctx->cfg->debugging) {
+        fprintf(log, "Found a free block, but it was too small.\n");
+      }
+      int error = gpu_free_actual(ctx, *memptr);
+      free(memptr);
+      if (error != FUTHARK_SUCCESS) {
+        return error;
+      }
+    }
+  }
+
+  *size_out = min_size;
+
+  // We have to allocate a new block from the driver.  If the
+  // allocation does not succeed, then we might be in an out-of-memory
+  // situation.  We now start freeing things from the free list until
+  // we think we have freed enough that the allocation will succeed.
+  // Since we don't know how far the allocation is from fitting, we
+  // have to check after every deallocation.  This might be pretty
+  // expensive.  Let's hope that this case is hit rarely.
+
+  if (ctx->cfg->debugging) {
+    fprintf(log, "Actually allocating the desired block.\n");
+  }
+
+  int error = gpu_alloc_actual(ctx, min_size, mem_out);
+
+  while (error == FUTHARK_OUT_OF_MEMORY) {
+    if (ctx->cfg->debugging) {
+      fprintf(log, "Out of GPU memory: releasing entry from the free list...\n");
+    }
+    gpu_mem* memptr;
+    if (free_list_first(&ctx->gpu_free_list, (fl_mem*)&memptr) == 0) {
+      gpu_mem mem = *memptr;
+      free(memptr);
+      error = gpu_free_actual(ctx, mem);
+      if (error != FUTHARK_SUCCESS) {
+        return error;
+      }
+    } else {
+      break;
+    }
+    error = gpu_alloc_actual(ctx, min_size, mem_out);
+  }
+
+  return error;
+}
+
+static int gpu_free(struct futhark_context *ctx,
+                    gpu_mem mem, size_t size, const char *tag) {
+  gpu_mem* memptr = malloc(sizeof(gpu_mem));
+  *memptr = mem;
+  free_list_insert(&ctx->gpu_free_list, size, (fl_mem)memptr, tag);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_all(struct futhark_context *ctx) {
+  free_list_pack(&ctx->gpu_free_list);
+  gpu_mem* memptr;
+  while (free_list_first(&ctx->gpu_free_list, (fl_mem*)&memptr) == 0) {
+    gpu_mem mem = *memptr;
+    free(memptr);
+    int error = gpu_free_actual(ctx, mem);
+    if (error != FUTHARK_SUCCESS) {
+      return error;
+    }
+  }
+
+  return FUTHARK_SUCCESS;
 }
 
 static int gpu_map_transpose(struct futhark_context* ctx,

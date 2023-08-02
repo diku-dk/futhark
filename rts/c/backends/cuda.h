@@ -276,7 +276,7 @@ struct futhark_context {
   CUmodule module;
   CUstream stream;
 
-  struct free_list cu_free_list;
+  struct free_list gpu_free_list;
 
   size_t max_group_size;
   size_t max_grid_size;
@@ -797,73 +797,6 @@ static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, const char* nam
   return events;
 }
 
-static CUresult cuda_alloc(struct futhark_context *ctx, FILE *log,
-                           size_t min_size, const char *tag,
-                           CUdeviceptr *mem_out, size_t *size_out) {
-  if (min_size < sizeof(int)) {
-    min_size = sizeof(int);
-  }
-
-  if (free_list_find(&ctx->cu_free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
-    if (*size_out >= min_size) {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "No need to allocate: Found a block in the free list.\n");
-      }
-      return CUDA_SUCCESS;
-    } else {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "Found a free block, but it was too small.\n");
-      }
-
-      CUresult res = cuMemFree(*mem_out);
-      if (res != CUDA_SUCCESS) {
-        return res;
-      }
-    }
-  }
-
-  *size_out = min_size;
-
-  if (ctx->cfg->debugging) {
-    fprintf(log, "Actually allocating the desired block.\n");
-  }
-
-  CUresult res = cuMemAlloc(mem_out, min_size);
-  while (res == CUDA_ERROR_OUT_OF_MEMORY) {
-    CUdeviceptr mem;
-    if (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
-      res = cuMemFree(mem);
-      if (res != CUDA_SUCCESS) {
-        return res;
-      }
-    } else {
-      break;
-    }
-    res = cuMemAlloc(mem_out, min_size);
-  }
-
-  return res;
-}
-
-static CUresult cuda_free(struct futhark_context *ctx,
-                          CUdeviceptr mem, size_t size, const char *tag) {
-  free_list_insert(&ctx->cu_free_list, size, (fl_mem)mem, tag);
-  return CUDA_SUCCESS;
-}
-
-static CUresult cuda_free_all(struct futhark_context *ctx) {
-  CUdeviceptr mem;
-  free_list_pack(&ctx->cu_free_list);
-  while (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
-    CUresult res = cuMemFree(mem);
-    if (res != CUDA_SUCCESS) {
-      return res;
-    }
-  }
-
-  return CUDA_SUCCESS;
-}
-
 int futhark_context_sync(struct futhark_context* ctx) {
   CUDA_SUCCEED_OR_RETURN(cuCtxPushCurrent(ctx->cu_ctx));
   CUDA_SUCCEED_OR_RETURN(cuCtxSynchronize());
@@ -922,7 +855,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   }
   CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
 
-  free_list_init(&ctx->cu_free_list);
+  free_list_init(&ctx->gpu_free_list);
 
   ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
   ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
@@ -957,7 +890,7 @@ void backend_context_teardown(struct futhark_context* ctx) {
   free_builtin_kernels(ctx, ctx->kernels);
   cuMemFree(ctx->global_failure);
   cuMemFree(ctx->global_failure_args);
-  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
+  CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
   (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
   CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
@@ -1080,6 +1013,21 @@ int gpu_launch_kernel(struct futhark_context* ctx,
     fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
   }
 
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
+  CUresult res = cuMemAlloc(mem_out, size);
+  if (res == CUDA_ERROR_OUT_OF_MEMORY) {
+    return FUTHARK_OUT_OF_MEMORY;
+  }
+  CUDA_SUCCEED_OR_RETURN(res);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  CUDA_SUCCEED_OR_RETURN(cuMemFree(mem));
   return FUTHARK_SUCCESS;
 }
 
