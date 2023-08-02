@@ -247,8 +247,7 @@ transformNames x = do
     substituter scope =
       ASTMapper
         { mapOnExp = onExp scope,
-          mapOnName = \v ->
-            pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
+          mapOnName = \v -> pure $ fst $ lookupSubstInScope v {qualQuals = []} scope,
           mapOnStructType = astMap (substituter scope),
           mapOnParamType = astMap (substituter scope),
           mapOnResRetType = astMap (substituter scope)
@@ -291,17 +290,15 @@ transformValBind (ValBind entry name tdecl (Info (RetType dims t)) tparams param
   tdecl' <- traverse transformTypeExp tdecl
   t' <- transformResType t
   e' <- transformExp e
-  tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
+  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams params' e' doc attrs loc
 
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do
   name' <- transformName name
   emit . TypeDec
-    =<< ( TypeBind name' l
-            <$> traverse transformNames tparams
-            <*> transformTypeExp te
+    =<< ( TypeBind name' l tparams
+            <$> transformTypeExp te
             <*> (Info . RetType dims <$> transformStructType t)
             <*> pure doc
             <*> pure loc
