@@ -122,7 +122,9 @@ $ispc_decls|]
 operations :: GC.Operations Multicore ISPCState
 operations =
   MC.operations
-    { GC.opsCompiler = compileOp
+    { GC.opsCompiler = compileOp,
+      -- FIXME: the default codegen for LMAD copies does not work for ISPC.
+      GC.opsCopies = mempty
     }
 
 ispcDecl :: C.Definition -> ISPCCompilerM ()
