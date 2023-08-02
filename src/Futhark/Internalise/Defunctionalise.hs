@@ -117,7 +117,7 @@ replaceStaticValSizes globals orig_substs sv =
           mapOnParamType = pure . replaceTypeSizes substs,
           mapOnResRetType = pure,
           mapOnExp = pure . onExp substs,
-          mapOnName = pure . onName substs
+          mapOnName = pure . fmap (onName substs)
         }
 
     onName substs v =
