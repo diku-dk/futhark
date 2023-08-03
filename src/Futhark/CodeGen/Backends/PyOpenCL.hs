@@ -189,6 +189,7 @@ compileProg mode class_name prog = do
           Py.opsReadScalar = readOpenCLScalar,
           Py.opsAllocate = allocateOpenCLBuffer,
           Py.opsCopy = copyOpenCLMemory,
+          Py.opsCopies = mempty,
           Py.opsEntryOutput = packArrayOutput,
           Py.opsEntryInput = unpackArrayInput
         }
