@@ -2,7 +2,7 @@
 -- ==
 -- input { 10i16 }
 -- output { 100i16 }
--- structure { DoLoop 0 }
+-- structure { Loop 0 }
 
 def main (x: i16) =
   loop acc = 0 for i < x do acc + x

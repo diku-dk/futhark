@@ -4,7 +4,7 @@
 -- ==
 -- structure gpu {
 --   /GPUBody/If/True/Index 2
---   /GPUBody/DoLoop/Index 5
+--   /GPUBody/Loop/Index 5
 -- }
 
 entry case_if (A: *[5]i64) (x: i64) : [1]i64 =

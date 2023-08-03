@@ -108,8 +108,8 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> ((,) <$> mapOnExp tv x <*> pure xext)
       <*> ((,) <$> mapOnExp tv y <*> pure yext)
       <*> pure loc
-  astMap tv (DoLoop sparams mergepat mergeexp form loopbody loc) =
-    DoLoop sparams
+  astMap tv (Loop sparams mergepat mergeexp form loopbody loc) =
+    Loop sparams
       <$> astMap tv mergepat
       <*> mapOnExp tv mergeexp
       <*> astMap tv form
@@ -481,8 +481,8 @@ bareExp (AppExp appexp _) =
       case appexp of
         Match e cases loc ->
           Match (bareExp e) (fmap bareCase cases) loc
-        DoLoop _ mergepat mergeexp form loopbody loc ->
-          DoLoop
+        Loop _ mergepat mergeexp form loopbody loc ->
+          Loop
             []
             (barePat mergepat)
             (bareExp mergeexp)

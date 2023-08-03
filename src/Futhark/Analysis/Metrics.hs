@@ -100,10 +100,10 @@ stmMetrics = expMetrics . stmExp
 expMetrics :: OpMetrics (Op rep) => Exp rep -> MetricsM ()
 expMetrics (BasicOp op) =
   seen "BasicOp" >> basicOpMetrics op
-expMetrics (DoLoop _ ForLoop {} body) =
-  inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-expMetrics (DoLoop _ WhileLoop {} body) =
-  inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
+expMetrics (Loop _ ForLoop {} body) =
+  inside "Loop" $ seen "ForLoop" >> bodyMetrics body
+expMetrics (Loop _ WhileLoop {} body) =
+  inside "Loop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (Match _ [Case [Just (BoolValue True)] tb] fb _) =
   inside "If" $ do
     inside "True" $ bodyMetrics tb

@@ -2,7 +2,7 @@
 -- the migration of parent statements.
 -- ==
 -- structure gpu {
---   /DoLoop/DoLoop/If 1
+--   /Loop/Loop/If 1
 -- }
 
 def main (A: [10][5]i64): i64 =

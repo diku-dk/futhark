@@ -644,7 +644,7 @@ radixSort xs n w = do
       radixSortStep (map paramName params) types bit n w
 
   letTupExp "sorted" $
-    DoLoop
+    Loop
       (zip params $ map Var xs)
       (ForLoop i Int64 iters [])
       loopbody
@@ -664,7 +664,7 @@ radixSort xs n w = do
 
       l <-
         letTupExp' "log2res" $
-          DoLoop
+          Loop
             (zip params [cond_init, m, Constant $ blankPrimValue int64])
             (WhileLoop $ paramName cond)
             body

@@ -320,8 +320,8 @@ bodyContainsParallelism = any isParallelStm . bodyStms
     isMap BasicOp {} = False
     isMap Apply {} = False
     isMap Match {} = False
-    isMap (DoLoop _ ForLoop {} body) = bodyContainsParallelism body
-    isMap (DoLoop _ WhileLoop {} _) = False
+    isMap (Loop _ ForLoop {} body) = bodyContainsParallelism body
+    isMap (Loop _ WhileLoop {} _) = False
     isMap (WithAcc _ lam) = bodyContainsParallelism $ lambdaBody lam
     isMap Op {} = True
 
@@ -378,7 +378,7 @@ maybeDistributeStm stm@(Let pat _ (Op (Screma w arrs form))) acc
       distributeIfPossible acc >>= \case
         Nothing -> addStmToAcc stm acc
         Just acc' -> distribute =<< onInnerMap (MapLoop pat (stmAux stm) w lam arrs) acc'
-maybeDistributeStm stm@(Let pat aux (DoLoop merge form@ForLoop {} body)) acc
+maybeDistributeStm stm@(Let pat aux (Loop merge form@ForLoop {} body)) acc
   | all (`notNameIn` freeIn (patTypes pat)) (patNames pat),
     bodyContainsParallelism body =
       distributeSingleStm acc stm >>= \case

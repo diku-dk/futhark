@@ -1,7 +1,7 @@
 -- Must realise that the 'take (i+1)' is invariant to the 'map' after
 -- interchange.
 -- ==
--- structure gpu { DoLoop/SegRed 1 }
+-- structure gpu { Loop/SegRed 1 }
 
 def main [n] (xs: [n]i32) =
   #[incremental_flattening(only_inner)]

@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /If/True/Concat 1
---   /DoLoop/Concat 2
+--   /Loop/Concat 2
 -- }
 
 entry case_if (A: [5]i64) (x: i64) : i64 =

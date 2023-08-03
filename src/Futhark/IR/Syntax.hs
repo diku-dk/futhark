@@ -435,7 +435,7 @@ data Exp rep
     -- body/ is picked.
     Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
+    Loop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The

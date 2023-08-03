@@ -35,7 +35,7 @@ import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Consumption qualified as Consumption
 import Language.Futhark.TypeChecker.Match
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
-import Language.Futhark.TypeChecker.Terms.DoLoop
+import Language.Futhark.TypeChecker.Terms.Loop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
 import Language.Futhark.TypeChecker.Types
@@ -46,7 +46,7 @@ hasBinding :: Exp -> Bool
 hasBinding Lambda {} = True
 hasBinding (AppExp LetPat {} _) = True
 hasBinding (AppExp LetFun {} _) = True
-hasBinding (AppExp DoLoop {} _) = True
+hasBinding (AppExp Loop {} _) = True
 hasBinding (AppExp LetWith {} _) = True
 hasBinding (AppExp Match {} _) = True
 hasBinding e = isNothing $ astMap m e
@@ -839,12 +839,12 @@ checkExp (IndexSection slice NoInfo loc) = do
   (t', retext) <- sliceShape Nothing slice' t
   let ft = Scalar $ Arrow mempty Unnamed Observe t $ RetType retext $ toRes Nonunique t'
   pure $ IndexSection slice' (Info ft) loc
-checkExp (AppExp (DoLoop _ mergepat mergeexp form loopbody loc) _) = do
+checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
   ((sparams, mergepat', mergeexp', form', loopbody'), appres) <-
-    checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc
+    checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc
   pure $
     AppExp
-      (DoLoop sparams mergepat' mergeexp' form' loopbody' loc)
+      (Loop sparams mergepat' mergeexp' form' loopbody' loc)
       (Info appres)
 checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"

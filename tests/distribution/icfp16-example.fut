@@ -20,7 +20,7 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure gpu {
---   DoLoop/SegMap 1
+--   Loop/SegMap 1
 --   SegMap 2
 --   SegRed 1
 -- }

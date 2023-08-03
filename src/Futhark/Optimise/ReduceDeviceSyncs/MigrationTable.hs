@@ -127,9 +127,9 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let _ _ (Match cond _ _ _)) mt =
   all ((== MoveToDevice) . (`statusOf` mt)) $ subExpVars cond
-shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (ForLoop _ _ (Var n) _) _)) mt =
   statusOf n mt == MoveToDevice
-shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (WhileLoop n) _)) mt =
   statusOf n mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables (shouldn't happen).
 -- If statements might use a constant branch condition.
@@ -216,7 +216,7 @@ checkFunDef fun = do
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
     checkExp (Match _ cases defbody _) =
       mconcat <$> mapM checkBody (defbody : map caseBody cases)
-    checkExp (DoLoop params lform body) = do
+    checkExp (Loop params lform body) = do
       checkLParams params
       checkLoopForm lform
       checkBody body
@@ -507,7 +507,7 @@ graphStm stm = do
       graphApply fn bs e
     Match ses cases defbody _ ->
       graphMatch bs ses cases defbody
-    DoLoop params lform body ->
+    Loop params lform body ->
       graphLoop bs params lform body
     WithAcc inputs f ->
       graphWithAcc bs inputs f
@@ -1012,7 +1012,7 @@ graphedScalarOperands e =
       mapM_ collectSubExp ses
       mapM_ (collectBody . caseBody) cases
       collectBody defbody
-    collect (DoLoop params lform body) = do
+    collect (Loop params lform body) = do
       mapM_ (collectSubExp . snd) params
       collectLForm lform
       collectBody body

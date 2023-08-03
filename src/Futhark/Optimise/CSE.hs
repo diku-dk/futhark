@@ -188,7 +188,7 @@ cseInStms consumed (stm : stms) m =
     nestedCSE stm' = do
       let ds =
             case stmExp stm' of
-              DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
+              Loop merge _ _ -> map (diet . declTypeOf . fst) merge
               _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       pure stm' {stmExp = e}

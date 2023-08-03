@@ -287,7 +287,7 @@ nodeToSoacNode n@(StmNode s@(Let pat aux op)) = case op of
     case maybeSoac of
       Right hsoac -> pure $ SoacNode mempty pat hsoac aux
       Left H.NotSOAC -> pure n
-  DoLoop {} ->
+  Loop {} ->
     pure $ DoNode s []
   Match {} ->
     pure $ MatchNode s []
@@ -383,7 +383,7 @@ expInputs (Match cond cases defbody attr) =
   foldMap (bodyInputs . caseBody) cases
     <> bodyInputs defbody
     <> freeClassifications (cond, attr)
-expInputs (DoLoop params form b1) =
+expInputs (Loop params form b1) =
   freeClassifications (params, form) <> bodyInputs b1
 expInputs (Op soac) = case soac of
   Futhark.Screma w is form -> inputs is <> freeClassifications (w, form)

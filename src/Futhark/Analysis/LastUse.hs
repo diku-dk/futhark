@@ -253,7 +253,7 @@ lastUseExp (Match _ cases body _) used_nms = do
   let used_nms' = used_cases <> body_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
   pure (lutab_cases <> lutab', last_used_arrs, used_nms')
-lastUseExp (DoLoop var_ses lf body) used_nms0 = inScopeOf lf $ do
+lastUseExp (Loop var_ses lf body) used_nms0 = inScopeOf lf $ do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses
   var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses

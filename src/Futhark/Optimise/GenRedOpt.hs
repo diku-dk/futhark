@@ -403,7 +403,7 @@ costBody bdy =
 
 costRedundantStmt :: Stm GPU -> Cost
 costRedundantStmt (Let _ _ (Op _)) = Big
-costRedundantStmt (Let _ _ DoLoop {}) = Big
+costRedundantStmt (Let _ _ Loop {}) = Big
 costRedundantStmt (Let _ _ Apply {}) = Big
 costRedundantStmt (Let _ _ WithAcc {}) = Big
 costRedundantStmt (Let _ _ (Match _ cases defbody _)) =

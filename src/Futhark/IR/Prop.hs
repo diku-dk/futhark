@@ -119,7 +119,7 @@ safeExp (BasicOp op) = safeBasicOp op
     safeBasicOp Iota {} = True
     safeBasicOp Replicate {} = True
     safeBasicOp _ = False
-safeExp (DoLoop _ _ body) = safeBody body
+safeExp (Loop _ _ body) = safeBody body
 safeExp (Apply fname _ _ _) =
   isBuiltInFunction fname
 safeExp (Match _ cases def_case _) =

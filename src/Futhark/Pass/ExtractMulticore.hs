@@ -110,12 +110,12 @@ transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
-transformStm (Let pat aux (DoLoop merge form body)) = do
+transformStm (Let pat aux (Loop merge form body)) = do
   let form' = transformLoopForm form
   body' <-
     localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
       transformBody body
-  pure $ oneStm $ Let pat aux $ DoLoop merge form' body'
+  pure $ oneStm $ Let pat aux $ Loop merge form' body'
 transformStm (Let pat aux (Match ses cases defbody ret)) =
   oneStm . Let pat aux
     <$> (Match ses <$> mapM transformCase cases <*> transformBody defbody <*> pure ret)

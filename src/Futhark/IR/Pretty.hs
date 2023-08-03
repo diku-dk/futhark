@@ -309,7 +309,7 @@ instance PrettyRep rep => Pretty (Exp rep) where
         Unsafe -> "apply <unsafe>"
         Safe -> "apply"
   pretty (Op op) = pretty op
-  pretty (DoLoop merge form loopbody) =
+  pretty (Loop merge form loopbody) =
     "loop"
       <+> braces (commastack $ map pretty params)
       <+> equals
