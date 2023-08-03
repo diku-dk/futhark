@@ -9,6 +9,7 @@ module Futhark.CodeGen.Backends.GenericC.Code
     compileDest,
     compileArg,
     compileLMADCopy,
+    compileLMADCopyWith,
     errorMsgString,
     linearCode,
   )
@@ -405,6 +406,42 @@ compileCode (Call dests fname args) = do
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
 
+-- | Compile an 'LMADCopy' using sequential nested loops, but
+-- parameterised over how to do the reads and writes.
+compileLMADCopyWith ::
+  [Count Elements (TExp Int64)] ->
+  (C.Exp -> C.Exp -> CompilerM op s ()) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  (C.Exp -> CompilerM op s C.Exp) ->
+  ( Count Elements (TExp Int64),
+    [Count Elements (TExp Int64)]
+  ) ->
+  CompilerM op s ()
+compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
+  let (dstoffset, dststrides) = dst_lmad
+      (srcoffset, srcstrides) = src_lmad
+  shape' <- mapM (compileExp . untyped . unCount) shape
+  body <- collect $ do
+    dst_i <-
+      compileExp . untyped . unCount $
+        dstoffset + sum (zipWith (*) is' dststrides)
+    src_i <-
+      compileExp . untyped . unCount $
+        srcoffset + sum (zipWith (*) is' srcstrides)
+    doWrite dst_i =<< doRead src_i
+  items $ loops (zip is shape') body
+  where
+    r = length shape
+    is = map (VName "i") [0 .. r - 1]
+    is' :: [Count Elements (TExp Int64)]
+    is' = map (elements . le64) is
+    loops [] body = body
+    loops ((i, n) : ins) body =
+      [C.citems|for (typename int64_t $id:i = 0; $id:i < $exp:n; $id:i++)
+                  { $items:(loops ins body) }|]
+
 -- | Compile an 'LMADCopy' using sequential nested loops and
 -- 'Read'/'Write' of individual scalars.  This always works, but can
 -- be pretty slow if those reads and writes are costly.
@@ -420,28 +457,9 @@ compileLMADCopy ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopy
-  t
-  shape
-  (dst, dstspace)
-  (dstoffset, dststrides)
-  (src, srcspace)
-  (srcoffset, srcstrides) = do
-    shape' <- mapM (compileExp . untyped . unCount) shape
-    dst_i <- compileExp $ untyped $ unCount $ dstoffset + sum (zipWith (*) is' dststrides)
-    src_i <- compileExp $ untyped $ unCount $ srcoffset + sum (zipWith (*) is' srcstrides)
-    body <- collect $ do
-      src' <- rawMem src
-      dst' <- rawMem dst
-      generateWrite dst' dst_i t dstspace Nonvolatile
-        =<< generateRead src' src_i t srcspace Nonvolatile
-    items $ loops (zip is shape') body
-    where
-      r = length shape
-      is = map (VName "i") [0 .. r - 1]
-      is' :: [Count Elements (TExp Int64)]
-      is' = map (elements . le64) is
-      loops [] body = body
-      loops ((i, n) : ins) body =
-        [C.citems|for (typename int64_t $id:i = 0; $id:i < $exp:n; $id:i++)
-                  { $items:(loops ins body) }|]
+compileLMADCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
+  src' <- rawMem src
+  dst' <- rawMem dst
+  let doWrite dst_i = generateWrite dst' dst_i t dstspace Nonvolatile
+      doRead src_i = generateRead src' src_i t srcspace Nonvolatile
+  compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
