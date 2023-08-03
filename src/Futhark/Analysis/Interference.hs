@@ -86,7 +86,7 @@ analyseStm lumap inuse0 stm =
             (namesToList $ inuse_outside <> inuse <> lus <> last_use_mems)
       )
 
--- We conservatively treat all memory arguments to a DoLoop to
+-- We conservatively treat all memory arguments to a Loop to
 -- interfere with each other, as well as anything used inside the
 -- loop.  This could potentially be improved by looking at the
 -- interference computed by the loop body wrt. the loop arguments, but
@@ -115,7 +115,7 @@ analyseExp lumap inuse_outside expr =
       fmap mconcat $
         mapM (analyseBody lumap inuse_outside) $
           defbody : map caseBody cases
-    DoLoop merge _ body ->
+    Loop merge _ body ->
       analyseLoopParams merge <$> analyseBody lumap inuse_outside body
     Op (Inner (SegOp segop)) -> do
       analyseSegOp lumap inuse_outside segop
@@ -283,7 +283,7 @@ memSizes stms =
             $ kernelBodyStms body
     memSizesExp (Match _ cases defbody _) = do
       mconcat <$> mapM (memSizes . bodyStms) (defbody : map caseBody cases)
-    memSizesExp (DoLoop _ _ body) =
+    memSizesExp (Loop _ _ body) =
       memSizes $ bodyStms body
     memSizesExp _ = pure mempty
 
@@ -300,7 +300,7 @@ memSpaces stms =
       foldMap getSpacesStm $ kernelBodyStms $ segBody segop
     getSpacesStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (foldMap getSpacesStm . bodyStms) $ defbody : map caseBody cases
-    getSpacesStm (Let _ _ (DoLoop _ _ body)) =
+    getSpacesStm (Let _ _ (Loop _ _ body)) =
       foldMap getSpacesStm (bodyStms body)
     getSpacesStm _ = mempty
 
@@ -322,7 +322,7 @@ analyseGPU' lumap stms =
       inScopeOf stm $
         mconcat
           <$> mapM (analyseGPU' lumap . bodyStms) (defbody : map caseBody cases)
-    helper stm@Let {stmExp = DoLoop merge _ body} =
+    helper stm@Let {stmExp = Loop merge _ body} =
       fmap (analyseLoopParams merge) . inScopeOf stm $
         analyseGPU' lumap $
           bodyStms body

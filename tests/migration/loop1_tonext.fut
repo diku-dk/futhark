@@ -1,7 +1,7 @@
 -- Reads can be reduced from one iteration to the next.
 -- ==
 -- structure gpu {
---   /DoLoop/Index 0
+--   /Loop/Index 0
 -- }
 
 def main [n] (A: *[n]f32) : *[n]f32 =
@@ -12,4 +12,3 @@ def main [n] (A: *[n]f32) : *[n]f32 =
       let A' = A' with [i*i % n] = 42
        in (A', y)
    in A'
-

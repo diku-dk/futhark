@@ -2,7 +2,7 @@
 -- doing so can save a read.
 -- ==
 -- structure gpu {
---   /GPUBody/DoLoop 1
+--   /GPUBody/Loop 1
 --   /Index 1
 -- }
 

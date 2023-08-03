@@ -841,7 +841,7 @@ mkCoalsTabStm lutab (Let patt _ (Match _ cases defbody _)) td_env bu_env = do
       -- hence remove the coalescing of the result.
 
       (markFailedCoal (act, inhb) (patMem mbr), succc)
-mkCoalsTabStm lutab (Let pat _ (DoLoop arginis lform body)) td_env bu_env = do
+mkCoalsTabStm lutab (Let pat _ (Loop arginis lform body)) td_env bu_env = do
   let pat_val_elms = patElems pat
 
       --  i) Filter @activeCoals@ by the 2nd, 3rd AND 5th safety conditions. In
@@ -1701,7 +1701,7 @@ computeScalarTable ::
 computeScalarTable scope_table (Let (Pat [pe]) _ e)
   | Just primexp <- primExpFromExp (vnameToPrimExp scope_table mempty) e =
       pure $ M.singleton (patElemName pe) primexp
-computeScalarTable scope_table (Let _ _ (DoLoop loop_inits loop_form body)) =
+computeScalarTable scope_table (Let _ _ (Loop loop_inits loop_form body)) =
   concatMapM
     ( computeScalarTable $
         scope_table

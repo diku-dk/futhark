@@ -50,7 +50,7 @@ lowerUpdate ::
     AliasableRep rep
   ) =>
   LowerUpdate rep m
-lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
+lowerUpdate scope (Let pat aux (Loop merge form body)) updates = do
   canDo <- lowerUpdateIntoLoop scope updates pat merge form body
   Just $ do
     (prestms, poststms, pat', merge', body') <- canDo
@@ -58,7 +58,7 @@ lowerUpdate scope (Let pat aux (DoLoop merge form body)) updates = do
       prestms
         ++ [ certify (stmAuxCerts aux) $
                mkLet pat' $
-                 DoLoop merge' form body'
+                 Loop merge' form body'
            ]
         ++ poststms
 lowerUpdate

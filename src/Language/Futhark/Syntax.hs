@@ -693,7 +693,7 @@ data AppExpBase f vn
       (ExpBase f vn)
       SrcLoc
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-  | DoLoop
+  | Loop
       [VName] -- Size parameters.
       (PatBase f vn ParamType) -- Merge variable pattern.
       (ExpBase f vn) -- Initial values of merge variables.
@@ -738,7 +738,7 @@ instance Located (AppExpBase f vn) where
   locOf (LetFun _ _ _ loc) = locOf loc
   locOf (LetWith _ _ _ _ _ loc) = locOf loc
   locOf (Index _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
+  locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
 
 -- | An annotation inserted by the type checker on constructs that are

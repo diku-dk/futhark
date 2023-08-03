@@ -181,11 +181,11 @@ mapExpM tv (WithAcc inputs lam) =
         <$> mapOnShape tv shape
         <*> mapM (mapOnVName tv) vs
         <*> traverse (bitraverse (mapOnLambda tv) (mapM (mapOnSubExp tv))) op
-mapExpM tv (DoLoop merge form loopbody) = do
+mapExpM tv (Loop merge form loopbody) = do
   params' <- mapM (mapOnFParam tv) params
   form' <- mapOnLoopForm tv form
   let scope = scopeOf form' <> scopeOfFParams params'
-  DoLoop
+  Loop
     <$> (zip params' <$> mapM (mapOnSubExp tv) args)
     <*> pure form'
     <*> mapOnBody tv scope loopbody
@@ -347,7 +347,7 @@ walkExpM tv (WithAcc inputs lam) = do
     mapM_ (walkOnVName tv) vs
     traverse_ (bitraverse (walkOnLambda tv) (mapM (walkOnSubExp tv))) op
   walkOnLambda tv lam
-walkExpM tv (DoLoop merge form loopbody) = do
+walkExpM tv (Loop merge form loopbody) = do
   mapM_ (walkOnFParam tv) params
   walkOnLoopForm tv form
   mapM_ (walkOnSubExp tv) args

@@ -811,7 +811,7 @@ defCompileExp pat (Apply fname args _ _) = do
         (Var v, Mem {}) -> pure $ Just $ Imp.MemArg v
         _ -> pure Nothing
 defCompileExp pat (BasicOp op) = defCompileBasicOp pat op
-defCompileExp pat (DoLoop merge form body) = do
+defCompileExp pat (Loop merge form body) = do
   attrs <- askAttrs
   when ("unroll" `inAttrs` attrs) $
     warn (noLoc :: SrcLoc) [] "#[unroll] on loop with unknown number of iterations." -- FIXME: no location.

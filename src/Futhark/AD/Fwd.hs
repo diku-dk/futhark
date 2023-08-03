@@ -402,21 +402,21 @@ fwdStm (Let pat aux (Match ses cases defbody (MatchDec ret ifsort))) = do
   pat' <- bundleNewPat pat
   ret' <- bundleTangents ret
   addStm $ Let pat' aux $ Match ses cases' defbody' $ MatchDec ret' ifsort
-fwdStm (Let pat aux (DoLoop val_pats loop@(WhileLoop v) body)) = do
+fwdStm (Let pat aux (Loop val_pats loop@(WhileLoop v) body)) = do
   val_pats' <- bundleNewList val_pats
   pat' <- bundleNewPat pat
   body' <-
     localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) . slocal' $
       fwdBody body
-  addStm $ Let pat' aux $ DoLoop val_pats' (WhileLoop v) body'
-fwdStm (Let pat aux (DoLoop val_pats loop@(ForLoop i it bound loop_vars) body)) = do
+  addStm $ Let pat' aux $ Loop val_pats' (WhileLoop v) body'
+fwdStm (Let pat aux (Loop val_pats loop@(ForLoop i it bound loop_vars) body)) = do
   pat' <- bundleNewPat pat
   val_pats' <- bundleNewList val_pats
   loop_vars' <- bundleNewList loop_vars
   body' <-
     localScope (scopeOfFParams (map fst val_pats) <> scopeOf loop) . slocal' $
       fwdBody body
-  addStm $ Let pat' aux $ DoLoop val_pats' (ForLoop i it bound loop_vars') body'
+  addStm $ Let pat' aux $ Loop val_pats' (ForLoop i it bound loop_vars') body'
 fwdStm (Let pat aux (WithAcc inputs lam)) = do
   inputs' <- forM inputs $ \(shape, arrs, op) -> do
     arrs_tan <- mapM tangent arrs
