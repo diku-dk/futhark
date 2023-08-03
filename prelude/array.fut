@@ -197,7 +197,7 @@ def tabulate 'a (n: i64) (f: i64 -> a): *[n]a =
 
 -- | Create a value for each point in a two-dimensional index space.
 --
--- **Work:** *O(n ✕ W(f))*
+-- **Work:** *O(n ✕ m ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
 def tabulate_2d 'a (n: i64) (m: i64) (f: i64 -> i64 -> a): *[n][m]a =
@@ -205,7 +205,7 @@ def tabulate_2d 'a (n: i64) (m: i64) (f: i64 -> i64 -> a): *[n][m]a =
 
 -- | Create a value for each point in a three-dimensional index space.
 --
--- **Work:** *O(n ✕ W(f))*
+-- **Work:** *O(n ✕ m ✕ o ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
 def tabulate_3d 'a (n: i64) (m: i64) (o: i64) (f: i64 -> i64 -> i64 -> a): *[n][m][o]a =
