@@ -190,13 +190,13 @@ intraGroupStm stm@(Let pat aux e) = do
   let lvl = SegThread SegNoVirt Nothing
 
   case e of
-    DoLoop merge form loopbody ->
+    Loop merge form loopbody ->
       localScope (scopeOf form') $
         localScope (scopeOfFParams $ map fst merge) $ do
           loopbody' <- intraGroupBody loopbody
           certifying (stmAuxCerts aux) $
             letBind pat $
-              DoLoop merge form' loopbody'
+              Loop merge form' loopbody'
       where
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps

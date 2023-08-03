@@ -1059,7 +1059,7 @@ expReturns (BasicOp (FlatUpdate v _ _)) =
   Just . pure <$> varReturns v
 expReturns (BasicOp op) =
   Just . extReturns . staticShapes <$> basicOpType op
-expReturns e@(DoLoop merge _ _) = do
+expReturns e@(Loop merge _ _) = do
   t <- expExtType e
   Just <$> zipWithM typeWithDec t (map fst merge)
   where

@@ -4,7 +4,7 @@
 -- group-level stream.
 --
 -- ==
--- structure gpu { SegMap 2 SegMap/DoLoop 1 }
+-- structure gpu { SegMap 2 SegMap/Loop 1 }
 
 def indexOfMax8 ((x,i): (u8,i32)) ((y,j): (u8,i32)): (u8,i32) =
   if x < y then (y,j) else (x,i)

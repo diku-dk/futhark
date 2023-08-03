@@ -284,7 +284,7 @@ instance
   ) =>
   FreeIn (Exp rep)
   where
-  freeIn' (DoLoop merge form loopbody) =
+  freeIn' (Loop merge form loopbody) =
     let (params, args) = unzip merge
         bound_here =
           namesFromList $ M.keys $ scopeOf form <> scopeOfFParams params

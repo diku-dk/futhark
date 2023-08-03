@@ -164,7 +164,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               poststms'
               stms_res
       -- Tiling inside for-loop.
-      | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | Loop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
         not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
@@ -191,7 +191,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             Nothing -> next
             Just tiled ->
               Just
-                <$> tileDoLoop
+                <$> tileLoop
                   initial_space
                   variance
                   prestms'
@@ -350,7 +350,7 @@ injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody)
 
       tiledBody private' (prelude_privstms <> privstms)
 
-tileDoLoop ::
+tileLoop ::
   SegSpace ->
   VarianceTable ->
   Stms GPU ->
@@ -366,7 +366,7 @@ tileDoLoop ::
   Stms GPU ->
   Result ->
   TileM (Stms GPU, Tiling, TiledBody)
-tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
+tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
   let prestms_used = used_in_body <> freeIn poststms <> freeIn poststms_res
       ( invariant_prestms,
         precomputed_variant_prestms,
@@ -432,7 +432,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
             resultBody . map Var <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            DoLoop merge' (ForLoop i it bound []) loopbody'
+            Loop merge' (ForLoop i it bound []) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -713,7 +713,7 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
                   ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
             resultBody . map Var <$> tilingProcessTile tiling tile_args
 
-      accs <- letTupExp "accs" $ DoLoop merge loopform loopbody
+      accs <- letTupExp "accs" $ Loop merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam

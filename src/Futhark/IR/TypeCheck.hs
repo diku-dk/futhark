@@ -1017,7 +1017,7 @@ checkExp (Apply fname args rettype_annot _) = do
         </> "But annotation is:"
         </> indent 2 (pretty $ map fst rettype_annot)
   consumeArgs paramtypes argflows
-checkExp (DoLoop merge form loopbody) = do
+checkExp (Loop merge form loopbody) = do
   let (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 

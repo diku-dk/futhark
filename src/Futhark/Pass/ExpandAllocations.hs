@@ -733,13 +733,13 @@ offsetMemoryInLoopParams merge f = do
     onParamArg rm _ = rm
 
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
-offsetMemoryInExp (DoLoop merge form body) = do
+offsetMemoryInExp (Loop merge form body) = do
   offsetMemoryInLoopParams merge $ \merge' -> do
     body' <-
       localScope
         (scopeOfFParams (map fst merge') <> scopeOf form)
         (offsetMemoryInBody body)
-    pure $ DoLoop merge' form body'
+    pure $ Loop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =

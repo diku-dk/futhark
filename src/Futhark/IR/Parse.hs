@@ -479,7 +479,7 @@ pApply pr =
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
   keyword "loop"
-    $> DoLoop
+    $> Loop
     <*> pLoopParams
     <*> pLoopForm
     <* keyword "do"

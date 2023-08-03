@@ -181,7 +181,7 @@ transformExp aliases e =
       (defbody', defbody_deps) <- transformBody aliases defbody
       let deps = depsOf ses <> mconcat cases_deps <> defbody_deps <> depsOf dec
       pure (Match ses cases' defbody' dec, deps)
-    DoLoop merge lform body -> do
+    Loop merge lform body -> do
       -- What merge and lform aliases outside the loop is irrelevant as those
       -- cannot be consumed within the loop.
       (body', body_deps) <- transformBody aliases body
@@ -192,10 +192,10 @@ transformExp aliases e =
       let bound = IS.fromList $ map baseTag (M.keys scope)
       let deps' = deps \\ bound
 
-      let dummy = DoLoop merge lform (Body (bodyDec body) SQ.empty [])
-      let DoLoop merge' lform' _ = removeExpAliases dummy
+      let dummy = Loop merge lform (Body (bodyDec body) SQ.empty [])
+      let Loop merge' lform' _ = removeExpAliases dummy
 
-      pure (DoLoop merge' lform' body', deps')
+      pure (Loop merge' lform' body', deps')
     WithAcc inputs lambda -> do
       accs <- mapM (transformWithAccInput aliases) inputs
       let (inputs', input_deps) = unzip accs

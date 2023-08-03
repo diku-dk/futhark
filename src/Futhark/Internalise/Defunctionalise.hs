@@ -582,7 +582,7 @@ defuncExp OpSectionLeft {} = error "defuncExp: unexpected operator section."
 defuncExp OpSectionRight {} = error "defuncExp: unexpected operator section."
 defuncExp ProjectSection {} = error "defuncExp: unexpected projection section."
 defuncExp IndexSection {} = error "defuncExp: unexpected projection section."
-defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
+defuncExp (AppExp (Loop sparams pat e1 form e3 loc) res) = do
   (e1', sv1) <- defuncExp e1
   let env1 = alwaysMatchPatSV pat sv1
   (form', env2) <- case form of
@@ -596,7 +596,7 @@ defuncExp (AppExp (DoLoop sparams pat e1 form e3 loc) res) = do
       e2' <- localEnv env1 $ defuncExp' e2
       pure (While e2', mempty)
   (e3', sv) <- localEnv (env1 <> env2) $ defuncExp e3
-  pure (AppExp (DoLoop sparams pat e1' form' e3' loc) res, sv)
+  pure (AppExp (Loop sparams pat e1' form' e3' loc) res, sv)
   where
     envFromIdent (Ident vn (Info tp) _) =
       M.singleton vn $ Binding Nothing $ Dynamic $ toParam Observe tp

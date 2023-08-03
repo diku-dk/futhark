@@ -2,8 +2,8 @@
 -- ==
 -- structure gpu {
 --   /Index 0
---   /DoLoop/If/True/GPUBody/BinOp 1
---   /DoLoop/If/False/GPUBody/BinOp 1
+--   /Loop/If/True/GPUBody/BinOp 1
+--   /Loop/If/False/GPUBody/BinOp 1
 -- }
 
 def main (A: *[10]i64) : *[10]i64 =
@@ -13,7 +13,3 @@ def main (A: *[10]i64) : *[10]i64 =
          then (x-1, A)
          else (x+1, A with [i] = 42)
    in A with [6] = x
-
-
-
-

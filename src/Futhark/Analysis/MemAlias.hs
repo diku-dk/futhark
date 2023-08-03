@@ -95,7 +95,7 @@ analyzeStm m (Let pat _ (Match _ cases defbody _)) = do
     & mapMaybe (filterFun m')
     & foldr (uncurry addAlias) m'
     & pure
-analyzeStm m (Let pat _ (DoLoop params _ body)) = do
+analyzeStm m (Let pat _ (Loop params _ body)) = do
   let m_init =
         map snd params
           & zip (patNames pat)

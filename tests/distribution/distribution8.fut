@@ -13,7 +13,7 @@
 --     scan
 --
 -- ==
--- structure gpu { DoLoop/SegMap 1 DoLoop 2 }
+-- structure gpu { Loop/SegMap 1 Loop 2 }
 
 
 def combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
@@ -21,7 +21,7 @@ def combineVs [n] (n_row: [n]f64, vol_row: [n]f64, dr_row: [n]f64): [n]f64 =
 
 def mkPrices [num_und][num_dates]
           (md_starts: [num_und]f64, md_vols: [num_dates][num_und]f64,
-	   md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
+           md_drifts: [num_dates][num_und]f64, noises: [num_dates][num_und]f64): [num_dates][num_und]f64 =
   let e_rows = map (\(x: []f64)  ->
                       map f64.exp x
                   ) (map combineVs (zip3 noises (md_vols) (md_drifts)))

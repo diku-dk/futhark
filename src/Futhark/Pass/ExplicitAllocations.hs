@@ -932,7 +932,7 @@ allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
-allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
+allocInExp (Loop merge form (Body () bodystms bodyres)) =
   allocInMergeParams merge $ \merge' mk_loop_val -> do
     form' <- allocInLoopForm form
     localScope (scopeOf form') $ do
@@ -940,7 +940,7 @@ allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
         buildBody_ . allocInStms bodystms $ do
           (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
-      pure $ DoLoop merge' form' body'
+      pure $ Loop merge' form' body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace

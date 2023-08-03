@@ -699,7 +699,7 @@ segOpSizes = onStms
       S.singleton $ arrayDims $ patElemType pe
     onStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (onStms . bodyStms . caseBody) cases <> onStms (bodyStms defbody)
-    onStm (Let _ _ (DoLoop _ _ body)) =
+    onStm (Let _ _ (Loop _ _ body)) =
       onStms (bodyStms body)
     onStm _ = mempty
 

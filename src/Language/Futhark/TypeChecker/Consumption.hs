@@ -697,10 +697,10 @@ checkExp (AppExp (Apply f args loc) appres) = do
       pure ((Info (d, p), e'), e_als)
 
 --
-checkExp (AppExp (DoLoop sparams pat args form body loc) appres) = do
+checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
   ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
   pure
-    ( AppExp (DoLoop sparams pat' args' form' body' loc) appres,
+    ( AppExp (Loop sparams pat' args' form' body' loc) appres,
       als
     )
 

@@ -85,7 +85,7 @@ multiplicity stm =
           : free 1 defbody
           : map (free 1 . caseBody) cases
     Op {} -> free 2 stm
-    DoLoop {} -> free 2 stm
+    Loop {} -> free 2 stm
     _ -> free 1 stm
   where
     free k x = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
@@ -183,13 +183,13 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
            in ( stm {stmExp = Match cond cases' defbody' ret} : stms',
                 mconcat cases_sunk <> defbody_sunk <> sunk
               )
-      | DoLoop merge lform body <- stmExp stm =
+      | Loop merge lform body <- stmExp stm =
           let comps = (merge, lform, body)
               (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
               (merge', lform', body') = comps'
 
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-           in ( stm {stmExp = DoLoop merge' lform' body'} : stms',
+           in ( stm {stmExp = Loop merge' lform' body'} : stms',
                 stms_sunk <> loop_sunk
               )
       | Op op <- stmExp stm =

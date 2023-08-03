@@ -144,12 +144,12 @@ replaceInExp pat_elems (Match cond_ses cases defbody dec) = do
   case_rets <- zipWithM (generalizeIxfun pat_elems) pat_elems $ matchReturns dec
   let dec' = dec {matchReturns = case_rets}
   pure $ Match cond_ses cases' defbody' dec'
-replaceInExp _ (DoLoop loop_inits loop_form (Body dec stms res)) = do
+replaceInExp _ (Loop loop_inits loop_form (Body dec stms res)) = do
   loop_inits' <- mapM (replaceInFParam . fst) loop_inits
   stms' <- updateStms stms
   coalstab <- asks envCoalesceTab
   let res' = map (replaceResMem coalstab) res
-  pure $ DoLoop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res'
+  pure $ Loop (zip loop_inits' $ map snd loop_inits) loop_form $ Body dec stms' res'
 replaceInExp _ (Op op) =
   case op of
     Inner i -> do

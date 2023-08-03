@@ -2,7 +2,7 @@
 -- ==
 -- compiled random input { [256][256]f32 [256]f32 } auto output
 -- compiled random input { [256][10]f32 [256]f32 } auto output
--- structure gpu { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/Loop/SegMap 2 }
 
 def dotprod [n] (xs: [n]f32) (ys: [n]f32): f32 =
   reduce (+) 0.0 (map2 (*) xs ys)

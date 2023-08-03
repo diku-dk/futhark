@@ -2,9 +2,9 @@
 -- ==
 -- random input { [10][10][10]i32 } auto output
 -- structure gpu {
---   /DoLoop 1
---   /DoLoop/SegRed 1
---   /DoLoop/SegMap 1
+--   /Loop 1
+--   /Loop/SegRed 1
+--   /Loop/SegMap 1
 -- }
 
 def main xsss =

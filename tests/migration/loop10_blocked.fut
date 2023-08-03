@@ -3,7 +3,7 @@
 -- In this case migrating the whole loop could cause a copy of A.
 -- ==
 -- structure gpu {
---   /DoLoop 1
+--   /Loop 1
 -- }
 
 def main (A: [5]i64) : [5]i64 =

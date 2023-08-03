@@ -391,7 +391,7 @@ internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
   error $ "Unexpected LetFun " ++ prettyString ofname
-internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) = do
+internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = do
   ses <- internaliseExp "loop_init" mergeexp
   ((loopbody', (form', shapepat, mergepat', mergeinit')), initstms) <-
     collectStms $ handleForm ses form
@@ -438,7 +438,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
   map I.Var . dropCond
     <$> attributing
       attrs
-      (letValExp desc (I.DoLoop merge form' loopbody''))
+      (letValExp desc (I.Loop merge form' loopbody''))
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
@@ -474,7 +474,7 @@ internaliseAppExp desc _ (E.DoLoop sparams mergepat mergeexp form loopbody loc) 
       num_iterations_t <- I.subExpType num_iterations'
       it <- case num_iterations_t of
         I.Prim (IntType it) -> pure it
-        _ -> error "internaliseExp DoLoop: invalid type"
+        _ -> error "internaliseExp Loop: invalid type"
 
       ts <- mapM subExpType mergeinit
       bindingLoopParams sparams' mergepat ts $

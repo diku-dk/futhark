@@ -33,7 +33,7 @@ bindForLoop ::
     a
   ) ->
   a
-bindForLoop (DoLoop val_pats form@(ForLoop i it bound loop_vars) body) f =
+bindForLoop (Loop val_pats form@(ForLoop i it bound loop_vars) body) f =
   f val_pats form i it bound loop_vars body
 bindForLoop e _ = error $ "bindForLoop: not a for-loop:\n" <> prettyString e
 
@@ -57,7 +57,7 @@ renameForLoop loop f = renameExp loop >>= \loop' -> bindForLoop loop' (f loop')
 
 -- | Is the loop a while-loop?
 isWhileLoop :: Exp rep -> Bool
-isWhileLoop (DoLoop _ WhileLoop {} _) = True
+isWhileLoop (Loop _ WhileLoop {} _) = True
 isWhileLoop _ = False
 
 -- | Transforms a 'ForLoop' into a 'ForLoop' with an empty list of
@@ -73,11 +73,11 @@ removeLoopVars loop =
           pure (paramName x_param, x')
     (substs_list, subst_stms) <- collectStms $ mapM indexify loop_vars
     let Body aux' stms' res' = substituteNames (M.fromList substs_list) body
-    pure $ DoLoop val_pats form $ Body aux' (subst_stms <> stms') res'
+    pure $ Loop val_pats form $ Body aux' (subst_stms <> stms') res'
 
 -- | Augments a while-loop to also compute the number of iterations.
 computeWhileIters :: Exp SOACS -> ADM SubExp
-computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
+computeWhileIters (Loop val_pats (WhileLoop b) body) = do
   bound_v <- newVName "bound"
   let t = Prim $ IntType Int64
       bound_param = Param mempty bound_v t
@@ -89,17 +89,17 @@ computeWhileIters (DoLoop val_pats (WhileLoop b) body) = do
          in letSubExp "bound+1" $ BasicOp $ BinOp (Add Int64 OverflowUndef) (Var bound_v) one
       addStms $ bodyStms body
       pure (pure (subExpRes bound_plus_one) <> bodyResult body)
-  res <- letTupExp' "loop" $ DoLoop ((bound_param, bound_init) : val_pats) (WhileLoop b) body'
+  res <- letTupExp' "loop" $ Loop ((bound_param, bound_init) : val_pats) (WhileLoop b) body'
   pure $ head res
 computeWhileIters e = error $ "convertWhileIters: not a while-loop:\n" <> prettyString e
 
 -- | Converts a 'WhileLoop' into a 'ForLoop'. Requires that the
--- surrounding 'DoLoop' is annotated with a @#[bound(n)]@ attribute,
+-- surrounding 'Loop' is annotated with a @#[bound(n)]@ attribute,
 -- where @n@ is an upper bound on the number of iterations of the
 -- while-loop. The resulting for-loop will execute for @n@ iterations on
 -- all inputs, so the tighter the bound the better.
 convertWhileLoop :: SubExp -> Exp SOACS -> ADM (Exp SOACS)
-convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
+convertWhileLoop bound_se (Loop val_pats (WhileLoop cond) body) =
   localScope (scopeOfFParams $ map fst val_pats) $ do
     i <- newVName "i"
     body' <-
@@ -109,7 +109,7 @@ convertWhileLoop bound_se (DoLoop val_pats (WhileLoop cond) body) =
             (pure body)
             (resultBodyM $ map (Var . paramName . fst) val_pats)
         ]
-    pure $ DoLoop val_pats (ForLoop i Int64 bound_se mempty) body'
+    pure $ Loop val_pats (ForLoop i Int64 bound_se mempty) body'
 convertWhileLoop _ e = error $ "convertWhileLoopBound: not a while-loop:\n" <> prettyString e
 
 -- | @nestifyLoop n bound loop@ transforms a loop into a depth-@n@ loop nest
@@ -149,12 +149,12 @@ nestifyLoop bound_se = nestifyLoop' bound_se
                         =<< nestifyLoop'
                           offset'
                           (n - 1)
-                          (DoLoop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
+                          (Loop val_pats'' (ForLoop i' it' bound_se loop_vars') inner_body)
                     pure $ varsRes inner_loop
                 pure $
-                  DoLoop val_pats (ForLoop i it bound_se loop_vars) outer_body
+                  Loop val_pats (ForLoop i it bound_se loop_vars) outer_body
           | n == 1 =
-              pure $ DoLoop val_pats (ForLoop i it bound_se loop_vars) body
+              pure $ Loop val_pats (ForLoop i it bound_se loop_vars) body
           | otherwise = pure loop
 
 -- | @stripmine n pat loop@ stripmines a loop into a depth-@n@ loop nest.
@@ -185,7 +185,7 @@ stripmine n pat loop = do
       let loop_params_rem = map fst val_pats'
           loop_inits_rem = map (Var . patElemName) $ patElems pat'
           val_pats_rem = zip loop_params_rem loop_inits_rem
-          remain_loop = DoLoop val_pats_rem (ForLoop i' it' remain_iters loop_vars') remain_body
+          remain_loop = Loop val_pats_rem (ForLoop i' it' remain_iters loop_vars') remain_body
       collectStms_ $ do
         letBind pat' mined_loop
         letBind pat remain_loop
@@ -194,7 +194,7 @@ stripmine n pat loop = do
 -- expression is a for-loop with a @#[stripmine(n)]@ attribute, where
 -- @n@ is the nesting depth.
 stripmineStm :: Stm SOACS -> ADM (Stms SOACS)
-stripmineStm stm@(Let pat aux loop@(DoLoop _ ForLoop {} _)) =
+stripmineStm stm@(Let pat aux loop@(Loop _ ForLoop {} _)) =
   case nums of
     (n : _) -> stripmine n pat loop
     _ -> pure $ oneStm stm
@@ -256,7 +256,7 @@ fwdLoop pat aux loop =
 
     let pat' = pat <> Pat saved_pats
         val_pats' = val_pats <> zip saved_params empty_saved_array
-    addStm $ Let pat' aux $ DoLoop val_pats' form body'
+    addStm $ Let pat' aux $ Loop val_pats' form body'
 
 -- | Construct a loop value-pattern for the adjoint of the
 -- given variable.
@@ -420,7 +420,7 @@ revLoop diffStms pat loop =
             adjs' <-
               letTupExp "loop_adj" $
                 substituteNames (restore_true_deps <> var_array_substs) $
-                  DoLoop val_pat_adjs_list form' body_adj
+                  Loop val_pat_adjs_list form' body_adj
             let (loop_res_adjs, loop_free_var_val_adjs) =
                   splitAt (length $ loopRes loop_adjs) adjs'
                 (loop_free_adjs, loop_var_val_adjs) =

@@ -648,7 +648,7 @@ cheapExp (BasicOp Assert {}) = True
 cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Concat {}) = False
 cheapExp (BasicOp Manifest {}) = False
-cheapExp DoLoop {} = False
+cheapExp Loop {} = False
 cheapExp (Match _ cases defbranch _) =
   all (all cheapStm . bodyStms . caseBody) cases
     && all cheapStm (bodyStms defbranch)
@@ -770,8 +770,8 @@ simplifyResult usages res = do
         <> more_usages
     )
 
-isDoLoopResult :: Result -> UT.UsageTable
-isDoLoopResult = mconcat . map checkForVar
+isLoopResult :: Result -> UT.UsageTable
+isLoopResult = mconcat . map checkForVar
   where
     checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
@@ -827,7 +827,7 @@ simplifyExp usage (Pat pes) (Match ses cases defbody ifdec@(MatchDec ts ifsort))
         protectCaseHoisted ses' prior vs $
           simplifyBody block usage pes_usages body
       pure (hoisted, Case vs body')
-simplifyExp _ _ (DoLoop merge form loopbody) = do
+simplifyExp _ _ (Loop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
   args' <- mapM simplify args
@@ -870,9 +870,9 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
                 (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
                 params'
         (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
-        pure (res, uses <> isDoLoopResult res)
+        pure (res, uses <> isLoopResult res)
   loopbody' <- constructBody loopstms loopres
-  pure (DoLoop merge' form' loopbody', hoisted)
+  pure (Loop merge' form' loopbody', hoisted)
   where
     fparamnames =
       namesFromList (map (paramName . fst) merge)

@@ -122,7 +122,7 @@ expAliases pes (Match _ cases defbody _) =
     onBody body = (bodyAliases body, consumedInBody body)
     bound = foldMap boundInBody $ defbody : map caseBody cases
 expAliases _ (BasicOp op) = basicOpAliases op
-expAliases pes (DoLoop merge _ loopbody) =
+expAliases pes (Loop merge _ loopbody) =
   mutualAliases (bound <> param_names) pes $ do
     (p, als) <-
       transitive . zip params $ zipWith (<>) arg_aliases (bodyAliases loopbody)
@@ -166,7 +166,7 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (Match _ cases defbody _) =
   foldMap (consumedInBody . caseBody) cases <> consumedInBody defbody
-consumedInExp (DoLoop merge form body) =
+consumedInExp (Loop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge

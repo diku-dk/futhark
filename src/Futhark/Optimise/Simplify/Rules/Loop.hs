@@ -24,7 +24,7 @@ import Futhark.Transform.Rename
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleDoLoop rep
+removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleLoop rep
 removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
   | not $ all (usedAfterLoop . fst) merge =
       let necessaryForReturned =
@@ -63,7 +63,7 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
               body'' <- insertStmsM $ do
                 mapM_ (uncurry letBindNames) $ dummyStms discard_val
                 pure body'
-              auxing aux $ letBind pat' $ DoLoop merge' form body''
+              auxing aux $ letBind pat' $ Loop merge' form body''
   where
     pat_used = map (`UT.isUsedDirectly` used) $ patNames pat
     used_vals = map fst $ filter snd $ zip (map (paramName . fst) merge) pat_used
@@ -85,7 +85,7 @@ removeRedundantMergeVariables _ _ _ _ =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleDoLoop rep
+hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleLoop rep
 hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
@@ -101,7 +101,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
           explpat'' = map fst explpat'
       forM_ invariant $ \(v1, (v2, cs)) ->
         certifying cs $ letBindNames [identName v1] $ BasicOp $ SubExp v2
-      letBind (Pat explpat'') $ DoLoop merge' form loopbody'
+      letBind (Pat explpat'') $ Loop merge' form loopbody'
   where
     res = bodyResult loopbody
 
@@ -172,12 +172,12 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (name `notNameIn` namesOfMergeParams)
         || (name `nameIn` namesOfInvariant)
 
-simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleDoLoop rep
+simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleLoop rep
 simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =
   Simplify $ loopClosedForm pat val (oneName i) it bound body
 simplifyClosedFormLoop _ _ _ _ = Skip
 
-simplifyLoopVariables :: (BuilderOps rep, Aliased rep) => TopDownRuleDoLoop rep
+simplifyLoopVariables :: (BuilderOps rep, Aliased rep) => TopDownRuleLoop rep
 simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_vars), body)
   | simplifiable <- map checkIfSimplifiable loop_vars,
     not $ all isNothing simplifiable = Simplify $ do
@@ -193,7 +193,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
             addStms $ mconcat body_prefix_stms
             bodyBind body
           let form' = ForLoop i it num_iters $ catMaybes maybe_loop_vars
-          auxing aux $ letBind pat $ DoLoop merge form' body'
+          auxing aux $ letBind pat $ Loop merge form' body'
   where
     seType (Var v)
       | v == i = Just $ Prim $ IntType it
@@ -275,7 +275,7 @@ unroll n merge (iv, it, i) loop_vars body
       let merge' = zip (map fst merge) $ bodyResult iter_body'
       unroll n merge' (iv, it, i + 1) loop_vars body
 
-simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleDoLoop rep
+simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleLoop rep
 simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_vars, body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
@@ -287,15 +287,15 @@ simplifyKnownIterationLoop _ _ _ _ =
 
 topDownRules :: (BuilderOps rep, Aliased rep) => [TopDownRule rep]
 topDownRules =
-  [ RuleDoLoop hoistLoopInvariantMergeVariables,
-    RuleDoLoop simplifyClosedFormLoop,
-    RuleDoLoop simplifyKnownIterationLoop,
-    RuleDoLoop simplifyLoopVariables
+  [ RuleLoop hoistLoopInvariantMergeVariables,
+    RuleLoop simplifyClosedFormLoop,
+    RuleLoop simplifyKnownIterationLoop,
+    RuleLoop simplifyLoopVariables
   ]
 
 bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
 bottomUpRules =
-  [ RuleDoLoop removeRedundantMergeVariables
+  [ RuleLoop removeRedundantMergeVariables
   ]
 
 -- | Standard loop simplification rules.

@@ -175,7 +175,7 @@ usageInExp (Apply _ args _ _) =
       | (arg, d) <- args,
         d == Consume
     ]
-usageInExp e@DoLoop {} =
+usageInExp e@Loop {} =
   foldMap consumedUsage $ namesToList $ consumedInExp e
 usageInExp (Match _ cases defbody _) =
   foldMap (usageInBody . caseBody) cases <> usageInBody defbody

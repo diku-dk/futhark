@@ -18,7 +18,7 @@
 --   [[18, 17], [8, 10]]
 -- }
 --
--- structure gpu { Map/DoLoop 0 }
+-- structure gpu { Map/Loop 0 }
 
 def main [n][m][k] (a: [n][m][k]i32): [n][k]i32 =
   let acc = replicate k 0 in

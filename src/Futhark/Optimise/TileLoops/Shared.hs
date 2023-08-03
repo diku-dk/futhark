@@ -67,7 +67,7 @@ forLoop' i_bound merge body = do
         map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
+    Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->

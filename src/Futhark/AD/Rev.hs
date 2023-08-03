@@ -278,7 +278,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
     zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
-diffStm (Let pat aux loop@DoLoop {}) m =
+diffStm (Let pat aux loop@Loop {}) m =
   diffLoop diffStms pat aux loop m
 -- See Note [Adjoints of accumulators]
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do

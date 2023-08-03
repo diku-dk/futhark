@@ -3,7 +3,7 @@
 -- ==
 -- structure gpu {
 --   /If/True/Replicate 1
---   /DoLoop/Replicate 2
+--   /Loop/Replicate 2
 -- }
 
 entry case_if (A: [5]i64) (x: i64) : i64 =
@@ -21,4 +21,3 @@ entry case_for (A: [5]i64) (x: i64) : i64 =
   loop y = 0 for i < A[0] do
     let B = replicate y 1337
      in #[unsafe] (opaque B)[x % length B]
-

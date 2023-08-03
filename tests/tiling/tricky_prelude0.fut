@@ -1,7 +1,7 @@
 -- A case of tiling with a complex dependency.
 -- ==
 -- compiled random input { [100]i32 } auto output
--- structure gpu { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/Loop/SegMap 2 }
 
 def main (xs: []i32) =
   map (\x ->

@@ -263,7 +263,7 @@ instance Renameable rep => Rename (Stm rep) where
 instance Renameable rep => Rename (Exp rep) where
   rename (WithAcc inputs lam) =
     WithAcc <$> rename inputs <*> rename lam
-  rename (DoLoop merge form loopbody) = do
+  rename (Loop merge form loopbody) = do
     let (params, args) = unzip merge
     args' <- mapM rename args
     case form of
@@ -280,7 +280,7 @@ instance Renameable rep => Rename (Exp rep) where
           i' <- rename i
           loopbody' <- rename loopbody
           pure $
-            DoLoop
+            Loop
               (zip params' args')
               (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
               loopbody'
@@ -289,7 +289,7 @@ instance Renameable rep => Rename (Exp rep) where
           params' <- mapM rename params
           loopbody' <- rename loopbody
           cond' <- rename cond
-          pure $ DoLoop (zip params' args') (WhileLoop cond') loopbody'
+          pure $ Loop (zip params' args') (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where
       mapper =

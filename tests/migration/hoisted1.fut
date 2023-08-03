@@ -5,8 +5,8 @@
 -- structure gpu {
 --   GPUBody 3
 --   /GPUBody 1
---   /DoLoop/GPUBody/Index 2
---   /DoLoop/DoLoop/GPUBody/BinOp 1
+--   /Loop/GPUBody/Index 2
+--   /Loop/Loop/GPUBody/BinOp 1
 -- }
 
 def main [n] (A: *[n]i64) (x: i64) : *[n]i64 =

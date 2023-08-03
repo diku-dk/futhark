@@ -226,7 +226,7 @@ letBody body = "in" <+> align (pretty body)
 prettyAppExp :: (Eq vn, IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
 prettyAppExp p (BinOp (bop, _) _ (x, _) (y, _) _) = prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
-prettyAppExp _ (DoLoop sizeparams pat initexp form loopbody _) =
+prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
   "loop"
     <+> align
       ( hsep (map (brackets . prettyName) sizeparams ++ [pretty pat])

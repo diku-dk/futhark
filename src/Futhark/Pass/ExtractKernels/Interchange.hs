@@ -41,7 +41,7 @@ loopPerm (SeqLoop perm _ _ _ _) = perm
 
 seqLoopStm :: SeqLoop -> Stm SOACS
 seqLoopStm (SeqLoop _ pat merge form body) =
-  Let pat (defAux ()) $ DoLoop merge form body
+  Let pat (defAux ()) $ Loop merge form body
 
 interchangeLoop ::
   (MonadBuilder m, Rep m ~ SOACS) =>

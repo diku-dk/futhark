@@ -94,7 +94,7 @@ expDefs e =
                 <> mconcat (map patternDefs params)
         AppExp (LetWith v _ _ _ _ _) _ ->
           identDefs v
-        AppExp (DoLoop _ merge _ form _ _) _ ->
+        AppExp (Loop _ merge _ form _ _) _ ->
           patternDefs merge
             <> case form of
               For i _ -> identDefs i
@@ -268,7 +268,7 @@ atPosInExp (AppExp (LetPat _ pat _ _ _) _) pos
 atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
-atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
+atPosInExp (AppExp (Loop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
 atPosInExp (Ascript _ te _) pos
   | te `contains` pos = atPosInTypeExp te pos

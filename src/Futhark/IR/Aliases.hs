@@ -157,7 +157,7 @@ instance
     where
       merge_dec =
         case e of
-          DoLoop merge _ body ->
+          Loop merge _ body ->
             let mergeParamAliases fparam als
                   | primType (paramType fparam) =
                       Nothing

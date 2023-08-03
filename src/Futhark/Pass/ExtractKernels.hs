@@ -279,7 +279,7 @@ unbalancedLambda orig_lam =
       w `subExpBound` bound
     unbalancedStm _ Op {} =
       False
-    unbalancedStm _ DoLoop {} = False
+    unbalancedStm _ Loop {} = False
     unbalancedStm bound (WithAcc _ lam) =
       unbalancedBody bound (lambdaBody lam)
     unbalancedStm bound (Match ses cases defbody _) =
@@ -363,9 +363,9 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
   where
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToGPU) op)
-transformStm path (Let pat aux (DoLoop merge form body)) =
+transformStm path (Let pat aux (Loop merge form body)) =
   localScope (castScope (scopeOf form) <> scopeOfFParams params) $
-    oneStm . Let pat aux . DoLoop merge form' <$> transformBody path body
+    oneStm . Let pat aux . Loop merge form' <$> transformBody path body
   where
     params = map fst merge
     form' = case form of
@@ -519,7 +519,7 @@ worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
           mapLike w lam'
       | Op (Scatter w _ lam' _) <- stmExp stm =
           mapLike w lam'
-      | DoLoop _ _ body <- stmExp stm =
+      | Loop _ _ body <- stmExp stm =
           bodyInterest body * 10
       | Match _ cases defbody _ <- stmExp stm =
           foldl
@@ -562,7 +562,7 @@ worthSequentialising lam = bodyInterest (lambdaBody lam) > 1
             else bodyInterest (lambdaBody lam')
       | Op Scatter {} <- stmExp stm =
           0 -- Basically a map.
-      | DoLoop _ ForLoop {} body <- stmExp stm =
+      | Loop _ ForLoop {} body <- stmExp stm =
           bodyInterest body * 10
       | WithAcc _ withacc_lam <- stmExp stm =
           bodyInterest (lambdaBody withacc_lam)
