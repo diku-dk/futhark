@@ -160,7 +160,7 @@ defaultOperations =
       opsReadScalar = defReadScalar,
       opsAllocate = defAllocate,
       opsCopy = defCopy,
-      opsCopies = mempty,
+      opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsCompiler = defCompiler,
       opsEntryOutput = defEntryOutput,
       opsEntryInput = defEntryInput
@@ -1410,3 +1410,18 @@ compileCode (Imp.Read x src (Imp.Count iexp) pt space _) = do
   src' <- compileVar src
   stm . Assign x' =<< generateRead src' iexp' pt space
 compileCode Imp.Skip = pure ()
+
+lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
+  stm . Exp $
+    simpleCall
+      "lmad_copy"
+      [ Var (compilePrimType t),
+        dst,
+        unCount dstoffset,
+        List (map unCount dststride),
+        src,
+        unCount srcoffset,
+        List (map unCount srcstride),
+        List (map unCount shape)
+      ]

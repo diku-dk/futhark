@@ -55,4 +55,79 @@ class opaque(object):
         return "<opaque Futhark value of type {}>".format(self.desc)
 
 
+# LMAD stuff
+
+
+def lmad_contiguous_search(checked, expected, strides, shape, used):
+    for i in range(len(strides)):
+        for j in range(len(strides)):
+            if not used[j] and strides[j] == expected and strides[j] >= 0:
+                used[j] = True
+                if checked + 1 == len(strides) or lmad_contiguous_search(
+                    checked + 1, expected * shape[j], strides, shape, used
+                ):
+                    return True
+                used[j] = False
+    return False
+
+
+def lmad_contiguous(strides, shape):
+    used = len(strides) * [False]
+    return lmad_contiguous_search(0, 1, strides, shape, used)
+
+
+def lmad_memcpyable(dst_strides, src_strides, shape):
+    if not lmad_contiguous(dst_strides, shape):
+        return False
+    for i in range(len(dst_strides)):
+        if dst_strides[i] != src_strides[i] and shape[i] != 1:
+            return False
+    return True
+
+
+def lmad_copy_elements(
+    pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
+):
+    if len(shape) == 1:
+        for i in range(shape[0]):
+            writeScalarArray(
+                dst,
+                dst_offset + i * dst_strides[0],
+                pt(indexArray(src, src_offset + i * src_stride[0], pt)),
+            )
+    else:
+        for i in range(shape[0]):
+            lmad_copy_elements(
+                dst,
+                dst_offset + i * dst_strides[0],
+                dst_strides[1:],
+                src,
+                src_offset + i * src_strides[0],
+                src_strides[1:],
+                shape[1:],
+            )
+
+
+def lmad_copy(
+    pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
+):
+    if lmad_memcpyable(dst_strides, src_strides, shape):
+        ct.memmove(
+            addressOffset(dst, dst_offset, pt),
+            addressOffset(src, src_offset, pt),
+            np.prod(shape) * ct.sizeof(pt),
+        )
+    else:
+        lmad_copy_elements(
+            pt,
+            dst,
+            dst_offset,
+            dst_strides,
+            src,
+            src_offset,
+            src_strides,
+            shape,
+        )
+
+
 # End of memory.py.
