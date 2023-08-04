@@ -93,11 +93,12 @@ def lmad_copy_elements(
             writeScalarArray(
                 dst,
                 dst_offset + i * dst_strides[0],
-                pt(indexArray(src, src_offset + i * src_stride[0], pt)),
+                pt(indexArray(src, src_offset + i * src_strides[0], pt)),
             )
     else:
         for i in range(shape[0]):
             lmad_copy_elements(
+                pt,
                 dst,
                 dst_offset + i * dst_strides[0],
                 dst_strides[1:],
