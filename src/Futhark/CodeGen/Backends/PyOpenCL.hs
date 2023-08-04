@@ -261,7 +261,9 @@ launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = d
           ]
   Py.stm . Exp $
     Py.simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-      [local_memory] ++ failure_args ++ args'
+      [Py.simpleCall "cl.LocalMemory" [Py.simpleCall "max" [local_memory, Integer 1]]]
+        ++ failure_args
+        ++ args'
   Py.stm . Exp $
     Py.simpleCall
       "cl.enqueue_nd_range_kernel"
