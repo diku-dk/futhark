@@ -48,6 +48,8 @@ module Futhark.IR.SOACS.SOAC
   )
 where
 
+import Debug.Trace
+
 import Control.Category
 import Control.Monad
 import Control.Monad.Identity
@@ -56,11 +58,13 @@ import Control.Monad.Writer
 import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
+import qualified Data.Foldable as Foldable
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
+import Futhark.Analysis.DataDependencies
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
@@ -589,6 +593,39 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
+  opDependencies (Screma w arrs (ScremaForm [] [] map_lam)) =
+    let deps_in = M.fromList $ zip (boundByLambda map_lam) (map oneName arrs)
+        deps = dataDependencies' deps_in (lambdaBody map_lam)
+        -- TODO No longer explicitly adding dependency on size; could
+        -- zip name with map_lam parameters?
+        -- TODO Use valid_deps?
+        -- TODO ^ How would this be tested? For example,
+        --   map xs (\x -> let y = x+1 in y)
+        -- should only depend on xs; rest is out of scope.
+        names_in_scope = freeIn map_lam <> (namesFromList arrs)
+    in print "opDependencies:map_lam" $
+      map (namesIntersection names_in_scope) $
+        map (depsOfRes deps) (print "bodyResult" $ bodyResult (lambdaBody map_lam))
+    where
+      print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+  opDependencies (Screma w arrs (ScremaForm scans [] map_lam)) =
+    let depsOfScan (Scan lam nes, deps_in) =
+          let deps_in' = print "depsOfScan:deps_in" deps_in
+              deps_nes = print "depsOfScan:deps_nes" $ map (depsOf mempty) nes
+              deps_lam_params' = zipWith (<>) deps_nes deps_in
+              deps_lam_params = M.fromList $
+                zip (boundByLambda lam) deps_lam_params'
+              deps = dataDependencies' deps_lam_params (lambdaBody lam)
+              names_in_scope = freeIn lam <> (mconcat deps_lam_params')
+          in map (namesIntersection names_in_scope) $
+            map (depsOfRes deps) (bodyResult $ lambdaBody lam)
+        deps_map = opDependencies (Screma w arrs (ScremaForm [] [] map_lam))
+        deps_scans_in = chunks (map inputSize scans) deps_map
+        deps_scan = concatMap depsOfScan (zip scans deps_scans_in)
+    in print "deps_scan" $ deps_scan <> (drop (scanResults scans) deps_map)
+    where
+      print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+      inputSize = length . scanNeutral
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t

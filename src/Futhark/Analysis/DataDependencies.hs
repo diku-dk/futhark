@@ -2,6 +2,9 @@
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
+    dataDependencies',
+    depsOf,
+    depsOfRes,
     findNecessaryForReturned,
   )
 where
@@ -9,6 +12,9 @@ where
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.IR
+
+import Debug.Trace
+qqprint msg x = Debug.Trace.trace (msg ++ " " ++ show x) x
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could
@@ -27,6 +33,9 @@ dataDependencies' ::
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
+    grow deps (Let pat _ (Op op)) = qqprint "yello Op!" $
+      M.fromList (zip (patNames pat) (opDependencies op)) <> deps
+      -- TODO transitive dependencies
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
@@ -59,6 +68,9 @@ depsOf deps (Var v) = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
+
+depsOfRes :: Dependencies -> SubExpRes -> Names
+depsOfRes deps (SubExpRes _ se) = depsOf deps se
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,
