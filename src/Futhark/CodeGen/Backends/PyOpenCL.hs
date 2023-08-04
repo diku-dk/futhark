@@ -222,14 +222,14 @@ callKernel (Imp.CmpSizeLe v key x) = do
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- Py.compileVar v
   Py.stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
-callKernel (Imp.LaunchKernel safety name args num_workgroups workgroup_size) = do
+callKernel (Imp.LaunchKernel safety name local_memory args num_workgroups workgroup_size) = do
   num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
   workgroup_size' <- mapM compileGroupDim workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-
-  body <- Py.collect $ launchKernel name safety kernel_size workgroup_size' args
+  local_memory' <- Py.compileExp $ Imp.untyped $ Imp.unCount local_memory
+  body <- Py.collect $ launchKernel name safety kernel_size workgroup_size' local_memory' args
   Py.stm $ If cond body []
 
   when (safety >= Imp.SafetyFull) $
@@ -244,9 +244,10 @@ launchKernel ::
   Imp.KernelSafety ->
   [PyExp] ->
   [PyExp] ->
+  PyExp ->
   [Imp.KernelArg] ->
   Py.CompilerM op s ()
-launchKernel kernel_name safety kernel_dims workgroup_dims args = do
+launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = do
   let kernel_dims' = Tuple kernel_dims
       workgroup_dims' = Tuple workgroup_dims
       kernel_name' = "self." <> zEncodeText (nameToText kernel_name) <> "_var"
@@ -258,24 +259,18 @@ launchKernel kernel_name safety kernel_dims workgroup_dims args = do
             Var "self.failure_is_an_option",
             Var "self.global_failure_args"
           ]
-  Py.stm $
-    Exp $
-      Py.simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-        failure_args ++ args'
-  Py.stm $
-    Exp $
-      Py.simpleCall
-        "cl.enqueue_nd_range_kernel"
-        [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
+  Py.stm . Exp $
+    Py.simpleCall (T.unpack $ kernel_name' <> ".set_args") $
+      [local_memory] ++ failure_args ++ args'
+  Py.stm . Exp $
+    Py.simpleCall
+      "cl.enqueue_nd_range_kernel"
+      [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
   finishIfSynchronous
   where
     processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
-    processKernelArg (Imp.ValueKArg e bt) =
-      Py.toStorage bt <$> Py.compileExp e
+    processKernelArg (Imp.ValueKArg e bt) = Py.toStorage bt <$> Py.compileExp e
     processKernelArg (Imp.MemKArg v) = Py.compileVar v
-    processKernelArg (Imp.SharedMemoryKArg (Imp.Count num_bytes)) = do
-      num_bytes' <- Py.compileExp num_bytes
-      pure $ Py.simpleCall "cl.LocalMemory" [asLong num_bytes']
 
 writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do

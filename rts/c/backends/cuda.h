@@ -110,11 +110,6 @@ struct futhark_context_config {
   int default_tile_size_changed;
 };
 
-// Constants used for transpositions.  In principle these should be configurable.
-#define TR_BLOCK_DIM 16
-#define TR_TILE_DIM (TR_BLOCK_DIM*2)
-#define TR_ELEMS_PER_THREAD 8
-
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_nvrtc_opts = 0;
   cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));

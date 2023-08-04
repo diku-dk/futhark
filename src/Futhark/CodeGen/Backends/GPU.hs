@@ -17,8 +17,6 @@ where
 
 import Control.Monad
 import Data.Bifunctor (bimap)
-import Data.List (unzip4)
-import Data.Maybe (catMaybes)
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
@@ -83,31 +81,28 @@ compileGroupDim (Right kc) = pure $ kernelConstToExp kc
 genLaunchKernel ::
   KernelSafety ->
   KernelName ->
+  Count Bytes (TExp Int64) ->
   [KernelArg] ->
   [Exp] ->
   [GroupDim] ->
   GC.CompilerM op s ()
-genLaunchKernel safety kernel_name args num_groups group_size = do
-  (arg_params, arg_params_inits, call_args, shared_vars) <-
-    unzip4 <$> zipWithM mkArgs [(0 :: Int) ..] args
-  let (shared_sizes, shared_offsets) = unzip $ catMaybes shared_vars
-      shared_offsets_sc = mkOffsets shared_sizes
-      shared_args = zip shared_offsets shared_offsets_sc
-      shared_bytes = last shared_offsets_sc
-  forM_ shared_args $ \(arg, offset) ->
-    GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
+genLaunchKernel safety kernel_name local_memory args num_groups group_size = do
+  (arg_params, arg_params_inits, call_args) <-
+    unzip3 <$> zipWithM mkArgs [(0 :: Int) ..] args
 
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_groups
   (group_x, group_y, group_z) <- mkDims <$> mapM compileGroupDim group_size
 
   kernel_fname <- genKernelFunction kernel_name safety arg_params arg_params_inits
 
+  local_memory' <- GC.compileExp $ untyped $ unCount local_memory
+
   GC.stm
     [C.cstm|{
            err = $id:kernel_fname(ctx,
                                   $exp:grid_x, $exp:grid_y, $exp:grid_z,
                                   $exp:group_x, $exp:group_y, $exp:group_z,
-                                  $exp:shared_bytes,
+                                  $exp:local_memory',
                                   $args:call_args);
            if (err != FUTHARK_SUCCESS) { goto cleanup; }
            }|]
@@ -119,9 +114,6 @@ genLaunchKernel safety kernel_name args num_groups group_size = do
     mkDims [x] = (x, [C.cexp|1|], [C.cexp|1|])
     mkDims [x, y] = (x, y, [C.cexp|1|])
     mkDims (x : y : z : _) = (x, y, z)
-    addExp x y = [C.cexp|$exp:x + $exp:y|]
-    alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
-    mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
 
     mkArgs i (ValueKArg e t) = do
       let arg = "arg" <> show i
@@ -129,8 +121,7 @@ genLaunchKernel safety kernel_name args num_groups group_size = do
       pure
         ( [C.cparam|$ty:(primStorageType t) $id:arg|],
           ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
-          toStorage t e',
-          Nothing
+          toStorage t e'
         )
     mkArgs i (MemKArg v) = do
       let arg = "arg" <> show i
@@ -138,20 +129,7 @@ genLaunchKernel safety kernel_name args num_groups group_size = do
       pure
         ( [C.cparam|typename gpu_mem $id:arg|],
           ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
-          v',
-          Nothing
-        )
-    mkArgs i (SharedMemoryKArg (Count c)) = do
-      let arg = "arg" <> show i
-      num_bytes <- GC.compileExp c
-      size <- newVName "shared_size"
-      offset <- newVName "shared_offset"
-      GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
-      pure
-        ( [C.cparam|unsigned int $id:arg|],
-          ([C.cexp|sizeof($id:arg)|], [C.cexp|&$id:arg|]),
-          [C.cexp|$id:offset|],
-          Just (size, offset)
+          v'
         )
 
 callKernel :: GC.OpCompiler OpenCL ()
@@ -172,8 +150,8 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
-callKernel (LaunchKernel safety kernel_name args num_groups group_size) =
-  genLaunchKernel safety kernel_name args num_groups group_size
+callKernel (LaunchKernel safety kernel_name local_memory args num_groups group_size) =
+  genLaunchKernel safety kernel_name local_memory args num_groups group_size
 
 copygpu2gpu :: GC.DoLMADCopy op s
 copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do

@@ -10,6 +10,10 @@ if cl.version.VERSION < (2015, 2):
         % cl.version.VERSION_TEXT
     )
 
+TR_BLOCK_DIM = 16
+TR_TILE_DIM = TR_BLOCK_DIM * 2
+TR_ELEMS_PER_THREAD = 8
+
 
 def parse_preferred_device(s):
     pref_num = 0
@@ -283,6 +287,12 @@ def initialise_opencl_object(
 
         if self.platform.name == "Oclgrind":
             build_options += ["-DEMULATE_F16"]
+
+        build_options += [
+            f"-DTR_BLOCK_DIM={TR_BLOCK_DIM}",
+            f"-DTR_TILE_DIM={TR_TILE_DIM}",
+            f"-DTR_ELEMS_PER_THREAD={TR_ELEMS_PER_THREAD}",
+        ]
 
         return cl.Program(self.ctx, program_src).build(build_options)
 

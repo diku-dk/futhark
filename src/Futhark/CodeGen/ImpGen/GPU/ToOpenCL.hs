@@ -30,10 +30,12 @@ import Futhark.CodeGen.RTS.CUDA (preludeCU)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeText)
+import Futhark.Util (mapAccumLM, zEncodeText)
+import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
+import Prelude hiding (rem)
 
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
@@ -141,7 +143,7 @@ pointerQuals "device" = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Count Bytes Exp)
+type LocalMemoryUse = (VName, Count Bytes (TExp Int64))
 
 data KernelState = KernelState
   { kernelLocalMemory :: [LocalMemoryUse],
@@ -346,11 +348,13 @@ onKernel target kernel = do
           mapM_ GC.item body
       kstate = GC.compUserState cstate
 
-      (local_memory_args, local_memory_params, local_memory_init) =
-        unzip3 . flip evalState (blankNameSource :: VNameSource) $
-          mapM prepareLocalMemory (kernelLocalMemory kstate)
-
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+
+  let (local_memory_bytes, (local_memory_params, local_memory_args, local_memory_init)) =
+        second unzip3 $
+          evalState
+            (mapAccumLM prepareLocalMemory 0 (kernelLocalMemory kstate))
+            blankNameSource
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
@@ -415,7 +419,7 @@ onKernel target kernel = do
       params =
         local_memory_param
           ++ take (numFailureParams safety) failure_params
-          ++ catMaybes local_memory_params
+          ++ local_memory_params
           ++ use_params
 
       attribute =
@@ -450,22 +454,25 @@ onKernel target kernel = do
         clFailures = kernelFailures kstate
       }
 
-  -- The argument corresponding to the global_failure parameters is
-  -- added automatically later.
-  let args = catMaybes local_memory_args ++ kernelArgs kernel
+  -- The error handling stuff is automatically added later.
+  let args = local_memory_args ++ kernelArgs kernel
 
-  pure $ LaunchKernel safety name args num_groups group_size
+  pure $ LaunchKernel safety name local_memory_bytes args num_groups group_size
   where
     name = kernelName kernel
     num_groups = kernelNumGroups kernel
     group_size = kernelGroupSize kernel
+    padTo8 e = e + ((8 - (e `rem` 8)) `rem` 8)
 
-    prepareLocalMemory (mem, size) = do
+    prepareLocalMemory (Count offset) (mem, Count size) = do
       param <- newVName $ baseString mem ++ "_offset"
+      let offset' = offset + padTo8 size
       pure
-        ( Just $ SharedMemoryKArg size,
-          Just [C.cparam|uint $id:param|],
-          [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &local_mem[$id:param];|]
+        ( bytes offset',
+          ( [C.cparam|typename int64_t $id:param|],
+            ValueKArg (untyped offset) $ IntType Int64,
+            [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &local_mem[$id:param];|]
+          )
         )
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
@@ -612,7 +619,7 @@ inKernelOperations env mode body =
     kernelOps (LocalAlloc name size) = do
       name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
-        s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
+        s {kernelLocalMemory = (name', size) : kernelLocalMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
