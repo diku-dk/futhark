@@ -114,8 +114,8 @@ def lmad_copy(
 ):
     if lmad_memcpyable(dst_strides, src_strides, shape):
         ct.memmove(
-            addressOffset(dst, dst_offset, pt),
-            addressOffset(src, src_offset, pt),
+            addressOffset(dst, dst_offset * ct.sizeof(pt), ct.c_byte),
+            addressOffset(src, src_offset * ct.sizeof(pt), ct.c_byte),
             np.prod(shape) * ct.sizeof(pt),
         )
     else:
