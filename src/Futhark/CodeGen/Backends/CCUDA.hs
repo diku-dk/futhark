@@ -56,14 +56,14 @@ compileProg version prog = do
     operations :: GC.Operations OpenCL ()
     operations =
       GC.defaultOperations
-        { GC.opsWriteScalar = writeScalarGPU,
+        { GC.opsCompiler = callKernel,
+          GC.opsWriteScalar = writeScalarGPU,
           GC.opsReadScalar = readScalarGPU,
           GC.opsAllocate = allocateGPU,
           GC.opsDeallocate = deallocateGPU,
-          GC.opsCopy = copyCUDAMemory,
+          GC.opsCopy = copyGPU,
           GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
           GC.opsMemoryType = cudaMemoryType,
-          GC.opsCompiler = callKernel,
           GC.opsFatMemory = True,
           GC.opsCritical =
             ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
@@ -127,33 +127,6 @@ cliOptions =
              optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
-
-copyCUDAMemory :: GC.Copy OpenCL ()
-copyCUDAMemory _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes = do
-  GC.stm [C.cstm|gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
-copyCUDAMemory b dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
-  let (copy, prof) = memcpyFun b dstSpace srcSpace
-      (bef, aft) = profilingEnclosure prof
-  GC.item
-    [C.citem|{$items:bef CUDA_SUCCEED_OR_RETURN($exp:copy); $items:aft}|]
-  where
-    dst = [C.cexp|$exp:dstmem + $exp:dstidx|]
-    src = [C.cexp|$exp:srcmem + $exp:srcidx|]
-    memcpyFun GC.CopyBarrier DefaultSpace (Space "device") =
-      ([C.cexp|cuMemcpyDtoH($exp:dst, $exp:src, $exp:nbytes)|], copyDevToHost)
-    memcpyFun GC.CopyBarrier (Space "device") DefaultSpace =
-      ([C.cexp|cuMemcpyHtoD($exp:dst, $exp:src, $exp:nbytes)|], copyHostToDev)
-    memcpyFun GC.CopyNoBarrier DefaultSpace (Space "device") =
-      ([C.cexp|cuMemcpyDtoHAsync($exp:dst, $exp:src, $exp:nbytes, ctx->stream)|], copyDevToHost)
-    memcpyFun GC.CopyNoBarrier (Space "device") DefaultSpace =
-      ([C.cexp|cuMemcpyHtoDAsync($exp:dst, $exp:src, $exp:nbytes, ctx->stream)|], copyHostToDev)
-    memcpyFun _ _ _ =
-      error $
-        "Cannot copy to '"
-          ++ show dstSpace
-          ++ "' from '"
-          ++ show srcSpace
-          ++ "'."
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
