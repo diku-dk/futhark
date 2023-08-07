@@ -17,7 +17,6 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (backendsCudaH, gpuH, gpuPrototypesH)
 import Futhark.Util (chunk)
 import Language.C.Quote.OpenCL qualified as C
-import Language.C.Syntax qualified as C
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes

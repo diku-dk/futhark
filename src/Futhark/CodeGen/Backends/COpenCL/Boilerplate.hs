@@ -2,12 +2,6 @@
 
 module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( generateBoilerplate,
-    profilingEvent,
-    copyDevToDev,
-    copyDevToHost,
-    copyHostToDev,
-    copyScalarToDev,
-    copyScalarFromDev,
     genProfileReport,
     failureMsgFunction,
   )
@@ -47,18 +41,6 @@ failureMsgFunction failures =
                   switch (failure_idx) { $stms:failure_cases }
                   return strdup("Unknown error.  This is a compiler bug.");
                 }|]
-
-copyDevToDev, copyDevToHost, copyHostToDev, copyScalarToDev, copyScalarFromDev :: Name
-copyDevToDev = "copy_dev_to_dev"
-copyDevToHost = "copy_dev_to_host"
-copyHostToDev = "copy_host_to_dev"
-copyScalarToDev = "copy_scalar_to_dev"
-copyScalarFromDev = "copy_scalar_from_dev"
-
-profilingEvent :: Name -> C.Exp
-profilingEvent name =
-  [C.cexp|(ctx->profiling_paused || !ctx->profiling) ? NULL
-          : opencl_get_event(ctx, $string:(nameToString name))|]
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
@@ -131,11 +113,11 @@ genProfileReport cost_centres =
               }|]
   where
     def_cost_centres =
-      [ copyDevToDev,
-        copyDevToHost,
-        copyHostToDev,
-        copyScalarToDev,
-        copyScalarFromDev
+      [ "copy_dev_to_dev",
+        "copy_dev_to_host",
+        "copy_host_to_dev",
+        "copy_scalar_to_dev",
+        "copy_scalar_from_dev"
       ]
     initCostCentre v =
       [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
