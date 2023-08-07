@@ -73,9 +73,7 @@ compileProg version prog = do
           GC.opsAllocate = allocateGPU,
           GC.opsDeallocate = deallocateGPU,
           GC.opsCopy = copyOpenCLMemory,
-          GC.opsCopies =
-            M.insert (Space "device", Space "device") copygpu2gpu $
-              GC.opsCopies GC.defaultOperations,
+          GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
           GC.opsMemoryType = openclMemoryType,
           GC.opsFatMemory = True
         }

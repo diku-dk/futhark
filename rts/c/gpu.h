@@ -467,6 +467,110 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
     }                                                                   \
   }
 
+static int
+lmad_copy_elements_host2gpu(struct futhark_context *ctx, size_t elem_size,
+                            int r,
+                            gpu_mem dst, int64_t dst_offset, int64_t dst_strides[r],
+                            unsigned char* src, int64_t src_offset, int64_t src_strides[r],
+                            int64_t shape[r]) {
+  (void)ctx; (void)elem_size; (void)r;
+  (void)dst; (void)dst_offset; (void)dst_strides;
+  (void)shape;
+  set_error(ctx, strdup("Futhark runtime limitation:\nCannot copy unstructured array from host to GPU.\n"));
+  return 1;
+}
+
+static int
+lmad_copy_elements_gpu2host (struct futhark_context *ctx, size_t elem_size,
+                             int r,
+                             unsigned char* dst, int64_t dst_offset, int64_t dst_strides[r],
+                             gpu_mem src, int64_t src_offset, int64_t src_strides[r],
+                             int64_t shape[r]) {
+  (void)ctx; (void)elem_size; (void)r;
+  (void)dst; (void)dst_offset; (void)dst_strides;
+  (void)shape;
+  set_error(ctx, strdup("Futhark runtime limitation:\nCannot copy unstructured array from GPU to host.\n"));
+  return 1;
+}
+
+#define GEN_LMAD_COPY_ELEMENTS_HOSTGPU(NAME, ELEM_TYPE)                 \
+  static int lmad_copy_elements_gpu2gpu_##NAME                          \
+  (struct futhark_context* ctx,                                         \
+   int r,                                                               \
+   gpu_mem dst, int64_t dst_offset, int64_t dst_strides[r],             \
+   gpu_mem src, int64_t src_offset, int64_t src_strides[r],             \
+   int64_t shape[r]) {                                                  \
+    return (ctx, ctx->kernels->lmad_copy_##NAME, r,                     \
+                         dst, dst_offset, dst_strides,                  \
+                         src, src_offset, src_strides,                  \
+                         shape);                                        \
+  }                                                                     \
+
+
+static int lmad_copy_host2gpu(struct futhark_context* ctx, size_t elem_size, bool sync,
+                              int r,
+                              gpu_mem dst, int64_t dst_offset, int64_t dst_strides[r],
+                              unsigned char* src, int64_t src_offset, int64_t src_strides[r],
+                              int64_t shape[r]) {
+  log_copy(ctx, "Host to GPU", r, dst_offset, dst_strides,
+           src_offset, src_strides, shape);
+  int64_t size = elem_size;
+  for (int i = 0; i < r; i++) { size *= shape[i]; }
+  if (size == 0) { return FUTHARK_SUCCESS; }
+  int64_t k, n, m;
+  if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {
+    if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}
+    return memcpy_host2gpu(ctx, sync,
+                           dst, dst_offset*elem_size,
+                           src, src_offset*elem_size,
+                           size);
+  } else {
+    if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}
+    int error;
+    error = lmad_copy_elements_host2gpu
+      (ctx, elem_size, r,
+       dst, dst_offset, dst_strides,
+       src, src_offset, src_strides,
+       shape);
+    if (error == 0 && sync) {
+      error = futhark_context_sync(ctx);
+    }
+    return error;
+  }
+}
+
+static int lmad_copy_gpu2host(struct futhark_context* ctx, size_t elem_size, bool sync,
+                              int r,
+                              unsigned char* dst, int64_t dst_offset, int64_t dst_strides[r],
+                              gpu_mem src, int64_t src_offset, int64_t src_strides[r],
+                              int64_t shape[r]) {
+  log_copy(ctx, "Host to GPU", r, dst_offset, dst_strides,
+           src_offset, src_strides, shape);
+  int64_t size = elem_size;
+  for (int i = 0; i < r; i++) { size *= shape[i]; }
+  if (size == 0) { return FUTHARK_SUCCESS; }
+  int64_t k, n, m;
+  if (lmad_memcpyable(r, dst_strides, src_strides, shape)) {
+    if (ctx->logging) {fprintf(ctx->log, "## Flat copy\n\n");}
+    return memcpy_gpu2host(ctx, sync,
+                           dst, dst_offset*elem_size,
+                           src, src_offset*elem_size,
+                           size);
+  } else {
+    if (ctx->logging) {fprintf(ctx->log, "## General copy\n\n");}
+    int error;
+    error = lmad_copy_elements_gpu2host
+      (ctx, elem_size, r,
+       dst, dst_offset, dst_strides,
+       src, src_offset, src_strides,
+       shape);
+    if (error == 0 && sync) {
+      error = futhark_context_sync(ctx);
+    }
+    return error;
+  }
+}
+
 GEN_MAP_TRANSPOSE_GPU2GPU(1b, uint8_t)
 GEN_MAP_TRANSPOSE_GPU2GPU(2b, uint16_t)
 GEN_MAP_TRANSPOSE_GPU2GPU(4b, uint32_t)

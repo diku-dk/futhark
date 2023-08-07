@@ -961,6 +961,56 @@ int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
+int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+                    gpu_mem dst, int64_t dst_offset,
+                    unsigned char* src, int64_t src_offset,
+                    int64_t nbytes) {
+  if (nbytes > 0) {
+    CUevent* pevents = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      pevents = cuda_get_events(ctx, "copy_host_to_dev");
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+    }
+    if (sync) {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyHtoD(dst + dst_offset, src + src_offset, nbytes));
+    } else {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyHtoDAsync(dst + dst_offset, src + src_offset, nbytes, ctx->stream));
+    }
+    if (pevents != NULL) {
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+                    void* dst, int64_t dst_offset,
+                    gpu_mem src, int64_t src_offset,
+                    int64_t nbytes) {
+  if (nbytes > 0) {
+    CUevent* pevents = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      pevents = cuda_get_events(ctx, "copy_dev_to_host");
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+    }
+    if (sync) {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyDtoH(dst + dst_offset, src + src_offset, nbytes));
+    } else {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyDtoHAsync(dst + dst_offset, src + src_offset, nbytes, ctx->stream));
+    }
+    if (sync &&
+        ctx->failure_is_an_option &&
+        futhark_context_sync(ctx) != 0) {
+      return 1;
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
 int gpu_launch_kernel(struct futhark_context* ctx,
                       gpu_kernel kernel, const char *name,
                       const int32_t grid[3],

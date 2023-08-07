@@ -6,7 +6,7 @@
 -- abstraction layer we define in the runtime system.
 module Futhark.CodeGen.Backends.GPU
   ( callKernel,
-    copygpu2gpu,
+    gpuCopies,
     createKernels,
     allocateGPU,
     deallocateGPU,
@@ -17,6 +17,7 @@ where
 
 import Control.Monad
 import Data.Bifunctor (bimap)
+import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
@@ -155,14 +156,7 @@ callKernel (LaunchKernel safety kernel_name local_memory args num_groups group_s
 
 copygpu2gpu :: GC.DoLMADCopy op s
 copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
-  let fname :: String
-      fname =
-        case primByteSize t :: Int of
-          1 -> "lmad_copy_gpu2gpu_1b"
-          2 -> "lmad_copy_gpu2gpu_2b"
-          4 -> "lmad_copy_gpu2gpu_4b"
-          8 -> "lmad_copy_gpu2gpu_8b"
-          k -> error $ "copygpu2gpu: " <> error (show k)
+  let fname = "lmad_copy_gpu2gpu_" <> show (primByteSize t :: Int) <> "b"
       r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
@@ -179,6 +173,62 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
            goto cleanup;
          }
      |]
+
+copyhost2gpu :: GC.DoLMADCopy op s
+copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  GC.stm
+    [C.cstm|
+         if ((err =
+                lmad_copy_host2gpu
+                         (ctx, $int:(primByteSize t::Int), $exp:sync', $int:r,
+                          $exp:dst, $exp:(unCount dstoffset),
+                          (typename int64_t[]){ $inits:dststride_inits },
+                          $exp:src, $exp:(unCount srcoffset),
+                          (typename int64_t[]){ $inits:srcstride_inits },
+                          (typename int64_t[]){ $inits:shape_inits })) != 0) {
+           goto cleanup;
+         }
+     |]
+  where
+    sync' = case sync of
+      GC.CopyBarrier -> [C.cexp|true|]
+      GC.CopyNoBarrier -> [C.cexp|false|]
+
+copygpu2host :: GC.DoLMADCopy op s
+copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  GC.stm
+    [C.cstm|
+         if ((err =
+                lmad_copy_gpu2host
+                         (ctx, $int:(primByteSize t::Int), $exp:sync', $int:r,
+                          $exp:dst, $exp:(unCount dstoffset),
+                          (typename int64_t[]){ $inits:dststride_inits },
+                          $exp:src, $exp:(unCount srcoffset),
+                          (typename int64_t[]){ $inits:srcstride_inits },
+                          (typename int64_t[]){ $inits:shape_inits })) != 0) {
+           goto cleanup;
+         }
+     |]
+  where
+    sync' = case sync of
+      GC.CopyBarrier -> [C.cexp|true|]
+      GC.CopyNoBarrier -> [C.cexp|false|]
+
+gpuCopies :: M.Map (Space, Space) (GC.DoLMADCopy op s)
+gpuCopies =
+  M.fromList
+    [ ((Space "device", Space "device"), copygpu2gpu),
+      ((Space "device", DefaultSpace), copyhost2gpu),
+      ((DefaultSpace, Space "device"), copygpu2host)
+    ]
 
 createKernels :: [KernelName] -> GC.CompilerM op s ()
 createKernels kernels = forM_ kernels $ \name ->

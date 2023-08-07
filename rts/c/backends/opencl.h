@@ -1210,6 +1210,54 @@ int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
+int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+                    gpu_mem dst, int64_t dst_offset,
+                    unsigned char* src, int64_t src_offset,
+                    int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_host_to_dev");
+    }
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueWriteBuffer(ctx->queue,
+                            dst,
+                            sync ? CL_TRUE : CL_FALSE,
+                            (size_t)dst_offset, (size_t)nbytes,
+                            src + src_offset,
+                            0, NULL, event));
+    if (ctx->debugging) {
+      OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+                    unsigned char* dst, int64_t dst_offset,
+                    gpu_mem src, int64_t src_offset,
+                    int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_dev_to_host");
+    }
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueReadBuffer(ctx->queue, src,
+                           ctx->failure_is_an_option ? CL_FALSE
+                           : sync ? CL_TRUE : CL_FALSE,
+                           src_offset, nbytes,
+                           dst + dst_offset,
+                           0, NULL, event));
+    if (sync &&
+        ctx->failure_is_an_option &&
+        futhark_context_sync(ctx) != 0) {
+      return 1;
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
 int gpu_launch_kernel(struct futhark_context* ctx,
                       gpu_kernel kernel, const char *name,
                       const int32_t grid[3],
