@@ -475,6 +475,7 @@ lmad_copy_elements_host2gpu(struct futhark_context *ctx, size_t elem_size,
                             int64_t shape[r]) {
   (void)ctx; (void)elem_size; (void)r;
   (void)dst; (void)dst_offset; (void)dst_strides;
+  (void)src; (void)src_offset; (void)src_strides;
   (void)shape;
   set_error(ctx, strdup("Futhark runtime limitation:\nCannot copy unstructured array from host to GPU.\n"));
   return 1;
@@ -488,6 +489,7 @@ lmad_copy_elements_gpu2host (struct futhark_context *ctx, size_t elem_size,
                              int64_t shape[r]) {
   (void)ctx; (void)elem_size; (void)r;
   (void)dst; (void)dst_offset; (void)dst_strides;
+  (void)src; (void)src_offset; (void)src_strides;
   (void)shape;
   set_error(ctx, strdup("Futhark runtime limitation:\nCannot copy unstructured array from GPU to host.\n"));
   return 1;
