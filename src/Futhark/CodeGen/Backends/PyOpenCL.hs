@@ -289,7 +289,7 @@ writeOpenCLScalar mem i bt "device" val = do
         [ Arg $ Var "self.queue",
           Arg mem,
           Arg nparr,
-          ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
+          ArgKeyword "dst_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
           ArgKeyword "is_blocking" $ Var "synchronous"
         ]
 writeOpenCLScalar _ _ _ space _ =
@@ -313,7 +313,7 @@ readOpenCLScalar mem i bt "device" = do
         [ Arg $ Var "self.queue",
           Arg val',
           Arg mem,
-          ArgKeyword "device_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
+          ArgKeyword "src_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
           ArgKeyword "is_blocking" $ Var "synchronous"
         ]
   Py.stm $ Exp $ Py.simpleCall "sync" [Var "self"]
