@@ -25,16 +25,15 @@ errorMsgNumArgs = length . errorMsgArgTypes
 -- the boilerplate.
 generateBoilerplate ::
   T.Text ->
-  T.Text ->
   [Name] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateBoilerplate gpu_program cuda_prelude cost_centres failures = do
+generateBoilerplate gpu_program cost_centres failures = do
   let gpu_program_fragments =
         -- Some C compilers limit the size of literal strings, so
         -- chunk the entire program into small bits here, and
         -- concatenate it again at runtime.
-        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack $ cuda_prelude <> gpu_program]
+        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack gpu_program]
       program_fragments = gpu_program_fragments ++ [[C.cinit|NULL|]]
   let max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
   mapM_

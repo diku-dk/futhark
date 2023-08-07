@@ -46,8 +46,7 @@ compileProg version prog = do
       extra = do
         createKernels (M.keys kernels)
         generateBoilerplate
-          opencl_code
-          opencl_prelude
+          (opencl_prelude <> opencl_code)
           cost_centres
           types
           failures

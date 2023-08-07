@@ -36,8 +36,7 @@ compileProg version prog = do
       extra = do
         createKernels (M.keys kernels)
         generateBoilerplate
-          cuda_code
-          cuda_prelude
+          (cuda_prelude <> cuda_code)
           cost_centres
           failures
   (ws,)
