@@ -82,7 +82,7 @@ compileProg version prog = do
 
 cliOptions :: [Option]
 cliOptions =
-  commonOptions
+  gpuOptions
     ++ [ Option
            { optionLongName = "platform",
              optionShortName = Just 'p',

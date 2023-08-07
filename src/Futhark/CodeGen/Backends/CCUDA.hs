@@ -13,7 +13,6 @@ where
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -71,7 +70,7 @@ compileProg version prog = do
 
 cliOptions :: [Option]
 cliOptions =
-  commonOptions
+  gpuOptions
     ++ [ Option
            { optionLongName = "dump-cuda",
              optionShortName = Nothing,

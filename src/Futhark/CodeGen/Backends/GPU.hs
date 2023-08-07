@@ -7,6 +7,7 @@
 module Futhark.CodeGen.Backends.GPU
   ( createKernels,
     gpuOperations,
+    gpuOptions,
   )
 where
 
@@ -15,6 +16,7 @@ import Data.Bifunctor (bimap)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
+import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
@@ -305,3 +307,50 @@ gpuOperations =
       GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
       GC.opsFatMemory = True
     }
+
+-- | Options that are common to multiple GPU-like backends.
+gpuOptions :: [Option]
+gpuOptions =
+  [ Option
+      { optionLongName = "device",
+        optionShortName = Just 'd',
+        optionArgument = RequiredArgument "NAME",
+        optionDescription = "Use the first OpenCL device whose name contains the given string.",
+        optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
+      },
+    Option
+      { optionLongName = "default-group-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default size of OpenCL workgroups that are launched.",
+        optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-num-groups",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default number of OpenCL workgroups that are launched.",
+        optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-tile-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default tile size used when performing two-dimensional tiling.",
+        optionAction = [C.cstm|futhark_context_config_set_default_tile_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-reg-tile-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default register tile size used when performing two-dimensional tiling.",
+        optionAction = [C.cstm|futhark_context_config_set_default_reg_tile_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-threshold",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default parallelism threshold.",
+        optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+      }
+  ]

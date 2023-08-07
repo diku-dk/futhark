@@ -10,11 +10,7 @@ where
 
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
-  ( copyDevToHost,
-    copyHostToDev,
-    copyScalarFromDev,
-    copyScalarToDev,
-    failureMsgFunction,
+  ( failureMsgFunction,
     genProfileReport,
   )
 import Futhark.CodeGen.Backends.GenericC qualified as GC
