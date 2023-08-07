@@ -3,7 +3,6 @@
 -- | Various boilerplate definitions for the CUDA backend.
 module Futhark.CodeGen.Backends.CCUDA.Boilerplate
   ( generateBoilerplate,
-    profilingEnclosure,
     module Futhark.CodeGen.Backends.COpenCL.Boilerplate,
   )
 where
@@ -22,23 +21,6 @@ import Language.C.Syntax qualified as C
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
-
--- | Block items to put before and after a thing to be profiled.
-profilingEnclosure :: Name -> ([C.BlockItem], [C.BlockItem])
-profilingEnclosure name =
-  ( [C.citems|
-      typename CUevent *pevents = NULL;
-      if (ctx->profiling && !ctx->profiling_paused) {
-        pevents = cuda_get_events(ctx, $string:(nameToString name));
-        CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
-      }
-      |],
-    [C.citems|
-      if (pevents != NULL) {
-        CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
-      }
-      |]
-  )
 
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
