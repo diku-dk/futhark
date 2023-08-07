@@ -7,10 +7,12 @@ where
 import Control.Monad
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.GenericPython qualified as Py
+import Futhark.CodeGen.Backends.GenericPython hiding (compileProg)
+import Futhark.CodeGen.Backends.GenericPython qualified as GP
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
+import Futhark.CodeGen.ImpCode (Count (..))
 import Futhark.CodeGen.ImpCode.OpenCL qualified as Imp
 import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
 import Futhark.CodeGen.RTS.Python (openclPy)
@@ -22,7 +24,7 @@ import Futhark.Util.Pretty (prettyString, prettyText)
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
   MonadFreshNames m =>
-  Py.CompilerMode ->
+  CompilerMode ->
   String ->
   Prog GPUMem ->
   m (ImpGen.Warnings, T.Text)
@@ -73,7 +75,7 @@ compileProg mode class_name prog = do
         ]
 
   let constructor =
-        Py.Constructor
+        Constructor
           [ "self",
             "build_options=build_options",
             "command_queue=None",
@@ -169,7 +171,7 @@ compileProg mode class_name prog = do
         ]
 
   (ws,)
-    <$> Py.compileProg
+    <$> GP.compileProg
       mode
       class_name
       constructor
@@ -177,27 +179,29 @@ compileProg mode class_name prog = do
       defines
       operations
       ()
-      [Exp $ Py.simpleCall "sync" [Var "self"]]
+      [Exp $ simpleCall "sync" [Var "self"]]
       options
       prog'
   where
-    operations :: Py.Operations Imp.OpenCL ()
+    operations :: Operations Imp.OpenCL ()
     operations =
-      Py.Operations
-        { Py.opsCompiler = callKernel,
-          Py.opsWriteScalar = writeOpenCLScalar,
-          Py.opsReadScalar = readOpenCLScalar,
-          Py.opsAllocate = allocateOpenCLBuffer,
-          Py.opsCopy = copyOpenCLMemory,
-          Py.opsCopies = mempty,
-          Py.opsEntryOutput = packArrayOutput,
-          Py.opsEntryInput = unpackArrayInput
+      Operations
+        { opsCompiler = callKernel,
+          opsWriteScalar = writeOpenCLScalar,
+          opsReadScalar = readOpenCLScalar,
+          opsAllocate = allocateOpenCLBuffer,
+          opsCopy = copyOpenCLMemory,
+          opsCopies =
+            M.insert (Imp.Space "device", Imp.Space "device") copygpu2gpu $
+              opsCopies defaultOperations,
+          opsEntryOutput = packArrayOutput,
+          opsEntryInput = unpackArrayInput
         }
 
 -- We have many casts to 'long', because PyOpenCL may get confused at
 -- the 32-bit numbers that ImpCode uses for offsets and the like.
 asLong :: PyExp -> PyExp
-asLong x = Py.simpleCall "np.int64" [x]
+asLong x = simpleCall "np.int64" [x]
 
 kernelConstToExp :: Imp.KernelConst -> PyExp
 kernelConstToExp (Imp.SizeConst key) =
@@ -205,37 +209,37 @@ kernelConstToExp (Imp.SizeConst key) =
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
-compileGroupDim :: Imp.GroupDim -> Py.CompilerM op s PyExp
-compileGroupDim (Left e) = asLong <$> Py.compileExp e
+compileGroupDim :: Imp.GroupDim -> CompilerM op s PyExp
+compileGroupDim (Left e) = asLong <$> compileExp e
 compileGroupDim (Right kc) = pure $ kernelConstToExp kc
 
-callKernel :: Py.OpCompiler Imp.OpenCL ()
+callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
-  v' <- Py.compileVar v
-  Py.stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
+  v' <- compileVar v
+  stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
 callKernel (Imp.CmpSizeLe v key x) = do
-  v' <- Py.compileVar v
-  x' <- Py.compileExp x
-  Py.stm $
+  v' <- compileVar v
+  x' <- compileExp x
+  stm $
     Assign v' $
       BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
 callKernel (Imp.GetSizeMax v size_class) = do
-  v' <- Py.compileVar v
-  Py.stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
+  v' <- compileVar v
+  stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
 callKernel (Imp.LaunchKernel safety name local_memory args num_workgroups workgroup_size) = do
-  num_workgroups' <- mapM (fmap asLong . Py.compileExp) num_workgroups
+  num_workgroups' <- mapM (fmap asLong . compileExp) num_workgroups
   workgroup_size' <- mapM compileGroupDim workgroup_size
   let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-  local_memory' <- Py.compileExp $ Imp.untyped $ Imp.unCount local_memory
-  body <- Py.collect $ launchKernel name safety kernel_size workgroup_size' local_memory' args
-  Py.stm $ If cond body []
+  local_memory' <- compileExp $ Imp.untyped $ Imp.unCount local_memory
+  body <- collect $ launchKernel name safety kernel_size workgroup_size' local_memory' args
+  stm $ If cond body []
 
   when (safety >= Imp.SafetyFull) $
-    Py.stm $
+    stm $
       Assign (Var "self.failure_is_an_option") $
-        Py.compilePrimValue (Imp.IntValue (Imp.Int32Value 1))
+        compilePrimValue (Imp.IntValue (Imp.Int32Value 1))
   where
     mult_exp = BinOp "*"
 
@@ -246,7 +250,7 @@ launchKernel ::
   [PyExp] ->
   PyExp ->
   [Imp.KernelArg] ->
-  Py.CompilerM op s ()
+  CompilerM op s ()
 launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = do
   let kernel_dims' = Tuple kernel_dims
       workgroup_dims' = Tuple workgroup_dims
@@ -259,28 +263,28 @@ launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = d
             Var "self.failure_is_an_option",
             Var "self.global_failure_args"
           ]
-  Py.stm . Exp $
-    Py.simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-      [Py.simpleCall "cl.LocalMemory" [Py.simpleCall "max" [local_memory, Integer 1]]]
+  stm . Exp $
+    simpleCall (T.unpack $ kernel_name' <> ".set_args") $
+      [simpleCall "cl.LocalMemory" [simpleCall "max" [local_memory, Integer 1]]]
         ++ failure_args
         ++ args'
-  Py.stm . Exp $
-    Py.simpleCall
+  stm . Exp $
+    simpleCall
       "cl.enqueue_nd_range_kernel"
       [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
   finishIfSynchronous
   where
-    processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
-    processKernelArg (Imp.ValueKArg e bt) = Py.toStorage bt <$> Py.compileExp e
-    processKernelArg (Imp.MemKArg v) = Py.compileVar v
+    processKernelArg :: Imp.KernelArg -> CompilerM op s PyExp
+    processKernelArg (Imp.ValueKArg e bt) = toStorage bt <$> compileExp e
+    processKernelArg (Imp.MemKArg v) = compileVar v
 
-writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
+writeOpenCLScalar :: WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
   let nparr =
         Call
           (Var "np.array")
-          [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
-  Py.stm $
+          [Arg val, ArgKeyword "dtype" $ Var $ compilePrimType bt]
+  stm $
     Exp $
       Call
         (Var "cl.enqueue_copy")
@@ -293,7 +297,7 @@ writeOpenCLScalar mem i bt "device" val = do
 writeOpenCLScalar _ _ _ space _ =
   error $ "Cannot write to '" ++ space ++ "' memory space."
 
-readOpenCLScalar :: Py.ReadScalar Imp.OpenCL ()
+readOpenCLScalar :: ReadScalar Imp.OpenCL ()
 readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ prettyString val
@@ -301,10 +305,10 @@ readOpenCLScalar mem i bt "device" = do
         Call
           (Var "np.empty")
           [ Arg $ Integer 1,
-            ArgKeyword "dtype" (Var $ Py.compilePrimType bt)
+            ArgKeyword "dtype" (Var $ compilePrimType bt)
           ]
-  Py.stm $ Assign val' nparr
-  Py.stm $
+  stm $ Assign val' nparr
+  stm $
     Exp $
       Call
         (Var "cl.enqueue_copy")
@@ -314,25 +318,25 @@ readOpenCLScalar mem i bt "device" = do
           ArgKeyword "src_offset" $ BinOp "*" (asLong i) (Integer $ Imp.primByteSize bt),
           ArgKeyword "is_blocking" $ Var "synchronous"
         ]
-  Py.stm $ Exp $ Py.simpleCall "sync" [Var "self"]
+  stm $ Exp $ simpleCall "sync" [Var "self"]
   pure $ Index val' $ IdxExp $ Integer 0
 readOpenCLScalar _ _ _ space =
   error $ "Cannot read from '" ++ space ++ "' memory space."
 
-allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
+allocateOpenCLBuffer :: Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" =
-  Py.stm $
+  stm $
     Assign mem $
-      Py.simpleCall "opencl_alloc" [Var "self", size, String $ prettyText mem]
+      simpleCall "opencl_alloc" [Var "self", size, String $ prettyText mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
-copyOpenCLMemory :: Py.Copy Imp.OpenCL ()
+copyOpenCLMemory :: Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
   let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
       end = BinOp "+" destidx divide
       dest = Index destmem (IdxRange destidx end)
-  Py.stm $
+  stm $
     ifNotZeroSize nbytes $
       Exp $
         Call
@@ -345,8 +349,8 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
           ]
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
   let end = BinOp "+" srcidx nbytes
-      src = Index (Py.simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
-  Py.stm $
+      src = Index (simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
+  stm $
     ifNotZeroSize nbytes $
       Exp $
         Call
@@ -358,7 +362,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
             ArgKeyword "is_blocking" $ Var "synchronous"
           ]
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
-  Py.stm $
+  stm $
     ifNotZeroSize nbytes $
       Exp $
         Call
@@ -366,48 +370,48 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
           [ Arg $ Var "self.queue",
             Arg destmem,
             Arg srcmem,
-            ArgKeyword "dest_offset" $ asLong destidx,
+            ArgKeyword "dst_offset" $ asLong destidx,
             ArgKeyword "src_offset" $ asLong srcidx,
             ArgKeyword "byte_count" $ asLong nbytes
           ]
   finishIfSynchronous
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace nbytes _ =
-  Py.copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
+  copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
+packArrayOutput :: EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do
-  mem' <- Py.compileVar mem
-  dims' <- mapM Py.compileDim dims
+  mem' <- compileVar mem
+  dims' <- mapM compileDim dims
   pure $
     Call
       (Var "cl.array.Array")
       [ Arg $ Var "self.queue",
         Arg $ Tuple $ dims' <> [Integer 0 | bt == Imp.Unit],
-        Arg $ Var $ Py.compilePrimToExtNp bt ept,
+        Arg $ Var $ compilePrimToExtNp bt ept,
         ArgKeyword "data" mem'
       ]
 packArrayOutput _ sid _ _ _ =
   error $ "Cannot return array from " ++ sid ++ " space."
 
-unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
+unpackArrayInput :: EntryInput Imp.OpenCL ()
 unpackArrayInput mem "device" t s dims e = do
   let type_is_ok =
         BinOp
           "and"
-          (BinOp "in" (Py.simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
-          (BinOp "==" (Field e "dtype") (Var (Py.compilePrimToExtNp t s)))
-  Py.stm $ Assert type_is_ok $ String "Parameter has unexpected type"
+          (BinOp "in" (simpleCall "type" [e]) (List [Var "np.ndarray", Var "cl.array.Array"]))
+          (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
+  stm $ Assert type_is_ok $ String "Parameter has unexpected type"
 
-  zipWithM_ (Py.unpackDim e) dims [0 ..]
+  zipWithM_ (unpackDim e) dims [0 ..]
 
-  let memsize' = Py.simpleCall "np.int64" [Field e "nbytes"]
+  let memsize' = simpleCall "np.int64" [Field e "nbytes"]
       pyOpenCLArrayCase =
         [Assign mem $ Field e "data"]
-  numpyArrayCase <- Py.collect $ do
+  numpyArrayCase <- collect $ do
     allocateOpenCLBuffer mem memsize' "device"
-    Py.stm $
+    stm $
       ifNotZeroSize memsize' $
         Exp $
           Call
@@ -418,9 +422,9 @@ unpackArrayInput mem "device" t s dims e = do
               ArgKeyword "is_blocking" $ Var "synchronous"
             ]
 
-  Py.stm $
+  stm $
     If
-      (BinOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))
+      (BinOp "==" (simpleCall "type" [e]) (Var "cl.array.Array"))
       pyOpenCLArrayCase
       numpyArrayCase
 unpackArrayInput _ sid _ _ _ _ =
@@ -430,6 +434,20 @@ ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
 ifNotZeroSize e s =
   If (BinOp "!=" e (Integer 0)) [s] []
 
-finishIfSynchronous :: Py.CompilerM op s ()
+finishIfSynchronous :: CompilerM op s ()
 finishIfSynchronous =
-  Py.stm $ If (Var "synchronous") [Exp $ Py.simpleCall "sync" [Var "self"]] []
+  stm $ If (Var "synchronous") [Exp $ simpleCall "sync" [Var "self"]] []
+
+copygpu2gpu :: DoLMADCopy op s
+copygpu2gpu t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  stm . Exp . simpleCall "lmad_copy_gpu2gpu" $
+    [ Var "self",
+      Var (compilePrimType t),
+      dst,
+      unCount dstoffset,
+      List (map unCount dststride),
+      src,
+      unCount srcoffset,
+      List (map unCount srcstride),
+      List (map unCount shape)
+    ]

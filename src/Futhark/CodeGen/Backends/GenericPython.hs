@@ -20,6 +20,7 @@ module Futhark.CodeGen.Backends.GenericPython
     fromStorage,
     toStorage,
     Operations (..),
+    DoLMADCopy,
     defaultOperations,
     unpackDim,
     CompilerM (..),
@@ -1413,15 +1414,13 @@ compileCode Imp.Skip = pure ()
 
 lmadcopyCPU :: DoLMADCopy op s
 lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
-  stm . Exp $
-    simpleCall
-      "lmad_copy"
-      [ Var (compilePrimType t),
-        dst,
-        unCount dstoffset,
-        List (map unCount dststride),
-        src,
-        unCount srcoffset,
-        List (map unCount srcstride),
-        List (map unCount shape)
-      ]
+  stm . Exp . simpleCall "lmad_copy" $
+    [ Var (compilePrimType t),
+      dst,
+      unCount dstoffset,
+      List (map unCount dststride),
+      src,
+      unCount srcoffset,
+      List (map unCount srcstride),
+      List (map unCount shape)
+    ]
