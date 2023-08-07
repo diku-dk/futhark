@@ -12,12 +12,12 @@ where
 
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.CCUDA.Boilerplate
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.CUDA qualified as ImpGen
+import Futhark.CodeGen.RTS.C (backendsCudaH)
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
@@ -27,45 +27,31 @@ import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C
 import NeatInterpolation (untrimming)
 
--- | Compile the program to C with calls to CUDA.
-compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg version prog = do
-  (ws, Program cuda_code cuda_prelude kernels _ params failures prog') <-
-    ImpGen.compileProg prog
-  let cost_centres = M.keys kernels
-      extra = do
-        createKernels (M.keys kernels)
-        generateBoilerplate
-          (cuda_prelude <> cuda_code)
-          cost_centres
-          failures
-  (ws,)
-    <$> GC.compileProg
-      "cuda"
-      version
-      params
-      operations
-      extra
-      cuda_includes
-      (Space "device", [Space "device", DefaultSpace])
-      cliOptions
-      prog'
-  where
-    operations :: GC.Operations OpenCL ()
-    operations =
-      gpuOperations
-        { GC.opsMemoryType = cudaMemoryType,
-          GC.opsCritical =
-            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
-              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]
-            )
-        }
-    cuda_includes =
-      [untrimming|
-       #include <cuda.h>
-       #include <cuda_runtime.h>
-       #include <nvrtc.h>
-      |]
+mkBoilerplate ::
+  T.Text ->
+  M.Map Name KernelSafety ->
+  [PrimType] ->
+  [FailureMsg] ->
+  GC.CompilerM OpenCL () ()
+mkBoilerplate cuda_program kernels types failures = do
+  generateGPUBoilerplate
+    cuda_program
+    backendsCudaH
+    (M.keys kernels)
+    types
+    failures
+
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char* opt);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
 
 cliOptions :: [Option]
 cliOptions =
@@ -121,3 +107,38 @@ cliOptions =
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
+
+-- | Compile the program to C with calls to CUDA.
+compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version prog = do
+  ( ws,
+    Program cuda_code cuda_prelude kernels types params failures prog'
+    ) <-
+    ImpGen.compileProg prog
+  (ws,)
+    <$> GC.compileProg
+      "cuda"
+      version
+      params
+      operations
+      (mkBoilerplate (cuda_prelude <> cuda_code) kernels types failures)
+      cuda_includes
+      (Space "device", [Space "device", DefaultSpace])
+      cliOptions
+      prog'
+  where
+    operations :: GC.Operations OpenCL ()
+    operations =
+      gpuOperations
+        { GC.opsMemoryType = cudaMemoryType,
+          GC.opsCritical =
+            ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
+              [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]
+            )
+        }
+    cuda_includes =
+      [untrimming|
+       #include <cuda.h>
+       #include <cuda_runtime.h>
+       #include <nvrtc.h>
+      |]

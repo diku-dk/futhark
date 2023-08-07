@@ -10,14 +10,16 @@ module Futhark.CodeGen.Backends.COpenCL
   )
 where
 
+import Control.Monad.State
 import Data.Map qualified as M
 import Data.Text qualified as T
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.OpenCL qualified as ImpGen
+import Futhark.CodeGen.OpenCL.Heuristics
+import Futhark.CodeGen.RTS.C (backendsOpenclH)
 import Futhark.IR.GPUMem hiding
   ( CmpSizeLe,
     GetSize,
@@ -25,59 +27,84 @@ import Futhark.IR.GPUMem hiding
   )
 import Futhark.MonadFreshNames
 import Language.C.Quote.OpenCL qualified as C
+import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 
--- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
-compileProg version prog = do
-  ( ws,
-    Program
-      opencl_code
-      opencl_prelude
-      kernels
-      types
-      params
-      failures
-      prog'
-    ) <-
-    ImpGen.compileProg prog
-  let cost_centres =
-        M.keys kernels
-      extra = do
-        createKernels (M.keys kernels)
-        generateBoilerplate
-          (opencl_prelude <> opencl_code)
-          cost_centres
-          types
-          failures
-  (ws,)
-    <$> GC.compileProg
-      "opencl"
-      version
-      params
-      operations
-      extra
-      include_opencl_h
-      (Space "device", [Space "device", DefaultSpace])
-      cliOptions
-      prog'
+sizeHeuristicsCode :: SizeHeuristic -> C.Stm
+sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what)) =
+  [C.cstm|
+   if ($exp:which' == 0 &&
+       strstr(option->platform_name, $string:platform_name) != NULL &&
+       (option->device_type & $exp:(clDeviceType device_type)) == $exp:(clDeviceType device_type)) {
+     $items:get_size
+   }|]
   where
-    operations :: GC.Operations OpenCL ()
-    operations =
-      gpuOperations
-        { GC.opsMemoryType = openclMemoryType
-        }
-    include_opencl_h =
-      [untrimming|
-       #define CL_TARGET_OPENCL_VERSION 120
-       #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
-       #ifdef __APPLE__
-       #define CL_SILENCE_DEPRECATION
-       #include <OpenCL/cl.h>
-       #else
-       #include <CL/cl.h>
-       #endif
-       |]
+    clDeviceType DeviceGPU = [C.cexp|CL_DEVICE_TYPE_GPU|]
+    clDeviceType DeviceCPU = [C.cexp|CL_DEVICE_TYPE_CPU|]
+
+    which' = case which of
+      LockstepWidth -> [C.cexp|ctx->lockstep_width|]
+      NumGroups -> [C.cexp|ctx->cfg->default_num_groups|]
+      GroupSize -> [C.cexp|ctx->cfg->default_group_size|]
+      TileSize -> [C.cexp|ctx->cfg->default_tile_size|]
+      RegTileSize -> [C.cexp|ctx->cfg->default_reg_tile_size|]
+      Threshold -> [C.cexp|ctx->cfg->default_threshold|]
+
+    get_size =
+      let (e, m) = runState (GC.compilePrimExp onLeaf what) mempty
+       in concat (M.elems m) ++ [[C.citem|$exp:which' = $exp:e;|]]
+
+    onLeaf (DeviceInfo s) = do
+      let s' = "CL_DEVICE_" ++ s
+          v = s ++ "_val"
+      m <- get
+      case M.lookup s m of
+        Nothing ->
+          -- XXX: Cheating with the type here; works for the infos we
+          -- currently use because we zero-initialise and assume a
+          -- little-endian platform, but should be made more
+          -- size-aware in the future.
+          modify $
+            M.insert
+              s'
+              [C.citems|size_t $id:v = 0;
+                        clGetDeviceInfo(ctx->device, $id:s',
+                                        sizeof($id:v), &$id:v,
+                                        NULL);|]
+        Just _ -> pure ()
+
+      pure [C.cexp|$id:v|]
+
+mkBoilerplate ::
+  T.Text ->
+  M.Map Name KernelSafety ->
+  [PrimType] ->
+  [FailureMsg] ->
+  GC.CompilerM OpenCL () ()
+mkBoilerplate opencl_program kernels types failures = do
+  generateGPUBoilerplate
+    opencl_program
+    backendsOpenclH
+    (M.keys kernels)
+    types
+    failures
+
+  GC.earlyDecl
+    [C.cedecl|void post_opencl_setup(struct futhark_context *ctx, struct opencl_device_option *option) {
+             $stms:(map sizeHeuristicsCode sizeHeuristicsTable)
+             }|]
+
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char* opt);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
 
 cliOptions :: [Option]
 cliOptions =
@@ -149,3 +176,39 @@ cliOptions =
 openclMemoryType :: GC.MemoryType OpenCL ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
+
+-- | Compile the program to C with calls to OpenCL.
+compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg version prog = do
+  ( ws,
+    Program opencl_code opencl_prelude kernels types params failures prog'
+    ) <-
+    ImpGen.compileProg prog
+  (ws,)
+    <$> GC.compileProg
+      "opencl"
+      version
+      params
+      operations
+      (mkBoilerplate (opencl_prelude <> opencl_code) kernels types failures)
+      opencl_includes
+      (Space "device", [Space "device", DefaultSpace])
+      cliOptions
+      prog'
+  where
+    operations :: GC.Operations OpenCL ()
+    operations =
+      gpuOperations
+        { GC.opsMemoryType = openclMemoryType
+        }
+    opencl_includes =
+      [untrimming|
+       #define CL_TARGET_OPENCL_VERSION 120
+       #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+       #ifdef __APPLE__
+       #define CL_SILENCE_DEPRECATION
+       #include <OpenCL/cl.h>
+       #else
+       #include <CL/cl.h>
+       #endif
+       |]

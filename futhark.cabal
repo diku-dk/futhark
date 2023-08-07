@@ -215,9 +215,7 @@ library
       Futhark.CLI.Test
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
-      Futhark.CodeGen.Backends.CCUDA.Boilerplate
       Futhark.CodeGen.Backends.COpenCL
-      Futhark.CodeGen.Backends.COpenCL.Boilerplate
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
       Futhark.CodeGen.Backends.GenericC.Code

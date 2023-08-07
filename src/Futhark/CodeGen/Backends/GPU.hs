@@ -5,9 +5,9 @@
 -- This module generates codes that targets the tiny GPU API
 -- abstraction layer we define in the runtime system.
 module Futhark.CodeGen.Backends.GPU
-  ( createKernels,
-    gpuOperations,
+  ( gpuOperations,
     gpuOptions,
+    generateGPUBoilerplate,
   )
 where
 
@@ -20,7 +20,9 @@ import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
+import Futhark.CodeGen.RTS.C (gpuH, gpuPrototypesH)
 import Futhark.MonadFreshNames
+import Futhark.Util (chunk)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -354,3 +356,85 @@ gpuOptions =
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
       }
   ]
+
+errorMsgNumArgs :: ErrorMsg a -> Int
+errorMsgNumArgs = length . errorMsgArgTypes
+
+failureMsgFunction :: [FailureMsg] -> C.Definition
+failureMsgFunction failures =
+  let printfEscape =
+        let escapeChar '%' = "%%"
+            escapeChar c = [c]
+         in concatMap escapeChar
+      onPart (ErrorString s) = printfEscape $ T.unpack s
+      -- FIXME: bogus for non-ints.
+      onPart ErrorVal {} = "%lld"
+      onFailure i (FailureMsg emsg@(ErrorMsg parts) backtrace) =
+        let msg = concatMap onPart parts ++ "\n" ++ printfEscape backtrace
+            msgargs = [[C.cexp|args[$int:j]|] | j <- [0 .. errorMsgNumArgs emsg - 1]]
+         in [C.cstm|case $int:i: {return msgprintf($string:msg, $args:msgargs); break;}|]
+      failure_cases =
+        zipWith onFailure [(0 :: Int) ..] failures
+   in [C.cedecl|static char* get_failure_msg(int failure_idx, typename int64_t args[]) {
+                  (void)args;
+                  switch (failure_idx) { $stms:failure_cases }
+                  return strdup("Unknown error.  This is a compiler bug.");
+                }|]
+
+genProfileReport :: [Name] -> GC.CompilerM op s ()
+genProfileReport cost_centres =
+  GC.profileReport
+    [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
+              $stms:(map initCostCentre (def_cost_centres<>cost_centres))
+              tally_profiling_records(ctx, ccs);
+              cost_centre_report(ccs, &builder);
+              cost_centres_free(ccs);
+              }|]
+  where
+    def_cost_centres =
+      [ "copy_dev_to_dev",
+        "copy_dev_to_host",
+        "copy_host_to_dev",
+        "copy_scalar_to_dev",
+        "copy_scalar_from_dev"
+      ]
+    initCostCentre v =
+      [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
+
+-- | Called after most code has been generated to generate the bulk of
+-- the boilerplate.
+generateGPUBoilerplate ::
+  T.Text ->
+  T.Text ->
+  [Name] ->
+  [PrimType] ->
+  [FailureMsg] ->
+  GC.CompilerM OpenCL () ()
+generateGPUBoilerplate gpu_program backendH kernels types failures = do
+  createKernels kernels
+  let gpu_program_fragments =
+        -- Some C compilers limit the size of literal strings, so
+        -- chunk the entire program into small bits here, and
+        -- concatenate it again at runtime.
+        [[C.cinit|$string:s|] | s <- chunk 2000 $ T.unpack gpu_program]
+      program_fragments = gpu_program_fragments ++ [[C.cinit|NULL|]]
+      f64_required
+        | FloatType Float64 `elem` types = [C.cexp|1|]
+        | otherwise = [C.cexp|0|]
+      max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+  mapM_
+    GC.earlyDecl
+    [C.cunit|static const int max_failure_args = $int:max_failure_args;
+             static const int f64_required = $exp:f64_required;
+             static const char *gpu_program[] = {$inits:program_fragments};
+             $esc:(T.unpack gpuPrototypesH)
+             $esc:(T.unpack backendH)
+             $esc:(T.unpack gpuH)
+            |]
+  GC.earlyDecl $ failureMsgFunction failures
+
+  GC.generateProgramStruct
+
+  GC.onClear [C.citem|if (ctx->error == NULL) { gpu_free_all(ctx); }|]
+
+  genProfileReport kernels
