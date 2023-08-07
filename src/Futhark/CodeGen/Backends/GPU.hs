@@ -5,14 +5,8 @@
 -- This module generates codes that targets the tiny GPU API
 -- abstraction layer we define in the runtime system.
 module Futhark.CodeGen.Backends.GPU
-  ( callKernel,
-    gpuCopies,
-    createKernels,
-    allocateGPU,
-    deallocateGPU,
-    readScalarGPU,
-    writeScalarGPU,
-    copyGPU,
+  ( createKernels,
+    gpuOperations,
   )
 where
 
@@ -298,3 +292,16 @@ copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes =
     [C.cstm|if (memcpy_host2gpu(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes) != 0) { return 1; }|]
 copyGPU _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+gpuOperations :: GC.Operations OpenCL ()
+gpuOperations =
+  GC.defaultOperations
+    { GC.opsCompiler = callKernel,
+      GC.opsWriteScalar = writeScalarGPU,
+      GC.opsReadScalar = readScalarGPU,
+      GC.opsAllocate = allocateGPU,
+      GC.opsDeallocate = deallocateGPU,
+      GC.opsCopy = copyGPU,
+      GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
+      GC.opsFatMemory = True
+    }

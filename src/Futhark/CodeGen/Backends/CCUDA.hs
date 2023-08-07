@@ -55,16 +55,8 @@ compileProg version prog = do
   where
     operations :: GC.Operations OpenCL ()
     operations =
-      GC.defaultOperations
-        { GC.opsCompiler = callKernel,
-          GC.opsWriteScalar = writeScalarGPU,
-          GC.opsReadScalar = readScalarGPU,
-          GC.opsAllocate = allocateGPU,
-          GC.opsDeallocate = deallocateGPU,
-          GC.opsCopy = copyGPU,
-          GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
-          GC.opsMemoryType = cudaMemoryType,
-          GC.opsFatMemory = True,
+      gpuOperations
+        { GC.opsMemoryType = cudaMemoryType,
           GC.opsCritical =
             ( [C.citems|CUDA_SUCCEED_FATAL(cuCtxPushCurrent(ctx->cu_ctx));|],
               [C.citems|CUDA_SUCCEED_FATAL(cuCtxPopCurrent(&ctx->cu_ctx));|]

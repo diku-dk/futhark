@@ -65,16 +65,8 @@ compileProg version prog = do
   where
     operations :: GC.Operations OpenCL ()
     operations =
-      GC.defaultOperations
-        { GC.opsCompiler = callKernel,
-          GC.opsWriteScalar = writeScalarGPU,
-          GC.opsReadScalar = readScalarGPU,
-          GC.opsAllocate = allocateGPU,
-          GC.opsDeallocate = deallocateGPU,
-          GC.opsCopy = copyGPU,
-          GC.opsCopies = gpuCopies <> GC.opsCopies GC.defaultOperations,
-          GC.opsFatMemory = True,
-          GC.opsMemoryType = openclMemoryType
+      gpuOperations
+        { GC.opsMemoryType = openclMemoryType
         }
     include_opencl_h =
       [untrimming|
