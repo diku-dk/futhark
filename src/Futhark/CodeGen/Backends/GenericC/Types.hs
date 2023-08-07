@@ -140,17 +140,22 @@ arrayLibraryFunctions pub space pt signed rank = do
     libDecl
     [C.cunit|
           $ty:array_type* $id:new_array($ty:ctx_ty *ctx, const $ty:pt' *data, $params:shape_params) {
+            int err = 0;
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
               return bad;
             }
             $items:(criticalSection ops new_body)
+            if (err != 0) {
+              free(arr);
+              return bad;
+            }
             return arr;
           }
 
-          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, typename int64_t offset,
-                                            $params:shape_params) {
+          $ty:array_type* $id:new_raw_array($ty:ctx_ty *ctx, const $ty:memty data, typename int64_t offset, $params:shape_params) {
+            int err = 0;
             $ty:array_type* bad = NULL;
             $ty:array_type *arr = ($ty:array_type*) malloc(sizeof($ty:array_type));
             if (arr == NULL) {
@@ -167,8 +172,9 @@ arrayLibraryFunctions pub space pt signed rank = do
           }
 
           int $id:values_array($ty:ctx_ty *ctx, $ty:array_type *arr, $ty:pt' *data) {
+            int err = 0;
             $items:(criticalSection ops values_body)
-            return 0;
+            return err;
           }
 
           $ty:memty $id:values_raw_array($ty:ctx_ty *ctx, $ty:array_type *arr) {

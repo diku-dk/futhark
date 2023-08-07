@@ -287,13 +287,13 @@ syncArg GC.CopyNoBarrier = [C.cexp|false|]
 copyGPU :: GC.Copy OpenCL ()
 copyGPU _ dstmem dstidx (Space "device") srcmem srcidx (Space "device") nbytes =
   GC.stm
-    [C.cstm|if (gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes) != 0) { return 1; }|]
+    [C.cstm|err = gpu_memcpy(ctx, $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyGPU b dstmem dstidx DefaultSpace srcmem srcidx (Space "device") nbytes =
   GC.stm
-    [C.cstm|if (memcpy_gpu2host(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes) != 0) { return 1; }|]
+    [C.cstm|err = memcpy_gpu2host(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyGPU b dstmem dstidx (Space "device") srcmem srcidx DefaultSpace nbytes =
   GC.stm
-    [C.cstm|if (memcpy_host2gpu(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes) != 0) { return 1; }|]
+    [C.cstm|err = memcpy_host2gpu(ctx, $exp:(syncArg b), $exp:dstmem, $exp:dstidx, $exp:srcmem, $exp:srcidx, $exp:nbytes);|]
 copyGPU _ _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
