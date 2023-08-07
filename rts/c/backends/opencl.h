@@ -1212,7 +1212,7 @@ int gpu_memcpy(struct futhark_context* ctx,
 
 int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                     gpu_mem dst, int64_t dst_offset,
-                    unsigned char* src, int64_t src_offset,
+                    const unsigned char* src, int64_t src_offset,
                     int64_t nbytes) {
   if (nbytes > 0) {
     cl_event* event = NULL;

@@ -83,7 +83,7 @@ arrayLibraryFunctions pub space pt signed rank = do
       [C.cexp|arr->mem.mem|]
       [C.cexp|0|]
       space
-      [C.cexp|data|]
+      [C.cexp|(const unsigned char*)data|]
       [C.cexp|0|]
       DefaultSpace
       [C.cexp|((size_t)$exp:arr_size) * $int:(primByteSize pt::Int)|]
@@ -106,7 +106,7 @@ arrayLibraryFunctions pub space pt signed rank = do
     collect $
       copy
         CopyNoBarrier
-        [C.cexp|data|]
+        [C.cexp|(unsigned char*)data|]
         [C.cexp|0|]
         DefaultSpace
         [C.cexp|arr->mem.mem|]

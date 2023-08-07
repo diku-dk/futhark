@@ -963,7 +963,7 @@ int gpu_memcpy(struct futhark_context* ctx,
 
 int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                     gpu_mem dst, int64_t dst_offset,
-                    unsigned char* src, int64_t src_offset,
+                    const unsigned char* src, int64_t src_offset,
                     int64_t nbytes) {
   if (nbytes > 0) {
     CUevent* pevents = NULL;
@@ -986,7 +986,7 @@ int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
 }
 
 int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
-                    void* dst, int64_t dst_offset,
+                    unsigned char* dst, int64_t dst_offset,
                     gpu_mem src, int64_t src_offset,
                     int64_t nbytes) {
   if (nbytes > 0) {
