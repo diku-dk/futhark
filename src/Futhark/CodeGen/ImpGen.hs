@@ -195,17 +195,17 @@ defaultOperations opc =
 data MemLoc = MemLoc
   { memLocName :: VName,
     memLocShape :: [Imp.DimSize],
-    memLocIxFun :: IxFun.IxFun (Imp.TExp Int64)
+    memLocLMAD :: LMAD.LMAD (Imp.TExp Int64)
   }
   deriving (Eq, Show)
 
 sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
-sliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape $ IxFun.slice ixfun slice
+sliceMemLoc (MemLoc mem shape lmad) slice =
+  MemLoc mem shape $ LMAD.slice lmad slice
 
 flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
-flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape $ IxFun.flatSlice ixfun slice
+flatSliceMemLoc (MemLoc mem shape lmad) slice =
+  MemLoc mem shape $ LMAD.flatSlice lmad slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -514,8 +514,8 @@ compileInParam fparam = case paramDec fparam of
     pure $ Left $ Imp.ScalarParam name bt
   MemMem space ->
     pure $ Left $ Imp.MemParam name space
-  MemArray bt shape _ (ArrayIn mem ixfun) ->
-    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) ixfun
+  MemArray bt shape _ (ArrayIn mem lmad) ->
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -616,9 +616,9 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
       mkValueDesc _ signedness (MemArray t shape _ ret) = do
         (mem, space) <-
           case ret of
-            ReturnsNewBlock space j _ixfun ->
+            ReturnsNewBlock space j _lmad ->
               pure (nthOut j, space)
-            ReturnsInBlock mem _ixfun -> do
+            ReturnsInBlock mem _lmad -> do
               space <- entryMemSpace <$> lookupMemory mem
               pure (mem, space)
         pure $ Imp.ArrayValue mem space t signedness $ map f $ shapeDims shape
@@ -971,7 +971,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
       emit $ Imp.DeclareArray static_array t $ Imp.ArrayValues vs
       let static_src =
             MemLoc static_array [intConst Int64 $ fromIntegral $ length es] $
-              IxFun.iota [fromIntegral $ length es]
+              LMAD.iota 0 [fromIntegral $ length es]
       addVar static_array $ MemVar Nothing $ MemEntry DefaultSpace
       copy t dest_mem static_src
   | otherwise =
@@ -1118,8 +1118,8 @@ memBoundToVarEntry e (MemMem space) =
   MemVar e $ MemEntry space
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
-memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem ixfun)) =
-  let location = MemLoc mem (shapeDims shape) ixfun
+memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
+  let location = MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
    in ArrayVar
         e
         ArrayEntry
@@ -1162,12 +1162,11 @@ dScope ::
   ImpM rep r op ()
 dScope e = mapM_ (uncurry $ dInfo e) . M.toList
 
-dArray :: VName -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op ()
-dArray name pt shape mem ixfun =
+dArray :: VName -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op ()
+dArray name pt shape mem lmad =
   addVar name $ ArrayVar Nothing $ ArrayEntry location pt
   where
-    location =
-      MemLoc mem (shapeDims shape) ixfun
+    location = MemLoc mem (shapeDims shape) lmad
 
 everythingVolatile :: ImpM rep r op a -> ImpM rep r op a
 everythingVolatile = local $ \env -> env {envVolatility = Imp.Volatile}
@@ -1383,12 +1382,12 @@ fullyIndexArray' ::
   MemLoc ->
   [Imp.TExp Int64] ->
   ImpM rep r op (VName, Imp.Space, Count Elements (Imp.TExp Int64))
-fullyIndexArray' (MemLoc mem _ ixfun) indices = do
+fullyIndexArray' (MemLoc mem _ lmad) indices = do
   space <- entryMemSpace <$> lookupMemory mem
   pure
     ( mem,
       space,
-      elements $ IxFun.index ixfun indices
+      elements $ LMAD.index lmad indices
     )
 
 -- More complicated read/write operations that use index functions.
@@ -1396,17 +1395,17 @@ fullyIndexArray' (MemLoc mem _ ixfun) indices = do
 copy :: CopyCompiler rep r op
 copy
   bt
-  dst@(MemLoc dst_name _ dst_ixfn@(IxFun.IxFun dst_lmad _))
-  src@(MemLoc src_name _ src_ixfn@(IxFun.IxFun src_lmad _)) = do
+  dst@(MemLoc dst_name _ dst_ixfn@dst_lmad)
+  src@(MemLoc src_name _ src_ixfn@src_lmad) = do
     -- If we can statically determine that the two index-functions
     -- are equivalent, don't do anything
-    unless (dst_name == src_name && dst_ixfn `IxFun.equivalent` src_ixfn)
+    unless (dst_name == src_name && dst_ixfn `LMAD.equivalent` src_ixfn)
       $
       -- It's also possible that we can dynamically determine that the two
       -- index-functions are equivalent.
       sUnless
         ( fromBool (dst_name == src_name)
-            .&&. IxFun.dynamicEqualsLMAD dst_lmad src_lmad
+            .&&. LMAD.dynamicEqualsLMAD dst_lmad src_lmad
         )
       $ do
         -- If none of the above is true, actually do the copy
@@ -1417,8 +1416,8 @@ lmadCopy :: CopyCompiler rep r op
 lmadCopy t dstloc srcloc = do
   let dstmem = memLocName dstloc
       srcmem = memLocName srcloc
-      dstlmad = IxFun.ixfunLMAD $ memLocIxFun dstloc
-      srclmad = IxFun.ixfunLMAD $ memLocIxFun srcloc
+      dstlmad = memLocLMAD dstloc
+      srclmad = memLocLMAD srcloc
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
@@ -1722,7 +1721,7 @@ sAlloc name size space = do
   sAlloc_ name' size space
   pure name'
 
-sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> IxFun -> ImpM rep r op VName
+sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
 sArray name bt shape mem ixfun = do
   name' <- newVName name
   dArray name' bt shape mem ixfun
@@ -1732,7 +1731,7 @@ sArray name bt shape mem ixfun = do
 sArrayInMem :: String -> PrimType -> ShapeBase SubExp -> VName -> ImpM rep r op VName
 sArrayInMem name pt shape mem =
   sArray name pt shape mem $
-    IxFun.iota $
+    LMAD.iota 0 $
       map (isInt64 . primExpFromSubExp int64) $
         shapeDims shape
 
@@ -1741,9 +1740,9 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  let iota_ixfun = IxFun.iota $ map (isInt64 . primExpFromSubExp int64) permuted_dims
+  let iota_ixfun = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    IxFun.permute iota_ixfun $
+    LMAD.permute iota_ixfun $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.
@@ -1761,7 +1760,7 @@ sStaticArray name pt vs = do
   mem <- newVNameForFun $ name ++ "_mem"
   emit $ Imp.DeclareArray mem pt vs
   addVar mem $ MemVar Nothing $ MemEntry DefaultSpace
-  sArray name pt shape mem $ IxFun.iota [fromIntegral num_elems]
+  sArray name pt shape mem $ LMAD.iota 0 [fromIntegral num_elems]
 
 sWrite :: VName -> [Imp.TExp Int64] -> Imp.Exp -> ImpM rep r op ()
 sWrite arr is v = do

@@ -12,7 +12,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
@@ -85,7 +85,7 @@ createLocalArrays (Count groupSize) m types = do
         ty
         (Shape [groupSize])
         localMem
-        $ IxFun.iotaOffset off' [pe64 groupSize]
+        $ LMAD.iota off' [pe64 groupSize]
 
   warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
@@ -96,7 +96,7 @@ createLocalArrays (Count groupSize) m types = do
         ty
         (Shape [constant (warpSize :: Int64)])
         localMem
-        $ IxFun.iotaOffset off' [warpSize]
+        $ LMAD.iota off' [warpSize]
 
   pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 

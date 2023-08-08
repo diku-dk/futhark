@@ -56,7 +56,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -142,9 +142,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
         sArray "red_arr" pt shape' mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape'
+          LMAD.iota 0 (map pe64 $ shapeDims shape')
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]
