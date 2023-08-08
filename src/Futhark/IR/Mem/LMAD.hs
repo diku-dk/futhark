@@ -16,16 +16,12 @@ module Futhark.IR.Mem.LMAD
     permute,
     shape,
     rank,
-    setShape,
     substituteInLMAD,
     permuteInv,
-    permuteFwd,
     disjoint,
     disjoint2,
     disjoint3,
     dynamicEqualsLMAD,
-    contiguous,
-    memcpyable,
     iota,
     mkExistential,
     equivalent,
@@ -36,7 +32,7 @@ where
 import Control.Category
 import Control.Monad
 import Data.Function (on, (&))
-import Data.List (elemIndex, partition, permutations, sortBy)
+import Data.List (elemIndex, partition, sortBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromJust, isNothing)
 import Data.Traversable
@@ -240,9 +236,6 @@ reshape lmad@(LMAD off dims) newshape = do
   let LMAD off' dims_sup = iota off newshape
   Just $ LMAD off' dims_sup
 
-setShape :: Shape num -> LMAD num -> LMAD num
-setShape shp lmad = lmad {dims = zipWith (\dim s -> dim {ldShape = s}) (dims lmad) shp}
-
 -- | Substitute a name with a PrimExp in an LMAD.
 substituteInLMAD ::
   Ord a =>
@@ -262,9 +255,6 @@ shape = map ldShape . dims
 -- | Rank of an LMAD.
 rank :: LMAD num -> Int
 rank = length . shape
-
-permuteFwd :: Permutation -> [a] -> [a]
-permuteFwd ps elems = map (elems !!) ps
 
 permuteInv :: Permutation -> [a] -> [a]
 permuteInv ps elems = map snd $ sortBy (compare `on` fst) $ zip ps elems
@@ -531,45 +521,6 @@ dynamicEqualsLMAD lmad1 lmad2 =
       ((.&&.) . uncurry dynamicEqualsLMADDim)
       true
       (zip (dims lmad1) (dims lmad2))
-
--- | True if these LMADs represent the same function (ignoring
--- offset).
-compatible ::
-  Eq num =>
-  LMAD (TPrimExp Int64 num) ->
-  LMAD (TPrimExp Int64 num) ->
-  TPrimExp Bool num
-compatible x y =
-  foldl1 (.&&.) $ zipWith dynamicEqualsLMADDim (dims x) (dims y)
-
--- | True if this LMAD corresponds to an array without "holes".  This
--- implies it can be copied with a memcpy()-like operation.
-contiguous ::
-  (Pretty num, Eq num) =>
-  LMAD (TPrimExp Int64 num) ->
-  TPrimExp Bool num
-contiguous lmad =
-  -- The expression produced here can get pretty large as we consider
-  -- every possible permutation.
-  foldl1 (.||.) $ map matches $ permutations $ shape lmad
-  where
-    strides = map ldStride . dims
-    orig_strides = strides (iota (offset lmad) (shape lmad))
-    matches ds =
-      foldl1
-        (.&&.)
-        (zipWith (.==.) orig_strides (strides (iota (offset lmad) ds)))
-
--- | True if these LMADs have the same contiguous representation, such
--- that one can be copied to the other with a @memcpy()@-like
--- operation.
-memcpyable ::
-  (Pretty num, Eq num) =>
-  LMAD (TPrimExp Int64 num) ->
-  LMAD (TPrimExp Int64 num) ->
-  TPrimExp Bool num
-memcpyable dest_lmad src_lmad =
-  contiguous dest_lmad .&&. compatible dest_lmad src_lmad
 
 -- | Returns true if two 'LMAD's are equivalent.
 --
