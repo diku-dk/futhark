@@ -7,10 +7,8 @@ module Futhark.IR.Mem.IxFun
     Shape,
     LMAD (..),
     LMADDim (..),
-    index,
     mkExistential,
     iota,
-    iotaOffset,
     permute,
     reshape,
     coerce,
@@ -24,12 +22,10 @@ module Futhark.IR.Mem.IxFun
     substituteInLMAD,
     existentialize,
     closeEnough,
-    equivalent,
     permuteInv,
     disjoint,
     disjoint2,
     disjoint3,
-    dynamicEqualsLMAD,
   )
 where
 
@@ -138,15 +134,6 @@ isDirect (IxFun (LMAD offset dims) oshp) =
 -- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
 shape = LMAD.shape . ixfunLMAD
-
--- | Compute the flat memory index for a complete set @inds@ of array indices
--- and a certain element size @elem_size@.
-index ::
-  (IntegralExp num, Eq num) =>
-  IxFun num ->
-  Indices num ->
-  num
-index = LMAD.index . ixfunLMAD
 
 -- | iota with offset.
 iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
@@ -275,11 +262,3 @@ closeEnough ixf1 ixf2 =
   where
     closeEnoughLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
-
--- | Returns true if two 'IxFun's are equivalent.
---
--- Equivalence in this case is defined as having the same number of LMADs, with
--- each pair of LMADs matching in permutation, offsets, and strides.
-equivalent :: Eq num => IxFun num -> IxFun num -> Bool
-equivalent ixf1 ixf2 =
-  LMAD.equivalent (ixfunLMAD ixf1) (ixfunLMAD ixf2)
