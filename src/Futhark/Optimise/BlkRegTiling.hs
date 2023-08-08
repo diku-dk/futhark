@@ -149,10 +149,8 @@ kkLoopBody
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
-            q = length lmad_dims
-            last_perm = IxFun.ldPerm $ last lmad_dims
             stride = IxFun.ldStride $ last lmad_dims
-         in (last_perm == q - 1) && (stride == pe64 (intConst Int64 1))
+         in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
         -- the actual redomap.

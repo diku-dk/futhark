@@ -13,6 +13,7 @@
 --  [[0i64, 0i64], [0i64, 1i64]],
 --  [[0i64, 0i64], [0i64, 1i64]]]
 -- }
+-- compiled input { 19i64 17i64 } auto output
 
 def update [n] (mat: *[n][n]i64): *[n][n]i64 =
     let mat = transpose mat

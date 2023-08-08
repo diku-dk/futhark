@@ -70,10 +70,9 @@ module Futhark.CodeGen.ImpGen
     copy,
     copyDWIM,
     copyDWIMFix,
-    copyElementWise,
+    lmadCopy,
     typeSize,
     inBounds,
-    isMapTransposeCopy,
     caseMatch,
 
     -- * Constructing code.
@@ -108,7 +107,6 @@ module Futhark.CodeGen.ImpGen
     sWrite,
     sUpdate,
     sLoopNest,
-    sCopy,
     sLoopSpace,
     (<--),
     (<~~),
@@ -137,12 +135,9 @@ import Futhark.CodeGen.ImpCode
   ( Bytes,
     Count,
     Elements,
-    bytes,
     elements,
-    withElemType,
   )
 import Futhark.CodeGen.ImpCode qualified as Imp
-import Futhark.CodeGen.ImpGen.Transpose
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
@@ -192,7 +187,7 @@ defaultOperations opc =
     { opsExpCompiler = defCompileExp,
       opsOpCompiler = opc,
       opsStmsCompiler = defCompileStms,
-      opsCopyCompiler = defaultCopy,
+      opsCopyCompiler = lmadCopy,
       opsAllocCompilers = mempty
     }
 
@@ -208,9 +203,9 @@ sliceMemLoc :: MemLoc -> Slice (Imp.TExp Int64) -> MemLoc
 sliceMemLoc (MemLoc mem shape ixfun) slice =
   MemLoc mem shape $ IxFun.slice ixfun slice
 
-flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> Maybe MemLoc
+flatSliceMemLoc :: MemLoc -> FlatSlice (Imp.TExp Int64) -> MemLoc
 flatSliceMemLoc (MemLoc mem shape ixfun) slice =
-  MemLoc mem shape <$> IxFun.flatSlice ixfun slice
+  MemLoc mem shape $ IxFun.flatSlice ixfun slice
 
 data ArrayEntry = ArrayEntry
   { entryArrayLoc :: MemLoc,
@@ -932,11 +927,8 @@ defCompileBasicOp _ FlatIndex {} =
 defCompileBasicOp (Pat [pe]) (FlatUpdate _ slice v) = do
   pe_loc <- entryArrayLoc <$> lookupArray (patElemName pe)
   v_loc <- entryArrayLoc <$> lookupArray v
-  case flatSliceMemLoc pe_loc slice' of
-    Just pe_loc' -> copy (elemType (patElemType pe)) pe_loc' v_loc
-    Nothing -> error "defCompileBasicOp FlatUpdate"
-  where
-    slice' = fmap pe64 slice
+  let pe_loc' = flatSliceMemLoc pe_loc $ fmap pe64 slice
+  copy (elemType (patElemType pe)) pe_loc' v_loc
 defCompileBasicOp (Pat [pe]) (Replicate shape se)
   | Acc {} <- patElemType pe = pure ()
   | shape == mempty =
@@ -1421,133 +1413,26 @@ copy
         cc <- asks envCopyCompiler
         cc bt dst src
 
--- | Is this copy really a mapping with transpose?  Produce an
--- expression that is true if so, as well as other expressions that
--- contain information about the transpose in that case (don't trust
--- these if the boolean is false).
-isMapTransposeCopy ::
-  PrimType ->
-  MemLoc ->
-  MemLoc ->
-  Maybe
-    ( Imp.TExp Bool,
-      ( Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64,
-        Imp.TExp Int64
-      )
-    )
-isMapTransposeCopy pt (MemLoc _ _ destIxFun) (MemLoc _ _ srcIxFun)
-  | perm <- LMAD.permutation dest_lmad,
-    LMAD.permutation src_lmad == [0 .. rank - 1],
-    Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (IxFun.shape destIxFun) swap r1 r2
-  | perm <- LMAD.permutation src_lmad,
-    LMAD.permutation dest_lmad == [0 .. rank - 1],
-    Just (r1, r2, _) <- isMapTranspose perm =
-      isOk (IxFun.shape srcIxFun) id r1 r2
-  | otherwise =
-      Nothing
-  where
-    rank = IxFun.rank destIxFun
-    swap (x, y) = (y, x)
-    dest_lmad = IxFun.ixfunLMAD destIxFun
-    src_lmad = IxFun.ixfunLMAD srcIxFun
-    dest_offset = LMAD.offset dest_lmad
-    src_offset = LMAD.offset src_lmad
-
-    isOk shape f r1 r2 =
-      let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
-       in Just
-            ( LMAD.contiguous dest_lmad
-                .&&. LMAD.contiguous src_lmad,
-              ( dest_offset * primByteSize pt,
-                src_offset * primByteSize pt,
-                num_arrays,
-                size_x,
-                size_y
-              )
-            )
-
-    getSizes shape f r1 r2 =
-      let (mapped, notmapped) = splitAt r1 shape
-          (pretrans, posttrans) = f $ splitAt r2 notmapped
-       in (product mapped, product pretrans, product posttrans)
-
-mapTransposeName :: PrimType -> String
-mapTransposeName bt = "map_transpose_" ++ prettyString bt
-
-mapTransposeForType :: PrimType -> ImpM rep r op Name
-mapTransposeForType bt = do
-  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
-
-  exists <- hasFunction fname
-  unless exists $ emitFunction fname $ mapTransposeFunction fname bt
-
-  pure fname
-
--- | Use 'sCopy' if possible, otherwise 'copyElementWise'.
-defaultCopy :: CopyCompiler rep r op
-defaultCopy pt dest src
-  | Just (is_transpose, (destoffset, srcoffset, num_arrays, size_x, size_y)) <-
-      isMapTransposeCopy pt dest src = do
-      fname <- mapTransposeForType pt
-      sIf
-        is_transpose
-        ( emit . Imp.Call [] fname $
-            transposeArgs
-              pt
-              destmem
-              (bytes destoffset)
-              srcmem
-              (bytes srcoffset)
-              num_arrays
-              size_x
-              size_y
-        )
-        nontranspose
-  | otherwise = nontranspose
-  where
-    num_elems = Imp.elements $ product $ IxFun.shape $ memLocIxFun src
-
-    MemLoc destmem _ dest_ixfun = dest
-    MemLoc srcmem _ src_ixfun = src
-
-    isScalarSpace ScalarSpace {} = True
-    isScalarSpace _ = False
-
-    nontranspose = do
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      if isScalarSpace srcspace || isScalarSpace destspace
-        then copyElementWise pt dest src
-        else do
-          let dest_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD dest_ixfun
-              src_lmad = LMAD.noPermutation $ IxFun.ixfunLMAD src_ixfun
-              destoffset = elements (LMAD.offset dest_lmad) `withElemType` pt
-              srcoffset = elements (LMAD.offset src_lmad) `withElemType` pt
-          sIf
-            (LMAD.memcpyable dest_lmad src_lmad)
-            (sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt)
-            (copyElementWise pt dest src)
-
-copyElementWise :: CopyCompiler rep r op
-copyElementWise bt dest src = do
-  let bounds = IxFun.shape $ memLocIxFun src
-  is <- replicateM (length bounds) (newVName "i")
-  let ivars = map Imp.le64 is
-  (destmem, destspace, destidx) <- fullyIndexArray' dest ivars
-  (srcmem, srcspace, srcidx) <- fullyIndexArray' src ivars
-  vol <- asks envVolatility
-  tmp <- newVName "tmp"
+lmadCopy :: CopyCompiler rep r op
+lmadCopy t dstloc srcloc = do
+  let dstmem = memLocName dstloc
+      srcmem = memLocName srcloc
+      dstlmad = IxFun.ixfunLMAD $ memLocIxFun dstloc
+      srclmad = IxFun.ixfunLMAD $ memLocIxFun srcloc
+  srcspace <- entryMemSpace <$> lookupMemory srcmem
+  dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
-    foldl (.) id (zipWith Imp.For is $ map untyped bounds) $
-      mconcat
-        [ Imp.DeclareScalar tmp vol bt,
-          Imp.Read tmp srcmem srcidx bt srcspace vol,
-          Imp.Write destmem destidx bt destspace vol $ Imp.var tmp bt
-        ]
+    Imp.LMADCopy
+      t
+      (elements <$> LMAD.shape dstlmad)
+      (dstmem, dstspace)
+      ( LMAD.offset $ elements <$> dstlmad,
+        map LMAD.ldStride $ LMAD.dims $ elements <$> dstlmad
+      )
+      (srcmem, srcspace)
+      ( LMAD.offset $ elements <$> srclmad,
+        map LMAD.ldStride $ LMAD.dims $ elements <$> srclmad
+      )
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.
@@ -1904,33 +1789,6 @@ sLoopNest ::
   ([Imp.TExp Int64] -> ImpM rep r op ()) ->
   ImpM rep r op ()
 sLoopNest = sLoopSpace . map pe64 . shapeDims
-
-sCopy ::
-  VName ->
-  Count Bytes (Imp.TExp Int64) ->
-  Space ->
-  VName ->
-  Count Bytes (Imp.TExp Int64) ->
-  Space ->
-  Count Elements (Imp.TExp Int64) ->
-  PrimType ->
-  ImpM rep r op ()
-sCopy destmem destoffset destspace srcmem srcoffset srcspace num_elems pt =
-  if destmem == srcmem
-    then sUnless (Imp.unCount destoffset .==. Imp.unCount srcoffset) the_copy
-    else the_copy
-  where
-    the_copy =
-      emit
-        $ Imp.Copy
-          pt
-          destmem
-          destoffset
-          destspace
-          srcmem
-          srcoffset
-          srcspace
-        $ num_elems `withElemType` pt
 
 -- | Untyped assignment.
 (<~~) :: VName -> Imp.Exp -> ImpM rep r op ()

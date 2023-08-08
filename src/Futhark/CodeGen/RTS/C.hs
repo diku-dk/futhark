@@ -5,7 +5,10 @@ module Futhark.CodeGen.RTS.C
   ( atomicsH,
     contextH,
     contextPrototypesH,
+    copyH,
     freeListH,
+    gpuH,
+    gpuPrototypesH,
     halfH,
     lockH,
     scalarF16H,
@@ -47,6 +50,16 @@ uniformH = $(embedStringFile "rts/c/uniform.h")
 freeListH :: T.Text
 freeListH = $(embedStringFile "rts/c/free_list.h")
 {-# NOINLINE freeListH #-}
+
+-- | @rts/c/gpu.h@
+gpuH :: T.Text
+gpuH = $(embedStringFile "rts/c/gpu.h")
+{-# NOINLINE gpuH #-}
+
+-- | @rts/c/gpu_prototypes.h@
+gpuPrototypesH :: T.Text
+gpuPrototypesH = $(embedStringFile "rts/c/gpu_prototypes.h")
+{-# NOINLINE gpuPrototypesH #-}
 
 -- | @rts/c/half.h@
 halfH :: T.Text
@@ -142,3 +155,8 @@ backendsCH = $(embedStringFile "rts/c/backends/c.h")
 backendsMulticoreH :: T.Text
 backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
 {-# NOINLINE backendsMulticoreH #-}
+
+-- | @rts/c/copy.h@
+copyH :: T.Text
+copyH = $(embedStringFile "rts/c/copy.h")
+{-# NOINLINE copyH #-}

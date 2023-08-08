@@ -135,7 +135,8 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
   | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) = do
-      x_ixfn_slc <- IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+      let x_ixfn_slc =
+            IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
       let r1 = (m_b, m_x, x_ixfn_slc)
       case getDirAliasedIxfn td_env coal_tab v of
         Nothing -> Just ([r1], [r1])
@@ -457,13 +458,11 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
-            IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride spn 0 : map incPerm dims0
+            IxFun.LMAD new_offset $ IxFun.LMADDim new_stride spn : dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad
   where
-    incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
 
 -- | Takes a 'VName' and converts it into a 'TPrimExp' with type 'Int64'.
