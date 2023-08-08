@@ -90,11 +90,11 @@ instance TraverseOpStms (Engine.Wise GPUMem) where
   traverseOpStms = traverseMemOpStms (traverseHostOpStms (const pure))
 
 simplifyProg :: Prog GPUMem -> PassM (Prog GPUMem)
-simplifyProg = simplifyProgGeneric simpleGPUMem
+simplifyProg = simplifyProgGeneric memRuleBook simpleGPUMem
 
 simplifyStms ::
   (HasScope GPUMem m, MonadFreshNames m) => Stms GPUMem -> m (Stms GPUMem)
-simplifyStms = simplifyStmsGeneric simpleGPUMem
+simplifyStms = simplifyStmsGeneric memRuleBook simpleGPUMem
 
 simpleGPUMem :: Engine.SimpleOps GPUMem
 simpleGPUMem =

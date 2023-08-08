@@ -82,7 +82,7 @@ instance TraverseOpStms (Engine.Wise MCMem) where
   traverseOpStms = traverseMemOpStms (traverseMCOpStms (const pure))
 
 simplifyProg :: Prog MCMem -> PassM (Prog MCMem)
-simplifyProg = simplifyProgGeneric simpleMCMem
+simplifyProg = simplifyProgGeneric memRuleBook simpleMCMem
 
 simpleMCMem :: Engine.SimpleOps MCMem
 simpleMCMem =

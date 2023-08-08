@@ -10,6 +10,10 @@ if cl.version.VERSION < (2015, 2):
         % cl.version.VERSION_TEXT
     )
 
+TR_BLOCK_DIM = 16
+TR_TILE_DIM = TR_BLOCK_DIM * 2
+TR_ELEMS_PER_THREAD = 8
+
 
 def parse_preferred_device(s):
     pref_num = 0
@@ -284,7 +288,53 @@ def initialise_opencl_object(
         if self.platform.name == "Oclgrind":
             build_options += ["-DEMULATE_F16"]
 
-        return cl.Program(self.ctx, program_src).build(build_options)
+        build_options += [
+            f"-DTR_BLOCK_DIM={TR_BLOCK_DIM}",
+            f"-DTR_TILE_DIM={TR_TILE_DIM}",
+            f"-DTR_ELEMS_PER_THREAD={TR_ELEMS_PER_THREAD}",
+        ]
+
+        program = cl.Program(self.ctx, program_src).build(build_options)
+
+        self.transpose_kernels = {
+            1: {
+                "default": program.map_transpose_1b,
+                "low_height": program.map_transpose_1b_low_height,
+                "low_width": program.map_transpose_1b_low_width,
+                "small": program.map_transpose_1b_small,
+                "large": program.map_transpose_1b_large,
+            },
+            2: {
+                "default": program.map_transpose_2b,
+                "low_height": program.map_transpose_2b_low_height,
+                "low_width": program.map_transpose_2b_low_width,
+                "small": program.map_transpose_2b_small,
+                "large": program.map_transpose_2b_large,
+            },
+            4: {
+                "default": program.map_transpose_4b,
+                "low_height": program.map_transpose_4b_low_height,
+                "low_width": program.map_transpose_4b_low_width,
+                "small": program.map_transpose_4b_small,
+                "large": program.map_transpose_4b_large,
+            },
+            8: {
+                "default": program.map_transpose_8b,
+                "low_height": program.map_transpose_8b_low_height,
+                "low_width": program.map_transpose_8b_low_width,
+                "small": program.map_transpose_8b_small,
+                "large": program.map_transpose_8b_large,
+            },
+        }
+
+        self.copy_kernels = {
+            1: program.lmad_copy_1b,
+            2: program.lmad_copy_2b,
+            4: program.lmad_copy_4b,
+            8: program.lmad_copy_8b,
+        }
+
+        return program
 
 
 def opencl_alloc(self, min_size, tag):
@@ -323,3 +373,122 @@ def sync(self):
         )
 
         raise Exception(self.failure_msgs[failure[0]].format(*failure_args))
+
+
+def map_transpose_gpu2gpu(
+    self, elem_size, dst, dst_offset, src, src_offset, k, n, m
+):
+    kernels = self.transpose_kernels[elem_size]
+    kernel = kernels["default"]
+    mulx = TR_BLOCK_DIM / n
+    muly = TR_BLOCK_DIM / m
+
+    group_dims = (TR_TILE_DIM, TR_TILE_DIM // TR_ELEMS_PER_THREAD, 1)
+    dims = (
+        (m + TR_TILE_DIM - 1) // TR_TILE_DIM * group_dims[0],
+        (n + TR_TILE_DIM - 1) // TR_TILE_DIM * group_dims[1],
+        k,
+    )
+
+    k32 = np.int32(k)
+    n32 = np.int32(n)
+    m32 = np.int32(m)
+    mulx32 = np.int32(mulx)
+    muly32 = np.int32(muly)
+
+    kernel.set_args(
+        cl.LocalMemory(TR_TILE_DIM * (TR_TILE_DIM + 1) * elem_size),
+        dst,
+        dst_offset,
+        src,
+        src_offset,
+        k32,
+        m32,
+        n32,
+        mulx32,
+        muly32,
+        np.int32(0),
+        np.int32(0),
+    )
+    cl.enqueue_nd_range_kernel(self.queue, kernel, dims, group_dims)
+
+
+def copy_elements_gpu2gpu(
+    self,
+    elem_size,
+    dst,
+    dst_offset,
+    dst_strides,
+    src,
+    src_offset,
+    src_strides,
+    shape,
+):
+    r = len(shape)
+    if r > 8:
+        raise Exception(
+            "Futhark runtime limitation:\nCannot copy array of greater than rank 8.\n"
+        )
+
+    n = np.product(shape)
+    zero = np.int64(0)
+    layout_args = [None] * (8 * 3)
+    for i in range(8):
+        if i < r:
+            layout_args[i * 3 + 0] = shape[i]
+            layout_args[i * 3 + 1] = dst_strides[i]
+            layout_args[i * 3 + 2] = src_strides[i]
+        else:
+            layout_args[i * 3 + 0] = zero
+            layout_args[i * 3 + 1] = zero
+            layout_args[i * 3 + 2] = zero
+
+    kernel = self.copy_kernels[elem_size]
+    kernel.set_args(
+        cl.LocalMemory(1),
+        dst,
+        dst_offset,
+        src,
+        src_offset,
+        n,
+        np.int32(r),
+        *layout_args,
+    )
+    w = 256
+    dims = ((n + w - 1) // w * w,)
+    group_dims = (w,)
+    cl.enqueue_nd_range_kernel(self.queue, kernel, dims, group_dims)
+
+
+def lmad_copy_gpu2gpu(
+    self, pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
+):
+    elem_size = ct.sizeof(pt)
+    if lmad_memcpyable(dst_strides, src_strides, shape):
+        cl.enqueue_copy(
+            self.queue,
+            dst,
+            src,
+            dst_offset=dst_offset * elem_size,
+            src_offset=src_offset * elem_size,
+            byte_count=np.product(shape) * elem_size,
+        )
+    else:
+        tr = lmad_map_tr(dst_strides, src_strides, shape)
+        if tr is not None:
+            (k, n, m) = tr
+            map_transpose_gpu2gpu(
+                self, elem_size, dst, dst_offset, src, src_offset, k, m, n
+            )
+        else:
+            copy_elements_gpu2gpu(
+                self,
+                elem_size,
+                dst,
+                dst_offset,
+                dst_strides,
+                src,
+                src_offset,
+                src_strides,
+                shape,
+            )

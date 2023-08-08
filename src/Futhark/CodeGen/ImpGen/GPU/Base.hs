@@ -33,7 +33,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sCopy,
 
     -- * Atomics
     AtomicBinOp,
@@ -1201,7 +1200,7 @@ sKernelFailureTolerant tol ops constants name m = do
 threadOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
-    { opsCopyCompiler = copyElementWise,
+    { opsCopyCompiler = lmadCopy,
       opsExpCompiler = compileThreadExp,
       opsStmsCompiler = \_ -> defCompileStms mempty,
       opsAllocCompilers =

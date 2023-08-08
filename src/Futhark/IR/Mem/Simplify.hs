@@ -5,6 +5,7 @@ module Futhark.IR.Mem.Simplify
     simplifyStmsGeneric,
     simpleGeneric,
     SimplifyMemory,
+    memRuleBook,
   )
 where
 
@@ -50,13 +51,14 @@ simpleGeneric = simplifiable
 
 simplifyProgGeneric ::
   (SimplifyMemory rep inner) =>
+  RuleBook (Wise rep) ->
   Simplify.SimpleOps rep ->
   Prog rep ->
   PassM (Prog rep)
-simplifyProgGeneric ops =
+simplifyProgGeneric rules ops =
   Simplify.simplifyProg
     ops
-    callKernelRules
+    rules
     blockers {Engine.blockHoistBranch = blockAllocs}
   where
     blockAllocs vtable _ (Let _ _ (Op Alloc {})) =
@@ -75,14 +77,15 @@ simplifyStmsGeneric ::
     MonadFreshNames m,
     SimplifyMemory rep inner
   ) =>
+  RuleBook (Wise rep) ->
   Simplify.SimpleOps rep ->
   Stms rep ->
   m (Stms rep)
-simplifyStmsGeneric ops stms = do
+simplifyStmsGeneric rules ops stms = do
   scope <- askScope
   Simplify.simplifyStms
     ops
-    callKernelRules
+    rules
     blockers
     scope
     stms
@@ -106,8 +109,10 @@ blockers =
       Engine.isAllocation = isAlloc mempty mempty
     }
 
-callKernelRules :: SimplifyMemory rep inner => RuleBook (Wise rep)
-callKernelRules =
+-- | Standard collection of simplification rules for representations
+-- with memory.
+memRuleBook :: SimplifyMemory rep inner => RuleBook (Wise rep)
+memRuleBook =
   standardRules
     <> ruleBook
       [ RuleMatch unExistentialiseMemory,

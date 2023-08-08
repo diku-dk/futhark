@@ -16,9 +16,8 @@ module Futhark.IR.Mem.IxFun
     coerce,
     slice,
     flatSlice,
-    rebase,
+    expand,
     shape,
-    permutation,
     rank,
     isDirect,
     substituteInIxFun,
@@ -37,7 +36,6 @@ where
 import Control.Category
 import Control.Monad
 import Control.Monad.State
-import Data.List (sort, zip4)
 import Data.Map.Strict qualified as M
 import Data.Traversable
 import Futhark.Analysis.PrimExp
@@ -47,8 +45,8 @@ import Futhark.IR.Mem.LMAD hiding
     index,
     iota,
     mkExistential,
-    permutation,
     permute,
+    rank,
     reshape,
     shape,
     slice,
@@ -131,24 +129,13 @@ isDirect (IxFun (LMAD offset dims) oshp) =
    in length oshp == length dims
         && offset == 0
         && all
-          (\(LMADDim s n p, m, d, se) -> s == se && n == d && p == m)
-          (zip4 dims [0 .. length dims - 1] oshp strides_expected)
-
--- | Does the index function have an ascending permutation?
-hasContiguousPerm :: IxFun num -> Bool
-hasContiguousPerm (IxFun lmad _) =
-  let perm = LMAD.permutation lmad
-   in perm == sort perm
+          (\(LMADDim s n, d, se) -> s == se && n == d)
+          (zip3 dims oshp strides_expected)
 
 -- | The index space of the index function.  This is the same as the
 -- shape of arrays that the index function supports.
 shape :: (Eq num, IntegralExp num) => IxFun num -> Shape num
-shape (IxFun lmad _) =
-  permuteFwd (LMAD.permutation lmad) $ LMAD.shapeBase lmad
-
--- | The permutation of the first LMAD of the index function.
-permutation :: IxFun num -> Permutation
-permutation = map LMAD.ldPerm . LMAD.dims . ixfunLMAD
+shape = LMAD.shape . ixfunLMAD
 
 -- | Compute the flat memory index for a complete set @inds@ of array indices
 -- and a certain element size @elem_size@.
@@ -169,12 +156,11 @@ iota = iotaOffset 0
 
 -- | Create a single-LMAD index function that is
 -- existential in everything, with the provided permutation.
-mkExistential :: Int -> [Int] -> Int -> IxFun (Ext a)
-mkExistential basis_rank perm start =
-  IxFun (LMAD.mkExistential perm start) basis
+mkExistential :: Int -> Int -> Int -> IxFun (Ext a)
+mkExistential basis_rank lmad_rank start =
+  IxFun (LMAD.mkExistential lmad_rank start) basis
   where
-    basis = take basis_rank $ map Ext [start + 1 + dims_rank * 2 ..]
-    dims_rank = length perm
+    basis = take basis_rank $ map Ext [start + 1 + lmad_rank * 2 ..]
 
 -- | Permute dimensions.
 permute ::
@@ -202,10 +188,8 @@ flatSlice ::
   (Eq num, IntegralExp num) =>
   IxFun num ->
   FlatSlice num ->
-  Maybe (IxFun num)
-flatSlice (IxFun lmad oshp) s = do
-  lmad' <- LMAD.flatSlice lmad s
-  Just $ IxFun lmad' oshp
+  IxFun num
+flatSlice (IxFun lmad oshp) s = IxFun (LMAD.flatSlice lmad s) oshp
 
 -- | Reshape an index function.
 --
@@ -246,86 +230,18 @@ coerce (IxFun lmad _) new_shape =
 rank :: IntegralExp num => IxFun num -> Int
 rank (IxFun (LMAD _ sss) _) = length sss
 
--- | Essentially @rebase new_base ixfun = ixfun o new_base@
--- Core soundness condition: @base ixfun == shape new_base@
--- Handles the case where a rebase operation can stay within m + n - 1 LMADs,
--- where m is the number of LMADs in the index function, and n is the number of
--- LMADs in the new base.  If both index function have only on LMAD, this means
--- that we stay within the single-LMAD domain.
---
--- We can often stay in that domain if the original ixfun is essentially a
--- slice, e.g. `x[i, (k1,m,s1), (k2,n,s2)] = orig`.
---
--- However, I strongly suspect that for in-place update what we need is actually
--- the INVERSE of the rebase function, i.e., given an index function new-base
--- and another one orig, compute the index function ixfun0 such that:
---
---   new-base == rebase ixfun0 ixfun, or equivalently:
---   new-base == ixfun o ixfun0
---
--- because then I can go bottom up and compose with ixfun0 all the index
--- functions corresponding to the memory block associated with ixfun.
-rebase ::
-  (Eq num, IntegralExp num) =>
-  IxFun num ->
-  IxFun num ->
-  Maybe (IxFun num)
-rebase new_base@(IxFun lmad_base _) ixfun@(IxFun lmad shp) = do
-  let dims = LMAD.dims lmad
-      perm = LMAD.permutation lmad
-      perm_base = LMAD.permutation lmad_base
-
-  guard $
-    -- Core rebase condition.
-    base ixfun == shape new_base
-      -- XXX: We should be able to handle some basic cases where both index
-      -- functions have non-trivial permutations.
-      && (hasContiguousPerm ixfun || hasContiguousPerm new_base)
-      -- We need the permutations to be of the same size if we want to compose
-      -- them.  They don't have to be of the same size if the ixfun has a trivial
-      -- permutation.  Supporting this latter case allows us to rebase when ixfun
-      -- has been created by slicing with fixed dimensions.
-      && (length perm == length perm_base || hasContiguousPerm ixfun)
-      -- To not have to worry about ixfun having non-1 strides, we also check that
-      -- it is a row-major array (modulo permutation, which is handled
-      -- separately).  Accept a non-full outermost dimension.  XXX: Maybe this can
-      -- be less conservative?
-      && and
-        ( zipWith3
-            (\sn ld inner -> inner || sn == ldShape ld)
-            shp
-            dims
-            (True : replicate (length dims - 1) False)
-        )
-
-  -- Compose permutations, reverse strides and adjust offset if necessary.
-  let perm_base' =
-        if hasContiguousPerm ixfun
-          then perm_base
-          else map (perm !!) perm_base
-      lmad_base' = LMAD.setPermutation perm_base' lmad_base
-      dims_base = LMAD.dims lmad_base'
-      n_fewer_dims = length dims_base - length dims
-      (dims_base', offs_contrib) =
-        unzip $
-          zipWith
-            ( \(LMADDim s1 n1 p1) (LMADDim {}) ->
-                let (s', off') = (s1, 0)
-                 in (LMADDim s' n1 (p1 - n_fewer_dims), off')
-            )
-            -- If @dims@ is morally a slice, it might have fewer dimensions than
-            -- @dims_base@.  Drop extraneous outer dimensions.
-            (drop n_fewer_dims dims_base)
-            dims
-      off_base = LMAD.offset lmad_base' + sum offs_contrib
-      lmad_base'' =
-        LMAD.setShape
-          (LMAD.shape lmad)
-          ( LMAD
-              (off_base + ldStride (last dims_base) * LMAD.offset lmad)
-              dims_base'
-          )
-  pure $ IxFun lmad_base'' shp
+-- | Conceptually expand index function to be a particular slice of
+-- another by adjusting the offset and strides.  Used for memory
+-- expansion.
+expand ::
+  (Eq num, IntegralExp num) => num -> num -> IxFun num -> Maybe (IxFun num)
+expand o p (IxFun lmad base) =
+  let onDim ld = ld {LMAD.ldStride = LMAD.ldStride ld * p}
+      lmad' =
+        LMAD
+          (o + p * LMAD.offset lmad)
+          (map onDim (LMAD.dims lmad))
+   in Just $ IxFun lmad' base
 
 -- | Turn all the leaves of the index function into 'Ext's.  We
 --  require that there's only one LMAD, that the index function is
@@ -357,7 +273,6 @@ closeEnough ixf1 ixf2 =
   where
     closeEnoughLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
-        && map ldPerm (LMAD.dims lmad1) == map ldPerm (LMAD.dims lmad2)
 
 -- | Returns true if two 'IxFun's are equivalent.
 --
@@ -369,6 +284,5 @@ equivalent ixf1 ixf2 =
   where
     equivalentLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
-        && map ldPerm (LMAD.dims lmad1) == map ldPerm (LMAD.dims lmad2)
         && LMAD.offset lmad1 == LMAD.offset lmad2
         && map ldStride (LMAD.dims lmad1) == map ldStride (LMAD.dims lmad2)

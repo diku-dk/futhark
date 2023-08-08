@@ -26,12 +26,16 @@ import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import Futhark.CodeGen.ImpCode.OpenCL qualified as ImpOpenCL
 import Futhark.CodeGen.RTS.C (atomicsH, halfH)
+import Futhark.CodeGen.RTS.CUDA (preludeCU)
+import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
-import Futhark.Util (zEncodeText)
+import Futhark.Util (mapAccumLM, zEncodeText)
+import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
+import Prelude hiding (rem)
 
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
@@ -139,7 +143,7 @@ pointerQuals "device" = pointerQuals "global"
 pointerQuals s = error $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
 -- In-kernel name and per-workgroup size in bytes.
-type LocalMemoryUse = (VName, Count Bytes Exp)
+type LocalMemoryUse = (VName, Count Bytes (TExp Int64))
 
 data KernelState = KernelState
   { kernelLocalMemory :: [LocalMemoryUse],
@@ -344,39 +348,13 @@ onKernel target kernel = do
           mapM_ GC.item body
       kstate = GC.compUserState cstate
 
-      (local_memory_args, local_memory_params, local_memory_init) =
-        unzip3 . flip evalState (blankNameSource :: VNameSource) $
-          mapM (prepareLocalMemory target) $
-            kernelLocalMemory kstate
-
-      -- CUDA has very strict restrictions on the number of blocks
-      -- permitted along the 'y' and 'z' dimensions of the grid
-      -- (1<<16).  To work around this, we are going to dynamically
-      -- permute the block dimensions to move the largest one to the
-      -- 'x' dimension, which has a higher limit (1<<31).  This means
-      -- we need to extend the kernel with extra parameters that
-      -- contain information about this permutation, but we only do
-      -- this for multidimensional kernels (at the time of this
-      -- writing, only transposes).  The corresponding arguments are
-      -- added automatically in CCUDA.hs.
-      (perm_params, block_dim_init) =
-        case (target, num_groups) of
-          (TargetCUDA, [_, _, _]) ->
-            ( [ [C.cparam|const int block_dim0|],
-                [C.cparam|const int block_dim1|],
-                [C.cparam|const int block_dim2|]
-              ],
-              mempty
-            )
-          _ ->
-            ( mempty,
-              [ [C.citem|const int block_dim0 = 0;|],
-                [C.citem|const int block_dim1 = 1;|],
-                [C.citem|const int block_dim2 = 2;|]
-              ]
-            )
-
       (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+
+  let (local_memory_bytes, (local_memory_params, local_memory_args, local_memory_init)) =
+        second unzip3 $
+          evalState
+            (mapAccumLM prepareLocalMemory 0 (kernelLocalMemory kstate))
+            blankNameSource
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
@@ -430,10 +408,18 @@ onKernel target kernel = do
           [C.cparam|__global typename int64_t *global_failure_args|]
         ]
 
+      (local_memory_param, prepare_local_memory) =
+        case target of
+          TargetOpenCL ->
+            ( [[C.cparam|__local typename uint64_t* local_mem_aligned|]],
+              [C.citems|__local unsigned char* local_mem = local_mem_aligned;|]
+            )
+          TargetCUDA -> (mempty, mempty)
+
       params =
-        perm_params
+        local_memory_param
           ++ take (numFailureParams safety) failure_params
-          ++ catMaybes local_memory_params
+          ++ local_memory_params
           ++ use_params
 
       attribute =
@@ -452,7 +438,7 @@ onKernel target kernel = do
             [C.cfun|__kernel void $id:name ($params:params) {
                     $items:(mconcat unpack_params)
                     $items:const_defs
-                    $items:block_dim_init
+                    $items:prepare_local_memory
                     $items:local_memory_init
                     $items:error_init
                     $items:kernel_body
@@ -468,29 +454,25 @@ onKernel target kernel = do
         clFailures = kernelFailures kstate
       }
 
-  -- The argument corresponding to the global_failure parameters is
-  -- added automatically later.
-  let args = catMaybes local_memory_args ++ kernelArgs kernel
+  -- The error handling stuff is automatically added later.
+  let args = local_memory_args ++ kernelArgs kernel
 
-  pure $ LaunchKernel safety name args num_groups group_size
+  pure $ LaunchKernel safety name local_memory_bytes args num_groups group_size
   where
     name = kernelName kernel
     num_groups = kernelNumGroups kernel
     group_size = kernelGroupSize kernel
+    padTo8 e = e + ((8 - (e `rem` 8)) `rem` 8)
 
-    prepareLocalMemory TargetOpenCL (mem, size) = do
-      mem_aligned <- newVName $ baseString mem ++ "_aligned"
-      pure
-        ( Just $ SharedMemoryKArg size,
-          Just [C.cparam|__local volatile typename int64_t* $id:mem_aligned|],
-          [C.citem|__local volatile unsigned char* restrict $id:mem = (__local volatile unsigned char*) $id:mem_aligned;|]
-        )
-    prepareLocalMemory TargetCUDA (mem, size) = do
+    prepareLocalMemory (Count offset) (mem, Count size) = do
       param <- newVName $ baseString mem ++ "_offset"
+      let offset' = offset + padTo8 size
       pure
-        ( Just $ SharedMemoryKArg size,
-          Just [C.cparam|uint $id:param|],
-          [C.citem|volatile $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
+        ( bytes offset',
+          ( [C.cparam|typename int64_t $id:param|],
+            ValueKArg (untyped offset) $ IntType Int64,
+            [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &local_mem[$id:param];|]
+          )
         )
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
@@ -531,154 +513,27 @@ constDef _ = Nothing
 
 genOpenClPrelude :: S.Set PrimType -> T.Text
 genOpenClPrelude ts =
-  [untrimming|
-// Clang-based OpenCL implementations need this for 'static' to work.
-#ifdef cl_clang_storage_class_specifiers
-#pragma OPENCL EXTENSION cl_clang_storage_class_specifiers : enable
-#endif
-#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-$enable_f64
-// Some OpenCL programs dislike empty progams, or programs with no kernels.
-// Declare a dummy kernel to ensure they remain our friends.
-__kernel void dummy_kernel(__global unsigned char *dummy, int n)
-{
-    const int thread_gid = get_global_id(0);
-    if (thread_gid >= n) return;
-}
-
-#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
-#pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
-
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long int64_t;
-
-typedef uchar uint8_t;
-typedef ushort uint16_t;
-typedef uint uint32_t;
-typedef ulong uint64_t;
-
-// NVIDIAs OpenCL does not create device-wide memory fences (see #734), so we
-// use inline assembly if we detect we are on an NVIDIA GPU.
-#ifdef cl_nv_pragma_unroll
-static inline void mem_fence_global() {
-  asm("membar.gl;");
-}
-#else
-static inline void mem_fence_global() {
-  mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
-}
-#endif
-static inline void mem_fence_local() {
-  mem_fence(CLK_LOCAL_MEM_FENCE);
-}
-|]
+  enable_f64
+    <> preludeCL
     <> halfH
     <> cScalarDefs
     <> atomicsH
+    <> transposeCL
+    <> copyCL
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
-          [untrimming|
-         #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-         #define FUTHARK_F64_ENABLED
-         |]
+          [untrimming|#define FUTHARK_F64_ENABLED|]
       | otherwise = mempty
 
 genCUDAPrelude :: T.Text
 genCUDAPrelude =
-  [untrimming|
-#define FUTHARK_CUDA
-#define FUTHARK_F64_ENABLED
-
-typedef char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long long int64_t;
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-typedef uint8_t uchar;
-typedef uint16_t ushort;
-typedef uint32_t uint;
-typedef uint64_t ulong;
-#define __kernel extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
-#define __global
-#define __local
-#define __private
-#define __constant
-#define __write_only
-#define __read_only
-
-static inline int get_group_id_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
-  switch (d) {
-    case 0: return blockIdx.x;
-    case 1: return blockIdx.y;
-    case 2: return blockIdx.z;
-    default: return 0;
-  }
-}
-#define get_group_id(d) get_group_id_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_num_groups_fn(int block_dim0, int block_dim1, int block_dim2, int d) {
-  switch (d) {
-    case 0: d = block_dim0; break;
-    case 1: d = block_dim1; break;
-    case 2: d = block_dim2; break;
-  }
-  switch(d) {
-    case 0: return gridDim.x;
-    case 1: return gridDim.y;
-    case 2: return gridDim.z;
-    default: return 0;
-  }
-}
-#define get_num_groups(d) get_num_groups_fn(block_dim0, block_dim1, block_dim2, d)
-
-static inline int get_local_id(int d) {
-  switch (d) {
-    case 0: return threadIdx.x;
-    case 1: return threadIdx.y;
-    case 2: return threadIdx.z;
-    default: return 0;
-  }
-}
-
-static inline int get_local_size(int d) {
-  switch (d) {
-    case 0: return blockDim.x;
-    case 1: return blockDim.y;
-    case 2: return blockDim.z;
-    default: return 0;
-  }
-}
-
-#define CLK_LOCAL_MEM_FENCE 1
-#define CLK_GLOBAL_MEM_FENCE 2
-static inline void barrier(int x) {
-  __syncthreads();
-}
-static inline void mem_fence_local() {
-  __threadfence_block();
-}
-static inline void mem_fence_global() {
-  __threadfence();
-}
-
-#define NAN (0.0/0.0)
-#define INFINITY (1.0/0.0)
-extern volatile __shared__ unsigned char shared_mem[];
-|]
+  preludeCU
     <> halfH
     <> cScalarDefs
     <> atomicsH
+    <> transposeCL
+    <> copyCL
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
@@ -733,6 +588,7 @@ inKernelOperations env mode body =
       GC.opsAllocate = cannotAllocate,
       GC.opsDeallocate = cannotDeallocate,
       GC.opsCopy = copyInKernel,
+      GC.opsCopies = mempty,
       GC.opsFatMemory = False,
       GC.opsError = errorInKernel,
       GC.opsCall = callInKernel,
@@ -763,7 +619,7 @@ inKernelOperations env mode body =
     kernelOps (LocalAlloc name size) = do
       name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
-        s {kernelLocalMemory = (name', fmap untyped size) : kernelLocalMemory s}
+        s {kernelLocalMemory = (name', size) : kernelLocalMemory s}
       GC.stm [C.cstm|$id:name = (__local unsigned char*) $id:name';|]
     kernelOps (ErrorSync f) = do
       label <- nextErrorLabel
@@ -941,8 +797,12 @@ typesInCode (DeclareScalar _ _ t) = S.singleton t
 typesInCode (DeclareArray _ t _) = S.singleton t
 typesInCode (Allocate _ (Count (TPrimExp e)) _) = typesInExp e
 typesInCode Free {} = mempty
-typesInCode (Copy _ _ (Count (TPrimExp e1)) _ _ (Count (TPrimExp e2)) _ (Count (TPrimExp e3))) =
-  typesInExp e1 <> typesInExp e2 <> typesInExp e3
+typesInCode (LMADCopy _ shape _ (Count (TPrimExp dstoffset), dststrides) _ (Count (TPrimExp srcoffset), srcstrides)) =
+  foldMap (typesInExp . untyped . unCount) shape
+    <> typesInExp dstoffset
+    <> foldMap (typesInExp . untyped . unCount) dststrides
+    <> typesInExp srcoffset
+    <> foldMap (typesInExp . untyped . unCount) srcstrides
 typesInCode (Write _ (Count (TPrimExp e1)) t _ _ e2) =
   typesInExp e1 <> S.singleton t <> typesInExp e2
 typesInCode (Read _ _ (Count (TPrimExp e1)) t _ _) =

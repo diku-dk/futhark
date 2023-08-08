@@ -169,13 +169,13 @@ copyInGroup pt destloc srcloc = do
             Slice $
               replicate (rank - length srcds) (DimFix 0)
                 ++ takeLast (length srcds) (map fullDim dims)
-      copyElementWise
+      lmadCopy
         pt
         (sliceMemLoc destloc destslice')
         (sliceMemLoc srcloc srcslice')
     _ -> do
       groupCoverSpace (map sExt32 dims) $ \is ->
-        copyElementWise
+        lmadCopy
           pt
           (sliceMemLoc destloc (Slice $ map (DimFix . sExt64) is))
           (sliceMemLoc srcloc (Slice $ map (DimFix . sExt64) is))

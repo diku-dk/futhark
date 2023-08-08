@@ -37,7 +37,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
@@ -61,6 +61,29 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
+lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let fname :: String
+      fname =
+        case primByteSize t :: Int of
+          1 -> "lmad_copy_1b"
+          2 -> "lmad_copy_2b"
+          4 -> "lmad_copy_4b"
+          8 -> "lmad_copy_8b"
+          k -> error $ "lmadcopyCPU: " <> error (show k)
+      r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  stm
+    [C.cstm|
+         $id:fname(ctx, $int:r,
+                   $exp:dst, $exp:(unCount dstoffset),
+                   (typename int64_t[]){ $inits:dststride_inits },
+                   $exp:src, $exp:(unCount srcoffset),
+                   (typename int64_t[]){ $inits:srcstride_inits },
+                   (typename int64_t[]){ $inits:shape_inits });|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -72,6 +95,7 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
+      opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,
@@ -438,6 +462,8 @@ $contextPrototypesH
 $early_decls
 
 $contextH
+
+$copyH
 
 $prototypes
 

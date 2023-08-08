@@ -377,8 +377,7 @@ ensureRowMajorArray space_ok v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
-    && length (IxFun.base ixfun) == IxFun.rank ixfun
+  if length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocLinearArray space (baseString v) v
@@ -569,7 +568,6 @@ ensurePermArray space_ok perm v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   if length (IxFun.base ixfun) == length (IxFun.shape ixfun)
-    && IxFun.permutation ixfun == perm
     && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
@@ -758,14 +756,14 @@ allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
 data MemReq
-  = MemReq Space [Int] Rank
+  = MemReq Space Rank
   | NeedsNormalisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsNormalisation {} _ = x
 combMemReqs _ y@NeedsNormalisation {} = y
-combMemReqs x@(MemReq x_space _ _) y@MemReq {} =
+combMemReqs x@(MemReq x_space _) y@MemReq {} =
   if x == y then x else NeedsNormalisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -776,7 +774,7 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ (Rank base_rank))) =
+contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
   -- Memory + offset + base_rank + (stride,size)*rank.
   MemMem space
     : MemPrim int64
@@ -809,10 +807,7 @@ allocInMatchBody rets (Body _ stms res) =
         (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
           space <- lookupMemSpace mem
           pure . MemArray pt shape u $
-            MemReq
-              space
-              (IxFun.permutation ixfun)
-              (Rank $ length $ IxFun.base ixfun)
+            MemReq space (Rank $ length $ IxFun.base ixfun)
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -834,15 +829,15 @@ mkBranchRet reqs =
       )
 
     arrayInfo rank (NeedsNormalisation space) =
-      (space, [0 .. rank - 1], rank)
-    arrayInfo _ (MemReq space perm (Rank base_rank)) =
-      (space, perm, base_rank)
+      (space, rank)
+    arrayInfo _ (MemReq space (Rank base_rank)) =
+      (space, base_rank)
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, base_rank) = arrayInfo (shapeRank shape) req
+          (space, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert <$> IxFun.mkExistential base_rank perm (ctx_offset + 1)
+            convert <$> IxFun.mkExistential base_rank (shapeRank shape) (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
