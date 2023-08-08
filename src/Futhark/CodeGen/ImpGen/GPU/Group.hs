@@ -26,7 +26,7 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Construct (fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
@@ -42,9 +42,7 @@ flattenArray k flat arr = do
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
   sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
     fromMaybe (error "flattenArray") $
-      IxFun.reshape (memLocIxFun arr_loc) $
-        map pe64 $
-          shapeDims flat_shape
+      LMAD.reshape (memLocLMAD arr_loc) (map pe64 $ shapeDims flat_shape)
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
 sliceArray start size arr = do
@@ -59,7 +57,7 @@ sliceArray start size arr = do
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
-    $ IxFun.slice ixfun slice
+    $ LMAD.slice ixfun slice
 
 -- | @applyLambda lam dests args@ emits code that:
 --
@@ -154,8 +152,8 @@ copyInGroup pt destloc srcloc = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocName srcloc)
 
-  let src_ixfun = memLocIxFun srcloc
-      dims = IxFun.shape src_ixfun
+  let src_lmad = memLocLMAD srcloc
+      dims = LMAD.shape src_lmad
       rank = length dims
 
   case (dest_space, src_space) of
@@ -229,7 +227,7 @@ prepareIntraGroupSegHist group_size =
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) locks_mem $
-            IxFun.iota . map pe64 . arrayDims $
+            LMAD.iota 0 . map pe64 . arrayDims $
               locks_t
 
           sComment "All locks start out unlocked" $

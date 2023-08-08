@@ -47,7 +47,7 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
@@ -114,7 +114,7 @@ computeHistoUsage space op = do
         (elemType dest_t)
         subhistos_shape
         subhistos_mem
-        $ IxFun.iota
+        $ LMAD.iota 0
         $ map pe64
         $ shapeDims subhistos_shape
 

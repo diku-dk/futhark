@@ -41,9 +41,11 @@ import Data.Traversable
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.LMAD hiding
-  ( flatSlice,
+  ( equivalent,
+    flatSlice,
     index,
     iota,
+    isDirect,
     mkExistential,
     permute,
     rank,
@@ -280,9 +282,4 @@ closeEnough ixf1 ixf2 =
 -- each pair of LMADs matching in permutation, offsets, and strides.
 equivalent :: Eq num => IxFun num -> IxFun num -> Bool
 equivalent ixf1 ixf2 =
-  equivalentLMADs (ixfunLMAD ixf1) (ixfunLMAD ixf2)
-  where
-    equivalentLMADs lmad1 lmad2 =
-      length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
-        && LMAD.offset lmad1 == LMAD.offset lmad2
-        && map ldStride (LMAD.dims lmad1) == map ldStride (LMAD.dims lmad2)
+  LMAD.equivalent (ixfunLMAD ixf1) (ixfunLMAD ixf2)

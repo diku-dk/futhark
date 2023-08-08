@@ -64,6 +64,7 @@ module Futhark.IR.Mem
     MemReturn (..),
     IxFun,
     ExtIxFun,
+    LMAD,
     isStaticIxFun,
     ExpReturns,
     BodyReturns,
@@ -249,6 +250,9 @@ instance ST.IndexOp (inner rep) => ST.IndexOp (MemOp inner rep) where
 
 -- | The index function representation used for memory annotations.
 type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
+
+-- | The LMAD representation used for memory annotations.
+type LMAD = IxFun.LMAD (TPrimExp Int64 VName)
 
 -- | An index function that may contain existential variables.
 type ExtIxFun = IxFun.IxFun (TPrimExp Int64 (Ext VName))

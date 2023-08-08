@@ -28,6 +28,8 @@ module Futhark.IR.Mem.LMAD
     memcpyable,
     iota,
     mkExistential,
+    equivalent,
+    isDirect,
   )
 where
 
@@ -568,3 +570,19 @@ memcpyable ::
   TPrimExp Bool num
 memcpyable dest_lmad src_lmad =
   contiguous dest_lmad .&&. compatible dest_lmad src_lmad
+
+-- | Returns true if two 'LMAD's are equivalent.
+--
+-- Equivalence in this case is matching in offsets and strides.
+equivalent :: Eq num => LMAD num -> LMAD num -> Bool
+equivalent lmad1 lmad2 =
+  length (dims lmad1) == length (dims lmad2)
+    && offset lmad1 == offset lmad2
+    && map ldStride (dims lmad1) == map ldStride (dims lmad2)
+
+-- | Is this is a row-major array?
+isDirect :: (Eq num, IntegralExp num) => LMAD num -> Bool
+isDirect (LMAD offset dims) =
+  let strides_expected = reverse $ scanl (*) 1 $ reverse $ tail $ map ldShape dims
+   in offset == 0
+        && and (zipWith (==) (map ldStride dims) strides_expected)

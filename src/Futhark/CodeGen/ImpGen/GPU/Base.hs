@@ -51,7 +51,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
@@ -1251,7 +1251,7 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape mem $ IxFun.iota $ map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $ LMAD.iota 0 $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
@@ -1262,7 +1262,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isDirect arr_ixfun -> pure $
+      | LMAD.isDirect arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1347,9 +1347,7 @@ iotaForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" (IntType bt) shape mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape
+          LMAD.iota 0 (map pe64 (shapeDims shape))
       sIotaKernel arr (sExt64 n') x' s' bt
 
   pure fname
@@ -1364,7 +1362,7 @@ sIota ::
   CallKernelGen ()
 sIota arr n x s et = do
   ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if IxFun.isDirect arr_ixfun
+  if LMAD.isDirect arr_ixfun
     then do
       fname <- iotaForType et
       emit $
