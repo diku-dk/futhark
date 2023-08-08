@@ -464,6 +464,9 @@ def lmad_copy_gpu2gpu(
     self, pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
 ):
     elem_size = ct.sizeof(pt)
+    nbytes = np.product(shape) * elem_size
+    if nbytes == 0:
+        return None
     if lmad_memcpyable(dst_strides, src_strides, shape):
         cl.enqueue_copy(
             self.queue,
@@ -471,7 +474,7 @@ def lmad_copy_gpu2gpu(
             src,
             dst_offset=dst_offset * elem_size,
             src_offset=src_offset * elem_size,
-            byte_count=np.product(shape) * elem_size,
+            byte_count=nbytes,
         )
     else:
         tr = lmad_map_tr(dst_strides, src_strides, shape)
