@@ -593,43 +593,25 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
-  opDependencies (Screma w arrs (ScremaForm [] [] map_lam)) =
-    let deps_in = M.fromList $ zip (boundByLambda map_lam) (map oneName arrs)
-        deps = dataDependencies' deps_in (lambdaBody map_lam)
-        -- TODO No longer explicitly adding dependency on size; could
-        -- zip name with map_lam parameters?
-        -- TODO Use valid_deps?
-        -- TODO ^ How would this be tested? For example,
-        --   map xs (\x -> let y = x+1 in y)
-        -- should only depend on xs; rest is out of scope.
-        names_in_scope = freeIn map_lam <> (namesFromList arrs)
-    in print "opDependencies:map_lam" $
-      map (namesIntersection names_in_scope . depsOfRes deps)
-          (print "bodyResult" $ bodyResult (lambdaBody map_lam))
-    where
-      print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
         depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
         depsOf' lam nes deps_in =
-          let deps_in' = print "depsOf':deps_in" deps_in
-              deps_nes = print "depsOf':deps_nes" $ map (depsOf mempty) nes
-              deps_lam_params' = zipWith (<>) deps_nes deps_in'
-              deps_lam_params = M.fromList $
-                zip (boundByLambda lam) deps_lam_params'
-              deps = dataDependencies' deps_lam_params (lambdaBody lam)
-              names_in_scope = freeIn lam <> mconcat deps_lam_params'
-          in map (namesIntersection names_in_scope . depsOfRes deps)
-                 (bodyResult $ lambdaBody lam)
-        deps_map = opDependencies (Screma w arrs (ScremaForm [] [] map_lam))
+          let deps_nes = map (depsOf mempty) nes
+          in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
+
+        deps_map = print "deps_map" $
+          lambdaDependencies mempty map_lam (map oneName arrs)
 
         (deps_scans_in', deps_map') = splitAt (scanResults scans) deps_map
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
-        deps_scans = concatMap depsOfScan (zip scans deps_scans_in)
+        deps_scans = print "deps_scans" $
+          concatMap depsOfScan (zip scans deps_scans_in)
 
         (deps_reds_in', deps_map'') = splitAt (redResults reds) deps_map'
         deps_reds_in = chunks (redSizes reds) deps_reds_in'
-        deps_reds = concatMap depsOfRed (zip reds deps_reds_in)
+        deps_reds = print "deps_reds" $
+          concatMap depsOfRed (zip reds deps_reds_in)
     in print "deps_screma" $ deps_scans <> deps_reds <> deps_map''
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x

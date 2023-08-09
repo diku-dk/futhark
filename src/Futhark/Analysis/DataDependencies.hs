@@ -2,9 +2,8 @@
 module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
-    dataDependencies',
     depsOf,
-    depsOfRes,
+    lambdaDependencies,
     findNecessaryForReturned,
   )
 where
@@ -71,6 +70,16 @@ depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 
 depsOfRes :: Dependencies -> SubExpRes -> Names
 depsOfRes deps (SubExpRes _ se) = depsOf deps se
+
+-- | Determine the variables on which the results of applying
+-- anonymous function @lam@ to @inputs@ depend.
+lambdaDependencies :: ASTRep rep => Dependencies -> Lambda rep -> [Names] -> [Names]
+lambdaDependencies deps lam inputs =
+  let names_in_scope = freeIn lam <> mconcat inputs
+      deps_in = M.fromList $ zip (boundByLambda lam) inputs
+      deps' = dataDependencies' (deps_in <> deps) (lambdaBody lam)
+  in map (namesIntersection names_in_scope . depsOfRes deps')
+         (bodyResult $ lambdaBody lam)
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,
