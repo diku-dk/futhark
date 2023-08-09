@@ -14,7 +14,6 @@ module Futhark.IR.Prop.Names
     oneName,
     namesFromList,
     namesToList,
-    namesUnion,
     namesIntersection,
     namesIntersect,
     namesSubtract,
@@ -100,10 +99,6 @@ namesToList = IM.elems . namesIntMap
 -- | Construct a name set from a single name.
 oneName :: VName -> Names
 oneName v = Names $ IM.singleton (baseTag v) v
-
--- | The union of two name sets.
-namesUnion :: Names -> Names -> Names
-namesUnion (Names vs1) (Names vs2) = Names $ IM.union vs1 vs2
 
 -- | The intersection of two name sets.
 namesIntersection :: Names -> Names -> Names
