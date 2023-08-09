@@ -73,7 +73,7 @@ import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (chunks, maybeNth)
+import Futhark.Util (chunks, maybeNth, splitAt3)
 import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
@@ -600,19 +600,18 @@ instance ASTRep rep => IsOp (SOAC rep) where
           let deps_nes = map (depsOf mempty) nes
           in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
-        deps_map = print "deps_map" $
-          lambdaDependencies mempty map_lam (map oneName arrs)
+        (deps_scans_in', deps_reds_in', deps_map) = print "deps_map" $
+          splitAt3 (scanResults scans) (redResults reds) $
+            lambdaDependencies mempty map_lam (map oneName arrs)
 
-        (deps_scans_in', deps_map') = splitAt (scanResults scans) deps_map
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
         deps_scans = print "deps_scans" $
           concatMap depsOfScan (zip scans deps_scans_in)
 
-        (deps_reds_in', deps_map'') = splitAt (redResults reds) deps_map'
         deps_reds_in = chunks (redSizes reds) deps_reds_in'
         deps_reds = print "deps_reds" $
           concatMap depsOfRed (zip reds deps_reds_in)
-    in print "deps_screma" $ deps_scans <> deps_reds <> deps_map''
+    in print "deps_screma" $ deps_scans <> deps_reds <> deps_map
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
       scanSizes = map (length . scanNeutral)
