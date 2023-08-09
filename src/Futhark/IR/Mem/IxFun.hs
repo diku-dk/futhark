@@ -23,7 +23,6 @@ module Futhark.IR.Mem.IxFun
     substituteInLMAD,
     existentialize,
     closeEnough,
-    permuteInv,
     disjoint,
     disjoint2,
     disjoint3,
