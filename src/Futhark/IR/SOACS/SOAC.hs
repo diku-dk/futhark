@@ -604,8 +604,8 @@ instance ASTRep rep => IsOp (SOAC rep) where
         -- should only depend on xs; rest is out of scope.
         names_in_scope = freeIn map_lam <> (namesFromList arrs)
     in print "opDependencies:map_lam" $
-      map (namesIntersection names_in_scope) $
-        map (depsOfRes deps) (print "bodyResult" $ bodyResult (lambdaBody map_lam))
+      map (namesIntersection names_in_scope . depsOfRes deps)
+          (print "bodyResult" $ bodyResult (lambdaBody map_lam))
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
   opDependencies (Screma w arrs (ScremaForm scans [] map_lam)) =
@@ -616,13 +616,13 @@ instance ASTRep rep => IsOp (SOAC rep) where
               deps_lam_params = M.fromList $
                 zip (boundByLambda lam) deps_lam_params'
               deps = dataDependencies' deps_lam_params (lambdaBody lam)
-              names_in_scope = freeIn lam <> (mconcat deps_lam_params')
-          in map (namesIntersection names_in_scope) $
-            map (depsOfRes deps) (bodyResult $ lambdaBody lam)
+              names_in_scope = freeIn lam <> mconcat deps_lam_params'
+          in map (namesIntersection names_in_scope . depsOfRes deps)
+                 (bodyResult $ lambdaBody lam)
         deps_map = opDependencies (Screma w arrs (ScremaForm [] [] map_lam))
         deps_scans_in = chunks (map inputSize scans) deps_map
         deps_scan = concatMap depsOfScan (zip scans deps_scans_in)
-    in print "deps_scan" $ deps_scan <> (drop (scanResults scans) deps_map)
+    in print "deps_scan" $ deps_scan <> drop (scanResults scans) deps_map
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
       inputSize = length . scanNeutral
