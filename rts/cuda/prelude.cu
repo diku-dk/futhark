@@ -11,10 +11,7 @@ typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
-typedef uint8_t uchar;
-typedef uint16_t ushort;
-typedef uint32_t uint;
-typedef uint64_t ulong;
+
 #define __kernel extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
 #define __global
 #define __local
@@ -80,17 +77,17 @@ static inline int get_global_size(int d) {
 
 #define CLK_LOCAL_MEM_FENCE 1
 #define CLK_GLOBAL_MEM_FENCE 2
-static inline void barrier(int x) {
+static inline __device__ void barrier(int x) {
   __syncthreads();
 }
-static inline void mem_fence_local() {
+static inline __device__ void mem_fence_local() {
   __threadfence_block();
 }
-static inline void mem_fence_global() {
+static inline __device__ void mem_fence_global() {
   __threadfence();
 }
 
-static inline void barrier_local() {
+static inline __device__ void barrier_local() {
   __syncthreads();
 }
 
