@@ -17,7 +17,6 @@ module Futhark.IR.Mem.LMAD
     shape,
     rank,
     substituteInLMAD,
-    permuteInv,
     disjoint,
     disjoint2,
     disjoint3,
