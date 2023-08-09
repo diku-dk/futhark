@@ -608,11 +608,13 @@ instance ASTRep rep => IsOp (SOAC rep) where
           (print "bodyResult" $ bodyResult (lambdaBody map_lam))
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
-  opDependencies (Screma w arrs (ScremaForm scans [] map_lam)) =
-    let depsOfScan (Scan lam nes, deps_in) =
-          let deps_in' = print "depsOfScan:deps_in" deps_in
-              deps_nes = print "depsOfScan:deps_nes" $ map (depsOf mempty) nes
-              deps_lam_params' = zipWith (<>) deps_nes deps_in
+  opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
+    let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
+        depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
+        depsOf' lam nes deps_in =
+          let deps_in' = print "depsOf':deps_in" deps_in
+              deps_nes = print "depsOf':deps_nes" $ map (depsOf mempty) nes
+              deps_lam_params' = zipWith (<>) deps_nes deps_in'
               deps_lam_params = M.fromList $
                 zip (boundByLambda lam) deps_lam_params'
               deps = dataDependencies' deps_lam_params (lambdaBody lam)
@@ -620,12 +622,19 @@ instance ASTRep rep => IsOp (SOAC rep) where
           in map (namesIntersection names_in_scope . depsOfRes deps)
                  (bodyResult $ lambdaBody lam)
         deps_map = opDependencies (Screma w arrs (ScremaForm [] [] map_lam))
-        deps_scans_in = chunks (map inputSize scans) deps_map
-        deps_scan = concatMap depsOfScan (zip scans deps_scans_in)
-    in print "deps_scan" $ deps_scan <> drop (scanResults scans) deps_map
+
+        (deps_scans_in', deps_map') = splitAt (scanResults scans) deps_map
+        deps_scans_in = chunks (scanSizes scans) deps_scans_in'
+        deps_scans = concatMap depsOfScan (zip scans deps_scans_in)
+
+        (deps_reds_in', deps_map'') = splitAt (redResults reds) deps_map'
+        deps_reds_in = chunks (redSizes reds) deps_reds_in'
+        deps_reds = concatMap depsOfRed (zip reds deps_reds_in)
+    in print "deps_screma" $ deps_scans <> deps_reds <> deps_map''
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
-      inputSize = length . scanNeutral
+      scanSizes = map (length . scanNeutral)
+      redSizes = map (length . redNeutral)
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
