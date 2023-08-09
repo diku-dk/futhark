@@ -900,24 +900,24 @@ void backend_context_teardown(struct futhark_context* ctx) {
 typedef CUfunction gpu_kernel;
 typedef CUdeviceptr gpu_mem;
 
-void gpu_create_kernel(struct futhark_context *ctx,
-                       gpu_kernel* kernel,
-                       const char* name) {
+static void gpu_create_kernel(struct futhark_context *ctx,
+                              gpu_kernel* kernel,
+                              const char* name) {
   if (ctx->debugging) {
     fprintf(ctx->log, "Creating kernel %s.\n", name);
   }
   CUDA_SUCCEED_FATAL(cuModuleGetFunction(kernel, ctx->module, name));
 }
 
-void gpu_free_kernel(struct futhark_context *ctx,
-                     gpu_kernel kernel) {
+static void gpu_free_kernel(struct futhark_context *ctx,
+                            gpu_kernel kernel) {
   (void)ctx;
   (void)kernel;
 }
 
-int gpu_scalar_to_device(struct futhark_context* ctx,
-                         gpu_mem dst, size_t offset, size_t size,
-                         void *src) {
+static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                gpu_mem dst, size_t offset, size_t size,
+                                void *src) {
   CUevent *pevents = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     pevents = cuda_get_events(ctx, "copy_scalar_to_dev");
@@ -930,9 +930,9 @@ int gpu_scalar_to_device(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-int gpu_scalar_from_device(struct futhark_context* ctx,
-                           void *dst,
-                           gpu_mem src, size_t offset, size_t size) {
+static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  void *dst,
+                                  gpu_mem src, size_t offset, size_t size) {
   CUevent *pevents = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     pevents = cuda_get_events(ctx, "copy_scalar_from_dev");
@@ -945,10 +945,10 @@ int gpu_scalar_from_device(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-int gpu_memcpy(struct futhark_context* ctx,
-               gpu_mem dst, int64_t dst_offset,
-               gpu_mem src, int64_t src_offset,
-               int64_t nbytes) {
+static int gpu_memcpy(struct futhark_context* ctx,
+                      gpu_mem dst, int64_t dst_offset,
+                      gpu_mem src, int64_t src_offset,
+                      int64_t nbytes) {
   CUevent *pevents = NULL;
   if (ctx->profiling && !ctx->profiling_paused) {
     pevents = cuda_get_events(ctx, "copy_dev_to_dev");
@@ -961,10 +961,10 @@ int gpu_memcpy(struct futhark_context* ctx,
   return FUTHARK_SUCCESS;
 }
 
-int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
-                    gpu_mem dst, int64_t dst_offset,
-                    const unsigned char* src, int64_t src_offset,
-                    int64_t nbytes) {
+static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+                           gpu_mem dst, int64_t dst_offset,
+                           const unsigned char* src, int64_t src_offset,
+                           int64_t nbytes) {
   if (nbytes > 0) {
     CUevent* pevents = NULL;
     if (ctx->profiling && !ctx->profiling_paused) {
@@ -985,10 +985,10 @@ int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
   return FUTHARK_SUCCESS;
 }
 
-int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
-                    unsigned char* dst, int64_t dst_offset,
-                    gpu_mem src, int64_t src_offset,
-                    int64_t nbytes) {
+static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+                           unsigned char* dst, int64_t dst_offset,
+                           gpu_mem src, int64_t src_offset,
+                           int64_t nbytes) {
   if (nbytes > 0) {
     CUevent* pevents = NULL;
     if (ctx->profiling && !ctx->profiling_paused) {
@@ -1011,14 +1011,14 @@ int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
   return FUTHARK_SUCCESS;
 }
 
-int gpu_launch_kernel(struct futhark_context* ctx,
-                      gpu_kernel kernel, const char *name,
-                      const int32_t grid[3],
-                      const int32_t block[3],
-                      unsigned int local_mem_bytes,
-                      int num_args,
-                      void* args[num_args],
-                      size_t args_sizes[num_args]) {
+static int gpu_launch_kernel(struct futhark_context* ctx,
+                             gpu_kernel kernel, const char *name,
+                             const int32_t grid[3],
+                             const int32_t block[3],
+                             unsigned int local_mem_bytes,
+                             int num_args,
+                             void* args[num_args],
+                             size_t args_sizes[num_args]) {
   (void) args_sizes;
   int64_t time_start = 0, time_end = 0;
   if (ctx->logging) {
