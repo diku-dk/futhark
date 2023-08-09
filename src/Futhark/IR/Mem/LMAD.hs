@@ -255,9 +255,6 @@ shape = map ldShape . dims
 rank :: LMAD num -> Int
 rank = length . shape
 
-permuteInv :: Permutation -> [a] -> [a]
-permuteInv ps elems = map snd $ sortBy (compare `on` fst) $ zip ps elems
-
 -- | Generalised iota with user-specified offset.
 iota ::
   IntegralExp num =>
