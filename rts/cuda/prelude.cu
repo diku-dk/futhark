@@ -1,6 +1,5 @@
-// Start of prelude.cu
+// start of prelude.cu
 
-#define FUTHARK_CUDA
 #define FUTHARK_F64_ENABLED
 
 typedef char int8_t;
@@ -20,7 +19,7 @@ typedef unsigned long long uint64_t;
 #define __write_only
 #define __read_only
 
-static inline int get_group_id(int d) {
+static inline __device__ int get_group_id(int d) {
   switch (d) {
   case 0: return blockIdx.x;
   case 1: return blockIdx.y;
@@ -29,7 +28,7 @@ static inline int get_group_id(int d) {
   }
 }
 
-static inline int get_num_groups(int d) {
+static inline __device__ int get_num_groups(int d) {
   switch(d) {
   case 0: return gridDim.x;
   case 1: return gridDim.y;
@@ -38,7 +37,7 @@ static inline int get_num_groups(int d) {
   }
 }
 
-static inline int get_global_id(int d) {
+static inline __device__ int get_global_id(int d) {
   switch (d) {
     case 0: return threadIdx.x + blockIdx.x * blockDim.x;
     case 1: return threadIdx.y + blockIdx.y * blockDim.y;
@@ -47,7 +46,7 @@ static inline int get_global_id(int d) {
   }
 }
 
-static inline int get_local_id(int d) {
+static inline __device__ int get_local_id(int d) {
   switch (d) {
     case 0: return threadIdx.x;
     case 1: return threadIdx.y;
@@ -56,7 +55,7 @@ static inline int get_local_id(int d) {
   }
 }
 
-static inline int get_local_size(int d) {
+static inline __device__ int get_local_size(int d) {
   switch (d) {
     case 0: return blockDim.x;
     case 1: return blockDim.y;
@@ -65,7 +64,7 @@ static inline int get_local_size(int d) {
   }
 }
 
-static inline int get_global_size(int d) {
+static inline __device__ int get_global_size(int d) {
   switch (d) {
     case 0: return gridDim.x * blockDim.x;
     case 1: return gridDim.y * blockDim.y;

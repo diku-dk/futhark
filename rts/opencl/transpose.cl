@@ -60,7 +60,7 @@ __kernel void map_transpose_##NAME(LOCAL_MEM_PARAM                      \
   }                                                                     \
 }                                                                       \
                                                                         \
-__attribute__((reqd_work_group_size(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)))   \
+REQD_GROUP_SIZE(TR_BLOCK_DIM, TR_BLOCK_DIM, 1)                          \
 __kernel void map_transpose_##NAME##_low_height(LOCAL_MEM_PARAM        \
                                                 __global ELEM_TYPE *dst_mem, \
                                                 int64_t dst_offset,     \
