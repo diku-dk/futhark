@@ -511,15 +511,20 @@ constDef (ConstUse v e) =
     undef = "#undef " <> idText (C.toIdent v mempty)
 constDef _ = Nothing
 
-genOpenClPrelude :: S.Set PrimType -> T.Text
-genOpenClPrelude ts =
-  enable_f64
-    <> preludeCL
-    <> halfH
+commonPrelude :: T.Text
+commonPrelude =
+  halfH
     <> cScalarDefs
     <> atomicsH
     <> transposeCL
     <> copyCL
+
+genOpenClPrelude :: S.Set PrimType -> T.Text
+genOpenClPrelude ts =
+  "#define FUTHARK_OPENCL\n"
+    <> enable_f64
+    <> preludeCL
+    <> commonPrelude
   where
     enable_f64
       | FloatType Float64 `S.member` ts =
@@ -528,12 +533,9 @@ genOpenClPrelude ts =
 
 genCUDAPrelude :: T.Text
 genCUDAPrelude =
-  preludeCU
-    <> halfH
-    <> cScalarDefs
-    <> atomicsH
-    <> transposeCL
-    <> copyCL
+  "#define FUTHARK_CUDA\n"
+    <> preludeCU
+    <> commonPrelude
 
 compilePrimExp :: PrimExp KernelConst -> C.Exp
 compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
