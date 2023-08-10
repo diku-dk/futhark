@@ -48,23 +48,22 @@ module Futhark.IR.SOACS.SOAC
   )
 where
 
-import Debug.Trace
-
 import Control.Category
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
+import Data.Foldable qualified as Foldable
 import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
-import qualified Data.Foldable as Foldable
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
-import Futhark.Analysis.DataDependencies
 import Futhark.Construct
 import Futhark.IR
 import Futhark.IR.Aliases (Aliases, CanBeAliased (..))
@@ -598,20 +597,23 @@ instance ASTRep rep => IsOp (SOAC rep) where
         depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
         depsOf' lam nes deps_in =
           let deps_nes = map (depsOf mempty) nes
-          in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
+           in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
-        (deps_scans_in', deps_reds_in', deps_map) = print "deps_map" $
-          splitAt3 (scanResults scans) (redResults reds) $
-            lambdaDependencies mempty map_lam (map oneName arrs)
+        (deps_scans_in', deps_reds_in', deps_map) =
+          print "deps_map" $
+            splitAt3 (scanResults scans) (redResults reds) $
+              lambdaDependencies mempty map_lam (map oneName arrs)
 
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
-        deps_scans = print "deps_scans" $
-          concatMap depsOfScan (zip scans deps_scans_in)
+        deps_scans =
+          print "deps_scans" $
+            concatMap depsOfScan (zip scans deps_scans_in)
 
         deps_reds_in = chunks (redSizes reds) deps_reds_in'
-        deps_reds = print "deps_reds" $
-          concatMap depsOfRed (zip reds deps_reds_in)
-    in print "deps_screma" $ deps_scans <> deps_reds <> deps_map
+        deps_reds =
+          print "deps_reds" $
+            concatMap depsOfRed (zip reds deps_reds_in)
+     in print "deps_screma" $ deps_scans <> deps_reds <> deps_map
     where
       print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
       scanSizes = map (length . scanNeutral)
