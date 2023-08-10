@@ -10,6 +10,8 @@ where
 
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Debug.Trace
+import Data.Function ((&))
 import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
@@ -30,7 +32,13 @@ dataDependencies' ::
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
     grow deps (Let pat _ (Op op)) =
+      -- TODO transitive dependencies
+      -- TODO for map0 test this outputs [res1, res2, out of scope var cond]
+      -- where cond depends on i and res1 and res2 depend on cond.
       M.fromList (zip (patNames pat) (opDependencies op)) <> deps
+        & dprint "@dataDependencies opCase@"
+      where
+        dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
@@ -56,6 +64,9 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
       let free = freeIn pat <> freeIn e
           freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free
        in M.fromList [(name, freeDeps) | name <- patNames pat] `M.union` deps
+            & dprint "@dataDependencies@"
+      where
+        dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty
