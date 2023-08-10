@@ -10,9 +10,9 @@ where
 
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Debug.Trace
 import Futhark.IR
 
-import Debug.Trace
 qqprint msg x = Debug.Trace.trace (msg ++ " " ++ show x) x
 
 -- | A mapping from a variable name @v@, to those variables on which
@@ -32,9 +32,8 @@ dataDependencies' ::
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
-    grow deps (Let pat _ (Op op)) = qqprint "yello Op!" $
+    grow deps (Let pat _ (Op op)) =
       M.fromList (zip (patNames pat) (opDependencies op)) <> deps
-      -- TODO transitive dependencies
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
@@ -78,8 +77,9 @@ lambdaDependencies deps lam inputs =
   let names_in_scope = freeIn lam <> mconcat inputs
       deps_in = M.fromList $ zip (boundByLambda lam) inputs
       deps' = dataDependencies' (deps_in <> deps) (lambdaBody lam)
-  in map (namesIntersection names_in_scope . depsOfRes deps')
-         (bodyResult $ lambdaBody lam)
+   in map
+        (namesIntersection names_in_scope . depsOfRes deps')
+        (bodyResult $ lambdaBody lam)
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,
