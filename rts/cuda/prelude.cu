@@ -1,5 +1,6 @@
 // start of prelude.cu
 
+#define SCALAR_FUN_ATTR __device__ static inline
 #define FUTHARK_F64_ENABLED
 
 typedef char int8_t;
