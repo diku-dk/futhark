@@ -191,13 +191,8 @@ class (ASTConstraints op, TypedOp op) => IsOp op where
   -- | Should we try to hoist this out of branches?
   cheapOp :: op -> Bool
 
+  -- | Compute the data dependencies of an operation.
   opDependencies :: op -> [Names]
-  -- | Get dependencies of operation. By default,
-  -- each variable returned by op depends on all
-  -- free variables in `op`.
-  -- opDependencies op = do
-  --   ts <- opType op
-  --   pure $ replicate (length ts) (freeIn op)
 
 instance IsOp (NoOp rep) where
   safeOp NoOp = True
