@@ -368,24 +368,6 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   return 0;
 }
 
-static char *concat_fragments(const char *src_fragments[]) {
-  size_t src_len = 0;
-  const char **p;
-
-  for (p = src_fragments; *p; p++) {
-    src_len += strlen(*p);
-  }
-
-  char *src = (char*) malloc(src_len + 1);
-  size_t n = 0;
-  for (p = src_fragments; *p; p++) {
-    strcpy(src + n, *p);
-    n += strlen(*p);
-  }
-
-  return src;
-}
-
 static const char *cuda_nvrtc_get_arch(CUdevice dev) {
   static struct {
     int major;
@@ -643,7 +625,7 @@ static char* cuda_module_setup(struct futhark_context *ctx,
   struct futhark_context_config *cfg = ctx->cfg;
 
   if (cfg->load_program_from == NULL) {
-    src = concat_fragments(src_fragments);
+    src = strconcat(src_fragments);
   } else {
     src = slurp_file(cfg->load_program_from, NULL);
   }
