@@ -599,20 +599,21 @@ instance ASTRep rep => IsOp (SOAC rep) where
            in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
         (deps_scans_in', deps_reds_in', deps_map) =
-          dprint "deps_map" $
-            splitAt3 (scanResults scans) (redResults reds) $
-              lambdaDependencies mempty map_lam (map oneName arrs)
+          splitAt3 (scanResults scans) (redResults reds) $
+            lambdaDependencies mempty map_lam (map oneName arrs)
+              & dprint "deps_map"
 
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
         deps_scans =
-          dprint "deps_scans" $
-            concatMap depsOfScan (zip scans deps_scans_in)
+          concatMap depsOfScan (zip scans deps_scans_in)
+            & dprint "deps_scans"
 
         deps_reds_in = chunks (redSizes reds) deps_reds_in'
         deps_reds =
-          dprint "deps_reds" $
-            concatMap depsOfRed (zip reds deps_reds_in)
-     in dprint "deps_screma" $ deps_scans <> deps_reds <> deps_map
+          concatMap depsOfRed (zip reds deps_reds_in)
+            & dprint "deps_reds"
+     in deps_scans <> deps_reds <> deps_map
+          & dprint "deps_screma"
     where
       dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
       scanSizes = map (length . scanNeutral)
