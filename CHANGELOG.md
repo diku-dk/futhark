@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect handling of `match` in lambda lifting (#2000).
 
+* Regression in checking of consumption (#2007).
+
 ## [0.25.2]
 
 ### Added
