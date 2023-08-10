@@ -217,7 +217,7 @@ __constant static const unsigned short offset_table[64] = {
   0, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024,
   0, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024 };
 
-static uint16_t float2halfbits(float value) {
+SCALAR_FUN_ATTR uint16_t float2halfbits(float value) {
   union { float x; uint32_t y; } u;
   u.x = value;
   uint32_t bits = u.y;
@@ -227,7 +227,7 @@ static uint16_t float2halfbits(float value) {
   return hbits;
 }
 
-static float halfbits2float(uint16_t value) {
+SCALAR_FUN_ATTR float halfbits2float(uint16_t value) {
   uint32_t bits = mantissa_table[offset_table[value>>10]+(value&0x3FF)] + exponent_table[value>>10];
 
   union { uint32_t x; float y; } u;
@@ -235,7 +235,7 @@ static float halfbits2float(uint16_t value) {
   return u.y;
 }
 
-static uint16_t halfbitsnextafter(uint16_t from, uint16_t to) {
+SCALAR_FUN_ATTR uint16_t halfbitsnextafter(uint16_t from, uint16_t to) {
   int fabs = from & 0x7FFF, tabs = to & 0x7FFF;
   if(fabs > 0x7C00 || tabs > 0x7C00) {
     return ((from&0x7FFF)>0x7C00) ? (from|0x200) : (to|0x200);

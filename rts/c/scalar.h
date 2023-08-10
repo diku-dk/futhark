@@ -17,14 +17,6 @@
 // Double-precision definitions are only included if the preprocessor
 // macro FUTHARK_F64_ENABLED is set.
 
-#if defined(FUTHARK_CUDA)
-#define SCALAR_FUN_ATTR __device__ static inline
-#elif defined(OPENCL_DEVICE_CODE)
-#define SCALAR_FUN_ATTR static inline
-#else
-#define SCALAR_FUN_ATTR static inline
-#endif
-
 SCALAR_FUN_ATTR uint8_t add8(uint8_t x, uint8_t y) {
   return x + y;
 }
@@ -1215,19 +1207,19 @@ SCALAR_FUN_ATTR int64_t btoi_bool_i64(bool x) {
 #define zext_i64_i32(x) ((int32_t) (uint64_t) (x))
 #define zext_i64_i64(x) ((int64_t) (uint64_t) (x))
 
-static int8_t abs8(int8_t x) {
+SCALAR_FUN_ATTR int8_t abs8(int8_t x) {
   return (int8_t)abs(x);
 }
 
-static int16_t abs16(int16_t x) {
+SCALAR_FUN_ATTR int16_t abs16(int16_t x) {
   return (int16_t)abs(x);
 }
 
-static int32_t abs32(int32_t x) {
+SCALAR_FUN_ATTR int32_t abs32(int32_t x) {
   return abs(x);
 }
 
-static int64_t abs64(int64_t x) {
+SCALAR_FUN_ATTR int64_t abs64(int64_t x) {
 #if defined(__OPENCL_VERSION__) || defined(ISPC)
   return abs(x);
 #else
@@ -1236,60 +1228,60 @@ static int64_t abs64(int64_t x) {
 }
 
 #if defined(__OPENCL_VERSION__)
-static int32_t futrts_popc8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc8(int8_t x) {
   return popcount(x);
 }
 
-static int32_t futrts_popc16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc16(int16_t x) {
   return popcount(x);
 }
 
-static int32_t futrts_popc32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc32(int32_t x) {
   return popcount(x);
 }
 
-static int32_t futrts_popc64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc64(int64_t x) {
   return popcount(x);
 }
 #elif defined(__CUDA_ARCH__)
 
-static int32_t futrts_popc8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc8(int8_t x) {
   return __popc(zext_i8_i32(x));
 }
 
-static int32_t futrts_popc16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc16(int16_t x) {
   return __popc(zext_i16_i32(x));
 }
 
-static int32_t futrts_popc32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc32(int32_t x) {
   return __popc(x);
 }
 
-static int32_t futrts_popc64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc64(int64_t x) {
   return __popcll(x);
 }
 
 #else // Not OpenCL or CUDA, but plain C.
 
-static int32_t futrts_popc8(uint8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc8(uint8_t x) {
   int c = 0;
   for (; x; ++c) { x &= x - 1; }
   return c;
 }
 
-static int32_t futrts_popc16(uint16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc16(uint16_t x) {
   int c = 0;
   for (; x; ++c) { x &= x - 1; }
   return c;
 }
 
-static int32_t futrts_popc32(uint32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc32(uint32_t x) {
   int c = 0;
   for (; x; ++c) { x &= x - 1; }
   return c;
 }
 
-static int32_t futrts_popc64(uint64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_popc64(uint64_t x) {
   int c = 0;
   for (; x; ++c) { x &= x - 1; }
   return c;
@@ -1297,28 +1289,28 @@ static int32_t futrts_popc64(uint64_t x) {
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static uint8_t  futrts_umul_hi8 ( uint8_t a,  uint8_t b) { return mul_hi(a, b); }
-static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return mul_hi(a, b); }
-static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return mul_hi(a, b); }
-static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return mul_hi(a, b); }
-static uint8_t  futrts_smul_hi8 ( int8_t a,  int8_t b) { return mul_hi(a, b); }
-static uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return mul_hi(a, b); }
-static uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return mul_hi(a, b); }
-static uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint8_t  futrts_umul_hi8 ( uint8_t a,  uint8_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint8_t  futrts_smul_hi8 ( int8_t a,  int8_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return mul_hi(a, b); }
+SCALAR_FUN_ATTR uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return mul_hi(a, b); }
 #elif defined(__CUDA_ARCH__)
-static  uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
-static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
-static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return __umulhi(a, b); }
-static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return __umul64hi(a, b); }
-static  uint8_t futrts_smul_hi8 ( int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
-static uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
-static uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return __mulhi(a, b); }
-static uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return __mul64hi(a, b); }
+SCALAR_FUN_ATTR  uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+SCALAR_FUN_ATTR uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+SCALAR_FUN_ATTR uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return __umulhi(a, b); }
+SCALAR_FUN_ATTR uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return __umul64hi(a, b); }
+SCALAR_FUN_ATTR  uint8_t futrts_smul_hi8 ( int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
+SCALAR_FUN_ATTR uint16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
+SCALAR_FUN_ATTR uint32_t futrts_smul_hi32(int32_t a, int32_t b) { return __mulhi(a, b); }
+SCALAR_FUN_ATTR uint64_t futrts_smul_hi64(int64_t a, int64_t b) { return __mul64hi(a, b); }
 #elif ISPC
-static uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
-static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
-static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
-static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) {
+SCALAR_FUN_ATTR uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+SCALAR_FUN_ATTR uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+SCALAR_FUN_ATTR uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+SCALAR_FUN_ATTR uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) {
   uint64_t ah = a >> 32;
   uint64_t al = a & 0xffffffff;
   uint64_t bh = b >> 32;
@@ -1341,10 +1333,10 @@ static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) {
 
   return h;
 }
-static  int8_t futrts_smul_hi8 ( int8_t a,  int8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
-static int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
-static int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
-static int64_t futrts_smul_hi64(int64_t a, int64_t b) {
+SCALAR_FUN_ATTR  int8_t futrts_smul_hi8 ( int8_t a,  int8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+SCALAR_FUN_ATTR int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+SCALAR_FUN_ATTR int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+SCALAR_FUN_ATTR int64_t futrts_smul_hi64(int64_t a, int64_t b) {
   uint64_t ah = a >> 32;
   uint64_t al = a & 0xffffffff;
   uint64_t bh = b >> 32;
@@ -1369,132 +1361,132 @@ static int64_t futrts_smul_hi64(int64_t a, int64_t b) {
 }
 
 #else // Not OpenCL, ISPC, or CUDA, but plain C.
-static uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
-static uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
-static uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
-static uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return ((__uint128_t)a) * ((__uint128_t)b) >> 64; }
-static int8_t futrts_smul_hi8(int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
-static int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
-static int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((int64_t)a) * ((int64_t)b) >> 32; }
-static int64_t futrts_smul_hi64(int64_t a, int64_t b) { return ((__int128_t)a) * ((__int128_t)b) >> 64; }
+SCALAR_FUN_ATTR uint8_t futrts_umul_hi8(uint8_t a, uint8_t b) { return ((uint16_t)a) * ((uint16_t)b) >> 8; }
+SCALAR_FUN_ATTR uint16_t futrts_umul_hi16(uint16_t a, uint16_t b) { return ((uint32_t)a) * ((uint32_t)b) >> 16; }
+SCALAR_FUN_ATTR uint32_t futrts_umul_hi32(uint32_t a, uint32_t b) { return ((uint64_t)a) * ((uint64_t)b) >> 32; }
+SCALAR_FUN_ATTR uint64_t futrts_umul_hi64(uint64_t a, uint64_t b) { return ((__uint128_t)a) * ((__uint128_t)b) >> 64; }
+SCALAR_FUN_ATTR int8_t futrts_smul_hi8(int8_t a, int8_t b) { return ((int16_t)a) * ((int16_t)b) >> 8; }
+SCALAR_FUN_ATTR int16_t futrts_smul_hi16(int16_t a, int16_t b) { return ((int32_t)a) * ((int32_t)b) >> 16; }
+SCALAR_FUN_ATTR int32_t futrts_smul_hi32(int32_t a, int32_t b) { return ((int64_t)a) * ((int64_t)b) >> 32; }
+SCALAR_FUN_ATTR int64_t futrts_smul_hi64(int64_t a, int64_t b) { return ((__int128_t)a) * ((__int128_t)b) >> 64; }
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static  uint8_t futrts_umad_hi8 ( uint8_t a,  uint8_t b,  uint8_t c) { return mad_hi(a, b, c); }
-static uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return mad_hi(a, b, c); }
-static uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return mad_hi(a, b, c); }
-static uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return mad_hi(a, b, c); }
-static  uint8_t futrts_smad_hi8( int8_t a,  int8_t b,   int8_t c) { return mad_hi(a, b, c); }
-static uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return mad_hi(a, b, c); }
-static uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return mad_hi(a, b, c); }
-static uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR  uint8_t futrts_umad_hi8 ( uint8_t a,  uint8_t b,  uint8_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR  uint8_t futrts_smad_hi8( int8_t a,  int8_t b,   int8_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return mad_hi(a, b, c); }
+SCALAR_FUN_ATTR uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return mad_hi(a, b, c); }
 #else // Not OpenCL
 
-static  uint8_t futrts_umad_hi8( uint8_t a,  uint8_t b,  uint8_t c) { return futrts_umul_hi8(a, b) + c; }
-static uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return futrts_umul_hi16(a, b) + c; }
-static uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return futrts_umul_hi32(a, b) + c; }
-static uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return futrts_umul_hi64(a, b) + c; }
-static  uint8_t futrts_smad_hi8 ( int8_t a,  int8_t b,  int8_t c) { return futrts_smul_hi8(a, b) + c; }
-static uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return futrts_smul_hi16(a, b) + c; }
-static uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return futrts_smul_hi32(a, b) + c; }
-static uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return futrts_smul_hi64(a, b) + c; }
+SCALAR_FUN_ATTR  uint8_t futrts_umad_hi8( uint8_t a,  uint8_t b,  uint8_t c) { return futrts_umul_hi8(a, b) + c; }
+SCALAR_FUN_ATTR uint16_t futrts_umad_hi16(uint16_t a, uint16_t b, uint16_t c) { return futrts_umul_hi16(a, b) + c; }
+SCALAR_FUN_ATTR uint32_t futrts_umad_hi32(uint32_t a, uint32_t b, uint32_t c) { return futrts_umul_hi32(a, b) + c; }
+SCALAR_FUN_ATTR uint64_t futrts_umad_hi64(uint64_t a, uint64_t b, uint64_t c) { return futrts_umul_hi64(a, b) + c; }
+SCALAR_FUN_ATTR  uint8_t futrts_smad_hi8 ( int8_t a,  int8_t b,  int8_t c) { return futrts_smul_hi8(a, b) + c; }
+SCALAR_FUN_ATTR uint16_t futrts_smad_hi16(int16_t a, int16_t b, int16_t c) { return futrts_smul_hi16(a, b) + c; }
+SCALAR_FUN_ATTR uint32_t futrts_smad_hi32(int32_t a, int32_t b, int32_t c) { return futrts_smul_hi32(a, b) + c; }
+SCALAR_FUN_ATTR uint64_t futrts_smad_hi64(int64_t a, int64_t b, int64_t c) { return futrts_smul_hi64(a, b) + c; }
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static int32_t futrts_clzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz8(int8_t x) {
   return clz(x);
 }
 
-static int32_t futrts_clzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz16(int16_t x) {
   return clz(x);
 }
 
-static int32_t futrts_clzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz32(int32_t x) {
   return clz(x);
 }
 
-static int32_t futrts_clzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz64(int64_t x) {
   return clz(x);
 }
 
 #elif defined(__CUDA_ARCH__)
 
-static int32_t futrts_clzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz8(int8_t x) {
   return __clz(zext_i8_i32(x)) - 24;
 }
 
-static int32_t futrts_clzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz16(int16_t x) {
   return __clz(zext_i16_i32(x)) - 16;
 }
 
-static int32_t futrts_clzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz32(int32_t x) {
   return __clz(x);
 }
 
-static int32_t futrts_clzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz64(int64_t x) {
   return __clzll(x);
 }
 
 #elif ISPC
 
-static int32_t futrts_clzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz8(int8_t x) {
   return count_leading_zeros((int32_t)(uint8_t)x)-24;
 }
 
-static int32_t futrts_clzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz16(int16_t x) {
   return count_leading_zeros((int32_t)(uint16_t)x)-16;
 }
 
-static int32_t futrts_clzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz32(int32_t x) {
   return count_leading_zeros(x);
 }
 
-static int32_t futrts_clzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz64(int64_t x) {
   return count_leading_zeros(x);
 }
 
 #else // Not OpenCL, ISPC or CUDA, but plain C.
 
-static int32_t futrts_clzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz8(int8_t x) {
   return x == 0 ? 8 : __builtin_clz((uint32_t)zext_i8_i32(x)) - 24;
 }
 
-static int32_t futrts_clzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz16(int16_t x) {
   return x == 0 ? 16 : __builtin_clz((uint32_t)zext_i16_i32(x)) - 16;
 }
 
-static int32_t futrts_clzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz32(int32_t x) {
   return x == 0 ? 32 : __builtin_clz((uint32_t)x);
 }
 
-static int32_t futrts_clzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_clzz64(int64_t x) {
   return x == 0 ? 64 : __builtin_clzll((uint64_t)x);
 }
 #endif
 
 #if defined(__OPENCL_VERSION__)
-static int32_t futrts_ctzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz8(int8_t x) {
   int i = 0;
   for (; i < 8 && (x & 1) == 0; i++, x >>= 1)
     ;
   return i;
 }
 
-static int32_t futrts_ctzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz16(int16_t x) {
   int i = 0;
   for (; i < 16 && (x & 1) == 0; i++, x >>= 1)
     ;
   return i;
 }
 
-static int32_t futrts_ctzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz32(int32_t x) {
   int i = 0;
   for (; i < 32 && (x & 1) == 0; i++, x >>= 1)
     ;
   return i;
 }
 
-static int32_t futrts_ctzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz64(int64_t x) {
   int i = 0;
   for (; i < 64 && (x & 1) == 0; i++, x >>= 1)
     ;
@@ -1503,59 +1495,59 @@ static int32_t futrts_ctzz64(int64_t x) {
 
 #elif defined(__CUDA_ARCH__)
 
-static int32_t futrts_ctzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz8(int8_t x) {
   int y = __ffs(x);
   return y == 0 ? 8 : y - 1;
 }
 
-static int32_t futrts_ctzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz16(int16_t x) {
   int y = __ffs(x);
   return y == 0 ? 16 : y - 1;
 }
 
-static int32_t futrts_ctzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz32(int32_t x) {
   int y = __ffs(x);
   return y == 0 ? 32 : y - 1;
 }
 
-static int32_t futrts_ctzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz64(int64_t x) {
   int y = __ffsll(x);
   return y == 0 ? 64 : y - 1;
 }
 
 #elif ISPC
 
-static int32_t futrts_ctzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz8(int8_t x) {
   return x == 0 ? 8 : count_trailing_zeros((int32_t)x);
 }
 
-static int32_t futrts_ctzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz16(int16_t x) {
   return x == 0 ? 16 : count_trailing_zeros((int32_t)x);
 }
 
-static int32_t futrts_ctzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz32(int32_t x) {
   return count_trailing_zeros(x);
 }
 
-static int32_t futrts_ctzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz64(int64_t x) {
   return count_trailing_zeros(x);
 }
 
 #else // Not OpenCL or CUDA, but plain C.
 
-static int32_t futrts_ctzz8(int8_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz8(int8_t x) {
   return x == 0 ? 8 : __builtin_ctz((uint32_t)x);
 }
 
-static int32_t futrts_ctzz16(int16_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz16(int16_t x) {
   return x == 0 ? 16 : __builtin_ctz((uint32_t)x);
 }
 
-static int32_t futrts_ctzz32(int32_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz32(int32_t x) {
   return x == 0 ? 32 : __builtin_ctz((uint32_t)x);
 }
 
-static int32_t futrts_ctzz64(int64_t x) {
+SCALAR_FUN_ATTR int32_t futrts_ctzz64(int64_t x) {
   return x == 0 ? 64 : __builtin_ctzll((uint64_t)x);
 }
 #endif

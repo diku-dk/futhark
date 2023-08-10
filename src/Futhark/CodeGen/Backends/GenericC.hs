@@ -428,6 +428,7 @@ $errorsH
 #undef NDEBUG
 #include <assert.h>
 #include <stdarg.h>
+#define SCALAR_FUN_ATTR static inline
 $utilH
 $cacheH
 $halfH
