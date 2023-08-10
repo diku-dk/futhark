@@ -8,10 +8,10 @@ module Futhark.Analysis.DataDependencies
   )
 where
 
+import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Debug.Trace
-import Data.Function ((&))
 import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
@@ -32,13 +32,20 @@ dataDependencies' ::
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
     grow deps (Let pat _ (Op op)) =
-      -- TODO transitive dependencies
-      -- TODO for map0 test this outputs [res1, res2, out of scope var cond]
-      -- where cond depends on i and res1 and res2 depend on cond.
-      M.fromList (zip (patNames pat) (opDependencies op)) <> deps
-        & dprint "@dataDependencies opCase@"
+      -- TODO transitive dependencies; reduce res is still
+      -- not directly related to input array. But may just
+      -- be the way the example code is written; try to simplify.
+      let deps' = dprint "@dataDependencies opCase deps@" deps
+          res =
+            opDependencies op
+              & dprint ("@[1/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
+          res' =
+            map (depsOfNames deps) res
+              & dprint ("@[2/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
+       in M.fromList (zip (patNames pat) res') `M.union` deps'
+            & dprint "@dataDependencies opCase@"
       where
-        dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+        dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
@@ -62,11 +69,11 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
        in M.unions $ [branchdeps, deps, defbody_deps] ++ cases_deps
     grow deps (Let pat _ e) =
       let free = freeIn pat <> freeIn e
-          freeDeps = mconcat $ map (depsOfVar deps) $ namesToList free
-       in M.fromList [(name, freeDeps) | name <- patNames pat] `M.union` deps
+          free_deps = depsOfNames deps free
+       in M.fromList [(name, free_deps) | name <- patNames pat] `M.union` deps
             & dprint "@dataDependencies@"
       where
-        dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+        dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty
@@ -78,16 +85,33 @@ depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 depsOfRes :: Dependencies -> SubExpRes -> Names
 depsOfRes deps (SubExpRes _ se) = depsOf deps se
 
+-- | Extend @names@ with direct dependencies in @deps@.
+depsOfNames :: Dependencies -> Names -> Names
+depsOfNames deps names = mconcat $ map (depsOfVar deps) $ namesToList names
+
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.
-lambdaDependencies :: ASTRep rep => Dependencies -> Lambda rep -> [Names] -> [Names]
+lambdaDependencies ::
+  ASTRep rep =>
+  Dependencies ->
+  Lambda rep ->
+  [Names] ->
+  [Names]
 lambdaDependencies deps lam inputs =
   let names_in_scope = freeIn lam <> mconcat inputs
-      deps_in = M.fromList $ zip (boundByLambda lam) inputs
-      deps' = dataDependencies' (deps_in <> deps) (lambdaBody lam)
+      deps_in =
+        M.fromList $
+          zip (boundByLambda lam) inputs
+            & dprint "lambdaDependencies:deps_in"
+      deps' =
+        dataDependencies' (deps_in <> deps) (lambdaBody lam)
+          & dprint "lambdaDependencies:deps'"
    in map
         (namesIntersection names_in_scope . depsOfRes deps')
         (bodyResult $ lambdaBody lam)
+        & dprint "lambdaDependencies:"
+  where
+    dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,

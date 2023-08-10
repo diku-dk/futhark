@@ -591,6 +591,13 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
+  opDependencies (Scatter w arrs lam outputs) =
+    let input_deps = map (\vn -> oneName vn <> depsOf mempty w) arrs
+        -- TODO ^ this is duplicate code
+        lam_deps = lambdaDependencies mempty lam input_deps
+     in map flattenGroups (groupScatterResults' outputs lam_deps)
+    where
+      flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
         depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
@@ -616,7 +623,7 @@ instance ASTRep rep => IsOp (SOAC rep) where
      in deps_scans <> deps_reds <> deps_map
           & dprint "deps_screma"
     where
-      dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+      dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
       scanSizes = map (length . scanNeutral)
       redSizes = map (length . redNeutral)
 
