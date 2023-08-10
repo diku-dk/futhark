@@ -591,16 +591,17 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
-  opDependencies (Screma _ arrs (ScremaForm scans reds map_lam)) =
+  opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
         depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
         depsOf' lam nes deps_in =
           let deps_nes = map (depsOf mempty) nes
            in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
+        deps_map_in = map (\vn -> oneName vn <> depsOf mempty w) arrs
         (deps_scans_in', deps_reds_in', deps_map) =
           splitAt3 (scanResults scans) (redResults reds) $
-            lambdaDependencies mempty map_lam (map oneName arrs)
+            lambdaDependencies mempty map_lam deps_map_in
               & dprint "deps_map"
 
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
