@@ -524,13 +524,13 @@ removeDeadReduction :: BottomUpRuleOp (Wise SOACS)
 removeDeadReduction (_, used) pat aux (Screma w arrs form) =
   case isRedomapSOAC form of
     Just ([Reduce comm redlam rednes], maplam) ->
-      let mkOp lam nes' maplam' = redomapSOAC [Reduce comm lam nes'] maplam'
-      in removeDeadReduction' redlam rednes maplam mkOp
+      let mkOp lam nes' = redomapSOAC [Reduce comm lam nes']
+       in removeDeadReduction' redlam rednes maplam mkOp
     _ ->
       case isScanomapSOAC form of
         Just ([Scan scanlam nes], maplam) ->
-          let mkOp lam nes' maplam' = scanomapSOAC [Scan lam nes'] maplam'
-          in removeDeadReduction' scanlam nes maplam mkOp
+          let mkOp lam nes' = scanomapSOAC [Scan lam nes']
+           in removeDeadReduction' scanlam nes maplam mkOp
         _ -> Skip
   where
     removeDeadReduction' redlam nes maplam mkOp
