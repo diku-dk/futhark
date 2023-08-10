@@ -10,10 +10,7 @@ where
 
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Debug.Trace
 import Futhark.IR
-
-qqprint msg x = Debug.Trace.trace (msg ++ " " ++ show x) x
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could

@@ -53,7 +53,6 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State.Strict
 import Control.Monad.Writer
-import Data.Foldable qualified as Foldable
 import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
@@ -592,7 +591,7 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
-  opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
+  opDependencies (Screma _ arrs (ScremaForm scans reds map_lam)) =
     let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
         depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
         depsOf' lam nes deps_in =
@@ -600,22 +599,22 @@ instance ASTRep rep => IsOp (SOAC rep) where
            in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
         (deps_scans_in', deps_reds_in', deps_map) =
-          print "deps_map" $
+          dprint "deps_map" $
             splitAt3 (scanResults scans) (redResults reds) $
               lambdaDependencies mempty map_lam (map oneName arrs)
 
         deps_scans_in = chunks (scanSizes scans) deps_scans_in'
         deps_scans =
-          print "deps_scans" $
+          dprint "deps_scans" $
             concatMap depsOfScan (zip scans deps_scans_in)
 
         deps_reds_in = chunks (redSizes reds) deps_reds_in'
         deps_reds =
-          print "deps_reds" $
+          dprint "deps_reds" $
             concatMap depsOfRed (zip reds deps_reds_in)
-     in print "deps_screma" $ deps_scans <> deps_reds <> deps_map
+     in dprint "deps_screma" $ deps_scans <> deps_reds <> deps_map
     where
-      print msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+      dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
       scanSizes = map (length . scanNeutral)
       redSizes = map (length . redNeutral)
 
