@@ -101,6 +101,7 @@ typedef unsigned int32 uint32_t;
 typedef unsigned int16 uint16_t;
 typedef unsigned int8 uint8_t;
 #define volatile
+#define SCALAR_FUN_ATTR static inline
 
 $errorsH
 
