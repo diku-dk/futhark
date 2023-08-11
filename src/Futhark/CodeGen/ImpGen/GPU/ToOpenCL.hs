@@ -5,6 +5,7 @@
 module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
   ( kernelsToOpenCL,
     kernelsToCUDA,
+    kernelsToHIP,
   )
 where
 
@@ -36,6 +37,10 @@ import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
 import NeatInterpolation (untrimming)
 import Prelude hiding (rem)
+
+-- | Generate HIP host and device code.
+kernelsToHIP :: ImpGPU.Program -> ImpOpenCL.Program
+kernelsToHIP = translateGPU TargetHIP
 
 -- | Generate CUDA host and device code.
 kernelsToCUDA :: ImpGPU.Program -> ImpOpenCL.Program
@@ -91,6 +96,7 @@ translateGPU target prog =
   where
     genPrelude TargetOpenCL = genOpenClPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
+    genPrelude TargetHIP = const genHIPPrelude
 
 -- | Due to simplifications after kernel extraction, some threshold
 -- parameters may contain KernelPaths that reference threshold
@@ -415,6 +421,7 @@ onKernel target kernel = do
               [C.citems|__local unsigned char* local_mem = local_mem_aligned;|]
             )
           TargetCUDA -> (mempty, mempty)
+          TargetHIP -> (mempty, mempty)
 
       params =
         local_memory_param
@@ -534,6 +541,12 @@ genOpenClPrelude ts =
 genCUDAPrelude :: T.Text
 genCUDAPrelude =
   "#define FUTHARK_CUDA\n"
+    <> preludeCU
+    <> commonPrelude
+
+genHIPPrelude :: T.Text
+genHIPPrelude =
+  "#define FUTHARK_HIP\n"
     <> preludeCU
     <> commonPrelude
 

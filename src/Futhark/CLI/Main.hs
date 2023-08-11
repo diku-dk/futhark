@@ -17,6 +17,7 @@ import Futhark.CLI.Defs qualified as Defs
 import Futhark.CLI.Dev qualified as Dev
 import Futhark.CLI.Doc qualified as Doc
 import Futhark.CLI.Eval qualified as Eval
+import Futhark.CLI.HIP qualified as HIP
 import Futhark.CLI.LSP qualified as LSP
 import Futhark.CLI.Literate qualified as Literate
 import Futhark.CLI.Misc qualified as Misc
@@ -55,6 +56,7 @@ commands =
       ("c", (C.main, "Compile to sequential C.")),
       ("opencl", (OpenCL.main, "Compile to C calling OpenCL.")),
       ("cuda", (CCUDA.main, "Compile to C calling CUDA.")),
+      ("hip", (HIP.main, "Compile to C calling HIP.")),
       ("multicore", (Multicore.main, "Compile to multicore C.")),
       ("python", (Python.main, "Compile to sequential Python.")),
       ("pyopencl", (PyOpenCL.main, "Compile to Python calling PyOpenCL.")),
