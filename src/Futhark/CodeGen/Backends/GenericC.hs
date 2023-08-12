@@ -64,12 +64,12 @@ defError msg stacktrace = do
 lmadcopyCPU :: DoLMADCopy op s
 lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname :: String
-      fname =
+      (fname, ty) =
         case primByteSize t :: Int of
-          1 -> "lmad_copy_1b"
-          2 -> "lmad_copy_2b"
-          4 -> "lmad_copy_4b"
-          8 -> "lmad_copy_8b"
+          1 -> ("lmad_copy_1b", [C.cty|typename uint8_t|])
+          2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
+          4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
+          8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
           k -> error $ "lmadcopyCPU: " <> error (show k)
       r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -78,9 +78,9 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   stm
     [C.cstm|
          $id:fname(ctx, $int:r,
-                   $exp:dst, $exp:(unCount dstoffset),
+                   ($ty:ty*) $exp:dst, $exp:(unCount dstoffset),
                    (typename int64_t[]){ $inits:dststride_inits },
-                   $exp:src, $exp:(unCount srcoffset),
+                   ($ty:ty*) $exp:src, $exp:(unCount srcoffset),
                    (typename int64_t[]){ $inits:srcstride_inits },
                    (typename int64_t[]){ $inits:shape_inits });|]
 
