@@ -516,11 +516,10 @@ soacType (Stream outersize _ accs lam) =
     substs = M.fromList $ zip nms (outersize : accs)
     Lambda params _ rtp = lam
 soacType (Scatter _w _ivs lam dests) =
-  zipWith arrayOfShape val_ts ws
+  zipWith arrayOfShape (map (snd . head) rets) shapes
   where
-    indexes = sum $ zipWith (*) ns $ map length ws
-    val_ts = drop indexes $ lambdaReturnType lam
-    (ws, ns, _) = unzip3 dests
+    (shapes, _, rets) =
+      unzip3 $ groupScatterResults dests $ lambdaReturnType lam
 soacType (Hist _ _ ops _bucket_fun) = do
   op <- ops
   map (`arrayOfShape` histShape op) (lambdaReturnType $ histOp op)
