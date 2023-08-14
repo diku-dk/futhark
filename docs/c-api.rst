@@ -274,8 +274,9 @@ will not result in a double free.
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
 
    Asynchronously copy data from the value into ``data``, which must
-   be of sufficient size.  Multi-dimensional arrays are written in
-   row-major form.
+   point to free memory, allocated by the caller, with sufficient
+   space to store the full array.  Multi-dimensional arrays are
+   written in row-major form.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
