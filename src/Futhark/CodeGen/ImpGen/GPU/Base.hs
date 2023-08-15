@@ -539,10 +539,8 @@ groupReduceWithOffset offset w lam arrs = do
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
       errorsync
-        | all primType $ lambdaReturnType lam =
-            sOp $ Imp.ErrorSync Imp.FenceGlobal
-        | otherwise =
-            sOp $ Imp.ErrorSync Imp.FenceLocal
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
 
       readReduceArgument param arr = do
         let i = local_tid + tvExp offset
