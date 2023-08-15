@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Error in type checking of horisontally fused `scatter`s could crash
   the compiler (#2009).
 
+* Size-polymorphic value bindings with existential sizes are now
+  rejected by type checker (#1993).
+
 ## [0.25.2]
 
 ### Added

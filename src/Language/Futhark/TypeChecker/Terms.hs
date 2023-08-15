@@ -1480,6 +1480,18 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
       letGeneralise fname loc tparams' params''
         =<< unscopeUnknown rettype
 
+    when
+      ( null params
+          && any isSizeParam tparams''
+          && not (null (retDims rettype'))
+      )
+      $ typeError loc mempty
+      $ textwrap "A size-polymorphic value binding may not have a type with an existential size."
+        </> "Type of this binding is:"
+        </> indent 2 (pretty rettype')
+        </> "with the following type parameters:"
+        </> indent 2 (sep $ map pretty $ filter isSizeParam tparams'')
+
     pure (tparams'', params''', maybe_retdecl'', rettype', body')
 
 -- | Extract all the shape names that occur in positive position
