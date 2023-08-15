@@ -409,6 +409,12 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.Barrier fence
 
+      errorsync
+        | array_scan =
+            sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.ErrorSync Imp.FenceLocal
+
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
       writeBlockResult p arr
@@ -452,7 +458,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  barrier
+  errorsync
 
   when array_scan $ do
     sComment "move correct values for first block back a block" $
@@ -532,6 +538,12 @@ groupReduceWithOffset offset w lam arrs = do
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
+      errorsync
+        | all primType $ lambdaReturnType lam =
+            sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.ErrorSync Imp.FenceLocal
+
       readReduceArgument param arr = do
         let i = local_tid + tvExp offset
         copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
@@ -606,9 +618,9 @@ groupReduceWithOffset offset w lam arrs = do
 
   in_wave_reductions
   cross_wave_reductions
+  errorsync
 
   sComment "Copy array-typed operands to result array" $ do
-    barrier
     sWhen (local_tid .==. 0) $
       localOps threadOperations $
         zipWithM_ writeArrayOpResult reduce_acc_params arrs
