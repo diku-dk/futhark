@@ -3,6 +3,8 @@
 -- the scan and the chosen abckend.
 module Futhark.CodeGen.ImpGen.GPU.SegScan (compileSegScan) where
 
+import Control.Monad
+import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen hiding (compileProg)
 import Futhark.CodeGen.ImpGen.GPU.Base
@@ -35,6 +37,16 @@ combineScans ops =
               (concatMap (bodyResult . lambdaBody) lams)
         }
 
+bodyAssert :: Body GPUMem -> Bool
+bodyAssert = any (expAssert . stmExp) . bodyStms
+  where
+    expAssert (BasicOp Assert {}) = True
+    expAssert e = isNothing $ walkExpM walker e
+    walker =
+      identityWalker
+        { walkOnBody = const $ guard . not . bodyAssert
+        }
+
 canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
 canBeSinglePass ops
   | all ok ops =
@@ -45,6 +57,7 @@ canBeSinglePass ops
     ok op =
       segBinOpShape op == mempty
         && all primType (lambdaReturnType (segBinOpLambda op))
+        && not (bodyAssert (lambdaBody (segBinOpLambda op)))
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
