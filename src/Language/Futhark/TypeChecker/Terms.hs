@@ -27,7 +27,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util (mapAccumLM, topologicalSort)
+import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -1565,7 +1565,7 @@ injectExt ext ret = RetType ext_here $ deeper ret
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
     deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
-      Scalar $ Arrow als p d1 t1 $ injectExt (ext_there <> t2_ext) t2
+      Scalar $ Arrow als p d1 t1 $ injectExt (nubOrd (ext_there <> t2_ext)) t2
     deeper (Scalar (TypeVar u tn targs)) =
       Scalar $ TypeVar u tn $ map deeperArg targs
     deeper t@Array {} = t
@@ -1596,7 +1596,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
+      injectExt (nubOrd $ retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
     )
   where
     -- Diet does not matter here.
@@ -1639,7 +1639,7 @@ letGeneralise ::
   [Pat ParamType] ->
   ResType ->
   TermTypeM ([TypeParam], [Pat ParamType], ResRetType)
-letGeneralise defname defloc tparams params rettype =
+letGeneralise defname defloc tparams params restype =
   onFailure (CheckingLetGeneralise defname) $ do
     now_substs <- getConstraints
 
@@ -1663,19 +1663,19 @@ letGeneralise defname defloc tparams params rettype =
     let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= cur_lvl
         new_substs = M.filterWithKey candidate now_substs
 
-    (tparams', RetType ret_dims rettype') <-
+    (tparams', RetType ret_dims restype') <-
       closeOverTypes
         defname
         defloc
         tparams
         (map patternStructType params)
-        rettype
+        restype
         new_substs
 
-    rettype'' <- updateTypes rettype'
+    restype'' <- updateTypes restype'
 
     let used_sizes =
-          freeInType rettype'' <> foldMap (freeInType . patternType) params
+          freeInType restype'' <> foldMap (freeInType . patternType) params
     case filter ((`S.notMember` fvVars used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
@@ -1685,7 +1685,7 @@ letGeneralise defname defloc tparams params rettype =
     -- let-generalisation.
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
 
-    pure (tparams', params, RetType ret_dims rettype'')
+    pure (tparams', params, RetType ret_dims restype'')
 
 checkFunBody ::
   [Pat ParamType] ->
