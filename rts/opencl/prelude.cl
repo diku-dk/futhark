@@ -1,6 +1,7 @@
 // Start of prelude.cl
 
 #define SCALAR_FUN_ATTR static inline
+#define FUTHARK_FUN_ATTR static
 
 typedef char int8_t;
 typedef short int16_t;
