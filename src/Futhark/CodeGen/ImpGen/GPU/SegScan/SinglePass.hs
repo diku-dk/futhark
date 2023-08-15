@@ -641,5 +641,4 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. num_groups' - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []
-
 {-# NOINLINE compileSegScan #-}
