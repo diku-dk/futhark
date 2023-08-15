@@ -545,8 +545,9 @@ compileSegScan pat lvl space scanOp kbody = do
                   compileStms mempty (bodyStms $ lambdaBody lam) $
                     forM_ (zip3 prefixes tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
                       \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
-                sOp $ Imp.ErrorSync Imp.FenceLocal
+                sOp localFence
           )
+
         -- end sWhile
         -- end sIf
         sWhen (kernelLocalThreadId constants .==. 0) $ do
