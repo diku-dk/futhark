@@ -410,7 +410,7 @@ compileSegScan pat lvl space scanOp kbody = do
         scanOp'
         prefixArrays
 
-      sOp localBarrier
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       let firstThread acc prefixes =
             copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
@@ -545,7 +545,7 @@ compileSegScan pat lvl space scanOp kbody = do
                   compileStms mempty (bodyStms $ lambdaBody lam) $
                     forM_ (zip3 prefixes tys $ map resSubExp $ bodyResult $ lambdaBody lam) $
                       \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
-                sOp localFence
+                sOp $ Imp.ErrorSync Imp.FenceLocal
           )
         -- end sWhile
         -- end sIf
@@ -640,3 +640,5 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. num_groups' - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []
+
+{-# NOINLINE compileSegScan #-}

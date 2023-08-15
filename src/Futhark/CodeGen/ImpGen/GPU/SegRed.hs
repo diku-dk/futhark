@@ -870,7 +870,7 @@ reductionStageTwo
           when (primType $ paramType p) $
             copyDWIMFix arr [sExt64 local_tid] (Var $ paramName p) []
 
-        sOp $ Imp.Barrier Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal
 
         sComment "reduce the per-group results" $ do
           groupReduce (sExt32 group_size) red_op_renamed red_arrs
