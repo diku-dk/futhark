@@ -609,7 +609,13 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
-  ctx->lockstep_width = device_query(ctx->dev, hipDeviceAttributeWarpSize);
+  // FIXME: in principle we should query hipDeviceAttributeWarpSize
+  // from the device, which will provide 64 on AMD GPUs.
+  // Unfortunately, we currently do nasty implicit intra-warp
+  // synchronisation in codegen, which does not work when this is 64.
+  // Once our codegen properly synchronises intra-warp operations, we
+  // can use the actual hardware lockstep width instead.
+  ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
   ctx->error = hip_module_setup(ctx, gpu_program,
