@@ -466,6 +466,8 @@ $contextH
 
 $copyH
 
+#define FUTHARK_FUN_ATTR static
+
 $prototypes
 
 $lib_decls

@@ -63,10 +63,12 @@ compileFun get_constants extra (fname, func@(Function _ outputs inputs body)) = 
     body' <- collect $ compileFunBody out_ptrs outputs body
     decl_mem <- declAllocatedMem
     free_mem <- freeAllocatedMem
+    let futhark_function =
+          C.DeclSpec [] [C.EscTypeQual "FUTHARK_FUN_ATTR" mempty] (C.Tint Nothing mempty) mempty
 
     pure
-      ( [C.cedecl|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
-        [C.cfun|static int $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
+      ( [C.cedecl|$spec:futhark_function $id:(funName fname)($params:extra, $params:outparams, $params:inparams);|],
+        [C.cfun|$spec:futhark_function $id:(funName fname)($params:extra, $params:outparams, $params:inparams) {
                $stms:ignores
                int err = 0;
                $items:decl_cached
@@ -96,10 +98,12 @@ compileVoidFun get_constants (fname, func@(Function _ outputs inputs body)) = in
 
   cachingMemory (lexicalMemoryUsage func) $ \decl_cached free_cached -> do
     body' <- collect $ compileFunBody out_ptrs outputs body
+    let futhark_function =
+          C.DeclSpec [] [C.EscTypeQual "FUTHARK_FUN_ATTR" mempty] (C.Tvoid mempty) mempty
 
     pure
-      ( [C.cedecl|static void $id:(funName fname)($params:outparams, $params:inparams);|],
-        [C.cfun|static void $id:(funName fname)($params:outparams, $params:inparams) {
+      ( [C.cedecl|$spec:futhark_function $id:(funName fname)($params:outparams, $params:inparams);|],
+        [C.cfun|$spec:futhark_function $id:(funName fname)($params:outparams, $params:inparams) {
                $items:decl_cached
                $items:get_constants
                $items:body'
