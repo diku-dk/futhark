@@ -203,12 +203,10 @@ intraGroupStm stm@(Let pat aux e) = do
 
   case e of
     Loop merge form loopbody ->
-      localScope (scopeOf form') $
-        localScope (scopeOfFParams $ map fst merge) $ do
-          loopbody' <- intraGroupBody loopbody
-          certifying (stmAuxCerts aux) $
-            letBind pat $
-              Loop merge form' loopbody'
+      localScope (scopeOf form' <> scopeOfFParams (map fst merge)) $ do
+        loopbody' <- intraGroupBody loopbody
+        certifying (stmAuxCerts aux) . letBind pat $
+          Loop merge form' loopbody'
       where
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps
