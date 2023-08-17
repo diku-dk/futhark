@@ -708,6 +708,8 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                 $ \((acc, acc_is), se) ->
                   copyDWIMFix acc (acc_is ++ vec_is) se []
 
+    sOp $ Imp.ErrorSync Imp.FenceLocal
+
     case comm of
       Noncommutative -> do
         doTheReduction
