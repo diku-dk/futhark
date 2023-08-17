@@ -430,13 +430,13 @@ onKernel target kernel = do
           ++ use_params
 
       attribute =
-        case (target, mapM isConst $ kernelGroupSize kernel) of
-          (TargetOpenCL, Just [x, y, z]) ->
-            "__attribute__((reqd_work_group_size" <> prettyText (x, y, z) <> "))\n"
-          (TargetOpenCL, Just [x, y]) ->
-            "__attribute__((reqd_work_group_size" <> prettyText (x, y, 1 :: Int) <> "))\n"
-          (TargetOpenCL, Just [x]) ->
-            "__attribute__((reqd_work_group_size" <> prettyText (x, 1 :: Int, 1 :: Int) <> "))\n"
+        case mapM isConst $ kernelGroupSize kernel of
+          Just [x, y, z] ->
+            "REQD_GROUP_SIZE" <> prettyText (x, y, z) <> "\n"
+          Just [x, y] ->
+            "REQD_GROUP_SIZE" <> prettyText (x, y, 1 :: Int) <> "\n"
+          Just [x] ->
+            "REQD_GROUP_SIZE" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
           _ -> ""
 
       kernel_fun =
