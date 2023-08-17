@@ -23,7 +23,9 @@ pipeline is used.
 
 ``futhark hip`` uses ``-lhiprtc -lamdhip64`` to link.  If using
 ``--library``, you will need to do the same when linking the final
-binary.
+binary.  Although the HIP backend can be made to work on NVIDIA GPUs,
+you are probably better off using the very similar
+:ref:`futhark-cuda(1)`.
 
 OPTIONS
 =======
