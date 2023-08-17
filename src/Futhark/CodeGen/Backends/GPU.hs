@@ -384,7 +384,7 @@ failureMsgFunction failures =
 genProfileReport :: [Name] -> GC.CompilerM op s ()
 genProfileReport cost_centres =
   GC.profileReport
-    [C.citem|{struct cost_centres* ccs = cost_centres_new(sizeof(struct cost_centres));
+    [C.citem|{struct cost_centres* ccs = cost_centres_new();
               $stms:(map initCostCentre (def_cost_centres<>cost_centres))
               tally_profiling_records(ctx, ccs);
               cost_centre_report(ccs, &builder);
