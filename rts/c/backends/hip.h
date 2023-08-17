@@ -372,7 +372,7 @@ static char* hiprtc_build(const char *src, const char *opts[], size_t n_opts,
   hiprtcProgram prog;
   char *problem = NULL;
 
-  problem = HIP_SUCCEED_NONFATAL(hiprtcCreateProgram(&prog, src, "futhark-hip", 0, NULL, NULL));
+  problem = HIPRTC_SUCCEED_NONFATAL(hiprtcCreateProgram(&prog, src, "futhark-hip", 0, NULL, NULL));
 
   if (problem) {
     return problem;
