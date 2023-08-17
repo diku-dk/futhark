@@ -184,6 +184,18 @@ intraGroupBody body = do
   stms <- collectStms_ $ intraGroupStms $ bodyStms body
   pure $ mkBody stms $ bodyResult body
 
+intraGroupLambda :: Lambda SOACS -> IntraGroupM (Lambda GPU)
+intraGroupLambda lam =
+  mkLambda (lambdaParams lam) $
+    bodyBind =<< intraGroupBody (lambdaBody lam)
+
+intraGroupWithAccInput :: WithAccInput SOACS -> IntraGroupM (WithAccInput GPU)
+intraGroupWithAccInput (shape, arrs, Nothing) =
+  pure (shape, arrs, Nothing)
+intraGroupWithAccInput (shape, arrs, Just (lam, nes)) = do
+  lam' <- intraGroupLambda lam
+  pure (shape, arrs, Just (lam', nes))
+
 intraGroupStm :: Stm SOACS -> IntraGroupM ()
 intraGroupStm stm@(Let pat aux e) = do
   scope <- askScope
@@ -191,12 +203,10 @@ intraGroupStm stm@(Let pat aux e) = do
 
   case e of
     Loop merge form loopbody ->
-      localScope (scopeOf form') $
-        localScope (scopeOfFParams $ map fst merge) $ do
-          loopbody' <- intraGroupBody loopbody
-          certifying (stmAuxCerts aux) $
-            letBind pat $
-              Loop merge form' loopbody'
+      localScope (scopeOf form' <> scopeOfFParams (map fst merge)) $ do
+        loopbody' <- intraGroupBody loopbody
+        certifying (stmAuxCerts aux) . letBind pat $
+          Loop merge form' loopbody'
       where
         form' = case form of
           ForLoop i it bound inps -> ForLoop i it bound inps
@@ -206,6 +216,10 @@ intraGroupStm stm@(Let pat aux e) = do
       defbody' <- intraGroupBody defbody
       certifying (stmAuxCerts aux) . letBind pat $
         Match cond cases' defbody' ifdec
+    WithAcc inputs lam -> do
+      inputs' <- mapM intraGroupWithAccInput inputs
+      lam' <- intraGroupLambda lam
+      certifying (stmAuxCerts aux) . letBind pat $ WithAcc inputs' lam'
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
           intraGroupStms . fmap (certify (stmAuxCerts aux))
