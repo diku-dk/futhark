@@ -317,21 +317,21 @@ gpuOptions =
       { optionLongName = "device",
         optionShortName = Just 'd',
         optionArgument = RequiredArgument "NAME",
-        optionDescription = "Use the first OpenCL device whose name contains the given string.",
+        optionDescription = "Use the first device whose name contains the given string.",
         optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
       },
     Option
       { optionLongName = "default-group-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default size of OpenCL workgroups that are launched.",
+        optionDescription = "The default size of workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-num-groups",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default number of OpenCL workgroups that are launched.",
+        optionDescription = "The default number of workgroups that are launched.",
         optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
       },
     Option
