@@ -49,6 +49,22 @@ jobs:
         backend: opencl
         system: MI100
 
+  benchmark-MI100-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
+
+    env:
+      TMPDIR: "/scratch"
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - uses: ./.github/actions/benchmark
+      with:
+        backend: hip
+        system: MI100
+
   benchmark-A100:
     runs-on: hendrix
     needs: [build-linux-nix]
