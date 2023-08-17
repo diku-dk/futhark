@@ -431,7 +431,7 @@ jobs:
           set -e
           futhark test tests --no-terminal --backend=hip --concurrency=8
           source virtualenv/bin/activate
-          FUTHARK_BACKEND=cuda make -C tests_lib/c -j
+          FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04
