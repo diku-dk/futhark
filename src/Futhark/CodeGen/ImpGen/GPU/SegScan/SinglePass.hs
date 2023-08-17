@@ -14,7 +14,7 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (takeLast)
+import Futhark.Util (mapAccumLM, takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
 import Prelude hiding (mod, quot, rem)
 
@@ -49,18 +49,23 @@ createLocalArrays (Count groupSize) m types = do
       maxLookbackSize = maxWarpExchangeSize + warpSize
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
 
-      varTE :: TV Int64 -> TPrimExp Int64 VName
-      varTE = le64 . tvVar
+  (_, byteOffsets) <-
+    mapAccumLM
+      ( \off tySize -> do
+          off' <- dPrimVE "byte_offsets" $ alignTo off tySize + pe64 groupSize * tySize
+          pure (off', off)
+      )
+      0
+      $ map primByteSize types
 
-  byteOffsets <-
-    mapM (fmap varTE . dPrimV "byte_offsets") $
-      scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
-        map primByteSize types
-
-  warpByteOffsets <-
-    mapM (fmap varTE . dPrimV "warp_byte_offset") $
-      scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
-        map primByteSize types
+  (_, warpByteOffsets) <-
+    mapAccumLM
+      ( \off tySize -> do
+          off' <- dPrimVE "warp_byte_offset" $ alignTo off tySize + warpSize * tySize
+          pure (off', off)
+      )
+      warpSize
+      $ map primByteSize types
 
   sComment "Allocate reused shared memeory" $ pure ()
 
