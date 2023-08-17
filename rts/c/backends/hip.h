@@ -437,9 +437,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   struct futhark_context_config *cfg = ctx->cfg;
 
   for (num_extra_opts = 0; extra_opts[num_extra_opts] != NULL; num_extra_opts++) {
-    if (strstr(extra_opts[num_extra_opts], "-arch")
-        == extra_opts[num_extra_opts] ||
-        strstr(extra_opts[num_extra_opts], "--gpu-architecture")
+    if (strstr(extra_opts[num_extra_opts], "--gpu-architecture")
         == extra_opts[num_extra_opts]) {
       arch_set = 1;
     }
