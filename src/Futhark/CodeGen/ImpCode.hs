@@ -73,6 +73,7 @@ module Futhark.CodeGen.ImpCode
     ArrayContents (..),
     declaredIn,
     lexicalMemoryUsage,
+    declsFirst,
     calledFuncs,
     callGraph,
     ParamMap,
@@ -98,7 +99,7 @@ module Futhark.CodeGen.ImpCode
 where
 
 import Data.Bifunctor (second)
-import Data.List (intersperse)
+import Data.List (intersperse, partition)
 import Data.Map qualified as M
 import Data.Ord (comparing)
 import Data.Set qualified as S
@@ -383,6 +384,21 @@ lexicalMemoryUsage func =
         onArg ExpArg {} = mempty
         onArg (MemArg x) = oneName x
     set x = go set x
+
+-- | Reorder the code such that all declarations appear first.  This
+-- is always possible, because 'DeclareScalar' and 'DeclareMem' do
+-- not depend on any local bindings.
+declsFirst :: Code a -> Code a
+declsFirst = mconcat . uncurry (<>) . partition isDecl . listify
+  where
+    listify (c1 :>>: c2) = listify c1 <> listify c2
+    listify (If cond c1 c2) = [If cond (declsFirst c1) (declsFirst c2)]
+    listify (For i e c) = [For i e (declsFirst c)]
+    listify (While cond c) = [While cond (declsFirst c)]
+    listify c = [c]
+    isDecl (DeclareScalar {}) = True
+    isDecl (DeclareMem {}) = True
+    isDecl _ = False
 
 -- | The set of functions that are called by this code.  Accepts a
 -- function for determing function calls in 'Op's.

@@ -269,12 +269,12 @@ generateDeviceFun fname device_func = do
                     [C.cparam|__global typename int64_t *global_failure_args|]
                   ]
                 (f, cstate) =
-                  genGPUCode env FunMode (functionBody device_func) failures $
+                  genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
                     GC.compileFun mempty params (fname, device_func)
              in (f, GC.compUserState cstate)
           else
             let (f, cstate) =
-                  genGPUCode env FunMode (functionBody device_func) failures $
+                  genGPUCode env FunMode (declsFirst $ functionBody device_func) failures $
                     GC.compileVoidFun mempty (fname, device_func)
              in (f, GC.compUserState cstate)
 
@@ -348,7 +348,7 @@ onKernel target kernel = do
 
   let (kernel_body, cstate) =
         genGPUCode env KernelMode (kernelBody kernel) failures . GC.collect $ do
-          body <- GC.collect $ GC.compileCode $ kernelBody kernel
+          body <- GC.collect $ GC.compileCode $ declsFirst $ kernelBody kernel
           -- No need to free, as we cannot allocate memory in kernels.
           mapM_ GC.item =<< GC.declAllocatedMem
           mapM_ GC.item body
