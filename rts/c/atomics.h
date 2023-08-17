@@ -304,7 +304,7 @@ SCALAR_FUN_ATTR int64_t atomic_add_i64_local(volatile __local int64_t *p, int64_
 #ifdef FUTHARK_F64_ENABLED
 
 SCALAR_FUN_ATTR double atomic_fadd_f64_global(volatile __global double *p, double x) {
-#if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP) && __CUDA_ARCH__ >= 600
+#if defined(FUTHARK_CUDA) && __CUDA_ARCH__ >= 600 || defined(FUTHARK_HIP)
   return atomicAdd((double*)p, x);
 #else
   union { int64_t i; double f; } old;
@@ -320,7 +320,7 @@ SCALAR_FUN_ATTR double atomic_fadd_f64_global(volatile __global double *p, doubl
 }
 
 SCALAR_FUN_ATTR double atomic_fadd_f64_local(volatile __local double *p, double x) {
-#if defined(FUTHARK_CUDA) || defined(FUTHARK_HIP) && __CUDA_ARCH__ >= 600
+#if defined(FUTHARK_CUDA) && __CUDA_ARCH__ >= 600 || defined(FUTHARK_HIP)
   return atomicAdd((double*)p, x);
 #else
   union { int64_t i; double f; } old;
