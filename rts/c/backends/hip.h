@@ -286,8 +286,37 @@ static int function_query(hipFunction_t f, hipFunction_attribute attr) {
 }
 
 static int hip_device_setup(struct futhark_context *ctx) {
-  // TODO
-  ctx->dev_id = 0;
+  struct futhark_context_config *cfg = ctx->cfg;
+  int count, chosen = -1;
+  hipDevice_t dev;
+
+  HIP_SUCCEED_FATAL(hipGetDeviceCount(&count));
+  if (count == 0) { return 1; }
+
+  int num_device_matches = 0;
+
+  for (int i = 0; i < count; i++) {
+    hipDeviceProp_t prop;
+    hipGetDeviceProperties(&prop, i);
+
+    if (cfg->logging) {
+      fprintf(ctx->log, "Device #%d: name=\"%s\"\n", i, prop.name);
+    }
+
+    if (strstr(prop.name, cfg->preferred_device) != NULL &&
+        num_device_matches++ == cfg->preferred_device_num) {
+      chosen = i;
+      break;
+    }
+  }
+
+  if (chosen == -1) { return 1; }
+
+  if (cfg->logging) {
+    fprintf(ctx->log, "Using device #%d\n", chosen);
+  }
+
+  ctx->dev_id = chosen;
   HIP_SUCCEED_FATAL(hipDeviceGet(&ctx->dev, ctx->dev_id));
   return 0;
 }
