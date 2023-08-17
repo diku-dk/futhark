@@ -332,13 +332,13 @@ static int cuda_device_setup(struct futhark_context *ctx) {
     name[sizeof(name) - 1] = 0;
 
     if (cfg->logging) {
-      fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
+      fprintf(ctx->log, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
               i, name, cc_major, cc_minor);
     }
 
     if (device_query(dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
       if (cfg->logging) {
-        fprintf(stderr, "Device #%d is compute-prohibited, ignoring\n", i);
+        fprintf(ctx->log, "Device #%d is compute-prohibited, ignoring\n", i);
       }
       continue;
     }
@@ -361,7 +361,7 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   if (chosen == -1) { return 1; }
 
   if (cfg->logging) {
-    fprintf(stderr, "Using device #%d\n", chosen);
+    fprintf(ctx->log, "Using device #%d\n", chosen);
   }
 
   CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
