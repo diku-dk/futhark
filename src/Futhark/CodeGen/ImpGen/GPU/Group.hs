@@ -324,8 +324,17 @@ compileGroupExp (Pat [pe]) (BasicOp (Update safety _ slice se))
     slice' = fmap pe64 slice
     dims = map pe64 $ arrayDims $ patElemType pe
     write = copyDWIM (patElemName pe) (unSlice slice') se []
-compileGroupExp dest e =
+compileGroupExp dest e = do
+  -- It is a messy to jump into control flow for error handling.
+  -- Avoid that by always doing an error sync here.  Potential
+  -- improvement: only do this if any errors are pending (this could
+  -- also be handled in later codegen).
+  when (doSync e) $ sOp $ Imp.ErrorSync Imp.FenceLocal
   defCompileExp dest e
+  where
+    doSync Loop {} = True
+    doSync Match {} = True
+    doSync _ = False
 
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
