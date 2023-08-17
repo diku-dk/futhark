@@ -382,7 +382,8 @@ static char* hiprtc_build(const char *src, const char *opts[], size_t n_opts,
   if (res != HIPRTC_SUCCESS) {
     size_t log_size;
     if (hiprtcGetProgramLogSize(prog, &log_size) == HIPRTC_SUCCESS) {
-      char *log = (char*) malloc(log_size);
+      char *log = (char*) malloc(log_size+1);
+      log[log_size] = 0; // HIPRTC does not zero-terminate.
       if (hiprtcGetProgramLog(prog, log) == HIPRTC_SUCCESS) {
         problem = msgprintf("HIPRTC compilation failed.\n\n%s\n", log);
       } else {
