@@ -719,7 +719,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                       copyDWIMFix acc (acc_is ++ vec_is) ne []
           sUnless (local_tid .==. 0) reset_to_neutral
       _ -> pure ()
-
+  sOp $ Imp.ErrorSync Imp.FenceLocal
   pure (slugs_op_renamed, doTheReduction)
 
 reductionStageOne ::
