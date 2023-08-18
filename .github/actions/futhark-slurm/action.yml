@@ -34,6 +34,8 @@ runs:
       shell: bash
       run: |
         printf '#!/bin/bash
+        module load python
+        module load cuda
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
         srun ${{inputs.slurm-options}} temp.sh
