@@ -158,7 +158,7 @@ GPU Options
 ~~~~~~~~~~~
 
 The following options are supported by executables generated with the
-GPU backends (``opencl``, ``pyopencl``, and ``cuda``).
+GPU backends (``opencl``, ``pyopencl``, ``hip``, and ``cuda``).
 
   ``-d/--device DEVICE``
 
