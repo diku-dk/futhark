@@ -432,17 +432,17 @@ onKernel target kernel = do
       attribute =
         case mapM isConst $ kernelGroupSize kernel of
           Just [x, y, z] ->
-            "REQD_GROUP_SIZE" <> prettyText (x, y, z) <> "\n"
+            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, z) <> "\n"
           Just [x, y] ->
-            "REQD_GROUP_SIZE" <> prettyText (x, y, 1 :: Int) <> "\n"
+            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, 1 :: Int) <> "\n"
           Just [x] ->
-            "REQD_GROUP_SIZE" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
-          _ -> ""
+            "FUTHARK_KERNEL_SIZED" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
+          _ -> "FUTHARK_KERNEL"
 
       kernel_fun =
         attribute
           <> funcText
-            [C.cfun|__kernel void $id:name ($params:params) {
+            [C.cfun|void $id:name ($params:params) {
                     $items:(mconcat unpack_params)
                     $items:const_defs
                     $items:prepare_local_memory

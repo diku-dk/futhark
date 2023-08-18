@@ -13,7 +13,6 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 
-#define __kernel extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
 #define __global
 #define __local
 #define __private
@@ -97,6 +96,7 @@ static inline __device__ void barrier_local() {
 extern volatile __shared__ unsigned char local_mem[];
 
 #define LOCAL_MEM_PARAM
-#define REQD_GROUP_SIZE(a,b,c) __launch_bounds__(a*b*c)
+#define FUTHARK_KERNEL extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
+#define FUTHARK_KERNEL_SIZED(a,b,c) extern "C" __global__ __launch_bounds__(a*b*c)
 
 // End of prelude.cu

@@ -48,6 +48,7 @@ static inline void barrier_local() {
 
 // Important for this to be int64_t so it has proper alignment for any type.
 #define LOCAL_MEM_PARAM __local uint64_t* local_mem,
-#define REQD_GROUP_SIZE(a,b,c) __attribute__((reqd_work_group_size(a, b, c)))
+#define FUTHARK_KERNEL __kernel
+#define FUTHARK_KERNEL_SIZED(a,b,c) __attribute__((reqd_work_group_size(a, b, c))) __kernel
 
 // End of prelude.cl
