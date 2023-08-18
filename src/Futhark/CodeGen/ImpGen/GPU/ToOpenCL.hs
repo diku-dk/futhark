@@ -437,7 +437,7 @@ onKernel target kernel = do
             "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, 1 :: Int) <> "\n"
           Just [x] ->
             "FUTHARK_KERNEL_SIZED" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
-          _ -> "FUTHARK_KERNEL"
+          _ -> "FUTHARK_KERNEL\n"
 
       kernel_fun =
         attribute
