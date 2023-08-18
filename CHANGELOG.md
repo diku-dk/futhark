@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * pyopencl backend: compatibility with future versions of PyOpenCL.
 
+* New backend: hip.
+
 ### Removed
 
 ### Changed

@@ -41,6 +41,7 @@ extra-source-files:
     rts/c/context_prototypes.h
     rts/c/backends/c.h
     rts/c/backends/cuda.h
+    rts/c/backends/hip.h
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
     rts/c/lock.h
@@ -198,6 +199,7 @@ library
       Futhark.CLI.Dev
       Futhark.CLI.Doc
       Futhark.CLI.Eval
+      Futhark.CLI.HIP
       Futhark.CLI.Literate
       Futhark.CLI.LSP
       Futhark.CLI.Main
@@ -216,6 +218,7 @@ library
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.COpenCL
+      Futhark.CodeGen.Backends.HIP
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI
       Futhark.CodeGen.Backends.GenericC.Code
@@ -264,6 +267,7 @@ library
       Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass
       Futhark.CodeGen.ImpGen.GPU.SegScan.TwoPass
       Futhark.CodeGen.ImpGen.GPU.ToOpenCL
+      Futhark.CodeGen.ImpGen.HIP
       Futhark.CodeGen.ImpGen.Multicore
       Futhark.CodeGen.ImpGen.Multicore.Base
       Futhark.CodeGen.ImpGen.Multicore.SegHist

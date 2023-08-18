@@ -97,6 +97,6 @@ static inline __device__ void barrier_local() {
 extern volatile __shared__ unsigned char local_mem[];
 
 #define LOCAL_MEM_PARAM
-#define REQD_GROUP_SIZE(a,b,c)
+#define REQD_GROUP_SIZE(a,b,c) __launch_bounds__(a*b*c)
 
 // End of prelude.cu
