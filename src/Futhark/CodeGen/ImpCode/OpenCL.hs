@@ -103,6 +103,7 @@ data OpenCL
 data KernelTarget
   = TargetOpenCL
   | TargetCUDA
+  | TargetHIP
   deriving (Eq)
 
 instance Pretty OpenCL where

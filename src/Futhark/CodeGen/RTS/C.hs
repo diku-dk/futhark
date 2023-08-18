@@ -25,6 +25,7 @@ module Futhark.CodeGen.RTS.C
     ispcUtilH,
     backendsOpenclH,
     backendsCudaH,
+    backendsHipH,
     backendsCH,
     backendsMulticoreH,
   )
@@ -145,6 +146,11 @@ backendsOpenclH = $(embedStringFile "rts/c/backends/opencl.h")
 backendsCudaH :: T.Text
 backendsCudaH = $(embedStringFile "rts/c/backends/cuda.h")
 {-# NOINLINE backendsCudaH #-}
+
+-- | @rts/c/backends/hip.h@
+backendsHipH :: T.Text
+backendsHipH = $(embedStringFile "rts/c/backends/hip.h")
+{-# NOINLINE backendsHipH #-}
 
 -- | @rts/c/backends/c.h@
 backendsCH :: T.Text

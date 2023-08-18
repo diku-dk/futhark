@@ -7,6 +7,7 @@
 module Futhark.CodeGen.ImpGen.GPU
   ( compileProgOpenCL,
     compileProgCUDA,
+    compileProgHIP,
     Warnings,
   )
 where
@@ -82,10 +83,12 @@ compileProg env =
 -- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL,
-  compileProgCUDA ::
+  compileProgCUDA,
+  compileProgHIP ::
     MonadFreshNames m => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
+compileProgHIP = compileProg $ HostEnv cudaAtomics HIP mempty
 
 opCompiler ::
   Pat LetDecMem ->

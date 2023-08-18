@@ -62,7 +62,7 @@ import Prelude hiding (quot, rem)
 -- of the kernels code is the same, there are some cases where we
 -- generate special code based on the ultimate low-level API we are
 -- targeting.
-data Target = CUDA | OpenCL
+data Target = CUDA | OpenCL | HIP
 
 -- | Information about the locks available for accumulators.
 data Locks = Locks

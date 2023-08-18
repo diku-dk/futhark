@@ -13,6 +13,9 @@ ISPCFLAGS=--woff --pic --addressing=64
 else ifeq ($(FUTHARK_BACKEND),cuda)
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm -lcuda -lcudart -lnvrtc
+else ifeq ($(FUTHARK_BACKEND),hip)
+CFLAGS=-O3 -std=c99
+LDFLAGS=-lm -lamdhip64 -lhiprtc
 else
 CFLAGS=-O3 -std=c99
 LDFLAGS=-lm

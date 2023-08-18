@@ -45,16 +45,16 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    :caption: Manual Pages
    :maxdepth: 1
 
-   man/futhark.rst
    man/futhark-autotune.rst
    man/futhark-bench.rst
    man/futhark-c.rst
    man/futhark-cuda.rst
    man/futhark-dataset.rst
    man/futhark-doc.rst
+   man/futhark-hip.rst
+   man/futhark-ispc.rst
    man/futhark-literate.rst
    man/futhark-multicore.rst
-   man/futhark-ispc.rst
    man/futhark-opencl.rst
    man/futhark-pkg.rst
    man/futhark-pyopencl.rst
@@ -62,5 +62,6 @@ the `development blog <https://futhark-lang.org/blog.html>`_.
    man/futhark-repl.rst
    man/futhark-run.rst
    man/futhark-test.rst
-   man/futhark-wasm.rst
    man/futhark-wasm-multicore.rst
+   man/futhark-wasm.rst
+   man/futhark.rst
