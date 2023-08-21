@@ -50,7 +50,7 @@ data IxFun num
   | Expand num num (IxFun num)
   deriving (Eq, Show)
 
-instance Pretty num => Pretty (IxFun num) where
+instance (Pretty num) => Pretty (IxFun num) where
   pretty (Direct dims) =
     "Direct" <> parens (commasep $ map pretty dims)
   pretty (Permute fun perm) = pretty fun <> pretty perm
@@ -94,7 +94,7 @@ coerce :: IxFun num -> Shape num -> IxFun num
 coerce = Reshape
 
 shape ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   IxFun num ->
   Shape num
 shape (Direct dims) =

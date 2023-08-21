@@ -54,7 +54,7 @@ instance IsString VName where
     let (s', '_' : tag) = span (/= '_') s
      in VName (fromString s') (read tag)
 
-instance IsString v => IsString (QualName v) where
+instance (IsString v) => IsString (QualName v) where
   fromString = QualName [] . fromString
 
 instance IsString UncheckedTypeExp where
