@@ -25,13 +25,13 @@ type Permutation = [Int]
 type IxFun num = (Maybe (I.IxFun num), IA.IxFun num)
 
 iota ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   Shape num ->
   IxFun num
 iota x = (Just $ I.iota x, IA.iota x)
 
 permute ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   IxFun num ->
   Permutation ->
   IxFun num

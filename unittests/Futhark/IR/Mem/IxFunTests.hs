@@ -5,6 +5,7 @@ module Futhark.IR.Mem.IxFunTests
   )
 where
 
+import Data.Bifunctor
 import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map qualified as M
@@ -57,14 +58,22 @@ compareIxFuns (Just ixfunLMAD) ixfunAlg =
       resAlg = map (IxFunAlg.index ixfunAlg) points
       errorMessage =
         T.unpack . docText $
-          "lmad ixfun:  " <> pretty ixfunLMAD
-            </> "alg ixfun:   " <> pretty ixfunAlg
-            </> "lmad shape:  " <> pretty lmadShape
-            </> "alg shape:   " <> pretty algShape
-            </> "lmad points length: " <> pretty (length resLMAD)
-            </> "alg points length:  " <> pretty (length resAlg)
-            </> "lmad points: " <> pretty resLMAD
-            </> "alg points:  " <> pretty resAlg
+          "lmad ixfun:  "
+            <> pretty ixfunLMAD
+              </> "alg ixfun:   "
+            <> pretty ixfunAlg
+              </> "lmad shape:  "
+            <> pretty lmadShape
+              </> "alg shape:   "
+            <> pretty algShape
+              </> "lmad points length: "
+            <> pretty (length resLMAD)
+              </> "alg points length:  "
+            <> pretty (length resAlg)
+              </> "lmad points: "
+            <> pretty resLMAD
+              </> "alg points:  "
+            <> pretty resAlg
    in (lmadShape == algShape && resLMAD == resAlg) @? errorMessage
 compareIxFuns Nothing ixfunAlg =
   assertFailure $
@@ -81,8 +90,10 @@ compareOpsFailure (Nothing, _) = pure ()
 compareOpsFailure (Just ixfunLMAD, ixfunAlg) =
   assertFailure . T.unpack . docText $
     "Not supposed to be representable as LMAD."
-      </> "lmad ixfun: " <> pretty ixfunLMAD
-      </> "alg ixfun:  " <> pretty ixfunAlg
+      </> "lmad ixfun: "
+      <> pretty ixfunLMAD
+        </> "alg ixfun:  "
+      <> pretty ixfunAlg
 
 -- XXX: Clean this up.
 n :: Int
@@ -503,9 +514,11 @@ _test_disjoint3 =
            in res1 && res2 && res3 && res4 @? "Failed " <> show [res1, res2, res3, res4],
         testCase "lud long" $
           let lessthans =
-                [ (step, num_blocks - 1 :: TPrimExp Int64 VName)
+                [ bimap
+                    (head . namesToList . freeIn)
+                    untyped
+                    (step, num_blocks - 1 :: TPrimExp Int64 VName)
                 ]
-                  & map (\(v, p) -> (head $ namesToList $ freeIn v, untyped p))
 
               step = TPrimExp $ LeafExp (foo "step" 1337) $ IntType Int64
 
