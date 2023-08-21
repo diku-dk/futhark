@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 
 * Flattening/unflattening as the final operation in an entry point no
-  only forces a copy.
+  longer forces a copy.
 
 * The `opencl` backend no longer *always* fails on platforms that do
   not support 64-bit integer atomics, although it will still fail if
