@@ -104,9 +104,9 @@ type Copy op s =
   PrimType ->
   CompilerM op s ()
 
--- | Perform an 'LMADCopy'.  It is expected that these functions are
--- each specialised on which spaces they operate on, so that is not
--- part of their arguments.
+-- | Perform an 'Imp.LMADCopy'.  It is expected that these functions
+-- are each specialised on which spaces they operate on, so that is
+-- not part of their arguments.
 type DoLMADCopy op s =
   PrimType ->
   [Count Elements PyExp] ->
@@ -1261,8 +1261,8 @@ compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
       [For (compileName i) (simpleCall "range" [n]) $ loops ins body]
 
 -- | Compile an 'LMADCopy' using sequential nested loops and
--- 'Read'/'Write' of individual scalars.  This always works, but can
--- be pretty slow if those reads and writes are costly.
+-- 'Imp.Read'/'Imp.Write' of individual scalars.  This always works,
+-- but can be pretty slow if those reads and writes are costly.
 compileLMADCopy ::
   PrimType ->
   [Count Elements (TExp Int64)] ->
