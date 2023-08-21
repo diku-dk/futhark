@@ -31,7 +31,7 @@ import Futhark.Pass
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyProg ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   Engine.SimpleOps rep ->
   RuleBook (Engine.Wise rep) ->
   Engine.HoistBlockers rep ->

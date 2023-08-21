@@ -393,7 +393,7 @@ newtype ReduceM a = ReduceM (StateT State (Reader MigrationTable) a)
       MonadReader MigrationTable
     )
 
-runReduceM :: MonadFreshNames m => MigrationTable -> ReduceM a -> m a
+runReduceM :: (MonadFreshNames m) => MigrationTable -> ReduceM a -> m a
 runReduceM mt (ReduceM m) = modifyNameSource $ \src ->
   second stateNameSource (runReader (runStateT m (initialState src)) mt)
 

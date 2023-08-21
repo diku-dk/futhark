@@ -25,7 +25,7 @@ type IndexSubstitution = (Certs, VName, Type, Slice SubExp)
 -- should be replaced with.
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
-typeEnvFromSubstitutions :: LParamInfo rep ~ Type => IndexSubstitutions -> Scope rep
+typeEnvFromSubstitutions :: (LParamInfo rep ~ Type) => IndexSubstitutions -> Scope rep
 typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where
     fromSubstitution (_, name, t, _) =
@@ -130,7 +130,7 @@ substituteIndicesInExp substs e = do
        in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   IndexSubstitutions ->
   SubExp ->
   m SubExp
@@ -140,7 +140,7 @@ substituteIndicesInSubExp _ se =
   pure se
 
 substituteIndicesInVar ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   IndexSubstitutions ->
   VName ->
   m VName

@@ -13,7 +13,7 @@ import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 -- | Compile a 'SeqMem' program to sequential imperative code.
-compileProg :: MonadFreshNames m => Prog SeqMem -> m (ImpGen.Warnings, Imp.Program)
+compileProg :: (MonadFreshNames m) => Prog SeqMem -> m (ImpGen.Warnings, Imp.Program)
 compileProg = ImpGen.compileProg () ops Imp.DefaultSpace
   where
     ops = ImpGen.defaultOperations opCompiler

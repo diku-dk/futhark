@@ -47,14 +47,14 @@ rearrangeCompose = rearrangeShape
 -- if so, return the permutation.  This will also find identity
 -- permutations (i.e. the lists are the same) The implementation is
 -- naive and slow.
-isPermutationOf :: Eq a => [a] -> [a] -> Maybe [Int]
+isPermutationOf :: (Eq a) => [a] -> [a] -> Maybe [Int]
 isPermutationOf l1 l2 =
   case mapAccumLM (pick 0) (map Just l2) l1 of
     Just (l2', perm)
       | all (== Nothing) l2' -> Just perm
     _ -> Nothing
   where
-    pick :: Eq a => Int -> [Maybe a] -> a -> Maybe ([Maybe a], Int)
+    pick :: (Eq a) => Int -> [Maybe a] -> a -> Maybe ([Maybe a], Int)
     pick _ [] _ = Nothing
     pick i (x : xs) y
       | Just y == x = Just (Nothing : xs, i)

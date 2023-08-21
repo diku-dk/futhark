@@ -88,8 +88,8 @@ buildCallGraph prog =
         <> fcAllCalled cg
     ftable = buildFunctionTable prog
 
-count :: Ord k => [k] -> M.Map k Int
-count ks = M.fromListWith (+) $ zip ks $ repeat 1
+count :: (Ord k) => [k] -> M.Map k Int
+count ks = M.fromListWith (+) $ map (,1) ks
 
 -- | Produce a mapping of the number of occurences in the call graph
 -- of each function.  Only counts functions that are called at least

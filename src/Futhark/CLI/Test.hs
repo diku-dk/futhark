@@ -42,7 +42,7 @@ type TestM = ExceptT [T.Text] IO
 eitherToErrors :: Either e a -> Errors e a
 eitherToErrors = either failure Pure
 
-throwError :: MonadError [e] m => e -> m a
+throwError :: (MonadError [e] m) => e -> m a
 throwError e = E.throwError [e]
 
 runTestM :: TestM () -> IO TestResult
@@ -57,7 +57,7 @@ context s = withExceptT $
     [] -> []
     (e : es') -> (s <> ":\n" <> e) : es'
 
-context1 :: Monad m => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
+context1 :: (Monad m) => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
 context1 s = withExceptT $ \e -> s <> ":\n" <> e
 
 accErrors :: [TestM a] -> TestM [a]
@@ -358,7 +358,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         compareResult entry index program expected res
 
-checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
+checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $

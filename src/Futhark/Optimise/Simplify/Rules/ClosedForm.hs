@@ -118,7 +118,7 @@ loopClosedForm pat merge i it bound body = do
     knownBnds = M.fromList $ zip mergenames mergeexp
 
 checkResults ::
-  BuilderOps rep =>
+  (BuilderOps rep) =>
   [VName] ->
   SubExp ->
   Names ->

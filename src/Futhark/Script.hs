@@ -63,7 +63,7 @@ import Text.Megaparsec.Char.Lexer (charLiteral)
 
 type TypeMap = M.Map TypeName (Maybe [(Name, TypeName)])
 
-typeMap :: MonadIO m => Server -> m TypeMap
+typeMap :: (MonadIO m) => Server -> m TypeMap
 typeMap server = do
   liftIO $ either (pure mempty) onTypes =<< cmdTypes server
   where
@@ -88,7 +88,7 @@ data ScriptServer = ScriptServer
 
 -- | Run an action with a 'ScriptServer' produced by an existing
 -- 'Server', without shutting it down at the end.
-withScriptServer' :: MonadIO m => Server -> (ScriptServer -> m a) -> m a
+withScriptServer' :: (MonadIO m) => Server -> (ScriptServer -> m a) -> m a
 withScriptServer' server f = do
   counter <- liftIO $ newIORef 0
   types <- typeMap server

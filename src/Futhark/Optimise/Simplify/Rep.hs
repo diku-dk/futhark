@@ -157,11 +157,11 @@ instance (Informing rep, Pretty (OpC rep (Wise rep))) => PrettyRep (Wise rep) wh
 instance AliasesOf (VarWisdom, dec) where
   aliasesOf = unAliases . varWisdomAliases . fst
 
-instance Informing rep => Aliased (Wise rep) where
+instance (Informing rep) => Aliased (Wise rep) where
   bodyAliases = map unAliases . bodyWisdomAliases . fst . bodyDec
   consumedInBody = unAliases . bodyWisdomConsumed . fst . bodyDec
 
-removeWisdom :: RephraseOp (OpC rep) => Rephraser Identity (Wise rep) rep
+removeWisdom :: (RephraseOp (OpC rep)) => Rephraser Identity (Wise rep) rep
 removeWisdom =
   Rephraser
     { rephraseExpDec = pure . snd,
@@ -194,23 +194,23 @@ addScopeWisdom = M.map alias
     alias (IndexName it) = IndexName it
 
 -- | Remove simplifier information from function.
-removeFunDefWisdom :: RephraseOp (OpC rep) => FunDef (Wise rep) -> FunDef rep
+removeFunDefWisdom :: (RephraseOp (OpC rep)) => FunDef (Wise rep) -> FunDef rep
 removeFunDefWisdom = runIdentity . rephraseFunDef removeWisdom
 
 -- | Remove simplifier information from statement.
-removeStmWisdom :: RephraseOp (OpC rep) => Stm (Wise rep) -> Stm rep
+removeStmWisdom :: (RephraseOp (OpC rep)) => Stm (Wise rep) -> Stm rep
 removeStmWisdom = runIdentity . rephraseStm removeWisdom
 
 -- | Remove simplifier information from lambda.
-removeLambdaWisdom :: RephraseOp (OpC rep) => Lambda (Wise rep) -> Lambda rep
+removeLambdaWisdom :: (RephraseOp (OpC rep)) => Lambda (Wise rep) -> Lambda rep
 removeLambdaWisdom = runIdentity . rephraseLambda removeWisdom
 
 -- | Remove simplifier information from body.
-removeBodyWisdom :: RephraseOp (OpC rep) => Body (Wise rep) -> Body rep
+removeBodyWisdom :: (RephraseOp (OpC rep)) => Body (Wise rep) -> Body rep
 removeBodyWisdom = runIdentity . rephraseBody removeWisdom
 
 -- | Remove simplifier information from expression.
-removeExpWisdom :: RephraseOp (OpC rep) => Exp (Wise rep) -> Exp rep
+removeExpWisdom :: (RephraseOp (OpC rep)) => Exp (Wise rep) -> Exp rep
 removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
 -- | Remove simplifier information from pattern.
@@ -219,7 +219,7 @@ removePatWisdom = runIdentity . rephrasePat (pure . snd)
 
 -- | Add simplifier information to pattern.
 addWisdomToPat ::
-  Informing rep =>
+  (Informing rep) =>
   Pat (LetDec rep) ->
   Exp (Wise rep) ->
   Pat (LetDec (Wise rep))
@@ -230,7 +230,7 @@ addWisdomToPat pat e =
 
 -- | Produce a body with simplifier information.
 mkWiseBody ::
-  Informing rep =>
+  (Informing rep) =>
   BodyDec rep ->
   Stms (Wise rep) ->
   Result ->
@@ -247,7 +247,7 @@ mkWiseBody dec stms res =
 
 -- | Produce a statement with simplifier information.
 mkWiseStm ::
-  Informing rep =>
+  (Informing rep) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Wise rep) ->
@@ -258,7 +258,7 @@ mkWiseStm pat (StmAux cs attrs dec) e =
 
 -- | Produce simplifier information for an expression.
 mkWiseExpDec ::
-  Informing rep =>
+  (Informing rep) =>
   Pat (LetDec (Wise rep)) ->
   ExpDec rep ->
   Exp (Wise rep) ->
@@ -299,29 +299,29 @@ type Informing rep =
 
 -- | A type class for indicating that this operation can be lifted into the simplifier representation.
 class CanBeWise op where
-  addOpWisdom :: Informing rep => op rep -> op (Wise rep)
+  addOpWisdom :: (Informing rep) => op rep -> op (Wise rep)
 
 instance CanBeWise NoOp where
   addOpWisdom NoOp = NoOp
 
 -- | Construct a 'Wise' statement.
-informStm :: Informing rep => Stm rep -> Stm (Wise rep)
+informStm :: (Informing rep) => Stm rep -> Stm (Wise rep)
 informStm (Let pat aux e) = mkWiseStm pat aux $ informExp e
 
 -- | Construct 'Wise' statements.
-informStms :: Informing rep => Stms rep -> Stms (Wise rep)
+informStms :: (Informing rep) => Stms rep -> Stms (Wise rep)
 informStms = fmap informStm
 
 -- | Construct a 'Wise' body.
-informBody :: Informing rep => Body rep -> Body (Wise rep)
+informBody :: (Informing rep) => Body rep -> Body (Wise rep)
 informBody (Body dec stms res) = mkWiseBody dec (informStms stms) res
 
 -- | Construct a 'Wise' lambda.
-informLambda :: Informing rep => Lambda rep -> Lambda (Wise rep)
+informLambda :: (Informing rep) => Lambda rep -> Lambda (Wise rep)
 informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
 
 -- | Construct a 'Wise' expression.
-informExp :: Informing rep => Exp rep -> Exp (Wise rep)
+informExp :: (Informing rep) => Exp rep -> Exp (Wise rep)
 informExp (Match cond cases defbody (MatchDec ts ifsort)) =
   Match cond (map (fmap informBody) cases) (informBody defbody) (MatchDec ts ifsort)
 informExp (Loop merge form loopbody) =
@@ -344,6 +344,6 @@ informExp e = runIdentity $ mapExpM mapper e
         }
 
 -- | Construct a 'Wise' function definition.
-informFunDef :: Informing rep => FunDef rep -> FunDef (Wise rep)
+informFunDef :: (Informing rep) => FunDef rep -> FunDef (Wise rep)
 informFunDef (FunDef entry attrs fname rettype params body) =
   FunDef entry attrs fname rettype params $ informBody body

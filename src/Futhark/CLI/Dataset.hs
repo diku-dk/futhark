@@ -141,7 +141,7 @@ commandLineOptions =
   ]
 
 setRangeOption ::
-  Read a =>
+  (Read a) =>
   String ->
   (Range a -> RandomConfiguration -> RandomConfiguration) ->
   FunOptDescr DataOptions

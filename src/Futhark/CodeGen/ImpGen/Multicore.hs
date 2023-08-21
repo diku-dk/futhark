@@ -189,7 +189,7 @@ gccAtomics = flip lookup cpu
 
 -- | Compile the program.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Prog MCMem ->
   m (Warnings, Imp.Definitions Imp.Multicore)
 compileProg =

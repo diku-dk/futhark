@@ -62,7 +62,7 @@ data Shape d
 -- | The shape of an array.
 type ValueShape = Shape Int64
 
-instance Pretty d => Pretty (Shape d) where
+instance (Pretty d) => Pretty (Shape d) where
   pretty ShapeLeaf = mempty
   pretty (ShapeDim d s) = brackets (pretty d) <> pretty s
   pretty (ShapeRecord m) = prettyRecord pretty m
@@ -206,7 +206,7 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
   where
     shape = ShapeDim (genericLength vs) rowshape
 
-arrayLength :: Integral int => Array Int (Value m) -> int
+arrayLength :: (Integral int) => Array Int (Value m) -> int
 arrayLength = fromIntegral . (+ 1) . snd . bounds
 
 toTuple :: [Value m] -> Value m
@@ -220,7 +220,7 @@ fromDataShape :: V.Vector Int -> ValueShape
 fromDataShape = foldr (ShapeDim . fromIntegral) ShapeLeaf . SVec.toList
 
 fromDataValueWith ::
-  SVec.Storable a =>
+  (SVec.Storable a) =>
   (a -> PrimValue) ->
   SVec.Vector Int ->
   SVec.Vector a ->

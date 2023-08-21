@@ -56,7 +56,7 @@ mkHistBody accs (KernelBody () stms [Returns rm cs (Var v)]) = do
     )
 mkHistBody _ _ = Nothing
 
-withAccLamToHistLam :: MonadFreshNames m => Shape -> Lambda GPU -> m (Lambda GPU)
+withAccLamToHistLam :: (MonadFreshNames m) => Shape -> Lambda GPU -> m (Lambda GPU)
 withAccLamToHistLam shape lam =
   renameLambda $ lam {lambdaParams = drop (shapeRank shape) (lambdaParams lam)}
 
@@ -89,7 +89,7 @@ addArrsToAcc lvl shape arrs acc = do
     KernelBody () stms [Returns ResultMaySimplify mempty (Var acc')]
 
 flatKernelBody ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   SegSpace ->
   KernelBody (Rep m) ->
   m (SegSpace, KernelBody (Rep m))

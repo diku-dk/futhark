@@ -50,7 +50,7 @@ partitionAdjVars (fv : fvs) =
     (xs, ys, zs) = partitionAdjVars fvs
 
 buildRenamedBody ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   m (Result, a) ->
   m (Body (Rep m), a)
 buildRenamedBody m = do

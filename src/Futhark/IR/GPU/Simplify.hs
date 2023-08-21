@@ -130,7 +130,7 @@ removeDeadGPUBodyResult _ _ _ _ = Skip
 -- Update with a slice of that array.  This matters when the arrays
 -- are far away (on the GPU, say), because it avoids a copy of the
 -- scalar to and from the host.
-removeScalarCopy :: BuilderOps rep => TopDownRuleBasicOp rep
+removeScalarCopy :: (BuilderOps rep) => TopDownRuleBasicOp rep
 removeScalarCopy vtable pat aux (Update safety arr_x (Slice slice_x) (Var v))
   | Just _ <- sliceIndices (Slice slice_x),
     Just (Index arr_y (Slice slice_y), cs_y) <- ST.lookupBasicOp v vtable,

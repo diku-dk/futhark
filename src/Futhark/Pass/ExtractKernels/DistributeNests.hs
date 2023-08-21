@@ -57,7 +57,7 @@ import Futhark.Transform.Rename
 import Futhark.Util
 import Futhark.Util.Log
 
-scopeForSOACs :: SameScope rep SOACS => Scope rep -> Scope SOACS
+scopeForSOACs :: (SameScope rep SOACS) => Scope rep -> Scope SOACS
 scopeForSOACs = castScope
 
 data MapLoop = MapLoop (Pat Type) (StmAux ()) SubExp (Lambda SOACS) [VName]
@@ -104,7 +104,7 @@ instance Semigroup (PostStms rep) where
 instance Monoid (PostStms rep) where
   mempty = PostStms mempty
 
-typeEnvFromDistAcc :: DistRep rep => DistAcc rep -> Scope rep
+typeEnvFromDistAcc :: (DistRep rep) => DistAcc rep -> Scope rep
 typeEnvFromDistAcc = scopeOfPat . fst . outerTarget . distTargets
 
 addStmsToAcc :: Stms rep -> DistAcc rep -> DistAcc rep
@@ -148,7 +148,7 @@ liftInner m = do
         inner_scope <- askScope
         localScope (outer_scope `M.difference` inner_scope) m
 
-instance MonadFreshNames m => MonadFreshNames (DistNestT rep m) where
+instance (MonadFreshNames m) => MonadFreshNames (DistNestT rep m) where
   getNameSource = DistNestT $ lift getNameSource
   putNameSource = DistNestT . lift . putNameSource
 
@@ -159,7 +159,7 @@ instance (Monad m, ASTRep rep) => LocalScope rep (DistNestT rep m) where
   localScope types = local $ \env ->
     env {distScope = types <> distScope env}
 
-instance Monad m => MonadLogger (DistNestT rep m) where
+instance (Monad m) => MonadLogger (DistNestT rep m) where
   addLog msgs = tell mempty {accLog = msgs}
 
 runDistNestT ::
@@ -194,10 +194,10 @@ runDistNestT env (DistNestT m) = do
       certify cs . Let (Pat [pe]) (defAux ()) . BasicOp $
         Replicate (Shape [loopNestingWidth outermost]) se
 
-addPostStms :: Monad m => PostStms rep -> DistNestT rep m ()
+addPostStms :: (Monad m) => PostStms rep -> DistNestT rep m ()
 addPostStms ks = tell $ mempty {accPostStms = ks}
 
-postStm :: Monad m => Stms rep -> DistNestT rep m ()
+postStm :: (Monad m) => Stms rep -> DistNestT rep m ()
 postStm stms = addPostStms $ PostStms stms
 
 withStm ::
@@ -349,12 +349,12 @@ distributeMapBodyStms orig_acc = distribute <=< onStms orig_acc . stmsToList
       -- situation that stm is in scope of itself.
       withStm stm $ maybeDistributeStm stm =<< onStms acc stms
 
-onInnerMap :: Monad m => MapLoop -> DistAcc rep -> DistNestT rep m (DistAcc rep)
+onInnerMap :: (Monad m) => MapLoop -> DistAcc rep -> DistNestT rep m (DistAcc rep)
 onInnerMap loop acc = do
   f <- asks distOnInnerMap
   f loop acc
 
-onTopLevelStms :: Monad m => Stms SOACS -> DistNestT rep m ()
+onTopLevelStms :: (Monad m) => Stms SOACS -> DistNestT rep m ()
 onTopLevelStms stms = do
   f <- asks distOnTopLevelStms
   postStm =<< f stms
@@ -996,7 +996,7 @@ histKernel onLambda lvl orig_pat ispace inputs cs hist_w ops lam arrs = runBuild
       =<< segHist lvl orig_pat hist_w ispace inputs' ops' lam arrs
 
 determineReduceOp ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   Lambda SOACS ->
   [SubExp] ->
   m (Lambda SOACS, [SubExp], Shape)
@@ -1161,7 +1161,7 @@ permutationAndMissing (Pat pes) res = do
 
 -- Add extra pattern elements to every kernel nesting level.
 expandKernelNest ::
-  MonadFreshNames m => [PatElem Type] -> KernelNest -> m KernelNest
+  (MonadFreshNames m) => [PatElem Type] -> KernelNest -> m KernelNest
 expandKernelNest pes (outer_nest, inner_nests) = do
   let outer_size =
         loopNestingWidth outer_nest

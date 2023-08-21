@@ -43,19 +43,19 @@ instance ToLog T.Text where
 -- | Typeclass for monads that support logging.
 class (Applicative m, Monad m) => MonadLogger m where
   -- | Add one log entry.
-  logMsg :: ToLog a => a -> m ()
+  logMsg :: (ToLog a) => a -> m ()
   logMsg = addLog . toLog
 
   -- | Append an entire log.
   addLog :: Log -> m ()
 
-instance Monad m => MonadLogger (WriterT Log m) where
+instance (Monad m) => MonadLogger (WriterT Log m) where
   addLog = tell
 
-instance Monad m => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
+instance (Monad m) => MonadLogger (Control.Monad.RWS.Lazy.RWST r Log s m) where
   addLog = tell
 
-instance Monad m => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
+instance (Monad m) => MonadLogger (Control.Monad.RWS.Strict.RWST r Log s m) where
   addLog = tell
 
 instance MonadLogger IO where

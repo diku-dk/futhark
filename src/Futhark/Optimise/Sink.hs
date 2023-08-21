@@ -76,7 +76,7 @@ type Constraints rep =
 -- | Given a statement, compute how often each of its free variables
 -- are used.  Not accurate: what we care about are only 1, and greater
 -- than 1.
-multiplicity :: Constraints rep => Stm rep -> M.Map VName Int
+multiplicity :: (Constraints rep) => Stm rep -> M.Map VName Int
 multiplicity stm =
   case stmExp stm of
     Match cond cases defbody _ ->
@@ -88,11 +88,11 @@ multiplicity stm =
     Loop {} -> free 2 stm
     _ -> free 1 stm
   where
-    free k x = M.fromList $ zip (namesToList $ freeIn x) $ repeat k
+    free k x = M.fromList $ map (,k) $ namesToList $ freeIn x
     comb = M.unionWith (+)
 
 optimiseBranch ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (Body rep)
 optimiseBranch onOp vtable sinking (Body dec stms res) =
@@ -111,7 +111,7 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
     sunk = namesFromList $ foldMap (patNames . stmPat) sunk_stms
 
 optimiseLoop ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep ([(FParam rep, SubExp)], LoopForm rep, Body rep)
 optimiseLoop onOp vtable sinking (merge, form, body0)
@@ -144,7 +144,7 @@ optimiseLoop onOp vtable sinking (merge, form, body0)
        in stm <| stms
 
 optimiseStms ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   SymbolTable rep ->
   Sinking rep ->
@@ -159,7 +159,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
     multiplicities =
       foldl'
         (M.unionWith (+))
-        (M.fromList (zip (namesToList free_in_res) (repeat 1)))
+        (M.fromList (map (,1) (namesToList free_in_res)))
         (map multiplicity $ stmsToList all_stms)
 
     optimiseStms' _ _ [] = ([], mempty)
@@ -220,7 +220,7 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
             }
 
 optimiseBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (Body rep)
 optimiseBody onOp vtable sinking (Body attr stms res) =
@@ -228,7 +228,7 @@ optimiseBody onOp vtable sinking (Body attr stms res) =
    in (Body attr stms' res, sunk)
 
 optimiseKernelBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (KernelBody rep)
 optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
@@ -236,7 +236,7 @@ optimiseKernelBody onOp vtable sinking (KernelBody attr stms res) =
    in (KernelBody attr stms' res, sunk)
 
 optimiseSegOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   Sinker rep (Op rep) ->
   Sinker rep (SegOp lvl rep)
 optimiseSegOp onOp vtable sinking op =

@@ -71,7 +71,7 @@ badOptions usage nonopts errs unrecs = do
   exitWith $ ExitFailure 1
 
 -- | Short-hand for 'liftIO . hPutStrLn stderr'
-errput :: MonadIO m => String -> m ()
+errput :: (MonadIO m) => String -> m ()
 errput = liftIO . hPutStrLn stderr
 
 -- | Common definitions for @-v@ and @-h@, given the list of all other

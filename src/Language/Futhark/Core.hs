@@ -118,7 +118,7 @@ nameFromText = Name
 --
 -- This function assumes that both start and end position is in the
 -- same file (it is not clear what the alternative would even mean).
-locStr :: Located a => a -> String
+locStr :: (Located a) => a -> String
 locStr a =
   case locOf a of
     NoLoc -> "unknown location"
@@ -150,7 +150,7 @@ locStrRel a b =
     _ -> locStr b
 
 -- | 'locStr', but for text.
-locText :: Located a => a -> T.Text
+locText :: (Located a) => a -> T.Text
 locText = T.pack . locStr
 
 -- | 'locStrRel', but for text.

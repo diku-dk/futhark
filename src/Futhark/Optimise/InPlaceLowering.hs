@@ -93,7 +93,7 @@ inPlaceLoweringMC = inPlaceLowering onMCOp lowerUpdate
 
 -- | Apply the in-place lowering optimisation to the given program.
 inPlaceLowering ::
-  Constraints rep =>
+  (Constraints rep) =>
   OnOp rep ->
   LowerUpdate rep (ForwardingM rep) ->
   Pass rep rep
@@ -122,7 +122,7 @@ inPlaceLowering onOp lower =
 type Constraints rep = (Buildable rep, AliasableRep rep)
 
 optimiseBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   Body (Aliases rep) ->
   ForwardingM rep (Body (Aliases rep))
 optimiseBody (Body als stms res) = do
@@ -133,7 +133,7 @@ optimiseBody (Body als stms res) = do
     seen (Var v) = seenVar v
 
 optimiseStms ::
-  Constraints rep =>
+  (Constraints rep) =>
   [Stm (Aliases rep)] ->
   ForwardingM rep () ->
   ForwardingM rep [Stm (Aliases rep)]
@@ -180,11 +180,11 @@ optimiseStms (stm : stms) m = do
     checkIfForwardableUpdate stm' =
       mapM_ seenVar $ namesToList $ freeIn $ stmExp stm'
 
-optimiseInStm :: Constraints rep => Stm (Aliases rep) -> ForwardingM rep (Stm (Aliases rep))
+optimiseInStm :: (Constraints rep) => Stm (Aliases rep) -> ForwardingM rep (Stm (Aliases rep))
 optimiseInStm (Let pat dec e) =
   Let pat dec <$> optimiseExp e
 
-optimiseExp :: Constraints rep => Exp (Aliases rep) -> ForwardingM rep (Exp (Aliases rep))
+optimiseExp :: (Constraints rep) => Exp (Aliases rep) -> ForwardingM rep (Exp (Aliases rep))
 optimiseExp (Loop merge form body) =
   bindingScope (scopeOf form) . bindingFParams (map fst merge) $
     Loop merge form <$> optimiseBody body
@@ -199,7 +199,7 @@ optimiseExp e = mapExpM optimise e
         }
 
 onSegOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   SegOp lvl (Aliases rep) ->
   ForwardingM rep (SegOp lvl (Aliases rep))
 onSegOp op =
@@ -270,7 +270,7 @@ instance MonadFreshNames (ForwardingM rep) where
   getNameSource = get
   putNameSource = put
 
-instance Constraints rep => HasScope (Aliases rep) (ForwardingM rep) where
+instance (Constraints rep) => HasScope (Aliases rep) (ForwardingM rep) where
   askScope = M.map entryType <$> asks topDownTable
 
 runForwardingM ::
@@ -393,7 +393,7 @@ tapBottomUp m = do
   pure (x, bup)
 
 maybeForward ::
-  Constraints rep =>
+  (Constraints rep) =>
   VName ->
   VName ->
   LetDec (Aliases rep) ->

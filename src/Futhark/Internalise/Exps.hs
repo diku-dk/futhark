@@ -30,7 +30,7 @@ import Language.Futhark.TypeChecker.Types qualified as E
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
-transformProg :: MonadFreshNames m => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
+transformProg :: (MonadFreshNames m) => Bool -> VisibleTypes -> [E.ValBind] -> m (I.Prog SOACS)
 transformProg always_safe types vbinds = do
   (opaques, consts, funs) <-
     runInternaliseM always_safe (internaliseValBinds types vbinds)
@@ -340,7 +340,7 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       -- application.  One caveat is that we need to replace any
       -- existential sizes, too (with zeroes, because they don't
       -- matter).
-      let subst = zip ext $ repeat $ E.ExpSubst $ E.sizeFromInteger 0 mempty
+      let subst = map (,E.ExpSubst (E.sizeFromInteger 0 mempty)) ext
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
     (FunctionName qfname, args) -> do

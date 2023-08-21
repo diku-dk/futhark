@@ -121,7 +121,7 @@ mkCoalsTab prog =
 
 -- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
@@ -184,7 +184,7 @@ shortCircuitSeqMem _ _ _ _ _ = pure
 
 -- | Short-circuit handler for SegOp.
 shortCircuitSegOp ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   (lvl -> Bool) ->
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
@@ -347,7 +347,7 @@ bodyToKernelBody (Body dec stms res) =
 -- 4. Mark active coalescings as finished, since a 'SegOp' is an array creation
 -- point.
 shortCircuitSegOpHelper ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   -- | The number of returns for which we should drop the last seg space
   Int ->
   -- | Whether we should look at a segop with this lvl.
@@ -596,7 +596,7 @@ fullSlice shp (Slice slc) =
   Slice $ slc ++ map (\d -> DimSlice 0 d 1) (drop (length slc) shp)
 
 fixPointCoalesce ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   [Param FParamMem] ->
   Body (Aliases rep) ->
@@ -659,7 +659,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
 
 -- | Perform short-circuiting on 'Stms'.
 mkCoalsTabStms ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   Stms (Aliases rep) ->
   TopdownEnv rep ->
@@ -702,7 +702,7 @@ mkCoalsTabStms lutab stms0 = traverseStms stms0
 --                          then the checks should be extended to the actual
 --                          array-creation points.
 mkCoalsTabStm ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   Stm (Aliases rep) ->
   TopdownEnv rep ->
@@ -1266,7 +1266,7 @@ ixfunToAccessSummary (IxFun.IxFun lmad _) = Set $ S.singleton lmad
 -- any variables used in the index function of the target array are available at
 -- the definition site of b.
 filterSafetyCond2and5 ::
-  HasMemBlock (Aliases rep) =>
+  (HasMemBlock (Aliases rep)) =>
   CoalsTab ->
   InhibitTab ->
   ScalarTab ->
@@ -1322,7 +1322,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
 -- |   Pattern matches a potentially coalesced statement and
 --     records a new association in @activeCoals@
 mkCoalsHelper3PatternMatch ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   Stm (Aliases rep) ->
   LUTabFun ->
   TopdownEnv rep ->
@@ -1455,7 +1455,7 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 -- The result of the 'SegMap' is treated as the destination, while the candidate
 -- array from inside the body is treated as the source.
 genSSPointInfoSegOp ::
-  Coalesceable rep inner => GenSSPoint rep (SegOp lvl (Aliases rep))
+  (Coalesceable rep inner) => GenSSPoint rep (SegOp lvl (Aliases rep))
 genSSPointInfoSegOp
   lutab
   td_env
@@ -1516,7 +1516,7 @@ genSSPointInfoMCMem = genSSPointInfoMemOp f
     f _ _ _ _ _ _ = Nothing
 
 genCoalStmtInfo ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   TopdownEnv rep ->
   ScopeTab rep ->
@@ -1690,7 +1690,7 @@ mkSubsTab pat res =
     mki64subst _ = Nothing
 
 computeScalarTable ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   ScopeTab rep ->
   Stm (Aliases rep) ->
   ScalarTableM rep (M.Map VName (PrimExp VName))
@@ -1730,7 +1730,7 @@ computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
 computeScalarTableSegOp ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   ComputeScalarTable rep (GPU.SegOp lvl (Aliases rep))
 computeScalarTableSegOp scope_table segop = do
   concatMapM

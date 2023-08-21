@@ -96,7 +96,7 @@ newtype UncheckedImport = UncheckedImport
 type ReaderState = MVar (M.Map ImportName (Maybe (MVar UncheckedImport)))
 
 newState :: [ImportName] -> IO ReaderState
-newState known = newMVar $ M.fromList $ zip known $ repeat Nothing
+newState known = newMVar $ M.fromList $ map (,Nothing) known
 
 orderedImports ::
   [((ImportName, Loc), MVar UncheckedImport)] ->
@@ -364,7 +364,7 @@ lpFilePaths :: LoadedProg -> [FilePath]
 lpFilePaths = map lfPath . lpFiles
 
 unchangedImports ::
-  MonadIO m =>
+  (MonadIO m) =>
   VNameSource ->
   VFS ->
   [LoadedFile CheckedFile] ->
@@ -398,7 +398,7 @@ noLoadedProg =
 -- | Find out how many of the old imports can be used.  Here we are
 -- forced to be overly conservative, because our type checker
 -- enforces a linear ordering.
-usableLoadedProg :: MonadIO m => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
+usableLoadedProg :: (MonadIO m) => LoadedProg -> VFS -> [FilePath] -> m LoadedProg
 usableLoadedProg (LoadedProg roots imports src) vfs new_roots
   | sort roots == sort new_roots = do
       (imports', src') <- unchangedImports src vfs imports

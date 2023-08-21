@@ -61,7 +61,7 @@ determineSizeWitnesses t =
 mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
-      alsoRet = M.unionWith (&&) $ M.fromList $ zip (S.toList (fvVars (freeInType ret))) (repeat True)
+      alsoRet = M.unionWith (&&) $ M.fromList $ map (,True) (S.toList (fvVars (freeInType ret)))
    in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map toStruct ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
@@ -74,7 +74,7 @@ mustBeExplicitInType = snd . determineSizeWitnesses
 
 -- | Ensure that the dimensions of the RetType are unique by
 -- generating new names for them.  This is to avoid name capture.
-renameRetType :: MonadTypeChecker m => ResRetType -> m ResRetType
+renameRetType :: (MonadTypeChecker m) => ResRetType -> m ResRetType
 renameRetType (RetType dims st)
   | dims /= mempty = do
       dims' <- mapM newName dims
@@ -86,7 +86,7 @@ renameRetType (RetType dims st)
       pure $ RetType dims st
 
 evalTypeExp ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   TypeExp NoInfo Name ->
   m (TypeExp Info VName, [VName], ResRetType, Liftedness)
 evalTypeExp (TEVar name loc) = do
@@ -273,7 +273,7 @@ evalTypeExp ote@TEApply {} = do
     tloc = srclocOf ote
 
     rootAndArgs ::
-      MonadTypeChecker m =>
+      (MonadTypeChecker m) =>
       TypeExp NoInfo Name ->
       m (QualName Name, SrcLoc, [TypeArgExp NoInfo Name])
     rootAndArgs (TEVar qn loc) = pure (qn, loc, [])
@@ -323,7 +323,7 @@ evalTypeExp ote@TEApply {} = do
 -- * The elaborated type.
 -- * The liftedness of the type.
 checkTypeExp ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   TypeExp NoInfo Name ->
   m (TypeExp Info VName, [VName], ResRetType, Liftedness)
 checkTypeExp te = do
@@ -332,7 +332,7 @@ checkTypeExp te = do
 
 -- | Check for duplication of names inside a binding group.
 checkForDuplicateNames ::
-  MonadTypeChecker m => [UncheckedTypeParam] -> [UncheckedPat t] -> m ()
+  (MonadTypeChecker m) => [UncheckedTypeParam] -> [UncheckedPat t] -> m ()
 checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
   mapM_ checkTypeParam tps
   mapM_ checkPat pats
@@ -369,7 +369,7 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
 -- since it is likely an error, but it's easy to assign a semantics to
 -- it (normal name shadowing).
 checkForDuplicateNamesInType ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   TypeExp NoInfo Name ->
   m ()
 checkForDuplicateNamesInType = check mempty
@@ -413,7 +413,7 @@ checkForDuplicateNamesInType = check mempty
 -- invokes the continuation @m@ with the checked parameters, while
 -- extending the monadic name map with @ps@.
 checkTypeParams ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   [TypeParamBase Name] ->
   ([TypeParamBase VName] -> m a) ->
   m a
@@ -456,7 +456,7 @@ typeParamToArg (TypeParamType _ v _) =
 data Subst t = Subst [TypeParam] t | ExpSubst Exp
   deriving (Show)
 
-instance Pretty t => Pretty (Subst t) where
+instance (Pretty t) => Pretty (Subst t) where
   pretty (Subst [] t) = pretty t
   pretty (Subst tps t) = mconcat (map pretty tps) <> colon <+> pretty t
   pretty (ExpSubst e) = pretty e
@@ -514,7 +514,7 @@ instance Substitutable Exp where
             mapOnResRetType = pure . applySubst f
           }
 
-instance Substitutable d => Substitutable (Shape d) where
+instance (Substitutable d) => Substitutable (Shape d) where
   applySubst f = fmap $ applySubst f
 
 instance Substitutable (Pat StructType) where
@@ -542,7 +542,7 @@ instance Substitutable (Pat ParamType) where
           }
 
 applyType ::
-  Monoid als =>
+  (Monoid als) =>
   [TypeParam] ->
   TypeBase Size als ->
   [StructTypeArg] ->
@@ -559,7 +559,7 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
 substTypesRet ::
-  Monoid as =>
+  (Monoid as) =>
   (VName -> Maybe (Subst (RetTypeBase Size as))) ->
   TypeBase Size as ->
   RetTypeBase Size as
@@ -590,7 +590,7 @@ substTypesRet lookupSubst ot =
 
     onType ::
       forall as.
-      Monoid as =>
+      (Monoid as) =>
       TypeBase Size as ->
       State [VName] (TypeBase Size as)
 
@@ -637,7 +637,7 @@ substTypesRet lookupSubst ot =
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
-  Monoid as =>
+  (Monoid as) =>
   (VName -> Maybe (Subst (RetTypeBase Size as))) ->
   TypeBase Size as ->
   TypeBase Size as

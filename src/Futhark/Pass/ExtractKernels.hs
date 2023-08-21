@@ -432,7 +432,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
 
       if not (lambdaContainsParallelism map_lam)
         || "sequential_inner"
-        `inAttrs` stmAuxAttrs aux
+          `inAttrs` stmAuxAttrs aux
         then paralleliseOuter
         else do
           ((outer_suff, outer_suff_key), suff_stms) <-
@@ -634,7 +634,7 @@ mayExploitOuter attrs =
     AttrComp "incremental_flattening" ["no_outer"]
       `inAttrs` attrs
       || AttrComp "incremental_flattening" ["only_inner"]
-      `inAttrs` attrs
+        `inAttrs` attrs
 
 mayExploitIntra :: Attrs -> Bool
 mayExploitIntra attrs =
@@ -642,7 +642,7 @@ mayExploitIntra attrs =
     AttrComp "incremental_flattening" ["no_intra"]
       `inAttrs` attrs
       || AttrComp "incremental_flattening" ["only_inner"]
-      `inAttrs` attrs
+        `inAttrs` attrs
 
 -- The minimum amount of inner parallelism we require (by default) in
 -- intra-group versions.  Less than this is usually pointless on a GPU

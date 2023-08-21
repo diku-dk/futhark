@@ -24,7 +24,7 @@ xParams scan =
 yParams scan =
   drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 
-alignTo :: IntegralExp a => a -> a -> a
+alignTo :: (IntegralExp a) => a -> a -> a
 alignTo x a = (x `divUp` a) * a
 
 createLocalArrays ::
@@ -41,7 +41,7 @@ createLocalArrays (Count groupSize) m types = do
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
 
-      warpSize :: Num a => a
+      warpSize :: (Num a) => a
       warpSize = 32
       maxWarpExchangeSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
@@ -231,7 +231,7 @@ compileSegScan pat lvl space scanOp kbody = do
       primByteSize' = max 4 . primByteSize
       sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys)
-      m :: Num a => a
+      m :: (Num a) => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       -- TODO: Make these constants dynamic by querying device
       k_reg = 64
@@ -255,7 +255,7 @@ compileSegScan pat lvl space scanOp kbody = do
       not_segmented_e = if segmented then false else true
       segment_size = last dims'
 
-      statusX, statusA, statusP :: Num a => a
+      statusX, statusA, statusP :: (Num a) => a
       statusX = 0
       statusA = 1
       statusP = 2

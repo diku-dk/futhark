@@ -71,7 +71,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
            ]
 
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   HostEnv ->
   Prog GPUMem ->
   m (Warnings, Imp.Program)
@@ -85,7 +85,7 @@ compileProg env =
 compileProgOpenCL,
   compileProgCUDA,
   compileProgHIP ::
-    MonadFreshNames m => Prog GPUMem -> m (Warnings, Imp.Program)
+    (MonadFreshNames m) => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
 compileProgHIP = compileProg $ HostEnv cudaAtomics HIP mempty

@@ -117,7 +117,7 @@ bindingLambdaParams params ts m = do
 type Params t = [I.Param t]
 
 processFlatPat ::
-  Show t =>
+  (Show t) =>
   [(E.Ident ParamType, [E.AttrInfo VName])] ->
   [t] ->
   InternaliseM ([Params t], VarSubsts)
@@ -150,7 +150,7 @@ processFlatPat x y = processFlatPat' [] x y
         n -> replicateM n $ newVName $ baseString name
 
 bindingFlatPat ::
-  Show t =>
+  (Show t) =>
   [(E.Ident E.ParamType, [E.AttrInfo VName])] ->
   [t] ->
   ([Params t] -> InternaliseM a) ->
@@ -161,7 +161,7 @@ bindingFlatPat idents ts m = do
     m ps
 
 -- | Flatten a pattern.  Returns a list of identifiers.
-flattenPat :: MonadFreshNames m => E.Pat (TypeBase Size u) -> m [(E.Ident (TypeBase Size u), [E.AttrInfo VName])]
+flattenPat :: (MonadFreshNames m) => E.Pat (TypeBase Size u) -> m [(E.Ident (TypeBase Size u), [E.AttrInfo VName])]
 flattenPat = flattenPat'
   where
     flattenPat' (E.PatParens p _) =

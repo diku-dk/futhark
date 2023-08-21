@@ -97,7 +97,7 @@ instance MonadBuilder InternaliseM where
   collectStms (InternaliseM m) = InternaliseM $ collectStms m
 
 runInternaliseM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Bool ->
   InternaliseM () ->
   m (OpaqueTypes, Stms SOACS, [FunDef SOACS])

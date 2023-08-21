@@ -77,7 +77,7 @@ import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Syntax.Core
 
 -- | Remove shape information from a type.
-rankShaped :: ArrayShape shape => TypeBase shape u -> TypeBase Rank u
+rankShaped :: (ArrayShape shape) => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Prim pt) = Prim pt
 rankShaped (Acc acc ispace ts u) = Acc acc ispace ts u
@@ -86,18 +86,18 @@ rankShaped (Mem space) = Mem space
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: ArrayShape shape => TypeBase shape u -> Int
+arrayRank :: (ArrayShape shape) => TypeBase shape u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is the
 -- 'mempty'.
-arrayShape :: ArrayShape shape => TypeBase shape u -> shape
+arrayShape :: (ArrayShape shape) => TypeBase shape u -> shape
 arrayShape (Array _ ds _) = ds
 arrayShape _ = mempty
 
 -- | Modify the shape of an array - for non-arrays, this does nothing.
 modifyArrayShape ::
-  ArrayShape newshape =>
+  (ArrayShape newshape) =>
   (oldshape -> newshape) ->
   TypeBase oldshape u ->
   TypeBase newshape u
@@ -113,7 +113,7 @@ modifyArrayShape _ (Mem space) = Mem space
 -- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
 setArrayShape ::
-  ArrayShape newshape =>
+  (ArrayShape newshape) =>
   TypeBase oldshape u ->
   newshape ->
   TypeBase newshape u
@@ -169,7 +169,7 @@ staticShapes1 (Mem space) =
 -- be returned, although if it is an array, with the uniqueness
 -- changed to @u@.
 arrayOf ::
-  ArrayShape shape =>
+  (ArrayShape shape) =>
   TypeBase shape u_unused ->
   shape ->
   u ->
@@ -188,7 +188,7 @@ arrayOf Mem {} _ _ =
 -- size is the given dimension.  This is just a convenient wrapper
 -- around 'arrayOf'.
 arrayOfRow ::
-  ArrayShape (ShapeBase d) =>
+  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) NoUniqueness ->
   d ->
   TypeBase (ShapeBase d) NoUniqueness
@@ -208,7 +208,7 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize ::
-  ArrayShape (ShapeBase d) =>
+  (ArrayShape (ShapeBase d)) =>
   TypeBase (ShapeBase d) u ->
   d ->
   TypeBase (ShapeBase d) u
@@ -217,7 +217,7 @@ setOuterSize = setDimSize 0
 -- | Replace the size of the given dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setDimSize ::
-  ArrayShape (ShapeBase d) =>
+  (ArrayShape (ShapeBase d)) =>
   Int ->
   TypeBase (ShapeBase d) u ->
   d ->
@@ -322,7 +322,7 @@ rearrangeType perm t =
 
 -- | Transform any t'SubExp's in the type.
 mapOnExtType ::
-  Monad m =>
+  (Monad m) =>
   (SubExp -> m SubExp) ->
   TypeBase ExtShape u ->
   m (TypeBase ExtShape u)
@@ -345,7 +345,7 @@ mapOnExtType f (Array t shape u) =
 
 -- | Transform any t'SubExp's in the type.
 mapOnType ::
-  Monad m =>
+  (Monad m) =>
   (SubExp -> m SubExp) ->
   TypeBase Shape u ->
   m (TypeBase Shape u)
@@ -385,9 +385,9 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   u2
     <= u1
     && t1
-    == t2
+      == t2
     && shape1
-    `subShapeOf` shape2
+      `subShapeOf` shape2
 subtypeOf t1 t2 = t1 == t2
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
@@ -515,7 +515,7 @@ shapeExtMapping = dimMapping arrayExtDims arrayDims match mappend
     match (Ext i) dim = M.singleton i dim
 
 dimMapping ::
-  Monoid res =>
+  (Monoid res) =>
   (t1 -> [dim1]) ->
   (t2 -> [dim2]) ->
   (dim1 -> dim2 -> res) ->
@@ -563,13 +563,13 @@ instance Typed DeclType where
 instance Typed Ident where
   typeOf = identType
 
-instance Typed dec => Typed (Param dec) where
+instance (Typed dec) => Typed (Param dec) where
   typeOf = typeOf . paramDec
 
-instance Typed dec => Typed (PatElem dec) where
+instance (Typed dec) => Typed (PatElem dec) where
   typeOf = typeOf . patElemDec
 
-instance Typed b => Typed (a, b) where
+instance (Typed b) => Typed (a, b) where
   typeOf = typeOf . snd
 
 -- | Typeclass for things that contain 'DeclType's.
@@ -579,11 +579,11 @@ class DeclTyped t where
 instance DeclTyped DeclType where
   declTypeOf = id
 
-instance DeclTyped dec => DeclTyped (Param dec) where
+instance (DeclTyped dec) => DeclTyped (Param dec) where
   declTypeOf = declTypeOf . paramDec
 
 -- | Typeclass for things that contain 'ExtType's.
-class FixExt t => ExtTyped t where
+class (FixExt t) => ExtTyped t where
   extTypeOf :: t -> ExtType
 
 instance ExtTyped ExtType where
@@ -593,23 +593,23 @@ instance ExtTyped DeclExtType where
   extTypeOf = fromDecl . declExtTypeOf
 
 -- | Typeclass for things that contain 'DeclExtType's.
-class FixExt t => DeclExtTyped t where
+class (FixExt t) => DeclExtTyped t where
   declExtTypeOf :: t -> DeclExtType
 
 instance DeclExtTyped DeclExtType where
   declExtTypeOf = id
 
 -- | Typeclass for things whose type can be changed.
-class Typed a => SetType a where
+class (Typed a) => SetType a where
   setType :: a -> Type -> a
 
 instance SetType Type where
   setType _ t = t
 
-instance SetType b => SetType (a, b) where
+instance (SetType b) => SetType (a, b) where
   setType (a, b) t = (a, setType b t)
 
-instance SetType dec => SetType (PatElem dec) where
+instance (SetType dec) => SetType (PatElem dec) where
   setType (PatElem name dec) t =
     PatElem name $ setType dec t
 
@@ -623,10 +623,10 @@ class FixExt t where
 instance (FixExt shape, ArrayShape shape) => FixExt (TypeBase shape u) where
   fixExt i se = modifyArrayShape $ fixExt i se
 
-instance FixExt d => FixExt (ShapeBase d) where
+instance (FixExt d) => FixExt (ShapeBase d) where
   fixExt i se = fmap $ fixExt i se
 
-instance FixExt a => FixExt [a] where
+instance (FixExt a) => FixExt [a] where
   fixExt i se = fmap $ fixExt i se
 
 instance FixExt ExtSize where

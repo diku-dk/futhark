@@ -359,7 +359,7 @@ progNotFound s = s ++ ": command not found"
 
 -- | Compile and produce reference datasets.
 prepareBenchmarkProgram ::
-  MonadIO m =>
+  (MonadIO m) =>
   Maybe Int ->
   CompileOptions ->
   FilePath ->

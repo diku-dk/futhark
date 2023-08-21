@@ -153,7 +153,7 @@ runPipeline p cfg prog = do
 
 -- | Construct a pipeline from a single compiler pass.
 onePass ::
-  Checkable torep =>
+  (Checkable torep) =>
   Pass fromrep torep ->
   Pipeline fromrep torep
 onePass pass = Pipeline perform
@@ -193,13 +193,13 @@ condPipeline cond (Pipeline f) =
 
 -- | Create a pipeline from a list of passes.
 passes ::
-  Checkable rep =>
+  (Checkable rep) =>
   [Pass rep rep] ->
   Pipeline rep rep
 passes = foldl (>>>) id . map onePass
 
 validationError ::
-  PrettyRep rep =>
+  (PrettyRep rep) =>
   Pass fromrep torep ->
   Prog rep ->
   String ->

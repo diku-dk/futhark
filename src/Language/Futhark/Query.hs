@@ -198,7 +198,7 @@ allBindings imports = M.mapMaybe forward defs
 
 data RawAtPos = RawAtName (QualName VName) Loc
 
-contains :: Located a => a -> Pos -> Bool
+contains :: (Located a) => a -> Pos -> Bool
 contains a pos =
   case locOf a of
     Loc start end -> pos >= start && pos <= end

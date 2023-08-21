@@ -32,7 +32,7 @@ compileSegRed pat space reds kbody nsubtasks =
         let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
-      red_cont $ segBinOpChunks reds $ zip (map kernelResultSubExp red_res) $ repeat []
+      red_cont $ segBinOpChunks reds $ map ((,[]) . kernelResultSubExp) red_res
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::

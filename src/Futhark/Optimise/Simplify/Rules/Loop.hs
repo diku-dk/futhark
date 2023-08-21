@@ -24,7 +24,7 @@ import Futhark.Transform.Rename
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: BuilderOps rep => BottomUpRuleLoop rep
+removeRedundantMergeVariables :: (BuilderOps rep) => BottomUpRuleLoop rep
 removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
   | not $ all (usedAfterLoop . fst) merge =
       let necessaryForReturned =
@@ -85,7 +85,7 @@ removeRedundantMergeVariables _ _ _ _ =
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: BuilderOps rep => TopDownRuleLoop rep
+hoistLoopInvariantMergeVariables :: (BuilderOps rep) => TopDownRuleLoop rep
 hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
@@ -172,7 +172,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
       (name `notNameIn` namesOfMergeParams)
         || (name `nameIn` namesOfInvariant)
 
-simplifyClosedFormLoop :: BuilderOps rep => TopDownRuleLoop rep
+simplifyClosedFormLoop :: (BuilderOps rep) => TopDownRuleLoop rep
 simplifyClosedFormLoop _ pat _ (val, ForLoop i it bound [], body) =
   Simplify $ loopClosedForm pat val (oneName i) it bound body
 simplifyClosedFormLoop _ _ _ _ = Skip
@@ -244,7 +244,7 @@ simplifyLoopVariables vtable pat aux (merge, form@(ForLoop i it num_iters loop_v
 simplifyLoopVariables _ _ _ _ = Skip
 
 unroll ::
-  BuilderOps rep =>
+  (BuilderOps rep) =>
   Integer ->
   [(FParam rep, SubExpRes)] ->
   (VName, IntType, Integer) ->
@@ -275,7 +275,7 @@ unroll n merge (iv, it, i) loop_vars body
       let merge' = zip (map fst merge) $ bodyResult iter_body'
       unroll n merge' (iv, it, i + 1) loop_vars body
 
-simplifyKnownIterationLoop :: BuilderOps rep => TopDownRuleLoop rep
+simplifyKnownIterationLoop :: (BuilderOps rep) => TopDownRuleLoop rep
 simplifyKnownIterationLoop _ pat aux (merge, ForLoop i it (Constant iters) loop_vars, body)
   | IntValue n <- iters,
     zeroIshInt n || oneIshInt n || "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
@@ -293,7 +293,7 @@ topDownRules =
     RuleLoop simplifyLoopVariables
   ]
 
-bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
+bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
 bottomUpRules =
   [ RuleLoop removeRedundantMergeVariables
   ]

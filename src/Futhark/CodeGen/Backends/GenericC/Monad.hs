@@ -370,7 +370,7 @@ fatMemory :: Space -> CompilerM op s Bool
 fatMemory ScalarSpace {} = pure False
 fatMemory _ = asks $ opsFatMemory . envOperations
 
-cacheMem :: C.ToExp a => a -> CompilerM op s (Maybe VName)
+cacheMem :: (C.ToExp a) => a -> CompilerM op s (Maybe VName)
 cacheMem a = asks $ M.lookup (C.toExp a noLoc) . envCachedMem
 
 -- | Construct a publicly visible definition using the specified name
@@ -487,7 +487,7 @@ rawMem v = rawMem' <$> fat <*> pure v
   where
     fat = asks ((&&) . opsFatMemory . envOperations) <*> (isNothing <$> cacheMem v)
 
-rawMem' :: C.ToExp a => Bool -> a -> C.Exp
+rawMem' :: (C.ToExp a) => Bool -> a -> C.Exp
 rawMem' True e = [C.cexp|$exp:e.mem|]
 rawMem' False e = [C.cexp|$exp:e|]
 
@@ -537,7 +537,7 @@ declMem name space = do
         ty <- memToCType name space
         decl [C.cdecl|$ty:ty $id:name;|]
 
-resetMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+resetMem :: (C.ToExp a) => a -> Space -> CompilerM op s ()
 resetMem mem space = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem
@@ -571,7 +571,7 @@ setMem dest src space = do
                   }|]
       _ -> stm [C.cstm|$exp:dest = $exp:src;|]
 
-unRefMem :: C.ToExp a => a -> Space -> CompilerM op s ()
+unRefMem :: (C.ToExp a) => a -> Space -> CompilerM op s ()
 unRefMem mem space = do
   refcount <- fatMemory space
   cached <- isJust <$> cacheMem mem

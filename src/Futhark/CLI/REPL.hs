@@ -358,7 +358,7 @@ runInterpreter m = runF m (pure . Right) intOp
 
       c
 
-runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err

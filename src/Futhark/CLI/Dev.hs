@@ -241,7 +241,7 @@ mcMemProg name rep =
     "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
 
 typedPassOption ::
-  Checkable torep =>
+  (Checkable torep) =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
   (Prog torep -> UntypedPassState) ->
   Pass fromrep torep ->

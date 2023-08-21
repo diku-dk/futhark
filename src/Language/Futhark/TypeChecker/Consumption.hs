@@ -156,7 +156,7 @@ noConsumable = local $ \env -> env {envVtable = M.map f $ envVtable env}
   where
     f = Nonconsumable . entryAliases
 
-addError :: Located loc => loc -> Notes -> Doc () -> CheckM ()
+addError :: (Located loc) => loc -> Notes -> Doc () -> CheckM ()
 addError loc notes e = modify $ \s ->
   s {stateErrors = DL.snoc (stateErrors s) (TypeError (locOf loc) notes e)}
 
@@ -410,7 +410,7 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
     delve t =
-      M.fromList $ zip (map aliasVar $ S.toList (aliases t)) $ repeat (1 :: Int)
+      M.fromList $ map ((,1 :: Int) . aliasVar) $ S.toList $ aliases t
 
 consumingParams :: [Pat ParamType] -> Names
 consumingParams =
@@ -454,7 +454,7 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       | otherwise =
           t `setUniqueness` Nonunique
 
-checkSubExps :: ASTMappable e => e -> CheckM e
+checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
 
 noAliases :: Exp -> CheckM (Exp, TypeAliases)
@@ -503,7 +503,8 @@ checkArg prev p_t e = do
             </> "which is also aliased by other argument"
             </> indent 2 (pretty prev_arg)
             </> "at"
-            <+> pretty (locTextRel (locOf e) (locOf prev_arg)) <> "."
+            <+> pretty (locTextRel (locOf e) (locOf prev_arg))
+            <> "."
   pure (e', e_als)
   where
     prevAlias v =
@@ -665,7 +666,8 @@ checkLoop loop_loc (param, arg, form, body) = do
     v' <- describeVar v
     addError loop_loc mempty $
       "Loop body uses"
-        <+> v' <> " (or an alias),"
+        <+> v'
+        <> " (or an alias),"
         </> "but this is consumed by the initial loop argument."
 
   v <- VName "internal_loop_result" <$> incCounter
@@ -680,7 +682,7 @@ checkLoop loop_loc (param, arg, form, body) = do
     )
 
 checkFuncall ::
-  Foldable f =>
+  (Foldable f) =>
   SrcLoc ->
   Maybe (QualName VName) ->
   TypeAliases ->

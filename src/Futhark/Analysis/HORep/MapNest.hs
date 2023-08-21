@@ -164,7 +164,7 @@ toSOAC (MapNest w lam (Nesting npnames nres nrettype nw : ns) inps) = do
   pure $ SOAC.Screma w (Futhark.mapSOAC outerlam) inps
 
 fixInputs ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   SubExp ->
   [(VName, SOAC.Input)] ->
   [(VName, SOAC.Input)] ->

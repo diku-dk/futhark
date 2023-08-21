@@ -16,7 +16,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-eReverse :: MonadBuilder m => VName -> m VName
+eReverse :: (MonadBuilder m) => VName -> m VName
 eReverse arr = do
   arr_t <- lookupType arr
   let w = arraySize 0 arr_t

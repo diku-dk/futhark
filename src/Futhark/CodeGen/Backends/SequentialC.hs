@@ -20,7 +20,7 @@ import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to sequential C.
-compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: (MonadFreshNames m) => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version =
   traverse
     ( GC.compileProg

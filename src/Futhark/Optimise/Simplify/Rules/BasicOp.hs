@@ -44,7 +44,7 @@ toConcatArg vtable v =
       (ArgVar v, mempty)
 
 fromConcatArg ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   Type ->
   (ConcatArg, Certs) ->
   m VName
@@ -75,7 +75,7 @@ fuseConcatArg ((ArgReplicate x_ws x_se, x_cs) : xs) (ArgReplicate y_ws y_se, y_c
 fuseConcatArg xs y =
   y : xs
 
-simplifyConcat :: BuilderOps rep => BottomUpRuleBasicOp rep
+simplifyConcat :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 -- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
 simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
   | Just r <- arrayRank <$> ST.lookupType x vtable,
@@ -144,7 +144,7 @@ simplifyConcat (vtable, _) pat aux (Concat 0 (x :| xs) outer_w)
     forSingleArray ys = ys
 simplifyConcat _ _ _ _ = Skip
 
-ruleBasicOp :: BuilderOps rep => TopDownRuleBasicOp rep
+ruleBasicOp :: (BuilderOps rep) => TopDownRuleBasicOp rep
 ruleBasicOp vtable pat aux op
   | Just (op', cs) <- applySimpleRules defOf seType op =
       Simplify $ certifying (cs <> stmAuxCerts aux) $ letBind pat $ BasicOp op'
@@ -370,12 +370,12 @@ ruleBasicOp vtable pat aux (Manifest perm v1)
 ruleBasicOp _ _ _ _ =
   Skip
 
-topDownRules :: BuilderOps rep => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleBasicOp ruleBasicOp
   ]
 
-bottomUpRules :: BuilderOps rep => [BottomUpRule rep]
+bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
 bottomUpRules =
   [ RuleBasicOp simplifyConcat
   ]

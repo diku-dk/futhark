@@ -35,7 +35,7 @@ import Futhark.MonadFreshNames
 --   file by itself).
 --
 -- * Options that should be passed to @emcc@.
-compileProg :: MonadFreshNames m => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
+compileProg :: (MonadFreshNames m) => T.Text -> Prog SeqMem -> m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))
 compileProg version prog = do
   (ws, prog') <- ImpGen.compileProg prog
 

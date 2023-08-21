@@ -142,7 +142,7 @@ compileThreadResult _ _ TileReturns {} =
 compileThreadResult _ _ RegTileReturns {} =
   compilerBugS "compileThreadResult: RegTileReturns unhandled."
 
-freeParams :: FreeIn a => a -> MulticoreGen [Imp.Param]
+freeParams :: (FreeIn a) => a -> MulticoreGen [Imp.Param]
 freeParams code = do
   let free = namesToList $ freeIn code
   ts <- mapM lookupType free

@@ -454,7 +454,7 @@ doPrelude tiling privstms prestms prestms_live =
       addStms prestms
       pure $ varsRes prestms_live
 
-liveSet :: FreeIn a => Stms GPU -> a -> Names
+liveSet :: (FreeIn a) => Stms GPU -> a -> Names
 liveSet stms after =
   namesFromList (concatMap (patNames . stmPat) stms)
     `namesIntersection` freeIn after
@@ -508,7 +508,7 @@ inputsToTiles _ _ = []
 -- The atual tile size may be smaller for the last tile, so we have to
 -- be careful now.
 sliceUntiled ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   VName ->
   SubExp ->
   SubExp ->
@@ -1049,7 +1049,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size kind privs
           TileFull ->
             mapM readTileElem arrs_and_perms
 
-findTileSize :: HasScope rep m => [InputTile] -> m SubExp
+findTileSize :: (HasScope rep m) => [InputTile] -> m SubExp
 findTileSize tiles =
   case mapMaybe isTiled tiles of
     v : _ -> arraySize 0 <$> lookupType v

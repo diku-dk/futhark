@@ -103,7 +103,7 @@ transformStmRecursively (Let pat aux e) =
 
 -- Produce scratch "arrays" for the Map and Scan outputs of Screma.
 -- "Arrays" is in quotes because some of those may be accumulators.
-resultArray :: Transformer m => [VName] -> [Type] -> m [VName]
+resultArray :: (Transformer m) => [VName] -> [Type] -> m [VName]
 resultArray arrs ts = do
   arrs_ts <- mapM lookupType arrs
   let oneArray t@Acc {}
@@ -117,7 +117,7 @@ resultArray arrs ts = do
 -- is untouched, and may or may not contain further 'SOAC's depending
 -- on the given rep.
 transformSOAC ::
-  Transformer m =>
+  (Transformer m) =>
   Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
@@ -385,7 +385,7 @@ transformLambda (Lambda params body rettype) = do
         transformBody body
   pure $ Lambda params body' rettype
 
-letwith :: Transformer m => [VName] -> SubExp -> [SubExp] -> m [VName]
+letwith :: (Transformer m) => [VName] -> SubExp -> [SubExp] -> m [VName]
 letwith ks i vs = do
   let update k v = do
         k_t <- lookupType k
@@ -397,7 +397,7 @@ letwith ks i vs = do
   zipWithM update ks vs
 
 bindLambda ::
-  Transformer m =>
+  (Transformer m) =>
   AST.Lambda (Rep m) ->
   [AST.Exp (Rep m)] ->
   m Result
@@ -409,7 +409,7 @@ bindLambda (Lambda params body _) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
-loopMerge vars = loopMerge' $ zip vars $ repeat Unique
+loopMerge vars = loopMerge' $ map (,Unique) vars
 
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =

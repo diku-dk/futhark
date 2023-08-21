@@ -157,7 +157,8 @@ instance Pretty Checking where
       <+> align (pretty actual)
   pretty (CheckingRecordUpdate fs expected actual) =
     "Type mismatch when updating record field"
-      <+> dquotes fs' <> "."
+      <+> dquotes fs'
+      <> "."
       </> "Existing:"
       <+> align (pretty expected)
       </> "New:     "
@@ -166,12 +167,14 @@ instance Pretty Checking where
       fs' = mconcat $ punctuate "." $ map pretty fs
   pretty (CheckingRequired [expected] actual) =
     "Expression must must have type"
-      <+> pretty expected <> "."
+      <+> pretty expected
+      <> "."
       </> "Actual type:"
       <+> align (pretty actual)
   pretty (CheckingRequired expected actual) =
     "Type of expression must must be one of "
-      <+> expected' <> "."
+      <+> expected'
+      <> "."
       </> "Actual type:"
       <+> align (pretty actual)
     where
@@ -362,7 +365,7 @@ instantiateTypeScheme qn loc tparams t = do
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
 instantiateTypeParam ::
-  Monoid as =>
+  (Monoid as) =>
   QualName VName ->
   SrcLoc ->
   TypeParam ->
@@ -585,7 +588,7 @@ allDimsFreshInType usage r desc t =
       pure $ sizeFromName (qualName v) $ srclocOf usage
 
 -- | Replace all type variables with their concrete types.
-updateTypes :: ASTMappable e => e -> TermTypeM e
+updateTypes :: (ASTMappable e) => e -> TermTypeM e
 updateTypes = astMap tv
   where
     tv =

@@ -47,7 +47,7 @@ reshapeInner newshape n oldshape =
 -- have the same length as @from_dims@, and @is'@ will have the same
 -- length as @to_dims@.
 reshapeIndex ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   [num] ->
   [num] ->
   [num] ->
@@ -59,14 +59,14 @@ reshapeIndex to_dims from_dims is =
 -- with dimension @dims@ given the flat index @i@.  The resulting list
 -- will have the same size as @dims@.
 unflattenIndex ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   [num] ->
   num ->
   [num]
 unflattenIndex = unflattenIndexFromSlices . drop 1 . sliceSizes
 
 unflattenIndexFromSlices ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   [num] ->
   num ->
   [num]
@@ -78,7 +78,7 @@ unflattenIndexFromSlices (size : slices) i =
 -- array with dimensions @dims@.  The length of @dims@ and @is@ must
 -- be the same.
 flattenIndex ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   [num] ->
   [num] ->
   num
@@ -92,7 +92,7 @@ flattenIndex dims is =
 -- slice.  The first element of this list will be the product of
 -- @dims@, and the last element will be 1.
 sliceSizes ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   [num] ->
   [num]
 sliceSizes [] = [1]

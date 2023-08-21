@@ -21,7 +21,7 @@ import Futhark.Util (nubOrd, traverseFold)
 -- | A convenience function to bring the components of a for-loop into
 -- scope and throw an error if the passed 'Exp' is not a for-loop.
 bindForLoop ::
-  PrettyRep rep =>
+  (PrettyRep rep) =>
   Exp rep ->
   ( [(Param (FParamInfo rep), SubExp)] ->
     LoopForm rep ->
@@ -62,7 +62,7 @@ isWhileLoop _ = False
 
 -- | Transforms a 'ForLoop' into a 'ForLoop' with an empty list of
 -- loop variables.
-removeLoopVars :: MonadBuilder m => Exp (Rep m) -> m (Exp (Rep m))
+removeLoopVars :: (MonadBuilder m) => Exp (Rep m) -> m (Exp (Rep m))
 removeLoopVars loop =
   bindForLoop loop $ \val_pats form i _it _bound loop_vars body -> do
     let indexify (x_param, xs) = do

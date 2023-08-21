@@ -58,7 +58,7 @@ compileExp :: Exp -> CompilerM op s C.Exp
 compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
-compilePrimExp :: Monad m => (v -> m C.Exp) -> PrimExp v -> m C.Exp
+compilePrimExp :: (Monad m) => (v -> m C.Exp) -> PrimExp v -> m C.Exp
 compilePrimExp _ (ValueExp val) =
   pure $ C.toExp val mempty
 compilePrimExp f (LeafExp v _) =

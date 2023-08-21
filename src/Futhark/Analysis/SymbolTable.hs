@@ -93,7 +93,7 @@ instance Monoid (SymbolTable rep) where
 empty :: SymbolTable rep
 empty = SymbolTable 0 M.empty mempty False
 
-fromScope :: ASTRep rep => Scope rep -> SymbolTable rep
+fromScope :: (ASTRep rep) => Scope rep -> SymbolTable rep
 fromScope = M.foldlWithKey' insertFreeVar' empty
   where
     insertFreeVar' m k dec = insertFreeVar k dec m
@@ -182,7 +182,7 @@ data FreeVarEntry rep = FreeVarEntry
     freeVarIndex :: VName -> IndexArray
   }
 
-instance ASTRep rep => Typed (Entry rep) where
+instance (ASTRep rep) => Typed (Entry rep) where
   typeOf = typeOf . entryInfo
 
 entryInfo :: Entry rep -> NameInfo rep
@@ -239,10 +239,10 @@ lookupBasicOp name vtable = case lookupExp name vtable of
   Just (BasicOp e, cs) -> Just (e, cs)
   _ -> Nothing
 
-lookupType :: ASTRep rep => VName -> SymbolTable rep -> Maybe Type
+lookupType :: (ASTRep rep) => VName -> SymbolTable rep -> Maybe Type
 lookupType name vtable = typeOf <$> lookup name vtable
 
-lookupSubExpType :: ASTRep rep => SubExp -> SymbolTable rep -> Maybe Type
+lookupSubExpType :: (ASTRep rep) => SubExp -> SymbolTable rep -> Maybe Type
 lookupSubExpType (Var v) = lookupType v
 lookupSubExpType (Constant v) = const $ Just $ Prim $ primValueType v
 
@@ -288,7 +288,7 @@ subExpAvailable (Var name) = available name
 subExpAvailable Constant {} = const True
 
 index ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   VName ->
   [SubExp] ->
   SymbolTable rep ->
@@ -405,11 +405,11 @@ bindingEntries stm@(Let pat _ _) vtable = do
   pat_elem <- patElems pat
   pure $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
 
-adjustSeveral :: Ord k => (v -> v) -> [k] -> M.Map k v -> M.Map k v
+adjustSeveral :: (Ord k) => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
 
 insertEntry ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   VName ->
   EntryType rep ->
   SymbolTable rep ->
@@ -433,7 +433,7 @@ insertEntry name entry vtable =
         }
 
 insertEntries ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   [(VName, EntryType rep)] ->
   SymbolTable rep ->
   SymbolTable rep
@@ -495,7 +495,7 @@ expandAliases names vtable = names <> aliasesOfAliases
       mconcat . map (`lookupAliases` vtable) . namesToList $ names
 
 insertFParam ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   AST.FParam rep ->
   SymbolTable rep ->
   SymbolTable rep
@@ -511,13 +511,13 @@ insertFParam fparam = insertEntry name entry
           }
 
 insertFParams ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   [AST.FParam rep] ->
   SymbolTable rep ->
   SymbolTable rep
 insertFParams fparams symtable = foldl' (flip insertFParam) symtable fparams
 
-insertLParam :: ASTRep rep => LParam rep -> SymbolTable rep -> SymbolTable rep
+insertLParam :: (ASTRep rep) => LParam rep -> SymbolTable rep -> SymbolTable rep
 insertLParam param = insertEntry name bind
   where
     bind =
@@ -537,7 +537,7 @@ insertLParam param = insertEntry name bind
 -- used to help some loop optimisations detect invariant loop
 -- parameters.
 insertLoopMerge ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   [(AST.FParam rep, SubExp, SubExpRes)] ->
   SymbolTable rep ->
   SymbolTable rep
@@ -552,7 +552,7 @@ insertLoopMerge = flip $ foldl' $ flip bind
               fparamMerge = Just (initial, res)
             }
 
-insertLoopVar :: ASTRep rep => VName -> IntType -> SubExp -> SymbolTable rep -> SymbolTable rep
+insertLoopVar :: (ASTRep rep) => VName -> IntType -> SubExp -> SymbolTable rep -> SymbolTable rep
 insertLoopVar name it bound = insertEntry name bind
   where
     bind =
@@ -562,7 +562,7 @@ insertLoopVar name it bound = insertEntry name bind
             loopVarBound = bound
           }
 
-insertFreeVar :: ASTRep rep => VName -> NameInfo rep -> SymbolTable rep -> SymbolTable rep
+insertFreeVar :: (ASTRep rep) => VName -> NameInfo rep -> SymbolTable rep -> SymbolTable rep
 insertFreeVar name dec = insertEntry name entry
   where
     entry =

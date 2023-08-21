@@ -266,7 +266,7 @@ instance Substitute Input where
       (substituteNames substs t)
 
 -- | Create a plain array variable input with no transformations.
-varInput :: HasScope t f => VName -> f Input
+varInput :: (HasScope t f) => VName -> f Input
 varInput v = withType <$> lookupType v
   where
     withType = Input (ArrayTransforms Seq.empty) v
@@ -301,7 +301,7 @@ addTransform tr (Input trs a t) =
 addInitialTransforms :: ArrayTransforms -> Input -> Input
 addInitialTransforms ts (Input ots a t) = Input (ts <> ots) a t
 
-applyTransform :: MonadBuilder m => ArrayTransform -> VName -> m VName
+applyTransform :: (MonadBuilder m) => ArrayTransform -> VName -> m VName
 applyTransform tr ia = do
   (cs, e) <- transformToExp tr ia
   certifying cs $ letExp s e
@@ -313,7 +313,7 @@ applyTransform tr ia = do
       ReshapeOuter {} -> "reshape_outer"
       ReshapeInner {} -> "reshape_inner"
 
-applyTransforms :: MonadBuilder m => ArrayTransforms -> VName -> m VName
+applyTransforms :: (MonadBuilder m) => ArrayTransforms -> VName -> m VName
 applyTransforms (ArrayTransforms ts) a = foldlM (flip applyTransform) a ts
 
 -- | Convert SOAC inputs to the corresponding expressions.
@@ -416,7 +416,7 @@ instance PP.Pretty Input where
       f e (Replicate cs ne) =
         "replicate" <> pretty cs <> PP.apply [pretty ne, e]
 
-instance PrettyRep rep => PP.Pretty (SOAC rep) where
+instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
   pretty (Screma w form arrs) = Futhark.ppScrema w arrs form
   pretty (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
   pretty (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
@@ -499,7 +499,7 @@ toExp ::
 toExp soac = Op <$> toSOAC soac
 
 -- | Convert a SOAC to a Futhark-level SOAC.
-toSOAC :: MonadBuilder m => SOAC (Rep m) -> m (Futhark.SOAC (Rep m))
+toSOAC :: (MonadBuilder m) => SOAC (Rep m) -> m (Futhark.SOAC (Rep m))
 toSOAC (Stream w lam nes inps) =
   Futhark.Stream w <$> inputsToSubExps inps <*> pure nes <*> pure lam
 toSOAC (Scatter w lam ivs dests) =

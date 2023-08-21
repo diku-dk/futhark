@@ -154,7 +154,7 @@ expAliases _ (WithAcc inputs lam) =
 expAliases _ (Op op) = opAliases op
 
 -- | The variables consumed in this statement.
-consumedInStm :: Aliased rep => Stm rep -> Names
+consumedInStm :: (Aliased rep) => Stm rep -> Names
 consumedInStm = consumedInExp . stmExp
 
 -- | The variables consumed in this expression.
@@ -193,11 +193,11 @@ consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
 -- | The variables consumed by this lambda.
-consumedByLambda :: Aliased rep => Lambda rep -> Names
+consumedByLambda :: (Aliased rep) => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element.
-patAliases :: AliasesOf dec => Pat dec -> [Names]
+patAliases :: (AliasesOf dec) => Pat dec -> [Names]
 patAliases = map aliasesOf . patElems
 
 -- | Something that contains alias information.
@@ -208,11 +208,11 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-instance AliasesOf dec => AliasesOf (PatElem dec) where
+instance (AliasesOf dec) => AliasesOf (PatElem dec) where
   aliasesOf = aliasesOf . patElemDec
 
 -- | Also includes the name itself.
-lookupAliases :: AliasesOf (LetDec rep) => VName -> Scope rep -> Names
+lookupAliases :: (AliasesOf (LetDec rep)) => VName -> Scope rep -> Names
 lookupAliases root scope =
   -- We must be careful to handle circular aliasing properly (this
   -- can happen due to Match and Loop).
@@ -229,7 +229,7 @@ lookupAliases root scope =
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.
-class IsOp op => AliasedOp op where
+class (IsOp op) => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 

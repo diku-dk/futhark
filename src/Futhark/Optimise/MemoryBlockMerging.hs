@@ -79,7 +79,7 @@ setAllocsSegOp m (SegHist lvl sp segbinops tps body) =
   SegHist lvl sp segbinops tps $
     body {kernelBodyStms = setAllocsStm m <$> kernelBodyStms body}
 
-maxSubExp :: MonadBuilder m => Set SubExp -> m SubExp
+maxSubExp :: (MonadBuilder m) => Set SubExp -> m SubExp
 maxSubExp = helper . S.toList
   where
     helper (s1 : s2 : sexps) = do
@@ -98,7 +98,7 @@ isScalarSpace (_, ScalarSpace _ _) = True
 isScalarSpace _ = False
 
 onKernelBodyStms ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   SegOp lvl GPUMem ->
   (Stms GPUMem -> m (Stms GPUMem)) ->
   m (SegOp lvl GPUMem)
@@ -160,7 +160,7 @@ optimiseKernel graph segop0 = do
 
 -- | Helper function that modifies kernels found inside some statements.
 onKernels ::
-  LocalScope GPUMem m =>
+  (LocalScope GPUMem m) =>
   (SegOp SegLevel GPUMem -> m (SegOp SegLevel GPUMem)) ->
   Stms GPUMem ->
   m (Stms GPUMem)

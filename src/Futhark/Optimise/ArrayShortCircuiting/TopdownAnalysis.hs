@@ -141,7 +141,7 @@ instance TopDownHelper (HostOp NoOp (Aliases GPUMem)) where
   scopeHelper (SegOp op) = scopeHelper op
   scopeHelper _ = mempty
 
-instance TopDownHelper (inner (Aliases MCMem)) => TopDownHelper (MC.MCOp inner (Aliases MCMem)) where
+instance (TopDownHelper (inner (Aliases MCMem))) => TopDownHelper (MC.MCOp inner (Aliases MCMem)) where
   innerNonNegatives vs (ParOp par_op op) =
     maybe mempty (innerNonNegatives vs) par_op
       <> innerNonNegatives vs op
@@ -197,7 +197,7 @@ updateTopdownEnv env stm =
       nonNegatives = nonNegatives env <> nonNegativesInPat (stmPat stm)
     }
 
-nonNegativesInPat :: Typed rep => Pat rep -> Names
+nonNegativesInPat :: (Typed rep) => Pat rep -> Names
 nonNegativesInPat (Pat elems) =
   foldMap (namesFromList . mapMaybe subExpVar . arrayDims . typeOf) elems
 
@@ -225,7 +225,7 @@ updateTopdownEnvLoop td_env arginis lform =
 -- | Get direct aliased index function.  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
 -- the access in the space of the destination block.
-getDirAliasedIxfn :: HasMemBlock (Aliases rep) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
@@ -241,7 +241,7 @@ getDirAliasedIxfn td_env coals_tab x =
 
 -- | Like 'getDirAliasedIxfn', but this version returns 'Nothing' if the value
 -- is not currently subject to coalescing.
-getDirAliasedIxfn' :: HasMemBlock (Aliases rep) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn' :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
 getDirAliasedIxfn' td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x _) ->
@@ -283,7 +283,7 @@ walkAliasTab _ _ _ = Nothing
 --     @vartab@, of course if their aliasing operations are invertible.
 --   We assume inverting aliases has been performed by the top-down pass.
 addInvAliasesVarTab ::
-  HasMemBlock (Aliases rep) =>
+  (HasMemBlock (Aliases rep)) =>
   TopdownEnv rep ->
   M.Map VName Coalesced ->
   VName ->

@@ -33,7 +33,7 @@ data IndexResult
 
 -- | Try to simplify an index operation.
 simplifyIndexing ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   ST.SymbolTable (Rep m) ->
   TypeLookup ->
   VName ->

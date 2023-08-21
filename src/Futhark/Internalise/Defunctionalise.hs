@@ -282,7 +282,7 @@ data SizeSubst
   deriving (Eq, Ord, Show)
 
 dimMapping ::
-  Monoid a =>
+  (Monoid a) =>
   TypeBase Size a ->
   TypeBase Size a ->
   M.Map VName SizeSubst
@@ -299,7 +299,7 @@ dimMapping t1 t2 = execState (matchDims f t1 t2) mempty
     f _ d _ = pure d
 
 dimMapping' ::
-  Monoid a =>
+  (Monoid a) =>
   TypeBase Size a ->
   TypeBase Size a ->
   M.Map VName VName
@@ -372,7 +372,7 @@ combineTypeShapes _ t = t
 -- When we instantiate a polymorphic StaticVal, we rename all the
 -- sizes to avoid name conflicts later on.  This is a bit of a hack...
 instStaticVal ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   S.Set VName ->
   [VName] ->
   StructType ->
@@ -668,14 +668,14 @@ defuncExp (Constr name es (Info sum_t@(Scalar (Sum all_fs))) loc) = do
   pure (Constr name es' (Info sum_t') loc, sv)
   where
     defuncType ::
-      Monoid als =>
+      (Monoid als) =>
       TypeBase Size als ->
       TypeBase Size als
     defuncType (Array u shape t) = Array u shape (defuncScalar t)
     defuncType (Scalar t) = Scalar $ defuncScalar t
 
     defuncScalar ::
-      Monoid als =>
+      (Monoid als) =>
       ScalarTypeBase Size als ->
       ScalarTypeBase Size als
     defuncScalar (Record fs) = Record $ M.map defuncType fs
@@ -826,7 +826,7 @@ defuncLet _ [] body (RetType _ rettype) = do
       RecordSV $ M.toList $ M.intersectionWith imposeType (M.fromList fs1) fs2
     imposeType sv _ = sv
 
-instAnySizes :: MonadFreshNames m => [Pat ParamType] -> m [Pat ParamType]
+instAnySizes :: (MonadFreshNames m) => [Pat ParamType] -> m [Pat ParamType]
 instAnySizes = traverse $ traverse $ bitraverse onDim pure
   where
     onDim d
@@ -1298,7 +1298,7 @@ defuncVals (valbind : ds) = do
 -- | Transform a list of top-level value bindings. May produce new
 -- lifted function definitions, which are placed in front of the
 -- resulting list of declarations.
-transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg decs = modifyNameSource $ \namesrc ->
   let ((), namesrc', decs') = runDefM namesrc $ defuncVals decs
    in (decs', namesrc')

@@ -28,15 +28,15 @@ type Table rep = M.Map VName (Stm rep)
 mkTable :: Stms rep -> Table rep
 mkTable = foldMap f
   where
-    f stm = M.fromList $ zip (patNames (stmPat stm)) $ repeat stm
+    f stm = M.fromList $ map (,stm) (patNames (stmPat stm))
 
-varInfo :: Mem rep inner => VName -> Table rep -> Maybe (LetDecMem, Exp rep)
+varInfo :: (Mem rep inner) => VName -> Table rep -> Maybe (LetDecMem, Exp rep)
 varInfo v table = do
   Let pat _ e <- M.lookup v table
   PatElem _ info <- find ((== v) . patElemName) (patElems pat)
   Just (letDecMem info, e)
 
-optimiseFun :: Mem rep inner => Table rep -> FunDef rep -> FunDef rep
+optimiseFun :: (Mem rep inner) => Table rep -> FunDef rep -> FunDef rep
 optimiseFun consts_table fd =
   fd {funDefBody = onBody $ funDefBody fd}
   where
@@ -53,7 +53,7 @@ optimiseFun consts_table fd =
       let substs = mconcat $ map (mkSubst . resSubExp) res
        in Body dec stms $ substituteNames substs res
 
-entryPointMem :: Mem rep inner => Pass rep rep
+entryPointMem :: (Mem rep inner) => Pass rep rep
 entryPointMem =
   Pass
     { passName = "Entry point memory optimisation",

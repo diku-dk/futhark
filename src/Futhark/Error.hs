@@ -43,15 +43,15 @@ prettyCompilerError (ExternalError e) = e
 prettyCompilerError (InternalError s _ _) = pretty s
 
 -- | Raise an 'ExternalError' based on a prettyprinting result.
-externalError :: MonadError CompilerError m => Doc AnsiStyle -> m a
+externalError :: (MonadError CompilerError m) => Doc AnsiStyle -> m a
 externalError = throwError . ExternalError
 
 -- | Raise an 'ExternalError' based on a string.
-externalErrorS :: MonadError CompilerError m => String -> m a
+externalErrorS :: (MonadError CompilerError m) => String -> m a
 externalErrorS = externalError . pretty
 
 -- | Raise an v'InternalError' based on a prettyprinting result.
-internalErrorS :: MonadError CompilerError m => String -> Doc AnsiStyle -> m a
+internalErrorS :: (MonadError CompilerError m) => String -> Doc AnsiStyle -> m a
 internalErrorS s d =
   throwError $ InternalError (T.pack s) (p d) CompilerBug
   where
