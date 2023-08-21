@@ -321,6 +321,27 @@ static int hip_device_setup(struct futhark_context *ctx) {
   return 0;
 }
 
+static void hip_load_code_from_cache(struct futhark_context_config *cfg,
+                                     const char *src,
+                                     const char *opts[], size_t n_opts,
+                                     struct cache_hash *h, const char *cache_fname,
+                                     char **code, size_t *code_size) {
+  if (cfg->logging) {
+    fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
+  }
+  cache_hash_init(h);
+  for (size_t i = 0; i < n_opts; i++) {
+    cache_hash(h, opts[i], strlen(opts[i]));
+  }
+  cache_hash(h, src, strlen(src));
+  errno = 0;
+  if (cache_restore(cache_fname, h, (unsigned char**)code, code_size) != 0) {
+    if (cfg->logging) {
+      fprintf(stderr, "Failed to restore cache (errno: %s)\n", strerror(errno));
+    }
+  }
+}
+
 static void hip_size_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
   if (cfg->default_block_size > ctx->max_group_size) {
@@ -397,7 +418,7 @@ static void hip_size_setup(struct futhark_context *ctx) {
 }
 
 static char* hiprtc_build(const char *src, const char *opts[], size_t n_opts,
-                          char **code) {
+                          char **code, size_t *code_size) {
   hiprtcProgram prog;
   char *problem = NULL;
 
@@ -423,9 +444,8 @@ static char* hiprtc_build(const char *src, const char *opts[], size_t n_opts,
     return problem;
   }
 
-  size_t code_size;
-  HIPRTC_SUCCEED_FATAL(hiprtcGetCodeSize(prog, &code_size));
-  *code = (char*) malloc(code_size);
+  HIPRTC_SUCCEED_FATAL(hiprtcGetCodeSize(prog, code_size));
+  *code = (char*) malloc(*code_size);
   HIPRTC_SUCCEED_FATAL(hiprtcGetCode(prog, *code));
   HIPRTC_SUCCEED_FATAL(hiprtcDestroyProgram(&prog));
   return NULL;
@@ -481,6 +501,7 @@ static char* hip_module_setup(struct futhark_context *ctx,
                               const char *extra_opts[],
                               const char* cache_fname) {
   char *code = NULL, *src = NULL;
+  size_t code_size = 0;
   struct futhark_context_config *cfg = ctx->cfg;
 
   if (cfg->load_program_from == NULL) {
@@ -505,13 +526,51 @@ static char* hip_module_setup(struct futhark_context *ctx,
     fprintf(stderr, "\n");
   }
 
-  char* problem = hiprtc_build(src, (const char**)opts, n_opts, &code);
-  if (problem != NULL) {
-    free(src);
-    return problem;
+  struct cache_hash h;
+  int loaded_code_from_cache = 0;
+  if (cache_fname != NULL) {
+    hip_load_code_from_cache(cfg, src, (const char**)opts, n_opts, &h, cache_fname, &code, &code_size);
+
+    if (code != NULL) {
+      if (cfg->logging) {
+        fprintf(stderr, "Restored compiled code from cache; now loading module...\n");
+      }
+      if (hipModuleLoadData(&ctx->module, code) == hipSuccess) {
+        if (cfg->logging) {
+          fprintf(stderr, "Success!\n");
+        }
+        loaded_code_from_cache = 1;
+      } else {
+        if (cfg->logging) {
+          fprintf(stderr, "Failed!\n");
+        }
+        free(code);
+        code = NULL;
+      }
+    }
   }
 
-  HIP_SUCCEED_FATAL(hipModuleLoadData(&ctx->module, code));
+  if (code == NULL) {
+    char* problem = hiprtc_build(src, (const char**)opts, n_opts, &code, &code_size);
+    if (problem != NULL) {
+      free(src);
+      return problem;
+    }
+  }
+
+  if (!loaded_code_from_cache) {
+    HIP_SUCCEED_FATAL(hipModuleLoadData(&ctx->module, code));
+  }
+
+  if (cache_fname != NULL && !loaded_code_from_cache) {
+    if (cfg->logging) {
+      fprintf(stderr, "Caching compiled code in %s...\n", cache_fname);
+    }
+    errno = 0;
+    if (cache_store(cache_fname, &h, (const unsigned char*)code, code_size) != 0) {
+      fprintf(stderr, "Failed to cache compiled code: %s\n", strerror(errno));
+    }
+  }
 
   for (size_t i = 0; i < n_opts; i++) {
     free((char *)opts[i]);
