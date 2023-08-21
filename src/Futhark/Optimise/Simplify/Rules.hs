@@ -35,7 +35,7 @@ import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Optimise.Simplify.Rules.Match
 import Futhark.Util
 
-topDownRules :: BuilderOps rep => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleGeneric constantFoldPrimFun,
     RuleGeneric withAccTopDown,
@@ -62,7 +62,7 @@ standardRules =
 -- statement and it can be consumed.
 --
 -- This simplistic rule is only valid before we introduce memory.
-removeUnnecessaryCopy :: BuilderOps rep => BottomUpRuleBasicOp rep
+removeUnnecessaryCopy :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v))
   | not (v `UT.isConsumed` used),
     -- This two first clauses below are too conservative, but the
@@ -95,7 +95,7 @@ removeUnnecessaryCopy (vtable, used) (Pat [d]) aux (Replicate (Shape []) (Var v)
       pure True
 removeUnnecessaryCopy _ _ _ _ = Skip
 
-constantFoldPrimFun :: BuilderOps rep => TopDownRuleGeneric rep
+constantFoldPrimFun :: (BuilderOps rep) => TopDownRuleGeneric rep
 constantFoldPrimFun _ (Let pat (StmAux cs attrs _) (Apply fname args _ _))
   | Just args' <- mapM (isConst . fst) args,
     Just (_, _, fun) <- M.lookup (nameToString fname) primFuns,
@@ -114,7 +114,7 @@ constantFoldPrimFun _ _ = Skip
 
 -- | If an expression produces an array with a constant zero anywhere
 -- in its shape, just turn that into a Scratch.
-emptyArrayToScratch :: BuilderOps rep => TopDownRuleGeneric rep
+emptyArrayToScratch :: (BuilderOps rep) => TopDownRuleGeneric rep
 emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
   | Just (pt, shape) <- isEmptyArray $ patElemType pe,
     not $ isScratch e =
@@ -124,7 +124,7 @@ emptyArrayToScratch _ (Let pat@(Pat [pe]) aux e)
     isScratch _ = False
 emptyArrayToScratch _ _ = Skip
 
-simplifyIndex :: BuilderOps rep => BottomUpRuleBasicOp rep
+simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
   | Just m <- simplifyIndexing vtable seType idd inds consumed =
       Simplify $ certifying cs $ do
@@ -140,7 +140,7 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
 
-withAccTopDown :: BuilderOps rep => TopDownRuleGeneric rep
+withAccTopDown :: (BuilderOps rep) => TopDownRuleGeneric rep
 -- A WithAcc with no accumulators is sent to Valhalla.
 withAccTopDown _ (Let pat aux (WithAcc [] lam)) = Simplify . auxing aux $ do
   lam_res <- bodyBind $ lambdaBody lam
@@ -219,7 +219,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
     onExp = mapExpM mapper
       where
         mapper =
-          (identityMapper :: forall m. Monad m => Mapper rep rep m)
+          (identityMapper :: forall m. (Monad m) => Mapper rep rep m)
             { mapOnOp = traverseOpStms (\_ stms -> onStms stms),
               mapOnBody = \_ body -> onBody body
             }

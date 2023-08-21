@@ -97,7 +97,7 @@ internaliseLoopParamType et ts =
     <$> internaliseParamTypes [et]
 
 -- Tag every sublist with its offset in corresponding flattened list.
-withOffsets :: Foldable a => [a b] -> [(a b, Int)]
+withOffsets :: (Foldable a) => [a b] -> [(a b, Int)]
 withOffsets xs = zip xs (scanl (+) 0 $ map length xs)
 
 numberFrom :: Int -> Tree a -> Tree (a, Int)

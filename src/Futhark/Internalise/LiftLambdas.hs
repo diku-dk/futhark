@@ -188,7 +188,7 @@ transformValBind vb = do
 {-# NOINLINE transformProg #-}
 
 -- | Perform the transformation.
-transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg vbinds =
   modifyNameSource $ \namesrc ->
     runLiftM namesrc $ mapM_ transformValBind vbinds

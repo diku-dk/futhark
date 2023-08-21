@@ -37,7 +37,7 @@ import Futhark.MonadFreshNames
 --
 -- * Options that should be passed to @emcc@.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   Prog MCMem ->
   m (ImpGen.Warnings, (GC.CParts, T.Text, [String]))

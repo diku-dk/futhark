@@ -33,7 +33,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.Construct
 import Futhark.IR
 
-instance ToExp v => ToExp (PrimExp v) where
+instance (ToExp v) => ToExp (PrimExp v) where
   toExp (BinOpExp op x y) =
     BasicOp <$> (BinOp op <$> toSubExp "binop_x" x <*> toSubExp "binop_y" y)
   toExp (CmpOpExp op x y) =
@@ -54,7 +54,7 @@ instance ToExp v => ToExp (PrimExp v) where
   toExp (LeafExp v _) =
     toExp v
 
-instance ToExp v => ToExp (TPrimExp t v) where
+instance (ToExp v) => ToExp (TPrimExp t v) where
   toExp = toExp . untyped
 
 -- | Convert an expression to a 'PrimExp'.  The provided function is
@@ -83,7 +83,7 @@ primExpFromExp f (Apply fname args ts _)
 primExpFromExp _ _ = fail "Not a PrimExp"
 
 -- | Like 'primExpFromExp', but for a t'SubExp'.
-primExpFromSubExpM :: Applicative m => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
+primExpFromSubExpM :: (Applicative m) => (VName -> m (PrimExp v)) -> SubExp -> m (PrimExp v)
 primExpFromSubExpM f (Var v) = f v
 primExpFromSubExpM _ (Constant v) = pure $ ValueExp v
 
@@ -126,7 +126,7 @@ f64le = isF64 . flip LeafExp float64
 
 -- | Applying a monadic transformation to the leaves in a 'PrimExp'.
 replaceInPrimExpM ::
-  Monad m =>
+  (Monad m) =>
   (a -> PrimType -> m (PrimExp b)) ->
   PrimExp a ->
   m (PrimExp b)
@@ -157,7 +157,7 @@ replaceInPrimExp f e = runIdentity $ replaceInPrimExpM f' e
 
 -- | Substituting names in a PrimExp with other PrimExps
 substituteInPrimExp ::
-  Ord v =>
+  (Ord v) =>
   M.Map v (PrimExp v) ->
   PrimExp v ->
   PrimExp v
@@ -169,5 +169,5 @@ primExpSlice :: Slice SubExp -> Slice (TPrimExp Int64 VName)
 primExpSlice = fmap pe64
 
 -- | Convert a 'PrimExp' slice to a t'SubExp' slice.
-subExpSlice :: MonadBuilder m => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
+subExpSlice :: (MonadBuilder m) => Slice (TPrimExp Int64 VName) -> m (Slice SubExp)
 subExpSlice = traverse $ toSubExp "slice"

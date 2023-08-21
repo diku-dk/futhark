@@ -17,11 +17,11 @@ import Futhark.IR
 type Dependencies = M.Map VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: ASTRep rep => Body rep -> Dependencies
+dataDependencies :: (ASTRep rep) => Body rep -> Dependencies
 dataDependencies = dataDependencies' M.empty
 
 dataDependencies' ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Dependencies ->
   Body rep ->
   Dependencies

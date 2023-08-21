@@ -79,20 +79,20 @@ data IxFun num = IxFun
   }
   deriving (Show, Eq)
 
-instance Pretty num => Pretty (IxFun num) where
+instance (Pretty num) => Pretty (IxFun num) where
   pretty (IxFun lmad oshp) =
     braces . semistack $
       [ "base:" <+> brackets (commasep $ map pretty oshp),
         "LMAD:" <+> pretty lmad
       ]
 
-instance Substitute num => Substitute (IxFun num) where
+instance (Substitute num) => Substitute (IxFun num) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute num => Rename (IxFun num) where
+instance (Substitute num) => Rename (IxFun num) where
   rename = substituteRename
 
-instance FreeIn num => FreeIn (IxFun num) where
+instance (FreeIn num) => FreeIn (IxFun num) where
   freeIn' = foldMap freeIn'
 
 instance Functor IxFun where
@@ -109,7 +109,7 @@ instance Traversable IxFun where
 
 -- | Substitute a name with a PrimExp in an index function.
 substituteInIxFun ::
-  Ord a =>
+  (Ord a) =>
   M.Map a (TPrimExp t a) ->
   IxFun (TPrimExp t a) ->
   IxFun (TPrimExp t a)
@@ -145,11 +145,11 @@ index ::
 index = LMAD.index . ixfunLMAD
 
 -- | iota with offset.
-iotaOffset :: IntegralExp num => num -> Shape num -> IxFun num
+iotaOffset :: (IntegralExp num) => num -> Shape num -> IxFun num
 iotaOffset o ns = IxFun (LMAD.iota o ns) ns
 
 -- | iota.
-iota :: IntegralExp num => Shape num -> IxFun num
+iota :: (IntegralExp num) => Shape num -> IxFun num
 iota = iotaOffset 0
 
 -- | Create a single-LMAD index function that is
@@ -162,7 +162,7 @@ mkExistential basis_rank lmad_rank start =
 
 -- | Permute dimensions.
 permute ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   IxFun num ->
   Permutation ->
   IxFun num
@@ -225,7 +225,7 @@ coerce (IxFun lmad _) new_shape =
     onDim ld d = ld {ldShape = d}
 
 -- | The number of dimensions in the domain of the input function.
-rank :: IntegralExp num => IxFun num -> Int
+rank :: (IntegralExp num) => IxFun num -> Int
 rank (IxFun (LMAD _ sss) _) = length sss
 
 -- | Conceptually expand index function to be a particular slice of

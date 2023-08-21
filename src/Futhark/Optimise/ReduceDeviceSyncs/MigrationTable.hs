@@ -296,7 +296,7 @@ analyseStms hof usage stms =
 --                                TYPE HELPERS                                --
 --------------------------------------------------------------------------------
 
-isScalar :: Typed t => t -> Bool
+isScalar :: (Typed t) => t -> Bool
 isScalar = isScalarType . typeOf
 
 isScalarType :: TypeBase shape u -> Bool
@@ -304,10 +304,10 @@ isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
 
-isArray :: Typed t => t -> Bool
+isArray :: (Typed t) => t -> Bool
 isArray = isArrayType . typeOf
 
-isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
+isArrayType :: (ArrayShape shape) => TypeBase shape u -> Bool
 isArrayType = (0 <) . arrayRank
 
 --------------------------------------------------------------------------------
@@ -1504,7 +1504,7 @@ outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
 -- | Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
 -- connected to sinks.
-onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
+onlyGraphedScalars :: (Foldable t) => t VName -> Grapher IdSet
 onlyGraphedScalars vs = do
   let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
   IS.intersection is <$> getGraphedScalars

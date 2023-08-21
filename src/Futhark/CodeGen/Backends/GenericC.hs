@@ -359,7 +359,7 @@ relevantParams fname m =
   map fst $ filter ((fname `S.member`) . snd . snd) $ M.toList m
 
 compileProg' ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->
@@ -546,7 +546,7 @@ $entry_point_decls
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->

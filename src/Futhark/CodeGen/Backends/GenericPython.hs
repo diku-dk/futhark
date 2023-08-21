@@ -384,7 +384,7 @@ constructorToFunDef (Constructor params body) at_init =
   Def "__init__" params $ body <> at_init
 
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   CompilerMode ->
   String ->
   Constructor ->
@@ -1018,7 +1018,7 @@ compileUnOp op =
     FSignum {} -> "np.sign"
 
 compileBinOpLike ::
-  Monad m =>
+  (Monad m) =>
   (v -> m PyExp) ->
   Imp.PrimExp v ->
   Imp.PrimExp v ->
@@ -1141,7 +1141,7 @@ compileVar v = asks $ fromMaybe (Var v') . M.lookup v' . envVarExp
     v' = compileName v
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
-compilePrimExp :: Monad m => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
+compilePrimExp :: (Monad m) => (v -> m PyExp) -> Imp.PrimExp v -> m PyExp
 compilePrimExp _ (Imp.ValueExp v) = pure $ compilePrimValue v
 compilePrimExp f (Imp.LeafExp v _) = f v
 compilePrimExp f (Imp.BinOpExp op x y) = do

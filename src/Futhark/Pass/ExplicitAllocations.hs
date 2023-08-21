@@ -130,7 +130,7 @@ askDefaultSpace :: AllocM fromrep torep Space
 askDefaultSpace = asks allocSpace
 
 runAllocM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
@@ -148,14 +148,14 @@ runAllocM space handleOp hints (AllocM m) =
           envExpHints = hints
         }
 
-elemSize :: Num a => Type -> a
+elemSize :: (Num a) => Type -> a
 elemSize = primByteSize . elemType
 
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   untyped $ foldl' (*) (elemSize t) $ map pe64 (arrayDims t)
 
-arraySizeInBytesExpM :: MonadBuilder m => Type -> m (PrimExp VName)
+arraySizeInBytesExpM :: (MonadBuilder m) => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   let dim_prod_i64 = product $ map pe64 (arrayDims t)
       elm_size_i64 = elemSize t
@@ -164,7 +164,7 @@ arraySizeInBytesExpM t = do
       untyped $
         dim_prod_i64 * elm_size_i64
 
-arraySizeInBytes :: MonadBuilder m => Type -> m SubExp
+arraySizeInBytes :: (MonadBuilder m) => Type -> m SubExp
 arraySizeInBytes = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM
 
 allocForArray' ::
@@ -178,7 +178,7 @@ allocForArray' t space = do
 
 -- | Allocate memory for a value of the given type.
 allocForArray ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   Type ->
   Space ->
   AllocM fromrep torep VName
@@ -245,7 +245,7 @@ patWithAllocations def_space names e hints = do
   rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
   Pat <$> allocsForPat def_space idents rts hints
 
-mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
+mkMissingIdents :: (MonadFreshNames m) => [Ident] -> [ExpReturns] -> m [Ident]
 mkMissingIdents idents rts =
   reverse <$> zipWithM f (reverse rts) (map Just (reverse idents) ++ repeat Nothing)
   where
@@ -301,7 +301,7 @@ allocsForPat def_space some_idents rts hints = do
         inst (Free v) = v
         inst (Ext i) = getIdent idents i
 
-instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
+instantiateIxFun :: (Monad m) => ExtIxFun -> m IxFun
 instantiateIxFun = traverse $ traverse inst
   where
     inst Ext {} = error "instantiateIxFun: not yet"
@@ -628,7 +628,7 @@ explicitAllocationsGeneric space handleOp hints =
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
       runAllocM space handleOp hints . inScopeOf consts $
-        allocInFParams (zip params $ repeat space) $ \params' -> do
+        allocInFParams (map (,space) params) $ \params' -> do
           (fbody', mem_rets) <-
             allocInFunBody (map (const $ Just space) rettype) fbody
           let num_extra_params = length params' - length params
@@ -748,7 +748,7 @@ allocInStm (Let (Pat pes) _ e) =
   addStm =<< allocsForStm (map patElemIdent pes) =<< allocInExp e
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
@@ -886,7 +886,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
 -- Futhark.Optimise.EntryPointMem for a very specialised version of
 -- the idea, but which could perhaps be generalised.
 simplifyMatch ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   [Case (Body rep)] ->
   Body rep ->
   [BranchTypeMem] ->
@@ -1057,11 +1057,11 @@ class SizeSubst op where
 
 instance SizeSubst (NoOp rep)
 
-instance SizeSubst (op rep) => SizeSubst (MemOp op rep) where
+instance (SizeSubst (op rep)) => SizeSubst (MemOp op rep) where
   opIsConst (Inner op) = opIsConst op
   opIsConst _ = False
 
-stmConsts :: SizeSubst (Op rep) => Stm rep -> S.Set VName
+stmConsts :: (SizeSubst (Op rep)) => Stm rep -> S.Set VName
 stmConsts (Let pat _ (Op op))
   | opIsConst op = S.fromList $ patNames pat
 stmConsts _ = mempty
@@ -1108,7 +1108,7 @@ mkLetNamesB'' space names e = do
     nohints = map (const NoHint) names
 
 simplifyMemOp ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   ( inner (Engine.Wise rep) ->
     Engine.SimpleM rep (inner (Engine.Wise rep), Stms (Engine.Wise rep))
   ) ->

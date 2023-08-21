@@ -39,13 +39,13 @@ import Futhark.IR.RetType
 import Futhark.IR.Syntax
 
 -- | The type of a subexpression.
-subExpType :: HasScope t m => SubExp -> m Type
+subExpType :: (HasScope t m) => SubExp -> m Type
 subExpType (Constant val) = pure $ Prim $ primValueType val
 subExpType (Var name) = lookupType name
 
 -- | Type type of a 'SubExpRes' - not that this might refer to names
 -- bound in the body containing the result.
-subExpResType :: HasScope t m => SubExpRes -> m Type
+subExpResType :: (HasScope t m) => SubExpRes -> m Type
 subExpResType = subExpType . resSubExp
 
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
@@ -58,7 +58,7 @@ mapType outersize f =
   ]
 
 -- | The type of a primitive operation.
-basicOpType :: HasScope rep m => BasicOp -> m [Type]
+basicOpType :: (HasScope rep m) => BasicOp -> m [Type]
 basicOpType (SubExp se) =
   pure <$> subExpType se
 basicOpType (Opaque _ se) =
@@ -141,7 +141,7 @@ expExtType (WithAcc inputs lam) =
 expExtType (Op op) = opType op
 
 -- | Given the parameters of a loop, produce the return type.
-loopExtType :: Typed dec => [Param dec] -> [ExtType]
+loopExtType :: (Typed dec) => [Param dec] -> [ExtType]
 loopExtType params =
   existentialiseExtTypes inaccessible $ staticShapes $ map typeOf params
   where
@@ -150,7 +150,7 @@ loopExtType params =
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).
 class TypedOp op where
-  opType :: HasScope t m => op -> m [ExtType]
+  opType :: (HasScope t m) => op -> m [ExtType]
 
 instance TypedOp (NoOp rep) where
   opType NoOp = pure []

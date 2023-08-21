@@ -56,7 +56,7 @@ instance MonadFreshNames FusionM where
   putNameSource source =
     modify (\env -> env {vNameSource = source})
 
-runFusionM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionM a -> m a
+runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
 runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
   let x = runReaderT a scope
       (y, z) = runState x (fenv {vNameSource = src})

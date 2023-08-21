@@ -390,12 +390,12 @@ sliceDims = mapMaybe dimSlice . unSlice
     dimSlice DimFix {} = Nothing
 
 -- | A slice with a stride of one.
-unitSlice :: Num d => d -> d -> DimIndex d
+unitSlice :: (Num d) => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
 
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
-fixSlice :: Num d => Slice d -> [d] -> [d]
+fixSlice :: (Num d) => Slice d -> [d] -> [d]
 fixSlice = fixSlice' . unSlice
   where
     fixSlice' (DimFix j : mis') is' =
@@ -406,7 +406,7 @@ fixSlice = fixSlice' . unSlice
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
-sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice :: (Num d) => Slice d -> Slice d -> Slice d
 sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
   where
     sliceSlice' (DimFix j : js') is' =

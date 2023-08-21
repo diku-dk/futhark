@@ -71,7 +71,7 @@ sliceArray start size arr = do
 -- provided @dest@s, again interpreted as the destination for a
 -- 'copyDWIM'.
 applyLambda ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Lambda rep ->
   [(VName, [DimIndex (Imp.TExp Int64)])] ->
   [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
@@ -90,7 +90,7 @@ applyLambda lam dests args = do
 -- anyway, but you have to be more careful - use this if you are in
 -- doubt.)
 applyRenamedLambda ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Lambda rep ->
   [(VName, [DimIndex (Imp.TExp Int64)])] ->
   [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
@@ -136,9 +136,9 @@ virtualisedGroupScan seg_flag w lam arrs = do
         carry_idx <- dPrimVE "carry_idx" $ sExt64 chunk_start - 1
         applyRenamedLambda
           lam
-          (zip arrs $ repeat [DimFix $ sExt64 chunk_start])
-          ( zip (map Var arrs) (repeat [DimFix carry_idx])
-              ++ zip (map Var arrs) (repeat [DimFix $ sExt64 chunk_start])
+          (map (,[DimFix $ sExt64 chunk_start]) arrs)
+          ( map ((,[DimFix carry_idx]) . Var) arrs
+              ++ map ((,[DimFix $ sExt64 chunk_start]) . Var) arrs
           )
 
     arrs_chunks <- mapM (sliceArray (sExt64 chunk_start) chunk_size) arrs
@@ -428,9 +428,9 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
             forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
               applyRenamedLambda
                 (segBinOpLambda op)
-                (zip tmps $ repeat [DimFix $ sExt64 chunk_start])
-                ( zip (map (Var . patElemName) red_pes) (repeat [])
-                    ++ zip (map Var tmps) (repeat [DimFix $ sExt64 chunk_start])
+                (map (,[DimFix $ sExt64 chunk_start]) tmps)
+                ( map ((,[]) . Var . patElemName) red_pes
+                    ++ map ((,[DimFix $ sExt64 chunk_start]) . Var) tmps
                 )
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -544,7 +544,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
         \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
           let bin' = pe64 bin
               dest_shape' = map pe64 $ shapeDims dest_shape
-              bin_in_bounds = inBounds (Slice (map DimFix [bin'])) dest_shape'
+              bin_in_bounds = inBounds (Slice [DimFix bin']) dest_shape'
               bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 

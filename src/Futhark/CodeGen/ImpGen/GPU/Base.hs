@@ -187,7 +187,7 @@ compileThreadExp dest e =
 -- The body must contain thread-level code.  For multidimensional
 -- loops, use 'groupCoverSpace'.
 kernelLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   Imp.TExp t ->
   Imp.TExp t ->
@@ -207,7 +207,7 @@ kernelLoop tid num_threads n f =
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 groupLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   (Imp.TExp t -> InKernelGen ()) ->
   InKernelGen ()
@@ -223,7 +223,7 @@ groupLoop n f = do
 -- all threads in the group participate.  The passed-in function is
 -- invoked with a (symbolic) point in the index space.
 groupCoverSpace ::
-  IntExp t =>
+  (IntExp t) =>
   [Imp.TExp t] ->
   ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
@@ -862,7 +862,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     sWhen (isBool won) (run_loop <-- false)
 
 computeKernelUses ::
-  FreeIn a =>
+  (FreeIn a) =>
   a ->
   [VName] ->
   CallKernelGen [Imp.KernelUse]

@@ -465,17 +465,17 @@ var = LeafExp
 
 -- Prettyprinting definitions.
 
-instance Pretty op => Pretty (Definitions op) where
+instance (Pretty op) => Pretty (Definitions op) where
   pretty (Definitions types consts funs) =
     pretty types </> pretty consts </> pretty funs
 
-instance Pretty op => Pretty (Functions op) where
+instance (Pretty op) => Pretty (Functions op) where
   pretty (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
         "Function " <> pretty name <> colon </> indent 2 (pretty fun)
 
-instance Pretty op => Pretty (Constants op) where
+instance (Pretty op) => Pretty (Constants op) where
   pretty (Constants decls code) =
     "Constants:"
       </> indent 2 (stack $ map pretty decls)
@@ -495,7 +495,7 @@ instance Pretty EntryPoint where
       ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
       ppRes (u, t) = pretty u <> pretty t
 
-instance Pretty op => Pretty (FunctionT op) where
+instance (Pretty op) => Pretty (FunctionT op) where
   pretty (Function entry outs ins body) =
     "Inputs:"
       </> indent 2 (stack $ map pretty ins)
@@ -536,7 +536,7 @@ instance Pretty ArrayContents where
   pretty (ArrayValues vs) = braces (commasep $ map pretty vs)
   pretty (ArrayZeros n) = braces "0" <+> "*" <+> pretty n
 
-instance Pretty op => Pretty (Code op) where
+instance (Pretty op) => Pretty (Code op) where
   pretty (Op op) = pretty op
   pretty Skip = "skip"
   pretty (c1 :>>: c2) = pretty c1 </> pretty c2
@@ -600,8 +600,10 @@ instance Pretty op => Pretty (Code op) where
   pretty (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
     ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
       <> (parens . align)
-        ( foldMap (brackets . pretty) shape <> ","
-            </> p dst dstspace dstoffset dststrides <> ","
+        ( foldMap (brackets . pretty) shape
+            <> ","
+            </> p dst dstspace dstoffset dststrides
+            <> ","
             </> p src srcspace srcoffset srcstrides
         )
     where
@@ -727,7 +729,7 @@ instance FreeIn EntryPoint where
   freeIn' (EntryPoint _ res args) =
     freeIn' (map snd res) <> freeIn' (map snd args)
 
-instance FreeIn a => FreeIn (Functions a) where
+instance (FreeIn a) => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
     where
       onFun f =
@@ -744,7 +746,7 @@ instance FreeIn ExternalValue where
   freeIn' (TransparentValue vd) = freeIn' vd
   freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
 
-instance FreeIn a => FreeIn (Code a) where
+instance (FreeIn a) => FreeIn (Code a) where
   freeIn' (x :>>: y) =
     fvBind (declaredIn x) $ freeIn' x <> freeIn' y
   freeIn' Skip =

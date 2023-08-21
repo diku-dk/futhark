@@ -67,7 +67,7 @@ import System.FilePath
 import System.Info qualified
 
 -- | Print the result to stdout.
-printAction :: ASTRep rep => Action rep
+printAction :: (ASTRep rep) => Action rep
 printAction =
   Action
     { actionName = "Prettyprint",
@@ -76,7 +76,7 @@ printAction =
     }
 
 -- | Print the result to stdout, alias annotations.
-printAliasesAction :: AliasableRep rep => Action rep
+printAliasesAction :: (AliasableRep rep) => Action rep
 printAliasesAction =
   Action
     { actionName = "Prettyprint",
@@ -143,7 +143,7 @@ callGraphAction =
     }
 
 -- | Print metrics about AST node counts to stdout.
-metricsAction :: OpMetrics (Op rep) => Action rep
+metricsAction :: (OpMetrics (Op rep)) => Action rep
 metricsAction =
   Action
     { actionName = "Compute metrics",

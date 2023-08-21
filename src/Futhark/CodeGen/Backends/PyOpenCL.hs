@@ -23,7 +23,7 @@ import Futhark.Util.Pretty (prettyString, prettyText)
 
 -- | Compile the program to Python with calls to OpenCL.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   CompilerMode ->
   String ->
   Prog GPUMem ->

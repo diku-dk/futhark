@@ -40,7 +40,7 @@ import Futhark.Util
 -- table) until all vars appearing in the index function are defined in the
 -- current scope?"
 freeVarSubstitutions ::
-  FreeIn a =>
+  (FreeIn a) =>
   ScopeTab rep ->
   ScalarTab ->
   a ->
@@ -299,7 +299,7 @@ noMemOverlap _ _ _ = False
 --   \bigcup_{j=0}^{j<n} Access_j
 -- \]
 aggSummaryLoopTotal ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScopeTab rep ->
   ScopeTab rep ->
   ScalarTab ->
@@ -336,7 +336,7 @@ aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 --   \bigcup_{j=i+1}^{j<n} Access_j
 -- \]
 aggSummaryLoopPartial ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
@@ -373,7 +373,7 @@ aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set 
 -- total aggregation of the inner dimensions. For outer dimensions, the equation
 -- is the same, the point accesses in $Access_j$ are replaced with the total
 -- aggregation of the inner dimensions.
-aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
+aggSummaryMapPartial :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
 aggSummaryMapPartial _ [] = const $ pure mempty
 aggSummaryMapPartial scalars dims =
   helper mempty (reverse dims) . Set . S.singleton -- Reverse dims so we work from the inside out
@@ -397,7 +397,7 @@ aggSummaryMapPartial scalars dims =
 -- \[
 --   \bigcup_{j=0}^{j<i} a_j \cup \bigcup_{j=i+1}^{j<n} a_j
 -- \]
-aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
+aggSummaryMapPartialOne :: (MonadFreshNames m) => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
 aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
@@ -413,7 +413,7 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
     helper (x, y) = concatMapM (aggSummaryOne gtid x y) lmads
 
 -- | Computes to total access summary over a multi-dimensional map.
-aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
+aggSummaryMapTotal :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapTotal _ [] _ = pure mempty
 aggSummaryMapTotal _ _ (Set lmads)
   | lmads == mempty = pure mempty
@@ -447,7 +447,7 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
 --
 -- The function returns 'Underterminable' if the iterator is free in the output
 -- LMAD or the dimensions of the input LMAD .
-aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
+aggSummaryOne :: (MonadFreshNames m) => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
   | iterator_var `notNameIn` freeIn offset0 = pure $ Set $ S.singleton lmad

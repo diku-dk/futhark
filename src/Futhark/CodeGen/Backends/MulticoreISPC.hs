@@ -61,7 +61,7 @@ varying = C.EscTypeQual "varying" noLoc
 
 -- | Compile the program to C and ISPC code using multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
+  (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, (GC.CParts, T.Text))
 compileProg version prog = do
   -- Dynamic scheduling seems completely broken currently, so we disable it.
   (ws, defs) <- ImpGen.compileProg prog
@@ -172,7 +172,7 @@ setMem dest src space = do
                   }|]
 
 -- | Unref memory in ISPC
-unRefMem :: C.ToExp a => a -> Space -> ISPCCompilerM ()
+unRefMem :: (C.ToExp a) => a -> Space -> ISPCCompilerM ()
 unRefMem mem space = do
   cached <- isJust <$> GC.cacheMem mem
   let mem_s = T.unpack $ expText $ C.toExp mem noLoc

@@ -104,7 +104,7 @@ pNonArray =
     ]
 
 pTypeBase ::
-  ArrayShape shape =>
+  (ArrayShape shape) =>
   Parser shape ->
   Parser u ->
   Parser (TypeBase shape u)

@@ -157,7 +157,7 @@ class HasLetDecMem t where
 instance HasLetDecMem LetDecMem where
   letDecMem = id
 
-instance HasLetDecMem b => HasLetDecMem (a, b) where
+instance (HasLetDecMem b) => HasLetDecMem (a, b) where
   letDecMem = letDecMem . snd
 
 type Mem rep inner =
@@ -187,64 +187,64 @@ data MemOp (inner :: Data.Kind.Type -> Data.Kind.Type) (rep :: Data.Kind.Type)
 
 -- | A helper for defining 'TraverseOpStms'.
 traverseMemOpStms ::
-  Monad m =>
+  (Monad m) =>
   OpStmsTraverser m (inner rep) rep ->
   OpStmsTraverser m (MemOp inner rep) rep
 traverseMemOpStms _ _ op@Alloc {} = pure op
 traverseMemOpStms onInner f (Inner inner) = Inner <$> onInner f inner
 
-instance RephraseOp inner => RephraseOp (MemOp inner) where
+instance (RephraseOp inner) => RephraseOp (MemOp inner) where
   rephraseInOp _ (Alloc e space) = pure (Alloc e space)
   rephraseInOp r (Inner x) = Inner <$> rephraseInOp r x
 
-instance FreeIn (inner rep) => FreeIn (MemOp inner rep) where
+instance (FreeIn (inner rep)) => FreeIn (MemOp inner rep) where
   freeIn' (Alloc size _) = freeIn' size
   freeIn' (Inner k) = freeIn' k
 
-instance TypedOp (inner rep) => TypedOp (MemOp inner rep) where
+instance (TypedOp (inner rep)) => TypedOp (MemOp inner rep) where
   opType (Alloc _ space) = pure [Mem space]
   opType (Inner k) = opType k
 
-instance AliasedOp (inner rep) => AliasedOp (MemOp inner rep) where
+instance (AliasedOp (inner rep)) => AliasedOp (MemOp inner rep) where
   opAliases Alloc {} = [mempty]
   opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc {} = mempty
   consumedInOp (Inner k) = consumedInOp k
 
-instance CanBeAliased inner => CanBeAliased (MemOp inner) where
+instance (CanBeAliased inner) => CanBeAliased (MemOp inner) where
   addOpAliases _ (Alloc se space) = Alloc se space
   addOpAliases aliases (Inner k) = Inner $ addOpAliases aliases k
 
-instance Rename (inner rep) => Rename (MemOp inner rep) where
+instance (Rename (inner rep)) => Rename (MemOp inner rep) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
   rename (Inner k) = Inner <$> rename k
 
-instance Substitute (inner rep) => Substitute (MemOp inner rep) where
+instance (Substitute (inner rep)) => Substitute (MemOp inner rep) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
-instance PP.Pretty (inner rep) => PP.Pretty (MemOp inner rep) where
+instance (PP.Pretty (inner rep)) => PP.Pretty (MemOp inner rep) where
   pretty (Alloc e DefaultSpace) = "alloc" <> PP.apply [PP.pretty e]
   pretty (Alloc e s) = "alloc" <> PP.apply [PP.pretty e, PP.pretty s]
   pretty (Inner k) = PP.pretty k
 
-instance OpMetrics (inner rep) => OpMetrics (MemOp inner rep) where
+instance (OpMetrics (inner rep)) => OpMetrics (MemOp inner rep) where
   opMetrics Alloc {} = seen "Alloc"
   opMetrics (Inner k) = opMetrics k
 
-instance IsOp (inner rep) => IsOp (MemOp inner rep) where
+instance (IsOp (inner rep)) => IsOp (MemOp inner rep) where
   safeOp (Alloc (Constant (IntValue (Int64Value k))) _) = k >= 0
   safeOp Alloc {} = False
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc {} = True
 
-instance CanBeWise inner => CanBeWise (MemOp inner) where
+instance (CanBeWise inner) => CanBeWise (MemOp inner) where
   addOpWisdom (Alloc size space) = Alloc size space
   addOpWisdom (Inner k) = Inner $ addOpWisdom k
 
-instance ST.IndexOp (inner rep) => ST.IndexOp (MemOp inner rep) where
+instance (ST.IndexOp (inner rep)) => ST.IndexOp (MemOp inner rep) where
   indexOp vtable k (Inner op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
@@ -277,22 +277,22 @@ data MemInfo d u ret
 
 type MemBound u = MemInfo SubExp u MemBind
 
-instance FixExt ret => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
+instance (FixExt ret) => DeclExtTyped (MemInfo ExtSize Uniqueness ret) where
   declExtTypeOf (MemPrim pt) = Prim pt
   declExtTypeOf (MemMem space) = Mem space
   declExtTypeOf (MemArray pt shape u _) = Array pt shape u
   declExtTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
 
-instance FixExt ret => ExtTyped (MemInfo ExtSize Uniqueness ret) where
+instance (FixExt ret) => ExtTyped (MemInfo ExtSize Uniqueness ret) where
   extTypeOf = fromDecl . declExtTypeOf
 
-instance FixExt ret => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
+instance (FixExt ret) => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
   extTypeOf (MemPrim pt) = Prim pt
   extTypeOf (MemMem space) = Mem space
   extTypeOf (MemArray pt shape u _) = Array pt shape u
   extTypeOf (MemAcc acc ispace ts u) = Acc acc ispace ts u
 
-instance FixExt ret => FixExt (MemInfo ExtSize u ret) where
+instance (FixExt ret) => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
   fixExt _ _ (MemMem space) = MemMem space
   fixExt i se (MemArray pt shape u ret) =
@@ -342,13 +342,13 @@ instance (Substitute d, Substitute ret) => Rename (MemInfo d u ret) where
   rename = substituteRename
 
 simplifyIxFun ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   IxFun ->
   Engine.SimpleM rep IxFun
 simplifyIxFun = traverse $ fmap isInt64 . simplifyPrimExp . untyped
 
 simplifyExtIxFun ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   ExtIxFun ->
   Engine.SimpleM rep ExtIxFun
 simplifyExtIxFun = traverse $ fmap isInt64 . simplifyExtPrimExp . untyped
@@ -672,7 +672,7 @@ getExtMaps ctx_lst_ids =
   )
 
 matchReturnType ::
-  PP.Pretty u =>
+  (PP.Pretty u) =>
   [MemInfo ExtSize u MemReturn] ->
   [SubExp] ->
   [MemInfo SubExp NoUniqueness MemBind] ->
@@ -821,7 +821,7 @@ matchPatToExp pat e = do
     matches _ _ _ _ = False
 
 varMemInfo ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   VName ->
   TC.TypeM rep (MemInfo SubExp NoUniqueness MemBind)
 varMemInfo name = do
@@ -833,7 +833,7 @@ varMemInfo name = do
     LParamName summary -> pure summary
     IndexName it -> pure $ MemPrim $ IntType it
 
-nameInfoToMemInfo :: Mem rep inner => NameInfo rep -> MemBound NoUniqueness
+nameInfoToMemInfo :: (Mem rep inner) => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
     FParamName summary -> noUniquenessReturns summary
@@ -887,7 +887,7 @@ lookupMemSpace name = do
           <> prettyText summary
 
 checkMemInfo ::
-  TC.Checkable rep =>
+  (TC.Checkable rep) =>
   VName ->
   MemInfo SubExp u MemBind ->
   TC.TypeM rep ()
@@ -1135,11 +1135,11 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness . ArrayIn mem
     & pure
 
-class IsOp op => OpReturns op where
+class (IsOp op) => OpReturns op where
   opReturns :: (Mem rep inner, Monad m, HasScope rep m) => op -> m [ExpReturns]
   opReturns op = extReturns <$> opType op
 
-instance OpReturns (inner rep) => OpReturns (MemOp inner rep) where
+instance (OpReturns (inner rep)) => OpReturns (MemOp inner rep) where
   opReturns (Alloc _ space) = pure [MemMem space]
   opReturns (Inner op) = opReturns op
 
@@ -1147,7 +1147,7 @@ instance OpReturns (NoOp rep) where
   opReturns NoOp = pure []
 
 applyFunReturns ::
-  Typed dec =>
+  (Typed dec) =>
   [FunReturns] ->
   [Param dec] ->
   [(SubExp, Type)] ->

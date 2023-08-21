@@ -141,7 +141,7 @@ onValBind vb = do
 
 -- | Monomorphise a list of top-level declarations. A module-free input program
 -- is expected, so only value declarations and type declaration are accepted.
-transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg vbs =
   modifyNameSource $ \namesrc ->
     runRecordM namesrc $ mapM onValBind vbs

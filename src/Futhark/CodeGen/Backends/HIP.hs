@@ -91,7 +91,7 @@ hipMemoryType "device" = pure [C.cty|void*|]
 hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
 -- | Compile the program to C with calls to HIP.
-compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
     Program hip_code hip_prelude kernels types params failures prog'

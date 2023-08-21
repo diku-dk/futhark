@@ -183,7 +183,7 @@ openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
 -- | Compile the program to C with calls to OpenCL.
-compileProg :: MonadFreshNames m => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
+compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
     Program opencl_code opencl_prelude kernels types params failures prog'

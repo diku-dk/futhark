@@ -406,7 +406,7 @@ warnings :: Warnings -> ImpM rep r op ()
 warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 
 -- | Emit a warning about something the user should be aware of.
-warn :: Located loc => loc -> [loc] -> T.Text -> ImpM rep r op ()
+warn :: (Located loc) => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
   warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
 
@@ -422,7 +422,7 @@ hasFunction fname = gets $ \s ->
   let Imp.Functions fs = stateFunctions s
    in isJust $ lookup fname fs
 
-constsVTable :: Mem rep inner => Stms rep -> VTable rep
+constsVTable :: (Mem rep inner) => Stms rep -> VTable rep
 constsVTable = foldMap stmVtable
   where
     stmVtable (Let pat _ e) =
@@ -506,7 +506,7 @@ entryPointSize types (TypeOpaque desc) =
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
 
 compileInParam ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   FParam rep ->
   ImpM rep r op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramDec fparam of
@@ -524,7 +524,7 @@ compileInParam fparam = case paramDec fparam of
 data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
 compileInParams ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   OpaqueTypes ->
   [FParam rep] ->
   Maybe [EntryParam] ->
@@ -596,7 +596,7 @@ compileOutParam MemAcc {} =
   error "Functions may not return accumulators."
 
 compileExternalValues ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
   [EntryResult] ->
@@ -646,7 +646,7 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
   mkExts (length ctx_rts) orig_epts val_rts
 
 compileOutParams ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   OpaqueTypes ->
   [RetType rep] ->
   Maybe [EntryResult] ->
@@ -660,7 +660,7 @@ compileOutParams types orig_rts maybe_orig_epts = do
   pure (evs, catMaybes maybe_params, dests)
 
 compileFunDef ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   OpaqueTypes ->
   FunDef rep ->
   ImpM rep r op ()
@@ -703,7 +703,7 @@ compileBody' params (Body _ stms ses) =
     forM_ (zip params ses) $
       \(param, SubExpRes _ se) -> copyDWIM (paramName param) [] se []
 
-compileLoopBody :: Typed dec => [Param dec] -> Body rep -> ImpM rep r op ()
+compileLoopBody :: (Typed dec) => [Param dec] -> Body rep -> ImpM rep r op ()
 compileLoopBody mergeparams (Body _ stms ses) = do
   -- We cannot write the results to the merge parameters immediately,
   -- as some of the results may actually *be* merge parameters, and
@@ -869,7 +869,7 @@ traceArray s t shape se = do
   emit . Imp.TracePrint $ ErrorMsg ["\n"]
 
 defCompileBasicOp ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Pat (LetDec rep) ->
   BasicOp ->
   ImpM rep r op ()
@@ -1039,7 +1039,7 @@ addArrays = mapM_ addArray
 
 -- | Like 'dFParams', but does not create new declarations.
 -- Note: a hack to be used only for functions.
-addFParams :: Mem rep inner => [FParam rep] -> ImpM rep r op ()
+addFParams :: (Mem rep inner) => [FParam rep] -> ImpM rep r op ()
 addFParams = mapM_ addFParam
   where
     addFParam fparam =
@@ -1053,7 +1053,7 @@ addLoopVar :: VName -> IntType -> ImpM rep r op ()
 addLoopVar i it = addVar i $ ScalarVar Nothing $ ScalarEntry $ IntType it
 
 dVars ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Maybe (Exp rep) ->
   [PatElem (LetDec rep)] ->
   ImpM rep r op ()
@@ -1061,10 +1061,10 @@ dVars e = mapM_ dVar
   where
     dVar = dScope e . scopeOfPatElem
 
-dFParams :: Mem rep inner => [FParam rep] -> ImpM rep r op ()
+dFParams :: (Mem rep inner) => [FParam rep] -> ImpM rep r op ()
 dFParams = dScope Nothing . scopeOfFParams
 
-dLParams :: Mem rep inner => [LParam rep] -> ImpM rep r op ()
+dLParams :: (Mem rep inner) => [LParam rep] -> ImpM rep r op ()
 dLParams = dScope Nothing . scopeOfLParams
 
 dPrimVol :: String -> PrimType -> Imp.TExp t -> ImpM rep r op (TV t)
@@ -1128,7 +1128,7 @@ memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
           }
 
 infoDec ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   NameInfo rep ->
   MemInfo SubExp NoUniqueness MemBind
 infoDec (LetName dec) = letDecMem dec
@@ -1137,7 +1137,7 @@ infoDec (LParamName dec) = dec
 infoDec (IndexName it) = MemPrim $ IntType it
 
 dInfo ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Maybe (Exp rep) ->
   VName ->
   NameInfo rep ->
@@ -1156,7 +1156,7 @@ dInfo e name info = do
   addVar name entry
 
 dScope ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Maybe (Exp rep) ->
   Scope rep ->
   ImpM rep r op ()
@@ -1621,7 +1621,7 @@ copyDWIMFix dest dest_is src src_is =
 -- @space@, writing the result to @pat@, which must contain a single
 -- memory-typed element.
 compileAlloc ::
-  Mem rep inner => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
+  (Mem rep inner) => Pat (LetDec rep) -> SubExp -> Space -> ImpM rep r op ()
 compileAlloc (Pat [mem]) e space = do
   let e' = Imp.bytes $ pe64 e
   allocator <- asks $ M.lookup space . envAllocCompilers

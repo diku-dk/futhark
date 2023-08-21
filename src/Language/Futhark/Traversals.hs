@@ -42,7 +42,7 @@ data ASTMapper m = ASTMapper
   }
 
 -- | An 'ASTMapper' that just leaves its input unchanged.
-identityMapper :: Monad m => ASTMapper m
+identityMapper :: (Monad m) => ASTMapper m
 identityMapper =
   ASTMapper
     { mapOnExp = pure,
@@ -58,7 +58,7 @@ class ASTMappable x where
   -- object.  Importantly, the 'astMap' action is not invoked for
   -- the object itself, and the mapping does not descend recursively
   -- into subexpressions.  The mapping is done left-to-right.
-  astMap :: Monad m => ASTMapper m -> x -> m x
+  astMap :: (Monad m) => ASTMapper m -> x -> m x
 
 instance ASTMappable (AppExpBase Info VName) where
   astMap tv (Range start next end loc) =
@@ -275,7 +275,7 @@ type TypeTraverser f t dim1 als1 dim2 als2 =
   f (t dim2 als2)
 
 traverseScalarType ::
-  Applicative f =>
+  (Applicative f) =>
   TypeTraverser f ScalarTypeBase dim1 als1 dims als2
 traverseScalarType _ _ _ (Prim t) = pure $ Prim t
 traverseScalarType f g h (Record fs) = Record <$> traverse (traverseType f g h) fs
@@ -291,14 +291,14 @@ traverseScalarType f g h (Arrow als v u t1 (RetType dims t2)) =
 traverseScalarType f g h (Sum cs) =
   Sum <$> (traverse . traverse) (traverseType f g h) cs
 
-traverseType :: Applicative f => TypeTraverser f TypeBase dim1 als1 dims als2
+traverseType :: (Applicative f) => TypeTraverser f TypeBase dim1 als1 dims als2
 traverseType f g h (Array als shape et) =
   Array <$> h als <*> traverse g shape <*> traverseScalarType f g pure et
 traverseType f g h (Scalar t) =
   Scalar <$> traverseScalarType f g h t
 
 traverseTypeArg ::
-  Applicative f =>
+  (Applicative f) =>
   (QualName VName -> f (QualName VName)) ->
   (dim1 -> f dim2) ->
   TypeArg dim1 ->
@@ -324,7 +324,7 @@ instance ASTMappable (IdentBase Info VName StructType) where
   astMap tv (Ident name (Info t) loc) =
     Ident name <$> (Info <$> mapOnStructType tv t) <*> pure loc
 
-traversePat :: Monad m => (t1 -> m t2) -> PatBase Info VName t1 -> m (PatBase Info VName t2)
+traversePat :: (Monad m) => (t1 -> m t2) -> PatBase Info VName t1 -> m (PatBase Info VName t2)
 traversePat f (Id name (Info t) loc) =
   Id name <$> (Info <$> f t) <*> pure loc
 traversePat f (TuplePat pats loc) =
@@ -363,13 +363,13 @@ instance ASTMappable (CaseBase Info VName) where
   astMap tv (CasePat pat e loc) =
     CasePat <$> astMap tv pat <*> mapOnExp tv e <*> pure loc
 
-instance ASTMappable a => ASTMappable (Info a) where
+instance (ASTMappable a) => ASTMappable (Info a) where
   astMap tv = traverse $ astMap tv
 
-instance ASTMappable a => ASTMappable [a] where
+instance (ASTMappable a) => ASTMappable [a] where
   astMap tv = traverse $ astMap tv
 
-instance ASTMappable a => ASTMappable (NE.NonEmpty a) where
+instance (ASTMappable a) => ASTMappable (NE.NonEmpty a) where
   astMap tv = traverse $ astMap tv
 
 instance (ASTMappable a, ASTMappable b) => ASTMappable (a, b) where

@@ -109,7 +109,7 @@ data LMAD num = LMAD
   }
   deriving (Show, Eq, Ord)
 
-instance Pretty num => Pretty (LMAD num) where
+instance (Pretty num) => Pretty (LMAD num) where
   pretty (LMAD offset dims) =
     braces . semistack $
       [ "offset:" <+> group (pretty offset),
@@ -119,16 +119,16 @@ instance Pretty num => Pretty (LMAD num) where
     where
       p f = group $ brackets $ align $ commasep $ map (pretty . f) dims
 
-instance Substitute num => Substitute (LMAD num) where
+instance (Substitute num) => Substitute (LMAD num) where
   substituteNames substs = fmap $ substituteNames substs
 
-instance Substitute num => Rename (LMAD num) where
+instance (Substitute num) => Rename (LMAD num) where
   rename = substituteRename
 
-instance FreeIn num => FreeIn (LMAD num) where
+instance (FreeIn num) => FreeIn (LMAD num) where
   freeIn' = foldMap freeIn'
 
-instance FreeIn num => FreeIn (LMADDim num) where
+instance (FreeIn num) => FreeIn (LMADDim num) where
   freeIn' (LMADDim s n) = freeIn' s <> freeIn' n
 
 instance Functor LMAD where
@@ -237,7 +237,7 @@ reshape lmad@(LMAD off dims) newshape = do
 
 -- | Substitute a name with a PrimExp in an LMAD.
 substituteInLMAD ::
-  Ord a =>
+  (Ord a) =>
   M.Map a (TPrimExp t a) ->
   LMAD (TPrimExp t a) ->
   LMAD (TPrimExp t a)
@@ -257,7 +257,7 @@ rank = length . shape
 
 -- | Generalised iota with user-specified offset.
 iota ::
-  IntegralExp num =>
+  (IntegralExp num) =>
   -- | Offset
   num ->
   -- | Shape
@@ -503,14 +503,14 @@ lmadToIntervals (LMAD offset dims0) =
 -- | Dynamically determine if two 'LMADDim' are equal.
 --
 -- True if the dynamic values of their constituents are equal.
-dynamicEqualsLMADDim :: Eq num => LMADDim (TPrimExp t num) -> LMADDim (TPrimExp t num) -> TPrimExp Bool num
+dynamicEqualsLMADDim :: (Eq num) => LMADDim (TPrimExp t num) -> LMADDim (TPrimExp t num) -> TPrimExp Bool num
 dynamicEqualsLMADDim dim1 dim2 =
   ldStride dim1 .==. ldStride dim2 .&&. ldShape dim1 .==. ldShape dim2
 
 -- | Dynamically determine if two 'LMAD' are equal.
 --
 -- True if offset and constituent 'LMADDim' are equal.
-dynamicEqualsLMAD :: Eq num => LMAD (TPrimExp t num) -> LMAD (TPrimExp t num) -> TPrimExp Bool num
+dynamicEqualsLMAD :: (Eq num) => LMAD (TPrimExp t num) -> LMAD (TPrimExp t num) -> TPrimExp Bool num
 dynamicEqualsLMAD lmad1 lmad2 =
   offset lmad1 .==. offset lmad2
     .&&. foldr
@@ -521,7 +521,7 @@ dynamicEqualsLMAD lmad1 lmad2 =
 -- | Returns true if two 'LMAD's are equivalent.
 --
 -- Equivalence in this case is matching in offsets and strides.
-equivalent :: Eq num => LMAD num -> LMAD num -> Bool
+equivalent :: (Eq num) => LMAD num -> LMAD num -> Bool
 equivalent lmad1 lmad2 =
   length (dims lmad1) == length (dims lmad2)
     && offset lmad1 == offset lmad2

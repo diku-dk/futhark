@@ -343,7 +343,7 @@ diffLambda res_adjs get_adjs_for (Lambda params body _) =
     ts' <- mapM lookupType get_adjs_for
     pure $ Lambda params body' ts'
 
-revVJP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+revVJP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
 revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->

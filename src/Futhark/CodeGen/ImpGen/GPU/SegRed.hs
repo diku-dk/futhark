@@ -94,7 +94,7 @@ compileSegRed pat lvl space reds body = do
         let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
-      red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+      red_cont $ map ((,[]) . kernelResultSubExp) red_res
   emit $ Imp.DebugPrint "" Nothing
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
@@ -309,7 +309,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
           in_bounds =
             body $ \red_res ->
               sComment "save results to be reduced" $ do
-                let red_dests = zip (concat reds_arrs) $ repeat [ltid]
+                let red_dests = map (,[ltid]) (concat reds_arrs)
                 forM_ (zip red_dests red_res) $ \((d, d_is), (res, res_is)) ->
                   copyDWIMFix d d_is res res_is
 

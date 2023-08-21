@@ -72,7 +72,7 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: MonadFreshNames m => ADM a -> m a
+runADM :: (MonadFreshNames m) => ADM a -> m a
 runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $
@@ -91,7 +91,7 @@ class TanBuilder a where
   newTan :: a -> ADM a
   bundleNew :: a -> ADM [a]
 
-bundleNewList :: TanBuilder a => [a] -> ADM [a]
+bundleNewList :: (TanBuilder a) => [a] -> ADM [a]
 bundleNewList = fmap mconcat . mapM bundleNew
 
 instance TanBuilder (PatElem (TypeBase s u)) where
@@ -111,10 +111,10 @@ instance TanBuilder (PatElem (TypeBase s u)) where
       then pure [pe']
       else pure [pe, pe']
 
-newTanPat :: TanBuilder (PatElem t) => Pat t -> ADM (Pat t)
+newTanPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 newTanPat (Pat pes) = Pat <$> mapM newTan pes
 
-bundleNewPat :: TanBuilder (PatElem t) => Pat t -> ADM (Pat t)
+bundleNewPat :: (TanBuilder (PatElem t)) => Pat t -> ADM (Pat t)
 bundleNewPat (Pat pes) = Pat <$> bundleNewList pes
 
 instance TanBuilder (Param (TypeBase s u)) where
@@ -129,7 +129,7 @@ instance TanBuilder (Param (TypeBase s u)) where
       then pure [param']
       else pure [param, param']
 
-instance Tangent a => TanBuilder (Param (TypeBase s u), a) where
+instance (Tangent a) => TanBuilder (Param (TypeBase s u), a) where
   newTan (p, x) = (,) <$> newTan p <*> tangent x
   bundleNew (p, x) = do
     b <- bundleNew p
@@ -150,7 +150,7 @@ instance Tangent (TypeBase s u) where
         t' <- tangent t
         pure [t, t']
 
-bundleTangents :: Tangent a => [a] -> ADM [a]
+bundleTangents :: (Tangent a) => [a] -> ADM [a]
 bundleTangents = (mconcat <$>) . mapM bundleTan
 
 instance Tangent VName where
@@ -451,7 +451,7 @@ fwdBodyTansLast (Body _ stms res) = buildBody_ $ do
   mapM_ fwdStm stms
   (res <>) <$> mapM tangent res
 
-fwdJVP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+fwdJVP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
 fwdJVP scope l@(Lambda params body ret) =
   runADM . localScope scope . inScopeOf l $ do
     params_tan <- mapM newTan params

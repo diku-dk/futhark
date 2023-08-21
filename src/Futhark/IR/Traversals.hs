@@ -66,7 +66,7 @@ data Mapper frep trep m = Mapper
   }
 
 -- | A mapper that simply returns the tree verbatim.
-identityMapper :: forall rep m. Monad m => Mapper rep rep m
+identityMapper :: forall rep m. (Monad m) => Mapper rep rep m
 identityMapper =
   Mapper
     { mapOnSubExp = pure,
@@ -83,7 +83,7 @@ identityMapper =
 -- expression.  Importantly, the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
 mapExpM ::
-  Monad m =>
+  (Monad m) =>
   Mapper frep trep m ->
   Exp frep ->
   m (Exp trep)
@@ -194,11 +194,11 @@ mapExpM tv (Loop merge form loopbody) = do
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
 
-mapOnShape :: Monad m => Mapper frep trep m -> Shape -> m Shape
+mapOnShape :: (Monad m) => Mapper frep trep m -> Shape -> m Shape
 mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
 
 mapOnLoopForm ::
-  Monad m =>
+  (Monad m) =>
   Mapper frep trep m ->
   LoopForm frep ->
   m (LoopForm trep)
@@ -214,7 +214,7 @@ mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
 mapOnLambda ::
-  Monad m =>
+  (Monad m) =>
   Mapper frep trep m ->
   Lambda frep ->
   m (Lambda trep)
@@ -243,7 +243,7 @@ data Walker rep m = Walker
   }
 
 -- | A no-op traversal.
-identityWalker :: forall rep m. Monad m => Walker rep m
+identityWalker :: forall rep m. (Monad m) => Walker rep m
 identityWalker =
   Walker
     { walkOnSubExp = const $ pure (),
@@ -256,10 +256,10 @@ identityWalker =
       walkOnOp = const $ pure ()
     }
 
-walkOnShape :: Monad m => Walker rep m -> Shape -> m ()
+walkOnShape :: (Monad m) => Walker rep m -> Shape -> m ()
 walkOnShape tv (Shape ds) = mapM_ (walkOnSubExp tv) ds
 
-walkOnType :: Monad m => Walker rep m -> Type -> m ()
+walkOnType :: (Monad m) => Walker rep m -> Type -> m ()
 walkOnType _ Prim {} = pure ()
 walkOnType tv (Acc acc ispace ts _) = do
   walkOnVName tv acc
@@ -268,7 +268,7 @@ walkOnType tv (Acc acc ispace ts _) = do
 walkOnType _ Mem {} = pure ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
-walkOnLoopForm :: Monad m => Walker rep m -> LoopForm rep -> m ()
+walkOnLoopForm :: (Monad m) => Walker rep m -> LoopForm rep -> m ()
 walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
   walkOnVName tv i
     >> walkOnSubExp tv bound
@@ -279,14 +279,14 @@ walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
 walkOnLoopForm tv (WhileLoop cond) =
   walkOnVName tv cond
 
-walkOnLambda :: Monad m => Walker rep m -> Lambda rep -> m ()
+walkOnLambda :: (Monad m) => Walker rep m -> Lambda rep -> m ()
 walkOnLambda tv (Lambda params body ret) = do
   mapM_ (walkOnLParam tv) params
   walkOnBody tv (scopeOfLParams params) body
   mapM_ (walkOnType tv) ret
 
 -- | As 'mapExpM', but do not construct a result AST.
-walkExpM :: Monad m => Walker rep m -> Exp rep -> m ()
+walkExpM :: (Monad m) => Walker rep m -> Exp rep -> m ()
 walkExpM tv (BasicOp (SubExp se)) =
   walkOnSubExp tv se
 walkExpM tv (BasicOp (ArrayLit els rowt)) =
@@ -366,9 +366,9 @@ type OpStmsTraverser m op rep = (Scope rep -> Stms rep -> m (Stms rep)) -> op ->
 -- This is used for some simplification rules.
 class TraverseOpStms rep where
   -- | Transform every sub-'Stms' of this op.
-  traverseOpStms :: Monad m => OpStmsTraverser m (Op rep) rep
+  traverseOpStms :: (Monad m) => OpStmsTraverser m (Op rep) rep
 
 -- | A helper for defining 'traverseOpStms'.
-traverseLambdaStms :: Monad m => OpStmsTraverser m (Lambda rep) rep
+traverseLambdaStms :: (Monad m) => OpStmsTraverser m (Lambda rep) rep
 traverseLambdaStms f (Lambda ps (Body dec stms res) ret) =
   Lambda ps <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res) <*> pure ret

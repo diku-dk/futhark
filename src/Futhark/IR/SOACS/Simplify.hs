@@ -56,7 +56,7 @@ simplifySOACS =
   Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyFun ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ST.SymbolTable (Wise SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
@@ -75,12 +75,12 @@ simplifyStms stms = do
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
 
 simplifyConsts ::
-  MonadFreshNames m => Stms SOACS -> m (Stms SOACS)
+  (MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC ::
-  Simplify.SimplifiableRep rep =>
+  (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
 simplifySOAC (VJP lam arr vec) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
@@ -356,7 +356,7 @@ removeReplicateWrite vtable pat aux (Scatter w ivs lam as)
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput ::
-  Aliased rep =>
+  (Aliased rep) =>
   ST.SymbolTable rep ->
   Lambda rep ->
   [VName] ->
@@ -537,7 +537,7 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form)
             (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
             redlam_deps,
     let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-    not $ all (== True) (take (length nes) alive_mask) = Simplify $ do
+    not $ and (take (length nes) alive_mask) = Simplify $ do
       let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
           dead_fix = zipWith fixDeadToNeutral alive_mask nes
           (used_red_pes, _, used_nes) =

@@ -211,7 +211,9 @@ checkPat' _ (RecordPat p_fs _) _
   | Just (f, fp) <- find (("_" `isPrefixOf`) . nameToString . fst) p_fs =
       typeError fp mempty $
         "Underscore-prefixed fields are not allowed."
-          </> "Did you mean" <> dquotes (pretty (drop 1 (nameToString f)) <> "=_") <> "?"
+          </> "Did you mean"
+          <> dquotes (pretty (drop 1 (nameToString f)) <> "=_")
+          <> "?"
 checkPat' sizes (RecordPat p_fs loc) (Ascribed (Scalar (Record t_fs)))
   | sort (map fst p_fs) == sort (M.keys t_fs) =
       RecordPat . M.toList <$> check <*> pure loc
