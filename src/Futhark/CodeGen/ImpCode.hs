@@ -28,9 +28,9 @@
 -- ImpCode does not have arrays. 'DeclareArray' is for declaring
 -- constant array literals, not arrays in general.  Instead, ImpCode
 -- deals only with memory.  Array operations present in core IR
--- programs are turned into 'Write', v'Read', and 'Copy' operations
--- that use flat indexes and offsets based on the index function of
--- the original array.
+-- programs are turned into 'Write', v'Read', and 'LMADCopy'
+-- operations that use flat indexes and offsets based on the index
+-- function of the original array.
 --
 -- == Scoping
 --
