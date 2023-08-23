@@ -60,6 +60,7 @@ changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
 configuration may *not* be used for multiple concurrent contexts.
+Configuration objects are cheap to create and destroy.
 
 .. c:struct:: futhark_context_config
 
