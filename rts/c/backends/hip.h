@@ -722,7 +722,7 @@ void backend_context_teardown(struct futhark_context* ctx) {
 // GPU ABSTRACTION LAYER
 
 typedef hipFunction_t gpu_kernel;
-typedef void* gpu_mem;
+typedef hipDeviceptr_t gpu_mem;
 
 static void gpu_create_kernel(struct futhark_context *ctx,
                               gpu_kernel* kernel,
