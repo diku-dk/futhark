@@ -747,7 +747,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
     pevents = hip_get_events(ctx, "copy_scalar_to_dev");
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
   }
-  HIP_SUCCEED_OR_RETURN(hipMemcpyHtoD(dst + offset, src, size));
+  HIP_SUCCEED_OR_RETURN(hipMemcpyHtoD((unsigned char*)dst + offset, src, size));
   if (pevents != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
   }
@@ -762,7 +762,7 @@ static int gpu_scalar_from_device(struct futhark_context* ctx,
     pevents = hip_get_events(ctx, "copy_scalar_from_dev");
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
   }
-  HIP_SUCCEED_OR_RETURN(hipMemcpyDtoH(dst, src + offset, size));
+  HIP_SUCCEED_OR_RETURN(hipMemcpyDtoH(dst, (unsigned char*)src + offset, size));
   if (pevents != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
   }
@@ -778,7 +778,8 @@ static int gpu_memcpy(struct futhark_context* ctx,
     pevents = hip_get_events(ctx, "copy_dev_to_dev");
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
   }
-  HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream(dst+dst_offset, src+src_offset, nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
+  HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
+                                            nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
   if (pevents != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
   }
@@ -797,10 +798,13 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
     }
     if (sync) {
       HIP_SUCCEED_OR_RETURN
-        (hipMemcpyHtoD(dst + dst_offset, (unsigned char*)src + src_offset, nbytes));
+        (hipMemcpyHtoD((unsigned char*)dst + dst_offset,
+                       (unsigned char*)src + src_offset, nbytes));
     } else {
       HIP_SUCCEED_OR_RETURN
-        (hipMemcpyHtoDAsync(dst + dst_offset, (unsigned char*)src + src_offset, nbytes, ctx->stream));
+        (hipMemcpyHtoDAsync((unsigned char*)dst + dst_offset,
+                            (unsigned char*)src + src_offset,
+                            nbytes, ctx->stream));
     }
     if (pevents != NULL) {
       HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
@@ -821,10 +825,14 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
     }
     if (sync) {
       HIP_SUCCEED_OR_RETURN
-        (hipMemcpyDtoH(dst + dst_offset, src + src_offset, nbytes));
+        (hipMemcpyDtoH(dst + dst_offset,
+                       (unsigned char*)src + src_offset,
+                       nbytes));
     } else {
       HIP_SUCCEED_OR_RETURN
-        (hipMemcpyDtoHAsync(dst + dst_offset, src + src_offset, nbytes, ctx->stream));
+        (hipMemcpyDtoHAsync(dst + dst_offset,
+                            (unsigned char*)src + src_offset,
+                            nbytes, ctx->stream));
     }
     if (sync &&
         ctx->failure_is_an_option &&
