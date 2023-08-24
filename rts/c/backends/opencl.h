@@ -130,13 +130,12 @@ struct futhark_context_config {
   const char** tuning_param_classes;
   // Uniform fields above.
 
+  char* program;
   int preferred_device_num;
   const char *preferred_platform;
   const char *preferred_device;
   int ignore_blacklist;
 
-  const char* dump_program_to;
-  const char* load_program_from;
   const char* dump_binary_to;
   const char* load_binary_from;
 
@@ -163,10 +162,9 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
   cfg->preferred_platform = "";
   cfg->preferred_device = "";
   cfg->ignore_blacklist = 0;
-  cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
   cfg->dump_binary_to = NULL;
   cfg->load_binary_from = NULL;
+  cfg->program = strconcat(gpu_program);
 
   // The following are dummy sizes that mean the concrete defaults
   // will be set during initialisation via hardware-inspection-based
@@ -185,6 +183,7 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
   free(cfg->build_opts);
+  free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config* cfg, const char *opt) {
@@ -405,12 +404,12 @@ void futhark_context_config_list_devices(struct futhark_context_config *cfg) {
   free(devices);
 }
 
-void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_program_to = path;
+const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
+  return cfg->program;
 }
 
-void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_program_from = path;
+void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path) {
@@ -720,7 +719,6 @@ int futhark_context_sync(struct futhark_context* ctx) {
 // array must be NULL-terminated.
 static void setup_opencl_with_command_queue(struct futhark_context *ctx,
                                             cl_command_queue queue,
-                                            const char *srcs[],
                                             const char *extra_build_opts[],
                                             const char* cache_fname) {
   int error;
@@ -869,7 +867,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
   }
 
-  char *fut_opencl_src = NULL;
+  const char* opencl_src = ctx->cfg->program;
   cl_program prog;
   error = CL_SUCCESS;
 
@@ -879,40 +877,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->load_binary_from == NULL) {
     size_t src_size = 0;
 
-    // Maybe we have to read OpenCL source from somewhere else (used for debugging).
-    if (ctx->cfg->load_program_from != NULL) {
-      fut_opencl_src = slurp_file(ctx->cfg->load_program_from, NULL);
-      assert(fut_opencl_src != NULL);
-    } else {
-      // Construct the OpenCL source concatenating all the fragments.
-      for (const char **src = srcs; src && *src; src++) {
-        src_size += strlen(*src);
-      }
-
-      fut_opencl_src = (char*) malloc(src_size + 1);
-
-      size_t n, i;
-      for (i = 0, n = 0; srcs && srcs[i]; i++) {
-        strncpy(fut_opencl_src+n, srcs[i], src_size-n);
-        n += strlen(srcs[i]);
-      }
-      fut_opencl_src[src_size] = 0;
-    }
-
-    if (ctx->cfg->dump_program_to != NULL) {
-      if (ctx->cfg->logging) {
-        fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg->dump_program_to);
-      }
-
-      dump_file(ctx->cfg->dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
-    }
-
     if (cache_fname != NULL) {
       if (ctx->cfg->logging) {
         fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
       }
       cache_hash_init(&h);
-      cache_hash(&h, fut_opencl_src, strlen(fut_opencl_src));
+      cache_hash(&h, opencl_src, strlen(opencl_src));
       cache_hash(&h, compile_opts, strlen(compile_opts));
 
       unsigned char *buf;
@@ -949,7 +919,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
         fprintf(stderr, "Creating OpenCL program...\n");
       }
 
-      const char* src_ptr[] = {fut_opencl_src};
+      const char* src_ptr[] = {opencl_src};
       prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
       OPENCL_SUCCEED_FATAL(error);
     }
@@ -978,7 +948,6 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   OPENCL_SUCCEED_FATAL(build_gpu_program(prog, device_option.device, compile_opts));
 
   free(compile_opts);
-  free(fut_opencl_src);
 
   size_t binary_size = 0;
   unsigned char *binary = NULL;
@@ -1042,7 +1011,6 @@ static struct opencl_device_option get_preferred_device(const struct futhark_con
 }
 
 static void setup_opencl(struct futhark_context *ctx,
-                         const char *srcs[],
                          const char *extra_build_opts[],
                          const char* cache_fname) {
   struct opencl_device_option device_option = get_preferred_device(ctx->cfg);
@@ -1071,7 +1039,7 @@ static void setup_opencl(struct futhark_context *ctx,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  setup_opencl_with_command_queue(ctx, queue, srcs, extra_build_opts, cache_fname);
+  setup_opencl_with_command_queue(ctx, queue, extra_build_opts, cache_fname);
 }
 
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
@@ -1091,9 +1059,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->cur_mem_usage_device = 0;
 
   if (ctx->cfg->queue_set) {
-    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, gpu_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
-    setup_opencl(ctx, gpu_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl(ctx, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   }
 
   cl_int error;

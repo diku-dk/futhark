@@ -87,14 +87,12 @@ struct futhark_context_config {
   const char** tuning_param_classes;
   // Uniform fields above.
 
+  char* program;
   int num_nvrtc_opts;
   const char **nvrtc_opts;
 
   const char *preferred_device;
   int preferred_device_num;
-
-  const char *dump_program_to;
-  const char *load_program_from;
 
   const char *dump_ptx_to;
   const char *load_ptx_from;
@@ -115,10 +113,10 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
   cfg->nvrtc_opts[0] = NULL;
 
+  cfg->program = strconcat(gpu_program);
+
   cfg->preferred_device_num = 0;
   cfg->preferred_device = "";
-  cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
 
   cfg->dump_ptx_to = NULL;
   cfg->load_ptx_from = NULL;
@@ -161,12 +159,12 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
   cfg->preferred_device_num = x;
 }
 
-void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_program_to = path;
+const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
+  return cfg->program;
 }
 
-void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_program_from = path;
+void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path) {
@@ -618,29 +616,14 @@ static void cuda_size_setup(struct futhark_context *ctx)
 }
 
 static char* cuda_module_setup(struct futhark_context *ctx,
-                               const char *src_fragments[],
+                               const char *src,
                                const char *extra_opts[],
                                const char* cache_fname) {
-  char *ptx = NULL, *src = NULL;
+  char *ptx = NULL;
   struct futhark_context_config *cfg = ctx->cfg;
 
-  if (cfg->load_program_from == NULL) {
-    src = strconcat(src_fragments);
-  } else {
-    src = slurp_file(cfg->load_program_from, NULL);
-  }
-
   if (cfg->load_ptx_from) {
-    if (cfg->load_program_from != NULL) {
-      fprintf(stderr,
-              "WARNING: Using PTX from %s instead of C code from %s\n",
-              cfg->load_ptx_from, cfg->load_program_from);
-    }
     ptx = slurp_file(cfg->load_ptx_from, NULL);
-  }
-
-  if (cfg->dump_program_to != NULL) {
-    dump_file(cfg->dump_program_to, src, strlen(src));
   }
 
   char **opts;
@@ -682,7 +665,6 @@ static char* cuda_module_setup(struct futhark_context *ctx,
   if (ptx == NULL) {
     char* problem = cuda_nvrtc_build(src, (const char**)opts, n_opts, &ptx);
     if (problem != NULL) {
-      free(src);
       return problem;
     }
   }
@@ -709,11 +691,7 @@ static char* cuda_module_setup(struct futhark_context *ctx,
     free((char *)opts[i]);
   }
   free(opts);
-
   free(ptx);
-  if (src != NULL) {
-    free(src);
-  }
 
   return NULL;
 }
@@ -843,7 +821,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
-  ctx->error = cuda_module_setup(ctx, gpu_program,
+  ctx->error = cuda_module_setup(ctx, ctx->cfg->program,
                                  ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {

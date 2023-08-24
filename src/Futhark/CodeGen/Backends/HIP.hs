@@ -43,8 +43,8 @@ mkBoilerplate hip_program kernels types failures = do
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char* opt);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|const char* futhark_context_config_get_program(struct futhark_context_config *cfg);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
@@ -60,15 +60,23 @@ cliOptions =
              optionArgument = RequiredArgument "FILE",
              optionDescription = "Dump the embedded HIP kernels to the indicated file.",
              optionAction =
-               [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
-                                     entry_point = NULL;}|]
+               [C.cstm|{const char* prog = futhark_context_config_get_program(cfg);
+                        if (dump_file(optarg, prog, strlen(prog)) != 0) {
+                          fprintf(stderr, "%s: %s\n", optarg, strerror(errno));
+                          exit(1);
+                        }
+                        exit(0);}|]
            },
          Option
            { optionLongName = "load-hip",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
              optionDescription = "Instead of using the embedded HIP kernels, load them from the indicated file.",
-             optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+             optionAction =
+               [C.cstm|{ size_t n; const char *s = slurp_file(optarg, &n);
+                         if (s == NULL) { fprintf(stderr, "%s: %s\n", optarg, strerror(errno)); exit(1); }
+                         futhark_context_config_set_program(cfg, s);
+                       }|]
            },
          Option
            { optionLongName = "build-option",

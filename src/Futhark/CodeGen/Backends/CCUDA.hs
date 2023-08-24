@@ -43,8 +43,8 @@ mkBoilerplate cuda_program kernels types failures = do
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char* opt);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_device(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char* s);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|const char* futhark_context_config_get_program(struct futhark_context_config *cfg);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
@@ -62,15 +62,23 @@ cliOptions =
              optionArgument = RequiredArgument "FILE",
              optionDescription = "Dump the embedded CUDA kernels to the indicated file.",
              optionAction =
-               [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
-                                     entry_point = NULL;}|]
+               [C.cstm|{const char* prog = futhark_context_config_get_program(cfg);
+                        if (dump_file(optarg, prog, strlen(prog)) != 0) {
+                          fprintf(stderr, "%s: %s\n", optarg, strerror(errno));
+                          exit(1);
+                        }
+                        exit(1);}|]
            },
          Option
            { optionLongName = "load-cuda",
              optionShortName = Nothing,
              optionArgument = RequiredArgument "FILE",
              optionDescription = "Instead of using the embedded CUDA kernels, load them from the indicated file.",
-             optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+             optionAction =
+               [C.cstm|{ size_t n; const char *s = slurp_file(optarg, &n);
+                         if (s == NULL) { fprintf(stderr, "%s: %s\n", optarg, strerror(errno)); exit(1); }
+                         futhark_context_config_set_program(cfg, s);
+                       }|]
            },
          Option
            { optionLongName = "dump-ptx",
