@@ -95,7 +95,7 @@ cliOptions =
        ]
 
 hipMemoryType :: GC.MemoryType OpenCL ()
-hipMemoryType "device" = pure [C.cty|void*|]
+hipMemoryType "device" = pure [C.cty|typename hipDeviceptr_t|]
 hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
 -- | Compile the program to C with calls to HIP.
