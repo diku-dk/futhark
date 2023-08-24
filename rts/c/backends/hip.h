@@ -85,14 +85,12 @@ struct futhark_context_config {
   const char** tuning_param_classes;
   // Uniform fields above.
 
+  char* program;
   int num_build_opts;
   const char **build_opts;
 
   const char *preferred_device;
   int preferred_device_num;
-
-  const char *dump_program_to;
-  const char *load_program_from;
 
   size_t default_block_size;
   size_t default_grid_size;
@@ -109,11 +107,9 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_build_opts = 0;
   cfg->build_opts = (const char**) malloc(sizeof(const char*));
   cfg->build_opts[0] = NULL;
-
   cfg->preferred_device_num = 0;
   cfg->preferred_device = "";
-  cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
+  cfg->program = strconcat(gpu_program);
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
@@ -128,6 +124,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
   free(cfg->build_opts);
+  free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char *opt) {
@@ -153,12 +150,13 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
   cfg->preferred_device_num = x;
 }
 
-void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_program_to = path;
+
+const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
+  return cfg->program;
 }
 
-void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_program_from = path;
+void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  cfg->program = strdup(s);
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
@@ -497,22 +495,12 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
 }
 
 static char* hip_module_setup(struct futhark_context *ctx,
-                              const char *src_fragments[],
+                              const char *src,
                               const char *extra_opts[],
                               const char* cache_fname) {
-  char *code = NULL, *src = NULL;
+  char *code = NULL;
   size_t code_size = 0;
   struct futhark_context_config *cfg = ctx->cfg;
-
-  if (cfg->load_program_from == NULL) {
-    src = strconcat(src_fragments);
-  } else {
-    src = slurp_file(cfg->load_program_from, NULL);
-  }
-
-  if (cfg->dump_program_to != NULL) {
-    dump_file(cfg->dump_program_to, src, strlen(src));
-  }
 
   char **opts;
   size_t n_opts;
@@ -553,7 +541,6 @@ static char* hip_module_setup(struct futhark_context *ctx,
   if (code == NULL) {
     char* problem = hiprtc_build(src, (const char**)opts, n_opts, &code, &code_size);
     if (problem != NULL) {
-      free(src);
       return problem;
     }
   }
@@ -576,11 +563,7 @@ static char* hip_module_setup(struct futhark_context *ctx,
     free((char *)opts[i]);
   }
   free(opts);
-
   free(code);
-  if (src != NULL) {
-    free(src);
-  }
 
   return NULL;
 }
@@ -705,7 +688,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
-  ctx->error = hip_module_setup(ctx, gpu_program,
+  ctx->error = hip_module_setup(ctx, ctx->cfg->program,
                                 ctx->cfg->build_opts, ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {

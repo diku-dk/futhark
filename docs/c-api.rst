@@ -441,8 +441,8 @@ permitted on a consumed value.
 GPU
 ---
 
-The following API functions are available when using the ``opencl`` or
-``cuda`` backends.
+The following API functions are available when using the ``opencl``,
+``cuda``, or ``hip`` backends.
 
 .. c:function:: void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s)
 
@@ -471,15 +471,15 @@ The following functions are not interesting to most users.
    Set the default tile size used when executing kernels that have
    been block tiled.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: const char* futhark_context_config_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the OpenCL or CUDA
-   program source to the given file.
+   Retrieve the embedded GPU program.  The context configuration keeps
+   ownership, so don't free the string.
 
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *program)
 
-   During :c:func:`futhark_context_new`, read OpenCL or CUDA program
-   source from the given file instead of using the embedded program.
+   Instead of using the embedded GPU program, use the provided string,
+   which is copied by this function.
 
 OpenCL
 ------
@@ -522,10 +522,9 @@ advanced usage.
    Add a build option to the OpenCL kernel compiler.  See the OpenCL
    specification for `clBuildProgram` for available options.
 
-.. c:function:: void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: cl_program futhark_context_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the compiled OpenCL
-   binary to the given file.
+   Retrieve the compiled OpenCL program.
 
 .. c:function:: void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char *path)
 
@@ -549,7 +548,7 @@ advanced usage.
    Add a build option to the NVRTC compiler.  See the CUDA
    documentation for ``nvrtcCompileProgram`` for available options.
 
-.. c:function:: void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the generated PTX code
    to the given file.
