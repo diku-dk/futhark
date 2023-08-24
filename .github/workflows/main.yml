@@ -366,7 +366,7 @@ jobs:
             --cache-extension=cache
           source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-pyopencl:
     runs-on: opencl
@@ -386,7 +386,7 @@ jobs:
           set -e
           source virtualenv/bin/activate
           futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
     runs-on: cuda
@@ -408,7 +408,7 @@ jobs:
           futhark test tests --no-terminal --backend=cuda --concurrency=8
           source virtualenv/bin/activate
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-hip:
     runs-on: MI100
