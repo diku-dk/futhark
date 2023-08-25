@@ -2028,12 +2028,18 @@ interpretFunction ctx fname vs = do
     updateType _ t =
       Right t
 
-    -- FIXME: we don't check array sizes.
     checkInput :: ValueType -> StructType -> Either T.Text ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput (Array _ _ (Prim vt)) (Array _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
+    checkInput vArr@(Array _ (F.Shape vd) _) pArr@(Array _ (F.Shape pd) _)
+      | length vd /= length pd = badDim vArr pArr
+      | not . all (== True) $ zipWith sameShape vd pd = badDim vArr pArr
+      where
+        sameShape :: Int64 -> Size -> Bool
+        sameShape shape0 (IntLit shape1 _ _) = fromIntegral shape0 == shape1
+        sameShape _ _ = True
     checkInput _ _ =
       Right ()
 
@@ -2044,3 +2050,11 @@ interpretFunction ctx fname vs = do
           <+> align (pretty pt)
           </> "Got:     "
           <+> align (pretty vt)
+
+    badDim vd pd =
+      Left . docText $
+        "Invalid argument dimensions."
+          </> "Expected:"
+          <+> align (pretty pd)
+          </> "Got:     "
+          <+> align (pretty vd)
