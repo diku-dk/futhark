@@ -305,6 +305,11 @@ data TermBinding
     TermPoly (Maybe T.BoundV) (StructType -> Eval -> EvalM Value)
   | TermModule Module
 
+instance Show TermBinding where
+  show (TermValue bv v) = unwords ["TermValue", show bv, show v]
+  show (TermPoly bv _) = unwords ["TermPoly", show bv]
+  show (TermModule _) = "TermModule"
+
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
@@ -649,12 +654,14 @@ evalTermVar env qv t =
   case lookupVar qv env of
     Just (TermPoly _ v) -> v (expandType env t) =<< evalWithExts env
     Just (TermValue _ v) -> pure v
-    _ -> do
+    x -> do
       ss <- map (locText . srclocOf) <$> stacktrace
       error $
         prettyString qv
           <> " is not bound to a value.\n"
           <> T.unpack (prettyStacktrace 0 ss)
+          <> "Bound to\n"
+          <> show x
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
