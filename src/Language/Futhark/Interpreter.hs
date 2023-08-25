@@ -308,17 +308,22 @@ data TermBinding
 instance Show TermBinding where
   show (TermValue bv v) = unwords ["TermValue", show bv, show v]
   show (TermPoly bv _) = unwords ["TermPoly", show bv]
-  show (TermModule _) = "TermModule"
+  show (TermModule m) = unwords ["TermModule", show m]
 
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
+
+instance Show Module where
+  show (Module env) = "(" <> unwords ["Module", show env] <> ")"
+  show (ModuleFun _) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
     envType :: M.Map VName T.TypeBinding
   }
+  deriving (Show)
 
 instance Monoid Env where
   mempty = Env mempty mempty
