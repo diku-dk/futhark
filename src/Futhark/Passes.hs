@@ -80,7 +80,7 @@ adPipeline =
       simplifySOACS
     ]
 
--- | The pipeline used by the CUDA and OpenCL backends, but before
+-- | The pipeline used by the CUDA, HIP, and OpenCL backends, but before
 -- adding memory information.  Includes 'standardPipeline'.
 gpuPipeline :: Pipeline SOACS GPU
 gpuPipeline =
