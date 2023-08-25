@@ -260,8 +260,8 @@ compileSegScan pat lvl space scanOp kbody = do
       statusA = 1
       statusP = 2
 
-  emit $ Imp.DebugPrint "Sequential elements per thread (m):" $ Just $ untyped (m :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "Memory constraint " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Sequential elements per thread (m) " $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Memory constraint" $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
