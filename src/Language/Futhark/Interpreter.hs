@@ -1152,7 +1152,9 @@ evalModExp env (ModDecs ds _) = do
   Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
   pure
-    ( Env terms types,
+    ( Env
+        (terms `M.difference` envTerm env)
+        (types `M.difference` envType env),
       Module $
         Env
           (terms `M.difference` envTerm env)
