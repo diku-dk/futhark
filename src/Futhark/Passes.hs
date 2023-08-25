@@ -34,6 +34,7 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
+import Futhark.Pass.CoalesceAccess
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -93,7 +94,7 @@ gpuPipeline =
         tileLoops,
         simplifyGPU,
         histAccsGPU,
-        babysitKernels,
+        coalesceAccess,
         simplifyGPU,
         unstreamGPU,
         performCSE True,
