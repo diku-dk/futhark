@@ -3,6 +3,7 @@ module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
     depsOf,
+    depsOfArray,
     lambdaDependencies,
     findNecessaryForReturned,
   )
@@ -85,6 +86,9 @@ depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 
 depsOfRes :: Dependencies -> SubExpRes -> Names
 depsOfRes deps (SubExpRes _ se) = depsOf deps se
+
+depsOfArray :: Dependencies -> SubExp -> VName -> Names
+depsOfArray deps size name = depsOfVar deps name <> depsOf deps size
 
 -- | Extend @names@ with direct dependencies in @deps@.
 depsOfNames :: Dependencies -> Names -> Names

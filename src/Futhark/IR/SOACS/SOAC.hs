@@ -596,7 +596,7 @@ instance ASTRep rep => IsOp (SOAC rep) where
   opDependencies (Hist w arrs ops lam) =
     undefined
   opDependencies (Scatter w arrs lam outputs) =
-    let input_deps = map (\vn -> oneName vn <> depsOf mempty w) arrs
+    let input_deps = map (depsOfArray mempty w) arrs
         -- TODO ^ this is duplicate code
         lam_deps = lambdaDependencies mempty lam input_deps
      in map flattenGroups (groupScatterResults' outputs lam_deps)
@@ -609,7 +609,7 @@ instance ASTRep rep => IsOp (SOAC rep) where
           let deps_nes = map (depsOf mempty) nes
            in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
 
-        deps_map_in = map (\vn -> oneName vn <> depsOf mempty w) arrs
+        deps_map_in = map (depsOfArray mempty w) arrs
         (deps_scans_in', deps_reds_in', deps_map) =
           splitAt3 (scanResults scans) (redResults reds) $
             lambdaDependencies mempty map_lam deps_map_in
