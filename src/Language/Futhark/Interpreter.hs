@@ -2035,7 +2035,7 @@ interpretFunction ctx fname vs = do
       | vt /= pt = badPrim vt pt
     checkInput vArr@(Array _ (F.Shape vd) _) pArr@(Array _ (F.Shape pd) _)
       | length vd /= length pd = badDim vArr pArr
-      | not . all (== True) $ zipWith sameShape vd pd = badDim vArr pArr
+      | not . and $ zipWith sameShape vd pd = badDim vArr pArr
       where
         sameShape :: Int64 -> Size -> Bool
         sameShape shape0 (IntLit shape1 _ _) = fromIntegral shape0 == shape1
