@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Size-polymorphic value bindings with existential sizes are now
   rejected by type checker (#1993).
 
+* Single pass scans with complicated fused map functions were
+  insufficiently memory-expanded (#2023).
+
 ## [0.25.2]
 
 ### Added
