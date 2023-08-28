@@ -591,6 +591,10 @@ instance CanBeAliased SOAC where
 instance ASTRep rep => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
+  opDependencies (Stream w arr accs lam) =
+    undefined -- TODO write an example program for this first; see issue656.fut
+  opDependencies (Hist w arrs ops lam) =
+    undefined
   opDependencies (Scatter w arrs lam outputs) =
     let input_deps = map (\vn -> oneName vn <> depsOf mempty w) arrs
         -- TODO ^ this is duplicate code
