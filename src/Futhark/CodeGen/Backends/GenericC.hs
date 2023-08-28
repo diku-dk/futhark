@@ -198,20 +198,11 @@ defineMemorySpace space = do
     return ret;
   }
 
-  long long new_usage = ctx->$id:usagename + size;
   if (ctx->detail_memory) {
-    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (currently allocated: %lld bytes).",
             (long long) size,
             desc, $string:spacedesc,
-            new_usage);
-  }
-  if (new_usage > ctx->$id:peakname) {
-    ctx->$id:peakname = new_usage;
-    if (ctx->detail_memory) {
-      fprintf(ctx->log, " (new peak).\n");
-    }
-  } else if (ctx->detail_memory) {
-    fprintf(ctx->log, ".\n");
+            ctx->$id:usagename);
   }
 
   $items:alloc
@@ -221,7 +212,20 @@ defineMemorySpace space = do
     *(block->references) = 1;
     block->size = size;
     block->desc = desc;
+    long long new_usage = ctx->$id:usagename + size;
+    if (ctx->detail_memory) {
+      fprintf(ctx->log, "Received block of %lld bytes; now allocated: %lld bytes",
+              (long long)block->size, new_usage);
+    }
     ctx->$id:usagename = new_usage;
+    if (new_usage > ctx->$id:peakname) {
+      ctx->$id:peakname = new_usage;
+      if (ctx->detail_memory) {
+        fprintf(ctx->log, " (new peak).\n");
+      }
+    } else if (ctx->detail_memory) {
+        fprintf(ctx->log, ".\n");
+    }
     return FUTHARK_SUCCESS;
   } else {
     // We are naively assuming that any memory allocation error is due to OOM.
