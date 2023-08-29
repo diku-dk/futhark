@@ -612,7 +612,9 @@ fixPointCoalesce lutab fpar bdy topenv = do
       handleFunctionParams (a, i, s) (_, u, MemBlock _ _ m ixf) =
         case (u, M.lookup m a) of
           (Unique, Just entry)
-            | dstind entry == ixf ->
+            | dstind entry == ixf,
+              Set dst_uses <- dstrefs (memrefs entry),
+              dst_uses == mempty ->
                 let (a', s') = markSuccessCoal (a, s) m entry
                  in (a', i, s')
           _ ->
