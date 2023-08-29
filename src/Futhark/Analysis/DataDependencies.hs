@@ -93,7 +93,7 @@ depsOfNames :: Dependencies -> Names -> Names
 depsOfNames deps names = mconcat $ map (depsOfVar deps) $ namesToList names
 
 depsOfArrays :: SubExp -> [VName] -> [Names]
-depsOfArrays size arrs = map (\arr -> oneName arr <> depsOf mempty size) arrs
+depsOfArrays size = map (\arr -> oneName arr <> depsOf mempty size)
 
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.

@@ -57,7 +57,6 @@ import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
@@ -609,24 +608,26 @@ instance ASTRep rep => IsOp (SOAC rep) where
         value_lengths = [length (histNeutral op) | op <- ops]
         (indices, values) = splitAt (sum ranks) bucket_fun_deps'
         bucket_fun_deps =
-          zipWith concatIndicesToEachValue
-                  (chunks ranks indices) (chunks value_lengths values)
+          zipWith
+            concatIndicesToEachValue
+            (chunks ranks indices)
+            (chunks value_lengths values)
      in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
-   where
-     depsOfHistOp (HistOp dest_shape rf dests nes op) =
-       -- TODO dependence on race factor necessary? (ie is it always a constant?)
-       -- TODO Missing freeIn nes? Might be a general oversight.
-       -- TODO Missing freeIn shape? Don't think a shape can have free variables?
-       -- TODO Is there a more elegant way than `depsOf mempty` to create
-       -- new names?
-       let shape_deps = (freeIn dest_shape) <> (mconcat $ map (depsOf mempty) (shapeDims dest_shape))
-           rf_deps = freeIn rf <> depsOf mempty rf
-           in_deps = map (<> (shape_deps <> rf_deps)) (map oneName dests)
-        in reductionDependencies mempty op nes in_deps
-     -- A histogram operation may use the same index for multiple values.
-     concatIndicesToEachValue is vs =
-       let is_flat = mconcat is
-        in map ((<>) is_flat) vs
+    where
+      depsOfHistOp (HistOp dest_shape rf dests nes op) =
+        -- TODO dependence on race factor necessary? (ie is it always a constant?)
+        -- TODO Missing freeIn nes? Might be a general oversight.
+        -- TODO Missing freeIn shape? Don't think a shape can have free variables?
+        -- TODO Is there a more elegant way than `depsOf mempty` to create
+        -- new names?
+        let shape_deps = mconcat $ map (depsOf mempty) (shapeDims dest_shape)
+            rf_deps = freeIn rf <> depsOf mempty rf
+            in_deps = map (\vn -> oneName vn <> (shape_deps <> rf_deps)) dests
+         in reductionDependencies mempty op nes in_deps
+      -- A histogram operation may use the same index for multiple values.
+      concatIndicesToEachValue is vs =
+        let is_flat = mconcat is
+         in map (is_flat <>) vs
   opDependencies (Scatter w arrs lam outputs) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenGroups (groupScatterResults' outputs deps)
