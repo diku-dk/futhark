@@ -622,7 +622,7 @@ instance ASTRep rep => IsOp (SOAC rep) where
         -- new names?
         let shape_deps = mconcat $ map (depsOf mempty) (shapeDims dest_shape)
             rf_deps = freeIn rf <> depsOf mempty rf
-            in_deps = map (\vn -> oneName vn <> (shape_deps <> rf_deps)) dests
+            in_deps = map (\vn -> oneName vn <> shape_deps <> rf_deps) dests
          in reductionDependencies mempty op nes in_deps
       -- A histogram operation may use the same index for multiple values.
       concatIndicesToEachValue is vs =
