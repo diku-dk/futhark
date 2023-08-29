@@ -3,8 +3,9 @@ module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
     depsOf,
-    depsOfArray,
+    depsOfArrays,
     lambdaDependencies,
+    reductionDependencies,
     findNecessaryForReturned,
   )
 where
@@ -87,12 +88,12 @@ depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
 depsOfRes :: Dependencies -> SubExpRes -> Names
 depsOfRes deps (SubExpRes _ se) = depsOf deps se
 
-depsOfArray :: Dependencies -> SubExp -> VName -> Names
-depsOfArray deps size name = depsOfVar deps name <> depsOf deps size
-
 -- | Extend @names@ with direct dependencies in @deps@.
 depsOfNames :: Dependencies -> Names -> Names
 depsOfNames deps names = mconcat $ map (depsOfVar deps) $ namesToList names
+
+depsOfArrays :: SubExp -> [VName] -> [Names]
+depsOfArrays size arrs = map (\arr -> oneName arr <> depsOf mempty size) arrs
 
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.
@@ -117,6 +118,17 @@ lambdaDependencies deps lam inputs =
         & dprint "lambdaDependencies:"
   where
     dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
+
+reductionDependencies ::
+  ASTRep rep =>
+  Dependencies ->
+  Lambda rep ->
+  [SubExp] ->
+  [Names] ->
+  [Names]
+reductionDependencies deps lam neutrals inputs =
+  let neutrals' = map (depsOf deps) neutrals
+   in lambdaDependencies deps lam (zipWith (<>) neutrals' inputs)
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,

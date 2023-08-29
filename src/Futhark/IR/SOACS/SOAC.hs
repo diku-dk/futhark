@@ -172,9 +172,13 @@ data Scan rep = Scan
   }
   deriving (Eq, Ord, Show)
 
+-- | What are the sizes of reduction results produced by these 'Scan's?
+scanSizes :: [Scan rep] -> [Int]
+scanSizes = map (length . scanNeutral)
+
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan rep] -> Int
-scanResults = sum . map (length . scanNeutral)
+scanResults = sum . scanSizes
 
 -- | Combine multiple scan operators to a single operator.
 singleScan :: Buildable rep => [Scan rep] -> Scan rep
@@ -191,9 +195,13 @@ data Reduce rep = Reduce
   }
   deriving (Eq, Ord, Show)
 
+-- | What are the sizes of reduction results produced by these 'Reduce's?
+redSizes :: [Reduce rep] -> [Int]
+redSizes = map (length . redNeutral)
+
 -- | How many reduction results are produced by these 'Reduce's?
 redResults :: [Reduce rep] -> Int
-redResults = sum . map (length . redNeutral)
+redResults = sum . redSizes
 
 -- | Combine multiple reduction operators to a single operator.
 singleReduce :: Buildable rep => [Reduce rep] -> Reduce rep
@@ -594,42 +602,50 @@ instance ASTRep rep => IsOp (SOAC rep) where
   opDependencies (Stream w arr accs lam) =
     undefined -- TODO write an example program for this first; see issue656.fut
   opDependencies (Hist w arrs ops lam) =
-    undefined
+    let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
+        -- Bucket function results are indices followed by values.
+        -- Reshape this to align with list of histogram operations.
+        ranks = [length (histShape op) | op <- ops]
+        value_lengths = [length (histNeutral op) | op <- ops]
+        (indices, values) = splitAt (sum ranks) bucket_fun_deps'
+        bucket_fun_deps =
+          zipWith concatIndicesToEachValue
+                  (chunks ranks indices) (chunks value_lengths values)
+     in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+   where
+     depsOfHistOp (HistOp dest_shape rf dests nes op) =
+       -- TODO dependence on race factor necessary? (ie is it always a constant?)
+       -- TODO Missing freeIn nes? Might be a general oversight.
+       -- TODO Missing freeIn shape? Don't think a shape can have free variables?
+       -- TODO Is there a more elegant way than `depsOf mempty` to create
+       -- new names?
+       let shape_deps = (freeIn dest_shape) <> (mconcat $ map (depsOf mempty) (shapeDims dest_shape))
+           rf_deps = freeIn rf <> depsOf mempty rf
+           in_deps = map (<> (shape_deps <> rf_deps)) (map oneName dests)
+        in reductionDependencies mempty op nes in_deps
+     -- A histogram operation may use the same index for multiple values.
+     concatIndicesToEachValue is vs =
+       let is_flat = mconcat is
+        in map ((<>) is_flat) vs
   opDependencies (Scatter w arrs lam outputs) =
-    let input_deps = map (depsOfArray mempty w) arrs
-        -- TODO ^ this is duplicate code
-        lam_deps = lambdaDependencies mempty lam input_deps
-     in map flattenGroups (groupScatterResults' outputs lam_deps)
+    let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
+     in map flattenGroups (groupScatterResults' outputs deps)
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
-    let depsOfScan (Scan lam nes, deps_in) = depsOf' lam nes deps_in
-        depsOfRed (Reduce _ lam nes, deps_in) = depsOf' lam nes deps_in
-        depsOf' lam nes deps_in =
-          let deps_nes = map (depsOf mempty) nes
-           in lambdaDependencies mempty lam (zipWith (<>) deps_nes deps_in)
-
-        deps_map_in = map (depsOfArray mempty w) arrs
-        (deps_scans_in', deps_reds_in', deps_map) =
+    let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
-            lambdaDependencies mempty map_lam deps_map_in
-              & dprint "deps_map"
-
-        deps_scans_in = chunks (scanSizes scans) deps_scans_in'
-        deps_scans =
-          concatMap depsOfScan (zip scans deps_scans_in)
-            & dprint "deps_scans"
-
-        deps_reds_in = chunks (redSizes reds) deps_reds_in'
-        deps_reds =
-          concatMap depsOfRed (zip reds deps_reds_in)
-            & dprint "deps_reds"
-     in deps_scans <> deps_reds <> deps_map
-          & dprint "deps_screma"
+            lambdaDependencies mempty map_lam (depsOfArrays w arrs)
+        scans_deps =
+          concatMap depsOfScan (zip scans $ chunks (scanSizes scans) scans_in)
+        reds_deps =
+          concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
+     in scans_deps <> reds_deps <> map_deps
     where
-      dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
-      scanSizes = map (length . scanNeutral)
-      redSizes = map (length . redNeutral)
+      depsOfScan (Scan lam nes, deps_in) =
+        reductionDependencies mempty lam nes deps_in
+      depsOfRed (Reduce _ lam nes, deps_in) =
+        reductionDependencies mempty lam nes deps_in
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
