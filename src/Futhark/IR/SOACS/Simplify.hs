@@ -548,7 +548,7 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form) =
                 (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
                 redlam_deps,
         let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-        not $ all (== True) (take (length nes) alive_mask) = Simplify $ do
+        not $ and (take (length nes) alive_mask) = Simplify $ do
           let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
               dead_fix = zipWith fixDeadToNeutral alive_mask nes
               (used_red_pes, _, used_nes) =
