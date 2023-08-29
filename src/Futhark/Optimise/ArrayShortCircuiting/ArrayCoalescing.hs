@@ -1180,9 +1180,9 @@ mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
 mkCoalsTabStm lutab stm@(Let pat aux (Op op)) td_env bu_env = do
   -- Process body
   on_op <- asks onOp
-  activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env
-  let bu_env' = bu_env {activeCoals = activeCoals'}
-  on_op lutab pat (stmAuxCerts aux) op td_env bu_env'
+  bu_env' <- on_op lutab pat (stmAuxCerts aux) op td_env bu_env
+  activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env'
+  pure $ bu_env' {activeCoals = activeCoals'}
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --   i) Filter @activeCoals@ by the 3rd safety condition:
   --      this is now relaxed by use of LMAD eqs:
