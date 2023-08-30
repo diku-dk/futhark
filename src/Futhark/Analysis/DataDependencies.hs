@@ -105,20 +105,14 @@ lambdaDependencies ::
   [Names]
 lambdaDependencies deps lam inputs =
   let names_in_scope = freeIn lam <> mconcat inputs
-      deps_in =
-        M.fromList $
-          zip (boundByLambda lam) inputs
-            & dprint "lambdaDependencies:deps_in"
-      deps' =
-        dataDependencies' (deps_in <> deps) (lambdaBody lam)
-          & dprint "lambdaDependencies:deps'"
+      deps_in = M.fromList $ zip (boundByLambda lam) inputs
+      deps' = dataDependencies' (deps_in <> deps) (lambdaBody lam)
    in map
         (namesIntersection names_in_scope . depsOfRes deps')
         (bodyResult $ lambdaBody lam)
-        & dprint "lambdaDependencies:"
-  where
-    dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
 
+-- | Like 'lambdaDependencies', but @lam@ is a binary operation
+-- with a neutral element.
 reductionDependencies ::
   (ASTRep rep) =>
   Dependencies ->
