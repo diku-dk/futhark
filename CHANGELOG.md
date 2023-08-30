@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Single pass scans with complicated fused map functions were
   insufficiently memory-expanded (#2023).
 
+* Invalid short circuiting (#2013).
+
 ## [0.25.2]
 
 ### Added
