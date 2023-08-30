@@ -1465,11 +1465,11 @@ genSSPointInfoSegOp
   (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
   certs
   (SegMap _ space _ kernel_body)
-    | (src, MemBlock _ shp src_mem src_ixf) : _ <-
+    | (src, MemBlock src_pt shp src_mem src_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
             kernelBodyStms kernel_body =
-        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, dst_pt, shp, certs)]
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, src_pt, shp, certs)]
     where
       iterators = map fst $ unSegSpace space
       frees = freeIn kernel_body
