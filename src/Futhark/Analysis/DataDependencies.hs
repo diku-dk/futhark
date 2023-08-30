@@ -98,7 +98,7 @@ depsOfArrays size = map (\arr -> oneName arr <> depsOf mempty size)
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.
 lambdaDependencies ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Dependencies ->
   Lambda rep ->
   [Names] ->
@@ -120,7 +120,7 @@ lambdaDependencies deps lam inputs =
     dprint msg x = Debug.Trace.trace (msg ++ " " ++ show x ++ "\n") x
 
 reductionDependencies ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Dependencies ->
   Lambda rep ->
   [SubExp] ->
