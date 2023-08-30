@@ -612,7 +612,9 @@ fixPointCoalesce lutab fpar bdy topenv = do
       handleFunctionParams (a, i, s) (_, u, MemBlock _ _ m ixf) =
         case (u, M.lookup m a) of
           (Unique, Just entry)
-            | dstind entry == ixf ->
+            | dstind entry == ixf,
+              Set dst_uses <- dstrefs (memrefs entry),
+              dst_uses == mempty ->
                 let (a', s') = markSuccessCoal (a, s) m entry
                  in (a', i, s')
           _ ->
@@ -1178,9 +1180,9 @@ mkCoalsTabStm _ (Let pat _ (BasicOp Update {})) _ _ =
 mkCoalsTabStm lutab stm@(Let pat aux (Op op)) td_env bu_env = do
   -- Process body
   on_op <- asks onOp
-  activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env
-  let bu_env' = bu_env {activeCoals = activeCoals'}
-  on_op lutab pat (stmAuxCerts aux) op td_env bu_env'
+  bu_env' <- on_op lutab pat (stmAuxCerts aux) op td_env bu_env
+  activeCoals' <- mkCoalsHelper3PatternMatch stm lutab td_env bu_env'
+  pure $ bu_env' {activeCoals = activeCoals'}
 mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
   --   i) Filter @activeCoals@ by the 3rd safety condition:
   --      this is now relaxed by use of LMAD eqs:
@@ -1434,7 +1436,7 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 -- | For 'SegOp', we currently only handle 'SegMap', and only under the following
 -- circumstances:
 --
---  1. The 'SegMap' has only one return/pattern value.
+--  1. The 'SegMap' has only one return/pattern value, which is a 'Returns'.
 --
 --  2. The 'KernelBody' contains an 'Index' statement that is indexing an array using
 --  only the values from the 'SegSpace'.
@@ -1462,12 +1464,12 @@ genSSPointInfoSegOp
   scopetab
   (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
   certs
-  (SegMap _ space _ kernel_body)
-    | (src, MemBlock _ shp src_mem src_ixf) : _ <-
+  (SegMap _ space _ kernel_body@KernelBody {kernelBodyResult = [Returns {}]})
+    | (src, MemBlock src_pt shp src_mem src_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
             kernelBodyStms kernel_body =
-        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, dst_pt, shp, certs)]
+        Just [(MapCoal, id, dst, dst_mem, dst_ixf, src, src_mem, src_ixf, src_pt, shp, certs)]
     where
       iterators = map fst $ unSegSpace space
       frees = freeIn kernel_body
