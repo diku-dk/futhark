@@ -33,7 +33,7 @@ dataDependencies' ::
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
-    grow deps (Let pat _ (WithAcc _ _)) = undefined
+    grow _deps (Let _pat _ (WithAcc _ _)) = undefined
     grow deps (Let pat _ (Op op)) =
       -- TODO transitive dependencies; reduce res is still
       -- not directly related to input array. But may just
