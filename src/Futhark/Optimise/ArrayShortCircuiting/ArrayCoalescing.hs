@@ -1436,7 +1436,7 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 -- | For 'SegOp', we currently only handle 'SegMap', and only under the following
 -- circumstances:
 --
---  1. The 'SegMap' has only one return/pattern value.
+--  1. The 'SegMap' has only one return/pattern value, which is a 'Returns'.
 --
 --  2. The 'KernelBody' contains an 'Index' statement that is indexing an array using
 --  only the values from the 'SegSpace'.
@@ -1464,7 +1464,7 @@ genSSPointInfoSegOp
   scopetab
   (Pat [PatElem dst (_, MemArray dst_pt _ _ (ArrayIn dst_mem dst_ixf))])
   certs
-  (SegMap _ space _ kernel_body)
+  (SegMap _ space _ kernel_body@KernelBody {kernelBodyResult = [Returns {}]})
     | (src, MemBlock src_pt shp src_mem src_ixf) : _ <-
         mapMaybe getPotentialMapShortCircuit $
           stmsToList $
