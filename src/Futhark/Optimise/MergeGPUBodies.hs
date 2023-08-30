@@ -64,7 +64,7 @@ type Consumption = IS.IntSet
 --------------------------------------------------------------------------------
 
 -- | All free variables of a construct as 'Dependencies'.
-depsOf :: FreeIn a => a -> Dependencies
+depsOf :: (FreeIn a) => a -> Dependencies
 depsOf = namesToSet . freeIn
 
 -- | Convert 'Names' to an integer set of name tags.

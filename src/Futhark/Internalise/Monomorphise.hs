@@ -460,7 +460,7 @@ transformRetTypeSizes argset (RetType dims ty) = do
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
-sizesForPat :: MonadFreshNames m => Pat ParamType -> m ([VName], Pat ParamType)
+sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
   (params', sizes) <- runStateT (traverse (bitraverse onDim pure) pat) []
   pure (sizes, params')
@@ -866,7 +866,7 @@ transformPat = traverse transformType
 type DimInst = M.Map VName Size
 
 dimMapping ::
-  Monoid a =>
+  (Monoid a) =>
   TypeBase Size a ->
   TypeBase Size a ->
   ExpReplacements ->
@@ -1142,7 +1142,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
         }
 
 typeSubstsM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   SrcLoc ->
   TypeBase () NoUniqueness ->
   MonoType ->
@@ -1309,7 +1309,7 @@ transformDecs (dec : _) =
 
 -- | Monomorphise a list of top-level declarations. A module-free input program
 -- is expected, so only value declarations and type declaration are accepted.
-transformProg :: MonadFreshNames m => [Dec] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [Dec] -> m [ValBind]
 transformProg decs =
   fmap (toList . fmap snd . snd) $
     modifyNameSource $ \namesrc ->

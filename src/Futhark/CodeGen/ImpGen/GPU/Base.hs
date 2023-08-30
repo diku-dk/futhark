@@ -33,7 +33,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sCopy,
 
     -- * Atomics
     AtomicBinOp,
@@ -52,7 +51,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
@@ -63,7 +62,7 @@ import Prelude hiding (quot, rem)
 -- of the kernels code is the same, there are some cases where we
 -- generate special code based on the ultimate low-level API we are
 -- targeting.
-data Target = CUDA | OpenCL
+data Target = CUDA | OpenCL | HIP
 
 -- | Information about the locks available for accumulators.
 data Locks = Locks
@@ -188,7 +187,7 @@ compileThreadExp dest e =
 -- The body must contain thread-level code.  For multidimensional
 -- loops, use 'groupCoverSpace'.
 kernelLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   Imp.TExp t ->
   Imp.TExp t ->
@@ -208,7 +207,7 @@ kernelLoop tid num_threads n f =
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 groupLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   (Imp.TExp t -> InKernelGen ()) ->
   InKernelGen ()
@@ -224,7 +223,7 @@ groupLoop n f = do
 -- all threads in the group participate.  The passed-in function is
 -- invoked with a (symbolic) point in the index space.
 groupCoverSpace ::
-  IntExp t =>
+  (IntExp t) =>
   [Imp.TExp t] ->
   ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
@@ -410,6 +409,12 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.Barrier fence
 
+      errorsync
+        | array_scan =
+            sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.ErrorSync Imp.FenceLocal
+
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
       writeBlockResult p arr
@@ -453,7 +458,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  barrier
+  errorsync
 
   when array_scan $ do
     sComment "move correct values for first block back a block" $
@@ -533,6 +538,10 @@ groupReduceWithOffset offset w lam arrs = do
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
+      errorsync
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
+
       readReduceArgument param arr = do
         let i = local_tid + tvExp offset
         copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
@@ -607,9 +616,9 @@ groupReduceWithOffset offset w lam arrs = do
 
   in_wave_reductions
   cross_wave_reductions
+  errorsync
 
   sComment "Copy array-typed operands to result array" $ do
-    barrier
     sWhen (local_tid .==. 0) $
       localOps threadOperations $
         zipWithM_ writeArrayOpResult reduce_acc_params arrs
@@ -853,7 +862,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     sWhen (isBool won) (run_loop <-- false)
 
 computeKernelUses ::
-  FreeIn a =>
+  (FreeIn a) =>
   a ->
   [VName] ->
   CallKernelGen [Imp.KernelUse]
@@ -1201,7 +1210,7 @@ sKernelFailureTolerant tol ops constants name m = do
 threadOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
-    { opsCopyCompiler = copyElementWise,
+    { opsCopyCompiler = lmadCopy,
       opsExpCompiler = compileThreadExp,
       opsStmsCompiler = \_ -> defCompileStms mempty,
       opsAllocCompilers =
@@ -1252,7 +1261,7 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape mem $ IxFun.iota $ map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $ LMAD.iota 0 $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
@@ -1263,7 +1272,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isDirect arr_ixfun -> pure $
+      | LMAD.isDirect arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1348,9 +1357,7 @@ iotaForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" (IntType bt) shape mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape
+          LMAD.iota 0 (map pe64 (shapeDims shape))
       sIotaKernel arr (sExt64 n') x' s' bt
 
   pure fname
@@ -1365,7 +1372,7 @@ sIota ::
   CallKernelGen ()
 sIota arr n x s et = do
   ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if IxFun.isDirect arr_ixfun
+  if LMAD.isDirect arr_ixfun
     then do
       fname <- iotaForType et
       emit $

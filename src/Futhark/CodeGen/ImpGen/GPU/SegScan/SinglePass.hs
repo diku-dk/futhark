@@ -12,9 +12,9 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (takeLast)
+import Futhark.Util (mapAccumLM, takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
 import Prelude hiding (mod, quot, rem)
 
@@ -24,7 +24,7 @@ xParams scan =
 yParams scan =
   drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 
-alignTo :: IntegralExp a => a -> a -> a
+alignTo :: (IntegralExp a) => a -> a -> a
 alignTo x a = (x `divUp` a) * a
 
 createLocalArrays ::
@@ -41,7 +41,7 @@ createLocalArrays (Count groupSize) m types = do
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
 
-      warpSize :: Num a => a
+      warpSize :: (Num a) => a
       warpSize = 32
       maxWarpExchangeSize =
         foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
@@ -49,18 +49,23 @@ createLocalArrays (Count groupSize) m types = do
       maxLookbackSize = maxWarpExchangeSize + warpSize
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
 
-      varTE :: TV Int64 -> TPrimExp Int64 VName
-      varTE = le64 . tvVar
+  (_, byteOffsets) <-
+    mapAccumLM
+      ( \off tySize -> do
+          off' <- dPrimVE "byte_offsets" $ alignTo off tySize + pe64 groupSize * tySize
+          pure (off', off)
+      )
+      0
+      $ map primByteSize types
 
-  byteOffsets <-
-    mapM (fmap varTE . dPrimV "byte_offsets") $
-      scanl (\off tySize -> alignTo off tySize + pe64 groupSize * tySize) 0 $
-        map primByteSize types
-
-  warpByteOffsets <-
-    mapM (fmap varTE . dPrimV "warp_byte_offset") $
-      scanl (\off tySize -> alignTo off tySize + warpSize * tySize) warpSize $
-        map primByteSize types
+  (_, warpByteOffsets) <-
+    mapAccumLM
+      ( \off tySize -> do
+          off' <- dPrimVE "warp_byte_offset" $ alignTo off tySize + warpSize * tySize
+          pure (off', off)
+      )
+      warpSize
+      $ map primByteSize types
 
   sComment "Allocate reused shared memeory" $ pure ()
 
@@ -85,7 +90,7 @@ createLocalArrays (Count groupSize) m types = do
         ty
         (Shape [groupSize])
         localMem
-        $ IxFun.iotaOffset off' [pe64 groupSize]
+        $ LMAD.iota off' [pe64 groupSize]
 
   warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
   warpExchanges <-
@@ -96,7 +101,7 @@ createLocalArrays (Count groupSize) m types = do
         ty
         (Shape [constant (warpSize :: Int64)])
         localMem
-        $ IxFun.iotaOffset off' [warpSize]
+        $ LMAD.iota off' [warpSize]
 
   pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
@@ -226,7 +231,7 @@ compileSegScan pat lvl space scanOp kbody = do
       primByteSize' = max 4 . primByteSize
       sumT' = foldl (\bytes typ -> bytes + primByteSize' typ) 0 tys `div` 4
       maxT = maximum (map primByteSize tys)
-      m :: Num a => a
+      m :: (Num a) => a
       m = fromIntegral $ max 1 $ min mem_constraint reg_constraint
       -- TODO: Make these constants dynamic by querying device
       k_reg = 64
@@ -250,13 +255,13 @@ compileSegScan pat lvl space scanOp kbody = do
       not_segmented_e = if segmented then false else true
       segment_size = last dims'
 
-      statusX, statusA, statusP :: Num a => a
+      statusX, statusA, statusP :: (Num a) => a
       statusX = 0
       statusA = 1
       statusP = 2
 
-  emit $ Imp.DebugPrint "Sequential elements per thread (m):" $ Just $ untyped (m :: Imp.TExp Int32)
-  emit $ Imp.DebugPrint "Memory constraint " $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Sequential elements per thread (m) " $ Just $ untyped (m :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Memory constraint" $ Just $ untyped (fromIntegral mem_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
@@ -359,7 +364,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
-      sOp localBarrier
+    sOp $ Imp.ErrorSync Imp.FenceLocal
 
     sComment "Per thread scan" $ do
       -- We don't need to touch the first element, so only m-1
@@ -410,7 +415,7 @@ compileSegScan pat lvl space scanOp kbody = do
         scanOp'
         prefixArrays
 
-      sOp localBarrier
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       let firstThread acc prefixes =
             copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
@@ -547,6 +552,7 @@ compileSegScan pat lvl space scanOp kbody = do
                       \(prefix, ty, res) -> prefix <-- TPrimExp (toExp' ty res)
                 sOp localFence
           )
+
         -- end sWhile
         -- end sIf
         sWhen (kernelLocalThreadId constants .==. 0) $ do
@@ -640,3 +646,4 @@ compileSegScan pat lvl space scanOp kbody = do
     sComment "If this is the last block, reset the dynamicId" $
       sWhen (tvExp dynamicId .==. num_groups' - 1) $
         copyDWIMFix globalId [0] (constant (0 :: Int32)) []
+{-# NOINLINE compileSegScan #-}

@@ -1,5 +1,5 @@
 -- ==
--- tags { no_opencl no_cuda no_pyopencl }
+-- tags { no_opencl no_cuda no_hip no_pyopencl }
 
 entry main (xs: [3][3]f32) : [3]f32 =
   map (\x ->

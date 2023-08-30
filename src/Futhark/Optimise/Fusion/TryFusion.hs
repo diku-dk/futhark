@@ -51,7 +51,7 @@ newtype TryFusion a
     )
 
 tryFusion ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   TryFusion a ->
   Scope SOACS ->
   m (Maybe a)

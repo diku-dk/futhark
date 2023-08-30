@@ -59,7 +59,7 @@ numberOfGroups desc w group_size = do
 -- | Like 'segThread', but cap the thread count to the input size.
 -- This is more efficient for small kernels, e.g. summing a small
 -- array.
-segThreadCapped :: MonadFreshNames m => MkSegLevel GPU m
+segThreadCapped :: (MonadFreshNames m) => MkSegLevel GPU m
 segThreadCapped ws desc r = do
   w <-
     letSubExp "nest_size"

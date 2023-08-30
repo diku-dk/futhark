@@ -25,9 +25,6 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          versions =
-            haskellPackagesNew.versions_6_0_1;
-
           lsp =
             haskellPackagesNew.callPackage ./nix/lsp.nix { };
 

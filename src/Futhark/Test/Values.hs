@@ -48,7 +48,7 @@ instance Traversable Compound where
   traverse f (ValueTuple vs) = ValueTuple <$> traverse (traverse f) vs
   traverse f (ValueRecord m) = ValueRecord <$> traverse (traverse f) m
 
-instance Pretty v => Pretty (Compound v) where
+instance (Pretty v) => Pretty (Compound v) where
   pretty (ValueAtom v) = pretty v
   pretty (ValueTuple vs) = parens $ commasep $ map pretty vs
   pretty (ValueRecord m) = braces $ commasep $ map field $ M.toList m

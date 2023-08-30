@@ -15,7 +15,7 @@ import Futhark.Pass.ExplicitAllocations
 instance SizeSubst (SegOp lvl rep)
 
 allocInKernelBody ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   KernelBody fromrep ->
   AllocM fromrep torep (KernelBody torep)
 allocInKernelBody (KernelBody () stms res) =
@@ -23,7 +23,7 @@ allocInKernelBody (KernelBody () stms res) =
     <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
@@ -33,7 +33,7 @@ allocInLambda params body =
       bodyResult body
 
 allocInBinOpParams ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   TPrimExp Int64 VName ->
   TPrimExp Int64 VName ->
@@ -83,7 +83,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             )
 
 allocInBinOpLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   SegSpace ->
   Lambda fromrep ->

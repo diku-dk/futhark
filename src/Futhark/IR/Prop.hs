@@ -76,7 +76,7 @@ asBasicOp _ = Nothing
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: IsOp (Op rep) => Exp rep -> Bool
+safeExp :: (IsOp (Op rep)) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
     safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
@@ -128,7 +128,7 @@ safeExp (Match _ cases def_case _) =
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
-safeBody :: IsOp (Op rep) => Body rep -> Bool
+safeBody :: (IsOp (Op rep)) => Body rep -> Bool
 safeBody = all (safeExp . stmExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
@@ -227,7 +227,7 @@ class
     m [BranchType rep]
 
 -- | Construct the type of an expression that would match the pattern.
-expExtTypesFromPat :: Typed dec => Pat dec -> [ExtType]
+expExtTypesFromPat :: (Typed dec) => Pat dec -> [ExtType]
 expExtTypesFromPat pat =
   existentialiseExtTypes (patNames pat) $
     staticShapes $
@@ -243,7 +243,7 @@ attrsForAssert (Attrs attrs) =
     attrForAssert = (== AttrComp "warn" ["safety_checks"])
 
 -- | Horizontally fission a lambda that models a binary operator.
-lamIsBinOp :: ASTRep rep => Lambda rep -> Maybe [(BinOp, PrimType, VName, VName)]
+lamIsBinOp :: (ASTRep rep) => Lambda rep -> Maybe [(BinOp, PrimType, VName, VName)]
 lamIsBinOp lam = mapM splitStm $ bodyResult $ lambdaBody lam
   where
     n = length $ lambdaReturnType lam

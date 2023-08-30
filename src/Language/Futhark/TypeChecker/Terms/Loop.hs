@@ -30,7 +30,7 @@ import Prelude hiding (mod)
 -- | Retrieve an oracle that can be used to decide whether two are in
 -- the same equivalence class (i.e. have been unified).  This is an
 -- exotic operation.
-getAreSame :: MonadUnify m => m (VName -> VName -> Bool)
+getAreSame :: (MonadUnify m) => m (VName -> VName -> Bool)
 getAreSame = check <$> getConstraints
   where
     check constraints x y =

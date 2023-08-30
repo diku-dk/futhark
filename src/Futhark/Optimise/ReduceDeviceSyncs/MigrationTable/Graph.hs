@@ -185,7 +185,7 @@ data Result a
     FoundSink
   deriving (Eq)
 
-instance Semigroup a => Semigroup (Result a) where
+instance (Semigroup a) => Semigroup (Result a) where
   FoundSink <> _ = FoundSink
   _ <> FoundSink = FoundSink
   Produced x <> Produced y = Produced (x <> y)
@@ -344,7 +344,7 @@ fold g f (res, vs) et i
 --
 -- The reduction of a cyclic reference resolves to 'mempty'.
 reduce ::
-  Monoid a =>
+  (Monoid a) =>
   Graph m ->
   (a -> EdgeType -> Vertex m -> a) ->
   Visited (Result a) ->

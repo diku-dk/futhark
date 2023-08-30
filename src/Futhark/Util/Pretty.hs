@@ -93,15 +93,15 @@ docTextForHandle h d = do
       else Prettyprinter.Render.Text.renderStrict sds
 
 -- | Prettyprint a value to a 'String', appropriately wrapped.
-prettyString :: Pretty a => a -> String
+prettyString :: (Pretty a) => a -> String
 prettyString = T.unpack . prettyText
 
 -- | Prettyprint a value to a 'String' on a single line.
-prettyStringOneLine :: Pretty a => a -> String
+prettyStringOneLine :: (Pretty a) => a -> String
 prettyStringOneLine = T.unpack . prettyTextOneLine
 
 -- | Prettyprint a value to a 'Text', appropriately wrapped.
-prettyText :: Pretty a => a -> Text
+prettyText :: (Pretty a) => a -> Text
 prettyText = docText . pretty
 
 -- | Convert a 'Doc' to text.  Thsi ignores any annotations (i.e. it
@@ -113,7 +113,7 @@ docText = Prettyprinter.Render.Text.renderStrict . layouter
       layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
 
 -- | Prettyprint a value to a 'Text' on a single line.
-prettyTextOneLine :: Pretty a => a -> Text
+prettyTextOneLine :: (Pretty a) => a -> Text
 prettyTextOneLine = Prettyprinter.Render.Text.renderStrict . layoutSmart oneLineLayout . group . pretty
   where
     oneLineLayout = defaultLayoutOptions {layoutPageWidth = Unbounded}
@@ -125,11 +125,11 @@ ppTupleLines' :: [Doc a] -> Doc a
 ppTupleLines' ets = braces $ commastack $ map align ets
 
 -- | Prettyprint a list enclosed in curly braces.
-prettyTuple :: Pretty a => [a] -> Text
+prettyTuple :: (Pretty a) => [a] -> Text
 prettyTuple = docText . ppTuple' . map pretty
 
 -- | Like 'prettyTuple', but put a linebreak after every element.
-prettyTupleLines :: Pretty a => [a] -> Text
+prettyTupleLines :: (Pretty a) => [a] -> Text
 prettyTupleLines = docText . ppTupleLines' . map pretty
 
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with

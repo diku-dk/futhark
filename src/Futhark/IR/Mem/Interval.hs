@@ -30,7 +30,7 @@ data Interval = Interval
 instance FreeIn Interval where
   freeIn' (Interval lb ne st) = freeIn' lb <> freeIn' ne <> freeIn' st
 
-distributeOffset :: MonadFail m => AlgSimplify.SofP -> [Interval] -> m [Interval]
+distributeOffset :: (MonadFail m) => AlgSimplify.SofP -> [Interval] -> m [Interval]
 distributeOffset [] interval = pure interval
 distributeOffset offset [] = fail $ "Cannot distribute offset " <> show offset <> " across empty interval"
 distributeOffset offset [Interval lb ne 1] = pure [Interval (lb + TPrimExp (AlgSimplify.sumToExp offset)) ne 1]

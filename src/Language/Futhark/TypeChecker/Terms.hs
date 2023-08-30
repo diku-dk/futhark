@@ -27,7 +27,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util (mapAccumLM, topologicalSort)
+import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -1060,13 +1060,16 @@ checkApply loc (fname, prev_applied) ftype argexp = do
       else
         "Cannot apply"
           <+> fname'
-          <+> "to argument #" <> pretty (prev_applied + 1)
-          <+> dquotes (shorten $ group $ pretty argexp) <> ","
+          <+> "to argument #"
+          <> pretty (prev_applied + 1)
+          <+> dquotes (shorten $ group $ pretty argexp)
+          <> ","
           </> "as"
           <+> fname'
           <+> "only takes"
           <+> pretty prev_applied
-          <+> arguments <> "."
+          <+> arguments
+          <> "."
   where
     arguments
       | prev_applied == 1 = "argument"
@@ -1224,12 +1227,14 @@ causalityCheck binding_body = do
         "Causality check: size"
           <+> dquotes (prettyName d)
           <+> "needed for type of"
-          <+> what <> colon
+          <+> what
+          <> colon
           </> indent 2 (pretty t)
           </> "But"
           <+> dquotes (prettyName d)
           <+> "is computed at"
-          <+> pretty (locStrRel loc dloc) <> "."
+          <+> pretty (locStrRel loc dloc)
+          <> "."
           </> ""
           </> "Hint:"
           <+> align
@@ -1381,7 +1386,8 @@ fixOverloadedTypes tyvars_at_toplevel =
       | otherwise =
           typeError usage mempty . withIndexLink "ambiguous-type" $
             "Type is ambiguous (could be one of"
-              <+> commasep (map pretty ots) <> ")."
+              <+> commasep (map pretty ots)
+              <> ")."
               </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
@@ -1403,7 +1409,8 @@ fixOverloadedTypes tyvars_at_toplevel =
     fixOverloaded (_, HasConstrs _ cs usage) =
       typeError usage mempty . withIndexLink "ambiguous-type" $
         "Type is ambiguous (must be a sum type with constructors:"
-          <+> pretty (Sum cs) <> ")."
+          <+> pretty (Sum cs)
+          <> ")."
           </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
@@ -1480,6 +1487,18 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
       letGeneralise fname loc tparams' params''
         =<< unscopeUnknown rettype
 
+    when
+      ( null params
+          && any isSizeParam tparams''
+          && not (null (retDims rettype'))
+      )
+      $ typeError loc mempty
+      $ textwrap "A size-polymorphic value binding may not have a type with an existential size."
+        </> "Type of this binding is:"
+        </> indent 2 (pretty rettype')
+        </> "with the following type parameters:"
+        </> indent 2 (sep $ map pretty $ filter isSizeParam tparams'')
+
     pure (tparams'', params''', maybe_retdecl'', rettype', body')
 
 -- | Extract all the shape names that occur in positive position
@@ -1515,13 +1534,13 @@ verifyFunctionParams fname params =
               <+> dquotes (pretty p)
               </> "refers to size"
               <+> dquotes (prettyName d)
-                <> comma
+              <> comma
               </> textwrap "which will not be accessible to the caller"
-                <> comma
+              <> comma
               </> textwrap "possibly because it is nested in a tuple or record."
               </> textwrap "Consider ascribing an explicit type that does not reference "
-                <> dquotes (prettyName d)
-                <> "."
+              <> dquotes (prettyName d)
+              <> "."
       | otherwise = verifyParams forbidden' ps
       where
         forbidden' =
@@ -1553,7 +1572,7 @@ injectExt ext ret = RetType ext_here $ deeper ret
     deeper (Scalar (Record fs)) = Scalar $ Record $ M.map deeper fs
     deeper (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map deeper) cs
     deeper (Scalar (Arrow als p d1 t1 (RetType t2_ext t2))) =
-      Scalar $ Arrow als p d1 t1 $ injectExt (ext_there <> t2_ext) t2
+      Scalar $ Arrow als p d1 t1 $ injectExt (nubOrd (ext_there <> t2_ext)) t2
     deeper (Scalar (TypeVar u tn targs)) =
       Scalar $ TypeVar u tn $ map deeperArg targs
     deeper t@Array {} = t
@@ -1584,7 +1603,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
   pure
     ( tparams ++ more_tparams,
-      injectExt (retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
+      injectExt (nubOrd $ retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
     )
   where
     -- Diet does not matter here.
@@ -1613,7 +1632,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
               <+> dquotes (prettyName k)
               <+> "in parameter of"
               <+> dquotes (prettyName defname)
-                <> ", which is inferred as:"
+              <> ", which is inferred as:"
               </> indent 2 (pretty t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
@@ -1627,7 +1646,7 @@ letGeneralise ::
   [Pat ParamType] ->
   ResType ->
   TermTypeM ([TypeParam], [Pat ParamType], ResRetType)
-letGeneralise defname defloc tparams params rettype =
+letGeneralise defname defloc tparams params restype =
   onFailure (CheckingLetGeneralise defname) $ do
     now_substs <- getConstraints
 
@@ -1651,19 +1670,19 @@ letGeneralise defname defloc tparams params rettype =
     let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= cur_lvl
         new_substs = M.filterWithKey candidate now_substs
 
-    (tparams', RetType ret_dims rettype') <-
+    (tparams', RetType ret_dims restype') <-
       closeOverTypes
         defname
         defloc
         tparams
         (map patternStructType params)
-        rettype
+        restype
         new_substs
 
-    rettype'' <- updateTypes rettype'
+    restype'' <- updateTypes restype'
 
     let used_sizes =
-          freeInType rettype'' <> foldMap (freeInType . patternType) params
+          freeInType restype'' <> foldMap (freeInType . patternType) params
     case filter ((`S.notMember` fvVars used_sizes) . typeParamName) $
       filter isSizeParam tparams' of
       [] -> pure ()
@@ -1673,7 +1692,7 @@ letGeneralise defname defloc tparams params rettype =
     -- let-generalisation.
     modifyConstraints $ M.filterWithKey $ \k _ -> k `notElem` map typeParamName tparams'
 
-    pure (tparams', params, RetType ret_dims rettype'')
+    pure (tparams', params, RetType ret_dims restype'')
 
 checkFunBody ::
   [Pat ParamType] ->

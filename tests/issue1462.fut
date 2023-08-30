@@ -10,6 +10,6 @@ def runs (t: i64): [][]f32 =
     in map (run t (t + 2) start) (iota 5)
 
 -- ==
--- tags { no_opencl no_cuda no_pyopencl }
+-- tags { no_opencl no_cuda no_hip no_pyopencl }
 -- input { }
 def main = runs 10

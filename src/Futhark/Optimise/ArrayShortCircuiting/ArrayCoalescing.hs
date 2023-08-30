@@ -121,7 +121,7 @@ mkCoalsTab prog =
 
 -- | Given a 'Prog' in 'GPUMem' representation, compute the coalescing table
 -- by folding over each function.
-mkCoalsTabGPU :: MonadFreshNames m => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
+mkCoalsTabGPU :: (MonadFreshNames m) => Prog (Aliases GPUMem) -> m (M.Map Name CoalsTab)
 mkCoalsTabGPU prog =
   mkCoalsTabProg
     (lastUseGPUMem prog)
@@ -184,7 +184,7 @@ shortCircuitSeqMem _ _ _ _ _ = pure
 
 -- | Short-circuit handler for SegOp.
 shortCircuitSegOp ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   (lvl -> Bool) ->
   LUTabFun ->
   Pat (VarAliases, LetDecMem) ->
@@ -347,7 +347,7 @@ bodyToKernelBody (Body dec stms res) =
 -- 4. Mark active coalescings as finished, since a 'SegOp' is an array creation
 -- point.
 shortCircuitSegOpHelper ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   -- | The number of returns for which we should drop the last seg space
   Int ->
   -- | Whether we should look at a segop with this lvl.
@@ -485,21 +485,17 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
                     Just (Coalesced knd mbd@(MemBlock _ _ _ ixfn) _) -> pure $
                       case freeVarSubstitutions (scope td_env) (scalarTable td_env) ixfn of
                         Just fv_subst ->
-                          if IxFun.permutation ixfn
-                            == IxFun.permutation (ixfun $ fromJust $ getScopeMemInfo (patElemName p) $ scope td_env)
-                            then
-                              let entry =
-                                    coal_entry
-                                      { vartab =
-                                          M.insert
-                                            (patElemName p)
-                                            (Coalesced knd mbd fv_subst)
-                                            (vartab coal_entry)
-                                      }
-                                  (ac, suc) =
-                                    markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
-                               in bu_env_f {activeCoals = ac, successCoals = suc}
-                            else fail_res
+                          let entry =
+                                coal_entry
+                                  { vartab =
+                                      M.insert
+                                        (patElemName p)
+                                        (Coalesced knd mbd fv_subst)
+                                        (vartab coal_entry)
+                                  }
+                              (ac, suc) =
+                                markSuccessCoal (activeCoals bu_env_f, successCoals bu_env_f) m_b entry
+                           in bu_env_f {activeCoals = ac, successCoals = suc}
                         Nothing ->
                           fail_res
                   else pure fail_res
@@ -600,7 +596,7 @@ fullSlice shp (Slice slc) =
   Slice $ slc ++ map (\d -> DimSlice 0 d 1) (drop (length slc) shp)
 
 fixPointCoalesce ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   [Param FParamMem] ->
   Body (Aliases rep) ->
@@ -663,7 +659,7 @@ fixPointCoalesce lutab fpar bdy topenv = do
 
 -- | Perform short-circuiting on 'Stms'.
 mkCoalsTabStms ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   Stms (Aliases rep) ->
   TopdownEnv rep ->
@@ -706,7 +702,7 @@ mkCoalsTabStms lutab stms0 = traverseStms stms0
 --                          then the checks should be extended to the actual
 --                          array-creation points.
 mkCoalsTabStm ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   Stm (Aliases rep) ->
   TopdownEnv rep ->
@@ -1004,6 +1000,9 @@ mkCoalsTabStm lutab (Let pat _ (Loop arginis lform body)) td_env bu_env = do
       | b <- patElemName patel,
         (_, MemArray _ _ _ (ArrayIn m_b _)) <- patElemDec patel,
         a <- paramName arg,
+        -- Not safe to short-circuit if the index function of this
+        -- parameter is variant to the loop.
+        not $ any ((`nameIn` freeIn (paramDec arg)) . paramName . fst) arginis,
         Var a0 <- ini,
         Var r <- bdyres,
         Just coal_etry <- M.lookup m_b actv0,
@@ -1267,7 +1266,7 @@ ixfunToAccessSummary (IxFun.IxFun lmad _) = Set $ S.singleton lmad
 -- any variables used in the index function of the target array are available at
 -- the definition site of b.
 filterSafetyCond2and5 ::
-  HasMemBlock (Aliases rep) =>
+  (HasMemBlock (Aliases rep)) =>
   CoalsTab ->
   InhibitTab ->
   ScalarTab ->
@@ -1323,7 +1322,7 @@ filterSafetyCond2and5 act_coal inhb_coal scals_env td_env pes =
 -- |   Pattern matches a potentially coalesced statement and
 --     records a new association in @activeCoals@
 mkCoalsHelper3PatternMatch ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   Stm (Aliases rep) ->
   LUTabFun ->
   TopdownEnv rep ->
@@ -1456,7 +1455,7 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 -- The result of the 'SegMap' is treated as the destination, while the candidate
 -- array from inside the body is treated as the source.
 genSSPointInfoSegOp ::
-  Coalesceable rep inner => GenSSPoint rep (SegOp lvl (Aliases rep))
+  (Coalesceable rep inner) => GenSSPoint rep (SegOp lvl (Aliases rep))
 genSSPointInfoSegOp
   lutab
   td_env
@@ -1517,7 +1516,7 @@ genSSPointInfoMCMem = genSSPointInfoMemOp f
     f _ _ _ _ _ _ = Nothing
 
 genCoalStmtInfo ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   LUTabFun ->
   TopdownEnv rep ->
   ScopeTab rep ->
@@ -1557,10 +1556,7 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b))
   where
     updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
-      fromMaybe (error "updateIndFunSlice") $
-        IxFun.flatSlice ind_fun $
-          FlatSlice (pe64 offset) $
-            map (fmap pe64) dims
+      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
@@ -1694,7 +1690,7 @@ mkSubsTab pat res =
     mki64subst _ = Nothing
 
 computeScalarTable ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   ScopeTab rep ->
   Stm (Aliases rep) ->
   ScalarTableM rep (M.Map VName (PrimExp VName))
@@ -1734,7 +1730,7 @@ computeScalarTableMemOp _ _ (Alloc _ _) = pure mempty
 computeScalarTableMemOp onInner scope_table (Inner op) = onInner scope_table op
 
 computeScalarTableSegOp ::
-  Coalesceable rep inner =>
+  (Coalesceable rep inner) =>
   ComputeScalarTable rep (GPU.SegOp lvl (Aliases rep))
 computeScalarTableSegOp scope_table segop = do
   concatMapM

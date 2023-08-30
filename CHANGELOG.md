@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* pyopencl backend: compatibility with future versions of PyOpenCL.
+
+* New backend: hip.
+
 ### Removed
 
 ### Changed
@@ -25,12 +29,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Incorrect handling of `match` in lambda lifting (#2000).
 
+* Regression in checking of consumption (#2007).
+
+* Error in type checking of horisontally fused `scatter`s could crash
+  the compiler (#2009).
+
+* Size-polymorphic value bindings with existential sizes are now
+  rejected by type checker (#1993).
+
+* Single pass scans with complicated fused map functions were
+  insufficiently memory-expanded (#2023).
+
 ## [0.25.2]
 
 ### Added
 
 * Flattening/unflattening as the final operation in an entry point no
-  only forces a copy.
+  longer forces a copy.
 
 * The `opencl` backend no longer *always* fails on platforms that do
   not support 64-bit integer atomics, although it will still fail if

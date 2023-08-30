@@ -36,7 +36,7 @@ instance MonadFreshNames PassM where
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error pretty or a result.
 runPassM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   PassM a ->
   m (a, Log)
 runPassM (PassM m) = modifyNameSource $ runState (runWriterT m)

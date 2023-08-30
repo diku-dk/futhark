@@ -28,7 +28,7 @@ caseNeverMatches ses = or . zipWith impossible ses . casePat
     impossible (Constant v1) (Just v2) = v1 /= v2
     impossible _ _ = False
 
-ruleMatch :: BuilderOps rep => TopDownRuleMatch rep
+ruleMatch :: (BuilderOps rep) => TopDownRuleMatch rep
 -- Remove impossible cases.
 ruleMatch _ pat _ (cond, cases, defbody, ifdec)
   | (impossible, cases') <- partition (caseNeverMatches cond) cases,
@@ -135,7 +135,7 @@ ruleMatch _ _ _ _ = Skip
 -- | Move out results of a conditional expression whose computation is
 -- either invariant to the branches (only done for results used for
 -- existentials), or the same in both branches.
-hoistBranchInvariant :: BuilderOps rep => TopDownRuleMatch rep
+hoistBranchInvariant :: (BuilderOps rep) => TopDownRuleMatch rep
 hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
   let case_reses = map (bodyResult . caseBody) cases
       defbody_res = bodyResult defbody
@@ -211,7 +211,7 @@ hoistBranchInvariant _ pat _ (cond, cases, defbody, MatchDec ret ifsort) =
 -- after a branch.  Standard dead code removal can remove the branch
 -- if *none* of the return values are used, but this rule is more
 -- precise.
-removeDeadBranchResult :: BuilderOps rep => BottomUpRuleMatch rep
+removeDeadBranchResult :: (BuilderOps rep) => BottomUpRuleMatch rep
 removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype ifsort)
   | -- Only if there is no existential binding...
     all (`notNameIn` foldMap freeIn (patElems pat)) (patNames pat),
@@ -234,7 +234,7 @@ removeDeadBranchResult (_, used) pat _ (cond, cases, defbody, MatchDec rettype i
   where
     onBody pick (Body _ stms res) = mkBodyM stms $ pick res
 
-topDownRules :: BuilderOps rep => [TopDownRule rep]
+topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
   [ RuleMatch ruleMatch,
     RuleMatch hoistBranchInvariant

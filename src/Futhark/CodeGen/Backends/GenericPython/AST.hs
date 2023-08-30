@@ -132,21 +132,25 @@ instance Pretty PyExp where
 instance Pretty PyStmt where
   pretty (If cond [] []) =
     "if"
-      <+> pretty cond <> ":"
+      <+> pretty cond
+      <> ":"
       </> indent 2 "pass"
   pretty (If cond [] fbranch) =
     "if"
-      <+> pretty cond <> ":"
+      <+> pretty cond
+      <> ":"
       </> indent 2 "pass"
       </> "else:"
       </> indent 2 (stack $ map pretty fbranch)
   pretty (If cond tbranch []) =
     "if"
-      <+> pretty cond <> ":"
+      <+> pretty cond
+      <> ":"
       </> indent 2 (stack $ map pretty tbranch)
   pretty (If cond tbranch fbranch) =
     "if"
-      <+> pretty cond <> ":"
+      <+> pretty cond
+      <> ":"
       </> indent 2 (stack $ map pretty tbranch)
       </> "else:"
       </> indent 2 (stack $ map pretty fbranch)
@@ -156,17 +160,20 @@ instance Pretty PyStmt where
       </> stack (map pretty pyexcepts)
   pretty (While cond body) =
     "while"
-      <+> pretty cond <> ":"
+      <+> pretty cond
+      <> ":"
       </> indent 2 (stack $ map pretty body)
   pretty (For i what body) =
     "for"
       <+> pretty i
       <+> "in"
-      <+> pretty what <> ":"
+      <+> pretty what
+      <> ":"
       </> indent 2 (stack $ map pretty body)
   pretty (With what body) =
     "with"
-      <+> pretty what <> ":"
+      <+> pretty what
+      <> ":"
       </> indent 2 (stack $ map pretty body)
   pretty (Assign e1 e2) = pretty e1 <+> "=" <+> pretty e2
   pretty (AssignOp op e1 e2) = pretty e1 <+> pretty (op ++ "=") <+> pretty e2
@@ -187,13 +194,16 @@ instance Pretty PyStmt where
 instance Pretty PyFunDef where
   pretty (Def fname params body) =
     "def"
-      <+> pretty fname <> parens (commasep $ map pretty params) <> ":"
+      <+> pretty fname
+      <> parens (commasep $ map pretty params)
+      <> ":"
       </> indent 2 (stack (map pretty body))
 
 instance Pretty PyClassDef where
   pretty (Class cname body) =
     "class"
-      <+> pretty cname <> ":"
+      <+> pretty cname
+      <> ":"
       </> indent 2 (stack (map pretty body))
 
 instance Pretty PyExcept where

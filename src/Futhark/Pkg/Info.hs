@@ -80,7 +80,7 @@ data PkgRevInfo m = PkgRevInfo
 -- | Create memoisation around a 'GetManifest' action to ensure that
 -- multiple inspections of the same revisions will not result in
 -- potentially expensive IO operations.
-memoiseGetManifest :: MonadIO m => GetManifest m -> m (GetManifest m)
+memoiseGetManifest :: (MonadIO m) => GetManifest m -> m (GetManifest m)
 memoiseGetManifest (GetManifest m) = do
   ref <- liftIO $ newIORef Nothing
   pure $
@@ -271,7 +271,7 @@ class (MonadIO m, MonadLogger m, MonadFail m) => MonadPkgRegistry m where
 
 -- | Given a package path, look up information about that package.
 lookupPackage ::
-  MonadPkgRegistry m =>
+  (MonadPkgRegistry m) =>
   CacheDir ->
   PkgPath ->
   m (PkgInfo m)
@@ -286,7 +286,7 @@ lookupPackage cachedir p = do
       pure pinfo
 
 lookupPackageCommit ::
-  MonadPkgRegistry m =>
+  (MonadPkgRegistry m) =>
   CacheDir ->
   PkgPath ->
   Maybe T.Text ->
@@ -306,7 +306,7 @@ lookupPackageCommit cachedir p ref = do
 
 -- | Look up information about a specific version of a package.
 lookupPackageRev ::
-  MonadPkgRegistry m =>
+  (MonadPkgRegistry m) =>
   CacheDir ->
   PkgPath ->
   SemVer ->
@@ -346,7 +346,7 @@ lookupPackageRev cachedir p v
 
 -- | Find the newest version of a package.
 lookupNewestRev ::
-  MonadPkgRegistry m =>
+  (MonadPkgRegistry m) =>
   CacheDir ->
   PkgPath ->
   m SemVer

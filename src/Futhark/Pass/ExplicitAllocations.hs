@@ -130,7 +130,7 @@ askDefaultSpace :: AllocM fromrep torep Space
 askDefaultSpace = asks allocSpace
 
 runAllocM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
@@ -148,14 +148,14 @@ runAllocM space handleOp hints (AllocM m) =
           envExpHints = hints
         }
 
-elemSize :: Num a => Type -> a
+elemSize :: (Num a) => Type -> a
 elemSize = primByteSize . elemType
 
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   untyped $ foldl' (*) (elemSize t) $ map pe64 (arrayDims t)
 
-arraySizeInBytesExpM :: MonadBuilder m => Type -> m (PrimExp VName)
+arraySizeInBytesExpM :: (MonadBuilder m) => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   let dim_prod_i64 = product $ map pe64 (arrayDims t)
       elm_size_i64 = elemSize t
@@ -164,7 +164,7 @@ arraySizeInBytesExpM t = do
       untyped $
         dim_prod_i64 * elm_size_i64
 
-arraySizeInBytes :: MonadBuilder m => Type -> m SubExp
+arraySizeInBytes :: (MonadBuilder m) => Type -> m SubExp
 arraySizeInBytes = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM
 
 allocForArray' ::
@@ -178,7 +178,7 @@ allocForArray' t space = do
 
 -- | Allocate memory for a value of the given type.
 allocForArray ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   Type ->
   Space ->
   AllocM fromrep torep VName
@@ -245,7 +245,7 @@ patWithAllocations def_space names e hints = do
   rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
   Pat <$> allocsForPat def_space idents rts hints
 
-mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
+mkMissingIdents :: (MonadFreshNames m) => [Ident] -> [ExpReturns] -> m [Ident]
 mkMissingIdents idents rts =
   reverse <$> zipWithM f (reverse rts) (map Just (reverse idents) ++ repeat Nothing)
   where
@@ -301,7 +301,7 @@ allocsForPat def_space some_idents rts hints = do
         inst (Free v) = v
         inst (Ext i) = getIdent idents i
 
-instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
+instantiateIxFun :: (Monad m) => ExtIxFun -> m IxFun
 instantiateIxFun = traverse $ traverse inst
   where
     inst Ext {} = error "instantiateIxFun: not yet"
@@ -377,8 +377,7 @@ ensureRowMajorArray space_ok v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if IxFun.permutation ixfun == [0 .. IxFun.rank ixfun - 1]
-    && length (IxFun.base ixfun) == IxFun.rank ixfun
+  if length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocLinearArray space (baseString v) v
@@ -569,7 +568,6 @@ ensurePermArray space_ok perm v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   if length (IxFun.base ixfun) == length (IxFun.shape ixfun)
-    && IxFun.permutation ixfun == perm
     && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
@@ -630,7 +628,7 @@ explicitAllocationsGeneric space handleOp hints =
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
       runAllocM space handleOp hints . inScopeOf consts $
-        allocInFParams (zip params $ repeat space) $ \params' -> do
+        allocInFParams (map (,space) params) $ \params' -> do
           (fbody', mem_rets) <-
             allocInFunBody (map (const $ Just space) rettype) fbody
           let num_extra_params = length params' - length params
@@ -750,7 +748,7 @@ allocInStm (Let (Pat pes) _ e) =
   addStm =<< allocsForStm (map patElemIdent pes) =<< allocInExp e
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
@@ -758,14 +756,14 @@ allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
 data MemReq
-  = MemReq Space [Int] Rank
+  = MemReq Space Rank
   | NeedsNormalisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsNormalisation {} _ = x
 combMemReqs _ y@NeedsNormalisation {} = y
-combMemReqs x@(MemReq x_space _ _) y@MemReq {} =
+combMemReqs x@(MemReq x_space _) y@MemReq {} =
   if x == y then x else NeedsNormalisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -776,7 +774,7 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ (Rank base_rank))) =
+contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
   -- Memory + offset + base_rank + (stride,size)*rank.
   MemMem space
     : MemPrim int64
@@ -809,10 +807,7 @@ allocInMatchBody rets (Body _ stms res) =
         (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
           space <- lookupMemSpace mem
           pure . MemArray pt shape u $
-            MemReq
-              space
-              (IxFun.permutation ixfun)
-              (Rank $ length $ IxFun.base ixfun)
+            MemReq space (Rank $ length $ IxFun.base ixfun)
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -834,15 +829,15 @@ mkBranchRet reqs =
       )
 
     arrayInfo rank (NeedsNormalisation space) =
-      (space, [0 .. rank - 1], rank)
-    arrayInfo _ (MemReq space perm (Rank base_rank)) =
-      (space, perm, base_rank)
+      (space, rank)
+    arrayInfo _ (MemReq space (Rank base_rank)) =
+      (space, base_rank)
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, base_rank) = arrayInfo (shapeRank shape) req
+          (space, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert <$> IxFun.mkExistential base_rank perm (ctx_offset + 1)
+            convert <$> IxFun.mkExistential base_rank (shapeRank shape) (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -891,7 +886,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
 -- Futhark.Optimise.EntryPointMem for a very specialised version of
 -- the idea, but which could perhaps be generalised.
 simplifyMatch ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   [Case (Body rep)] ->
   Body rep ->
   [BranchTypeMem] ->
@@ -1062,11 +1057,11 @@ class SizeSubst op where
 
 instance SizeSubst (NoOp rep)
 
-instance SizeSubst (op rep) => SizeSubst (MemOp op rep) where
+instance (SizeSubst (op rep)) => SizeSubst (MemOp op rep) where
   opIsConst (Inner op) = opIsConst op
   opIsConst _ = False
 
-stmConsts :: SizeSubst (Op rep) => Stm rep -> S.Set VName
+stmConsts :: (SizeSubst (Op rep)) => Stm rep -> S.Set VName
 stmConsts (Let pat _ (Op op))
   | opIsConst op = S.fromList $ patNames pat
 stmConsts _ = mempty
@@ -1113,7 +1108,7 @@ mkLetNamesB'' space names e = do
     nohints = map (const NoHint) names
 
 simplifyMemOp ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   ( inner (Engine.Wise rep) ->
     Engine.SimpleM rep (inner (Engine.Wise rep), Stms (Engine.Wise rep))
   ) ->

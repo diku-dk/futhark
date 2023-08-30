@@ -1,5 +1,18 @@
 // Start of backends/opencl.h
 
+// Note [32-bit transpositions]
+//
+// Transposition kernels are much slower when they have to use 64-bit
+// arithmetic.  I observed about 0.67x slowdown on an A100 GPU when
+// transposing four-byte elements (much less when transposing 8-byte
+// elements).  Unfortunately, 64-bit arithmetic is a requirement for
+// large arrays (see #1953 for what happens otherwise).  We generate
+// both 32- and 64-bit index arithmetic versions of transpositions,
+// and dynamically pick between them at runtime.  This is an
+// unfortunate code bloat, and it would be preferable if we could
+// simply optimise the 64-bit version to make this distinction
+// unnecessary.  Fortunately these kernels are quite small.
+
 // Forward declarations.
 struct opencl_device_option;
 // Invoked by setup_opencl() after the platform and device has been
@@ -117,13 +130,12 @@ struct futhark_context_config {
   const char** tuning_param_classes;
   // Uniform fields above.
 
+  char* program;
   int preferred_device_num;
   const char *preferred_platform;
   const char *preferred_device;
   int ignore_blacklist;
 
-  const char* dump_program_to;
-  const char* load_program_from;
   const char* dump_binary_to;
   const char* load_binary_from;
 
@@ -150,10 +162,9 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
   cfg->preferred_platform = "";
   cfg->preferred_device = "";
   cfg->ignore_blacklist = 0;
-  cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
   cfg->dump_binary_to = NULL;
   cfg->load_binary_from = NULL;
+  cfg->program = strconcat(gpu_program);
 
   // The following are dummy sizes that mean the concrete defaults
   // will be set during initialisation via hardware-inspection-based
@@ -172,6 +183,7 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
   free(cfg->build_opts);
+  free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config* cfg, const char *opt) {
@@ -392,12 +404,12 @@ void futhark_context_config_list_devices(struct futhark_context_config *cfg) {
   free(devices);
 }
 
-void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_program_to = path;
+const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
+  return cfg->program;
 }
 
-void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_program_from = path;
+void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path) {
@@ -502,7 +514,7 @@ struct futhark_context {
   cl_command_queue queue;
   cl_program clprogram;
 
-  struct free_list cl_free_list;
+  struct free_list gpu_free_list;
 
   size_t max_group_size;
   size_t max_num_groups;
@@ -516,9 +528,10 @@ struct futhark_context {
   int profiling_records_capacity;
   int profiling_records_used;
 
+  struct builtin_kernels* kernels;
 };
 
-static cl_build_status build_opencl_program(cl_program program, cl_device_id device, const char* options) {
+static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options) {
   cl_int clBuildProgram_error = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
@@ -590,6 +603,10 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                   "%s ", extra_build_opts[i]);
   }
 
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-DTR_BLOCK_DIM=%d -DTR_TILE_DIM=%d -DTR_ELEMS_PER_THREAD=%d ",
+                TR_BLOCK_DIM, TR_TILE_DIM, TR_ELEMS_PER_THREAD);
+
   // Oclgrind claims to support cl_khr_fp16, but this is not actually
   // the case.
   if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
@@ -602,8 +619,8 @@ static char* mk_compile_opts(struct futhark_context *ctx,
 
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static void opencl_tally_profiling_records(struct futhark_context *ctx,
-                                           struct cost_centres* ccs) {
+static void tally_profiling_records(struct futhark_context *ctx,
+                                    struct cost_centres* ccs) {
   cl_int err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
@@ -656,124 +673,6 @@ static cl_event* opencl_get_event(struct futhark_context *ctx, const char *name)
   return event;
 }
 
-// Allocate memory from driver. The problem is that OpenCL may perform
-// lazy allocation, so we cannot know whether an allocation succeeded
-// until the first time we try to use it.  Hence we immediately
-// perform a write to see if the allocation succeeded.  This is slow,
-// but the assumption is that this operation will be rare (most things
-// will go through the free list).
-static int opencl_alloc_actual(struct futhark_context *ctx, size_t size, cl_mem *mem_out) {
-  int error;
-  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
-
-  if (error != CL_SUCCESS) {
-    return error;
-  }
-
-  int x = 2;
-  error = clEnqueueWriteBuffer(ctx->queue, *mem_out,
-                               CL_TRUE,
-                               0, sizeof(x), &x,
-                               0, NULL, NULL);
-
-  // No need to wait for completion here. clWaitForEvents() cannot
-  // return mem object allocation failures. This implies that the
-  // buffer is faulted onto the device on enqueue. (Observation by
-  // Andreas Kloeckner.)
-
-  return error;
-}
-
-static int opencl_alloc(struct futhark_context *ctx, FILE *log,
-                        size_t min_size, const char *tag,
-                        cl_mem *mem_out, size_t *size_out) {
-  (void)tag;
-  if (min_size < sizeof(int)) {
-    min_size = sizeof(int);
-  }
-
-  cl_mem* memptr;
-  if (free_list_find(&ctx->cl_free_list, min_size, tag, size_out, (fl_mem*)&memptr) == 0) {
-    // Successfully found a free block.  Is it big enough?
-    if (*size_out >= min_size) {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "No need to allocate: Found a block in the free list.\n");
-      }
-      *mem_out = *memptr;
-      free(memptr);
-      return CL_SUCCESS;
-    } else {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "Found a free block, but it was too small.\n");
-      }
-      int error = clReleaseMemObject(*memptr);
-      free(*memptr);
-      if (error != CL_SUCCESS) {
-        return error;
-      }
-    }
-  }
-
-  *size_out = min_size;
-
-  // We have to allocate a new block from the driver.  If the
-  // allocation does not succeed, then we might be in an out-of-memory
-  // situation.  We now start freeing things from the free list until
-  // we think we have freed enough that the allocation will succeed.
-  // Since we don't know how far the allocation is from fitting, we
-  // have to check after every deallocation.  This might be pretty
-  // expensive.  Let's hope that this case is hit rarely.
-
-  if (ctx->cfg->debugging) {
-    fprintf(log, "Actually allocating the desired block.\n");
-  }
-
-  int error = opencl_alloc_actual(ctx, min_size, mem_out);
-
-  while (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
-    if (ctx->cfg->debugging) {
-      fprintf(log, "Out of OpenCL memory: releasing entry from the free list...\n");
-    }
-    cl_mem* memptr;
-    if (free_list_first(&ctx->cl_free_list, (fl_mem*)&memptr) == 0) {
-      cl_mem mem = *memptr;
-      free(memptr);
-      error = clReleaseMemObject(mem);
-      if (error != CL_SUCCESS) {
-        return error;
-      }
-    } else {
-      break;
-    }
-    error = opencl_alloc_actual(ctx, min_size, mem_out);
-  }
-
-  return error;
-}
-
-static int opencl_free(struct futhark_context *ctx,
-                       cl_mem mem, size_t size, const char *tag) {
-  cl_mem* memptr = malloc(sizeof(cl_mem));
-  *memptr = mem;
-  free_list_insert(&ctx->cl_free_list, size, (fl_mem)memptr, tag);
-  return CL_SUCCESS;
-}
-
-static int opencl_free_all(struct futhark_context *ctx) {
-  free_list_pack(&ctx->cl_free_list);
-  cl_mem* memptr;
-  while (free_list_first(&ctx->cl_free_list, (fl_mem*)&memptr) == 0) {
-    cl_mem mem = *memptr;
-    free(memptr);
-    int error = clReleaseMemObject(mem);
-    if (error != CL_SUCCESS) {
-      return error;
-    }
-  }
-
-  return CL_SUCCESS;
-}
-
 int futhark_context_sync(struct futhark_context* ctx) {
   // Check for any delayed error.
   cl_int failure_idx = -1;
@@ -820,12 +719,11 @@ int futhark_context_sync(struct futhark_context* ctx) {
 // array must be NULL-terminated.
 static void setup_opencl_with_command_queue(struct futhark_context *ctx,
                                             cl_command_queue queue,
-                                            const char *srcs[],
                                             const char *extra_build_opts[],
                                             const char* cache_fname) {
   int error;
 
-  free_list_init(&ctx->cl_free_list);
+  free_list_init(&ctx->gpu_free_list);
   ctx->queue = queue;
 
   OPENCL_SUCCEED_FATAL(clGetCommandQueueInfo(ctx->queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx->ctx, NULL));
@@ -969,7 +867,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     fprintf(stderr, "OpenCL compiler options: %s\n", compile_opts);
   }
 
-  char *fut_opencl_src = NULL;
+  const char* opencl_src = ctx->cfg->program;
   cl_program prog;
   error = CL_SUCCESS;
 
@@ -979,40 +877,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->load_binary_from == NULL) {
     size_t src_size = 0;
 
-    // Maybe we have to read OpenCL source from somewhere else (used for debugging).
-    if (ctx->cfg->load_program_from != NULL) {
-      fut_opencl_src = slurp_file(ctx->cfg->load_program_from, NULL);
-      assert(fut_opencl_src != NULL);
-    } else {
-      // Construct the OpenCL source concatenating all the fragments.
-      for (const char **src = srcs; src && *src; src++) {
-        src_size += strlen(*src);
-      }
-
-      fut_opencl_src = (char*) malloc(src_size + 1);
-
-      size_t n, i;
-      for (i = 0, n = 0; srcs && srcs[i]; i++) {
-        strncpy(fut_opencl_src+n, srcs[i], src_size-n);
-        n += strlen(srcs[i]);
-      }
-      fut_opencl_src[src_size] = 0;
-    }
-
-    if (ctx->cfg->dump_program_to != NULL) {
-      if (ctx->cfg->logging) {
-        fprintf(stderr, "Dumping OpenCL source to %s...\n", ctx->cfg->dump_program_to);
-      }
-
-      dump_file(ctx->cfg->dump_program_to, fut_opencl_src, strlen(fut_opencl_src));
-    }
-
     if (cache_fname != NULL) {
       if (ctx->cfg->logging) {
         fprintf(stderr, "Restoring cache from from %s...\n", cache_fname);
       }
       cache_hash_init(&h);
-      cache_hash(&h, fut_opencl_src, strlen(fut_opencl_src));
+      cache_hash(&h, opencl_src, strlen(opencl_src));
       cache_hash(&h, compile_opts, strlen(compile_opts));
 
       unsigned char *buf;
@@ -1049,7 +919,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
         fprintf(stderr, "Creating OpenCL program...\n");
       }
 
-      const char* src_ptr[] = {fut_opencl_src};
+      const char* src_ptr[] = {opencl_src};
       prog = clCreateProgramWithSource(ctx->ctx, 1, src_ptr, &src_size, &error);
       OPENCL_SUCCEED_FATAL(error);
     }
@@ -1075,10 +945,9 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
-  OPENCL_SUCCEED_FATAL(build_opencl_program(prog, device_option.device, compile_opts));
+  OPENCL_SUCCEED_FATAL(build_gpu_program(prog, device_option.device, compile_opts));
 
   free(compile_opts);
-  free(fut_opencl_src);
 
   size_t binary_size = 0;
   unsigned char *binary = NULL;
@@ -1142,7 +1011,6 @@ static struct opencl_device_option get_preferred_device(const struct futhark_con
 }
 
 static void setup_opencl(struct futhark_context *ctx,
-                         const char *srcs[],
                          const char *extra_build_opts[],
                          const char* cache_fname) {
   struct opencl_device_option device_option = get_preferred_device(ctx->cfg);
@@ -1171,8 +1039,11 @@ static void setup_opencl(struct futhark_context *ctx,
                          &clCreateCommandQueue_error);
   OPENCL_SUCCEED_FATAL(clCreateCommandQueue_error);
 
-  setup_opencl_with_command_queue(ctx, queue, srcs, extra_build_opts, cache_fname);
+  setup_opencl_with_command_queue(ctx, queue, extra_build_opts, cache_fname);
 }
+
+struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
+void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
@@ -1188,9 +1059,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->cur_mem_usage_device = 0;
 
   if (ctx->cfg->queue_set) {
-    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
-    setup_opencl(ctx, opencl_program, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl(ctx, ctx->cfg->build_opts, ctx->cfg->cache_fname);
   }
 
   cl_int error;
@@ -1207,15 +1078,23 @@ int backend_context_setup(struct futhark_context* ctx) {
                    CL_MEM_READ_WRITE,
                    sizeof(int64_t)*(max_failure_args+1), NULL, &error);
   OPENCL_SUCCEED_OR_RETURN(error);
-  return 0;
+
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+    return 1;
+  }
+
+  return FUTHARK_SUCCESS;
 }
 
+static int gpu_free_all(struct futhark_context *ctx);
+
 void backend_context_teardown(struct futhark_context* ctx) {
+  free_builtin_kernels(ctx, ctx->kernels);
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)opencl_tally_profiling_records(ctx, NULL);
+  (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
-  (void)opencl_free_all(ctx);
+  (void)gpu_free_all(ctx);
   (void)clReleaseProgram(ctx->clprogram);
   (void)clReleaseCommandQueue(ctx->queue);
   (void)clReleaseContext(ctx->ctx);
@@ -1223,6 +1102,231 @@ void backend_context_teardown(struct futhark_context* ctx) {
 
 cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) {
   return ctx->queue;
+}
+
+// GPU ABSTRACTION LAYER
+
+// Types.
+
+typedef cl_kernel gpu_kernel;
+typedef cl_mem gpu_mem;
+
+static void gpu_create_kernel(struct futhark_context *ctx,
+                              gpu_kernel* kernel,
+                              const char* name) {
+  if (ctx->debugging) {
+    fprintf(ctx->log, "Creating kernel %s.\n", name);
+  }
+  cl_int error;
+  *kernel = clCreateKernel(ctx->clprogram, name, &error);
+  OPENCL_SUCCEED_FATAL(error);
+}
+
+static void gpu_free_kernel(struct futhark_context *ctx,
+                            gpu_kernel kernel) {
+  (void)ctx;
+  clReleaseKernel(kernel);
+}
+
+static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                gpu_mem dst, size_t offset, size_t size,
+                                void *src) {
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, "copy_scalar_to_dev");
+  }
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueWriteBuffer
+     (ctx->queue, dst, CL_TRUE,
+      offset, size, src, 0, NULL, event));
+  return 0;
+}
+
+static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  void *dst,
+                                  gpu_mem src, size_t offset, size_t size) {
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, "copy_scalar_from_dev");
+  }
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueReadBuffer
+     (ctx->queue, src, ctx->failure_is_an_option ? CL_FALSE : CL_TRUE,
+      offset, size, dst, 0, NULL, event));
+  return 0;
+}
+
+static int gpu_memcpy(struct futhark_context* ctx,
+                      gpu_mem dst, int64_t dst_offset,
+                      gpu_mem src, int64_t src_offset,
+                      int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_dev_to_dev");
+    }
+    // OpenCL swaps the usual order of operands for memcpy()-like
+    // functions.  The order below is not a typo.
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueCopyBuffer
+       (ctx->queue, src, dst, src_offset, dst_offset, nbytes,
+        0, NULL, event));
+    if (ctx->debugging) {
+      OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+                           gpu_mem dst, int64_t dst_offset,
+                           const unsigned char* src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_host_to_dev");
+    }
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueWriteBuffer(ctx->queue,
+                            dst,
+                            sync ? CL_TRUE : CL_FALSE,
+                            (size_t)dst_offset, (size_t)nbytes,
+                            src + src_offset,
+                            0, NULL, event));
+    if (ctx->debugging) {
+      OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+                           unsigned char* dst, int64_t dst_offset,
+                           gpu_mem src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes > 0) {
+    cl_event* event = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      event = opencl_get_event(ctx, "copy_dev_to_host");
+    }
+    OPENCL_SUCCEED_OR_RETURN
+      (clEnqueueReadBuffer(ctx->queue, src,
+                           ctx->failure_is_an_option ? CL_FALSE
+                           : sync ? CL_TRUE : CL_FALSE,
+                           src_offset, nbytes,
+                           dst + dst_offset,
+                           0, NULL, event));
+    if (sync &&
+        ctx->failure_is_an_option &&
+        futhark_context_sync(ctx) != 0) {
+      return 1;
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_launch_kernel(struct futhark_context* ctx,
+                             gpu_kernel kernel, const char *name,
+                             const int32_t grid[3],
+                             const int32_t block[3],
+                             unsigned int local_mem_bytes,
+                             int num_args,
+                             void* args[num_args],
+                             size_t args_sizes[num_args]) {
+  int64_t time_start = 0, time_end = 0;
+  if (ctx->logging) {
+    fprintf(ctx->log,
+            "Launching kernel %s with\n"
+            "  grid=(%d,%d,%d)\n"
+            "  block=(%d,%d,%d)\n"
+            "  local memory=%d\n",
+            name,
+            grid[0], grid[1], grid[2],
+            block[0], block[1], block[2],
+            local_mem_bytes);
+    time_start = get_wall_time();
+  }
+
+  // Some implementations do not work with 0-byte local memory.
+  if (local_mem_bytes == 0) {
+    local_mem_bytes = 4;
+  }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clSetKernelArg(kernel, 0, local_mem_bytes, NULL));
+  for (int i = 0; i < num_args; i++) {
+    OPENCL_SUCCEED_OR_RETURN
+      (clSetKernelArg(kernel, i+1, args_sizes[i], args[i]));
+  }
+
+  const size_t global_work_size[3] =
+    {(size_t)grid[0]*block[0],
+     (size_t)grid[1]*block[1],
+     (size_t)grid[2]*block[2]};
+  const size_t local_work_size[3] =
+    {block[0],
+     block[1],
+     block[2]};
+
+  cl_event* event = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    event = opencl_get_event(ctx, name);
+  }
+
+  OPENCL_SUCCEED_OR_RETURN
+    (clEnqueueNDRangeKernel(ctx->queue,
+                            kernel,
+                            3, NULL, global_work_size, local_work_size,
+                            0, NULL, event));
+
+  if (ctx->debugging) {
+    OPENCL_SUCCEED_FATAL(clFinish(ctx->queue));
+    time_end = get_wall_time();
+    long int time_diff = time_end - time_start;
+    fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
+  }
+  if (ctx->logging) {
+    printf("\n");
+  }
+
+  return FUTHARK_SUCCESS;
+}
+
+// Allocate memory from driver. The problem is that OpenCL may perform
+// lazy allocation, so we cannot know whether an allocation succeeded
+// until the first time we try to use it.  Hence we immediately
+// perform a write to see if the allocation succeeded.  This is slow,
+// but the assumption is that this operation will be rare (most things
+// will go through the free list).
+static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
+  int error;
+  *mem_out = clCreateBuffer(ctx->ctx, CL_MEM_READ_WRITE, size, NULL, &error);
+
+  OPENCL_SUCCEED_OR_RETURN(error);
+
+  int x = 2;
+  error = clEnqueueWriteBuffer(ctx->queue, *mem_out,
+                               CL_TRUE,
+                               0, sizeof(x), &x,
+                               0, NULL, NULL);
+
+  // No need to wait for completion here. clWaitForEvents() cannot
+  // return mem object allocation failures. This implies that the
+  // buffer is faulted onto the device on enqueue. (Observation by
+  // Andreas Kloeckner.)
+
+  if (error == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
+    return FUTHARK_OUT_OF_MEMORY;
+  }
+  OPENCL_SUCCEED_OR_RETURN(error);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  OPENCL_SUCCEED_OR_RETURN(clReleaseMemObject(mem));
+  return FUTHARK_SUCCESS;
 }
 
 // End of backends/opencl.h

@@ -140,7 +140,7 @@ mkQualId s = case reverse $ T.splitOn "." s of
 suffZero :: T.Text -> T.Text
 suffZero s = if T.last s == '.' then s <> "0" else s
 
-tryRead :: Read a => String -> T.Text -> a
+tryRead :: (Read a) => String -> T.Text -> a
 tryRead desc s = case reads s' of
   [(x, "")] -> x
   _ -> error $ "Invalid " ++ desc ++ " literal: `" ++ T.unpack s ++ "'."
@@ -152,7 +152,7 @@ tokenC :: a -> BS.ByteString -> a
 tokenC v _ = v
 
 {-# INLINE decToken #-}
-decToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+decToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
 decToken f = f . BS.foldl' digit 0
   where
     digit x c =
@@ -161,7 +161,7 @@ decToken f = f . BS.foldl' digit 0
         else x
 
 {-# INLINE binToken #-}
-binToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+binToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
 binToken f = f . BS.foldl' digit 0
   where
     digit x c =
@@ -170,7 +170,7 @@ binToken f = f . BS.foldl' digit 0
         else x
 
 {-# INLINE hexToken #-}
-hexToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+hexToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
 hexToken f = f . BS.foldl' digit 0
   where
     digit x c
@@ -184,7 +184,7 @@ hexToken f = f . BS.foldl' digit 0
           x
 
 {-# INLINE romToken #-}
-romToken :: Integral a => (a -> Token) -> BS.ByteString -> Token
+romToken :: (Integral a) => (a -> Token) -> BS.ByteString -> Token
 romToken f = tokenS $ f . fromRoman
 
 {-# INLINE tokenS #-}
@@ -209,7 +209,7 @@ symbol [] q
   | otherwise = SYMBOL (leadingOperator q) [] q
 symbol qs q = SYMBOL (leadingOperator q) qs q
 
-romanNumerals :: Integral a => [(T.Text, a)]
+romanNumerals :: (Integral a) => [(T.Text, a)]
 romanNumerals =
   reverse
     [ ("I", 1),
@@ -227,13 +227,13 @@ romanNumerals =
       ("M", 1000)
     ]
 
-fromRoman :: Integral a => T.Text -> a
+fromRoman :: (Integral a) => T.Text -> a
 fromRoman s =
   case find ((`T.isPrefixOf` s) . fst) romanNumerals of
     Nothing -> 0
     Just (d, n) -> n + fromRoman (T.drop (T.length d) s)
 
-readHexRealLit :: RealFloat a => T.Text -> a
+readHexRealLit :: (RealFloat a) => T.Text -> a
 readHexRealLit s =
   let num = T.drop 2 s
    in -- extract number into integer, fractional and (optional) exponent

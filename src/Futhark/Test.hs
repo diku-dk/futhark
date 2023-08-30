@@ -236,7 +236,7 @@ valuesAsVars server names_and_types futhark dir (ScriptFile f) = do
 -- approach here seems robust enough for now, but certainly it could
 -- be made even better.  The race condition that remains should mostly
 -- result in duplicate work, not crashes or data corruption.
-getGenFile :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m FilePath
+getGenFile :: (MonadIO m) => FutharkExe -> FilePath -> GenValue -> m FilePath
 getGenFile futhark dir gen = do
   liftIO $ createDirectoryIfMissing True $ dir </> "data"
   exists_and_proper_size <-
@@ -257,7 +257,7 @@ getGenFile futhark dir gen = do
   where
     file = "data" </> genFileName gen
 
-getGenBS :: MonadIO m => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
+getGenBS :: (MonadIO m) => FutharkExe -> FilePath -> GenValue -> m BS.ByteString
 getGenBS futhark dir gen = liftIO . BS.readFile . (dir </>) =<< getGenFile futhark dir gen
 
 genValues :: FutharkExe -> [GenValue] -> IO SBS.ByteString
@@ -300,11 +300,11 @@ testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
 testRunReferenceOutput prog entry tr =
   "data"
     </> takeBaseName prog
-      <> ":"
-      <> T.unpack entry
-      <> "-"
-      <> map clean (T.unpack (runDescription tr))
-        <.> "out"
+    <> ":"
+    <> T.unpack entry
+    <> "-"
+    <> map clean (T.unpack (runDescription tr))
+    <.> "out"
   where
     clean '/' = '_' -- Would this ever happen?
     clean ' ' = '_'
@@ -457,7 +457,7 @@ ensureReferenceOutput concurrency futhark compiler prog ios = do
 -- | Determine the @--tuning@ options to pass to the program.  The first
 -- argument is the extension of the tuning file, or 'Nothing' if none
 -- should be used.
-determineTuning :: MonadIO m => Maybe FilePath -> FilePath -> m ([String], String)
+determineTuning :: (MonadIO m) => Maybe FilePath -> FilePath -> m ([String], String)
 determineTuning Nothing _ = pure ([], mempty)
 determineTuning (Just ext) program = do
   exists <- liftIO $ doesFileExist (program <.> ext)

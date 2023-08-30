@@ -239,7 +239,7 @@ transformName :: VName -> TransformM VName
 transformName v = lookupSubst v . scopeSubsts <$> askScope
 
 -- | A general-purpose substitution of names.
-transformNames :: ASTMappable x => x -> TransformM x
+transformNames :: (ASTMappable x) => x -> TransformM x
 transformNames x = do
   scope <- askScope
   pure $ runIdentity $ astMap (substituter scope) x
@@ -370,7 +370,7 @@ transformImports ((name, imp) : imps) = do
     maybeHideEntryPoint d = d
 
 -- | Perform defunctorisation.
-transformProg :: MonadFreshNames m => Imports -> m [Dec]
+transformProg :: (MonadFreshNames m) => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
   let ((), namesrc', prog') = runTransformM namesrc $ transformImports prog
    in (DL.toList prog', namesrc')

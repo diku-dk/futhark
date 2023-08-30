@@ -118,7 +118,7 @@ instance Traversable PrimExp where
   traverse f (FunExp h args t) =
     FunExp h <$> traverse (traverse f) args <*> pure t
 
-instance FreeIn v => FreeIn (PrimExp v) where
+instance (FreeIn v) => FreeIn (PrimExp v) where
   freeIn' = foldMap freeIn'
 
 -- | A 'PrimExp' tagged with a phantom type used to provide type-safe
@@ -136,7 +136,7 @@ instance Foldable (TPrimExp t) where
 instance Traversable (TPrimExp t) where
   traverse f (TPrimExp e) = TPrimExp <$> traverse f e
 
-instance FreeIn v => FreeIn (TPrimExp t v) where
+instance (FreeIn v) => FreeIn (TPrimExp t v) where
   freeIn' = freeIn' . untyped
 
 -- | This expression is of type t'Int8'.
@@ -246,7 +246,7 @@ constFoldPrimExp (BinOpExp SRem {} x y)
       ValueExp $ IntValue $ intValue it (0 :: Integer)
 constFoldPrimExp e = e
 
-constFoldCmpExp :: Eq v => PrimExp v -> PrimExp v
+constFoldCmpExp :: (Eq v) => PrimExp v -> PrimExp v
 constFoldCmpExp (CmpOpExp (CmpEq _) x y)
   | x == y =
       untyped true
@@ -267,7 +267,7 @@ class NumExp t where
 
 -- | The class of integer types that can be used for constructing
 -- 'TPrimExp's.
-class NumExp t => IntExp t where
+class (NumExp t) => IntExp t where
   -- | The type of an expression, known to be an integer type.
   expIntType :: TPrimExp t v -> IntType
 
@@ -301,7 +301,7 @@ instance IntExp Int64 where
 
 -- | The class of floating-point types that can be used for
 -- constructing 'TPrimExp's.
-class NumExp t => FloatExp t where
+class (NumExp t) => FloatExp t where
   -- | Construct a typed expression from a rational.
   fromRational' :: Rational -> TPrimExp t v
 
@@ -378,7 +378,7 @@ instance (FloatExp t, Pretty v) => Fractional (TPrimExp t v) where
 
   fromRational = fromRational'
 
-instance Pretty v => Floating (TPrimExp Half v) where
+instance (Pretty v) => Floating (TPrimExp Half v) where
   x ** y = isF16 $ BinOpExp (FPow Float16) (untyped x) (untyped y)
   pi = isF16 $ ValueExp $ FloatValue $ Float16Value pi
   exp x = isF16 $ FunExp "exp16" [untyped x] $ FloatType Float16
@@ -396,7 +396,7 @@ instance Pretty v => Floating (TPrimExp Half v) where
   acosh x = isF16 $ FunExp "acosh16" [untyped x] $ FloatType Float16
   atanh x = isF16 $ FunExp "atanh16" [untyped x] $ FloatType Float16
 
-instance Pretty v => Floating (TPrimExp Float v) where
+instance (Pretty v) => Floating (TPrimExp Float v) where
   x ** y = isF32 $ BinOpExp (FPow Float32) (untyped x) (untyped y)
   pi = isF32 $ ValueExp $ FloatValue $ Float32Value pi
   exp x = isF32 $ FunExp "exp32" [untyped x] $ FloatType Float32
@@ -414,7 +414,7 @@ instance Pretty v => Floating (TPrimExp Float v) where
   acosh x = isF32 $ FunExp "acosh32" [untyped x] $ FloatType Float32
   atanh x = isF32 $ FunExp "atanh32" [untyped x] $ FloatType Float32
 
-instance Pretty v => Floating (TPrimExp Double v) where
+instance (Pretty v) => Floating (TPrimExp Double v) where
   x ** y = isF64 $ BinOpExp (FPow Float64) (untyped x) (untyped y)
   pi = isF64 $ ValueExp $ FloatValue $ Float64Value pi
   exp x = isF64 $ FunExp "exp64" [untyped x] $ FloatType Float64
@@ -476,16 +476,16 @@ instance (IntExp t, Pretty v) => IntegralExp (TPrimExp t v) where
   sgn _ = Nothing
 
 -- | Lifted logical conjunction.
-(.&&.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+(.&&.) :: (Eq v) => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .&&. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogAnd x y
 
 -- | Lifted logical conjunction.
-(.||.) :: Eq v => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
+(.||.) :: (Eq v) => TPrimExp Bool v -> TPrimExp Bool v -> TPrimExp Bool v
 TPrimExp x .||. TPrimExp y = TPrimExp $ constFoldPrimExp $ BinOpExp LogOr x y
 
 -- | Lifted relational operators; assuming signed numbers in case of
 -- integers.
-(.<.), (.>.), (.<=.), (.>=.), (.==.) :: Eq v => TPrimExp t v -> TPrimExp t v -> TPrimExp Bool v
+(.<.), (.>.), (.<=.), (.>=.), (.==.) :: (Eq v) => TPrimExp t v -> TPrimExp t v -> TPrimExp Bool v
 TPrimExp x .<. TPrimExp y =
   TPrimExp $ constFoldCmpExp $ CmpOpExp cmp x y
   where
@@ -508,8 +508,8 @@ x .>. y = y .<. x
 x .>=. y = y .<=. x
 
 -- | Lifted bitwise operators.  The right-shift is logical, *not* arithmetic.
-(.&.), (.|.), (.^.), (.>>.), (.<<.) :: Eq v => TPrimExp t v -> TPrimExp t v -> TPrimExp t v
-bitPrimExp :: Eq v => (IntType -> BinOp) -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+(.&.), (.|.), (.^.), (.>>.), (.<<.) :: (Eq v) => TPrimExp t v -> TPrimExp t v -> TPrimExp t v
+bitPrimExp :: (Eq v) => (IntType -> BinOp) -> TPrimExp t v -> TPrimExp t v -> TPrimExp t v
 bitPrimExp op (TPrimExp x) (TPrimExp y) =
   TPrimExp $
     constFoldPrimExp $
@@ -552,7 +552,7 @@ asFloatOp f x y
   | FloatType t <- primExpType x = Just $ BinOpExp (f t) x y
   | otherwise = Nothing
 
-numBad :: Pretty a => String -> a -> b
+numBad :: (Pretty a) => String -> a -> b
 numBad s x =
   error $ "Invalid argument to PrimExp method " ++ s ++ ": " ++ prettyString x
 
@@ -661,19 +661,19 @@ sMin64 :: TPrimExp Int64 v -> TPrimExp Int64 v -> TPrimExp Int64 v
 sMin64 x y = TPrimExp $ BinOpExp (SMin Int64) (untyped x) (untyped y)
 
 -- | Sign-extend to 32 bit integer.
-sExt32 :: IntExp t => TPrimExp t v -> TPrimExp Int32 v
+sExt32 :: (IntExp t) => TPrimExp t v -> TPrimExp Int32 v
 sExt32 = isInt32 . sExt Int32 . untyped
 
 -- | Sign-extend to 64 bit integer.
-sExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
+sExt64 :: (IntExp t) => TPrimExp t v -> TPrimExp Int64 v
 sExt64 = isInt64 . sExt Int64 . untyped
 
 -- | Zero-extend to 32 bit integer.
-zExt32 :: IntExp t => TPrimExp t v -> TPrimExp Int32 v
+zExt32 :: (IntExp t) => TPrimExp t v -> TPrimExp Int32 v
 zExt32 = isInt32 . zExt Int32 . untyped
 
 -- | Zero-extend to 64 bit integer.
-zExt64 :: IntExp t => TPrimExp t v -> TPrimExp Int64 v
+zExt64 :: (IntExp t) => TPrimExp t v -> TPrimExp Int64 v
 zExt64 = isInt64 . zExt Int64 . untyped
 
 -- | 16-bit float minimum.
@@ -711,7 +711,7 @@ sExtAs from to = TPrimExp $ sExt (expIntType to) (untyped from)
 
 -- Prettyprinting instances
 
-instance Pretty v => Pretty (PrimExp v) where
+instance (Pretty v) => Pretty (PrimExp v) where
   pretty (LeafExp v _) = pretty v
   pretty (ValueExp v) = pretty v
   pretty (BinOpExp op x y) = pretty op <+> parens (pretty x) <+> parens (pretty y)
@@ -720,12 +720,12 @@ instance Pretty v => Pretty (PrimExp v) where
   pretty (UnOpExp op x) = pretty op <+> parens (pretty x)
   pretty (FunExp h args _) = pretty h <+> parens (commasep $ map pretty args)
 
-instance Pretty v => Pretty (TPrimExp t v) where
+instance (Pretty v) => Pretty (TPrimExp t v) where
   pretty = pretty . untyped
 
 -- | Produce a mapping from the leaves of the 'PrimExp' to their
 -- designated types.
-leafExpTypes :: Ord a => PrimExp a -> S.Set (a, PrimType)
+leafExpTypes :: (Ord a) => PrimExp a -> S.Set (a, PrimType)
 leafExpTypes (LeafExp x ptp) = S.singleton (x, ptp)
 leafExpTypes (ValueExp _) = S.empty
 leafExpTypes (UnOpExp _ e) = leafExpTypes e

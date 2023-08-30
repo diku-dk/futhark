@@ -94,7 +94,7 @@ histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do
   op'' <- transformLambda op'
   pure (stms, MC.HistOp num_bins rf dests nes' shape op'')
 
-mkSegSpace :: MonadFreshNames m => SubExp -> m (VName, SegSpace)
+mkSegSpace :: (MonadFreshNames m) => SubExp -> m (VName, SegSpace)
 mkSegSpace w = do
   flat <- newVName "flat_tid"
   gtid <- newVName "gtid"
@@ -164,7 +164,7 @@ transformFunDef (FunDef entry attrs name rettype params body) = do
 
 data NeedsRename = DoRename | DoNotRename
 
-renameIfNeeded :: Rename a => NeedsRename -> a -> ExtractM a
+renameIfNeeded :: (Rename a) => NeedsRename -> a -> ExtractM a
 renameIfNeeded DoRename = renameSomething
 renameIfNeeded DoNotRename = pure
 

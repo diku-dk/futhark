@@ -13,5 +13,5 @@ import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
 
 -- | Compile the program to ImpCode with CUDA kernels.
-compileProg :: MonadFreshNames m => Prog GPUMem -> m (Warnings, Program)
+compileProg :: (MonadFreshNames m) => Prog GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToCUDA <$> compileProgCUDA prog

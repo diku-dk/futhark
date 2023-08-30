@@ -148,7 +148,7 @@ checkProgM (Prog doc decs) = do
   pure (FileModule abs env (Prog doc decs') full_env)
 
 dupDefinitionError ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   Namespace ->
   Name ->
   SrcLoc ->
@@ -158,9 +158,11 @@ dupDefinitionError space name loc1 loc2 =
   typeError loc1 mempty $
     "Duplicate definition of"
       <+> pretty space
-      <+> prettyName name <> "."
+      <+> prettyName name
+      <> "."
       </> "Previously defined at"
-      <+> pretty (locStr loc2) <> "."
+      <+> pretty (locStr loc2)
+      <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()
 checkForDuplicateDecs =
@@ -228,7 +230,8 @@ checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
           typeError loc mempty $
             "All function parameters must have non-anonymous sizes."
               </> "Hint: add size parameters to"
-              <+> dquotes (prettyName name') <> "."
+              <+> dquotes (prettyName name')
+              <> "."
 
         pure (tparams', vtype', vtype_t)
 
@@ -588,7 +591,8 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
             typeError loc mempty $
               "Non-lifted type abbreviations may not use existential sizes in their definition."
                 </> "Hint: use 'type~' or add size parameters to"
-                <+> dquotes (prettyName name) <> "."
+                <+> dquotes (prettyName name)
+                <> "."
       _ -> pure ()
 
     bindSpaced [(Type, name)] $ do
@@ -710,12 +714,12 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
       vb
     )
 
-nastyType :: Monoid als => TypeBase dim als -> Bool
+nastyType :: (Monoid als) => TypeBase dim als -> Bool
 nastyType (Scalar Prim {}) = False
 nastyType t@Array {} = nastyType $ stripArray 1 t
 nastyType _ = True
 
-nastyReturnType :: Monoid als => Maybe (TypeExp Info VName) -> TypeBase dim als -> Bool
+nastyReturnType :: (Monoid als) => Maybe (TypeExp Info VName) -> TypeBase dim als -> Bool
 nastyReturnType Nothing (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =
   nastyType t1 || nastyReturnType Nothing t2
 nastyReturnType (Just (TEArrow _ te1 te2 _)) (Scalar (Arrow _ _ _ t1 (RetType _ t2))) =

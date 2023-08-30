@@ -77,7 +77,7 @@ lowerUpdate
 lowerUpdate _ _ _ =
   Nothing
 
-lowerUpdateGPU :: MonadFreshNames m => LowerUpdate GPU m
+lowerUpdateGPU :: (MonadFreshNames m) => LowerUpdate GPU m
 lowerUpdateGPU
   scope
   (Let pat aux (Op (SegOp (SegMap lvl space ts kbody))))
@@ -103,7 +103,7 @@ lowerUpdateGPU
 lowerUpdateGPU scope stm updates = lowerUpdate scope stm updates
 
 lowerUpdatesIntoSegMap ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Scope (Aliases GPU) ->
   Pat (LetDec (Aliases GPU)) ->
   [DesiredUpdate (LetDec (Aliases GPU))] ->
@@ -339,7 +339,7 @@ data LoopResultSummary dec = LoopResultSummary
   }
   deriving (Show)
 
-indexSubstitutions :: Typed dec => [LoopResultSummary dec] -> IndexSubstitutions
+indexSubstitutions :: (Typed dec) => [LoopResultSummary dec] -> IndexSubstitutions
 indexSubstitutions = mapMaybe getSubstitution
   where
     getSubstitution res = do

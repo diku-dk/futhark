@@ -182,7 +182,7 @@ data DimPos
 -- occurrence of the dimension.
 traverseDims ::
   forall f fdim tdim als.
-  Applicative f =>
+  (Applicative f) =>
   (S.Set VName -> DimPos -> fdim -> f tdim) ->
   TypeBase fdim als ->
   f (TypeBase tdim als)
@@ -380,7 +380,7 @@ matchDims ::
 matchDims onDims = matchDims' mempty
   where
     matchDims' ::
-      forall u'. Monoid u' => [VName] -> TypeBase d1 u' -> TypeBase d2 u' -> m (TypeBase d1 u')
+      forall u'. (Monoid u') => [VName] -> TypeBase d1 u' -> TypeBase d2 u' -> m (TypeBase d1 u')
     matchDims' bound t1 t2 =
       case (t1, t2) of
         (Array u1 shape1 et1, Array u2 shape2 et2) ->
@@ -1176,7 +1176,7 @@ isBuiltin = (== "/prelude") . takeDirectory
 
 -- | Is the position of this thing builtin as per 'isBuiltin'?  Things
 -- without location are considered not built-in.
-isBuiltinLoc :: Located a => a -> Bool
+isBuiltinLoc :: (Located a) => a -> Bool
 isBuiltinLoc x =
   case locOf x of
     NoLoc -> False

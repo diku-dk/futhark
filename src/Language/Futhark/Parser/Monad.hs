@@ -84,7 +84,7 @@ mustBe (L loc _) expected =
   parseErrorAt loc . Just $
     "Only the keyword '" <> expected <> "' may appear here."
 
-mustBeEmpty :: Located loc => loc -> ValueType -> ParserMonad ()
+mustBeEmpty :: (Located loc) => loc -> ValueType -> ParserMonad ()
 mustBeEmpty _ (Array _ (Shape dims) _)
   | 0 `elem` dims = pure ()
 mustBeEmpty loc t =
@@ -203,7 +203,7 @@ parseError (L loc _, expected) = do
       "Expected one of the following: " <> T.unwords (map T.pack expected)
     ]
 
-parseErrorAt :: Located loc => loc -> Maybe T.Text -> ParserMonad a
+parseErrorAt :: (Located loc) => loc -> Maybe T.Text -> ParserMonad a
 parseErrorAt loc Nothing = throwError $ SyntaxError (locOf loc) "Syntax error."
 parseErrorAt loc (Just s) = throwError $ SyntaxError (locOf loc) s
 

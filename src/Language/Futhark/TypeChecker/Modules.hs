@@ -280,7 +280,8 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
         "Module defines"
           </> indent 2 (ppTypeAbbr abs name mod_t)
           </> "but module type requires"
-          <+> what <> "."
+          <+> what
+          <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -332,17 +333,17 @@ resolveMTyNames = resolveMTyNames'
         resolve' name _ =
           M.lookup (namespace, baseName name) $ envNameMap mod_env
 
-missingType :: Pretty a => Loc -> a -> Either TypeError b
+missingType :: (Pretty a) => Loc -> a -> Either TypeError b
 missingType loc name =
   Left . TypeError loc mempty $
     "Module does not define a type named" <+> pretty name <> "."
 
-missingVal :: Pretty a => Loc -> a -> Either TypeError b
+missingVal :: (Pretty a) => Loc -> a -> Either TypeError b
 missingVal loc name =
   Left . TypeError loc mempty $
     "Module does not define a value named" <+> pretty name <> "."
 
-missingMod :: Pretty a => Loc -> a -> Either TypeError b
+missingMod :: (Pretty a) => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
     "Module does not define a module named" <+> pretty name <> "."

@@ -160,7 +160,7 @@ rwimPossible fun
   | otherwise =
       Nothing
 
-transposedArrays :: MonadBuilder m => [VName] -> m [VName]
+transposedArrays :: (MonadBuilder m) => [VName] -> m [VName]
 transposedArrays arrs = forM arrs $ \arr -> do
   t <- lookupType arr
   let perm = [1, 0] ++ [2 .. arrayRank t - 1]

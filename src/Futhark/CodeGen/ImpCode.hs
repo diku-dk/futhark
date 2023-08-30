@@ -28,9 +28,9 @@
 -- ImpCode does not have arrays. 'DeclareArray' is for declaring
 -- constant array literals, not arrays in general.  Instead, ImpCode
 -- deals only with memory.  Array operations present in core IR
--- programs are turned into 'Write', v'Read', and 'Copy' operations
--- that use flat indexes and offsets based on the index function of
--- the original array.
+-- programs are turned into 'Write', v'Read', and 'LMADCopy'
+-- operations that use flat indexes and offsets based on the index
+-- function of the original array.
 --
 -- == Scoping
 --
@@ -73,6 +73,7 @@ module Futhark.CodeGen.ImpCode
     ArrayContents (..),
     declaredIn,
     lexicalMemoryUsage,
+    declsFirst,
     calledFuncs,
     callGraph,
     ParamMap,
@@ -98,7 +99,7 @@ module Futhark.CodeGen.ImpCode
 where
 
 import Data.Bifunctor (second)
-import Data.List (intersperse)
+import Data.List (intersperse, partition)
 import Data.Map qualified as M
 import Data.Ord (comparing)
 import Data.Set qualified as S
@@ -279,18 +280,18 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | Element type being copied, destination, offset in
-    -- destination, destination space, source, offset in source,
-    -- offset space, number of bytes.
-    Copy
+  | -- | @LMADcopy pt dest dest_lmad src src_lmad shape@
+    LMADCopy
       PrimType
-      VName
-      (Count Bytes (TExp Int64))
-      Space
-      VName
-      (Count Bytes (TExp Int64))
-      Space
-      (Count Bytes (TExp Int64))
+      [Count Elements (TExp Int64)]
+      (VName, Space)
+      ( Count Elements (TExp Int64),
+        [Count Elements (TExp Int64)]
+      )
+      (VName, Space)
+      ( Count Elements (TExp Int64),
+        [Count Elements (TExp Int64)]
+      )
   | -- | @Write mem i t space vol v@ writes the value @v@ to
     -- @mem@ offset by @i@ elements of type @t@.  The
     -- 'Space' argument is the memory space of @mem@
@@ -384,6 +385,21 @@ lexicalMemoryUsage func =
         onArg (MemArg x) = oneName x
     set x = go set x
 
+-- | Reorder the code such that all declarations appear first.  This
+-- is always possible, because 'DeclareScalar' and 'DeclareMem' do
+-- not depend on any local bindings.
+declsFirst :: Code a -> Code a
+declsFirst = mconcat . uncurry (<>) . partition isDecl . listify
+  where
+    listify (c1 :>>: c2) = listify c1 <> listify c2
+    listify (If cond c1 c2) = [If cond (declsFirst c1) (declsFirst c2)]
+    listify (For i e c) = [For i e (declsFirst c)]
+    listify (While cond c) = [While cond (declsFirst c)]
+    listify c = [c]
+    isDecl (DeclareScalar {}) = True
+    isDecl (DeclareMem {}) = True
+    isDecl _ = False
+
 -- | The set of functions that are called by this code.  Accepts a
 -- function for determing function calls in 'Op's.
 calledFuncs :: (a -> S.Set Name) -> Code a -> S.Set Name
@@ -449,17 +465,17 @@ var = LeafExp
 
 -- Prettyprinting definitions.
 
-instance Pretty op => Pretty (Definitions op) where
+instance (Pretty op) => Pretty (Definitions op) where
   pretty (Definitions types consts funs) =
     pretty types </> pretty consts </> pretty funs
 
-instance Pretty op => Pretty (Functions op) where
+instance (Pretty op) => Pretty (Functions op) where
   pretty (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where
       ppFun (name, fun) =
         "Function " <> pretty name <> colon </> indent 2 (pretty fun)
 
-instance Pretty op => Pretty (Constants op) where
+instance (Pretty op) => Pretty (Constants op) where
   pretty (Constants decls code) =
     "Constants:"
       </> indent 2 (stack $ map pretty decls)
@@ -479,7 +495,7 @@ instance Pretty EntryPoint where
       ppArg ((p, u), t) = pretty p <+> ":" <+> ppRes (u, t)
       ppRes (u, t) = pretty u <> pretty t
 
-instance Pretty op => Pretty (FunctionT op) where
+instance (Pretty op) => Pretty (FunctionT op) where
   pretty (Function entry outs ins body) =
     "Inputs:"
       </> indent 2 (stack $ map pretty ins)
@@ -520,7 +536,7 @@ instance Pretty ArrayContents where
   pretty (ArrayValues vs) = braces (commasep $ map pretty vs)
   pretty (ArrayZeros n) = braces "0" <+> "*" <+> pretty n
 
-instance Pretty op => Pretty (Code op) where
+instance (Pretty op) => Pretty (Code op) where
   pretty (Op op) = pretty op
   pretty Skip = "skip"
   pretty (c1 :>>: c2) = pretty c1 </> pretty c2
@@ -581,17 +597,19 @@ instance Pretty op => Pretty (Code op) where
     pretty dest <+> "<-" <+> pretty from <+> "@" <> pretty space
   pretty (Assert e msg _) =
     "assert" <> parens (commasep [pretty msg, pretty e])
-  pretty (Copy t dest destoffset destspace src srcoffset srcspace size) =
-    "copy"
+  pretty (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+    ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
       <> (parens . align)
-        ( pretty t <> comma
-            </> ppMemLoc dest destoffset <> pretty destspace <> comma
-            </> ppMemLoc src srcoffset <> pretty srcspace <> comma
-            </> pretty size
+        ( foldMap (brackets . pretty) shape
+            <> ","
+            </> p dst dstspace dstoffset dststrides
+            <> ","
+            </> p src srcspace srcoffset srcstrides
         )
     where
-      ppMemLoc base offset =
-        pretty base <+> "+" <+> pretty offset
+      p mem space offset strides =
+        pretty mem <> pretty space <> "+" <> pretty offset
+          <+> foldMap (brackets . pretty) strides
   pretty (If cond tbranch fbranch) =
     "if"
       <+> pretty cond
@@ -673,8 +691,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (Copy dest pt destoffset destspace src srcoffset srcspace size) =
-    pure $ Copy dest pt destoffset destspace src srcoffset srcspace size
+  traverse _ (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+    pure $ LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -711,7 +729,7 @@ instance FreeIn EntryPoint where
   freeIn' (EntryPoint _ res args) =
     freeIn' (map snd res) <> freeIn' (map snd args)
 
-instance FreeIn a => FreeIn (Functions a) where
+instance (FreeIn a) => FreeIn (Functions a) where
   freeIn' (Functions fs) = foldMap (onFun . snd) fs
     where
       onFun f =
@@ -728,7 +746,7 @@ instance FreeIn ExternalValue where
   freeIn' (TransparentValue vd) = freeIn' vd
   freeIn' (OpaqueValue _ vds) = foldMap freeIn' vds
 
-instance FreeIn a => FreeIn (Code a) where
+instance (FreeIn a) => FreeIn (Code a) where
   freeIn' (x :>>: y) =
     fvBind (declaredIn x) $ freeIn' x <> freeIn' y
   freeIn' Skip =
@@ -747,8 +765,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (Copy _ dest x _ src y _ n) =
-    freeIn' dest <> freeIn' x <> freeIn' src <> freeIn' y <> freeIn' n
+  freeIn' (LMADCopy _ shape (dst, _) (dstoffset, dststrides) (src, _) (srcoffset, srcstrides)) =
+    freeIn' shape <> freeIn' dst <> freeIn' dstoffset <> freeIn' dststrides <> freeIn' src <> freeIn' srcoffset <> freeIn' srcstrides
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y
   freeIn' (Write v i _ _ _ e) =

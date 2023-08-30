@@ -237,7 +237,7 @@ instance Pretty IntValue where
   pretty (Int64Value v) = pretty $ show v ++ "i64"
 
 -- | Create an t'IntValue' from a type and an 'Integer'.
-intValue :: Integral int => IntType -> int -> IntValue
+intValue :: (Integral int) => IntType -> int -> IntValue
 intValue Int8 = Int8Value . fromIntegral
 intValue Int16 = Int16Value . fromIntegral
 intValue Int32 = Int32Value . fromIntegral
@@ -251,7 +251,7 @@ intValueType Int32Value {} = Int32
 intValueType Int64Value {} = Int64
 
 -- | Convert an t'IntValue' to any 'Integral' type.
-valueIntegral :: Integral int => IntValue -> int
+valueIntegral :: (Integral int) => IntValue -> int
 valueIntegral (Int8Value v) = fromIntegral v
 valueIntegral (Int16Value v) = fromIntegral v
 valueIntegral (Int32Value v) = fromIntegral v
@@ -313,7 +313,7 @@ instance Pretty FloatValue where
     | otherwise = pretty $ show v ++ "f64"
 
 -- | Create a t'FloatValue' from a type and a 'Rational'.
-floatValue :: Real num => FloatType -> num -> FloatValue
+floatValue :: (Real num) => FloatType -> num -> FloatValue
 floatValue Float16 = Float16Value . fromRational . toRational
 floatValue Float32 = Float32Value . fromRational . toRational
 floatValue Float64 = Float64Value . fromRational . toRational
@@ -1688,21 +1688,21 @@ primBitSize = (* 8) . primByteSize
 --
 -- Warning: note that this is 0 for 'Unit', but a 'Unit' takes up a
 -- byte in the binary data format.
-primByteSize :: Num a => PrimType -> a
+primByteSize :: (Num a) => PrimType -> a
 primByteSize (IntType t) = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
 primByteSize Bool = 1
 primByteSize Unit = 0
 
 -- | The size of a value of a given integer type in eight-bit bytes.
-intByteSize :: Num a => IntType -> a
+intByteSize :: (Num a) => IntType -> a
 intByteSize Int8 = 1
 intByteSize Int16 = 2
 intByteSize Int32 = 4
 intByteSize Int64 = 8
 
 -- | The size of a value of a given floating-point type in eight-bit bytes.
-floatByteSize :: Num a => FloatType -> a
+floatByteSize :: (Num a) => FloatType -> a
 floatByteSize Float16 = 2
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8

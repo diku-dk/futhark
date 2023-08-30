@@ -56,7 +56,7 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (chunks)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -94,7 +94,7 @@ compileSegRed pat lvl space reds body = do
         let map_arrs = drop (segBinOpResults reds) $ patElems pat
         zipWithM_ (compileThreadResult space) map_arrs map_res
 
-      red_cont $ zip (map kernelResultSubExp red_res) $ repeat []
+      red_cont $ map ((,[]) . kernelResultSubExp) red_res
   emit $ Imp.DebugPrint "" Nothing
 
 -- | Like 'compileSegRed', but where the body is a monadic action.
@@ -142,9 +142,7 @@ intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
       MemArray pt shape _ (ArrayIn mem _) -> do
         let shape' = Shape [num_threads] <> shape
         sArray "red_arr" pt shape' mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape'
+          LMAD.iota 0 (map pe64 $ shapeDims shape')
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]
@@ -311,7 +309,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
           in_bounds =
             body $ \red_res ->
               sComment "save results to be reduced" $ do
-                let red_dests = zip (concat reds_arrs) $ repeat [ltid]
+                let red_dests = map (,[ltid]) (concat reds_arrs)
                 forM_ (zip red_dests red_res) $ \((d, d_is), (res, res_is)) ->
                   copyDWIMFix d d_is res res_is
 
@@ -721,7 +719,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                       copyDWIMFix acc (acc_is ++ vec_is) ne []
           sUnless (local_tid .==. 0) reset_to_neutral
       _ -> pure ()
-
+  sOp $ Imp.ErrorSync Imp.FenceLocal
   pure (slugs_op_renamed, doTheReduction)
 
 reductionStageOne ::
@@ -872,7 +870,7 @@ reductionStageTwo
           when (primType $ paramType p) $
             copyDWIMFix arr [sExt64 local_tid] (Var $ paramName p) []
 
-        sOp $ Imp.Barrier Imp.FenceLocal
+        sOp $ Imp.ErrorSync Imp.FenceLocal
 
         sComment "reduce the per-group results" $ do
           groupReduce (sExt32 group_size) red_op_renamed red_arrs

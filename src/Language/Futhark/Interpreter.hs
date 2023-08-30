@@ -305,15 +305,25 @@ data TermBinding
     TermPoly (Maybe T.BoundV) (StructType -> Eval -> EvalM Value)
   | TermModule Module
 
+instance Show TermBinding where
+  show (TermValue bv v) = unwords ["TermValue", show bv, show v]
+  show (TermPoly bv _) = unwords ["TermPoly", show bv]
+  show (TermModule m) = unwords ["TermModule", show m]
+
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
+
+instance Show Module where
+  show (Module env) = "(" <> unwords ["Module", show env] <> ")"
+  show (ModuleFun _) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
     envType :: M.Map VName T.TypeBinding
   }
+  deriving (Show)
 
 instance Monoid Env where
   mempty = Env mempty mempty
@@ -530,7 +540,7 @@ writeArray :: [Indexing] -> Value -> Value -> Maybe Value
 writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
 
 updateArray ::
-  Monad m =>
+  (Monad m) =>
   (Value -> Value -> m Value) ->
   [Indexing] ->
   Value ->
@@ -584,7 +594,7 @@ evalIndex loc env is arr = do
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: Pretty u => Env -> TypeBase Size u -> TypeBase Size u
+expandType :: (Pretty u) => Env -> TypeBase Size u -> TypeBase Size u
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
 expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
@@ -649,12 +659,14 @@ evalTermVar env qv t =
   case lookupVar qv env of
     Just (TermPoly _ v) -> v (expandType env t) =<< evalWithExts env
     Just (TermValue _ v) -> pure v
-    _ -> do
+    x -> do
       ss <- map (locText . srclocOf) <$> stacktrace
       error $
         prettyString qv
           <> " is not bound to a value.\n"
           <> T.unpack (prettyStacktrace 0 ss)
+          <> "Bound to\n"
+          <> show x
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
@@ -1140,7 +1152,9 @@ evalModExp env (ModDecs ds _) = do
   Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
   pure
-    ( Env terms types,
+    ( Env
+        (terms `M.difference` envTerm env)
+        (types `M.difference` envType env),
       Module $
         Env
           (terms `M.difference` envTerm env)
@@ -1978,7 +1992,9 @@ checkEntryArgs entry args entry_t
       | null param_ts =
           "Entry point " <> dquotes (prettyName entry) <> " is not a function."
       | otherwise =
-          "Entry point " <> dquotes (prettyName entry) <> " expects input of type(s)"
+          "Entry point "
+            <> dquotes (prettyName entry)
+            <> " expects input of type(s)"
             </> indent 2 (stack (map pretty param_ts))
 
 -- | Execute the named function on the given arguments; may fail
@@ -2012,12 +2028,18 @@ interpretFunction ctx fname vs = do
     updateType _ t =
       Right t
 
-    -- FIXME: we don't check array sizes.
     checkInput :: ValueType -> StructType -> Either T.Text ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput (Array _ _ (Prim vt)) (Array _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
+    checkInput vArr@(Array _ (F.Shape vd) _) pArr@(Array _ (F.Shape pd) _)
+      | length vd /= length pd = badDim vArr pArr
+      | not . and $ zipWith sameShape vd pd = badDim vArr pArr
+      where
+        sameShape :: Int64 -> Size -> Bool
+        sameShape shape0 (IntLit shape1 _ _) = fromIntegral shape0 == shape1
+        sameShape _ _ = True
     checkInput _ _ =
       Right ()
 
@@ -2028,3 +2050,11 @@ interpretFunction ctx fname vs = do
           <+> align (pretty pt)
           </> "Got:     "
           <+> align (pretty vt)
+
+    badDim vd pd =
+      Left . docText $
+        "Invalid argument dimensions."
+          </> "Expected:"
+          <+> align (pretty pd)
+          </> "Got:     "
+          <+> align (pretty vd)
