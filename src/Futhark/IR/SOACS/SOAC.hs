@@ -597,7 +597,7 @@ instance CanBeAliased SOAC where
 instance (ASTRep rep) => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
-  opDependencies (Stream w arr accs lam) =
+  opDependencies (Stream _w _arr _accs _lam) =
     undefined -- TODO write an example program for this first; see issue656.fut
   opDependencies (Hist w arrs ops lam) =
     let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
@@ -632,6 +632,10 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
      in map flattenGroups (groupScatterResults' outputs deps)
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
+  opDependencies (JVP _ _ _) =
+    undefined
+  opDependencies (VJP _ _ _) =
+    undefined
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $

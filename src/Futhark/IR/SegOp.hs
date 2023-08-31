@@ -65,6 +65,7 @@ import Data.List
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -1005,6 +1006,11 @@ instance
   where
   cheapOp _ = False
   safeOp _ = True
+  opDependencies op =
+    let body = segBody op
+     in M.elems $
+       dataDependencies (Body (kernelBodyDec body) (kernelBodyStms body) [])
+     -- ^ kernelBodyResult is not used in analysis.
 
 --- Simplification
 
