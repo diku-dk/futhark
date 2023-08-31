@@ -10,10 +10,10 @@ module Futhark.Analysis.DataDependencies
   )
 where
 
-import Data.Function ((&))
+-- import Data.Function ((&))
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Debug.Trace
+-- import Debug.Trace
 import Futhark.IR
 
 -- | A mapping from a variable name @v@, to those variables on which
@@ -38,17 +38,20 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
       -- TODO transitive dependencies; reduce res is still
       -- not directly related to input array. But may just
       -- be the way the example code is written; try to simplify.
-      let deps' = dprint "@dataDependencies opCase deps@" deps
-          res =
-            opDependencies op
-              & dprint ("@[1/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
-          res' =
-            map (depsOfNames deps) res
-              & dprint ("@[2/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
-       in M.fromList (zip (patNames pat) res') `M.union` deps'
-            & dprint "@dataDependencies opCase@"
-      where
-        dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
+      let res = opDependencies op
+          res' = map (depsOfNames deps) res
+       in M.fromList (zip (patNames pat) res') `M.union` deps
+    -- let deps' = dprint "@dataDependencies opCase deps@" deps
+    --     res =
+    --       opDependencies op
+    --         & dprint ("@[1/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
+    --     res' =
+    --       map (depsOfNames deps) res
+    --         & dprint ("@[2/2]dataDependencies opCase Let " ++ show (patNames pat) ++ "=@")
+    --  in M.fromList (zip (patNames pat) res') `M.union` deps'
+    --       & dprint "@dataDependencies opCase@"
+    -- where
+    --   dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
@@ -74,9 +77,10 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
       let free = freeIn pat <> freeIn e
           free_deps = depsOfNames deps free
        in M.fromList [(name, free_deps) | name <- patNames pat] `M.union` deps
-            & dprint "@dataDependencies@"
-      where
-        dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
+
+--       & dprint "@dataDependencies@"
+-- where
+--   dprint msg x = Debug.Trace.trace (msg ++ "\n " ++ show x ++ "\n") x
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty
