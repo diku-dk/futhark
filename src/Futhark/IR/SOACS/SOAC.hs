@@ -57,6 +57,7 @@ import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
@@ -599,6 +600,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
   cheapOp _ = False
   opDependencies (Stream _w _arr _accs _lam) =
     undefined -- TODO write an example program for this first; see issue656.fut
+       & Debug.Trace.trace "# Stream"
   opDependencies (Hist w arrs ops lam) =
     let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
         -- Bucket function results are indices followed by values.
@@ -612,6 +614,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
             (chunks ranks indices)
             (chunks value_lengths values)
      in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+       & Debug.Trace.trace "# Hist"
     where
       depsOfHistOp (HistOp dest_shape rf dests nes op) =
         -- TODO dependence on race factor necessary? (ie is it always a constant?)
@@ -630,6 +633,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
   opDependencies (Scatter w arrs lam outputs) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenGroups (groupScatterResults' outputs deps)
+       & Debug.Trace.trace "# scatter"
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (JVP _ _ _) =
@@ -645,6 +649,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
         reds_deps =
           concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
      in scans_deps <> reds_deps <> map_deps
+       & Debug.Trace.trace "# screma"
     where
       depsOfScan (Scan lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
