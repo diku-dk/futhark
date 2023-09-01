@@ -32,11 +32,13 @@ data MemoryAccessPattern =
     , pattern :: Pattern
     , variance :: Variance
     }
+  deriving (Eq, Ord, Show)
 
 data MemoryEntry = MemoryEntry
     { idxExpr :: VName
     , memAccessPatterns :: [MemoryAccessPattern]
     }
+  deriving (Eq, Ord, Show)
 
 -- Theres probably a more readable way of doing this.
 type ArrayIndexDescriptors = M.Map VName [ MemoryEntry ]
