@@ -529,6 +529,11 @@ commandLineOptions =
       )
       "Print memory alias information.",
     Option
+      "z"
+      ["memory-access-pattern"]
+      (NoArg $ Right $ \opts -> opts {futharkAction = GPUAction printMemoryAccessAnalysis})
+      "Print the result of analyzing memory access patterns on arrays.",
+    Option
       []
       ["call-graph"]
       (NoArg $ Right $ \opts -> opts {futharkAction = SOACSAction callGraphAction})
