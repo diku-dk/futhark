@@ -598,8 +598,12 @@ instance CanBeAliased SOAC where
 instance (ASTRep rep) => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
-  opDependencies (Stream _w _arr _accs _lam) =
-    undefined -- TODO write an example program for this first; see issue656.fut
+  opDependencies (Stream w arrs accs lam) =
+    -- TODO Only one test in tests/ actually hit this case: issue419.fut.
+    -- Need to come up with a structural test program.
+    let accs_deps = map (depsOf mempty) accs
+        arrs_deps = depsOfArrays w arrs
+     in lambdaDependencies mempty lam (arrs_deps <> accs_deps)
        & Debug.Trace.trace "# Stream"
   opDependencies (Hist w arrs ops lam) =
     let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
@@ -637,6 +641,9 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (JVP _ _ _) =
+    -- TODO should be straightfoward lambdaDependencies on lambda
+    -- with inputs being x and x'. But I've no idea how to test
+    -- this. No test in tests/ hits this case.
     undefined
   opDependencies (VJP _ _ _) =
     undefined
