@@ -9,13 +9,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* pyopencl backend: compatibility with future versions of PyOpenCL.
-
-* New backend: hip.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+* Invalid simplification (#2015).
+
+## [0.25.3]
+
+### Added
+
+* pyopencl backend: compatibility with future versions of PyOpenCL.
+
+* New backend: hip.
 
 ### Fixed
 
@@ -39,6 +47,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Single pass scans with complicated fused map functions were
   insufficiently memory-expanded (#2023).
+
+* Invalid short circuiting (#2013).
 
 ## [0.25.2]
 
