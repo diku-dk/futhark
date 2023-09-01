@@ -1008,9 +1008,7 @@ instance
   safeOp _ = True
   opDependencies op =
     let body = segBody op
-     in M.elems $
-       dataDependencies (Body (kernelBodyDec body) (kernelBodyStms body) [])
-     -- ^ kernelBodyResult is not used in analysis.
+     in replicate (length . kernelBodyResult $ body) (freeIn op)
 
 --- Simplification
 

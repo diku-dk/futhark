@@ -296,8 +296,9 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
 
   opDependencies (SegOp op) = opDependencies op
   opDependencies (OtherOp op) = opDependencies op
-  opDependencies (SizeOp op) = opDependencies op
-  opDependencies (GPUBody _ body) = M.elems (dataDependencies body)
+  opDependencies op@(SizeOp {}) = [freeIn op]
+  opDependencies (GPUBody _ body) =
+    replicate (length . bodyResult $ body) (freeIn body)
 
 instance (TypedOp (op rep)) => TypedOp (HostOp op rep) where
   opType (SegOp op) = opType op
