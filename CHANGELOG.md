@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Invalid simplification (#2015).
+
 ## [0.25.3]
 
 ### Added
