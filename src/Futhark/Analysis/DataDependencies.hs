@@ -52,8 +52,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
        in Debug.Trace.trace ("========\n[1/2]dataDependencies Op case in-dependencies:\n" ++ mapToString deps ++ "\n") $
             Debug.Trace.trace ("\n[2/2]dataDependencies Op case out-dependencies:\n" ++ mapToString res' ++ "\n") $
               printSource stm $
-                Debug.Trace.trace "========\n" $
-                  res
+                Debug.Trace.trace "========\n" res
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody
