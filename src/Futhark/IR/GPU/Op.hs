@@ -24,11 +24,9 @@ module Futhark.IR.GPU.Op
 where
 
 import Control.Monad
-import Data.Map.Strict qualified as M
 import Data.Sequence qualified as SQ
 import Data.Text qualified as T
 import Futhark.Analysis.Alias qualified as Alias
-import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.IR

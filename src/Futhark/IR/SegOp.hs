@@ -65,7 +65,6 @@ import Data.List
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
-import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
