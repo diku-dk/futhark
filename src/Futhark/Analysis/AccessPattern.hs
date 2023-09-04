@@ -63,7 +63,7 @@ getAids f = M.singleton fdname aids
     fdname = funDefName f
     aids =
       -- merge results
-      foldl' mergeMemAccTable M.empty
+      mergeMemAccTable
         -- map analyzation over stmts
         . fmap (\stm' -> analyseStm stm' M.empty) -- TODO: Construct map
         -- functionBody -> [stm]
@@ -72,9 +72,9 @@ getAids f = M.singleton fdname aids
         . funDefBody
         $ f
 
--- Concat the list off array access (note, access != dimensions)
-mergeMemAccTable :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
-mergeMemAccTable = M.unionWith (++)
+-- Concat the lists of MemoryEntries
+mergeMemAccTable :: [ArrayIndexDescriptors] -> ArrayIndexDescriptors
+mergeMemAccTable = foldl' (M.unionWith (++)) M.empty
 
 -- TODO:
 -- Add patterns here
