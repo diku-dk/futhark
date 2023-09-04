@@ -40,7 +40,7 @@ coalesceAccess =
 analysis :: Prog GPU -> Prog GPU
 analysis prog = do
   let funaids = analyzeMemoryAccessPatterns prog
-   in prog
+   in pTrace "\nprog:\n" $ pTraceShow prog $ pTrace "\nfunaids:\n" $ pTraceShow funaids prog
 
 -- Code below is temporary and only to make the compiler happy.
 
