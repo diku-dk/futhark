@@ -9,7 +9,6 @@ where
 
 import Data.Foldable
 import Data.Map.Strict qualified as M
-import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.Util.Pretty
 
@@ -47,7 +46,7 @@ type MemoryEntry = [MemoryAccessPattern]
 -- | We map variable names of arrays to lists of memory access patterns.
 type ArrayIndexDescriptors = M.Map VName [MemoryEntry]
 
-type FunAids = S.Set (Name, ArrayIndexDescriptors)
+type FunAids = M.Map Name ArrayIndexDescriptors
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog GPU -> FunAids -- FunAids -- M.Map VName ArrayIndexDescriptors
@@ -56,10 +55,10 @@ analyzeMemoryAccessPatterns prog =
   -- We map over the program functions (usually always entries)
   -- Then fold them together to a singular map.
   -- foldl' mergeAids M.empty .
-  foldl' S.union S.empty $ getAids <$> progFuns prog
+  foldl' M.union M.empty $ getAids <$> progFuns prog
 
 getAids :: FunDef GPU -> FunAids
-getAids f = S.singleton (fdname, aids)
+getAids f = M.singleton fdname aids
   where
     fdname = funDefName f
     aids =
@@ -128,7 +127,7 @@ analyseOp _ = []
 
 -- Pretty printing stuffs
 instance Pretty FunAids where
-  pretty = stack . map f . S.toList :: FunAids -> Doc ann
+  pretty = stack . map f . M.toList :: FunAids -> Doc ann
     where
       f (entryName, aids) = pretty entryName </> indent 2 (pretty aids) -- pretty arr
 
