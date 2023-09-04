@@ -65,7 +65,7 @@ getAids f = M.singleton fdname aids
       -- merge results
       foldl' mergeMemAccTable M.empty
         -- map analyzation over stmts
-        . fmap analyseStm
+        . fmap (\stm' -> analyseStm stm' M.empty) -- TODO: Construct map
         -- functionBody -> [stm]
         . stmsToList
         . bodyStms
@@ -78,28 +78,26 @@ mergeMemAccTable = M.unionWith (++)
 
 -- TODO:
 -- Add patterns here
-analyseStm :: Stm GPU -> ArrayIndexDescriptors
--- Recurse into cases / conditional branches
-analyseStm (Let _ _ (Match _ _ b _)) =
-  foldl' mergeMemAccTable M.empty $
-    fmap analyseStm . stmsToList . bodyStms $
-      b
--- TODO: investigate whether we need the remaining patterns in (Pat (p:_))
-analyseStm (Let (Pat (p : _)) _ (BasicOp o)) = M.singleton (patElemName p) [analyseOp o]
-analyseStm (Let _ _ (Op (SegOp o))) =
-  foldl' mergeMemAccTable M.empty
-    . fmap analyseStm
-    . stmsToList
-    . kernelBodyStms
-    $ segBody o
+analyseStm :: Stm GPU -> M.Map VName BasicOp -> ArrayIndexDescriptors
+analyseStm stm m = do
+  case stm of
+    -- TODO: investigate whether we need the remaining patterns in (Pat (p:_))
+    (Let (Pat (p : _)) _ (BasicOp o)) -> M.singleton (patElemName p) [analyseOp o m]
+    (Let _ _ (Op (SegOp o))) ->
+      foldl' mergeMemAccTable M.empty
+        . fmap (\stm' -> analyseStm stm' m)
+        . stmsToList
+        . kernelBodyStms
+        $ segBody o
+    _ -> M.empty
 -- analyseStm (Let (Pat pp) _ _) =
 --  foldl' mergeMemAccTable M.empty
 --    $ map (\n -> M.singleton (patElemName n) []) pp
 
-analyseStm _ = M.empty
+analyseStm _ _ = M.empty
 
-analyseOp :: BasicOp -> [MemoryAccessPattern]
-analyseOp (Index name (Slice unslice)) =
+analyseOp :: BasicOp -> M.Map VName BasicOp -> [MemoryAccessPattern]
+analyseOp (Index name (Slice unslice)) m =
   map
     ( \case
         (DimFix (Constant _)) ->
@@ -109,11 +107,33 @@ analyseOp (Index name (Slice unslice)) =
             Linear
             Invariant
         (DimFix (Var n)) ->
-          MemoryAccessPattern
-            n
-            Sequential
-            Linear
-            Variant
+          case n of
+            VName "gtid" _ ->
+              MemoryAccessPattern
+                n
+                Parallel
+                Linear
+                Variant
+            VName "tmp" id ->
+              if varContainsGtid (VName "tmp" id) m
+                then
+                  MemoryAccessPattern
+                    n
+                    Parallel
+                    Linear
+                    Variant
+                else
+                  MemoryAccessPattern
+                    n
+                    Sequential
+                    Linear
+                    Variant
+            _ ->
+              MemoryAccessPattern
+                n
+                Sequential
+                Linear
+                Variant
         -- FIXME
         _ ->
           MemoryAccessPattern
@@ -123,7 +143,18 @@ analyseOp (Index name (Slice unslice)) =
             Variant
     )
     unslice
-analyseOp _ = []
+analyseOp _ _ = []
+
+varContainsGtid :: VName -> M.Map VName BasicOp -> Bool
+varContainsGtid name m =
+  maybe False checkGtid (M.lookup name m)
+  where
+    checkGtid (BinOp _ _ (Var (VName "gtid" _))) = True
+    checkGtid (BinOp _ (Var (VName "gtid" _)) _) = True
+    checkGtid (UnOp _ (Var (VName "gtid" _))) = True
+    -- TODO: Handle more cases?
+    -- TODO: Can BinOp contain another BinOp?
+    checkGtid _ = False
 
 -- Pretty printing stuffs
 instance Pretty FunAids where
