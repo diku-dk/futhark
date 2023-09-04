@@ -59,9 +59,10 @@ analyzeMemoryAccessPatterns prog =
   foldl' S.union S.empty $ getAids <$> progFuns prog
 
 getAids :: FunDef GPU -> FunAids
-getAids f =
-  S.singleton
-    ( funDefName f,
+getAids f = S.singleton (fdname, aids)
+  where
+    fdname = funDefName f
+    aids =
       -- merge results
       foldl' mergeMemAccTable M.empty
         -- map analyzation over stmts
@@ -71,7 +72,6 @@ getAids f =
         . bodyStms
         . funDefBody
         $ f
-    )
 
 -- Concat the list off array access (note, access != dimensions)
 mergeMemAccTable :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
@@ -126,6 +126,7 @@ analyseOp (Index name (Slice unslice)) =
     unslice
 analyseOp _ = []
 
+-- Pretty printing stuffs
 instance Pretty FunAids where
   pretty = stack . map f . S.toList :: FunAids -> Doc ann
     where
