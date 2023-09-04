@@ -65,85 +65,56 @@ getAids f = M.singleton fdname aids
   where
     fdname = funDefName f
     aids =
-      -- merge results
-      mergeMemAccTable
-        -- map analyzation over stmts
-        . fmap (\stm' -> analyseStm stm' M.empty) -- TODO: Construct map
+      flip analyseStm M.empty
         -- functionBody -> [stm]
         . stmsToList
         . bodyStms
         . funDefBody
         $ f
 
--- Concat the lists of MemoryEntries
-mergeMemAccTable :: [ArrayIndexDescriptors] -> ArrayIndexDescriptors
-mergeMemAccTable = foldl' (M.unionWith (++)) M.empty
-
--- TODO:
--- Add patterns here
-analyseStm :: Stm GPU -> M.Map VName BasicOp -> ArrayIndexDescriptors
-analyseStm stm m = do
+analyseStm :: [Stm GPU] -> M.Map VName BasicOp -> ArrayIndexDescriptors
+analyseStm (stm : ss) m = do
   case stm of
     -- TODO: investigate whether we need the remaining patterns in (Pat (p:_))
-    (Let (Pat (p : _)) _ (BasicOp o)) -> M.singleton (patElemName p) [analyseOp o m]
+    (Let (Pat (p : _)) _ (BasicOp o)) ->
+      let res = M.singleton (patElemName p) [analyseOp o m]
+       in -- TODO: Extend `m` with access of current let expr.
+          let m' = M.union m (M.singleton (patElemName p) o)
+           in M.unionWith (++) res $ analyseStm ss m'
     (Let _ _ (Op (SegOp o))) ->
-      mergeMemAccTable
-        . fmap (\stm' -> analyseStm stm' m)
-        . stmsToList
-        . kernelBodyStms
-        $ segBody o
-    _ -> M.empty
--- analyseStm (Let (Pat pp) _ _) =
---  foldl' mergeMemAccTable M.empty
---    $ map (\n -> M.singleton (patElemName n) []) pp
-
+      analyseStm ((stmsToList . kernelBodyStms $ segBody o) ++ ss) m
+    -- TODO:
+    -- Add patterns here
+    _ ->
+      analyseStm ss m
 analyseStm _ _ = M.empty
+
+accesssPatternOfVName :: VName -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
+accesssPatternOfVName n = MemoryAccessPattern $ IndexExpression $ Left n
+
+accesssPatternOfPrimValue :: PrimValue -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
+accesssPatternOfPrimValue n = MemoryAccessPattern $ IndexExpression $ Right n
 
 analyseOp :: BasicOp -> M.Map VName BasicOp -> [MemoryAccessPattern]
 analyseOp (Index name (Slice unslice)) m =
   map
     ( \case
         (DimFix (Constant primvalue)) ->
-          MemoryAccessPattern
-            (IndexExpression $ Right primvalue)
-            Sequential
-            Linear
-            Invariant
+          accesssPatternOfPrimValue primvalue Sequential Linear Invariant
         (DimFix (Var n)) ->
           case n of
             VName "gtid" _ ->
-              MemoryAccessPattern
-                (IndexExpression $ Left n)
-                Parallel
-                Linear
-                Variant
-            VName "tmp" id ->
-              if varContainsGtid (VName "tmp" id) m
-                then
-                  MemoryAccessPattern
-                    (IndexExpression $ Left n)
-                    Parallel
-                    Linear
-                    Variant
-                else
-                  MemoryAccessPattern
-                    (IndexExpression $ Left n)
-                    Sequential
-                    Linear
-                    Variant
+              accesssPatternOfVName n Parallel Linear Variant
+            VName "tmp" id' ->
+              let nn = VName "tmp" id'
+               in if varContainsGtid nn m
+                    then accesssPatternOfVName nn Parallel Linear Variant
+                    else accesssPatternOfVName nn Sequential Linear Variant
             _ ->
-              MemoryAccessPattern
-                (IndexExpression $ Left n)
-                Sequential
-                Linear
-                Variant
-        -- FIXME
+              accesssPatternOfVName n Sequential Linear Variant
+        -- FIXME with more patterns?
         _ ->
-          MemoryAccessPattern
-            (IndexExpression $ Left name)
-            Sequential
-            Linear
-            Variant
+          accesssPatternOfVName name Sequential Linear Variant
     )
     unslice
 analyseOp _ _ = []
@@ -155,6 +126,7 @@ varContainsGtid name m =
     checkGtid (BinOp _ _ (Var (VName "gtid" _))) = True
     checkGtid (BinOp _ (Var (VName "gtid" _)) _) = True
     checkGtid (UnOp _ (Var (VName "gtid" _))) = True
+    -- checkGtid (SegOp _ _ _ _) = True
     -- TODO: Handle more cases?
     -- TODO: Can BinOp contain another BinOp?
     checkGtid _ = False
@@ -186,5 +158,5 @@ instance Pretty IterationType where
   pretty Parallel = "par"
 
 instance Pretty Variance where
-  pretty Variant = "υ" -- v for variant
+  pretty Variant = "ν" -- v for variant
   pretty Invariant = "ψ" -- v dashed for invariant
