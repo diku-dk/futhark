@@ -142,7 +142,7 @@ printMemoryAccessAnalysis =
   Action
     { actionName = "call-graph",
       actionDescription = "Prettyprint the callgraph of the result to standard output.",
-      actionProcedure = liftIO . print . analyzeMemoryAccessPatterns
+      actionProcedure = liftIO . putStrLn . prettyString . analyzeMemoryAccessPatterns
     }
 
 -- | Print call graph to stdout.
