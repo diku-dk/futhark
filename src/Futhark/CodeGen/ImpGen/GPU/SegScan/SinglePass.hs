@@ -364,7 +364,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
-    sOp localBarrier
+        sOp localBarrier
 
     sComment "Per thread scan" $ do
       -- We don't need to touch the first element, so only m-1
