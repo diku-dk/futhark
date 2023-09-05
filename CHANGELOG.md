@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Invalid simplification (#2015).
 
+* Rarely occurring deadlock for fused map-scan compositions in CUDA
+  backend, when a bounds check failed in the map function.
+
 ## [0.25.3]
 
 ### Added
