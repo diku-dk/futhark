@@ -627,7 +627,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
         -- TODO Missing freeIn shape? Don't think a shape can have free variables?
         -- TODO Is there a more elegant way than `depsOf mempty` to create
         -- new names?
-        let shape_deps = mconcat $ map (depsOf mempty) (shapeDims dest_shape)
+        let shape_deps = depsOfShape dest_shape
             rf_deps = freeIn rf <> depsOf mempty rf
             in_deps = map (\vn -> oneName vn <> shape_deps <> rf_deps) dests
          in reductionDependencies mempty op nes in_deps

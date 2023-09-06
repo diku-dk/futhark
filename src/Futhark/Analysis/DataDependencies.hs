@@ -4,6 +4,7 @@ module Futhark.Analysis.DataDependencies
     dataDependencies,
     depsOf,
     depsOfArrays,
+    depsOfShape,
     lambdaDependencies,
     reductionDependencies,
     findNecessaryForReturned,
@@ -41,7 +42,21 @@ dataDependencies' ::
   Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
-    -- grow _deps (Let _pat _ (WithAcc _ _)) = undefined
+    grow deps (Let pat _ (WithAcc inputs lam)) =
+      -- TODO WithAcc test case
+      let input_deps = map (mconcat . depsOfWithAccInput) inputs
+          -- ^ Dependencies of each input reduction are concatenated.
+          -- Input to lam is cert_1, ..., cert_n, acc_1, ..., acc_n.
+          lam_deps = lambdaDependencies deps lam (input_deps <> input_deps)
+          transitive = map (depsOfNames deps) lam_deps
+       in M.fromList (zip (patNames pat) transitive) `M.union` deps
+      where
+        depsOfArrays' shape =
+          map (\arr -> oneName arr <> depsOfShape shape)
+        depsOfWithAccInput (shape, arrs, Nothing) =
+          depsOfArrays' shape arrs
+        depsOfWithAccInput (shape, arrs, Just (lam', nes)) =
+          reductionDependencies deps lam' nes (depsOfArrays' shape arrs)
     grow deps stm@(Let pat _ (Op op)) =
       -- TODO transitive dependencies; reduce res is still
       -- not directly related to input array. But may just
@@ -99,6 +114,9 @@ depsOfNames deps names = mconcat $ map (depsOfVar deps) $ namesToList names
 depsOfArrays :: SubExp -> [VName] -> [Names]
 depsOfArrays size = map (\arr -> oneName arr <> depsOf mempty size)
 
+depsOfShape :: Shape -> Names
+depsOfShape shape = mconcat $ map (depsOf mempty) (shapeDims shape)
+
 -- | Determine the variables on which the results of applying
 -- anonymous function @lam@ to @inputs@ depend.
 lambdaDependencies ::
@@ -124,9 +142,9 @@ reductionDependencies ::
   [SubExp] ->
   [Names] ->
   [Names]
-reductionDependencies deps lam neutrals inputs =
-  let neutrals' = map (depsOf deps) neutrals
-   in lambdaDependencies deps lam (zipWith (<>) neutrals' inputs)
+reductionDependencies deps lam nes inputs =
+  let nes' = map (depsOf deps) nes
+   in lambdaDependencies deps lam (zipWith (<>) nes' inputs)
 
 -- | @findNecessaryForReturned p merge deps@ computes which of the
 -- loop parameters (@merge@) are necessary for the result of the loop,
