@@ -3,6 +3,13 @@
 # The directory where the test files are located.
 TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
+# Counter for the number of successful tests.
+successes=0
+# Index of the current test
+test_i=0
+# Number of tests
+test_n=$(ls $TEST_DIR/*.fut | wc -l | awk '{print $1}')
+
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
 max_filename_length=0
@@ -18,16 +25,21 @@ do
     fi
 done
 
+
 # Read the test files in the directory.
 for file in $TEST_DIR/*.fut
 do 
+    # Increment the test index
+    test_i=$((test_i+1))
+
     # Get filename without path
     filename=$(basename -- "$file")
-    printf "=== Running test "
-    # Print with blue color
-    printf "\e[34m"
+    printf "\e[1m" # Bold
+    printf "=== Running test $test_i/$test_n: "
+    printf "\e[34m" # Blue
     printf "$filename "
-    printf "\e[0m"
+    printf "\e[0m" # White
+    
     
     # Print spaces to align the output.
     spaces=$((max_filename_length - ${#filename}))
@@ -55,10 +67,9 @@ do
 
     # If expected output line is empty, skip the test.
     if [ -z "$expected_output_line" ]; then
-        # Print with red color
-        printf "\e[31m"
+        printf "\e[31m" # Red
         printf "FAILED\n"
-        printf "\e[0m"
+        printf "\e[0m" # White
         printf "\nExpected output not specified in \"$file\". \nSkipping test.\n\n"
         continue
     fi
@@ -71,16 +82,85 @@ do
 
     # Compare the output to the expected output.
     if [ "$output" == "$expected_output" ]; then
-        # Print with green color
-        printf "\e[32m"
+        printf "\e[32m" # Green
         printf "PASSED\n"
-        printf "\e[0m"
+        printf "\e[0m" # Reset
+        successes=$((successes+1))
     else
-        # Print with red color
-        printf "\e[31m"
+        printf "\e[31m" # Red
         printf "FAILED\n"
-        printf "\e[0m"
-        printf "\n--- Output: \n\n$output\n"
-        printf "\n--- Expected output: \n\n$expected_output\n\n\n"
+        printf "\e[0m" # Reset
+
+        # Split the expected output into two string at the first difference.
+        # This is done to highlight the difference in the output.
+        
+        # Iterate over the characters in the output and expected output
+        # until the first difference is found.
+        output_i=0
+        expected_output_i=0
+        output_length=${#output}
+        expected_output_length=${#expected_output}
+        difference_location=0
+        while [ $output_i -lt $output_length ] && [ $expected_output_i -lt $expected_output_length ]
+        do
+            # Get the current character in the output and expected output.
+            output_char=${output:$output_i:1}
+            expected_output_char=${expected_output:$expected_output_i:1}
+
+            output_i=$((output_i+1))
+            expected_output_i=$((expected_output_i+1))
+
+            # If the characters are different, set the difference location 
+            # to the current index and break the loop.
+            if [ "$output_char" != "$expected_output_char" ]; then
+                # difference location is the minimum of output_i and expected_output_i minus 1.
+                difference_location=$((output_i<expected_output_i?output_i-1:expected_output_i-1))
+                break
+            fi
+        done
+
+        # Split the output and expected output into three strings at the difference location
+        # where the the second string is the difference.
+        output_1=${output:0:difference_location}
+        output_2=${output:difference_location:1}
+        output_3=${output:difference_location+1}
+        expected_output_1=${expected_output:0:difference_location}
+        expected_output_2=${expected_output:difference_location:1}
+        expected_output_3=${expected_output:difference_location+1}
+
+        # Print the output and expected output with the difference highlighted in red
+        printf "\nOutput: \n\n"
+        printf "\e[90m" # Grey
+        printf "$output_1"
+        printf "\e[41m" # Red background
+        printf "$output_2"
+        printf "\e[0m" # Reset
+        printf "\e[90m" # Grey
+        printf "$output_3\n"
+        printf "\e[0m" # Reset
+
+        printf "\nExpected output: \n\n"
+        printf "\e[90m" # Grey
+        printf "$expected_output_1"
+        printf "\e[41m" # Red background
+        printf "$expected_output_2"
+        printf "\e[0m" # Reset
+        printf "\e[90m" # Grey
+        printf "$expected_output_3\n\n\n"
+        printf "\e[0m" # Reset
+
     fi
 done
+
+
+# Print the number of successful tests.
+printf "\e[1m" # Bold
+if [ $successes -eq $test_n ]; then
+    printf "\e[32m" # Green
+    printf "\nAll $successes/$test_i tests passed!\n\n"
+    printf "\e[0m" # White
+else
+    printf "\e[31m" # Red   
+    printf "\n$successes/$test_i tests passed.\n\n"
+    printf "\e[0m" # White
+fi
