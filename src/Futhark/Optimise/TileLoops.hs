@@ -473,7 +473,8 @@ tileable stm
     lambdaReturnType map_lam == lambdaReturnType red_lam, -- No mapout arrays.
     not $ null arrs,
     all primType $ lambdaReturnType map_lam,
-    all (primType . paramType) $ lambdaParams map_lam =
+    all (primType . paramType) $ lambdaParams map_lam,
+    not $ "unroll" `inAttrs` stmAuxAttrs (stmAux stm) =
       Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
   | otherwise =
       Nothing
