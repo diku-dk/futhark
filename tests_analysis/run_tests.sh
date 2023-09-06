@@ -44,10 +44,14 @@ do
     
     # Run the test file.
     output=$($futhark_dev dev -se --gpu -z $file 2>&1)
+    # Rempove trailing whitespace
+    output=$(echo "$output" | sed 's/[[:space:]]*$//')
     
     # Get the expected output starting after the string "=== Expected output of analysis:"
     # Find the line where the expected output starts + 1
     expected_output_line=$(grep -n "=== Expected output of analysis:" $file | cut -d: -f1 | awk '{print $1+1}')
+    # Rempove trailing whitespace
+    expected_output_line=$(echo "$expected_output_line" | sed 's/[[:space:]]*$//')
 
     # If expected output line is empty, skip the test.
     if [ -z "$expected_output_line" ]; then
@@ -79,5 +83,4 @@ do
         printf "\n--- Output: \n\n$output\n"
         printf "\n--- Expected output: \n\n$expected_output\n\n\n"
     fi
-
 done
