@@ -137,11 +137,9 @@ onMCOp stage pat aux (ParOp par_op op) = do
   pure [Let pat aux $ Op $ ParOp par_op' op']
 onMCOp stage pat aux (MC.OtherOp soac)
   | sequentialise stage soac = do
-      stms <- runBuilder_ $ FOT.transformSOAC pat soac
-      fmap concat $
-        localScope (scopeOf stms) $
-          mapM (optimiseStm (onMCOp stage)) $
-            stmsToList stms
+      stms <- runBuilder_ $ auxing aux $ FOT.transformSOAC pat soac
+      fmap concat . localScope (scopeOf stms) $
+        mapM (optimiseStm (onMCOp stage)) (stmsToList stms)
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
@@ -159,11 +157,9 @@ sequentialise SeqAll _ = True
 onHostOp :: Stage -> OnOp GPU
 onHostOp stage pat aux (GPU.OtherOp soac)
   | sequentialise stage soac = do
-      stms <- runBuilder_ $ FOT.transformSOAC pat soac
-      fmap concat $
-        localScope (scopeOf stms) $
-          mapM (optimiseStm (onHostOp stage)) $
-            stmsToList stms
+      stms <- runBuilder_ $ auxing aux $ FOT.transformSOAC pat soac
+      fmap concat . localScope (scopeOf stms) $
+        mapM (optimiseStm (onHostOp stage)) (stmsToList stms)
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)
