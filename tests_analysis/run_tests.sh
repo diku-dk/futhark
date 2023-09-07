@@ -1,5 +1,13 @@
 # Bash script that reads the test files in the directory, runs them and compares their output to their expected output from comments in the test files.
 
+
+# Print help
+if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
+    printf "Usage: ./run_tests.sh [file ...] [OPTIONAL: specific test number]\n"
+    exit 0
+fi
+
+
 # The directory where the test files are located.
 TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
@@ -25,10 +33,29 @@ do
     fi
 done
 
+# If first argument is a number, run that test only.
+specific_test_number=$1
+# Check if the first argument is a number.
+run_specific_test=false
+if [ "$specific_test_number" -eq "$specific_test_number" ] 2>/dev/null; then
+    # Check if the number is in the range of the number of tests.
+    if [ $specific_test_number -gt 0 ] && [ $specific_test_number -le $test_n ]; then
+        run_specific_test=true
+    fi
+fi
 
 # Read the test files in the directory.
 for file in $TEST_DIR/*.fut
 do 
+    # Run specific test if specified.
+    if [ "$run_specific_test" = true ] ; then
+        # If the current test is not the specified test, skip it.
+        if [ $((test_i+1)) -ne $specific_test_number ]; then
+            test_i=$((test_i+1))
+            continue
+        fi
+    fi
+
     # Increment the test index
     test_i=$((test_i+1))
 
@@ -82,10 +109,25 @@ do
 
     # Compare the output to the expected output.
     if [ "$output" == "$expected_output" ]; then
-        printf "\e[32m" # Green
-        printf "PASSED\n"
-        printf "\e[0m" # Reset
         successes=$((successes+1))
+
+        # Print "CONFIRMED" if expected_output_line contains the string "CONFIRMED"
+        expected_output_line_prev=$((expected_output_line-1))
+        expected_output_line_content=$(sed -n "$expected_output_line_prev,$ p" $file)
+        if [[ $expected_output_line_content == *"CONFIRMED"* ]]; then
+            printf "\e[32m" # Green
+            printf "PASSED\t"
+
+        else
+            printf "\e[33m" # Yellow
+            printf "PASSED\t"
+
+            printf "\e[31m" # Red
+            printf "(Expected output may be wrong)\n"
+            printf "\e[0m" # Reset
+        fi
+
+
     else
         printf "\e[31m" # Red
         printf "FAILED\n"
