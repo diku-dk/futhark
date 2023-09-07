@@ -142,6 +142,11 @@ instance Pretty FunAids where
     where
       f (entryName, aids) = pretty entryName </> indent 2 (pretty aids) -- pretty arr
 
+instance Pretty StmtsAids where
+  pretty = stack . map f . M.toList :: StmtsAids -> Doc ann
+    where
+      f (entryName, aids) = pretty entryName </> indent 2 (pretty aids) -- pretty arr
+
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
@@ -151,8 +156,8 @@ instance Pretty ArrayIndexDescriptors where
       f (n, maps) = pretty n <+> mapprint maps
 
 instance Pretty MemoryAccessPattern where
-  pretty (MemoryAccessPattern idx t _p v) =
-    brackets $ pretty idx <+> "|" <+> pretty v <+> "|" <+> pretty t
+  pretty (MemoryAccessPattern d v) =
+    brackets $ pretty d <+> "|" <+> pretty v
 
 instance Pretty DimIndexExpression where
   pretty (DimIndexExpression (Left n)) = "σ" <+> pretty n -- sigma since it exists in our store
@@ -163,5 +168,5 @@ instance Pretty IterationType where
   pretty Parallel = "par"
 
 instance Pretty Variance where
-  pretty Variant = "ν" -- v for variant
+  pretty (Variant t) = "ν" <+> pretty t -- v for variant
   pretty Invariant = "ψ" -- v dashed for invariant
