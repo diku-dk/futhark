@@ -30,13 +30,13 @@ data Variance
   | Invariant
   deriving (Eq, Ord, Show)
 
-newtype IndexExpression = IndexExpression (Either VName PrimValue)
+newtype DimIndexExpression = DimIndexExpression (Either VName PrimValue)
   deriving (Eq, Ord, Show)
 
 -- | Collect all features of memory access together
 data MemoryAccessPattern = MemoryAccessPattern
   { -- | Expression reference that is used to index into a given dimension
-    idxExpr :: IndexExpression,
+    dimIdxExpr :: DimIndexExpression,
     iterationType :: IterationType,
     pattern' :: Pattern,
     variance :: Variance
@@ -90,10 +90,10 @@ analyseStm (stm : ss) m = do
 analyseStm _ _ = M.empty
 
 accesssPatternOfVName :: VName -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
-accesssPatternOfVName n = MemoryAccessPattern $ IndexExpression $ Left n
+accesssPatternOfVName n = MemoryAccessPattern $ DimIndexExpression $ Left n
 
 accesssPatternOfPrimValue :: PrimValue -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
-accesssPatternOfPrimValue n = MemoryAccessPattern $ IndexExpression $ Right n
+accesssPatternOfPrimValue n = MemoryAccessPattern $ DimIndexExpression $ Right n
 
 analyseOp :: BasicOp -> M.Map VName BasicOp -> [MemoryAccessPattern]
 analyseOp (Index name (Slice unslice)) m =
@@ -149,9 +149,9 @@ instance Pretty MemoryAccessPattern where
   pretty (MemoryAccessPattern idx t _p v) =
     brackets $ pretty idx <+> "|" <+> pretty v <+> "|" <+> pretty t
 
-instance Pretty IndexExpression where
-  pretty (IndexExpression (Left n)) = "σ" <+> pretty n -- sigma since it exists in our store
-  pretty (IndexExpression (Right c)) = "τ" <+> pretty c -- tau for a term
+instance Pretty DimIndexExpression where
+  pretty (DimIndexExpression (Left n)) = "σ" <+> pretty n -- sigma since it exists in our store
+  pretty (DimIndexExpression (Right c)) = "τ" <+> pretty c -- tau for a term
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
