@@ -1,3 +1,7 @@
+# Ignore all binary files (files with no extension).
+*
+!*.*
+
 # Ignore non-directories in root, so you can use it as scratch space.
 /*
 !/*/
@@ -53,3 +57,4 @@ testparser/
 
 # Ignore macOS system files.
 .DS_Store
+
