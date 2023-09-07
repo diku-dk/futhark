@@ -18,18 +18,15 @@ import Futhark.Util.Pretty
 data IterationType = Sequential | Parallel
   deriving (Eq, Ord, Show)
 
--- | Pattern determines what kind of physical pattern is used to index.
--- This is subject to get removed.
-data Pattern = Linear | Random
-  deriving (Eq, Ord, Show)
-
 -- | Variance represents whether the index is variant, or invariant to the outer
 -- kernel/iteration function.
 data Variance
-  = Variant
+  = Variant IterationType
   | Invariant
   deriving (Eq, Ord, Show)
 
+-- | DimFix'es can either be a constant expression (IntValue) or a VName to some
+-- pattern.
 newtype DimIndexExpression = DimIndexExpression (Either VName PrimValue)
   deriving (Eq, Ord, Show)
 
@@ -37,8 +34,6 @@ newtype DimIndexExpression = DimIndexExpression (Either VName PrimValue)
 data MemoryAccessPattern = MemoryAccessPattern
   { -- | Expression reference that is used to index into a given dimension
     dimIdxExpr :: DimIndexExpression,
-    iterationType :: IterationType,
-    pattern' :: Pattern,
     variance :: Variance
   }
   deriving (Eq, Ord, Show)
@@ -49,11 +44,16 @@ type MemoryEntry = [MemoryAccessPattern]
 -- | We map variable names of arrays to lists of memory access patterns.
 type ArrayIndexDescriptors = M.Map VName [MemoryEntry]
 
-type FunAids = M.Map Name ArrayIndexDescriptors
+-- | Map `Pat` to array index descriptors
+type StmtsAids = M.Map VName ArrayIndexDescriptors
+
+-- | Map Entries to array index descriptors (mostly used for debugging)
+type FunAids = M.Map Name StmtsAids
+
+type AnalyzeCtx = M.Map VName BasicOp
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
-analyzeMemoryAccessPatterns :: Prog GPU -> FunAids -- FunAids -- M.Map VName ArrayIndexDescriptors
--- analyzeMemoryAccessPatterns (Prog{progTypes = _, progConsts = _, progFuns = funs}) = M.empty
+analyzeMemoryAccessPatterns :: Prog GPU -> FunAids
 analyzeMemoryAccessPatterns prog =
   -- We map over the program functions (usually always entries)
   -- Then fold them together to a singular map.
@@ -72,52 +72,57 @@ getAids f = M.singleton fdname aids
         . funDefBody
         $ f
 
-analyseStm :: [Stm GPU] -> M.Map VName BasicOp -> ArrayIndexDescriptors
-analyseStm (stm : ss) m = do
+analyseStm :: [Stm GPU] -> AnalyzeCtx -> StmtsAids
+analyseStm (stm : ss) ctx = do
   case stm of
     -- TODO: investigate whether we need the remaining patterns in (Pat (p:_))
-    (Let (Pat (p : _)) _ (BasicOp o)) ->
-      let res = M.singleton (patElemName p) [analyseOp o m]
-       in -- TODO: Extend `m` with access of current let expr.
-          let m' = M.union m (M.singleton (patElemName p) o)
-           in M.unionWith (++) res $ analyseStm ss m'
+    (Let (Pat pp) _ (BasicOp o)) ->
+      let res = M.fromList $ zip (map patElemName pp) $ -- get vnames of patterns
+                replicate (length pp) $
+                  analyseOp o ctx -- create a result for each pattern
+       in let ctx'' = M.fromList $ zip (map patElemName pp) $ replicate (length pp) o
+       in let ctx' = M.union ctx ctx''
+           in M.union res $ analyseStm ss ctx'
     (Let _ _ (Op (SegOp o))) ->
-      analyseStm ((stmsToList . kernelBodyStms $ segBody o) ++ ss) m
+      analyseStm ((stmsToList . kernelBodyStms $ segBody o) ++ ss) ctx
     -- TODO:
     -- Add patterns here
     _ ->
-      analyseStm ss m
+      analyseStm ss ctx
 analyseStm _ _ = M.empty
 
-accesssPatternOfVName :: VName -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
+accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
 accesssPatternOfVName n = MemoryAccessPattern $ DimIndexExpression $ Left n
 
-accesssPatternOfPrimValue :: PrimValue -> IterationType -> Pattern -> Variance -> MemoryAccessPattern
-accesssPatternOfPrimValue n = MemoryAccessPattern $ DimIndexExpression $ Right n
+accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
+accesssPatternOfPrimValue n = MemoryAccessPattern (DimIndexExpression $ Right n) Invariant
 
-analyseOp :: BasicOp -> M.Map VName BasicOp -> [MemoryAccessPattern]
-analyseOp (Index name (Slice unslice)) m =
-  map
-    ( \case
-        (DimFix (Constant primvalue)) ->
-          accesssPatternOfPrimValue primvalue Sequential Linear Invariant
-        (DimFix (Var n)) ->
-          case n of
-            VName "gtid" _ ->
-              accesssPatternOfVName n Parallel Linear Variant
-            VName "tmp" id' ->
-              let nn = VName "tmp" id'
-               in if varContainsGtid nn m
-                    then accesssPatternOfVName nn Parallel Linear Variant
-                    else accesssPatternOfVName nn Sequential Linear Variant
-            _ ->
-              accesssPatternOfVName n Sequential Linear Variant
-        -- FIXME with more patterns?
-        _ ->
-          accesssPatternOfVName name Sequential Linear Variant
-    )
-    unslice
-analyseOp _ _ = []
+analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
+-- analyseOp (Index name (Slice unslice)) m =
+--  map
+--    ( \case
+--        (DimFix (Constant primvalue)) ->
+--          accesssPatternOfPrimValue primvalue Sequential
+--        (DimFix (Var n)) ->
+--          case n of
+--            -- TODO: This is a very abusive and improper way of doing it.
+--            -- We need to check the scope in which the expression was created,
+--            -- and if the expression is constant.
+--            VName "gtid" _ ->
+--              accesssPatternOfVName n Parallel Variant
+--            VName "tmp" id' ->
+--              let nn = VName "tmp" id'
+--               in if varContainsGtid nn m
+--                    then accesssPatternOfVName nn (Variant Parallel) Variant
+--                    else accesssPatternOfVName nn (Variant Sequential) Variant
+--            _ ->
+--              accesssPatternOfVName n Sequential Variant
+--        -- FIXME with more patterns?
+--        _ ->
+--          accesssPatternOfVName name Sequential Variant
+--    )
+--    unslice
+analyseOp _ _ = M.empty
 
 varContainsGtid :: VName -> M.Map VName BasicOp -> Bool
 varContainsGtid name m =
