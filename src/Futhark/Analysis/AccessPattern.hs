@@ -8,6 +8,7 @@ module Futhark.Analysis.AccessPattern
 where
 
 import Data.Foldable
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
 import Futhark.Util.Pretty
@@ -77,12 +78,14 @@ analyseStm (stm : ss) ctx = do
   case stm of
     -- TODO: investigate whether we need the remaining patterns in (Pat (p:_))
     (Let (Pat pp) _ (BasicOp o)) ->
-      let res = M.fromList $ zip (map patElemName pp) $ -- get vnames of patterns
+      let res =
+            M.fromList $
+              zip (map patElemName pp) $ -- get vnames of patterns
                 replicate (length pp) $
                   analyseOp o ctx -- create a result for each pattern
        in let ctx'' = M.fromList $ zip (map patElemName pp) $ replicate (length pp) o
-       in let ctx' = M.union ctx ctx''
-           in M.union res $ analyseStm ss ctx'
+           in let ctx' = M.union ctx ctx''
+               in M.union res $ analyseStm ss ctx'
     (Let _ _ (Op (SegOp o))) ->
       analyseStm ((stmsToList . kernelBodyStms $ segBody o) ++ ss) ctx
     -- TODO:
@@ -98,30 +101,32 @@ accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
 accesssPatternOfPrimValue n = MemoryAccessPattern (DimIndexExpression $ Right n) Invariant
 
 analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
--- analyseOp (Index name (Slice unslice)) m =
---  map
---    ( \case
---        (DimFix (Constant primvalue)) ->
---          accesssPatternOfPrimValue primvalue Sequential
---        (DimFix (Var n)) ->
---          case n of
---            -- TODO: This is a very abusive and improper way of doing it.
---            -- We need to check the scope in which the expression was created,
---            -- and if the expression is constant.
---            VName "gtid" _ ->
---              accesssPatternOfVName n Parallel Variant
---            VName "tmp" id' ->
---              let nn = VName "tmp" id'
---               in if varContainsGtid nn m
---                    then accesssPatternOfVName nn (Variant Parallel) Variant
---                    else accesssPatternOfVName nn (Variant Sequential) Variant
---            _ ->
---              accesssPatternOfVName n Sequential Variant
---        -- FIXME with more patterns?
---        _ ->
---          accesssPatternOfVName name Sequential Variant
---    )
---    unslice
+analyseOp (Index name (Slice unslice)) m =
+  M.singleton name $
+    L.singleton $
+      map
+        ( \case
+            (DimFix (Constant primvalue)) ->
+              accesssPatternOfPrimValue primvalue
+            (DimFix (Var _n)) ->
+              accesssPatternOfPrimValue (onePrimValue $ IntType Int64)
+            -- case n of
+            --  -- TODO: This is a very abusive and improper way of doing it.
+            --  -- We need to check the scope in which the expression was created,
+            --  -- and if the expression is constant.
+            --  VName "gtid" _ ->
+            --    accesssPatternOfVName n (Variant Parallel) Variant
+            --  VName "tmp" id' ->
+            --    let nn = VName "tmp" id'
+            --     in if varContainsGtid nn m
+            --          then accesssPatternOfVName nn (Variant Parallel) Variant
+            --          else accesssPatternOfVName nn (Variant Sequential) Variant
+            --  _ ->
+            --    accesssPatternOfVName n Sequential Variant
+            -- FIXME with more patterns?
+            _ -> accesssPatternOfVName name (Variant Sequential)
+        )
+        unslice
 analyseOp _ _ = M.empty
 
 varContainsGtid :: VName -> M.Map VName BasicOp -> Bool
