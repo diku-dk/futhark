@@ -986,10 +986,15 @@ boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
 dimUses :: TypeBase Size u -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (Var v _ _) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (Var v _ _) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (Var v _ _) = modify ((mempty, S.singleton (qualLeaf v)) <>)
-    f _ _ _ = pure ()
+    f bound pos e =
+      case pos of
+        PosImmediate ->
+          modify ((fvVars fv, mempty) <>)
+        PosParam ->
+          modify ((mempty, fvVars fv) <>)
+        PosReturn -> pure ()
+      where
+        fv = freeInExp e `freeWithout` bound
 
 checkApply ::
   SrcLoc ->
@@ -1007,7 +1012,7 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
     argtype' <- normTypeFully argtype
 
     -- Check whether this would produce an impossible return type.
-    let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
+    let (tp2_produced_dims, tp2_paramdims) = dimUses tp2'
         problematic = S.fromList ext <> boundInsideType argtype'
         problem = any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)
     when (not (S.null problematic) && problem) $ do
