@@ -76,6 +76,10 @@ getAids f = M.singleton fdname aids
         . funDefBody
         $ f
 
+-- | TODO FIXME PLZ
+sizeOpToCnst :: SizeOp -> BasicOp
+sizeOpToCnst = const undefined
+
 analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStm (stm : ss) ctx it =
   case stm of
@@ -96,6 +100,12 @@ analyseStm (stm : ss) ctx it =
               $ analyseKernelBody o ctx -- create a result for each pattern
        in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx it
     -- TODO: Add patterns here. ( which ones? )
+    (Let (Pat pp) _ (Op (SizeOp o))) ->
+      let ctx'' = M.fromList . zip (map patElemName pp) $ replicate (length pp) (it, sizeOpToCnst o)
+       in let ctx' = M.union ctx ctx''
+             -- create a result for each pattern
+       in analyseStm ss ctx' it
+    -- TODO: Add patterns here. ( which ones? )
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
 analyseStm [] _ _ = M.empty
@@ -108,7 +118,7 @@ analyseKernelBody op ctx =
   where
     toCtx (n, o) = (n, (Parallel, SubExp o))
 
--- Discard the context
+-- | Discard the context
 analyseOpStm :: [Stm GPU] -> AnalyzeCtx -> ArrayIndexDescriptors
 analyseOpStm prog ctx = foldl (M.unionWith (++)) M.empty $ toList $ analyseStm prog ctx Parallel
 
@@ -190,6 +200,7 @@ getOpVariance c (FlatUpdate _name1 (FlatSlice e _dims) _name2) = getSubExpVarian
 getOpVariance _ _ = Nothing
 
 -- Pretty printing stuffs
+-- TODO: Reorder this to an order that makes a little more sense
 instance Pretty FunAids where
   pretty = stack . map f . M.toList :: FunAids -> Doc ann
     where
