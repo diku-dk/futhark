@@ -6,5 +6,7 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   defunc_0_map_res_5323 [[σ xss_5346 | ν | seq], [σ xsss_5223 | ν | par]]
+--   defunc_0_map_res_5323 
+--     something_1337 [[σ xss_5346 | ν | seq], [σ xsss_5223 | ν | par]]
+
 -- WARNING: this output might be wrong!!!

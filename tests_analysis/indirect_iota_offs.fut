@@ -4,6 +4,9 @@ def main [n] (xs: [n]i64) : [n]i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   segmap_usable_groups_5260 []
---   index_primexp_5265 []
---   lifted_lambda_res_5266 [[σ index_primexp_5265 | ν | par]]
+--   segmap_usable_groups_5260
+
+--   index_primexp_5265
+
+--   lifted_lambda_res_5266
+--     xs_5199 [[σ index_primexp_5265 | ν | par]]

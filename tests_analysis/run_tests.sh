@@ -128,13 +128,23 @@ do
         expected_output_2=${expected_output:difference_location:1}
         expected_output_3=${expected_output:difference_location+1}
 
+        # Fix newlines being weird.
+        if [ "$output_2" == $'\n' ]; then
+            output_2="\e[41m \e[0m\n"
+        else
+            output_2="\e[41m$output_2\e[0m"
+        fi
+        if [ "$expected_output_2" == $'\n' ]; then
+            expected_output_2="\e[41m \e[0m\n"
+        else
+            expected_output_2="\e[41m$expected_output_2\e[0m"
+        fi
+
         # Print the output and expected output with the difference highlighted in red
         printf "\nOutput: \n\n"
         printf "\e[90m" # Grey
         printf "$output_1"
-        printf "\e[41m" # Red background
         printf "$output_2"
-        printf "\e[0m" # Reset
         printf "\e[90m" # Grey
         printf "$output_3\n"
         printf "\e[0m" # Reset
@@ -142,9 +152,7 @@ do
         printf "\nExpected output: \n\n"
         printf "\e[90m" # Grey
         printf "$expected_output_1"
-        printf "\e[41m" # Red background
         printf "$expected_output_2"
-        printf "\e[0m" # Reset
         printf "\e[90m" # Grey
         printf "$expected_output_3\n\n\n"
         printf "\e[0m" # Reset
