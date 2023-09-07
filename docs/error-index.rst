@@ -484,11 +484,12 @@ function actually returns.  The ``length`` function has this type:
 Whenever ``length`` occurs (as in the composition above), the type
 checker must *instantiate* the ``[n]`` with the concrete symbolic size
 of its input array.  But in the composition, that size does not
-actually exist until ``filter`` has been run.  For that matter, the
-type checker does not know what ``>->`` does, and for all it knows it
-may actually apply ``filter`` many times to different arrays, yielding
-different sizes.  This makes it impossible to uniquely instantiate the
-type of ``length``, and therefore the program is rejected.
+actually exist until ``filter`` has been fully applied.  For that
+matter, the type checker does not know what ``>->`` does, and for all
+it knows it may actually apply ``filter`` many times to different
+arrays, yielding different sizes.  This makes it impossible to
+uniquely instantiate the type of ``length``, and therefore the program
+is rejected.
 
 The common workaround is to use *pipelining* instead of composition
 whenever we use functions with existential return types:
