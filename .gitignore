@@ -58,3 +58,5 @@ testparser/
 # Ignore macOS system files.
 .DS_Store
 
+# Ignore .c files
+*.c

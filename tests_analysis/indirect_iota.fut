@@ -1,6 +1,7 @@
-def main [n] (xs: [n]i64) : [n]i64 =
+def main [n] (xs: [n]i32) : [n]i32 =
   let is = iota n
-  in map (\i -> #[unsafe] xs[is[i]]) (iota n)
+  in map (\i ->  #[unsafe] xs[is[i]] ) (iota n)
 
 -- === Expected output of analysis:
--- TBD
+-- entry_main
+-- WARNING: this output might be wrong!!!

@@ -10,4 +10,7 @@ def main [n][m] (xss: [n][m]i32) : i32 =
 
   
 -- === Expected output of analysis:
--- TBD
+-- entry_main
+--   main_res_5104 [[σ xss_5346 | ν | seq], [σ xss_5346 | ν | seq]]
+--   const_dev_5114 []
+-- WARNING: this output might be wrong!!!

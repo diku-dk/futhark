@@ -1,5 +1,7 @@
 def main [l][n][m] (xsss: [l][n][m]i64) : [l][n][m]i64 =
-  map (\xss -> map (\xs -> map (+2) xs) xss) xsss
+  map (\xss -> 
+    map (\xs -> map (+2) xs) xss
+  ) xsss
 
 -- === Expected output of analysis:
 -- entry_main

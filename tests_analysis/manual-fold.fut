@@ -8,4 +8,6 @@ def main [n][m] (xss: [n][m]i64) : [n]i64 =
 
 
 -- === Expected output of analysis:
--- TBD
+-- entry_main
+--   xsss_transformed_5310 [[σ xss_5128 | ν | par], [σ xss_5128 | ν | seq]]
+-- WARNING: This output might be completely wrong!!!!!!!
