@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Rarely occurring deadlock for fused map-scan compositions in CUDA
   backend, when a bounds check failed in the map function.
 
+* Compiler and interpreter crash for tricky interactions of abstract
+  types and sizes (#2016).  Solved by banning such uses - in principle
+  this could break code.
+
 ## [0.25.3]
 
 ### Added

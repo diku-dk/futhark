@@ -215,8 +215,8 @@ traverseDims f = go mempty PosImmediate
 
     onTypeArg bound b (TypeArgDim d) =
       TypeArgDim <$> f bound b d
-    onTypeArg bound b (TypeArgType t) =
-      TypeArgType <$> go bound b t
+    onTypeArg bound _ (TypeArgType t) =
+      TypeArgType <$> go bound PosReturn t
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape Uniqueness -> Uniqueness
