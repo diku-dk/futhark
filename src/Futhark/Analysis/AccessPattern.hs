@@ -80,31 +80,37 @@ getAids f = M.singleton fdname aids
 sizeOpToCnst :: SizeOp -> BasicOp
 sizeOpToCnst = const undefined
 
+-- | Extends the current analyzation context by mapping all input {patterns => basicop}
+-- This is more often than not just a single pattern element.
+extendCtx :: AnalyzeCtx -> [PatElem (LetDec GPU)] -> (IterationType, BasicOp) -> AnalyzeCtx
+extendCtx ctx patterns =
+  M.union ctx
+    . M.fromList
+    . zip (map patElemName patterns)
+    . replicate (length patterns)
+
+type ExpressionAnalyzer op = op -> AnalyzeCtx -> ArrayIndexDescriptors
+
+analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> (op -> AnalyzeCtx -> StmtsAids)
+analyzeExpression f pp o ctx =
+  M.fromList
+    . zip (map patElemName pp)
+    . replicate (length pp) -- get vnames of patterns
+    $ f o ctx -- create a result for each pattern
+
 analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStm (stm : ss) ctx it =
   case stm of
     (Let (Pat pp) _ (BasicOp o)) ->
-      let ctx'' = M.fromList . zip (map patElemName pp) $ replicate (length pp) (it, o)
-       in let ctx' = M.union ctx ctx''
-           in let res =
-                    M.fromList
-                      . zip (map patElemName pp)
-                      . replicate (length pp) -- get vnames of patterns
-                      $ analyseOp o ctx -- create a result for each pattern
-               in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx' it
+      let ctx' = extendCtx ctx pp (it, o)
+       in let res = analyzeExpression analyseOp pp o ctx
+           in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx' it
     (Let (Pat pp) _ (Op (SegOp o))) ->
-      let res =
-            M.fromList
-              . zip (map patElemName pp)
-              . replicate (length pp) -- get vnames of patterns
-              $ analyseKernelBody o ctx -- create a result for each pattern
+      let res = analyzeExpression analyseKernelBody pp o ctx
        in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx it
-    -- TODO: Add patterns here. ( which ones? )
     (Let (Pat pp) _ (Op (SizeOp o))) ->
-      let ctx'' = M.fromList . zip (map patElemName pp) $ replicate (length pp) (it, sizeOpToCnst o)
-       in let ctx' = M.union ctx ctx''
-           in -- create a result for each pattern
-              analyseStm ss ctx' it
+      let ctx' = extendCtx ctx pp (it, sizeOpToCnst o)
+       in analyseStm ss ctx' it
     -- TODO: Add patterns here. ( which ones? )
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
@@ -114,21 +120,24 @@ analyseStm [] _ _ = M.empty
 analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> ArrayIndexDescriptors
 analyseKernelBody op ctx =
   let ctx' = M.union ctx . M.fromList . map toCtx . unSegSpace $ segSpace op
-   in flip analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
+   in analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
   where
     toCtx (n, o) = (n, (Parallel, SubExp o))
+    analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
+    analyseOpStm ctx' prog =
+      foldl (M.unionWith (++)) M.empty . toList $ analyseStm prog ctx' Parallel
 
 -- | Discard the context
-analyseOpStm :: [Stm GPU] -> AnalyzeCtx -> ArrayIndexDescriptors
-analyseOpStm prog ctx = foldl (M.unionWith (++)) M.empty $ toList $ analyseStm prog ctx Parallel
 
 -- | Construct MemoryAccessPattern using a `VName`
 accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
-accesssPatternOfVName n = MemoryAccessPattern $ DimIndexExpression $ Left n
+accesssPatternOfVName n =
+  MemoryAccessPattern $ DimIndexExpression $ Left n
 
 -- | Construct MemoryAccessPattern using a `PrimValue`
 accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
-accesssPatternOfPrimValue n = MemoryAccessPattern (DimIndexExpression $ Right n) Invariant
+accesssPatternOfPrimValue n =
+  MemoryAccessPattern (DimIndexExpression $ Right n) Invariant
 
 -- | Return the map of all access from a given BasicOperator
 -- TODO: Implement other BasicOp patterns than Index
@@ -224,9 +233,6 @@ instance Pretty ArrayIndexDescriptors where
 
       memoryEntryPrint = hsep . punctuate " " . map pretty
       f (n, maps) = pretty n </> indent 2 (mapprint maps)
-
--- instance Pretty MemoryEntry where
---  pretty = stack . map pretty
 
 instance Pretty MemoryAccessPattern where
   pretty (MemoryAccessPattern d v) =
