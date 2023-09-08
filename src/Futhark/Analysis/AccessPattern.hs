@@ -218,13 +218,20 @@ instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
       mapprint [] = ""
-      mapprint (e : ee) = pretty e <+> mapprint ee
+      mapprint [e] = memoryEntryPrint e
+      mapprint (e : ee) = memoryEntryPrint e </> mapprint ee
 
-      f (n, maps) = pretty n <+> mapprint maps
+      memoryEntryPrint = hsep . punctuate " " . map pretty
+      f (n, maps) = pretty n </> indent 2 ( mapprint maps )
+
+--instance Pretty MemoryEntry where
+--  pretty = stack . map pretty
 
 instance Pretty MemoryAccessPattern where
   pretty (MemoryAccessPattern d v) =
-    brackets $ pretty d <+> "|" <+> pretty v
+    -- Instead of using `brackets $` we manually enclose with `[`s, to add
+    -- spacing between the enclosed elements
+    "[" <+> pretty d <+> "|" <+> pretty v <+> "]"
 
 instance Pretty DimIndexExpression where
   pretty (DimIndexExpression (Left n)) = "σ" <+> pretty n -- sigma since it exists in our store
