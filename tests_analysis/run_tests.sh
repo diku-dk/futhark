@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Bash script that reads the test files in the directory, runs them and compares their output to their expected output from comments in the test files.
 
 
@@ -22,7 +23,7 @@ test_n=$(ls $TEST_DIR/*.fut | wc -l | awk '{print $1}')
 # Needed for formatting the output.
 max_filename_length=0
 for file in $TEST_DIR/*.fut
-do 
+do
     # Get filename without path
     filename=$(basename -- "$file")
     # Get the length of the filename
@@ -46,7 +47,7 @@ fi
 
 # Read the test files in the directory.
 for file in $TEST_DIR/*.fut
-do 
+do
     # Run specific test if specified.
     if [ "$run_specific_test" = true ] ; then
         # If the current test is not the specified test, skip it.
@@ -66,8 +67,8 @@ do
     printf "\e[34m" # Blue
     printf "$filename "
     printf "\e[0m" # White
-    
-    
+
+
     # Print spaces to align the output.
     spaces=$((max_filename_length - ${#filename}))
     for ((i=0; i<$spaces; i++))
@@ -75,17 +76,17 @@ do
         printf " "
     done
     printf "\t"
-    
+
     # futhark_dev
     futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
 
     # Run the test file and compare the output to the expected output.
-    
+
     # Run the test file.
     output=$($futhark_dev dev -se --gpu -z $file 2>&1)
     # Rempove trailing whitespace
     output=$(echo "$output" | sed 's/[[:space:]]*$//')
-    
+
     # Get the expected output starting after the string "=== Expected output of analysis:"
     # Find the line where the expected output starts + 1
     expected_output_line=$(grep -n "=== Expected output of analysis:" $file | cut -d: -f1 | awk '{print $1+1}')
@@ -135,7 +136,7 @@ do
 
         # Split the expected output into two string at the first difference.
         # This is done to highlight the difference in the output.
-        
+
         # Iterate over the characters in the output and expected output
         # until the first difference is found.
         output_i=0
@@ -152,7 +153,7 @@ do
             output_i=$((output_i+1))
             expected_output_i=$((expected_output_i+1))
 
-            # If the characters are different, set the difference location 
+            # If the characters are different, set the difference location
             # to the current index and break the loop.
             if [ "$output_char" != "$expected_output_char" ]; then
                 # difference location is the minimum of output_i and expected_output_i minus 1.
@@ -210,7 +211,7 @@ if [ $successes -eq $test_n ]; then
     printf "\nAll $successes/$test_i tests passed!\n\n"
     printf "\e[0m" # White
 else
-    printf "\e[31m" # Red   
+    printf "\e[31m" # Red
     printf "\n$successes/$test_i tests passed.\n\n"
     printf "\e[0m" # White
 fi
