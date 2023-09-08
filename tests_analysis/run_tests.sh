@@ -17,19 +17,19 @@ successes=0
 # Index of the current test
 test_i=0
 # Number of tests
-test_n=$(ls $TEST_DIR/*.fut | wc -l | awk '{print $1}')
+test_n=$(find "$TEST_DIR" -name '*.fut' | wc -l)
 
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
 max_filename_length=0
-for file in $TEST_DIR/*.fut
+for file in "$TEST_DIR"/*.fut
 do
     # Get filename without path
     filename=$(basename -- "$file")
     # Get the length of the filename
     filename_length=${#filename}
     # If the filename is longer than the longest filename, set the longest filename to the length of the current filename.
-    if [ $filename_length -gt $max_filename_length ]; then
+    if [ "$filename_length" -gt "$max_filename_length" ]; then
         max_filename_length=$filename_length
     fi
 done
@@ -40,18 +40,18 @@ specific_test_number=$1
 run_specific_test=false
 if [ "$specific_test_number" -eq "$specific_test_number" ] 2>/dev/null; then
     # Check if the number is in the range of the number of tests.
-    if [ $specific_test_number -gt 0 ] && [ $specific_test_number -le $test_n ]; then
+    if [ "$specific_test_number" -gt 0 ] && [ "$specific_test_number" -le "$test_n" ]; then
         run_specific_test=true
     fi
 fi
 
 # Read the test files in the directory.
-for file in $TEST_DIR/*.fut
+for file in "$TEST_DIR"/*.fut
 do
     # Run specific test if specified.
     if [ "$run_specific_test" = true ] ; then
         # If the current test is not the specified test, skip it.
-        if [ $((test_i+1)) -ne $specific_test_number ]; then
+        if [ $((test_i+1)) -ne "$specific_test_number" ]; then
             test_i=$((test_i+1))
             continue
         fi
@@ -71,7 +71,7 @@ do
 
     # Print spaces to align the output.
     spaces=$((max_filename_length - ${#filename}))
-    for ((i=0; i<$spaces; i++))
+    for ((i=0; i<"$spaces"; i++))
     do
         printf " "
     done
@@ -83,13 +83,13 @@ do
     # Run the test file and compare the output to the expected output.
 
     # Run the test file.
-    output=$($futhark_dev dev -se --gpu -z $file 2>&1)
+    output=$($futhark_dev dev -se --gpu -z "$file" 2>&1)
     # Rempove trailing whitespace
     output=$(echo "$output" | sed 's/[[:space:]]*$//')
 
     # Get the expected output starting after the string "=== Expected output of analysis:"
     # Find the line where the expected output starts + 1
-    expected_output_line=$(grep -n "=== Expected output of analysis:" $file | cut -d: -f1 | awk '{print $1+1}')
+    expected_output_line=$(grep -n "=== Expected output of analysis:" "$file" | cut -d: -f1 | awk '{print $1+1}')
     # Rempove trailing whitespace
     expected_output_line=$(echo "$expected_output_line" | sed 's/[[:space:]]*$//')
 
@@ -103,7 +103,7 @@ do
     fi
 
     # Get the expected output.
-    expected_output=$(sed -n "${expected_output_line},$ p" $file)
+    expected_output=$(sed -n "${expected_output_line},$ p" "$file")
     # Remove the string "---" from the beginning of each line.
     expected_output=$(echo "$expected_output" | sed 's/^-- //g')
 
@@ -114,7 +114,7 @@ do
 
         # Print "CONFIRMED" if expected_output_line contains the string "CONFIRMED"
         expected_output_line_prev=$((expected_output_line-1))
-        expected_output_line_content=$(sed -n "$expected_output_line_prev,$ p" $file)
+        expected_output_line_content=$(sed -n "$expected_output_line_prev,$ p" "$file")
         if [[ $expected_output_line_content == *"CONFIRMED"* ]]; then
             printf "\e[32m" # Green
             printf "PASSED\t"
@@ -144,7 +144,7 @@ do
         output_length=${#output}
         expected_output_length=${#expected_output}
         difference_location=0
-        while [ $output_i -lt $output_length ] && [ $expected_output_i -lt $expected_output_length ]
+        while [ $output_i -lt "$output_length" ] && [ $expected_output_i -lt "$expected_output_length" ]
         do
             # Get the current character in the output and expected output.
             output_char=${output:$output_i:1}
@@ -206,7 +206,7 @@ done
 
 # Print the number of successful tests.
 printf "\e[1m" # Bold
-if [ $successes -eq $test_n ]; then
+if [ $successes -eq "$test_n" ]; then
     printf "\e[32m" # Green
     printf "\nAll $successes/$test_i tests passed!\n\n"
     printf "\e[0m" # White
