@@ -3,7 +3,8 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l]i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   segmap_usable_groups_5383
-
---   lifted_lambda_res_5389
---     xsss_5302 [[σ gtid_5385 | ν | par], [τ 0i64 | ψ], [σ gtid_5385 | ν | par]]
+--   segmap_usable_groups_5383 => []
+--   defunc_0_map_res_5384 => [
+--     xsss_5302
+--       [ σ gtid_5385 | ν par ]  [ τ 0i64 | ψ ]  [ σ gtid_5385 | ν par ]
+--   ]

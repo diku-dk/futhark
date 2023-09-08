@@ -7,14 +7,13 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][m]i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   xsss_transformed_5310
---     xsss_5223 [[σ xsss_5223 | ν | par], [τ 0i64 | ν | seq], [σ xsss_5223 | ν | par]]
---   fits_5331
+--   xsss_transformed_5310 => [
+--     xsss_5223
+--       [ σ xsss_5223 | ν par ]  [ τ 0i64 | ν seq ]  [ σ xsss_5223 | ν par ]
+--   ]
+--   fits_5331 => []
+--   intra_suff_and_fits_5332 => []
+--   nest_size_5409 => []
+--   segmap_usable_groups_5411 => []
 
---   intra_suff_and_fits_5332
-
---   nest_size_5409
-
---   segmap_usable_groups_5411
-
--- WARNING: This output is DEFINITELY wrong!!
+-- WARNING: This output may be wrong!!

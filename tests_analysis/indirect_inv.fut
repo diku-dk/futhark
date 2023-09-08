@@ -5,9 +5,12 @@ def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   defunc_0_map_res_5299
-
---   tmp_5302
---     is_5241 [[τ 5i64 | ψ]]
---   xss_prefix_5305
---     xss_5242 [[σ tmp_5302 | ψ], [σ xss_5242 | ν | par]]
+--   defunc_0_map_res_5299 => []
+--   tmp_5302 => [
+--     is_5241
+--       [ τ 5i64 | ψ ]
+--   ]
+--   xss_prefix_5305 => [
+--     xss_5242
+--       [ σ tmp_5302 | ψ ]  [ σ xss_5242 | ν par ]
+--   ]

@@ -5,6 +5,8 @@ def main [n][m] (xss: [n][m]i64) : i64 =
 
 -- === Expected output of analysis:
 -- entry_main
---   main_res_5098
---     main_res_dev_5103 [[τ 0i64 | ψ], [σ xss_5144 | ν | seq]]
---   const_dev_5104
+--   main_res_5098 => [
+--     main_res_dev_5103
+--       [ τ 0i64 | ψ ]  [ σ xss_5144 | ν seq ]
+--   ]
+--   const_dev_5104 => []
