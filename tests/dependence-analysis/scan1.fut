@@ -1,5 +1,5 @@
 -- A simple streamSeq; does not exercise the Stream case in opDependencies,
--- but dead code is still removed by (presumably) the Screma case.
+-- but dead code is still removed by the Screma case.
 -- ==
 -- structure { Stream/BinOp 2 }
 -- structure { Screma/BinOp 2 }
