@@ -63,9 +63,9 @@ do
     # Get filename without path
     filename=$(basename -- "$file")
     printf "\e[1m" # Bold
-    printf "=== Running test $test_i/$test_n: "
+    printf "=== Running test %d/%d: " "$test_i" "$test_n"
     printf "\e[34m" # Blue
-    printf "$filename "
+    printf "%s" "$filename "
     printf "\e[0m" # White
 
 
@@ -98,7 +98,7 @@ do
         printf "\e[31m" # Red
         printf "FAILED\n"
         printf "\e[0m" # White
-        printf "\nExpected output not specified in \"$file\". \nSkipping test.\n\n"
+        printf "\nExpected output not specified in \"%s\". \nSkipping test.\n\n" "$file"
         continue
     fi
 
@@ -186,18 +186,18 @@ do
         # Print the output and expected output with the difference highlighted in red
         printf "\nOutput: \n\n"
         printf "\e[90m" # Grey
-        printf "$output_1"
-        printf "$output_2"
+        echo -ne "$output_1"
+        echo -ne "$output_2"
         printf "\e[90m" # Grey
-        printf "$output_3\n"
+        echo -ne "$output_3\n"
         printf "\e[0m" # Reset
 
         printf "\nExpected output: \n\n"
         printf "\e[90m" # Grey
-        printf "$expected_output_1"
-        printf "$expected_output_2"
+        echo -ne "$expected_output_1"
+        echo -ne "$expected_output_2"
         printf "\e[90m" # Grey
-        printf "$expected_output_3\n\n\n"
+        echo -ne "$expected_output_3\n\n\n"
         printf "\e[0m" # Reset
 
     fi
@@ -208,10 +208,10 @@ done
 printf "\e[1m" # Bold
 if [ $successes -eq "$test_n" ]; then
     printf "\e[32m" # Green
-    printf "\nAll $successes/$test_i tests passed!\n\n"
+    printf "\nAll %d/%d tests passed!\n\n" "$successes" "$test_i"
     printf "\e[0m" # White
 else
     printf "\e[31m" # Red
-    printf "\n$successes/$test_i tests passed.\n\n"
+    printf "\n%d/%d tests passed.\n\n" "$successes" "$test_i"
     printf "\e[0m" # White
 fi
