@@ -19,6 +19,9 @@ test_i=0
 # Number of tests
 test_n=$(find "$TEST_DIR" -name '*.fut' | wc -l)
 
+# Get path of the latest build of the futhark executable
+futhark_dev=$(find . -name futhark -type f -printf "%T+ %p\n" | sort -r | head -1 | sed 's/^[^ ]\+ //')
+
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
 max_filename_length=0
@@ -76,9 +79,6 @@ do
         printf " "
     done
     printf "\t"
-
-    # futhark_dev
-    futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
 
     # Run the test file and compare the output to the expected output.
 
