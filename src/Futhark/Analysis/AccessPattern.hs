@@ -103,8 +103,8 @@ analyseStm (stm : ss) ctx it =
     (Let (Pat pp) _ (Op (SizeOp o))) ->
       let ctx'' = M.fromList . zip (map patElemName pp) $ replicate (length pp) (it, sizeOpToCnst o)
        in let ctx' = M.union ctx ctx''
-             -- create a result for each pattern
-       in analyseStm ss ctx' it
+           in -- create a result for each pattern
+              analyseStm ss ctx' it
     -- TODO: Add patterns here. ( which ones? )
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
@@ -161,10 +161,12 @@ getSubExpVariance c (Var vname) =
     Just (Parallel, _) -> Just $ Variant Parallel
     Just op -> getOpVariance c $ snd op
 
-mergeVariance :: Maybe Variance -> Maybe Variance -> Maybe Variance
-mergeVariance Nothing rhs = rhs
-mergeVariance lhs Nothing = lhs
-mergeVariance (Just lhs) (Just rhs) =
+-- | Combine two `Maybe Variance`s into the worst-case variance.
+-- This is used to reduce expressions consisting of multiple sub-expressions.
+(><) :: Maybe Variance -> Maybe Variance -> Maybe Variance
+(><) Nothing rhs = rhs
+(><) lhs Nothing = lhs
+(><) (Just lhs) (Just rhs) =
   case (lhs, rhs) of
     -- If either is variant, the expression is variant
     (Invariant, Variant i) -> Just $ Variant i
@@ -175,8 +177,7 @@ mergeVariance (Just lhs) (Just rhs) =
         if i == Parallel
           then Variant Parallel
           else Variant j
-    -- This case should only match when both is invariant
-    _ -> Just Invariant
+    (Invariant, Invariant) -> Just Invariant
 
 -- | Get variance from Basic operators. Looks up variables in the current
 -- context to determine whether an operator should be marked `Invariant`, or
@@ -185,12 +186,12 @@ getOpVariance :: AnalyzeCtx -> BasicOp -> Maybe Variance
 getOpVariance c (SubExp e) = getSubExpVariance c e
 getOpVariance _ (ArrayLit (_e : _ee) _) = Nothing
 getOpVariance c (UnOp _ e) = getSubExpVariance c e
-getOpVariance c (BinOp _ l r) = getSubExpVariance c l `mergeVariance` getSubExpVariance c r
-getOpVariance c (CmpOp _ l r) = getSubExpVariance c l `mergeVariance` getSubExpVariance c r
+getOpVariance c (BinOp _ l r) = getSubExpVariance c l >< getSubExpVariance c r
+getOpVariance c (CmpOp _ l r) = getSubExpVariance c l >< getSubExpVariance c r
 getOpVariance c (ConvOp _ e) = getSubExpVariance c e
 getOpVariance c (Assert e _ _) = getSubExpVariance c e
 -- Usually hit in indirect indices
-getOpVariance c (Index _name (Slice ee)) = foldl mergeVariance Nothing $ map (getSubExpVariance c . fromJust . dimFix) ee
+getOpVariance c (Index _name (Slice ee)) = foldl (><) Nothing $ map (getSubExpVariance c . fromJust . dimFix) ee
 --
 getOpVariance c (Update _ _name (Slice dsts) _src) = getSubExpVariance c . fromJust . dimFix $ head dsts
 getOpVariance c (FlatIndex _name (FlatSlice e _dims)) = getSubExpVariance c e
@@ -222,9 +223,9 @@ instance Pretty ArrayIndexDescriptors where
       mapprint (e : ee) = memoryEntryPrint e </> mapprint ee
 
       memoryEntryPrint = hsep . punctuate " " . map pretty
-      f (n, maps) = pretty n </> indent 2 ( mapprint maps )
+      f (n, maps) = pretty n </> indent 2 (mapprint maps)
 
---instance Pretty MemoryEntry where
+-- instance Pretty MemoryEntry where
 --  pretty = stack . map pretty
 
 instance Pretty MemoryAccessPattern where
