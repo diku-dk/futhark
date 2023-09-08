@@ -13,6 +13,7 @@ import Data.Foldable
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Pretty.Simple
 import Futhark.IR.GPU
 import Futhark.Util.Pretty
 
@@ -104,17 +105,35 @@ analyseStm (stm : ss) ctx it =
     (Let (Pat pp) _ (BasicOp o)) ->
       let ctx' = extendCtx ctx pp (it, o)
        in let res = analyzeExpression analyseOp pp o ctx
-           in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx' it
+           in M.union res $ analyseStm ss ctx' it
     (Let (Pat pp) _ (Op (SegOp o))) ->
       let res = analyzeExpression analyseKernelBody pp o ctx
-       in (M.unionWith $ M.unionWith (++)) res $ analyseStm ss ctx it
+       in M.union res $ analyseStm ss ctx it
     (Let (Pat pp) _ (Op (SizeOp o))) ->
       let ctx' = extendCtx ctx pp (it, sizeOpToCnst o)
        in analyseStm ss ctx' it
     -- TODO: Add patterns here. ( which ones? )
+    -- OtherOp (op rep)
+    (Let (Pat pp) _ (Op (GPUBody _ b))) ->
+      -- TODO: Add to context ((somehow))
+      let res' =
+            foldl (M.unionWith (++)) M.empty
+              . map snd
+              . M.toList
+              -- GPUBody is sequential!
+              . (\p -> analyseStm p M.empty Sequential)
+              . stmsToList
+              $ bodyStms b
+       in let res =
+                M.fromList
+                  . zip (map patElemName pp)
+                  . replicate (length pp) -- get vnames of patterns
+                  $ res'
+           in -- in let ctx' = extendCtx ctx pp (it, o)
+              M.union res $ analyseStm ss ctx it
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
-analyseStm [] _ _ = M.empty
+analyseStm [] c _ = M.empty
 
 -- | Extend current `ctx` with segSpace defs, as parallel
 analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> ArrayIndexDescriptors
@@ -126,8 +145,6 @@ analyseKernelBody op ctx =
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
     analyseOpStm ctx' prog =
       foldl (M.unionWith (++)) M.empty . toList $ analyseStm prog ctx' Parallel
-
--- | Discard the context
 
 -- | Construct MemoryAccessPattern using a `VName`
 accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
@@ -141,6 +158,8 @@ accesssPatternOfPrimValue n =
 
 -- | Return the map of all access from a given BasicOperator
 -- TODO: Implement other BasicOp patterns than Index
+-- In reality, we should use the Maybe monad, instead of returning empty maps,
+-- but i am lazy and we have a deadline.
 analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
 analyseOp (Index name (Slice unslice)) m =
   M.singleton name $
@@ -148,12 +167,14 @@ analyseOp (Index name (Slice unslice)) m =
       map
         ( \case
             (DimFix (Constant primvalue)) ->
+              -- accesssPatternOfVName (VName "eatCraaaap" 6969) (Variant Sequential)
               accesssPatternOfPrimValue primvalue
             (DimFix (Var name')) ->
               case getOpVariance m . snd $ fromJust $ M.lookup name' m of
                 Nothing -> accesssPatternOfVName name' Invariant
                 Just v -> accesssPatternOfVName name' v
-            _ -> accesssPatternOfVName name (Variant Sequential)
+            (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
+            _ -> accesssPatternOfVName (VName "UnhandledCase" 43) (Variant Sequential)
         )
         unslice
 analyseOp (BinOp {}) _ = M.empty
