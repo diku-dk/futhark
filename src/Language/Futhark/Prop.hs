@@ -411,7 +411,8 @@ matchDims onDims = matchDims' mempty
               <$> zipWithM (matchTypeArg bound) targs1 targs2
         _ -> pure t1
 
-    matchTypeArg _ ta@TypeArgType {} _ = pure ta
+    matchTypeArg bound (TypeArgType t1) (TypeArgType t2) =
+      TypeArgType <$> matchDims' bound t1 t2
     matchTypeArg bound (TypeArgDim x) (TypeArgDim y) =
       TypeArgDim <$> onDims bound x y
     matchTypeArg _ a _ = pure a
