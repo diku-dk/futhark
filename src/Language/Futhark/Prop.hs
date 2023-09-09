@@ -199,7 +199,7 @@ traverseDims f = go mempty PosImmediate
     go bound b (Scalar (Record fields)) =
       Scalar . Record <$> traverse (go bound b) fields
     go bound b (Scalar (TypeVar as tn targs)) =
-      Scalar <$> (TypeVar as tn <$> traverse (onTypeArg bound b) targs)
+      Scalar <$> (TypeVar as tn <$> traverse (onTypeArg tn bound b) targs)
     go bound b (Scalar (Sum cs)) =
       Scalar . Sum <$> traverse (traverse (go bound b)) cs
     go _ _ (Scalar (Prim t)) =
@@ -213,10 +213,15 @@ traverseDims f = go mempty PosImmediate
               Named p' -> S.insert p' bound
               Unnamed -> bound
 
-    onTypeArg bound b (TypeArgDim d) =
+    onTypeArg _ bound b (TypeArgDim d) =
       TypeArgDim <$> f bound b d
-    onTypeArg bound _ (TypeArgType t) =
-      TypeArgType <$> go bound PosReturn t
+    onTypeArg tn bound b (TypeArgType t) =
+      TypeArgType <$> go bound b' t
+      where
+        b' =
+          if qualLeaf tn == fst intrinsicAcc
+            then b
+            else PosParam
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape Uniqueness -> Uniqueness
