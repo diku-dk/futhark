@@ -43,7 +43,6 @@ dataDependencies' ::
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
     grow deps (Let pat _ (WithAcc inputs lam)) =
-      -- TODO WithAcc test case
       let input_deps = map (mconcat . depsOfWithAccInput) inputs
           -- ^ Dependencies of each input reduction are concatenated.
           -- Input to lam is cert_1, ..., cert_n, acc_1, ..., acc_n.
@@ -58,9 +57,6 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
         depsOfWithAccInput (shape, arrs, Just (lam', nes)) =
           reductionDependencies deps lam' nes (depsOfArrays' shape arrs)
     grow deps stm@(Let pat _ (Op op)) =
-      -- TODO transitive dependencies; reduce res is still
-      -- not directly related to input array. But may just
-      -- be the way the example code is written; try to simplify.
       let op_deps = map (depsOfNames deps) (opDependencies op)
           res' = M.fromList (zip (patNames pat) op_deps)
           res = res' `M.union` deps

@@ -599,8 +599,6 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
   opDependencies (Stream w arrs accs lam) =
-    -- TODO Only one test in tests/ actually hit this case: issue419.fut.
-    -- Need to come up with a structural test program.
     let accs_deps = map (depsOf mempty) accs
         arrs_deps = depsOfArrays w arrs
      in lambdaDependencies mempty lam (arrs_deps <> accs_deps)
@@ -622,13 +620,8 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
             & Debug.Trace.trace "# Hist"
     where
       depsOfHistOp (HistOp dest_shape rf dests nes op) =
-        -- TODO dependence on race factor necessary? (ie is it always a constant?)
-        -- TODO Missing freeIn nes? Might be a general oversight.
-        -- TODO Missing freeIn shape? Don't think a shape can have free variables?
-        -- TODO Is there a more elegant way than `depsOf mempty` to create
-        -- new names?
         let shape_deps = depsOfShape dest_shape
-            rf_deps = freeIn rf <> depsOf mempty rf
+            rf_deps = depsOf mempty rf
             in_deps = map (\vn -> oneName vn <> shape_deps <> rf_deps) dests
          in reductionDependencies mempty op nes in_deps
       -- A histogram operation may use the same index for multiple values.
@@ -642,9 +635,6 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (JVP {}) =
-    -- TODO should be straightfoward lambdaDependencies on lambda
-    -- with inputs being x and x'. But I haven't thought about how
-    -- to test this and no test in tests/ hits this case.
     undefined
   opDependencies (VJP {}) =
     undefined
