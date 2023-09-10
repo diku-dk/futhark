@@ -34,7 +34,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
     grow deps (Let pat _ (WithAcc inputs lam)) =
       let input_deps = map (mconcat . depsOfWithAccInput) inputs
-          -- ^ Dependencies of each input reduction are concatenated.
+          -- Dependencies of each input reduction are concatenated.
           -- Input to lam is cert_1, ..., cert_n, acc_1, ..., acc_n.
           lam_deps = lambdaDependencies deps lam (input_deps <> input_deps)
           transitive = map (depsOfNames deps) lam_deps
@@ -46,7 +46,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
           depsOfArrays' shape arrs
         depsOfWithAccInput (shape, arrs, Just (lam', nes)) =
           reductionDependencies deps lam' nes (depsOfArrays' shape arrs)
-    grow deps stm@(Let pat _ (Op op)) =
+    grow deps (Let pat _ (Op op)) =
       let op_deps = map (depsOfNames deps) (opDependencies op)
        in M.fromList (zip (patNames pat) op_deps) `M.union` deps
     grow deps (Let pat _ (Match c cases defbody _)) =
@@ -70,7 +70,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
                   )
                   (map (depsOf defbody_deps . resSubExp) (bodyResult defbody))
        in M.unions $ [branchdeps, deps, defbody_deps] ++ cases_deps
-    grow deps stm@(Let pat _ e) =
+    grow deps (Let pat _ e) =
       let free = freeIn pat <> freeIn e
           free_deps = depsOfNames deps free
        in M.fromList [(name, free_deps) | name <- patNames pat] `M.union` deps
