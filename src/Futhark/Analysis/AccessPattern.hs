@@ -9,12 +9,10 @@ module Futhark.Analysis.AccessPattern
   )
 where
 
-import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Pretty.Simple
 import Futhark.IR.GPU
 import Futhark.Util.Pretty
 
@@ -101,6 +99,12 @@ analyzeExpression f pp op ctx =
     $ replicate (length pp)
     $ f op ctx -- create a Maybe result for each pattern
 
+discardKeys :: StmtsAids -> ArrayIndexDescriptors
+discardKeys =
+  foldl (M.unionWith (++)) M.empty
+    . map snd
+    . M.toList
+
 analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStm (stm : ss) ctx it =
   case stm of
@@ -126,8 +130,20 @@ analyseStm (stm : ss) ctx it =
            in foldl (M.unionWith (++)) M.empty
                 . map snd
                 $ M.toList res
-    -- (Let (Pat pp) _ (Loop _ _ _body)) ->
-    --  undefined
+    (Let (Pat _pp) _ (Loop bindings _ _body)) ->
+      -- 0. let tmpCtx = ctx with (FParam = SubExp)
+      let tCtx = M.fromList $ map (\(p, x) -> (paramName p, (Sequential, SubExp x))) bindings
+       in -- 1. let res = analyseStm body Sequential
+          let res = analyzeExpression (\o c -> Just . discardKeys $ analyseStm o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
+           in -- 2. recurse
+              M.union res $ analyseStm ss ctx it
+    -- 3. profit
+
+    -- \| A match statement picks a branch by comparing the given
+    -- subexpressions (called the /scrutinee/) with the pattern in
+    -- each of the cases.  If none of the cases match, the /default
+    -- body/ is picked.
+    --  Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
     (Let (Pat pp) _ (Op (SegOp op))) ->
       let res = analyzeExpression analyseKernelBody pp op ctx
        in M.union res $ analyseStm ss ctx it
@@ -168,6 +184,9 @@ analyseKernelBody op ctx =
   let ctx' = M.union ctx . M.fromList . map toCtx . unSegSpace $ segSpace op
    in Just $ analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
   where
+    -- We extend the context by wrapping the operator in `SubExp`, effectively
+    -- wrapping it into a BasicOp.
+    -- We need to keep this in mind when checking context.
     toCtx (name, e) = (name, (Parallel, SubExp e))
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
     analyseOpStm ctx' prog =
@@ -195,12 +214,14 @@ analyseOp (Index name (Slice unslice)) ctx =
         map
           ( \case
               (DimFix (Constant primvalue)) ->
-                -- accesssPatternOfVName (VName "eatCraaaap" 6969) (Variant Sequential)
                 accesssPatternOfPrimValue primvalue
               (DimFix (Var name')) ->
-                case getOpVariance ctx . snd $ fromJust $ M.lookup name' ctx of
-                  Nothing -> accesssPatternOfVName name' Invariant
-                  Just var -> accesssPatternOfVName name' var
+                case M.lookup name' ctx of
+                  Nothing -> accesssPatternOfVName (VName "Missing" 42) (Variant Sequential)
+                  Just (_, op) ->
+                    case getOpVariance ctx op of
+                      Nothing -> accesssPatternOfVName name' Invariant
+                      Just var -> accesssPatternOfVName name' var
               (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
           )
           unslice
