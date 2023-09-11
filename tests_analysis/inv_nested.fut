@@ -7,5 +7,5 @@ def main [n][m] (xss: [n][m]i64) : [n][m]i64 =
 -- entry_main
 --   lifted_lambda_res_5410 => [
 --     xss_5335
---       [ τ 0i64 | ψ ]  [ σ xss_5335 | ν par ]
+--       [ τ 0i64 | ψ ] [ σ xss_5335 | ν par ]
 --   ]

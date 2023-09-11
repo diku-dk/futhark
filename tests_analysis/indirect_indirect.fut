@@ -9,3 +9,5 @@ def main [n] (xs: [n]i64) : [n]i64 =
 --     xs_5242
 --       [ σ slice_5325 | ν par ]
 --   ]
+
+-- WARNING: This program gets optimized too much!
