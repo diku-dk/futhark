@@ -94,19 +94,19 @@ extendCtx ctx patterns =
 type ExpressionAnalyzer op = op -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 
 analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> op -> AnalyzeCtx -> StmtsAids
-analyzeExpression f pp o ctx =
+analyzeExpression f pp op ctx =
   M.fromList
     . zip (map patElemName pp)
     $ catMaybes -- remove all Nothings
     $ replicate (length pp)
-    $ f o ctx -- create a Maybe result for each pattern
+    $ f op ctx -- create a Maybe result for each pattern
 
 analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStm (stm : ss) ctx it =
   case stm of
-    (Let (Pat pp) _ (BasicOp o)) ->
-      let ctx' = extendCtx ctx pp (it, o)
-       in let res = analyzeExpression analyseOp pp o ctx
+    (Let (Pat pp) _ (BasicOp op)) ->
+      let ctx' = extendCtx ctx pp (it, op)
+       in let res = analyzeExpression analyseOp pp op ctx
            in M.union res $ analyseStm ss ctx' it
     -- Apply is still not matched, but is it relevant?
     (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
@@ -128,16 +128,16 @@ analyseStm (stm : ss) ctx it =
                 $ M.toList res
     -- (Let (Pat pp) _ (Loop _ _ _body)) ->
     --  undefined
-    (Let (Pat pp) _ (Op (SegOp o))) ->
-      let res = analyzeExpression analyseKernelBody pp o ctx
+    (Let (Pat pp) _ (Op (SegOp op))) ->
+      let res = analyzeExpression analyseKernelBody pp op ctx
        in M.union res $ analyseStm ss ctx it
     -- (Let (Pat pp) _ (Op (SegOp (SegRed _lvl _space _ops _type _kbody)))) ->
     -- SegScan & SegHist?
     --  undefined
-    (Let (Pat pp) _ (Op (SizeOp o))) ->
-      let ctx' = extendCtx ctx pp (it, sizeOpToCnst o)
+    (Let (Pat pp) _ (Op (SizeOp op))) ->
+      let ctx' = extendCtx ctx pp (it, sizeOpToCnst op)
        in analyseStm ss ctx' it
-    (Let (Pat pp) _ (Op (GPUBody _ b))) ->
+    (Let (Pat pp) _ (Op (GPUBody _ body))) ->
       -- TODO: Add to context ((somehow))
       -- We cant use analyze expression here :(
       let res' =
@@ -147,7 +147,7 @@ analyseStm (stm : ss) ctx it =
               -- GPUBody is sequential!
               . (\p -> analyseStm p M.empty Sequential)
               . stmsToList
-              $ bodyStms b
+              $ bodyStms body
        in let res =
                 M.fromList
                   . zip (map patElemName pp)
@@ -158,7 +158,7 @@ analyseStm (stm : ss) ctx it =
     -- TODO: Add patterns here. ( which ones? )
     -- OtherOp (op rep)
     -- Match (op rep)
-    (Let (Pat _pp) _ _o) ->
+    (Let (Pat _pp) _ _op) ->
       analyseStm ss ctx it
 analyseStm [] _ _ = M.empty
 
@@ -168,20 +168,20 @@ analyseKernelBody op ctx =
   let ctx' = M.union ctx . M.fromList . map toCtx . unSegSpace $ segSpace op
    in Just $ analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
   where
-    toCtx (n, o) = (n, (Parallel, SubExp o))
+    toCtx (name, e) = (name, (Parallel, SubExp e))
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
     analyseOpStm ctx' prog =
       foldl (M.unionWith (++)) M.empty . toList $ analyseStm prog ctx' Parallel
 
 -- | Construct MemoryAccessPattern using a `VName`
 accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
-accesssPatternOfVName n =
-  MemoryAccessPattern $ DimIndexExpression $ Left n
+accesssPatternOfVName name =
+  MemoryAccessPattern $ DimIndexExpression $ Left name
 
 -- | Construct MemoryAccessPattern using a `PrimValue`
 accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
-accesssPatternOfPrimValue n =
-  MemoryAccessPattern (DimIndexExpression $ Right n) Invariant
+accesssPatternOfPrimValue val =
+  MemoryAccessPattern (DimIndexExpression $ Right val) Invariant
 
 -- | Return the map of all access from a given BasicOperator
 -- TODO: Implement other BasicOp patterns than Index
@@ -200,7 +200,7 @@ analyseOp (Index name (Slice unslice)) ctx =
               (DimFix (Var name')) ->
                 case getOpVariance ctx . snd $ fromJust $ M.lookup name' ctx of
                   Nothing -> accesssPatternOfVName name' Invariant
-                  Just v -> accesssPatternOfVName name' v
+                  Just var -> accesssPatternOfVName name' var
               (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
           )
           unslice
@@ -209,14 +209,14 @@ analyseOp _ _ = Nothing
 
 getSubExpVariance :: AnalyzeCtx -> SubExp -> Maybe Variance
 getSubExpVariance _ (Constant _) = Just Invariant
-getSubExpVariance c (Var vname) =
-  case M.lookup vname c of
+getSubExpVariance ctx (Var vname) =
+  case M.lookup vname ctx of
     Nothing -> Just Invariant
     -- TODO: Is this the right way to do it?
     --  All let p = .. are marked as parallel inside kernel bodies
     --  The gtid is added to context with parallel, how do we distinguish them?
     Just (Parallel, _) -> Just $ Variant Parallel
-    Just op -> getOpVariance c $ snd op
+    Just op -> getOpVariance ctx $ snd op
 
 -- | Combine two `Maybe Variance`s into the worst-case variance.
 -- This is used to reduce expressions consisting of multiple sub-expressions.
@@ -240,19 +240,19 @@ getSubExpVariance c (Var vname) =
 -- context to determine whether an operator should be marked `Invariant`, or
 -- `Variant` with some additional information.
 getOpVariance :: AnalyzeCtx -> BasicOp -> Maybe Variance
-getOpVariance c (SubExp e) = getSubExpVariance c e
+getOpVariance ctx (SubExp e) = getSubExpVariance ctx e
 getOpVariance _ (ArrayLit (_e : _ee) _) = Nothing
-getOpVariance c (UnOp _ e) = getSubExpVariance c e
-getOpVariance c (BinOp _ l r) = getSubExpVariance c l >< getSubExpVariance c r
-getOpVariance c (CmpOp _ l r) = getSubExpVariance c l >< getSubExpVariance c r
-getOpVariance c (ConvOp _ e) = getSubExpVariance c e
-getOpVariance c (Assert e _ _) = getSubExpVariance c e
+getOpVariance ctx (UnOp _ e) = getSubExpVariance ctx e
+getOpVariance ctx (BinOp _ l r) = getSubExpVariance ctx l >< getSubExpVariance ctx r
+getOpVariance ctx (CmpOp _ l r) = getSubExpVariance ctx l >< getSubExpVariance ctx r
+getOpVariance ctx (ConvOp _ e) = getSubExpVariance ctx e
+getOpVariance ctx (Assert e _ _) = getSubExpVariance ctx e
 -- Usually hit in indirect indices
-getOpVariance c (Index _name (Slice ee)) = foldl (><) Nothing $ map (getSubExpVariance c . fromJust . dimFix) ee
+getOpVariance ctx (Index _name (Slice ee)) = foldl (><) Nothing $ map (getSubExpVariance ctx . fromJust . dimFix) ee
 --
-getOpVariance c (Update _ _name (Slice dsts) _src) = getSubExpVariance c . fromJust . dimFix $ head dsts
-getOpVariance c (FlatIndex _name (FlatSlice e _dims)) = getSubExpVariance c e
-getOpVariance c (FlatUpdate _name1 (FlatSlice e _dims) _name2) = getSubExpVariance c e
+getOpVariance ctx (Update _ _name (Slice dsts) _src) = getSubExpVariance ctx . fromJust . dimFix $ head dsts
+getOpVariance ctx (FlatIndex _name (FlatSlice e _dims)) = getSubExpVariance ctx e
+getOpVariance ctx (FlatUpdate _name1 (FlatSlice e _dims) _name2) = getSubExpVariance ctx e
 -- TODO: Continue from src/Futhark/IR/Syntax.hs:349
 
 getOpVariance _ _ = Nothing
