@@ -634,10 +634,16 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
           & Debug.Trace.trace "# scatter"
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
-  opDependencies (JVP {}) =
-    undefined
-  opDependencies (VJP {}) =
-    undefined
+  opDependencies (JVP lam args vec) =
+    mconcat $
+      replicate 2 $
+        lambdaDependencies mempty lam $
+          zipWith (<>) (map (depsOf mempty) args) (map (depsOf mempty) vec)
+  opDependencies (VJP lam args vec) =
+    mconcat $
+      replicate 2 $
+        lambdaDependencies mempty lam $
+          zipWith (<>) (map (depsOf mempty) args) (map (depsOf mempty) vec)
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
