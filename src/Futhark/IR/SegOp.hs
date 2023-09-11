@@ -1006,8 +1006,7 @@ instance
   cheapOp _ = False
   safeOp _ = True
   opDependencies op =
-    let body = segBody op
-     in replicate (length . kernelBodyResult $ body) (freeIn op)
+    replicate (length . kernelBodyResult $ segBody op) (freeIn op)
 
 --- Simplification
 
