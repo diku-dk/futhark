@@ -246,17 +246,16 @@ getSubExpVariance ctx (Var vname) =
 (><) Nothing rhs = rhs
 (><) lhs Nothing = lhs
 (><) (Just lhs) (Just rhs) =
-  case (lhs, rhs) of
+  pure $ case (lhs, rhs) of
     -- If either is variant, the expression is variant
-    (Invariant, Variant i) -> Just $ Variant i
-    (Variant i, Invariant) -> Just $ Variant i
+    (Invariant, Variant i) -> Variant i
+    (Variant i, Invariant) -> Variant i
     -- If both is invariant, the expression is variant with the worst-case iter type (Parallel)
     (Variant i, Variant j) ->
-      Just $
         if i == Parallel
           then Variant Parallel
           else Variant j
-    (Invariant, Invariant) -> Just Invariant
+    (Invariant, Invariant) -> Invariant
 
 -- | Get variance from Basic operators. Looks up variables in the current
 -- context to determine whether an operator should be marked `Invariant`, or
