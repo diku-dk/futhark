@@ -50,6 +50,22 @@ that a `fieldid` can be a decimal number.  Futhark has three distinct
 name spaces: terms, module types, and types.  Modules (including
 parametric modules) and values both share the term namespace.
 
+.. _reserved:
+
+Reserved names and symbols
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A reserved name or symbol may be used only when explicitly present in
+the grammar.  In particular, they cannot be bound in definitions.
+
+The following identifier are reserved: ``true``, ``false``, ``if``,
+``then``, ``else``, ``def``, ``let``, ``loop``, ``in``, ``val``,
+``for``, ``do``, ``with``, ``local``, ``open``, ``include``,
+``import``, ``type``, ``entry``, ``module``, ``while``, ``assert``,
+``match``, ``case``.
+
+The following symbols are reserved: ``=``.
+
 .. _primitives:
 
 Primitive Types and Values
