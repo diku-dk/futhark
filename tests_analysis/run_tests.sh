@@ -121,6 +121,23 @@ function diff_strings() {
   printf "\e[0m" # Reset
 }
 
+function wordDiff() {
+  wdiff --start-delete="$(echo -en "\e[32m")" --end-delete="$(echo -en "\e[0m")" \
+    --start-insert="$(echo -en "\e[31m")" --end-insert="$(echo -en "\e[0m")" \
+    <(printf "${1}") \
+    <(printf "${2}")
+
+  printf "\n"
+}
+
+which wdiff >/dev/null
+
+if [ $? -eq 0 ] ; then
+  diffFunc=wordDiff
+else
+  diffFunc=diff_strings
+fi
+
 # Read the test files in the directory.
 for file in "$TEST_DIR"/*.fut
 do
@@ -205,9 +222,9 @@ do
     else
         printf "\e[31m" # Red
         printf "FAILED\n"
-        printf "\e[0m" # Reset
+        printf "\e[0m\n" # Reset
 
-        diff_strings "${expected_output}" "${output}"
+        $diffFunc "${expected_output}" "${output}"
     fi
 done
 
