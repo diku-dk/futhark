@@ -53,7 +53,7 @@ type StmtsAids = M.Map VName ArrayIndexDescriptors
 -- | Map Entries to array index descriptors (mostly used for debugging)
 type FunAids = M.Map Name StmtsAids
 
-type AnalyzeCtx = M.Map VName (IterationType, BasicOp)
+type AnalyzeCtx = M.Map VName (Variance, BasicOp)
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog GPU -> FunAids
@@ -81,7 +81,7 @@ sizeOpToCnst = const undefined
 
 -- | Extends the current analyzation context by mapping all input {patterns => basicop}
 -- This is more often than not just a single pattern element.
-extendCtx :: AnalyzeCtx -> [PatElem (LetDec GPU)] -> (IterationType, BasicOp) -> AnalyzeCtx
+extendCtx :: AnalyzeCtx -> [PatElem (LetDec GPU)] -> (Variance, BasicOp) -> AnalyzeCtx
 extendCtx ctx patterns =
   M.union ctx
     . M.fromList
@@ -108,7 +108,9 @@ analyseStms :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStms (stm : ss) ctx it =
   case stm of
     (Let (Pat pp) _ (BasicOp op)) ->
-      let ctx' = extendCtx ctx pp (it, op)
+      let ctxVar = fromJust $ getOpVariance ctx op
+      in
+      let ctx' = extendCtx ctx pp (ctxVar, op)
        in let res = analyzeExpression analyseOp pp op ctx
            in M.union res $ analyseStms ss ctx' it
     -- Apply is still not matched, but is it relevant?
@@ -131,9 +133,10 @@ analyseStms (stm : ss) ctx it =
                 $ M.toList res
     (Let (Pat _pp) _ (Loop bindings _ _body)) ->
       -- 0. Create temporary context
-      let tCtx = M.fromList $ map (\(p, x) -> (paramName p, (Sequential, SubExp x))) bindings
+      let tCtx = M.fromList $ map (\(p, x) -> (paramName p, (Variant Sequential, SubExp x))) bindings
        in -- 1. Run analysis on body with temporary context
-          let res = analyzeExpression (\o c -> Just . discardKeys $ analyseStms o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
+          let res =
+                analyzeExpression (\o c -> Just . discardKeys $ analyseStms o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
            in -- 2. recurse
               M.union res $ analyseStms ss ctx it
     (Let (Pat pp) _ (Op (SegOp op))) ->
@@ -143,7 +146,8 @@ analyseStms (stm : ss) ctx it =
     -- SegScan & SegHist?
     --  undefined
     (Let (Pat pp) _ (Op (SizeOp op))) ->
-      let ctx' = extendCtx ctx pp (it, sizeOpToCnst op)
+      -- Can a sizeop be variant?
+      let ctx' = extendCtx ctx pp (Invariant, sizeOpToCnst op)
        in analyseStms ss ctx' it
     (Let (Pat pp) _ (Op (GPUBody _ body))) ->
       -- TODO: Add to context ((somehow))
@@ -179,7 +183,7 @@ analyseKernelBody op ctx =
     -- We extend the context by wrapping the operator in `SubExp`, effectively
     -- wrapping it into a BasicOp.
     -- We need to keep this in mind when checking context.
-    toCtx (name, e) = (name, (Parallel, SubExp e))
+    toCtx (name, e) = (name, (Variant Parallel, SubExp e))
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
     analyseOpStm ctx' prog =
       foldl (M.unionWith (++)) M.empty . toList $ analyseStms prog ctx' Parallel
@@ -209,7 +213,7 @@ analyseOp (Index name (Slice unslice)) ctx =
                 accesssPatternOfPrimValue primvalue
               (DimFix (Var name')) ->
                 case M.lookup name' ctx of
-                  Nothing -> accesssPatternOfVName (VName "Missing" 42) (Variant Sequential)
+                  Nothing -> accesssPatternOfVName (VName "Missing" $ baseTag name') (Variant Sequential)
                   Just (_, op) ->
                     case getOpVariance ctx op of
                       Nothing -> accesssPatternOfVName name' Invariant
@@ -228,7 +232,7 @@ getSubExpVariance ctx (Var vname) =
     -- TODO: Is this the right way to do it?
     --  All let p = .. are marked as parallel inside kernel bodies
     --  The gtid is added to context with parallel, how do we distinguish them?
-    Just (Parallel, _) -> Just $ Variant Parallel
+    Just (Variant Parallel, _) -> Just $ Variant Parallel
     Just op -> getOpVariance ctx $ snd op
 
 -- | Combine two `Maybe Variance`s into the worst-case variance.
