@@ -301,7 +301,7 @@ instance Pretty ArrayIndexDescriptors where
       mapprint [e] = memoryEntryPrint e
       mapprint (e : ee) = memoryEntryPrint e </> mapprint ee
 
-      memoryEntryPrint = hsep . punctuate " " . map pretty
+      memoryEntryPrint = hsep . map pretty
       f (n, maps) = pretty n </> indent 2 (mapprint maps)
 
 instance Pretty MemoryAccessPattern where
