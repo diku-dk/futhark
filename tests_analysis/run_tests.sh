@@ -48,6 +48,79 @@ if [ "$specific_test_number" -eq "$specific_test_number" ] 2>/dev/null; then
     fi
 fi
 
+function diff_strings() {
+  local expected="${1}"
+  local output="${2}"
+
+  # Split the expected output into two string at the first difference.
+  # This is done to highlight the difference in the output.
+
+  # Iterate over the characters in the output and expected output
+  # until the first difference is found.
+  local output_i=0
+  local expected_output_i=0
+  local output_length=${#output}
+  local expected_output_length=${#expected}
+  local difference_location=0
+  local found_difference=false
+  while [ $output_i -lt "$output_length" ] && [ $expected_output_i -lt "$expected_output_length" ]
+  do
+    # Get the current character in the output and expected output.
+    local output_char=${output:$output_i:1}
+    local expected_output_char=${expected:$expected_output_i:1}
+
+    local output_i=$((output_i+1))
+    local expected_output_i=$((expected_output_i+1))
+
+    # If the characters are different, set the difference location
+    # to the current index and break the loop.
+    if [ "$output_char" != "$expected_output_char" ]; then
+      found_difference=true
+      break
+    fi
+
+    difference_location=$((difference_location+1))
+  done
+
+  # Split the output and expected output into three strings at the difference location
+  # where the the second string is the difference.
+  local output_1=${output:0:difference_location}
+  local output_2=${output:difference_location:1}
+  local output_3=${output:difference_location+1}
+  local expected_output_1=${expected:0:difference_location}
+  local expected_output_2=${expected:difference_location:1}
+  local expected_output_3=${expected:difference_location+1}
+
+  # Fix newlines being weird.
+  if [ "$output_2" == $'\n' ]; then
+    local output_2="\e[41m \e[0m\n" # Red highlighted space
+  else
+    local output_2="\e[41m$output_2\e[0m" # Red highlighted character
+  fi
+  if [ "$expected_output_2" == $'\n' ]; then
+    local expected_output_2="\e[41m \e[0m\n" # Red highlighted space
+  else
+    local expected_output_2="\e[41m$expected_output_2\e[0m" # Red highlighted character
+  fi
+
+  # Print the output and expected output with the difference highlighted in red
+  printf "\nOutput: \n\n"
+  printf "\e[37m" # Light grey
+  printf "$output_1"
+  printf "$output_2"
+  printf "\e[37m" # Light grey
+  printf "$output_3\n"
+  printf "\e[0m" # Reset
+
+  printf "\nExpected output: \n\n"
+  printf "\e[37m" # Light grey
+  printf "$expected_output_1"
+  printf "$expected_output_2"
+  printf "\e[37m" # Light grey
+  printf "$expected_output_3\n\n\n"
+  printf "\e[0m" # Reset
+}
+
 # Read the test files in the directory.
 for file in "$TEST_DIR"/*.fut
 do
@@ -134,74 +207,7 @@ do
         printf "FAILED\n"
         printf "\e[0m" # Reset
 
-        # Split the expected output into two string at the first difference.
-        # This is done to highlight the difference in the output.
-
-        # Iterate over the characters in the output and expected output
-        # until the first difference is found.
-        output_i=0
-        expected_output_i=0
-        output_length=${#output}
-        expected_output_length=${#expected_output}
-        difference_location=0
-        found_difference=false
-        while [ $output_i -lt "$output_length" ] && [ $expected_output_i -lt "$expected_output_length" ]
-        do
-            # Get the current character in the output and expected output.
-            output_char=${output:$output_i:1}
-            expected_output_char=${expected_output:$expected_output_i:1}
-
-            output_i=$((output_i+1))
-            expected_output_i=$((expected_output_i+1))
-
-            # If the characters are different, set the difference location
-            # to the current index and break the loop.
-            if [ "$output_char" != "$expected_output_char" ]; then
-                found_difference=true
-                break
-            fi
-
-            difference_location=$((difference_location+1))
-        done
-
-        # Split the output and expected output into three strings at the difference location
-        # where the the second string is the difference.
-        output_1=${output:0:difference_location}
-        output_2=${output:difference_location:1}
-        output_3=${output:difference_location+1}
-        expected_output_1=${expected_output:0:difference_location}
-        expected_output_2=${expected_output:difference_location:1}
-        expected_output_3=${expected_output:difference_location+1}
-
-        # Fix newlines being weird.
-        if [ "$output_2" == $'\n' ]; then
-            output_2="\e[41m \e[0m\n" # Red highlighted space
-        else
-            output_2="\e[41m$output_2\e[0m" # Red highlighted character
-        fi
-        if [ "$expected_output_2" == $'\n' ]; then
-            expected_output_2="\e[41m \e[0m\n" # Red highlighted space
-        else
-            expected_output_2="\e[41m$expected_output_2\e[0m" # Red highlighted character
-        fi
-
-        # Print the output and expected output with the difference highlighted in red
-        printf "\nOutput: \n\n"
-        printf "\e[37m" # Light grey
-        printf "$output_1"
-        printf "$output_2"
-        printf "\e[37m" # Light grey
-        printf "$output_3\n"
-        printf "\e[0m" # Reset
-
-        printf "\nExpected output: \n\n"
-        printf "\e[37m" # Light grey
-        printf "$expected_output_1"
-        printf "$expected_output_2"
-        printf "\e[37m" # Light grey
-        printf "$expected_output_3\n\n\n"
-        printf "\e[0m" # Reset
-
+        diff_strings "${expected_output}" "${output}"
     fi
 done
 
