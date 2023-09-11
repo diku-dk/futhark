@@ -106,16 +106,38 @@ analyseStm (stm : ss) ctx it =
       let ctx' = extendCtx ctx pp (it, o)
        in let res = analyzeExpression analyseOp pp o ctx
            in M.union res $ analyseStm ss ctx' it
+    -- Apply is still not matched, but is it relevant?
+    (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
+      -- Just union the cases? no subexps?
+      let bodies = (defaultBody : map caseBody cases)
+       in let res' = foldl (M.unionWith (++)) M.empty $ map analyzeCase bodies
+           in let res =
+                    M.fromList
+                      . zip (map patElemName pp)
+                      . replicate (length pp) -- get vnames of patterns
+                      $ res'
+               in -- in let ctx' = extendCtx ctx pp (it, o)
+                  M.union res $ analyseStm ss ctx it
+      where
+        analyzeCase body =
+          let res = analyseStm (stmsToList $ bodyStms body) ctx it
+           in foldl (M.unionWith (++)) M.empty
+                . map snd
+                $ M.toList res
+    -- (Let (Pat pp) _ (Loop _ _ _body)) ->
+    --  undefined
     (Let (Pat pp) _ (Op (SegOp o))) ->
       let res = analyzeExpression analyseKernelBody pp o ctx
        in M.union res $ analyseStm ss ctx it
+    -- (Let (Pat pp) _ (Op (SegOp (SegRed _lvl _space _ops _type _kbody)))) ->
+    -- SegScan & SegHist?
+    --  undefined
     (Let (Pat pp) _ (Op (SizeOp o))) ->
       let ctx' = extendCtx ctx pp (it, sizeOpToCnst o)
        in analyseStm ss ctx' it
-    -- TODO: Add patterns here. ( which ones? )
-    -- OtherOp (op rep)
     (Let (Pat pp) _ (Op (GPUBody _ b))) ->
       -- TODO: Add to context ((somehow))
+      -- We cant use analyze expression here :(
       let res' =
             foldl (M.unionWith (++)) M.empty
               . map snd
@@ -131,6 +153,9 @@ analyseStm (stm : ss) ctx it =
                   $ res'
            in -- in let ctx' = extendCtx ctx pp (it, o)
               M.union res $ analyseStm ss ctx it
+    -- TODO: Add patterns here. ( which ones? )
+    -- OtherOp (op rep)
+    -- Match (op rep)
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
 analyseStm [] _ _ = M.empty
