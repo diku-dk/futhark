@@ -20,7 +20,7 @@ test_i=0
 test_n=$(find "$TEST_DIR" -name '*.fut' | wc -l)
 
 # Get path of the latest build of the futhark executable
-futhark_dev=$(find . -name futhark -type f -printf "%T+ %p\n" | sort -r | head -1 | sed 's/^[^ ]\+ //')
+futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
 
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
@@ -173,31 +173,31 @@ do
 
         # Fix newlines being weird.
         if [ "$output_2" == $'\n' ]; then
-            output_2="\e[41m \e[0m\n"
+            output_2="\e[41m \e[0m\n" # Red highlighted space
         else
-            output_2="\e[41m$output_2\e[0m"
+            output_2="\e[41m$output_2\e[0m" # Red highlighted character
         fi
         if [ "$expected_output_2" == $'\n' ]; then
-            expected_output_2="\e[41m \e[0m\n"
+            expected_output_2="\e[41m \e[0m\n" # Red highlighted space
         else
-            expected_output_2="\e[41m$expected_output_2\e[0m"
+            expected_output_2="\e[41m$expected_output_2\e[0m" # Red highlighted character
         fi
 
         # Print the output and expected output with the difference highlighted in red
         printf "\nOutput: \n\n"
-        printf "\e[90m" # Grey
-        echo -ne "$output_1"
-        echo -ne "$output_2"
-        printf "\e[90m" # Grey
-        echo -ne "$output_3\n"
+        printf "\e[37m" # Light grey
+        printf "$output_1"
+        printf "$output_2"
+        printf "\e[37m" # Light grey
+        printf "$output_3\n"
         printf "\e[0m" # Reset
 
         printf "\nExpected output: \n\n"
-        printf "\e[90m" # Grey
-        echo -ne "$expected_output_1"
-        echo -ne "$expected_output_2"
-        printf "\e[90m" # Grey
-        echo -ne "$expected_output_3\n\n\n"
+        printf "\e[37m" # Light grey
+        printf "$expected_output_1"
+        printf "$expected_output_2"
+        printf "\e[37m" # Light grey
+        printf "$expected_output_3\n\n\n"
         printf "\e[0m" # Reset
 
     fi
