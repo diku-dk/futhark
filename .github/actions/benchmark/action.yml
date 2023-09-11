@@ -28,7 +28,7 @@ runs:
       with:
         script: |
           hostname
-          module load cuda
+          module load cuda/11.8
           futhark bench futhark-benchmarks \
             --backend ${{inputs.backend}} \
             --exclude no_${{inputs.system}} \

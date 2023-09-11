@@ -351,9 +351,9 @@ compileSegScan pat lvl space scanOp kbody = do
 
         sIf (phys_tid .<. n) in_bounds out_of_bounds
 
+    sOp $ Imp.ErrorSync Imp.FenceLocal
     sComment "Transpose scan inputs" $ do
       forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
-        sOp localBarrier
         sFor "i" m $ \i -> do
           sharedIdx <-
             dPrimVE "sharedIdx" $
@@ -364,7 +364,7 @@ compileSegScan pat lvl space scanOp kbody = do
         sFor "i" m $ \i -> do
           sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * m + i
           copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
-    sOp $ Imp.ErrorSync Imp.FenceLocal
+        sOp localBarrier
 
     sComment "Per thread scan" $ do
       -- We don't need to touch the first element, so only m-1
