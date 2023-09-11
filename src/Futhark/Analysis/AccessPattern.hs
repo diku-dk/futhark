@@ -60,7 +60,6 @@ analyzeMemoryAccessPatterns :: Prog GPU -> FunAids
 analyzeMemoryAccessPatterns prog =
   -- We map over the program functions (usually always entries)
   -- Then fold them together to a singular map.
-  -- foldl' mergeAids M.empty .
   foldl' M.union M.empty $ getAids <$> progFuns prog
 
 getAids :: FunDef GPU -> FunAids
@@ -77,7 +76,7 @@ getAids f = M.singleton fdname aids
 
 -- | TODO FIXME PLZ
 sizeOpToCnst :: SizeOp -> BasicOp
-sizeOpToCnst = const undefined
+sizeOpToCnst _ = SubExp $ Constant $ blankPrimValue (IntType Int64)
 
 -- | Extends the current analyzation context by mapping all input {patterns => basicop}
 -- This is more often than not just a single pattern element.
@@ -109,10 +108,9 @@ analyseStms (stm : ss) ctx it =
   case stm of
     (Let (Pat pp) _ (BasicOp op)) ->
       let ctxVar = fromJust $ getOpVariance ctx op
-      in
-      let ctx' = extendCtx ctx pp (ctxVar, op)
-       in let res = analyzeExpression analyseOp pp op ctx
-           in M.union res $ analyseStms ss ctx' it
+       in let ctx' = extendCtx ctx pp (ctxVar, op)
+           in let res = analyzeExpression analyseOp pp op ctx
+               in M.union res $ analyseStms ss ctx' it
     -- Apply is still not matched, but is it relevant?
     (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
       -- Just union the cases? no subexps?
@@ -133,19 +131,19 @@ analyseStms (stm : ss) ctx it =
                 $ M.toList res
     (Let (Pat pp) _ (Loop bindings loop body)) ->
       -- 0. Create temporary context
-      let tCtx' = M.fromList $ map (\(p, x) -> (paramName p, (Variant Sequential, SubExp x))) bindings in
-      let tCtx = case loop of
-                   (ForLoop iter _ numIter _) -> M.union ctx $ M.insert iter (Variant Sequential, SubExp numIter) tCtx'
-                   (WhileLoop _cond) -> tCtx'
-       in -- 1. Run analysis on body with temporary context
-          let res =
-                analyzeExpression
-                  (\o c -> Just . discardKeys $ analyseStms o c Sequential)
-                  pp
-                  (stmsToList $ bodyStms body)
-                  tCtx
-           in -- 2. recurse
-              M.union res $ analyseStms ss ctx it
+      let tCtx' = M.fromList $ map (\(p, x) -> (paramName p, (Variant Sequential, SubExp x))) bindings
+       in let tCtx = case loop of
+                (ForLoop iter _ numIter _) -> M.union ctx $ M.insert iter (Variant Sequential, SubExp numIter) tCtx'
+                (WhileLoop _cond) -> tCtx'
+           in -- 1. Run analysis on body with temporary context
+              let res =
+                    analyzeExpression
+                      (\o c -> Just . discardKeys $ analyseStms o c Sequential)
+                      pp
+                      (stmsToList $ bodyStms body)
+                      tCtx
+               in -- 2. recurse
+                  M.union res $ analyseStms ss ctx it
     (Let (Pat pp) _ (Op (SegOp op))) ->
       let res = analyzeExpression analyseKernelBody pp op ctx
        in M.union res $ analyseStms ss ctx it
@@ -176,7 +174,7 @@ analyseStms (stm : ss) ctx it =
               M.union res $ analyseStms ss ctx it
     -- TODO: Add patterns here. ( which ones? )
     -- OtherOp (op rep)
-    -- Match (op rep)
+
     (Let (Pat _pp) _ _op) ->
       analyseStms ss ctx it
 analyseStms [] _ _ = M.empty
@@ -185,15 +183,14 @@ analyseStms [] _ _ = M.empty
 analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 analyseKernelBody op ctx =
   let ctx' = M.union ctx . M.fromList . map toCtx . unSegSpace $ segSpace op
-   in Just $ analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
+   in pure . analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
   where
     -- We extend the context by wrapping the operator in `SubExp`, effectively
     -- wrapping it into a BasicOp.
     -- We need to keep this in mind when checking context.
     toCtx (name, e) = (name, (Variant Parallel, SubExp e))
-    analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
-    analyseOpStm ctx' prog =
-      foldl (M.unionWith (++)) M.empty . toList $ analyseStms prog ctx' Parallel
+    analyseOpStm ctx'' prog =
+      foldl (M.unionWith (++)) M.empty . toList $ analyseStms prog ctx'' Parallel
 
 -- | Construct MemoryAccessPattern using a `VName`
 accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
