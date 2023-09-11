@@ -93,15 +93,8 @@ extendCtx ctx patterns =
 
 type ExpressionAnalyzer op = op -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 
--- type ExpressionAnalyzer op = op -> AnalyzeCtx -> ArrayIndexDescriptors
-
 analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> op -> AnalyzeCtx -> StmtsAids
 analyzeExpression f pp o ctx =
-  -- M.fromList
-  -- . zip (map patElemName pp)
-  -- . replicate (length pp) -- get vnames of patterns
-  -- \$ f o ctx -- create a result for each pattern
-  -- M.fromList $ zip (map patElemName pp) $ replicate (length pp) $ fromMaybe M.empty (f o ctx)
   M.fromList
     . zip (map patElemName pp)
     $ catMaybes -- remove all Nothings
@@ -194,9 +187,8 @@ accesssPatternOfPrimValue n =
 -- TODO: Implement other BasicOp patterns than Index
 -- In reality, we should use the Maybe monad, instead of returning empty maps,
 -- but i am lazy and we have a deadline.
--- analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
 analyseOp :: BasicOp -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
-analyseOp (Index name (Slice unslice)) m =
+analyseOp (Index name (Slice unslice)) ctx =
   Just $
     M.singleton name $
       L.singleton $
@@ -206,7 +198,7 @@ analyseOp (Index name (Slice unslice)) m =
                 -- accesssPatternOfVName (VName "eatCraaaap" 6969) (Variant Sequential)
                 accesssPatternOfPrimValue primvalue
               (DimFix (Var name')) ->
-                case getOpVariance m . snd $ fromJust $ M.lookup name' m of
+                case getOpVariance ctx . snd $ fromJust $ M.lookup name' ctx of
                   Nothing -> accesssPatternOfVName name' Invariant
                   Just v -> accesssPatternOfVName name' v
               (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
@@ -214,9 +206,6 @@ analyseOp (Index name (Slice unslice)) m =
           unslice
 analyseOp (BinOp {}) _ = Nothing
 analyseOp _ _ = Nothing
-
--- analyseOp (BinOp {}) _ = M.empty
--- analyseOp _ _ = M.empty
 
 getSubExpVariance :: AnalyzeCtx -> SubExp -> Maybe Variance
 getSubExpVariance _ (Constant _) = Just Invariant
