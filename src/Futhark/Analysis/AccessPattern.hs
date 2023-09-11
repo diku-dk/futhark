@@ -2,7 +2,6 @@
 
 module Futhark.Analysis.AccessPattern
   ( analyzeMemoryAccessPatterns,
-    analyseStm,
     ArrayIndexDescriptors,
     Variance,
     IterationType,
@@ -69,7 +68,7 @@ getAids f = M.singleton fdname aids
   where
     fdname = funDefName f
     aids =
-      (\p -> analyseStm p M.empty Sequential)
+      (\p -> analyseStms p M.empty Sequential)
         -- functionBody -> [stm]
         . stmsToList
         . bodyStms
@@ -105,13 +104,13 @@ discardKeys =
     . map snd
     . M.toList
 
-analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
-analyseStm (stm : ss) ctx it =
+analyseStms :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
+analyseStms (stm : ss) ctx it =
   case stm of
     (Let (Pat pp) _ (BasicOp op)) ->
       let ctx' = extendCtx ctx pp (it, op)
        in let res = analyzeExpression analyseOp pp op ctx
-           in M.union res $ analyseStm ss ctx' it
+           in M.union res $ analyseStms ss ctx' it
     -- Apply is still not matched, but is it relevant?
     (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
       -- Just union the cases? no subexps?
@@ -123,10 +122,10 @@ analyseStm (stm : ss) ctx it =
                       . replicate (length pp) -- get vnames of patterns
                       $ res'
                in -- in let ctx' = extendCtx ctx pp (it, o)
-                  M.union res $ analyseStm ss ctx it
+                  M.union res $ analyseStms ss ctx it
       where
         analyzeCase body =
-          let res = analyseStm (stmsToList $ bodyStms body) ctx it
+          let res = analyseStms (stmsToList $ bodyStms body) ctx it
            in foldl (M.unionWith (++)) M.empty
                 . map snd
                 $ M.toList res
@@ -134,18 +133,18 @@ analyseStm (stm : ss) ctx it =
       -- 0. Create temporary context
       let tCtx = M.fromList $ map (\(p, x) -> (paramName p, (Sequential, SubExp x))) bindings
        in -- 1. Run analysis on body with temporary context
-          let res = analyzeExpression (\o c -> Just . discardKeys $ analyseStm o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
+          let res = analyzeExpression (\o c -> Just . discardKeys $ analyseStms o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
            in -- 2. recurse
-              M.union res $ analyseStm ss ctx it
+              M.union res $ analyseStms ss ctx it
     (Let (Pat pp) _ (Op (SegOp op))) ->
       let res = analyzeExpression analyseKernelBody pp op ctx
-       in M.union res $ analyseStm ss ctx it
+       in M.union res $ analyseStms ss ctx it
     -- (Let (Pat pp) _ (Op (SegOp (SegRed _lvl _space _ops _type _kbody)))) ->
     -- SegScan & SegHist?
     --  undefined
     (Let (Pat pp) _ (Op (SizeOp op))) ->
       let ctx' = extendCtx ctx pp (it, sizeOpToCnst op)
-       in analyseStm ss ctx' it
+       in analyseStms ss ctx' it
     (Let (Pat pp) _ (Op (GPUBody _ body))) ->
       -- TODO: Add to context ((somehow))
       -- We cant use analyze expression here :(
@@ -154,7 +153,7 @@ analyseStm (stm : ss) ctx it =
               . map snd
               . M.toList
               -- GPUBody is sequential!
-              . (\p -> analyseStm p M.empty Sequential)
+              . (\p -> analyseStms p M.empty Sequential)
               . stmsToList
               $ bodyStms body
        in let res =
@@ -163,13 +162,13 @@ analyseStm (stm : ss) ctx it =
                   . replicate (length pp) -- get vnames of patterns
                   $ res'
            in -- in let ctx' = extendCtx ctx pp (it, o)
-              M.union res $ analyseStm ss ctx it
+              M.union res $ analyseStms ss ctx it
     -- TODO: Add patterns here. ( which ones? )
     -- OtherOp (op rep)
     -- Match (op rep)
     (Let (Pat _pp) _ _op) ->
-      analyseStm ss ctx it
-analyseStm [] _ _ = M.empty
+      analyseStms ss ctx it
+analyseStms [] _ _ = M.empty
 
 -- | Extend current `ctx` with segSpace defs, as parallel
 analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
@@ -183,7 +182,7 @@ analyseKernelBody op ctx =
     toCtx (name, e) = (name, (Parallel, SubExp e))
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
     analyseOpStm ctx' prog =
-      foldl (M.unionWith (++)) M.empty . toList $ analyseStm prog ctx' Parallel
+      foldl (M.unionWith (++)) M.empty . toList $ analyseStms prog ctx' Parallel
 
 -- | Construct MemoryAccessPattern using a `VName`
 accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
