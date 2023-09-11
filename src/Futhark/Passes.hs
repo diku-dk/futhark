@@ -3,6 +3,7 @@ module Futhark.Passes
   ( standardPipeline,
     seqPipeline,
     gpuPipeline,
+    gpuPipelineDebug,
     seqmemPipeline,
     gpumemPipeline,
     mcPipeline,
@@ -108,6 +109,13 @@ gpuPipeline =
         sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU
       ]
+
+-- | Extend gpuPipeline by pretty-printing the true AST
+gpuPipelineDebug :: Pipeline SOACS GPU
+gpuPipelineDebug =
+  gpuPipeline >>>
+    onePass printASTstuffsDebuggingLol
+
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.

@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Pass.CoalesceAccess (coalesceAccess) where
+module Futhark.Pass.CoalesceAccess (coalesceAccess, printASTstuffsDebuggingLol) where
 
 import Control.Monad
 import Control.Monad.Reader
@@ -19,6 +19,13 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 
 type CoalesceM = ReaderT (Scope GPU) (State VNameSource)
+
+printASTstuffsDebuggingLol :: Pass GPU GPU
+printASTstuffsDebuggingLol =
+  Pass
+    "pretty print ast"
+    "Pretty-print the ast at current stage in pipeline"
+    $ pure . pTraceShowId
 
 -- | The pass definition.
 coalesceAccess :: Pass GPU GPU
