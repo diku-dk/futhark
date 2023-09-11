@@ -18,7 +18,11 @@ import Futhark.Util.Pretty
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
 -- parallel construct, like foldl or map.
-data IterationType = Sequential | Parallel
+data IterationType
+  = Sequential
+  | Parallel
+  -- start, increment, count
+  | SliceIter SubExp SubExp SubExp
   deriving (Eq, Ord, Show)
 
 -- | Variance represents whether the index is variant, or invariant to the outer
@@ -202,6 +206,12 @@ accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
 accesssPatternOfPrimValue val =
   MemoryAccessPattern (DimIndexExpression $ Right val) Invariant
 
+accesssPatternOfSlice :: SubExp -> SubExp -> SubExp -> MemoryAccessPattern
+accesssPatternOfSlice start increment count =
+  MemoryAccessPattern
+    (DimIndexExpression $ Right $ blankPrimValue (IntType Int64))
+    $ Variant $ SliceIter start increment count
+
 -- | Return the map of all access from a given BasicOperator
 -- TODO: Implement other BasicOp patterns than Index
 -- In reality, we should use the Maybe monad, instead of returning empty maps,
@@ -223,7 +233,8 @@ analyseOp (Index name (Slice unslice)) ctx =
                     case getOpVariance ctx op of
                       Nothing -> accesssPatternOfVName name' Invariant
                       Just var -> accesssPatternOfVName name' var
-              (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
+              (DimSlice _start _numelems _stride) ->
+                accesssPatternOfSlice _start _numelems _stride --  (VName "NicerSlicer" 42) (Variant Sequential)
           )
           unslice
 analyseOp (BinOp {}) _ = Nothing
@@ -316,6 +327,7 @@ instance Pretty DimIndexExpression where
 instance Pretty IterationType where
   pretty Sequential = "seq"
   pretty Parallel = "par"
+  pretty (SliceIter s i c) = braces . commasep $ [pretty s, pretty i, pretty c]
 
 instance Pretty Variance where
   pretty (Variant t) = "ν" <+> pretty t -- v for variant
