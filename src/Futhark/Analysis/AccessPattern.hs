@@ -133,7 +133,7 @@ analyseStm (stm : ss) ctx it =
               M.union res $ analyseStm ss ctx it
     (Let (Pat _pp) _ _o) ->
       analyseStm ss ctx it
-analyseStm [] c _ = M.empty
+analyseStm [] _ _ = M.empty
 
 -- | Extend current `ctx` with segSpace defs, as parallel
 analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> ArrayIndexDescriptors
@@ -174,7 +174,6 @@ analyseOp (Index name (Slice unslice)) m =
                 Nothing -> accesssPatternOfVName name' Invariant
                 Just v -> accesssPatternOfVName name' v
             (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
-            _ -> accesssPatternOfVName (VName "UnhandledCase" 43) (Variant Sequential)
         )
         unslice
 analyseOp (BinOp {}) _ = M.empty
