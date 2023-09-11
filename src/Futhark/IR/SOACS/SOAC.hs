@@ -57,6 +57,7 @@ import Data.Function ((&))
 import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Trace
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
@@ -601,6 +602,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     let accs_deps = map (depsOf mempty) accs
         arrs_deps = depsOfArrays w arrs
      in lambdaDependencies mempty lam (arrs_deps <> accs_deps)
+          & Debug.Trace.trace "# Stream"
   opDependencies (Hist w arrs ops lam) =
     let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
         -- Bucket function results are indices followed by values.
@@ -613,7 +615,9 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
             concatIndicesToEachValue
             (chunks ranks indices)
             (chunks value_lengths values)
-     in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+     in mconcat $
+          zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+            & Debug.Trace.trace "# Hist"
     where
       depsOfHistOp (HistOp dest_shape rf dests nes op) =
         let shape_deps = depsOfShape dest_shape
@@ -627,6 +631,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
   opDependencies (Scatter w arrs lam outputs) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenGroups (groupScatterResults' outputs deps)
+          & Debug.Trace.trace "# scatter"
     where
       flattenGroups (indicess, values) = mconcat indicess <> values
   opDependencies (JVP {}) =
@@ -642,6 +647,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
         reds_deps =
           concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
      in scans_deps <> reds_deps <> map_deps
+          & Debug.Trace.trace "# screma"
     where
       depsOfScan (Scan lam nes, deps_in) =
         reductionDependencies mempty lam nes deps_in
