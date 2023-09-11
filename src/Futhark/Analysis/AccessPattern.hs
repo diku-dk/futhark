@@ -214,7 +214,8 @@ analyseOp (Index name (Slice unslice)) ctx =
               (DimFix (Var name')) ->
                 case M.lookup name' ctx of
                   Nothing -> accesssPatternOfVName (VName "Missing" $ baseTag name') (Variant Sequential)
-                  Just (_, op) ->
+                  Just (Variant var, _op) -> accesssPatternOfVName name' $ Variant var
+                  Just (Invariant, op) ->
                     case getOpVariance ctx op of
                       Nothing -> accesssPatternOfVName name' Invariant
                       Just var -> accesssPatternOfVName name' var
@@ -232,7 +233,7 @@ getSubExpVariance ctx (Var vname) =
     -- TODO: Is this the right way to do it?
     --  All let p = .. are marked as parallel inside kernel bodies
     --  The gtid is added to context with parallel, how do we distinguish them?
-    Just (Variant Parallel, _) -> Just $ Variant Parallel
+    Just (Variant v, _) -> Just $ Variant v
     Just op -> getOpVariance ctx $ snd op
 
 -- | Combine two `Maybe Variance`s into the worst-case variance.
