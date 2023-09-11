@@ -599,7 +599,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
   opDependencies (Stream w arrs accs lam) =
-    let accs_deps = map (depsOf mempty) accs
+    let accs_deps = map depsOf' accs
         arrs_deps = depsOfArrays w arrs
      in lambdaDependencies mempty lam (arrs_deps <> accs_deps)
           & Debug.Trace.trace "# Stream"
@@ -621,8 +621,7 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     where
       depsOfHistOp (HistOp dest_shape rf dests nes op) =
         let shape_deps = depsOfShape dest_shape
-            rf_deps = depsOf mempty rf
-            in_deps = map (\vn -> oneName vn <> shape_deps <> rf_deps) dests
+            in_deps = map (\vn -> oneName vn <> shape_deps <> depsOf' rf) dests
          in reductionDependencies mempty op nes in_deps
       -- A histogram operation may use the same index for multiple values.
       concatIndicesToEachValue is vs =
@@ -638,12 +637,12 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
-          zipWith (<>) (map (depsOf mempty) args) (map (depsOf mempty) vec)
+          zipWith (<>) (map depsOf' args) (map depsOf' vec)
   opDependencies (VJP lam args vec) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
-          zipWith (<>) (map (depsOf mempty) args) (map (depsOf mempty) vec)
+          zipWith (<>) (map depsOf' args) (map depsOf' vec)
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $

@@ -3,6 +3,7 @@ module Futhark.Analysis.DataDependencies
   ( Dependencies,
     dataDependencies,
     depsOf,
+    depsOf',
     depsOfArrays,
     depsOfShape,
     lambdaDependencies,
@@ -96,6 +97,10 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = mempty
 depsOf deps (Var v) = depsOfVar deps v
+
+depsOf' :: SubExp -> Names
+depsOf' (Constant _) = mempty
+depsOf' (Var v) = depsOfVar mempty v
 
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = oneName name <> M.findWithDefault mempty name deps
