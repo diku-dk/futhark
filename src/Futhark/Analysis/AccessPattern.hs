@@ -131,19 +131,12 @@ analyseStm (stm : ss) ctx it =
                 . map snd
                 $ M.toList res
     (Let (Pat _pp) _ (Loop bindings _ _body)) ->
-      -- 0. let tmpCtx = ctx with (FParam = SubExp)
+      -- 0. Create temporary context
       let tCtx = M.fromList $ map (\(p, x) -> (paramName p, (Sequential, SubExp x))) bindings
-       in -- 1. let res = analyseStm body Sequential
+       in -- 1. Run analysis on body with temporary context
           let res = analyzeExpression (\o c -> Just . discardKeys $ analyseStm o c Sequential) _pp (stmsToList $ bodyStms _body) tCtx
            in -- 2. recurse
               M.union res $ analyseStm ss ctx it
-    -- 3. profit
-
-    -- \| A match statement picks a branch by comparing the given
-    -- subexpressions (called the /scrutinee/) with the pattern in
-    -- each of the cases.  If none of the cases match, the /default
-    -- body/ is picked.
-    --  Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
     (Let (Pat pp) _ (Op (SegOp op))) ->
       let res = analyzeExpression analyseKernelBody pp op ctx
        in M.union res $ analyseStm ss ctx it
