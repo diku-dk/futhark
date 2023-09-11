@@ -651,6 +651,14 @@ commandLineOptions =
       ["gpu"],
     pipelineOption
       getSOACSProg
+      "GPU"
+      GPU
+      "Run the default optimised kernels pipeline and pretty-print AST"
+      gpuPipelineDebug
+      []
+      ["gpu-debug"],
+    pipelineOption
+      getSOACSProg
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
