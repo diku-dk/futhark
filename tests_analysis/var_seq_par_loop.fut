@@ -10,6 +10,5 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
 --     xsss_???? 
 --       [[ σ xss_5346 | ν seq ]  [ σ xsss_5223 | ν par ]]
 --   ]
---   segmap_usable_groups_5347 => []
 
 -- WARNING: this output might be wrong!!!

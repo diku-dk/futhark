@@ -9,6 +9,7 @@ module Futhark.Analysis.AccessPattern
   )
 where
 
+import Data.Bifunctor (second)
 import Data.Foldable
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -90,14 +91,22 @@ extendCtx ctx patterns =
     . zip (map patElemName patterns)
     . replicate (length patterns)
 
-type ExpressionAnalyzer op = op -> AnalyzeCtx -> ArrayIndexDescriptors
+type ExpressionAnalyzer op = op -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 
-analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> (op -> AnalyzeCtx -> StmtsAids)
+-- type ExpressionAnalyzer op = op -> AnalyzeCtx -> ArrayIndexDescriptors
+
+analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> op -> AnalyzeCtx -> StmtsAids
 analyzeExpression f pp o ctx =
+  -- M.fromList
+  -- . zip (map patElemName pp)
+  -- . replicate (length pp) -- get vnames of patterns
+  -- \$ f o ctx -- create a result for each pattern
+  -- M.fromList $ zip (map patElemName pp) $ replicate (length pp) $ fromMaybe M.empty (f o ctx)
   M.fromList
     . zip (map patElemName pp)
-    . replicate (length pp) -- get vnames of patterns
-    $ f o ctx -- create a result for each pattern
+    $ catMaybes -- remove all Nothings
+    $ replicate (length pp)
+    $ f o ctx -- create a Maybe result for each pattern
 
 analyseStm :: [Stm GPU] -> AnalyzeCtx -> IterationType -> StmtsAids
 analyseStm (stm : ss) ctx it =
@@ -161,10 +170,10 @@ analyseStm (stm : ss) ctx it =
 analyseStm [] _ _ = M.empty
 
 -- | Extend current `ctx` with segSpace defs, as parallel
-analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> ArrayIndexDescriptors
+analyseKernelBody :: SegOp SegLevel GPU -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 analyseKernelBody op ctx =
   let ctx' = M.union ctx . M.fromList . map toCtx . unSegSpace $ segSpace op
-   in analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
+   in Just $ analyseOpStm ctx' . stmsToList . kernelBodyStms $ segBody op
   where
     toCtx (n, o) = (n, (Parallel, SubExp o))
     analyseOpStm :: AnalyzeCtx -> [Stm GPU] -> ArrayIndexDescriptors
@@ -185,24 +194,29 @@ accesssPatternOfPrimValue n =
 -- TODO: Implement other BasicOp patterns than Index
 -- In reality, we should use the Maybe monad, instead of returning empty maps,
 -- but i am lazy and we have a deadline.
-analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
+-- analyseOp :: BasicOp -> AnalyzeCtx -> ArrayIndexDescriptors
+analyseOp :: BasicOp -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 analyseOp (Index name (Slice unslice)) m =
-  M.singleton name $
-    L.singleton $
-      map
-        ( \case
-            (DimFix (Constant primvalue)) ->
-              -- accesssPatternOfVName (VName "eatCraaaap" 6969) (Variant Sequential)
-              accesssPatternOfPrimValue primvalue
-            (DimFix (Var name')) ->
-              case getOpVariance m . snd $ fromJust $ M.lookup name' m of
-                Nothing -> accesssPatternOfVName name' Invariant
-                Just v -> accesssPatternOfVName name' v
-            (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
-        )
-        unslice
-analyseOp (BinOp {}) _ = M.empty
-analyseOp _ _ = M.empty
+  Just $
+    M.singleton name $
+      L.singleton $
+        map
+          ( \case
+              (DimFix (Constant primvalue)) ->
+                -- accesssPatternOfVName (VName "eatCraaaap" 6969) (Variant Sequential)
+                accesssPatternOfPrimValue primvalue
+              (DimFix (Var name')) ->
+                case getOpVariance m . snd $ fromJust $ M.lookup name' m of
+                  Nothing -> accesssPatternOfVName name' Invariant
+                  Just v -> accesssPatternOfVName name' v
+              (DimSlice {}) -> accesssPatternOfVName (VName "NicerSlicer" 42) (Variant Sequential)
+          )
+          unslice
+analyseOp (BinOp {}) _ = Nothing
+analyseOp _ _ = Nothing
+
+-- analyseOp (BinOp {}) _ = M.empty
+-- analyseOp _ _ = M.empty
 
 getSubExpVariance :: AnalyzeCtx -> SubExp -> Maybe Variance
 getSubExpVariance _ (Constant _) = Just Invariant

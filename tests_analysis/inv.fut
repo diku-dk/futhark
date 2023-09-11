@@ -8,4 +8,3 @@ def main [n] (xs: [n]i64) : [n]i64 =
 --     defunc_0_map_res_5198
 --       [ σ defunc_0_map_res_5198 | ν par ]  [ τ 0i64 | ψ ]
 --   ]
---   defunc_0_map_res_5198 => []

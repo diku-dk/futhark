@@ -144,6 +144,7 @@ do
         output_length=${#output}
         expected_output_length=${#expected_output}
         difference_location=0
+        found_difference=false
         while [ $output_i -lt "$output_length" ] && [ $expected_output_i -lt "$expected_output_length" ]
         do
             # Get the current character in the output and expected output.
@@ -156,10 +157,11 @@ do
             # If the characters are different, set the difference location
             # to the current index and break the loop.
             if [ "$output_char" != "$expected_output_char" ]; then
-                # difference location is the minimum of output_i and expected_output_i minus 1.
-                difference_location=$((output_i<expected_output_i?output_i-1:expected_output_i-1))
+                found_difference=true
                 break
             fi
+
+            difference_location=$((difference_location+1))
         done
 
         # Split the output and expected output into three strings at the difference location

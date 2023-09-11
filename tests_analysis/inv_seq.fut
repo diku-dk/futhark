@@ -8,4 +8,3 @@ def main [n][m] (xss: [n][m]i64) : i64 =
 --     defunc_0_foldl_res_dev_5145
 --       [ τ 0i64 | ψ ]  [ σ xss_5144 | ν seq ]
 --   ]
---   const_dev_5146 => []
