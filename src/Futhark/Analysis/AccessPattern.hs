@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Futhark.Analysis.AccessPattern
   ( analyzeMemoryAccessPatterns,
     ArrayIndexDescriptors,
@@ -21,8 +19,6 @@ import Futhark.Util.Pretty
 data IterationType
   = Sequential
   | Parallel
-  -- start, increment, count
-  | SliceIter SubExp SubExp SubExp
   deriving (Eq, Ord, Show)
 
 -- | Variance represents whether the index is variant, or invariant to the outer
@@ -32,15 +28,10 @@ data Variance
   | Invariant
   deriving (Eq, Ord, Show)
 
--- | DimFix'es can either be a constant expression (IntValue) or a VName to some
--- pattern.
-newtype DimIndexExpression = DimIndexExpression (Either VName PrimValue)
-  deriving (Eq, Ord, Show)
-
 -- | Collect all features of memory access together
 data MemoryAccessPattern = MemoryAccessPattern
   { -- | Expression reference that is used to index into a given dimension
-    dimIdxExpr :: DimIndexExpression,
+    dimIdxExpr :: DimIndex SubExp,
     variance :: Variance
   }
   deriving (Eq, Ord, Show)
@@ -176,8 +167,7 @@ analyseStms (stm : ss) ctx it =
                   $ res'
            in -- in let ctx' = extendCtx ctx pp (it, o)
               M.union res $ analyseStms ss ctx it
-    -- TODO: Add patterns here. ( which ones? )
-    -- OtherOp (op rep)
+    -- TODO: Add OtherOp here.
 
     (Let (Pat _pp) _ _op) ->
       analyseStms ss ctx it
@@ -197,20 +187,24 @@ analyseKernelBody op ctx =
       foldl (M.unionWith (++)) M.empty . toList $ analyseStms prog ctx'' Parallel
 
 -- | Construct MemoryAccessPattern using a `VName`
-accesssPatternOfVName :: VName -> Variance -> MemoryAccessPattern
-accesssPatternOfVName name =
-  MemoryAccessPattern $ DimIndexExpression $ Left name
-
--- | Construct MemoryAccessPattern using a `PrimValue`
-accesssPatternOfPrimValue :: PrimValue -> MemoryAccessPattern
-accesssPatternOfPrimValue val =
-  MemoryAccessPattern (DimIndexExpression $ Right val) Invariant
-
-accesssPatternOfSlice :: SubExp -> SubExp -> SubExp -> MemoryAccessPattern
-accesssPatternOfSlice start increment count =
-  MemoryAccessPattern
-    (DimIndexExpression $ Right $ blankPrimValue (IntType Int64))
-    $ Variant $ SliceIter start increment count
+memoryAccessPattern :: AnalyzeCtx -> DimIndex SubExp -> MemoryAccessPattern
+memoryAccessPattern ctx (DimFix (Var name)) =
+  case M.lookup name ctx of
+    Nothing -> dfix (VName "Missing" $ baseTag name) Invariant
+    -- We might have already determined _op to be variant, if so
+    -- just go with it.
+    Just (Variant var, _op) -> dfix name $ Variant var
+    -- Otherwise we double-check.
+    Just (Invariant, op) ->
+      case getOpVariance ctx op of
+        Nothing -> dfix name Invariant
+        Just var -> dfix name var
+  where
+    dfix name' = MemoryAccessPattern (DimFix (Var name'))
+memoryAccessPattern _ (DimFix (Constant primvalue)) =
+  MemoryAccessPattern (DimFix (Constant primvalue)) Invariant
+memoryAccessPattern _ (DimSlice start numelems stride) =
+  MemoryAccessPattern (DimSlice start numelems stride) Invariant
 
 -- | Return the map of all access from a given BasicOperator
 -- TODO: Implement other BasicOp patterns than Index
@@ -221,22 +215,7 @@ analyseOp (Index name (Slice unslice)) ctx =
   Just $
     M.singleton name $
       L.singleton $
-        map
-          ( \case
-              (DimFix (Constant primvalue)) ->
-                accesssPatternOfPrimValue primvalue
-              (DimFix (Var name')) ->
-                case M.lookup name' ctx of
-                  Nothing -> accesssPatternOfVName (VName "Missing" $ baseTag name') (Variant Sequential)
-                  Just (Variant var, _op) -> accesssPatternOfVName name' $ Variant var
-                  Just (Invariant, op) ->
-                    case getOpVariance ctx op of
-                      Nothing -> accesssPatternOfVName name' Invariant
-                      Just var -> accesssPatternOfVName name' var
-              (DimSlice _start _numelems _stride) ->
-                accesssPatternOfSlice _start _numelems _stride --  (VName "NicerSlicer" 42) (Variant Sequential)
-          )
-          unslice
+        map (memoryAccessPattern ctx) unslice
 analyseOp (BinOp {}) _ = Nothing
 analyseOp _ _ = Nothing
 
@@ -263,9 +242,9 @@ getSubExpVariance ctx (Var vname) =
     (Variant i, Invariant) -> Variant i
     -- If both is invariant, the expression is variant with the worst-case iter type (Parallel)
     (Variant i, Variant j) ->
-        if i == Parallel
-          then Variant Parallel
-          else Variant j
+      if i == Parallel
+        then Variant Parallel
+        else Variant j
     (Invariant, Invariant) -> Invariant
 
 -- | Get variance from Basic operators. Looks up variables in the current
@@ -320,14 +299,9 @@ instance Pretty MemoryAccessPattern where
     -- spacing between the enclosed elements
     "[" <+> pretty d <+> "|" <+> pretty v <+> "]"
 
-instance Pretty DimIndexExpression where
-  pretty (DimIndexExpression (Left n)) = "σ" <+> pretty n -- sigma since it exists in our store
-  pretty (DimIndexExpression (Right c)) = "τ" <+> pretty c -- tau for a term
-
 instance Pretty IterationType where
   pretty Sequential = "seq"
   pretty Parallel = "par"
-  pretty (SliceIter s i c) = braces . commasep $ [pretty s, pretty i, pretty c]
 
 instance Pretty Variance where
   pretty (Variant t) = "ν" <+> pretty t -- v for variant
