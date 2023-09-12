@@ -14,6 +14,8 @@ TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 # Counter for the number of successful tests.
 successes=0
+# Counter for the number of skipped tests.
+skipped=0
 # Index of the current test
 test_i=0
 # Number of tests
@@ -21,6 +23,14 @@ test_n=$(find "$TEST_DIR" -name '*.fut' | wc -l)
 
 # Get path of the latest build of the futhark executable
 futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
+
+function skip_test() {
+  printf "\e[33m" # Yello
+  printf "SKIPPED\n"
+  printf "\e[0m" # Reset
+  printf "\n%s in \"%s\". \nSkipping test.\n\n" "${1}" "${2}"
+  skipped=$((${skipped} + 1))
+}
 
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
@@ -185,18 +195,21 @@ do
 
     # If expected output line is empty, skip the test.
     if [ -z "$expected_output_line" ]; then
-        printf "\e[31m" # Red
-        printf "FAILED\n"
-        printf "\e[0m" # White
-        printf "\nExpected output not specified in \"%s\". \nSkipping test.\n\n" "$file"
-        continue
+      skip_test "Expected output not specified" "$file"
+      continue
     fi
+
 
     # Get the expected output.
     expected_output=$(sed -n "${expected_output_line},$ p" "$file")
     # Remove the string "---" from the beginning of each line.
     expected_output=$(echo "$expected_output" | sed 's/^-- //g')
 
+    # If expected output line is "TBD", skip the test.
+    if [ "$expected_output" == "TBD" ]; then
+      skip_test "Expected output is not determined yet" "$file"
+      continue
+    fi
 
     # Compare the output to the expected output.
     if [ "$output" == "$expected_output" ]; then
@@ -233,10 +246,12 @@ done
 printf "\e[1m" # Bold
 if [ $successes -eq "$test_n" ]; then
     printf "\e[32m" # Green
-    printf "\nAll %d/%d tests passed!\n\n" "$successes" "$test_i"
-    printf "\e[0m" # White
+    printf "\nAll %d/%d tests passed!" "$successes" "$test_i"
+    [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
+    printf "\n\n\e[0m" # White
 else
     printf "\e[31m" # Red
-    printf "\n%d/%d tests passed.\n\n" "$successes" "$test_i"
-    printf "\e[0m" # White
+    printf "\n%d/%d tests passed." "$successes" "$test_i"
+    [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
+    printf "\n\n\e[0m" # White
 fi
