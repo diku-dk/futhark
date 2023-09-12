@@ -127,19 +127,20 @@ analyseStms it ctx (stm : ss) =
           maybeMap . foldl M.union M.empty $ analyseStms it ctx' $ stmsToList $ bodyStms body
     (Let (Pat pp) _ (Loop bindings loop body)) ->
       -- 0. Create temporary context
-      let tCtx' = M.fromList $ map (\(p, x) -> (paramName p, (Variant Sequential, SubExp x))) bindings
+      let tCtx' =
+            M.fromList $
+              map (\(p, x) -> (paramName p, loopExpr x)) bindings
        in let tCtx = case loop of
-                (ForLoop iter _ numIter _) -> M.union ctx $ M.insert iter (Variant Sequential, SubExp numIter) tCtx'
+                (ForLoop iter _ numIter _) -> M.union ctx $ M.insert iter (loopExpr numIter) tCtx'
                 (WhileLoop _cond) -> tCtx'
            in -- 1. Run analysis on body with temporary context
               let res =
-                    analyzeExpression
-                      (\o c -> maybeMap . discardKeys $ analyseStms Sequential c o)
-                      pp
-                      (stmsToList $ bodyStms body)
-                      tCtx
+                    analyzeExpression analyzeBody pp (stmsToList $ bodyStms body) tCtx
                in -- 2. recurse
                   M.union res $ analyseStms it ctx ss
+      where
+        analyzeBody op ctx' = maybeMap . discardKeys $ analyseStms Sequential ctx' op
+        loopExpr op = (Variant Sequential, SubExp op)
     (Let (Pat pp) _ (Op (SegOp op))) ->
       let res = analyzeExpression analyseKernelBody pp op ctx
        in M.union res $ analyseStms it ctx ss
