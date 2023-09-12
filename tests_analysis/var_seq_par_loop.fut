@@ -8,7 +8,7 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
 -- entry_main
 --   defunc_0_map_res_5323 => [
 --     xsss_????
---       [ σ xss_5346 | ν seq ] [ σ xsss_5223 | ν par ]
+--       [ xss_5346 | ν seq ] [ xsss_5223 | ν par ]
 --   ]
 
 -- WARNING: this output might be wrong!!!

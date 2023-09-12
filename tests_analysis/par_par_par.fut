@@ -7,5 +7,5 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n][m]i64 =
 -- entry_main
 --   defunc_0_map_res_5485 => [
 --     xsss_5281
---       [ σ gtid_5486 | ν par ] [ σ gtid_5487 | ν par ] [ σ gtid_5488 | ν par ]
+--       [ gtid_5486 | ν par ] [ gtid_5487 | ν par ] [ gtid_5488 | ν par ]
 --   ]

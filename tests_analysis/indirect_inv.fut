@@ -7,9 +7,9 @@ def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
 -- entry_main
 --   tmp_5302 => [
 --     is_5241
---       [ τ 5i64 | ψ ]
+--       [ 5i64 | ψ ]
 --   ]
 --   xss_prefix_5305 => [
 --     xss_5242
---       [ σ tmp_5302 | ψ ] [ σ xss_5242 | ν par ]
+--       [ tmp_5302 | ψ ] [ xss_5242 | ν par ]
 --   ]

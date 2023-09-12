@@ -7,5 +7,5 @@ def main [n][m] (xss: [n][m]i64) : i64 =
 -- entry_main
 --   main_res_5098 => [
 --     main_res_dev_5103
---       [ τ 0i64 | ψ ] [ σ xss_5144 | ν seq ]
+--       [ 0i64 | ψ ] [ xss_5144 | ν seq ]
 --   ]

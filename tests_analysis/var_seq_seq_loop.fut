@@ -13,7 +13,7 @@ def main [n][m] (xss: [n][m]i32) : i32 =
 -- entry_main
 --   main_res_5104 => [
 --     main_res_dev_5113
---       [ σ xss_5346 | ν seq ] [ σ xss_5346 | ν seq ]
+--       [ xss_5346 | ν seq ] [ xss_5346 | ν seq ]
 --   ]
 
 -- WARNING: this output might be wrong!!!

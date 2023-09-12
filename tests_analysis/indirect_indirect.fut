@@ -7,7 +7,7 @@ def main [n] (xs: [n]i64) : [n]i64 =
 -- entry_main
 --   defunc_0_map_res_5321 => [
 --     xs_5242
---       [ σ slice_5325 | ν par ]
+--       [ slice_5325 | ν par ]
 --   ]
 
 -- WARNING: This program gets optimized too much!

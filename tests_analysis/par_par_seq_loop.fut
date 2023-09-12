@@ -11,7 +11,7 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n]i64 =
 -- entry_main
 --   defunc_0_map_res_5390 => [
 --     xsss_5241
---       [ σ gtid_5391 | ν par ] [ σ gtid_5392 | ν par ] [ τ 0i64 | ν seq ]
+--       [ gtid_5391 | ν par ] [ gtid_5392 | ν par ] [ 0i64 | ν seq ]
 --   ]
 
 -- WARNING: This output may be wrong!!!

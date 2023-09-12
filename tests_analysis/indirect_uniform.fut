@@ -6,5 +6,5 @@ def main [n] (xs: [n]i64) : [n]i64 =
 -- entry_main
 --   defunc_0_map_res_5279 => [
 --     defunc_0_map_res_5282
---       [ σ defunc_0_map_res_5282 | ν par ] [ τ 0i64 | ψ ]
+--       [ defunc_0_map_res_5282 | ν par ] [ 0i64 | ψ ]
 --   ]
