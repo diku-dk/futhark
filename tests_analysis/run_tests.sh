@@ -132,8 +132,8 @@ function diff_strings() {
 }
 
 function wordDiff() {
-  wdiff --start-delete="$(echo -en "\e[32m")" --end-delete="$(echo -en "\e[0m")" \
-    --start-insert="$(echo -en "\e[31m")" --end-insert="$(echo -en "\e[0m")" \
+  wdiff --start-delete="$(printf "\e[32m")" --end-delete="$(printf "\e[0m")" \
+    --start-insert="$(printf "\e[31m")" --end-insert="$(printf "\e[0m")" \
     <(printf "${1}") \
     <(printf "${2}")
 
