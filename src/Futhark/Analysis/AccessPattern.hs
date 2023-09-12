@@ -84,6 +84,11 @@ extendCtx ctx patterns =
 
 type ExpressionAnalyzer op = op -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 
+-- Maybe TODO: Make ArrayIndexDescriptors into array, or maybe StmtsAids
+maybeMap :: M.Map k a -> Maybe (M.Map k a)
+maybeMap m = if M.null m then Nothing
+                         else Just m
+
 analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> op -> AnalyzeCtx -> StmtsAids
 analyzeExpression f pp op ctx =
   M.fromList
@@ -110,20 +115,13 @@ analyseStms (stm : ss) ctx it =
     (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
       -- Just union the cases? no subexps?
       let bodies = (defaultBody : map caseBody cases)
-       in let res' = foldl (M.unionWith (++)) M.empty $ map analyzeCase bodies
-           in let res =
-                    M.fromList
-                      . zip (map patElemName pp)
-                      . replicate (length pp) -- get vnames of patterns
-                      $ res'
-               in -- in let ctx' = extendCtx ctx pp (it, o)
-                  M.union res $ analyseStms ss ctx it
+       in let res =
+                foldl' (M.unionWith $ M.unionWith (++)) M.empty $
+                  map (\b -> analyzeExpression analyzeCase pp b ctx) bodies
+           in M.union res $ analyseStms ss ctx it
       where
-        analyzeCase body =
-          let res = analyseStms (stmsToList $ bodyStms body) ctx it
-           in foldl (M.unionWith (++)) M.empty
-                . map snd
-                $ M.toList res
+        analyzeCase body ctx' =
+          maybeMap . foldl M.union M.empty $ analyseStms (stmsToList $ bodyStms body) ctx' it
     (Let (Pat pp) _ (Loop bindings loop body)) ->
       -- 0. Create temporary context
       let tCtx' = M.fromList $ map (\(p, x) -> (paramName p, (Variant Sequential, SubExp x))) bindings
@@ -133,7 +131,7 @@ analyseStms (stm : ss) ctx it =
            in -- 1. Run analysis on body with temporary context
               let res =
                     analyzeExpression
-                      (\o c -> Just . discardKeys $ analyseStms o c Sequential)
+                      (\o c -> maybeMap . discardKeys $ analyseStms o c Sequential)
                       pp
                       (stmsToList $ bodyStms body)
                       tCtx
@@ -212,10 +210,10 @@ memoryAccessPattern _ (DimSlice start numelems stride) =
 -- but i am lazy and we have a deadline.
 analyseOp :: BasicOp -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 analyseOp (Index name (Slice unslice)) ctx =
-  Just $
-    M.singleton name $
-      L.singleton $
-        map (memoryAccessPattern ctx) unslice
+  maybeMap
+  . M.singleton name
+  . L.singleton $
+    map (memoryAccessPattern ctx) unslice
 analyseOp (BinOp {}) _ = Nothing
 analyseOp _ _ = Nothing
 
