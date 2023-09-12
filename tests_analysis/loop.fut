@@ -3,7 +3,7 @@ entry main [n] (xs: [n]i64) : i64 =
     #[unsafe]
     accumulator + xs[i]
 
--- == Expected output of analysis:
+-- === Expected output of analysis:
 -- entry_main
 --   main_res.. => [
 --     xs
