@@ -55,6 +55,7 @@ if [ "$specific_test_number" -eq "$specific_test_number" ] 2>/dev/null; then
     # Check if the number is in the range of the number of tests.
     if [ "$specific_test_number" -gt 0 ] && [ "$specific_test_number" -le "$test_n" ]; then
         run_specific_test=true
+        test_n=1
     fi
 fi
 
@@ -246,12 +247,12 @@ done
 printf "\e[1m" # Bold
 if [ $successes -eq "$test_n" ]; then
     printf "\e[32m" # Green
-    printf "\nAll %d/%d tests passed!" "$successes" "$test_i"
+    printf "\nAll %d/%d tests passed!" "$successes" "$test_n"
     [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
     printf "\n\n\e[0m" # White
 else
     printf "\e[31m" # Red
-    printf "\n%d/%d tests passed." "$successes" "$test_i"
+    printf "\n%d/%d tests passed." "$successes" "$test_n"
     [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
     printf "\n\n\e[0m" # White
 fi
