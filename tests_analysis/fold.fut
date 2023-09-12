@@ -5,5 +5,5 @@ def main [n][m] (xss: [n][m]i64) : [n]i64 =
 -- entry_main
 --   defunc_0_map_res_5204 => [
 --     xss_5144
---       [ gtid_5205 | ν par ] [ xss_5144 | ν seq ]
+--       [ gtid_5205 | ν par ] [ 0i64 :+ m_5143 * 1i64 | ψ ]
 --   ]
