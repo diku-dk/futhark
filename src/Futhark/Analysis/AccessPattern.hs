@@ -62,7 +62,7 @@ getAids f = M.singleton fdname aids
   where
     fdname = funDefName f
     aids =
-      (\p -> analyseStms Sequential M.empty p)
+      analyseStms Sequential M.empty
         -- functionBody -> [stm]
         . stmsToList
         . bodyStms
@@ -86,8 +86,10 @@ type ExpressionAnalyzer op = op -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 
 -- Maybe TODO: Make ArrayIndexDescriptors into array, or maybe StmtsAids
 maybeMap :: M.Map k a -> Maybe (M.Map k a)
-maybeMap m = if M.null m then Nothing
-                         else Just m
+maybeMap m =
+  if M.null m
+    then Nothing
+    else Just m
 
 analyzeExpression :: ExpressionAnalyzer op -> [PatElem (LetDec GPU)] -> op -> AnalyzeCtx -> StmtsAids
 analyzeExpression f pp op ctx =
@@ -114,11 +116,12 @@ analyseStms it ctx (stm : ss) =
     -- Apply is still not matched, but is it relevant?
     (Let (Pat pp) _ (Match _subexps cases defaultBody _)) ->
       -- Just union the cases? no subexps?
-      let bodies = (defaultBody : map caseBody cases)
-       in let res =
-                foldl' (M.unionWith $ M.unionWith (++)) M.empty $
-                  map (\b -> analyzeExpression analyzeCase pp b ctx) bodies
-           in M.union res $ analyseStms it ctx ss
+      let res =
+            foldl' (M.unionWith $ M.unionWith (++)) M.empty $
+              map
+                (\b -> analyzeExpression analyzeCase pp b ctx)
+                (defaultBody : map caseBody cases)
+       in M.union res $ analyseStms it ctx ss
       where
         analyzeCase body ctx' =
           maybeMap . foldl M.union M.empty $ analyseStms it ctx' $ stmsToList $ bodyStms body
@@ -155,7 +158,7 @@ analyseStms it ctx (stm : ss) =
               . map snd
               . M.toList
               -- GPUBody is sequential!
-              . (\p -> analyseStms Sequential M.empty p)
+              . analyseStms Sequential M.empty
               . stmsToList
               $ bodyStms body
        in let res =
@@ -211,9 +214,9 @@ memoryAccessPattern _ (DimSlice start numelems stride) =
 analyseOp :: BasicOp -> AnalyzeCtx -> Maybe ArrayIndexDescriptors
 analyseOp (Index name (Slice unslice)) ctx =
   maybeMap
-  . M.singleton name
-  . L.singleton $
-    map (memoryAccessPattern ctx) unslice
+    . M.singleton name
+    . L.singleton
+    $ map (memoryAccessPattern ctx) unslice
 analyseOp (BinOp {}) _ = Nothing
 analyseOp _ _ = Nothing
 
