@@ -243,16 +243,22 @@ do
 done
 
 
+# Get percentage of successful tests
+which wdiff &>/dev/null
+if [ $? -eq 0 ] ; then
+  success_percent=" ($(bc <<< "scale=1; ${successes} / ${test_n} * 100" )%)"
+fi
+
 # Print the number of successful tests.
 printf "\e[1m" # Bold
 if [ $successes -eq "$test_n" ]; then
     printf "\e[32m" # Green
-    printf "\nAll %d/%d tests passed!" "$successes" "$test_n"
+    printf "\nAll %d/%d %s tests passed!" "$successes" "$test_n" "$success_percent"
     [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
     printf "\n\n\e[0m" # White
 else
     printf "\e[31m" # Red
-    printf "\n%d/%d tests passed." "$successes" "$test_n"
+    printf "\n%d/%d %s tests passed." "$successes" "$test_n" "$success_percent"
     [ "${skipped}" -gt 0 ] && printf "  (%d skipped)" "${skipped}"
     printf "\n\n\e[0m" # White
 fi
