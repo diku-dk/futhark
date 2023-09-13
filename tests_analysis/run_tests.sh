@@ -221,7 +221,7 @@ do
         expected_output_line_content=$(sed -n "$expected_output_line_prev,$ p" "$file")
         if [[ $expected_output_line_content == *"CONFIRMED"* ]]; then
             printf "\e[32m" # Green
-            printf "PASSED\t"
+            printf "PASSED\n"
 
         else
             printf "\e[33m" # Yellow
