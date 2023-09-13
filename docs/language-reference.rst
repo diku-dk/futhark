@@ -543,7 +543,7 @@ in natural text.
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
 
-* In ``f [x]``, there is am ambiguity between indexing the array ``f``
+* In ``f [x]``, there is an ambiguity between indexing the array ``f``
   at position ``x``, or calling the function ``f`` with the singleton
   array ``x``.  We resolve this the following way:
 
