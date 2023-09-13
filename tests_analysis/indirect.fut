@@ -7,7 +7,7 @@ def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
   ) xss
 
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- entry_main
 --   defunc_0_map_res_5231 => [
 --     is_5157

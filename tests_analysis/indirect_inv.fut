@@ -3,7 +3,7 @@ def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
   in map (\i -> #[unsafe] xss[is[k],i] ) (iota n)
 
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- entry_main
 --   tmp_5302 => [
 --     is_5241
