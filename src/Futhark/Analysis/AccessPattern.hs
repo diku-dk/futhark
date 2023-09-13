@@ -21,11 +21,14 @@ data IterationType
   | Parallel
   deriving (Eq, Ord, Show)
 
+-- | Set of VNames of gtid's that some access is variant to
+data Variance = Names
+
 -- | Collect all features of memory access together
 data MemoryAccessPattern = MemoryAccessPattern
   { -- | Set of gtid's that the access is variant to.
     -- | Empty set means that the access is invariant.
-    variances :: Names,
+    variances :: Variance,
     -- | Whether the acess is parallel or sequential
     iterType :: IterationType
   }
@@ -46,7 +49,7 @@ type StmtsAids = M.Map VName ArrayIndexDescriptors
 -- | Map Entries to array index descriptors (mostly used for debugging)
 type FunAids = M.Map Name StmtsAids
 
-type AnalyzeCtx = M.Map VName (Variance, BasicOp)
+type AnalyzeCtx = M.Map VName Variance
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog GPU -> FunAids
