@@ -567,6 +567,8 @@ in natural text.
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
   semantically invalid anyway).
 
+* `Attributes`_ bind less tightly than any other syntactic construct.
+
 * A type application ``pt [n]t`` is parsed as an application of the
   type constructor ``pt`` to the size argument ``[n]`` and the type
   ``t``.  To pass a single array-typed parameter, enclose it in
