@@ -227,7 +227,7 @@ do
             printf "\e[33m" # Yellow
             printf "PASSED\t"
 
-            printf "\e[31m" # Red
+            printf "\e[35m" # Purple
             printf "(Expected output may be wrong)\n"
             printf "\e[0m" # Reset
         fi
