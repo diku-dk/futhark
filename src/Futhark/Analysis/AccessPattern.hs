@@ -21,20 +21,18 @@ data IterationType
   | Parallel
   deriving (Eq, Ord, Show)
 
--- | Variance represents whether the index is variant, or invariant to the outer
--- kernel/iteration function.
-data Variance
-  = Variant IterationType
-  | Invariant
-  deriving (Eq, Ord, Show)
-
 -- | Collect all features of memory access together
 data MemoryAccessPattern = MemoryAccessPattern
-  { -- | Expression reference that is used to index into a given dimension
-    dimIdxExpr :: DimIndex SubExp,
-    variance :: Variance
+  { -- | Set of gtid's that the access is variant to.
+    -- | Empty set means that the access is invariant.
+    variances :: Names,
+    -- | Whether the acess is parallel or sequential
+    iterType :: IterationType
   }
   deriving (Eq, Ord, Show)
+
+isVar :: MemoryAccessPattern -> Bool
+isVar = not . null . variances
 
 -- | Each element in the list corresponds to a dimension in the given array
 type MemoryEntry = [MemoryAccessPattern]
