@@ -67,7 +67,17 @@ type ArrayIndexDescriptors = M.Map SegMapName (M.Map ArrayName (M.Map IndexName 
 
 -- | A mapping from patterns occuring in Let expressions to their corresponding
 -- variance.
-type Context = M.Map VName Variance
+type Context = M.Map VName MemoryAccessPattern
+
+instance Semigroup MemoryAccessPattern where
+  (<>) :: MemoryAccessPattern -> MemoryAccessPattern -> MemoryAccessPattern
+  (<>)
+    (MemoryAccessPattern (Variance avars) atypes)
+    (MemoryAccessPattern (Variance bvars) btypes)
+      | atypes == btypes =
+        MemoryAccessPattern (Variance $ (<>) avars bvars) atypes
+      | otherwise =
+        undefined
 
 -- | Extend a context with another context
 extend :: Context -> Context -> Context
