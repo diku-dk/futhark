@@ -41,7 +41,7 @@ coalesceAccess =
 
 analysis :: Prog GPU -> Prog GPU
 analysis prog = do
-  let funaids = analyzeMemoryAccessPatterns prog
+  let funaids = analyzeDimIdxPats prog
    in -- pTrace "\nprog:\n" $ pTraceShow prog $ pTrace "\nfunaids:\n" $ pTraceShow funaids
       prog
 
