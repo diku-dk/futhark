@@ -109,15 +109,11 @@ instance Semigroup MemoryAccessPattern where
       | otherwise =
           undefined
 
-instance Semigroup CtxVal where
-  (<>) :: CtxVal -> CtxVal -> CtxVal
-  (<>)
-    (CtxVal (Left names) _hej)
-    _s = (CtxVal (Left names) _hej)
-
--- | Extend a context with another context
+-- | Extend a context with another context.
+-- We never have to consider the case where VNames clash in the context, since
+-- they are unique.
 extend :: Context -> Context -> Context
-extend = M.unionWith (<>)
+extend = M.union
 
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
