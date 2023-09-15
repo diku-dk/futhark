@@ -83,6 +83,16 @@ instance Semigroup MemoryAccessPattern where
 extend :: Context -> Context -> Context
 extend = M.unionWith (<>)
 
+-- | Create a singular context from a parameter
+contextFromParam :: IterationType -> FParam GPU -> Context
+contextFromParam i p = M.singleton (paramName p) $ MemoryAccessPattern mempty i
+
+-- | Create a context from a list of parameters
+contextFromParams :: IterationType -> [FParam GPU] -> Context
+contextFromParams i =
+  foldl (<>) mempty
+  . map (contextFromParam i)
+
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog rep -> ArrayIndexDescriptors
 analyzeMemoryAccessPatterns = foldMap analyzeFunction . progFuns
