@@ -74,11 +74,11 @@ extend :: Context -> Context -> Context
 extend = M.unionWith (<>)
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
-analyzeMemoryAccessPatterns :: Prog GPU -> ArrayIndexDescriptors
-analyzeMemoryAccessPatterns _ = undefined
+analyzeMemoryAccessPatterns :: Prog rep -> ArrayIndexDescriptors
+analyzeMemoryAccessPatterns = foldMap analyzeFunction . progFuns
 
-analyzeFunction :: Stms GPU -> ArrayIndexDescriptors
+analyzeFunction :: FunDef rep -> ArrayIndexDescriptors
 analyzeFunction = undefined
 
-analyzeStm :: Stm GPU -> ArrayIndexDescriptors
+analyzeStm :: Stm rep -> ArrayIndexDescriptors
 analyzeStm = undefined
