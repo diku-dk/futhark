@@ -120,6 +120,7 @@ tests =
         test_reshape_permute_iota,
         test_slice_reshape_iota2,
         test_reshape_slice_iota3,
+        test_flatten_strided,
         test_complex1,
         test_complex2,
         test_expand1,
@@ -198,6 +199,14 @@ test_reshape_slice_iota3 =
               DimSlice 0 n 1
             ]
      in reshape (slice (iota [n, n, n, n]) slc) newdims
+
+-- Tests flattening something that is strided - this can occur after
+-- memory expansion.
+test_flatten_strided :: [TestTree]
+test_flatten_strided =
+  singleton . testCase "reshape . fix . iota 3d" . compareOps $
+    let slc = Slice [DimSlice 0 n 1, DimSlice 0 2 1, DimFix 1]
+     in reshape (slice (iota [n, 2, n * n]) slc) [2 * 10]
 
 test_complex1 :: [TestTree]
 test_complex1 =
