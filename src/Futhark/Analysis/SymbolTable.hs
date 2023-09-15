@@ -403,7 +403,7 @@ bindingEntries ::
   [LetBoundEntry rep]
 bindingEntries stm@(Let pat _ _) vtable = do
   pat_elem <- patElems pat
-  pure $ defBndEntry vtable pat_elem (Aliases.aliasesOf pat_elem) stm
+  pure $ defBndEntry vtable pat_elem (expandAliases (Aliases.aliasesOf pat_elem) vtable) stm
 
 adjustSeveral :: (Ord k) => (v -> v) -> [k] -> M.Map k v -> M.Map k v
 adjustSeveral f = flip $ foldl' $ flip $ M.adjust f
@@ -449,35 +449,36 @@ insertStm ::
   SymbolTable rep
 insertStm stm vtable =
   flip (foldl' $ flip consume) (namesToList stm_consumed) $
-    flip (foldl' addRevAliases) (patElems $ stmPat stm) $
-      insertEntries (zip names $ map LetBound $ bindingEntries stm vtable) vtable
+    flip (foldl' addRevAliases) (zip names entries) $
+      insertEntries (zip names $ map LetBound entries) vtable
   where
+    entries = bindingEntries stm vtable
     names = patNames $ stmPat stm
     stm_consumed = expandAliases (Aliases.consumedInStm stm) vtable
-    addRevAliases vtable' pe =
+    addRevAliases vtable' (name, LetBoundEntry {letBoundAliases = als}) =
       vtable' {bindings = adjustSeveral update inedges $ bindings vtable'}
       where
-        inedges = namesToList $ expandAliases (Aliases.aliasesOf pe) vtable'
+        inedges = namesToList $ expandAliases als vtable'
         update e = e {entryType = update' $ entryType e}
         update' (LetBound entry) =
           LetBound
             entry
-              { letBoundAliases = oneName (patElemName pe) <> letBoundAliases entry
+              { letBoundAliases = oneName name <> letBoundAliases entry
               }
         update' (FParam entry) =
           FParam
             entry
-              { fparamAliases = oneName (patElemName pe) <> fparamAliases entry
+              { fparamAliases = oneName name <> fparamAliases entry
               }
         update' (LParam entry) =
           LParam
             entry
-              { lparamAliases = oneName (patElemName pe) <> lparamAliases entry
+              { lparamAliases = oneName name <> lparamAliases entry
               }
         update' (FreeVar entry) =
           FreeVar
             entry
-              { freeVarAliases = oneName (patElemName pe) <> freeVarAliases entry
+              { freeVarAliases = oneName name <> freeVarAliases entry
               }
         update' e = e
 
