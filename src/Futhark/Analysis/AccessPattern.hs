@@ -19,6 +19,7 @@ import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Names
+import Futhark.Util.Pretty
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -32,14 +33,11 @@ data IterationType
 newtype Variance = Variance {names :: Names}
   deriving (Eq, Ord, Show)
 
-newtype ArrayName = ArrayName VName
-  deriving (Eq, Ord, Show)
+type ArrayName = VName
 
-newtype SegMapName = SegMapName VName
-  deriving (Eq, Ord, Show)
+type SegMapName = VName
 
-newtype IndexExprName = IndexExprName VName
-  deriving (Eq, Ord, Show)
+type IndexExprName = VName
 
 instance Semigroup Variance where
   Variance v0 <> Variance v1 = Variance $ v0 <> v1
@@ -140,3 +138,28 @@ analyzeFunction func =
 
 analyzeStm :: Context -> [Stm GPU] -> ArrayIndexDescriptors
 analyzeStm = undefined
+
+instance Pretty ArrayIndexDescriptors where
+  pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
+    where
+      mapprint :: [(ArrayName, e)] -> Doc ann
+      mapprint [] = ""
+      mapprint [m] = memoryEntryPrint m
+      mapprint (m : mm) = memoryEntryPrint m </> mapprint mm
+
+      -- memoryEntryPrint = hsep . map pretty
+      memoryEntryPrint (name, b) = pretty $ baseName name
+      f (name, maps) = pretty name </> indent 2 (mapprint $ M.toList maps)
+
+instance Pretty MemoryAccessPattern where
+  pretty (MemoryAccessPattern variances iterType) =
+    -- Instead of using `brackets $` we manually enclose with `[`s, to add
+    -- spacing between the enclosed elements
+    "[\n variances = " <+> pretty variances <+> "\n iterType:" <+> pretty iterType <+> "]"
+
+instance Pretty IterationType where
+  pretty Sequential = "seq"
+  pretty Parallel = "par"
+
+instance Pretty Variance where
+  pretty (Variance names) = pretty names
