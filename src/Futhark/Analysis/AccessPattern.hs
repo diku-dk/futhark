@@ -133,11 +133,21 @@ analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
 analyzeFunction func =
   let stms = stmsToList . bodyStms $ funDefBody func
    in let ctx =
-            contextFromParams Sequential (funDefParams func) $ CtxVal {deps = Right Entry, iterrationType = Sequential}
-       in analyzeStm ctx stms
+            contextFromParams Sequential (funDefParams func) $
+              -- All entries are "sequential" in nature.
+              CtxVal {deps = Right Entry, iterrationType = Sequential}
+       in analyzeStms ctx stms
 
-analyzeStm :: Context -> [Stm GPU] -> ArrayIndexDescriptors
-analyzeStm = undefined
+analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
+analyzeStms c ((Let pats _aux expr) : stms) =
+  let (ctx, res) = analyzeStm c expr
+   in let ctx' = maybe c (extend c . M.singleton (patElemName . head $ patElems pats)) ctx
+       in M.union res $ analyzeStms ctx' stms
+analyzeStms _ [] = M.empty
+
+analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
+analyzeStm _c (BasicOp _o) = undefined
+analyzeStm _ _ = error "skill issue"
 
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
