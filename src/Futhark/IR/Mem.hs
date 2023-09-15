@@ -594,7 +594,7 @@ matchFunctionReturnType rettype result = do
               TC.bad . TC.TypeError $
                 "Array "
                   <> prettyText v
-                  <> " returned by function, but has nontrivial index function "
+                  <> " returned by function, but has nontrivial index function:\n"
                   <> prettyText ixfun
 
 matchLoopResultMem ::
