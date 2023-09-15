@@ -82,6 +82,14 @@ code, which speeds up testing for internal compiler errors:
 
     futhark test -C tests --pass-compiler-option=--library
 
+### Running only a single unit test
+
+    cabal run unit -- -p '/reshape . fix . iota 3d/'
+
+The argument to `-p` is the name of the test that fails, as reported
+by `cabal test`.  You may have to scroll through the output a bit to
+find it.
+
 ## Debugging Internal Type Errors
 
 The Futhark compiler uses a typed core language, and the type checker
