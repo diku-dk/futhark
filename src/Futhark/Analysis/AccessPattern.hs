@@ -1,11 +1,15 @@
 module Futhark.Analysis.AccessPattern
   ( analyzeMemoryAccessPatterns,
-    analyzeMemoryAccessPatterns,
     analyzeFunction,
     analyzeStm,
     ArrayIndexDescriptors,
-    Variance,
     IterationType,
+    Variance,
+    ArrayName,
+    SegMapName,
+    IndexExprName,
+    MemoryAccessPattern,
+    names,
   )
 where
 
@@ -34,7 +38,7 @@ newtype ArrayName = ArrayName VName
 newtype SegMapName = SegMapName VName
   deriving (Eq, Ord, Show)
 
-newtype IndexName = IndexName VName
+newtype IndexExprName = IndexExprName VName
   deriving (Eq, Ord, Show)
 
 instance Semigroup Variance where
@@ -63,7 +67,26 @@ isVar = not . isInv
 type MemoryEntry = [MemoryAccessPattern]
 
 -- | We map variable names of arrays to lists of memory access patterns.
-type ArrayIndexDescriptors = M.Map SegMapName (M.Map ArrayName (M.Map IndexName [MemoryEntry]))
+type ArrayIndexDescriptors =
+  M.Map SegMapName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
+
+-- segmap(pattern) => A(pattern) => indexExpressionName(pattern) => [MemoryAccessPattern]
+--
+-- segmap_0 (x,y)
+--   let as_1  = A[x,y,0]
+--   let res_2 = as + A[y,0,x]
+--   in res_2
+--
+-- ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+--
+-- {
+--   "segmap_0": {
+--     "A": {
+--        as_1: [x,y,0],
+--        res_2 : [y,0,x]
+--     }
+--   }
+-- }
 
 -- | A mapping from patterns occuring in Let expressions to their corresponding
 -- variance.
@@ -75,30 +98,38 @@ instance Semigroup MemoryAccessPattern where
     (MemoryAccessPattern (Variance avars) atypes)
     (MemoryAccessPattern (Variance bvars) btypes)
       | atypes == btypes =
-        MemoryAccessPattern (Variance $ (<>) avars bvars) atypes
+          MemoryAccessPattern (Variance $ (<>) avars bvars) atypes
       | otherwise =
-        undefined
+          undefined
 
 -- | Extend a context with another context
 extend :: Context -> Context -> Context
 extend = M.unionWith (<>)
 
 -- | Create a singular context from a parameter
-contextFromParam :: IterationType -> FParam GPU -> Context
-contextFromParam i p = M.singleton (paramName p) $ MemoryAccessPattern mempty i
+contextFromParam :: IterationType -> FParam GPU -> VName -> Context
+contextFromParam i p n =
+  M.singleton (paramName p) $ MemoryAccessPattern (oneName n) i
+
+-- type t = loop | gpuOp | funcdef
 
 -- | Create a context from a list of parameters
-contextFromParams :: IterationType -> [FParam GPU] -> Context
-contextFromParams i =
-  foldl (<>) mempty
-  . map (contextFromParam i)
+contextFromParams :: IterationType -> [FParam GPU] -> VName -> Context
+contextFromParams i pp n =
+  foldl (<>) mempty $
+    map (\p -> contextFromParam i p n) pp
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
-analyzeMemoryAccessPatterns :: Prog rep -> ArrayIndexDescriptors
+analyzeMemoryAccessPatterns :: Prog GPU -> ArrayIndexDescriptors
 analyzeMemoryAccessPatterns = foldMap analyzeFunction . progFuns
 
-analyzeFunction :: FunDef rep -> ArrayIndexDescriptors
-analyzeFunction = undefined
+analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
+analyzeFunction func =
+  let stms = stmsToList . bodyStms $ funDefBody func
+   in let ctx =
+            contextFromParams Sequential (funDefParams func) $
+              funDefName func
+       in analyzeStm ctx stms
 
-analyzeStm :: Stm rep -> ArrayIndexDescriptors
+analyzeStm :: Context -> [Stm GPU] -> ArrayIndexDescriptors
 analyzeStm = undefined
