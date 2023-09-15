@@ -121,9 +121,6 @@ extend = M.unionWith (<>)
 
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
--- contextFromParam i p =
--- M.singleton (paramName p) $ MemoryAccessPattern (oneName n) i
--- M.singleton (paramName p) $ CtxVal {deps = Left (oneName n), iterrationType = Sequential}
 contextFromParam i p = M.singleton (paramName p)
 
 -- type t = loop | gpuOp | funcdef
