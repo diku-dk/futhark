@@ -88,9 +88,16 @@ type ArrayIndexDescriptors =
 --   }
 -- }
 
+data Entry = Entry
+
+data CtxVal = CtxVal
+  { deps :: Either Names Entry,
+    iterrationType :: IterationType
+  }
+
 -- | A mapping from patterns occuring in Let expressions to their corresponding
 -- variance.
-type Context = M.Map VName MemoryAccessPattern
+type Context = M.Map VName CtxVal
 
 instance Semigroup MemoryAccessPattern where
   (<>) :: MemoryAccessPattern -> MemoryAccessPattern -> MemoryAccessPattern
@@ -102,19 +109,27 @@ instance Semigroup MemoryAccessPattern where
       | otherwise =
           undefined
 
+instance Semigroup CtxVal where
+  (<>) :: CtxVal -> CtxVal -> CtxVal
+  (<>)
+    (CtxVal (Left names) _hej)
+    _s = (CtxVal (Left names) _hej)
+
 -- | Extend a context with another context
 extend :: Context -> Context -> Context
 extend = M.unionWith (<>)
 
 -- | Create a singular context from a parameter
-contextFromParam :: IterationType -> FParam GPU -> VName -> Context
-contextFromParam i p n =
-  M.singleton (paramName p) $ MemoryAccessPattern (oneName n) i
+contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
+-- contextFromParam i p =
+-- M.singleton (paramName p) $ MemoryAccessPattern (oneName n) i
+-- M.singleton (paramName p) $ CtxVal {deps = Left (oneName n), iterrationType = Sequential}
+contextFromParam i p = M.singleton (paramName p)
 
 -- type t = loop | gpuOp | funcdef
 
 -- | Create a context from a list of parameters
-contextFromParams :: IterationType -> [FParam GPU] -> VName -> Context
+contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams i pp n =
   foldl (<>) mempty $
     map (\p -> contextFromParam i p n) pp
@@ -127,8 +142,7 @@ analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
 analyzeFunction func =
   let stms = stmsToList . bodyStms $ funDefBody func
    in let ctx =
-            contextFromParams Sequential (funDefParams func) $
-              funDefName func
+            contextFromParams Sequential (funDefParams func) $ CtxVal {deps = Right Entry, iterrationType = Sequential}
        in analyzeStm ctx stms
 
 analyzeStm :: Context -> [Stm GPU] -> ArrayIndexDescriptors
