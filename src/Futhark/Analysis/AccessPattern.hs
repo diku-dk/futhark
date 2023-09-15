@@ -65,6 +65,14 @@ type MemoryEntry = [MemoryAccessPattern]
 -- | We map variable names of arrays to lists of memory access patterns.
 type ArrayIndexDescriptors = M.Map SegMapName (M.Map ArrayName (M.Map IndexName [MemoryEntry]))
 
+-- | A mapping from patterns occuring in Let expressions to their corresponding
+-- variance.
+type Context = M.Map VName Variance
+
+-- | Extend a context with another context
+extend :: Context -> Context -> Context
+extend = M.unionWith (<>)
+
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog GPU -> ArrayIndexDescriptors
 analyzeMemoryAccessPatterns _ = undefined
