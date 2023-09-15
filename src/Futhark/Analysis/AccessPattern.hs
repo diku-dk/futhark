@@ -1,5 +1,8 @@
 module Futhark.Analysis.AccessPattern
   ( analyzeMemoryAccessPatterns,
+    analyzeMemoryAccessPatterns,
+    analyzeFunction,
+    analyzeStm,
     ArrayIndexDescriptors,
     Variance,
     IterationType,
@@ -64,5 +67,10 @@ type ArrayIndexDescriptors = M.Map SegMapName (M.Map ArrayName (M.Map IndexName 
 
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeMemoryAccessPatterns :: Prog GPU -> ArrayIndexDescriptors
-analyzeMemoryAccessPatterns _ =
-  undefined
+analyzeMemoryAccessPatterns _ = undefined
+
+analyzeFunction :: Stms GPU -> ArrayIndexDescriptors
+analyzeFunction = undefined
+
+analyzeStm :: Stm GPU -> ArrayIndexDescriptors
+analyzeStm = undefined
