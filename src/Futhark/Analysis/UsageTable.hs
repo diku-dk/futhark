@@ -170,11 +170,7 @@ usageInPat = sizeUsages . foldMap freeIn . patElems
 
 usageInExp :: (Aliased rep) => Exp rep -> UsageTable
 usageInExp (Apply _ args _ _) =
-  mconcat
-    [ mconcat $ map consumedUsage $ namesToList $ subExpAliases arg
-      | (arg, d) <- args,
-        d == Consume
-    ]
+  mconcat [consumedUsage v | (Var v, Consume) <- args]
 usageInExp e@Loop {} =
   foldMap consumedUsage $ namesToList $ consumedInExp e
 usageInExp (Match _ cases defbody _) =
