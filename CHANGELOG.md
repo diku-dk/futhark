@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   types and sizes (#2016).  Solved by banning such uses - in principle
   this could break code.
 
+* Incomplete alias tracking could cause removal of necessary copies,
+  leading to compiler crash (#2018).
+
 ## [0.25.3]
 
 ### Added
