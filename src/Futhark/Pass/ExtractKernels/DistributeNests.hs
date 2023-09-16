@@ -842,12 +842,8 @@ segmentedUpdateKernel nest perm cs arr slice v = do
   ((res_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     v' <-
-      certifying cs $
-        letSubExp "v" $
-          BasicOp $
-            Index v $
-              Slice $
-                map (DimFix . Var) slice_gtids
+      certifying cs . letSubExp "v" . BasicOp . Index v $
+        Slice (map (DimFix . Var) slice_gtids)
     slice_is <-
       traverse (toSubExp "index") $
         fixSlice (fmap pe64 slice) $
