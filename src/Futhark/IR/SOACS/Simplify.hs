@@ -691,7 +691,7 @@ simplifyKnownIterationSOAC _ pat aux op
     "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
       arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
         map_lam' <- renameLambda map_lam
-        eLambda map_lam' $ map (`eIndex` eSubExp (constant i)) arrs
+        eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
       forM_ (zip3 (patNames pat) arrs_elems (lambdaReturnType map_lam)) $
         \(v, arr_elems, t) ->
           certifying (mconcat (map resCerts arr_elems)) $
