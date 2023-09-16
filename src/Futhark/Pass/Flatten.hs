@@ -217,8 +217,11 @@ elemArr segments env inps (Var v)
 elemArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   dims <- arrayDims <$> lookupType rep
-  n <- toSubExp "n" $ product $ map pe64 dims
-  letExp "reshape" $ BasicOp $ Reshape ReshapeArbitrary (Shape [n]) rep
+  if length dims == 1
+    then pure rep
+    else do
+      n <- toSubExp "n" $ product $ map pe64 dims
+      letExp "reshape" $ BasicOp $ Reshape ReshapeArbitrary (Shape [n]) rep
 
 mkIrregFromReg ::
   Segments ->
@@ -228,7 +231,7 @@ mkIrregFromReg segments arr = do
   arr_t <- lookupType arr
   segment_size <-
     letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
-      drop (shapeRank (segmentsShape segments)) (arrayDims arr_t)
+      drop (segmentsRank segments) (arrayDims arr_t)
   segments_arr <-
     letExp "reg_segments" . BasicOp $
       Replicate (segmentsShape segments) segment_size
@@ -301,7 +304,7 @@ replicateIrreg segments env ns desc rep = do
 
   w <- arraySize 0 <$> lookupType ns_full_elems
 
-  elems <- letExp (desc <> "_elems") <=< segMap (Solo w) $ \(Solo i) -> do
+  elems <- letExp (desc <> "_rep_elems") <=< segMap (Solo w) $ \(Solo i) -> do
     -- Which segment we are in.
     segment_i <-
       letSubExp "segment_i" =<< eIndex ns_full_elems [eSubExp i]
@@ -623,7 +626,7 @@ onMapInputArr segments env inps ii2 p arr = do
               -- If parameter type of the map corresponds to the
               -- element type of the value array, we can map it
               -- directly.
-              if stripArray (shapeRank (segmentsShape segments)) elems_t == paramType p
+              if stripArray (segmentsRank segments) elems_t == paramType p
                 then pure $ MapArray (irregularElems rep) elems_t
                 else do
                   -- Otherwise we need to perform surgery on the metadata.
