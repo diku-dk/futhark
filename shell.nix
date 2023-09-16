@@ -43,6 +43,7 @@ pkgs.stdenv.mkDerivation {
       [ opencl-headers
         ocl-icd
         oclgrind
+        hip
       ]
   ;
 }

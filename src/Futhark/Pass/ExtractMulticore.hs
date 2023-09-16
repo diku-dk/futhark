@@ -94,7 +94,7 @@ histToSegBinOp (SOACS.HistOp num_bins rf dests nes op) = do
   op'' <- transformLambda op'
   pure (stms, MC.HistOp num_bins rf dests nes' shape op'')
 
-mkSegSpace :: MonadFreshNames m => SubExp -> m (VName, SegSpace)
+mkSegSpace :: (MonadFreshNames m) => SubExp -> m (VName, SegSpace)
 mkSegSpace w = do
   flat <- newVName "flat_tid"
   gtid <- newVName "gtid"
@@ -110,12 +110,12 @@ transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
-transformStm (Let pat aux (DoLoop merge form body)) = do
+transformStm (Let pat aux (Loop merge form body)) = do
   let form' = transformLoopForm form
   body' <-
     localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
       transformBody body
-  pure $ oneStm $ Let pat aux $ DoLoop merge form' body'
+  pure $ oneStm $ Let pat aux $ Loop merge form' body'
 transformStm (Let pat aux (Match ses cases defbody ret)) =
   oneStm . Let pat aux
     <$> (Match ses <$> mapM transformCase cases <*> transformBody defbody <*> pure ret)
@@ -164,7 +164,7 @@ transformFunDef (FunDef entry attrs name rettype params body) = do
 
 data NeedsRename = DoRename | DoNotRename
 
-renameIfNeeded :: Rename a => NeedsRename -> a -> ExtractM a
+renameIfNeeded :: (Rename a) => NeedsRename -> a -> ExtractM a
 renameIfNeeded DoRename = renameSomething
 renameIfNeeded DoNotRename = pure
 

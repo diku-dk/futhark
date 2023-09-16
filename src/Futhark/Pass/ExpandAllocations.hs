@@ -219,7 +219,8 @@ transformScanRed lvl space ops kbody = do
   let user = (lvl, [le64 $ segFlat space])
       (kbody', kbody_allocs) =
         extractKernelBodyAllocations user bound_outside bound_in_kernel kbody
-      (ops', ops_allocs) = unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
+      (ops', ops_allocs) =
+        unzip $ map (extractLambdaAllocations user bound_outside mempty) ops
       variantAlloc (_, Var v, _) = v `notNameIn` bound_outside
       variantAlloc _ = False
       (variant_allocs, invariant_allocs) =
@@ -247,10 +248,11 @@ transformScanRed lvl space ops kbody = do
     then pure (mempty, (lvl, ops, kbody))
     else do
       (lvl_stms, lvl', grid) <- ensureGridKnown lvl
-      allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $ \alloc_stms kbody'' -> do
-        ops'' <- forM ops' $ \op' ->
-          localScope (scopeOf op') $ offsetMemoryInLambda op'
-        pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
+      allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $
+        \alloc_stms kbody'' -> do
+          ops'' <- forM ops' $ \op' ->
+            localScope (scopeOf op') $ offsetMemoryInLambda op'
+          pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
   where
     bound_in_kernel =
       namesFromList (M.keys $ scopeOfSegSpace space)
@@ -320,9 +322,11 @@ memoryRequirements grid space kstms variant_allocs invariant_allocs = do
       num_threads_stms <> invariant_alloc_stms <> variant_alloc_stms
     )
 
+type Exp64 = TPrimExp Int64 VName
+
 -- | Identifying the spot where an allocation occurs in terms of its
 -- level and unique thread ID.
-type User = (SegLevel, [TPrimExp Int64 VName])
+type User = (SegLevel, [Exp64])
 
 -- | A description of allocations that have been extracted, and how
 -- much memory (and which space) is needed.
@@ -356,9 +360,12 @@ extractLambdaAllocations ::
   Names ->
   Lambda GPUMem ->
   (Lambda GPUMem, Extraction)
-extractLambdaAllocations user bound_outside bound_kernel lam = (lam {lambdaBody = body'}, allocs)
+extractLambdaAllocations user bound_outside bound_kernel lam =
+  (lam {lambdaBody = body'}, allocs)
   where
-    (body', allocs) = extractBodyAllocations user bound_outside bound_kernel $ lambdaBody lam
+    (body', allocs) =
+      extractBodyAllocations user bound_outside bound_kernel $
+        lambdaBody lam
 
 extractGenericBodyAllocations ::
   User ->
@@ -373,11 +380,9 @@ extractGenericBodyAllocations ::
 extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms body =
   let bound_kernel' = bound_kernel <> boundByStms (get_stms body)
       (stms, allocs) =
-        runWriter $
-          fmap catMaybes $
-            mapM (extractStmAllocations user bound_outside bound_kernel') $
-              stmsToList $
-                get_stms body
+        runWriter . fmap catMaybes $
+          mapM (extractStmAllocations user bound_outside bound_kernel') $
+            stmsToList (get_stms body)
    in (set_stms (stmsFromList stms) body, allocs)
 
 expandable, notScalar :: Space -> Bool
@@ -436,7 +441,8 @@ extractStmAllocations user bound_outside bound_kernel stm = do
         }
 
     onKernelBody user' body = do
-      let (body', allocs) = extractKernelBodyAllocations user' bound_outside bound_kernel body
+      let (body', allocs) =
+            extractKernelBodyAllocations user' bound_outside bound_kernel body
       tell allocs
       pure body'
 
@@ -445,7 +451,7 @@ extractStmAllocations user bound_outside bound_kernel stm = do
       pure lam {lambdaBody = body}
 
 genericExpandedInvariantAllocations ::
-  (User -> (Shape, [TPrimExp Int64 VName])) -> Extraction -> ExpandM (Stms GPUMem, RebaseMap)
+  (User -> (Shape, [Exp64])) -> Extraction -> ExpandM (Stms GPUMem, RebaseMap)
 genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the number of kernel threads.
@@ -462,29 +468,21 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
       letBind allocpat $ Op $ Alloc (Var total_size) space
       pure $ M.singleton mem $ newBase user
 
-    untouched d = DimSlice 0 d 1
-
-    newBaseThread user (old_shape, _) =
+    newBaseThread user _old_shape =
       let (users_shape, user_ids) = getNumUsers user
-          num_dims = length old_shape
-          perm = [num_dims .. num_dims + shapeRank users_shape - 1] ++ [0 .. num_dims - 1]
-          root_ixfun = IxFun.iota (old_shape ++ map pe64 (shapeDims users_shape))
-          permuted_ixfun = IxFun.permute root_ixfun perm
-          offset_ixfun =
-            IxFun.slice permuted_ixfun $
-              Slice $
-                map DimFix user_ids ++ map untouched old_shape
-       in offset_ixfun
+          dims = map pe64 (shapeDims users_shape)
+       in ( flattenIndex dims user_ids,
+            product dims
+          )
 
     newBase user@(SegThreadInGroup {}, _) = newBaseThread user
     newBase user@(SegThread {}, _) = newBaseThread user
-    newBase user@(SegGroup {}, _) = \(old_shape, _) ->
+    newBase user@(SegGroup {}, _) = \_old_shape ->
       let (users_shape, user_ids) = getNumUsers user
-          root_ixfun = IxFun.iota $ map pe64 (shapeDims users_shape) ++ old_shape
-          offset_ixfun =
-            IxFun.slice root_ixfun . Slice $
-              map DimFix user_ids ++ map untouched old_shape
-       in offset_ixfun
+          dims = map pe64 (shapeDims users_shape)
+       in ( flattenIndex dims user_ids,
+            product dims
+          )
 
 expandedInvariantAllocations ::
   SubExp ->
@@ -524,10 +522,7 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
   let variant_allocs' :: [(VName, (SubExp, SubExp, Space))]
       variant_allocs' =
         concat $
-          zipWith
-            memInfo
-            (map snd sizes_to_blocks)
-            (zip offsets size_sums)
+          zipWith memInfo (map snd sizes_to_blocks) (zip offsets size_sums)
       memInfo blocks (offset, total_size) =
         [(mem, (Var offset, Var total_size, space)) | (mem, space) <- blocks]
 
@@ -547,19 +542,15 @@ expandedVariantAllocations num_threads kspace kstms variant_allocs = do
     num_threads' = pe64 num_threads
     gtid = le64 $ segFlat kspace
 
-    untouched d = DimSlice 0 d 1
-
     -- For the variant allocations, we add an inner dimension,
     -- which is then offset by a thread-specific amount.
-    newBase (old_shape, _pt) =
-      let root_ixfun = IxFun.iota $ old_shape ++ [num_threads']
-          offset_ixfun =
-            IxFun.slice root_ixfun . Slice $
-              map untouched old_shape ++ [DimFix gtid]
-       in offset_ixfun
+    newBase _old_shape =
+      (gtid, num_threads')
 
--- | A map from memory block names to new index function bases.
-type RebaseMap = M.Map VName (([TPrimExp Int64 VName], PrimType) -> IxFun)
+type Expansion = (Exp64, Exp64)
+
+-- | A map from memory block names to index function embeddings..
+type RebaseMap = M.Map VName ([Exp64] -> Expansion)
 
 newtype OffsetM a
   = OffsetM
@@ -589,7 +580,7 @@ localRebaseMap f (OffsetM m) = OffsetM $ do
   scope <- ask
   lift $ local f $ runReaderT m scope
 
-lookupNewBase :: VName -> ([TPrimExp Int64 VName], PrimType) -> OffsetM (Maybe IxFun)
+lookupNewBase :: VName -> [Exp64] -> OffsetM (Maybe Expansion)
 lookupNewBase name x = do
   offsets <- askRebaseMap
   pure $ ($ x) <$> M.lookup name offsets
@@ -657,14 +648,18 @@ offsetMemoryInPat (Pat pes) rets = do
   where
     onPE
       (PatElem name (MemArray pt shape u (ArrayIn mem _)))
-      (MemArray _ _ _ (Just (ReturnsNewBlock _ _ ixfun))) =
-        pure . PatElem name . MemArray pt shape u . ArrayIn mem $
-          fmap (fmap unExt) ixfun
+      (MemArray _ _ _ info)
+        | Just ixfun <- getIxFun info =
+            pure . PatElem name . MemArray pt shape u . ArrayIn mem $
+              fmap (fmap unExt) ixfun
     onPE pe _ = do
       new_dec <- offsetMemoryInMemBound (patElemName pe) $ patElemDec pe
       pure pe {patElemDec = new_dec}
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
+    getIxFun (Just (ReturnsNewBlock _ _ ixfun)) = Just ixfun
+    getIxFun (Just (ReturnsInBlock _ ixfun)) = Just ixfun
+    getIxFun _ = Nothing
 
 offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
 offsetMemoryInParam fparam = do
@@ -673,42 +668,45 @@ offsetMemoryInParam fparam = do
 
 offsetMemoryInMemBound :: VName -> MemBound u -> OffsetM (MemBound u)
 offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
-  new_base <- lookupNewBase mem (IxFun.base ixfun, pt)
-  case new_base of
+  embedding <- lookupNewBase mem $ IxFun.shape ixfun
+  case embedding of
     Nothing -> pure summary
-    Just new_base' -> do
+    Just (o, p) -> do
       let problem =
             throwError . unlines $
               [ "offsetMemoryInMemBound",
                 prettyString v,
-                prettyString new_base',
+                prettyString (o, p),
                 prettyString ixfun
               ]
-      ixfun' <- maybe problem pure $ IxFun.rebase new_base' ixfun
+      ixfun' <- maybe problem pure $ IxFun.expand o p ixfun
       pure $ MemArray pt shape u $ ArrayIn mem ixfun'
 offsetMemoryInMemBound _ summary = pure summary
 
 offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
 offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticIxFun ixfun = do
-      new_base <- lookupNewBase mem (IxFun.base ixfun', pt)
-      case new_base of
+      embedding <- lookupNewBase mem $ IxFun.shape ixfun'
+      case embedding of
         Nothing -> pure br
-        Just new_base' -> do
+        Just (o, p) -> do
           let problem =
                 throwError . unlines $
                   [ "offsetMemoryInBodyReturns",
-                    prettyString new_base',
+                    prettyString (o, p),
                     prettyString ixfun
                   ]
-          ixfun'' <- maybe problem pure $ IxFun.rebase (fmap (fmap Free) new_base') ixfun
+          ixfun'' <-
+            maybe problem pure $
+              IxFun.expand (Free <$> o) (fmap Free p) ixfun
           pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
 offsetMemoryInBodyReturns br = pure br
 
 offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
-offsetMemoryInLambda lam = inScopeOf lam $ do
-  body <- offsetMemoryInBody $ lambdaBody lam
-  pure $ lam {lambdaBody = body}
+offsetMemoryInLambda lam = do
+  body <- inScopeOf lam $ offsetMemoryInBody $ lambdaBody lam
+  params <- mapM offsetMemoryInParam $ lambdaParams lam
+  pure $ lam {lambdaBody = body, lambdaParams = params}
 
 -- A loop may have memory parameters, and those memory blocks may
 -- be expanded.  We assume (but do not check - FIXME) that if the
@@ -731,13 +729,13 @@ offsetMemoryInLoopParams merge f = do
     onParamArg rm _ = rm
 
 offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
-offsetMemoryInExp (DoLoop merge form body) = do
+offsetMemoryInExp (Loop merge form body) = do
   offsetMemoryInLoopParams merge $ \merge' -> do
     body' <-
       localScope
         (scopeOfFParams (map fst merge') <> scopeOf form)
         (offsetMemoryInBody body)
-    pure $ DoLoop merge' form body'
+    pure $ Loop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e
   where
     recurse =

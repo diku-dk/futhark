@@ -158,11 +158,20 @@ transformExp (AppExp (LetPat sizes pat e body loc) appres) = do
   e' <- transformExp e
   body' <- bindingLetPat (map sizeName sizes) pat $ transformExp body
   pure $ AppExp (LetPat sizes pat e' body' loc) appres
-transformExp (AppExp (DoLoop sizes pat args form body loc) appres) = do
+transformExp (AppExp (Match e cases loc) appres) = do
+  e' <- transformExp e
+  cases' <- mapM transformCase cases
+  pure $ AppExp (Match e' cases' loc) appres
+  where
+    transformCase (CasePat case_pat case_e case_loc) =
+      CasePat case_pat
+        <$> bindingLetPat [] case_pat (transformExp case_e)
+        <*> pure case_loc
+transformExp (AppExp (Loop sizes pat args form body loc) appres) = do
   args' <- transformExp args
   form' <- astMap transformSubExps form
   body' <- bindingParams sizes [pat] $ bindingForm form' $ transformExp body
-  pure $ AppExp (DoLoop sizes pat args' form' body' loc) appres
+  pure $ AppExp (Loop sizes pat args' form' body' loc) appres
 transformExp e@(Var v _ _) =
   -- Note that function-typed variables can only occur in expressions,
   -- not in other places where VNames/QualNames can occur.
@@ -179,7 +188,7 @@ transformValBind vb = do
 {-# NOINLINE transformProg #-}
 
 -- | Perform the transformation.
-transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg vbinds =
   modifyNameSource $ \namesrc ->
     runLiftM namesrc $ mapM_ transformValBind vbinds

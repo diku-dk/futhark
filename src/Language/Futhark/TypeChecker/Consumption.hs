@@ -156,7 +156,7 @@ noConsumable = local $ \env -> env {envVtable = M.map f $ envVtable env}
   where
     f = Nonconsumable . entryAliases
 
-addError :: Located loc => loc -> Notes -> Doc () -> CheckM ()
+addError :: (Located loc) => loc -> Notes -> Doc () -> CheckM ()
 addError loc notes e = modify $ \s ->
   s {stateErrors = DL.snoc (stateErrors s) (TypeError (locOf loc) notes e)}
 
@@ -410,7 +410,7 @@ aliasesMultipleTimes = S.fromList . map fst . filter ((> 1) . snd) . M.toList . 
     delve (Scalar (Record fs)) =
       foldl' (M.unionWith (+)) mempty $ map delve $ M.elems fs
     delve t =
-      M.fromList $ zip (map aliasVar $ S.toList (aliases t)) $ repeat (1 :: Int)
+      M.fromList $ map ((,1 :: Int) . aliasVar) $ S.toList $ aliases t
 
 consumingParams :: [Pat ParamType] -> Names
 consumingParams =
@@ -454,7 +454,7 @@ inferReturnUniqueness params ret ret_als = delve ret ret_als
       | otherwise =
           t `setUniqueness` Nonunique
 
-checkSubExps :: ASTMappable e => e -> CheckM e
+checkSubExps :: (ASTMappable e) => e -> CheckM e
 checkSubExps = astMap identityMapper {mapOnExp = fmap fst . checkExp}
 
 noAliases :: Exp -> CheckM (Exp, TypeAliases)
@@ -481,8 +481,8 @@ consumeAsNeeded loc (Scalar (Record fs1)) (Scalar (Record fs2)) =
 consumeAsNeeded loc pt t =
   when (diet pt == Consume) $ consumeAliases loc $ aliases t
 
-checkArg :: ParamType -> Exp -> CheckM (Exp, TypeAliases)
-checkArg p_t e = do
+checkArg :: [(Exp, TypeAliases)] -> ParamType -> Exp -> CheckM (Exp, TypeAliases)
+checkArg prev p_t e = do
   ((e', e_als), e_cons) <- contain $ checkExp e
   consumed e_cons
   let e_t = typeOf e'
@@ -494,7 +494,21 @@ checkArg p_t e = do
   when (diet p_t == Consume) $ do
     noSelfAliases (locOf e) e_als
     consumeAsNeeded (locOf e) p_t e_als
+    case mapMaybe prevAlias $ S.toList $ boundAliases $ aliases e_als of
+      [] -> pure ()
+      (v, prev_arg) : _ ->
+        addError (locOf e) mempty $
+          "Argument is consumed, but aliases"
+            </> indent 2 (prettyName v)
+            </> "which is also aliased by other argument"
+            </> indent 2 (pretty prev_arg)
+            </> "at"
+            <+> pretty (locTextRel (locOf e) (locOf prev_arg))
+            <> "."
   pure (e', e_als)
+  where
+    prevAlias v =
+      (v,) . fst <$> find (S.member v . boundAliases . aliases . snd) prev
 
 -- | @returnType appres ret_type arg_diet arg_type@ gives result of applying
 -- an argument the given types to a function with the given return
@@ -643,7 +657,7 @@ checkLoop loop_loc (param, arg, form, body) = do
   param' <- convergeLoopParam loop_loc param (M.keysSet body_cons) body_als
 
   let param_t = patternType param'
-  ((arg', arg_als), arg_cons) <- contain $ checkArg param_t arg
+  ((arg', arg_als), arg_cons) <- contain $ checkArg [] param_t arg
   consumed arg_cons
   free_bound <- boundFreeInExp body
 
@@ -652,7 +666,8 @@ checkLoop loop_loc (param, arg, form, body) = do
     v' <- describeVar v
     addError loop_loc mempty $
       "Loop body uses"
-        <+> v' <> " (or an alias),"
+        <+> v'
+        <> " (or an alias),"
         </> "but this is consumed by the initial loop argument."
 
   v <- VName "internal_loop_result" <$> incCounter
@@ -667,24 +682,23 @@ checkLoop loop_loc (param, arg, form, body) = do
     )
 
 checkFuncall ::
-  Foldable f =>
+  (Foldable f) =>
   SrcLoc ->
   Maybe (QualName VName) ->
   TypeAliases ->
   f TypeAliases ->
   CheckM TypeAliases
-checkFuncall loc fname f_als args_als = do
+checkFuncall loc fname f_als arg_als = do
   v <- VName "internal_app_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameAppRes fname loc) $ stateNames s}
-  pure $ foldl applyArg (second (S.insert (AliasFree v)) f_als) args_als
+  pure $ foldl applyArg (second (S.insert (AliasFree v)) f_als) arg_als
 
 checkExp :: Exp -> CheckM (Exp, TypeAliases)
 -- First we have the complicated cases.
 
 --
 checkExp (AppExp (Apply f args loc) appres) = do
-  -- Note Futhark uses right-to-left evaluation of applications.
-  (args', args_als) <- NE.unzip . NE.reverse <$> traverse checkArg' (NE.reverse args)
+  (args', args_als) <- NE.unzip <$> checkArgs args
   (f', f_als) <- checkExp f
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
@@ -692,15 +706,21 @@ checkExp (AppExp (Apply f args loc) appres) = do
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' (Info (d, p), e) = do
-      (e', e_als) <- checkArg (second (const d) (typeOf e)) e
+    checkArg' prev (Info (d, p), e) = do
+      (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
       pure ((Info (d, p), e'), e_als)
 
+    checkArgs (x NE.:| args') = do
+      -- Note Futhark uses right-to-left evaluation of applications.
+      args'' <- maybe (pure []) (fmap NE.toList . checkArgs) $ NE.nonEmpty args'
+      (x', x_als) <- checkArg' (map (first snd) args'') x
+      pure $ (x', x_als) NE.:| args''
+
 --
-checkExp (AppExp (DoLoop sparams pat args form body loc) appres) = do
+checkExp (AppExp (Loop sparams pat args form body loc) appres) = do
   ((pat', args', form', body'), als) <- checkLoop (locOf loc) (pat, args, form, body)
   pure
-    ( AppExp (DoLoop sparams pat' args' form' body' loc) appres,
+    ( AppExp (Loop sparams pat' args' form' body' loc) appres,
       als
     )
 
@@ -777,8 +797,8 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
 checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   op_als <- observeVar (locOf oploc) (qualLeaf op) (unInfo opt)
   let at1 : at2 : _ = fst $ unfoldFunType op_als
-  (x', x_als) <- checkArg at1 x
-  (y', y_als) <- checkArg at2 y
+  (x', x_als) <- checkArg [] at1 x
+  (y', y_als) <- checkArg [(x', x_als)] at2 y
   res_als <- checkFuncall loc (Just op) op_als [x_als, y_als]
   pure
     ( AppExp (BinOp (op, oploc) opt (x', xp) (y', yp) loc) appres,

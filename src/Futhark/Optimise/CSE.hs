@@ -188,7 +188,7 @@ cseInStms consumed (stm : stms) m =
     nestedCSE stm' = do
       let ds =
             case stmExp stm' of
-              DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
+              Loop merge _ _ -> map (diet . declTypeOf . fst) merge
               _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       pure stm' {stmExp = e}
@@ -211,7 +211,7 @@ normExp (Apply fname args ret (safety, _, _)) =
 normExp e = e
 
 cseInStm ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Names ->
   Stm rep ->
   ([Stm rep] -> CSEM rep a) ->
@@ -271,7 +271,7 @@ addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Pat (LetDec rep) ->
   ExpDec rep ->
   Certs ->
@@ -336,7 +336,7 @@ cseInKernelBody (GPU.KernelBody bodydec stms res) = do
   Body _ stms' _ <- cseInBody (map (const Observe) res) $ Body bodydec stms []
   pure $ GPU.KernelBody bodydec stms' res
 
-instance CSEInOp (op rep) => CSEInOp (Memory.MemOp op rep) where
+instance (CSEInOp (op rep)) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 

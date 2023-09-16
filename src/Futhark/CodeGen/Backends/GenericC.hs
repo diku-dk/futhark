@@ -37,7 +37,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
@@ -61,6 +61,29 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
+lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
+  let fname :: String
+      (fname, ty) =
+        case primByteSize t :: Int of
+          1 -> ("lmad_copy_1b", [C.cty|typename uint8_t|])
+          2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
+          4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
+          8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
+          k -> error $ "lmadcopyCPU: " <> error (show k)
+      r = length shape
+      dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
+      srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
+      shape_inits = [[C.cinit|$exp:e|] | Count e <- shape]
+  stm
+    [C.cstm|
+         $id:fname(ctx, $int:r,
+                   ($ty:ty*) $exp:dst, $exp:(unCount dstoffset),
+                   (typename int64_t[]){ $inits:dststride_inits },
+                   ($ty:ty*) $exp:src, $exp:(unCount srcoffset),
+                   (typename int64_t[]){ $inits:srcstride_inits },
+                   (typename int64_t[]){ $inits:shape_inits });|]
+
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
 -- memory management.
@@ -72,6 +95,7 @@ defaultOperations =
       opsAllocate = defAllocate,
       opsDeallocate = defDeallocate,
       opsCopy = defCopy,
+      opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsMemoryType = defMemoryType,
       opsCompiler = defCompiler,
       opsFatMemory = True,
@@ -174,20 +198,11 @@ defineMemorySpace space = do
     return ret;
   }
 
-  long long new_usage = ctx->$id:usagename + size;
   if (ctx->detail_memory) {
-    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (then allocated: %lld bytes)",
+    fprintf(ctx->log, "Allocating %lld bytes for %s in %s (currently allocated: %lld bytes).\n",
             (long long) size,
             desc, $string:spacedesc,
-            new_usage);
-  }
-  if (new_usage > ctx->$id:peakname) {
-    ctx->$id:peakname = new_usage;
-    if (ctx->detail_memory) {
-      fprintf(ctx->log, " (new peak).\n");
-    }
-  } else if (ctx->detail_memory) {
-    fprintf(ctx->log, ".\n");
+            (long long) ctx->$id:usagename);
   }
 
   $items:alloc
@@ -197,7 +212,20 @@ defineMemorySpace space = do
     *(block->references) = 1;
     block->size = size;
     block->desc = desc;
+    long long new_usage = ctx->$id:usagename + size;
+    if (ctx->detail_memory) {
+      fprintf(ctx->log, "Received block of %lld bytes; now allocated: %lld bytes",
+              (long long)block->size, new_usage);
+    }
     ctx->$id:usagename = new_usage;
+    if (new_usage > ctx->$id:peakname) {
+      ctx->$id:peakname = new_usage;
+      if (ctx->detail_memory) {
+        fprintf(ctx->log, " (new peak).\n");
+      }
+    } else if (ctx->detail_memory) {
+        fprintf(ctx->log, ".\n");
+    }
     return FUTHARK_SUCCESS;
   } else {
     // We are naively assuming that any memory allocation error is due to OOM.
@@ -298,11 +326,14 @@ disableWarnings =
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wunused-const-variable"
 #pragma clang diagnostic ignored "-Wparentheses"
 #pragma clang diagnostic ignored "-Wunused-label"
+#pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #elif __GNUC__
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-const-variable"
 #pragma GCC diagnostic ignored "-Wparentheses"
 #pragma GCC diagnostic ignored "-Wunused-label"
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
@@ -332,7 +363,7 @@ relevantParams fname m =
   map fst $ filter ((fname `S.member`) . snd . snd) $ M.toList m
 
 compileProg' ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->
@@ -404,6 +435,7 @@ $errorsH
 #undef NDEBUG
 #include <assert.h>
 #include <stdarg.h>
+#define SCALAR_FUN_ATTR static inline
 $utilH
 $cacheH
 $halfH
@@ -438,6 +470,10 @@ $contextPrototypesH
 $early_decls
 
 $contextH
+
+$copyH
+
+#define FUTHARK_FUN_ATTR static
 
 $prototypes
 
@@ -514,7 +550,7 @@ $entry_point_decls
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   T.Text ->
   T.Text ->
   ParamMap ->

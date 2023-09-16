@@ -64,7 +64,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Sequence qualified as SQ
 import Data.Set (Set, (\\))
 import Data.Set qualified as S
@@ -127,9 +127,9 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let _ _ (Match cond _ _ _)) mt =
   all ((== MoveToDevice) . (`statusOf` mt)) $ subExpVars cond
-shouldMoveStm (Let _ _ (DoLoop _ (ForLoop _ _ (Var n) _) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (ForLoop _ _ (Var n) _) _)) mt =
   statusOf n mt == MoveToDevice
-shouldMoveStm (Let _ _ (DoLoop _ (WhileLoop n) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (WhileLoop n) _)) mt =
   statusOf n mt == MoveToDevice
 -- BasicOp and Apply statements might not bind any variables (shouldn't happen).
 -- If statements might use a constant branch condition.
@@ -216,7 +216,7 @@ checkFunDef fun = do
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
     checkExp (Match _ cases defbody _) =
       mconcat <$> mapM checkBody (defbody : map caseBody cases)
-    checkExp (DoLoop params lform body) = do
+    checkExp (Loop params lform body) = do
       checkLParams params
       checkLoopForm lform
       checkBody body
@@ -296,7 +296,7 @@ analyseStms hof usage stms =
 --                                TYPE HELPERS                                --
 --------------------------------------------------------------------------------
 
-isScalar :: Typed t => t -> Bool
+isScalar :: (Typed t) => t -> Bool
 isScalar = isScalarType . typeOf
 
 isScalarType :: TypeBase shape u -> Bool
@@ -304,10 +304,10 @@ isScalarType (Prim Unit) = False
 isScalarType (Prim _) = True
 isScalarType _ = False
 
-isArray :: Typed t => t -> Bool
+isArray :: (Typed t) => t -> Bool
 isArray = isArrayType . typeOf
 
-isArrayType :: ArrayShape shape => TypeBase shape u -> Bool
+isArrayType :: (ArrayShape shape) => TypeBase shape u -> Bool
 isArrayType = (0 <) . arrayRank
 
 --------------------------------------------------------------------------------
@@ -507,7 +507,7 @@ graphStm stm = do
       graphApply fn bs e
     Match ses cases defbody _ ->
       graphMatch bs ses cases defbody
-    DoLoop params lform body ->
+    Loop params lform body ->
       graphLoop bs params lform body
     WithAcc inputs f ->
       graphWithAcc bs inputs f
@@ -700,7 +700,7 @@ graphLoop (b : bs) params lform body = do
   unless may_migrate $ case lform of
     ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
     WhileLoop n
-      | (_, p, _, res) <- loopValueFor n -> do
+      | Just (_, p, _, res) <- loopValueFor n -> do
           connectToSink p
           case res of
             Var v -> connectToSink (nameToId v)
@@ -741,8 +741,9 @@ graphLoop (b : bs) params lform body = do
     ForLoop _ _ n _ ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
-      | (_, _, arg, _) <- loopValueFor n ->
+      | Just (_, _, arg, _) <- loopValueFor n ->
           onlyGraphedScalarSubExp arg >>= addEdges (ToNodes bindings Nothing)
+    _ -> pure ()
   where
     subgraphId :: Id
     subgraphId = fst b
@@ -759,9 +760,8 @@ graphLoop (b : bs) params lform body = do
     bindings :: IdSet
     bindings = IS.fromList $ map (\((i, _), _, _, _) -> i) loopValues
 
-    loopValueFor :: VName -> LoopValue
     loopValueFor n =
-      fromJust $ find (\(_, p, _, _) -> p == nameToId n) loopValues
+      find (\(_, p, _, _) -> p == nameToId n) loopValues
 
     graphTheLoop :: Grapher ()
     graphTheLoop = do
@@ -1012,7 +1012,7 @@ graphedScalarOperands e =
       mapM_ collectSubExp ses
       mapM_ (collectBody . caseBody) cases
       collectBody defbody
-    collect (DoLoop params lform body) = do
+    collect (Loop params lform body) = do
       mapM_ (collectSubExp . snd) params
       collectLForm lform
       collectBody body
@@ -1504,7 +1504,7 @@ outermostCopyableArray n = IM.lookup (nameToId n) <$> getCopyableMemory
 -- | Reduces the variables to just the 'Id's of those that are scalars and which
 -- have a vertex representation in the graph, excluding those that have been
 -- connected to sinks.
-onlyGraphedScalars :: Foldable t => t VName -> Grapher IdSet
+onlyGraphedScalars :: (Foldable t) => t VName -> Grapher IdSet
 onlyGraphedScalars vs = do
   let is = foldl' (\s n -> IS.insert (nameToId n) s) IS.empty vs
   IS.intersection is <$> getGraphedScalars

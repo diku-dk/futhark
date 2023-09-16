@@ -32,7 +32,7 @@ import Futhark.Transform.CopyPropagate
   )
 import Futhark.Transform.Rename
 
-parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+parMapM :: (MonadFreshNames m) => (a -> State VNameSource b) -> [a] -> m [b]
 -- The special-casing of [] is quite important here!  If 'as' is
 -- empty, then we might otherwise create an empty name source below,
 -- which can wreak all kinds of havoc.
@@ -50,7 +50,7 @@ parMapM f as =
 -- simplification rates used have been determined heuristically and
 -- are probably not optimal for any given program.
 inlineFunctions ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Int ->
   CallGraph ->
   S.Set Name ->
@@ -119,14 +119,14 @@ inlineBecauseTiny = foldMap onFunDef . progFuns
 
 -- Conservative inlining of functions that are called just once, or
 -- have #[inline] on them.
-consInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+consInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 consInlineFunctions prog =
   inlineFunctions 4 cg (calledOnce cg <> inlineBecauseTiny prog) prog
   where
     cg = buildCallGraph prog
 
 -- Inline everything that is not #[noinline].
-aggInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+aggInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
   inlineFunctions 3 cg (S.fromList $ map funDefName $ progFuns prog) prog
   where
@@ -138,7 +138,7 @@ aggInlineFunctions prog =
 -- importantly, the functions in @fdmap@ do not call any other
 -- functions.
 inlineInFunDef ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
@@ -146,7 +146,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
   FunDef entry attrs name rtp args <$> inlineInBody fdmap body
 
 inlineFunction ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
@@ -180,7 +180,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
     notmempty = (/= mempty) . locOf
 
 inlineInStms ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Stms SOACS ->
   m (Stms SOACS)
@@ -188,7 +188,7 @@ inlineInStms fdmap stms =
   bodyStms <$> inlineInBody fdmap (mkBody stms [])
 
 inlineInBody ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Body SOACS ->
   m (Body SOACS)

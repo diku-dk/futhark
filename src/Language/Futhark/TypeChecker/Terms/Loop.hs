@@ -1,10 +1,10 @@
 -- | Type inference of @loop@.  This is complicated because of the
 -- uniqueness and size inference, so the implementation is separate
 -- from the main type checker.
-module Language.Futhark.TypeChecker.Terms.DoLoop
+module Language.Futhark.TypeChecker.Terms.Loop
   ( UncheckedLoop,
     CheckedLoop,
-    checkDoLoop,
+    checkLoop,
   )
 where
 
@@ -30,7 +30,7 @@ import Prelude hiding (mod)
 -- | Retrieve an oracle that can be used to decide whether two are in
 -- the same equivalence class (i.e. have been unified).  This is an
 -- exotic operation.
-getAreSame :: MonadUnify m => m (VName -> VName -> Bool)
+getAreSame :: (MonadUnify m) => m (VName -> VName -> Bool)
 getAreSame = check <$> getConstraints
   where
     check constraints x y =
@@ -110,12 +110,12 @@ type CheckedLoop =
 
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
-checkDoLoop ::
+checkLoop ::
   (UncheckedExp -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
-checkDoLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
+checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   mergeexp' <- checkExp mergeexp
   known_before <- M.keysSet <$> getConstraints
   zeroOrderType

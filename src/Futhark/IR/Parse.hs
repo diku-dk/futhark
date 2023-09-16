@@ -104,7 +104,7 @@ pNonArray =
     ]
 
 pTypeBase ::
-  ArrayShape shape =>
+  (ArrayShape shape) =>
   Parser shape ->
   Parser u ->
   Parser (TypeBase shape u)
@@ -479,7 +479,7 @@ pApply pr =
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
   keyword "loop"
-    $> DoLoop
+    $> Loop
     <*> pLoopParams
     <*> pLoopForm
     <* keyword "do"
@@ -978,9 +978,8 @@ pIxFunBase pNum =
     pLMAD = braces $ do
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
-      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
-      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith3 IxFun.LMADDim strides shape perm
+      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma)
+      pure $ IxFun.LMAD offset $ zipWith IxFun.LMADDim strides shape
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName

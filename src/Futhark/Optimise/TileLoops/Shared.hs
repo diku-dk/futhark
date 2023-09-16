@@ -36,13 +36,13 @@ data TileKind = TilePartial | TileFull
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
-index :: MonadBuilder m => String -> VName -> [VName] -> m VName
+index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
 index se_desc arr outer_indices = do
   arr_t <- lookupType arr
   let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
-update :: MonadBuilder m => String -> VName -> [VName] -> SubExp -> m VName
+update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr indices new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
 
@@ -67,7 +67,7 @@ forLoop' i_bound merge body = do
         map paramName loop_inits
 
   letTupExp "loop" $
-    DoLoop (zip loop_inits $ map Var merge) loop_form loop_body
+    Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
   SubExp ->

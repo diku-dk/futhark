@@ -82,9 +82,9 @@ lowerAllocationsInStms (stm@(Let _ _ (Match cond_ses cases body dec)) :<| stms) 
   let stm' = stm {stmExp = Match cond_ses cases' body' dec}
       (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
-lowerAllocationsInStms (stm@(Let _ _ (DoLoop params form body)) :<| stms) alloc acc = do
+lowerAllocationsInStms (stm@(Let _ _ (Loop params form body)) :<| stms) alloc acc = do
   body' <- lowerAllocationsInBody body
-  let stm' = stm {stmExp = DoLoop params form body'}
+  let stm' = stm {stmExp = Loop params form body'}
       (alloc', acc') = insertLoweredAllocs (freeIn stm) alloc acc
   lowerAllocationsInStms stms alloc' (acc' :|> stm')
 lowerAllocationsInStms (stm :<| stms) alloc acc = do

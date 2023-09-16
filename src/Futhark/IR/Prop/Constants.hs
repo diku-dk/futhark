@@ -61,7 +61,7 @@ instance IsValue FloatValue where
   value = FloatValue
 
 -- | Create a 'Constant' 'SubExp' containing the given value.
-constant :: IsValue v => v -> SubExp
+constant :: (IsValue v) => v -> SubExp
 constant = Constant . value
 
 -- | Utility definition for reasons of type ambiguity.

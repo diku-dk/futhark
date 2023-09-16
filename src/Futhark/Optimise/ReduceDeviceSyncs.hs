@@ -195,7 +195,7 @@ optimizeStm out stm = do
 
         -- Read migrated scalars that are used on host.
         foldM addRead (out |> stm') (zip pes pes')
-      DoLoop ps lf b -> do
+      Loop ps lf b -> do
         -- Enable the migration of for-in loop variables.
         (params, lform, body) <- rewriteForIn (ps, lf, b)
 
@@ -249,7 +249,7 @@ optimizeStm out stm = do
         let body3 = body2 {bodyStms = bstms, bodyResult = reverse res}
 
         -- Rewrite statement.
-        let e' = DoLoop params' lform body3
+        let e' = Loop params' lform body3
         let stm' = Let (Pat pes') (stmAux stm) e'
 
         -- Read migrated scalars that are used on host.
@@ -393,7 +393,7 @@ newtype ReduceM a = ReduceM (StateT State (Reader MigrationTable) a)
       MonadReader MigrationTable
     )
 
-runReduceM :: MonadFreshNames m => MigrationTable -> ReduceM a -> m a
+runReduceM :: (MonadFreshNames m) => MigrationTable -> ReduceM a -> m a
 runReduceM mt (ReduceM m) = modifyNameSource $ \src ->
   second stateNameSource (runReader (runStateT m (initialState src)) mt)
 

@@ -103,7 +103,7 @@ transformStmRecursively (Let pat aux e) =
 
 -- Produce scratch "arrays" for the Map and Scan outputs of Screma.
 -- "Arrays" is in quotes because some of those may be accumulators.
-resultArray :: Transformer m => [VName] -> [Type] -> m [VName]
+resultArray :: (Transformer m) => [VName] -> [Type] -> m [VName]
 resultArray arrs ts = do
   arrs_ts <- mapM lookupType arrs
   let oneArray t@Acc {}
@@ -117,7 +117,7 @@ resultArray arrs ts = do
 -- is untouched, and may or may not contain further 'SOAC's depending
 -- on the given rep.
 transformSOAC ::
-  Transformer m =>
+  (Transformer m) =>
   Pat (LetDec (Rep m)) ->
   SOAC (Rep m) ->
   m ()
@@ -225,7 +225,7 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
   names <-
     (++ patNames pat)
       <$> replicateM (length scanacc_params) (newVName "discard")
-  letBindNames names $ DoLoop merge loopform loop_body
+  letBindNames names $ Loop merge loopform loop_body
 transformSOAC pat (Stream w arrs nes lam) = do
   -- Create a loop that repeatedly applies the lambda body to a
   -- chunksize of 1.  Hopefully this will lead to this outer loop
@@ -280,7 +280,7 @@ transformSOAC pat (Stream w arrs nes lam) = do
 
       mkBodyM mempty $ subExpsRes $ res' ++ mapout_res'
 
-  letBind pat $ DoLoop merge loop_form loop_body
+  letBind pat $ Loop merge loop_form loop_body
 transformSOAC pat (Scatter len ivs lam as) = do
   iter <- newVName "write_iter"
 
@@ -308,7 +308,7 @@ transformSOAC pat (Scatter len ivs lam as) = do
 
         foldM saveInArray arr indexes'
       pure $ resultBody (map Var ress)
-  letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ Loop merge (ForLoop iter Int64 len []) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
 
@@ -364,7 +364,7 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
     pure $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
-  letBind pat $ DoLoop merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ Loop merge (ForLoop iter Int64 len []) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
@@ -385,7 +385,7 @@ transformLambda (Lambda params body rettype) = do
         transformBody body
   pure $ Lambda params body' rettype
 
-letwith :: Transformer m => [VName] -> SubExp -> [SubExp] -> m [VName]
+letwith :: (Transformer m) => [VName] -> SubExp -> [SubExp] -> m [VName]
 letwith ks i vs = do
   let update k v = do
         k_t <- lookupType k
@@ -397,7 +397,7 @@ letwith ks i vs = do
   zipWithM update ks vs
 
 bindLambda ::
-  Transformer m =>
+  (Transformer m) =>
   AST.Lambda (Rep m) ->
   [AST.Exp (Rep m)] ->
   m Result
@@ -409,7 +409,7 @@ bindLambda (Lambda params body _) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
-loopMerge vars = loopMerge' $ zip vars $ repeat Unique
+loopMerge vars = loopMerge' $ map (,Unique) vars
 
 loopMerge' :: [(Ident, Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
 loopMerge' vars vals =

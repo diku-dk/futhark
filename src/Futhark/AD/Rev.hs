@@ -278,7 +278,7 @@ diffStm stm@(Let pat _ (Match ses cases defbody _)) m = do
     zipWithM_ insAdj branches_free branches_free_adj
 diffStm (Let pat aux (Op soac)) m =
   vjpSOAC vjpOps pat aux soac m
-diffStm (Let pat aux loop@DoLoop {}) m =
+diffStm (Let pat aux loop@Loop {}) m =
   diffLoop diffStms pat aux loop m
 -- See Note [Adjoints of accumulators]
 diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
@@ -343,7 +343,7 @@ diffLambda res_adjs get_adjs_for (Lambda params body _) =
     ts' <- mapM lookupType get_adjs_for
     pure $ Lambda params body' ts'
 
-revVJP :: MonadFreshNames m => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
+revVJP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
 revVJP scope (Lambda params body ts) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->

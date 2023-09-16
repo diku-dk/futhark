@@ -305,15 +305,25 @@ data TermBinding
     TermPoly (Maybe T.BoundV) (StructType -> Eval -> EvalM Value)
   | TermModule Module
 
+instance Show TermBinding where
+  show (TermValue bv v) = unwords ["TermValue", show bv, show v]
+  show (TermPoly bv _) = unwords ["TermPoly", show bv]
+  show (TermModule m) = unwords ["TermModule", show m]
+
 data Module
   = Module Env
   | ModuleFun (Module -> EvalM Module)
+
+instance Show Module where
+  show (Module env) = "(" <> unwords ["Module", show env] <> ")"
+  show (ModuleFun _) = "(ModuleFun _)"
 
 -- | The actual type- and value environment.
 data Env = Env
   { envTerm :: M.Map VName TermBinding,
     envType :: M.Map VName T.TypeBinding
   }
+  deriving (Show)
 
 instance Monoid Env where
   mempty = Env mempty mempty
@@ -530,7 +540,7 @@ writeArray :: [Indexing] -> Value -> Value -> Maybe Value
 writeArray slice x y = runIdentity $ updateArray (\_ y' -> pure y') slice x y
 
 updateArray ::
-  Monad m =>
+  (Monad m) =>
   (Value -> Value -> m Value) ->
   [Indexing] ->
   Value ->
@@ -584,7 +594,7 @@ evalIndex loc env is arr = do
 
 -- | Expand type based on information that was not available at
 -- type-checking time (the structure of abstract types).
-expandType :: Env -> TypeBase Size u -> TypeBase Size u
+expandType :: (Pretty u) => Env -> TypeBase Size u -> TypeBase Size u
 expandType _ (Scalar (Prim pt)) = Scalar $ Prim pt
 expandType env (Scalar (Record fs)) = Scalar $ Record $ fmap (expandType env) fs
 expandType env (Scalar (Arrow u p d t1 (RetType dims t2))) =
@@ -649,12 +659,14 @@ evalTermVar env qv t =
   case lookupVar qv env of
     Just (TermPoly _ v) -> v (expandType env t) =<< evalWithExts env
     Just (TermValue _ v) -> pure v
-    _ -> do
+    x -> do
       ss <- map (locText . srclocOf) <$> stacktrace
       error $
         prettyString qv
           <> " is not bound to a value.\n"
           <> T.unpack (prettyStacktrace 0 ss)
+          <> "Bound to\n"
+          <> show x
 
 typeValueShape :: Env -> StructType -> EvalM ValueShape
 typeValueShape env t = do
@@ -853,7 +865,7 @@ evalAppExp env (LetWith dest src is v body loc) = do
   eval (valEnv (M.singleton (identName dest) (Just t, dest')) <> env) body
   where
     oob = bad loc env "Update out of bounds"
-evalAppExp env (DoLoop sparams pat init_e form body _) = do
+evalAppExp env (Loop sparams pat init_e form body _) = do
   init_v <- eval env init_e
   case form of
     For iv bound -> do
@@ -1118,7 +1130,13 @@ evalModuleVar env qv =
     Just (TermModule m) -> pure m
     _ -> error $ prettyString qv <> " is not bound to a module."
 
-evalModExp :: Env -> ModExp -> EvalM Module
+-- We also return a new Env here, because we want the definitions
+-- inside any constructed modules to also be in scope at the top
+-- level. This is because types may contain un-qualified references to
+-- definitions in modules, and sometimes those definitions may not
+-- actually *have* any qualified name!  See tests/modules/sizes7.fut.
+-- This occurs solely because of evalType.
+evalModExp :: Env -> ModExp -> EvalM (Env, Module)
 evalModExp _ (ModImport _ (Info f) _) = do
   f' <- lookupImport f
   known <- asks snd
@@ -1129,33 +1147,47 @@ evalModExp _ (ModImport _ (Info f) _) = do
           [ "Unknown interpreter import: " ++ show f,
             "Known: " ++ show (M.keys known)
           ]
-    Just m -> pure $ Module m
+    Just m -> pure (mempty, Module m)
 evalModExp env (ModDecs ds _) = do
   Env terms types <- foldM evalDec env ds
   -- Remove everything that was present in the original Env.
-  pure $
-    Module $
-      Env
+  pure
+    ( Env
         (terms `M.difference` envTerm env)
-        (types `M.difference` envType env)
+        (types `M.difference` envType env),
+      Module $
+        Env
+          (terms `M.difference` envTerm env)
+          (types `M.difference` envType env)
+    )
 evalModExp env (ModVar qv _) =
-  evalModuleVar env qv
+  (mempty,) <$> evalModuleVar env qv
 evalModExp env (ModAscript me _ (Info substs) _) =
-  substituteInModule substs <$> evalModExp env me
-evalModExp env (ModParens me _) = evalModExp env me
+  bimap substituteInEnv (substituteInModule substs) <$> evalModExp env me
+  where
+    substituteInEnv env' =
+      let Module env'' = substituteInModule substs (Module env') in env''
+evalModExp env (ModParens me _) =
+  evalModExp env me
 evalModExp env (ModLambda p ret e loc) =
-  pure $
-    ModuleFun $ \am -> do
-      let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
-      evalModExp env' $ case ret of
-        Nothing -> e
-        Just (se, rsubsts) -> ModAscript e se rsubsts loc
+  pure
+    ( mempty,
+      ModuleFun $ \am -> do
+        let env' = env {envTerm = M.insert (modParamName p) (TermModule am) $ envTerm env}
+        fmap snd . evalModExp env' $ case ret of
+          Nothing -> e
+          Just (se, rsubsts) -> ModAscript e se rsubsts loc
+    )
 evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
-  f' <- evalModExp env f
+  (f_env, f') <- evalModExp env f
+  (e_env, e') <- evalModExp env e
   case f' of
     ModuleFun f'' -> do
-      e' <- evalModExp env e
-      substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+      res_mod <- substituteInModule rsubst <$> f'' (substituteInModule psubst e')
+      let res_env = case res_mod of
+            Module x -> x
+            _ -> mempty
+      pure (f_env <> e_env <> res_env, res_mod)
     _ -> error "Expected ModuleFun."
 
 evalDec :: Env -> Dec -> EvalM Env
@@ -1165,9 +1197,9 @@ evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localEx
   pure $
     env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
-  me' <- evalModExp env me
+  (me_env, me') <- evalModExp env me
   case me' of
-    Module me'' -> pure $ me'' <> env
+    Module me'' -> pure $ me'' <> me_env <> env
     _ -> error "Expected Module"
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
@@ -1177,8 +1209,8 @@ evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
   let abbr = T.TypeAbbr l ps . RetType dims $ expandType env t
   pure env {envType = M.insert v abbr $ envType env}
 evalDec env (ModDec (ModBind v ps ret body _ loc)) = do
-  mod <- evalModExp env $ wrapInLambda ps
-  pure $ modEnv (M.singleton v mod) <> env
+  (mod_env, mod) <- evalModExp env $ wrapInLambda ps
+  pure $ modEnv (M.singleton v mod) <> mod_env <> env
   where
     wrapInLambda [] = case ret of
       Just (se, substs) -> ModAscript body se substs loc
@@ -1960,7 +1992,9 @@ checkEntryArgs entry args entry_t
       | null param_ts =
           "Entry point " <> dquotes (prettyName entry) <> " is not a function."
       | otherwise =
-          "Entry point " <> dquotes (prettyName entry) <> " expects input of type(s)"
+          "Entry point "
+            <> dquotes (prettyName entry)
+            <> " expects input of type(s)"
             </> indent 2 (stack (map pretty param_ts))
 
 -- | Execute the named function on the given arguments; may fail
@@ -1994,12 +2028,18 @@ interpretFunction ctx fname vs = do
     updateType _ t =
       Right t
 
-    -- FIXME: we don't check array sizes.
     checkInput :: ValueType -> StructType -> Either T.Text ()
     checkInput (Scalar (Prim vt)) (Scalar (Prim pt))
       | vt /= pt = badPrim vt pt
     checkInput (Array _ _ (Prim vt)) (Array _ _ (Prim pt))
       | vt /= pt = badPrim vt pt
+    checkInput vArr@(Array _ (F.Shape vd) _) pArr@(Array _ (F.Shape pd) _)
+      | length vd /= length pd = badDim vArr pArr
+      | not . and $ zipWith sameShape vd pd = badDim vArr pArr
+      where
+        sameShape :: Int64 -> Size -> Bool
+        sameShape shape0 (IntLit shape1 _ _) = fromIntegral shape0 == shape1
+        sameShape _ _ = True
     checkInput _ _ =
       Right ()
 
@@ -2010,3 +2050,11 @@ interpretFunction ctx fname vs = do
           <+> align (pretty pt)
           </> "Got:     "
           <+> align (pretty vt)
+
+    badDim vd pd =
+      Left . docText $
+        "Invalid argument dimensions."
+          </> "Expected:"
+          <+> align (pretty pd)
+          </> "Got:     "
+          <+> align (pretty vd)

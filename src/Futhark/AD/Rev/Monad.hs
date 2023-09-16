@@ -125,7 +125,7 @@ instance Substitute Adj where
   substituteNames m (AdjVal (Var v)) = AdjVal $ Var $ substituteNames m v
   substituteNames _ adj = adj
 
-zeroArray :: MonadBuilder m => Shape -> Type -> m VName
+zeroArray :: (MonadBuilder m) => Shape -> Type -> m VName
 zeroArray shape t
   | shapeRank shape == 0 =
       letExp "zero" $ zeroExp t
@@ -217,7 +217,7 @@ instance MonadFreshNames (State RState) where
   getNameSource = gets stateNameSource
   putNameSource src = modify (\env -> env {stateNameSource = src})
 
-runADM :: MonadFreshNames m => ADM a -> m a
+runADM :: (MonadFreshNames m) => ADM a -> m a
 runADM (ADM m) =
   modifyNameSource $ \vn ->
     second stateNameSource $

@@ -40,7 +40,7 @@ import Futhark.Util
 -- table) until all vars appearing in the index function are defined in the
 -- current scope?"
 freeVarSubstitutions ::
-  FreeIn a =>
+  (FreeIn a) =>
   ScopeTab rep ->
   ScalarTab ->
   a ->
@@ -135,7 +135,8 @@ getUseSumFromStm td_env coal_tab (Let (Pat ys) _ (BasicOp (Replicate _shp se))) 
         Var x -> Just (ws, ws ++ mapMaybe (getDirAliasedIxfn td_env coal_tab) [x])
 getUseSumFromStm td_env coal_tab (Let (Pat [x]) _ (BasicOp (FlatUpdate _ (FlatSlice offset slc) v)))
   | Just (m_b, m_x, x_ixfn) <- getDirAliasedIxfn td_env coal_tab (patElemName x) = do
-      x_ixfn_slc <- IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
+      let x_ixfn_slc =
+            IxFun.flatSlice x_ixfn $ FlatSlice (pe64 offset) $ map (fmap pe64) slc
       let r1 = (m_b, m_x, x_ixfn_slc)
       case getDirAliasedIxfn td_env coal_tab v of
         Nothing -> Just ([r1], [r1])
@@ -298,7 +299,7 @@ noMemOverlap _ _ _ = False
 --   \bigcup_{j=0}^{j<n} Access_j
 -- \]
 aggSummaryLoopTotal ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScopeTab rep ->
   ScopeTab rep ->
   ScalarTab ->
@@ -335,7 +336,7 @@ aggSummaryLoopTotal _ _ _ _ _ = pure Undeterminable
 --   \bigcup_{j=i+1}^{j<n} Access_j
 -- \]
 aggSummaryLoopPartial ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ScalarTab ->
   Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName)) ->
   AccessSummary ->
@@ -372,7 +373,7 @@ aggSummaryLoopPartial scalars_loop (Just (iterator_var, (_, upper_bound))) (Set 
 -- total aggregation of the inner dimensions. For outer dimensions, the equation
 -- is the same, the point accesses in $Access_j$ are replaced with the total
 -- aggregation of the inner dimensions.
-aggSummaryMapPartial :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
+aggSummaryMapPartial :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> LmadRef -> m AccessSummary
 aggSummaryMapPartial _ [] = const $ pure mempty
 aggSummaryMapPartial scalars dims =
   helper mempty (reverse dims) . Set . S.singleton -- Reverse dims so we work from the inside out
@@ -396,7 +397,7 @@ aggSummaryMapPartial scalars dims =
 -- \[
 --   \bigcup_{j=0}^{j<i} a_j \cup \bigcup_{j=i+1}^{j<n} a_j
 -- \]
-aggSummaryMapPartialOne :: MonadFreshNames m => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
+aggSummaryMapPartialOne :: (MonadFreshNames m) => ScalarTab -> (VName, SubExp) -> AccessSummary -> m AccessSummary
 aggSummaryMapPartialOne _ _ Undeterminable = pure Undeterminable
 aggSummaryMapPartialOne _ (_, Constant n) (Set _) | oneIsh n = pure mempty
 aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
@@ -412,7 +413,7 @@ aggSummaryMapPartialOne scalars (gtid, size) (Set lmads0) =
     helper (x, y) = concatMapM (aggSummaryOne gtid x y) lmads
 
 -- | Computes to total access summary over a multi-dimensional map.
-aggSummaryMapTotal :: MonadFreshNames m => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
+aggSummaryMapTotal :: (MonadFreshNames m) => ScalarTab -> [(VName, SubExp)] -> AccessSummary -> m AccessSummary
 aggSummaryMapTotal _ [] _ = pure mempty
 aggSummaryMapTotal _ _ (Set lmads)
   | lmads == mempty = pure mempty
@@ -446,7 +447,7 @@ aggSummaryMapTotal scalars segspace (Set lmads0) =
 --
 -- The function returns 'Underterminable' if the iterator is free in the output
 -- LMAD or the dimensions of the input LMAD .
-aggSummaryOne :: MonadFreshNames m => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
+aggSummaryOne :: (MonadFreshNames m) => VName -> TPrimExp Int64 VName -> TPrimExp Int64 VName -> LmadRef -> m AccessSummary
 aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
   | iterator_var `nameIn` freeIn dims0 = pure Undeterminable
   | iterator_var `notNameIn` freeIn offset0 = pure $ Set $ S.singleton lmad
@@ -457,13 +458,11 @@ aggSummaryOne iterator_var lower_bound spn lmad@(IxFun.LMAD offset0 dims0)
           new_stride = TPrimExp $ constFoldPrimExp $ simplify $ untyped $ offsetp1 - offset
           new_offset = replaceIteratorWith lower_bound offset0
           new_lmad =
-            IxFun.LMAD new_offset $
-              IxFun.LMADDim new_stride spn 0 : map incPerm dims0
+            IxFun.LMAD new_offset $ IxFun.LMADDim new_stride spn : dims0
       if new_var `nameIn` freeIn new_lmad
         then pure Undeterminable
         else pure $ Set $ S.singleton new_lmad
   where
-    incPerm dim = dim {IxFun.ldPerm = IxFun.ldPerm dim + 1}
     replaceIteratorWith se = TPrimExp . substituteInPrimExp (M.singleton iterator_var $ untyped se) . untyped
 
 -- | Takes a 'VName' and converts it into a 'TPrimExp' with type 'Int64'.

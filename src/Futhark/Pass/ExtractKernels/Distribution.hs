@@ -108,10 +108,10 @@ popInnerTarget (Targets t ts) =
     x : xs -> Just (t, Targets x $ reverse xs)
     [] -> Nothing
 
-targetScope :: DistRep rep => Target -> Scope rep
+targetScope :: (DistRep rep) => Target -> Scope rep
 targetScope = scopeOfPat . fst
 
-targetsScope :: DistRep rep => Targets -> Scope rep
+targetsScope :: (DistRep rep) => Targets -> Scope rep
 targetsScope (Targets t ts) = mconcat $ map targetScope $ t : ts
 
 data LoopNesting = MapNesting
@@ -225,7 +225,7 @@ newKernel nest = (nest, [])
 kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
 
-scopeOfKernelNest :: LParamInfo rep ~ Type => KernelNest -> Scope rep
+scopeOfKernelNest :: (LParamInfo rep ~ Type) => KernelNest -> Scope rep
 scopeOfKernelNest = foldMap scopeOfLoopNesting . kernelNestLoops
 
 boundInKernelNest :: KernelNest -> Names
@@ -248,7 +248,7 @@ constructKernel ::
 constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
   (ispace, inps) <- flatKernel kernel_nest
   let aux = loopNestingAux first_nest
-      ispace_scope = M.fromList $ zip (map fst ispace) $ repeat $ IndexName Int64
+      ispace_scope = M.fromList $ map ((,IndexName Int64) . fst) ispace
       pat = loopNestingPat first_nest
       rts = map (stripArray (length ispace)) $ patTypes pat
 
@@ -273,7 +273,7 @@ constructKernel mk_lvl kernel_nest inner_body = runBuilderT' $ do
 --
 --  (2) The kernel inputs - note that some of these may be unused.
 flatKernel ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   KernelNest ->
   m ([(VName, SubExp)], [KernelInput])
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, []) = do
@@ -319,7 +319,7 @@ distributionInnerPat :: DistributionBody -> Pat Type
 distributionInnerPat = fst . innerTarget . distributionTarget
 
 distributionBodyFromStms ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Targets ->
   Stms rep ->
   (DistributionBody, Result)
@@ -340,7 +340,7 @@ distributionBodyFromStms (Targets (inner_pat, inner_res) targets) stms =
       )
 
 distributionBodyFromStm ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Targets ->
   Stm rep ->
   (DistributionBody, Result)

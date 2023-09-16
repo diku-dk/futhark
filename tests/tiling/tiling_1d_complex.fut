@@ -2,7 +2,7 @@
 -- still just 1D tiling.
 -- ==
 -- compiled random input { [2000]f32 [2000]f32 } auto output
--- structure gpu { SegMap/DoLoop/SegMap 2 }
+-- structure gpu { SegMap/Loop/SegMap 2 }
 
 type point = (f32,f32)
 

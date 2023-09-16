@@ -52,6 +52,7 @@ where
 
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Data.Either
@@ -65,6 +66,7 @@ import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
+import Language.Futhark.Traversals
 import Language.Futhark.Warnings
 import Paths_futhark qualified
 import Prelude hiding (mapM, mod)
@@ -121,13 +123,13 @@ withIndexLink href msg =
     ]
 
 -- | An unexpected functor appeared!
-unappliedFunctor :: MonadTypeChecker m => SrcLoc -> m a
+unappliedFunctor :: (MonadTypeChecker m) => SrcLoc -> m a
 unappliedFunctor loc =
   typeError loc mempty "Cannot have parametric module here."
 
 -- | An unknown variable was referenced.
 unknownVariable ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   Namespace ->
   QualName Name ->
   SrcLoc ->
@@ -137,13 +139,13 @@ unknownVariable space name loc =
     "Unknown" <+> pretty space <+> dquotes (pretty name)
 
 -- | An unknown type was referenced.
-unknownType :: MonadTypeChecker m => SrcLoc -> QualName Name -> m a
+unknownType :: (MonadTypeChecker m) => SrcLoc -> QualName Name -> m a
 unknownType loc name =
   typeError loc mempty $ "Unknown type" <+> pretty name <> "."
 
 -- | A name prefixed with an underscore was used.
 underscoreUse ::
-  MonadTypeChecker m =>
+  (MonadTypeChecker m) =>
   SrcLoc ->
   QualName Name ->
   m a
@@ -273,8 +275,8 @@ incCounter = do
 -- | Monads that support type checking.  The reason we have this
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
-class Monad m => MonadTypeChecker m where
-  warn :: Located loc => loc -> Doc () -> m ()
+class (Monad m) => MonadTypeChecker m where
+  warn :: (Located loc) => loc -> Doc () -> m ()
   warnings :: Warnings -> m ()
 
   newName :: VName -> m VName
@@ -292,16 +294,16 @@ class Monad m => MonadTypeChecker m where
 
   checkExpForSize :: UncheckedExp -> m Exp
 
-  typeError :: Located loc => loc -> Notes -> Doc () -> m a
+  typeError :: (Located loc) => loc -> Notes -> Doc () -> m a
 
 -- | Elaborate the given name in the given namespace at the given
 -- location, producing the corresponding unique 'VName'.
-checkName :: MonadTypeChecker m => Namespace -> Name -> SrcLoc -> m VName
+checkName :: (MonadTypeChecker m) => Namespace -> Name -> SrcLoc -> m VName
 checkName space name loc = qualLeaf <$> checkQualName space (qualName name) loc
 
 -- | Map source-level names do fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced :: MonadTypeChecker m => [(Namespace, Name)] -> m a -> m a
+bindSpaced :: (MonadTypeChecker m) => [(Namespace, Name)] -> m a -> m a
 bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList (zip names $ map qualName names')
@@ -442,8 +444,9 @@ qualifyTypeVars outer_env orig_except ref_qs = onType (S.fromList orig_except)
     onTypeArg except (TypeArgType t) =
       TypeArgType $ onType except t
 
-    onDim except (Var qn typ loc) = Var (qual except qn) typ loc
-    onDim _ d = d
+    onDim except e = runIdentity $ onDimM except e
+    onDimM except (Var qn typ loc) = pure $ Var (qual except qn) typ loc
+    onDimM except e = astMap (identityMapper {mapOnExp = onDimM except}) e
 
     qual except (QualName orig_qs name)
       | name `elem` except || reachable orig_qs name outer_env =
@@ -520,7 +523,7 @@ topLevelNameMap = M.filterWithKey (\k _ -> available k) intrinsicsNameMap
             map
               (nameFromText . prettyText)
               [minBound .. (maxBound :: BinOp)]
-        fun_names = S.fromList $ map nameFromString ["shape"]
+        fun_names = S.fromList [nameFromString "shape"]
     available _ = False
 
 -- | Construct the name of a new type variable given a base
@@ -534,7 +537,7 @@ mkTypeVarName desc i =
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 -- | Type-check an attribute.
-checkAttr :: MonadTypeChecker m => AttrInfo Name -> m (AttrInfo VName)
+checkAttr :: (MonadTypeChecker m) => AttrInfo Name -> m (AttrInfo VName)
 checkAttr (AttrComp f attrs loc) =
   AttrComp f <$> mapM checkAttr attrs <*> pure loc
 checkAttr (AttrAtom (AtomName v) loc) =

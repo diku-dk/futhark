@@ -15,7 +15,7 @@ import Futhark.MonadFreshNames
 
 -- | Compile the program to Python.
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   GenericPython.CompilerMode ->
   String ->
   Prog SeqMem ->

@@ -269,6 +269,12 @@ documentation and in compiler output.
      :term:`polymorphic` functions for each type it is used with.
      Performed by the Futhark compiler.
 
+   Name
+
+     A lexical token consisting of alphanumeric characters and
+     underscores, for example ``map`` and ``do_it``.  Most variables
+     are names.  See also :term:`symbol`.
+
    Nested data parallelism
 
      Nested :term:`data parallelism` occurs when a parallel construct
@@ -346,6 +352,12 @@ documentation and in compiler output.
      Futhark: functions such as ``map``, ``reduce``, ``scan``, and so
      on.  They are *second order* because they accept a functional
      argument, and so permit :term:`nested data parallelism`.
+
+   Symbol
+
+     A lexical token that consts of symbolic (non-alphabetic
+     characters), and can be bound to a value.  Infix operators such
+     as ``+`` and ``/`` are symbols.  See also :term:`name`.
 
    Type
 

@@ -56,7 +56,7 @@ instance MonadFreshNames FusionM where
   putNameSource source =
     modify (\env -> env {vNameSource = source})
 
-runFusionM :: MonadFreshNames m => Scope SOACS -> FusionEnv -> FusionM a -> m a
+runFusionM :: (MonadFreshNames m) => Scope SOACS -> FusionEnv -> FusionM a -> m a
 runFusionM scope fenv (FusionM a) = modifyNameSource $ \src ->
   let x = runReaderT a scope
       (y, z) = runState x (fenv {vNameSource = src})
@@ -401,10 +401,10 @@ doAllFusion =
 
 runInnerFusionOnContext :: DepContext -> FusionM DepContext
 runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
-  DoNode (Let pat aux (DoLoop params form body)) to_fuse ->
+  DoNode (Let pat aux (Loop params form body)) to_fuse ->
     doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
       b <- doFusionWithDelayed body to_fuse
-      pure (incoming, node, DoNode (Let pat aux (DoLoop params form b)) [], outgoing)
+      pure (incoming, node, DoNode (Let pat aux (Loop params form b)) [], outgoing)
   MatchNode (Let pat aux (Match cond cases defbody dec)) to_fuse -> doFuseScans $ do
     cases' <- mapM (traverse $ renameBody <=< (`doFusionWithDelayed` to_fuse)) cases
     defbody' <- doFusionWithDelayed defbody to_fuse

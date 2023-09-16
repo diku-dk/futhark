@@ -12,7 +12,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -42,9 +42,7 @@ makeLocalArrays (Count group_size) num_threads scans = do
               let shape' = Shape [num_threads] <> shape
               arr <-
                 lift . sArray "scan_arr" pt shape' mem $
-                  IxFun.iota $
-                    map pe64 $
-                      shapeDims shape'
+                  LMAD.iota 0 (map pe64 $ shapeDims shape')
               pure (arr, [])
             _ -> do
               let pt = elemType $ paramType p

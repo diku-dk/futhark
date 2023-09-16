@@ -230,7 +230,7 @@ instance OpMetrics SizeOp where
   opMetrics CmpSizeLe {} = seen "CmpSizeLe"
   opMetrics CalcNumGroups {} = seen "CalcNumGroups"
 
-typeCheckSizeOp :: TC.Checkable rep => SizeOp -> TC.TypeM rep ()
+typeCheckSizeOp :: (TC.Checkable rep) => SizeOp -> TC.TypeM rep ()
 typeCheckSizeOp GetSize {} = pure ()
 typeCheckSizeOp GetSizeMax {} = pure ()
 typeCheckSizeOp (CmpSizeLe _ _ x) = TC.require [Prim int64] x
@@ -251,7 +251,7 @@ data HostOp op rep
 
 -- | A helper for defining 'TraverseOpStms'.
 traverseHostOpStms ::
-  Monad m =>
+  (Monad m) =>
   OpStmsTraverser m (op rep) rep ->
   OpStmsTraverser m (HostOp op rep) rep
 traverseHostOpStms _ f (SegOp segop) = SegOp <$> traverseSegOpStms f segop
@@ -291,7 +291,7 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
     -- transfer scalars to device.
     SQ.null (bodyStms body) && all ((== 0) . arrayRank) types
 
-instance TypedOp (op rep) => TypedOp (HostOp op rep) where
+instance (TypedOp (op rep)) => TypedOp (HostOp op rep) where
   opType (SegOp op) = opType op
   opType (OtherOp op) = opType op
   opType (SizeOp op) = opType op
@@ -315,13 +315,13 @@ instance (ASTRep rep, FreeIn (op rep)) => FreeIn (HostOp op rep) where
   freeIn' (SizeOp op) = freeIn' op
   freeIn' (GPUBody ts body) = freeIn' ts <> freeIn' body
 
-instance CanBeAliased op => CanBeAliased (HostOp op) where
+instance (CanBeAliased op) => CanBeAliased (HostOp op) where
   addOpAliases aliases (SegOp op) = SegOp $ addOpAliases aliases op
   addOpAliases aliases (GPUBody ts body) = GPUBody ts $ Alias.analyseBody aliases body
   addOpAliases aliases (OtherOp op) = OtherOp $ addOpAliases aliases op
   addOpAliases _ (SizeOp op) = SizeOp op
 
-instance CanBeWise op => CanBeWise (HostOp op) where
+instance (CanBeWise op) => CanBeWise (HostOp op) where
   addOpWisdom (SegOp op) = SegOp $ addOpWisdom op
   addOpWisdom (OtherOp op) = OtherOp $ addOpWisdom op
   addOpWisdom (SizeOp op) = SizeOp op
@@ -345,19 +345,19 @@ instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (HostOp op rep) w
   opMetrics (SizeOp op) = opMetrics op
   opMetrics (GPUBody _ body) = inside "GPUBody" $ bodyMetrics body
 
-instance RephraseOp op => RephraseOp (HostOp op) where
+instance (RephraseOp op) => RephraseOp (HostOp op) where
   rephraseInOp r (SegOp op) = SegOp <$> rephraseInOp r op
   rephraseInOp r (OtherOp op) = OtherOp <$> rephraseInOp r op
   rephraseInOp _ (SizeOp op) = pure $ SizeOp op
   rephraseInOp r (GPUBody ts body) = GPUBody ts <$> rephraseBody r body
 
-checkGrid :: TC.Checkable rep => KernelGrid -> TC.TypeM rep ()
+checkGrid :: (TC.Checkable rep) => KernelGrid -> TC.TypeM rep ()
 checkGrid grid = do
   TC.require [Prim int64] $ unCount $ gridNumGroups grid
   TC.require [Prim int64] $ unCount $ gridGroupSize grid
 
 checkSegLevel ::
-  TC.Checkable rep =>
+  (TC.Checkable rep) =>
   Maybe SegLevel ->
   SegLevel ->
   TC.TypeM rep ()
@@ -381,7 +381,7 @@ checkSegLevel Nothing (SegGroup _virt grid) =
   mapM_ checkGrid grid
 
 typeCheckHostOp ::
-  TC.Checkable rep =>
+  (TC.Checkable rep) =>
   (SegLevel -> Op (Aliases rep) -> TC.TypeM rep ()) ->
   Maybe SegLevel ->
   (op (Aliases rep) -> TC.TypeM rep ()) ->

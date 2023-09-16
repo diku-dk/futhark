@@ -220,9 +220,7 @@ readEvalPrint = do
               <> mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
-      maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
-
-      case maybe_dec_or_e of
+      case parseDecOrExp prompt line of
         Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
@@ -360,7 +358,7 @@ runInterpreter m = runF m (pure . Right) intOp
 
       c
 
-runInterpreterNoBreak :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
+runInterpreterNoBreak :: (MonadIO m) => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreterNoBreak m = runF m (pure . Right) intOp
   where
     intOp (I.ExtOpError err) = pure $ Left err

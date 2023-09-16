@@ -2,10 +2,9 @@
 -- only if doing so can save a read.
 -- ==
 -- structure gpu {
---   /GPUBody/DoLoop 1
+--   /GPUBody/Loop 1
 -- }
 
 def main [n] (A: [n]i64) : i64 =
   loop x = 0 while x < 1000 do
     x + A[x%n]
-

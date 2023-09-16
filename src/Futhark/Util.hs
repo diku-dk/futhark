@@ -90,7 +90,7 @@ import System.Process.ByteString
 import Text.Read (readMaybe)
 
 -- | Like @nub@, but without the quadratic runtime.
-nubOrd :: Ord a => [a] -> [a]
+nubOrd :: (Ord a) => [a] -> [a]
 nubOrd = nubByOrd compare
 
 -- | Like @nubBy@, but without the quadratic runtime.
@@ -172,7 +172,7 @@ partitionMaybe f = helper ([], [])
         Nothing -> helper (acc1, x : acc2) xs
 
 -- | Return the list element at the given index, if the index is valid.
-maybeNth :: Integral int => int -> [a] -> Maybe a
+maybeNth :: (Integral int) => int -> [a] -> Maybe a
 maybeNth i l
   | i >= 0, v : _ <- genericDrop i l = Just v
   | otherwise = Nothing
@@ -201,7 +201,7 @@ splitAt3 n m l =
 
 -- | Return the list element at the given index, if the index is
 -- valid, along with the elements before and after.
-focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
+focusNth :: (Integral int) => int -> [a] -> Maybe ([a], a, [a])
 focusNth i xs
   | (bef, x : aft) <- genericSplitAt i xs = Just (bef, x, aft)
   | otherwise = Nothing
@@ -222,7 +222,7 @@ hashText =
   T.decodeUtf8With T.lenientDecode . Base16.encode . MD5.hash . T.encodeUtf8
 
 -- | Like 'show', but produces text.
-showText :: Show a => a -> T.Text
+showText :: (Show a) => a -> T.Text
 showText = T.pack . show
 
 {-# NOINLINE unixEnvironment #-}
@@ -470,7 +470,7 @@ traverseFold :: (Monoid m, Traversable t, Applicative f) => (a -> f m) -> t a ->
 traverseFold f = fmap fold . traverse f
 
 -- | Perform fixpoint iteration.
-fixPoint :: Eq a => (a -> a) -> a -> a
+fixPoint :: (Eq a) => (a -> a) -> a -> a
 fixPoint f x =
   let x' = f x
    in if x' == x then x else fixPoint f x'

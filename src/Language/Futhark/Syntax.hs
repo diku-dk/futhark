@@ -415,7 +415,7 @@ instance Located (SizeExp f vn) where
 
 deriving instance Show (SizeExp Info VName)
 
-deriving instance Show vn => Show (SizeExp NoInfo vn)
+deriving instance (Show vn) => Show (SizeExp NoInfo vn)
 
 deriving instance Eq (SizeExp NoInfo VName)
 
@@ -443,7 +443,7 @@ data TypeExp f vn
 
 deriving instance Show (TypeExp Info VName)
 
-deriving instance Show vn => Show (TypeExp NoInfo vn)
+deriving instance (Show vn) => Show (TypeExp NoInfo vn)
 
 deriving instance Eq (TypeExp NoInfo VName)
 
@@ -472,7 +472,7 @@ data TypeArgExp f vn
 
 deriving instance Show (TypeArgExp Info VName)
 
-deriving instance Show vn => Show (TypeArgExp NoInfo vn)
+deriving instance (Show vn) => Show (TypeArgExp NoInfo vn)
 
 deriving instance Eq (TypeArgExp NoInfo VName)
 
@@ -509,14 +509,14 @@ data IdentBase f vn t = Ident
     identSrcLoc :: SrcLoc
   }
 
-deriving instance Show (Info t) => Show (IdentBase Info VName t)
+deriving instance (Show (Info t)) => Show (IdentBase Info VName t)
 
 deriving instance (Show (Info t), Show vn) => Show (IdentBase NoInfo vn t)
 
-instance Eq vn => Eq (IdentBase ty vn t) where
+instance (Eq vn) => Eq (IdentBase ty vn t) where
   x == y = identName x == identName y
 
-instance Ord vn => Ord (IdentBase ty vn t) where
+instance (Ord vn) => Ord (IdentBase ty vn t) where
   compare = comparing identName
 
 instance Located (IdentBase ty vn t) where
@@ -574,7 +574,7 @@ data Inclusiveness a
   | UpToExclusive a
   deriving (Eq, Ord, Show)
 
-instance Located a => Located (Inclusiveness a) where
+instance (Located a) => Located (Inclusiveness a) where
   locOf (DownToExclusive x) = locOf x
   locOf (ToInclusive x) = locOf x
   locOf (UpToExclusive x) = locOf x
@@ -600,7 +600,7 @@ data DimIndexBase f vn
 
 deriving instance Show (DimIndexBase Info VName)
 
-deriving instance Show vn => Show (DimIndexBase NoInfo vn)
+deriving instance (Show vn) => Show (DimIndexBase NoInfo vn)
 
 deriving instance Eq (DimIndexBase NoInfo VName)
 
@@ -693,7 +693,7 @@ data AppExpBase f vn
       (ExpBase f vn)
       SrcLoc
   | If (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
-  | DoLoop
+  | Loop
       [VName] -- Size parameters.
       (PatBase f vn ParamType) -- Merge variable pattern.
       (ExpBase f vn) -- Initial values of merge variables.
@@ -719,7 +719,7 @@ data AppExpBase f vn
 
 deriving instance Show (AppExpBase Info VName)
 
-deriving instance Show vn => Show (AppExpBase NoInfo vn)
+deriving instance (Show vn) => Show (AppExpBase NoInfo vn)
 
 deriving instance Eq (AppExpBase NoInfo VName)
 
@@ -738,7 +738,7 @@ instance Located (AppExpBase f vn) where
   locOf (LetFun _ _ _ loc) = locOf loc
   locOf (LetWith _ _ _ _ _ loc) = locOf loc
   locOf (Index _ _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ loc) = locOf loc
+  locOf (Loop _ _ _ _ _ loc) = locOf loc
   locOf (Match _ _ loc) = locOf loc
 
 -- | An annotation inserted by the type checker on constructs that are
@@ -830,7 +830,7 @@ data ExpBase f vn
 
 deriving instance Show (ExpBase Info VName)
 
-deriving instance Show vn => Show (ExpBase NoInfo vn)
+deriving instance (Show vn) => Show (ExpBase NoInfo vn)
 
 deriving instance Eq (ExpBase NoInfo VName)
 
@@ -877,7 +877,7 @@ data FieldBase f vn
 
 deriving instance Show (FieldBase Info VName)
 
-deriving instance Show vn => Show (FieldBase NoInfo vn)
+deriving instance (Show vn) => Show (FieldBase NoInfo vn)
 
 deriving instance Eq (FieldBase NoInfo VName)
 
@@ -896,7 +896,7 @@ data CaseBase f vn = CasePat (PatBase f vn StructType) (ExpBase f vn) SrcLoc
 
 deriving instance Show (CaseBase Info VName)
 
-deriving instance Show vn => Show (CaseBase NoInfo vn)
+deriving instance (Show vn) => Show (CaseBase NoInfo vn)
 
 deriving instance Eq (CaseBase NoInfo VName)
 
@@ -917,7 +917,7 @@ data LoopFormBase f vn
 
 deriving instance Show (LoopFormBase Info VName)
 
-deriving instance Show vn => Show (LoopFormBase NoInfo vn)
+deriving instance (Show vn) => Show (LoopFormBase NoInfo vn)
 
 deriving instance Eq (LoopFormBase NoInfo VName)
 
@@ -947,17 +947,17 @@ data PatBase f vn t
   | PatConstr Name (f t) [PatBase f vn t] SrcLoc
   | PatAttr (AttrInfo vn) (PatBase f vn t) SrcLoc
 
-deriving instance Show (Info t) => Show (PatBase Info VName t)
+deriving instance (Show (Info t)) => Show (PatBase Info VName t)
 
 deriving instance (Show (NoInfo t), Show vn) => Show (PatBase NoInfo vn t)
 
-deriving instance Eq (NoInfo t) => Eq (PatBase NoInfo VName t)
+deriving instance (Eq (NoInfo t)) => Eq (PatBase NoInfo VName t)
 
-deriving instance Eq (Info t) => Eq (PatBase Info VName t)
+deriving instance (Eq (Info t)) => Eq (PatBase Info VName t)
 
-deriving instance Ord (NoInfo t) => Ord (PatBase NoInfo VName t)
+deriving instance (Ord (NoInfo t)) => Ord (PatBase NoInfo VName t)
 
-deriving instance Ord (Info t) => Ord (PatBase Info VName t)
+deriving instance (Ord (Info t)) => Ord (PatBase Info VName t)
 
 instance Located (PatBase f vn t) where
   locOf (TuplePat _ loc) = locOf loc
@@ -970,10 +970,10 @@ instance Located (PatBase f vn t) where
   locOf (PatConstr _ _ _ loc) = locOf loc
   locOf (PatAttr _ _ loc) = locOf loc
 
-instance Traversable f => Functor (PatBase f vn) where
+instance (Traversable f) => Functor (PatBase f vn) where
   fmap = fmapDefault
 
-instance Traversable f => Foldable (PatBase f vn) where
+instance (Traversable f) => Foldable (PatBase f vn) where
   foldMap = foldMapDefault
 
 instance (Traversable f) => Traversable (PatBase f vn) where

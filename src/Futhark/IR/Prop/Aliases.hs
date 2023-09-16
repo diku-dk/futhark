@@ -122,7 +122,7 @@ expAliases pes (Match _ cases defbody _) =
     onBody body = (bodyAliases body, consumedInBody body)
     bound = foldMap boundInBody $ defbody : map caseBody cases
 expAliases _ (BasicOp op) = basicOpAliases op
-expAliases pes (DoLoop merge _ loopbody) =
+expAliases pes (Loop merge _ loopbody) =
   mutualAliases (bound <> param_names) pes $ do
     (p, als) <-
       transitive . zip params $ zipWith (<>) arg_aliases (bodyAliases loopbody)
@@ -154,7 +154,7 @@ expAliases _ (WithAcc inputs lam) =
 expAliases _ (Op op) = opAliases op
 
 -- | The variables consumed in this statement.
-consumedInStm :: Aliased rep => Stm rep -> Names
+consumedInStm :: (Aliased rep) => Stm rep -> Names
 consumedInStm = consumedInExp . stmExp
 
 -- | The variables consumed in this expression.
@@ -166,7 +166,7 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (Match _ cases defbody _) =
   foldMap (consumedInBody . caseBody) cases <> consumedInBody defbody
-consumedInExp (DoLoop merge form body) =
+consumedInExp (Loop merge form body) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
@@ -193,11 +193,11 @@ consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
 -- | The variables consumed by this lambda.
-consumedByLambda :: Aliased rep => Lambda rep -> Names
+consumedByLambda :: (Aliased rep) => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element.
-patAliases :: AliasesOf dec => Pat dec -> [Names]
+patAliases :: (AliasesOf dec) => Pat dec -> [Names]
 patAliases = map aliasesOf . patElems
 
 -- | Something that contains alias information.
@@ -208,11 +208,11 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-instance AliasesOf dec => AliasesOf (PatElem dec) where
+instance (AliasesOf dec) => AliasesOf (PatElem dec) where
   aliasesOf = aliasesOf . patElemDec
 
 -- | Also includes the name itself.
-lookupAliases :: AliasesOf (LetDec rep) => VName -> Scope rep -> Names
+lookupAliases :: (AliasesOf (LetDec rep)) => VName -> Scope rep -> Names
 lookupAliases root scope =
   -- We must be careful to handle circular aliasing properly (this
   -- can happen due to Match and Loop).
@@ -229,7 +229,7 @@ lookupAliases root scope =
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.
-class IsOp op => AliasedOp op where
+class (IsOp op) => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 

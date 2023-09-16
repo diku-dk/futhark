@@ -75,7 +75,7 @@ doSolveDeps (PkgRevDeps deps) = mapM_ add $ M.toList deps
 -- | Run the solver, producing both a package registry containing
 -- a cache of the lookups performed, as well as a build list.
 solveDeps ::
-  MonadPkgRegistry m =>
+  (MonadPkgRegistry m) =>
   CacheDir ->
   PkgRevDeps ->
   m BuildList

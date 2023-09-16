@@ -182,7 +182,7 @@ data DimPos
 -- occurrence of the dimension.
 traverseDims ::
   forall f fdim tdim als.
-  Applicative f =>
+  (Applicative f) =>
   (S.Set VName -> DimPos -> fdim -> f tdim) ->
   TypeBase fdim als ->
   f (TypeBase tdim als)
@@ -199,7 +199,7 @@ traverseDims f = go mempty PosImmediate
     go bound b (Scalar (Record fields)) =
       Scalar . Record <$> traverse (go bound b) fields
     go bound b (Scalar (TypeVar as tn targs)) =
-      Scalar <$> (TypeVar as tn <$> traverse (onTypeArg bound b) targs)
+      Scalar <$> (TypeVar as tn <$> traverse (onTypeArg tn bound b) targs)
     go bound b (Scalar (Sum cs)) =
       Scalar . Sum <$> traverse (traverse (go bound b)) cs
     go _ _ (Scalar (Prim t)) =
@@ -213,10 +213,15 @@ traverseDims f = go mempty PosImmediate
               Named p' -> S.insert p' bound
               Unnamed -> bound
 
-    onTypeArg bound b (TypeArgDim d) =
+    onTypeArg _ bound b (TypeArgDim d) =
       TypeArgDim <$> f bound b d
-    onTypeArg bound b (TypeArgType t) =
-      TypeArgType <$> go bound b t
+    onTypeArg tn bound b (TypeArgType t) =
+      TypeArgType <$> go bound b' t
+      where
+        b' =
+          if qualLeaf tn == fst intrinsicAcc
+            then b
+            else PosParam
 
 -- | Return the uniqueness of a type.
 uniqueness :: TypeBase shape Uniqueness -> Uniqueness
@@ -380,7 +385,7 @@ matchDims ::
 matchDims onDims = matchDims' mempty
   where
     matchDims' ::
-      forall u'. Monoid u' => [VName] -> TypeBase d1 u' -> TypeBase d2 u' -> m (TypeBase d1 u')
+      forall u'. (Monoid u') => [VName] -> TypeBase d1 u' -> TypeBase d2 u' -> m (TypeBase d1 u')
     matchDims' bound t1 t2 =
       case (t1, t2) of
         (Array u1 shape1 et1, Array u2 shape2 et2) ->
@@ -411,7 +416,8 @@ matchDims onDims = matchDims' mempty
               <$> zipWithM (matchTypeArg bound) targs1 targs2
         _ -> pure t1
 
-    matchTypeArg _ ta@TypeArgType {} _ = pure ta
+    matchTypeArg bound (TypeArgType t1) (TypeArgType t2) =
+      TypeArgType <$> matchDims' bound t1 t2
     matchTypeArg bound (TypeArgDim x) (TypeArgDim y) =
       TypeArgDim <$> onDims bound x y
     matchTypeArg _ a _ = pure a
@@ -1176,7 +1182,7 @@ isBuiltin = (== "/prelude") . takeDirectory
 
 -- | Is the position of this thing builtin as per 'isBuiltin'?  Things
 -- without location are considered not built-in.
-isBuiltinLoc :: Located a => a -> Bool
+isBuiltinLoc :: (Located a) => a -> Bool
 isBuiltinLoc x =
   case locOf x of
     NoLoc -> False

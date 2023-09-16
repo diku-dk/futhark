@@ -82,7 +82,7 @@ addBind (PatBind s p e) = do
 addBind b@FunBind {} =
   OrderingM $ modify $ first $ first (b :)
 
-runOrdering :: MonadFreshNames m => OrderingM a -> m (a, [Binding])
+runOrdering :: (MonadFreshNames m) => OrderingM a -> m (a, [Binding])
 runOrdering (OrderingM m) =
   modifyNameSource $ mod_tup . flip runReader "tmp" . runStateT m . (([], []),)
   where
@@ -283,14 +283,14 @@ getOrdering final (AppExp (If cond et ef loc) resT) = do
   et' <- transformBody et
   ef' <- transformBody ef
   nameExp final $ AppExp (If cond' et' ef' loc) resT
-getOrdering final (AppExp (DoLoop sizes pat einit form body loc) resT) = do
+getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
   einit' <- getOrdering False einit
   form' <- case form of
     For ident e -> For ident <$> getOrdering True e
     ForIn fpat e -> ForIn fpat <$> getOrdering True e
     While e -> While <$> transformBody e
   body' <- transformBody body
-  nameExp final $ AppExp (DoLoop sizes pat einit' form' body' loc) resT
+  nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) loc) (Info resT)) = do
   expr' <- case (isOr, isAnd) of
     (True, _) -> do
@@ -335,7 +335,7 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
 -- branches of an if/match...
 -- Note that this is not producing an OrderingM, produce
 -- a complete separtion of states.
-transformBody :: MonadFreshNames m => Exp -> m Exp
+transformBody :: (MonadFreshNames m) => Exp -> m Exp
 transformBody e = do
   (e', pre_eval) <- runOrdering (getOrdering True e)
   pure $ foldl f e' pre_eval
@@ -357,11 +357,11 @@ transformBody e = do
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
 
-transformDec :: MonadFreshNames m => Dec -> m Dec
+transformDec :: (MonadFreshNames m) => Dec -> m Dec
 transformDec (ValDec valbind) = do
   body' <- transformBody $ valBindBody valbind
   pure $ ValDec (valbind {valBindBody = body'})
 transformDec d = pure d
 
-transformProg :: MonadFreshNames m => [Dec] -> m [Dec]
+transformProg :: (MonadFreshNames m) => [Dec] -> m [Dec]
 transformProg = mapM transformDec

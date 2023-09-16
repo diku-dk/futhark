@@ -205,7 +205,7 @@ data StmAux dec = StmAux
   }
   deriving (Ord, Show, Eq)
 
-instance Semigroup dec => Semigroup (StmAux dec) where
+instance (Semigroup dec) => Semigroup (StmAux dec) where
   StmAux cs1 attrs1 dec1 <> StmAux cs2 attrs2 dec2 =
     StmAux (cs1 <> cs2) (attrs1 <> attrs2) (dec1 <> dec2)
 
@@ -219,11 +219,11 @@ data Stm rep = Let
     stmExp :: Exp rep
   }
 
-deriving instance RepTypes rep => Ord (Stm rep)
+deriving instance (RepTypes rep) => Ord (Stm rep)
 
-deriving instance RepTypes rep => Show (Stm rep)
+deriving instance (RepTypes rep) => Show (Stm rep)
 
-deriving instance RepTypes rep => Eq (Stm rep)
+deriving instance (RepTypes rep) => Eq (Stm rep)
 
 -- | A sequence of statements.
 type Stms rep = Seq.Seq (Stm rep)
@@ -291,11 +291,11 @@ data Body rep = Body
     bodyResult :: Result
   }
 
-deriving instance RepTypes rep => Ord (Body rep)
+deriving instance (RepTypes rep) => Ord (Body rep)
 
-deriving instance RepTypes rep => Show (Body rep)
+deriving instance (RepTypes rep) => Show (Body rep)
 
-deriving instance RepTypes rep => Eq (Body rep)
+deriving instance (RepTypes rep) => Eq (Body rep)
 
 -- | Apart from being Opaque, what else is going on here?
 data OpaqueOp
@@ -435,7 +435,7 @@ data Exp rep
     -- body/ is picked.
     Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    DoLoop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
+    Loop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
@@ -446,11 +446,11 @@ data Exp rep
     WithAcc [WithAccInput rep] (Lambda rep)
   | Op (Op rep)
 
-deriving instance RepTypes rep => Eq (Exp rep)
+deriving instance (RepTypes rep) => Eq (Exp rep)
 
-deriving instance RepTypes rep => Show (Exp rep)
+deriving instance (RepTypes rep) => Show (Exp rep)
 
-deriving instance RepTypes rep => Ord (Exp rep)
+deriving instance (RepTypes rep) => Ord (Exp rep)
 
 -- | For-loop or while-loop?
 data LoopForm rep
@@ -464,11 +464,11 @@ data LoopForm rep
       [(LParam rep, VName)]
   | WhileLoop VName
 
-deriving instance RepTypes rep => Eq (LoopForm rep)
+deriving instance (RepTypes rep) => Eq (LoopForm rep)
 
-deriving instance RepTypes rep => Show (LoopForm rep)
+deriving instance (RepTypes rep) => Show (LoopForm rep)
 
-deriving instance RepTypes rep => Ord (LoopForm rep)
+deriving instance (RepTypes rep) => Ord (LoopForm rep)
 
 -- | Data associated with a branch.
 data MatchDec rt = MatchDec
@@ -503,11 +503,11 @@ data Lambda rep = Lambda
     lambdaReturnType :: [Type]
   }
 
-deriving instance RepTypes rep => Eq (Lambda rep)
+deriving instance (RepTypes rep) => Eq (Lambda rep)
 
-deriving instance RepTypes rep => Show (Lambda rep)
+deriving instance (RepTypes rep) => Show (Lambda rep)
 
-deriving instance RepTypes rep => Ord (Lambda rep)
+deriving instance (RepTypes rep) => Ord (Lambda rep)
 
 -- | A function and loop parameter.
 type FParam rep = Param (FParamInfo rep)
@@ -527,11 +527,11 @@ data FunDef rep = FunDef
     funDefBody :: Body rep
   }
 
-deriving instance RepTypes rep => Eq (FunDef rep)
+deriving instance (RepTypes rep) => Eq (FunDef rep)
 
-deriving instance RepTypes rep => Show (FunDef rep)
+deriving instance (RepTypes rep) => Show (FunDef rep)
 
-deriving instance RepTypes rep => Ord (FunDef rep)
+deriving instance (RepTypes rep) => Ord (FunDef rep)
 
 -- | An entry point parameter, comprising its name and original type.
 data EntryParam = EntryParam

@@ -43,7 +43,7 @@ unstreamMC = unstream onMCOp MC.simplifyProg
 data Stage = SeqStreams | SeqAll
 
 unstream ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   (Stage -> OnOp rep) ->
   (Prog rep -> PassM (Prog rep)) ->
   Pass rep rep
@@ -64,7 +64,7 @@ type OnOp rep =
   Pat (LetDec rep) -> StmAux (ExpDec rep) -> Op rep -> UnstreamM rep [Stm rep]
 
 optimiseStms ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   Stms rep ->
   UnstreamM rep (Stms rep)
@@ -73,7 +73,7 @@ optimiseStms onOp stms =
     stmsFromList . concat <$> mapM (optimiseStm onOp) (stmsToList stms)
 
 optimiseBody ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   Body rep ->
   UnstreamM rep (Body rep)
@@ -81,7 +81,7 @@ optimiseBody onOp (Body aux stms res) =
   Body aux <$> optimiseStms onOp stms <*> pure res
 
 optimiseKernelBody ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   KernelBody rep ->
   UnstreamM rep (KernelBody rep)
@@ -92,7 +92,7 @@ optimiseKernelBody onOp (KernelBody attr stms res) =
       <*> pure res
 
 optimiseLambda ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   Lambda rep ->
   UnstreamM rep (Lambda rep)
@@ -101,7 +101,7 @@ optimiseLambda onOp lam = localScope (scopeOfLParams $ lambdaParams lam) $ do
   pure lam {lambdaBody = body}
 
 optimiseStm ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   Stm rep ->
   UnstreamM rep [Stm rep]
@@ -117,7 +117,7 @@ optimiseStm onOp (Let pat aux e) =
         }
 
 optimiseSegOp ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   OnOp rep ->
   SegOp lvl rep ->
   UnstreamM rep (SegOp lvl rep)
@@ -137,11 +137,9 @@ onMCOp stage pat aux (ParOp par_op op) = do
   pure [Let pat aux $ Op $ ParOp par_op' op']
 onMCOp stage pat aux (MC.OtherOp soac)
   | sequentialise stage soac = do
-      stms <- runBuilder_ $ FOT.transformSOAC pat soac
-      fmap concat $
-        localScope (scopeOf stms) $
-          mapM (optimiseStm (onMCOp stage)) $
-            stmsToList stms
+      stms <- runBuilder_ $ auxing aux $ FOT.transformSOAC pat soac
+      fmap concat . localScope (scopeOf stms) $
+        mapM (optimiseStm (onMCOp stage)) (stmsToList stms)
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . MC.OtherOp <$> mapSOACM optimise soac)
@@ -159,11 +157,9 @@ sequentialise SeqAll _ = True
 onHostOp :: Stage -> OnOp GPU
 onHostOp stage pat aux (GPU.OtherOp soac)
   | sequentialise stage soac = do
-      stms <- runBuilder_ $ FOT.transformSOAC pat soac
-      fmap concat $
-        localScope (scopeOf stms) $
-          mapM (optimiseStm (onHostOp stage)) $
-            stmsToList stms
+      stms <- runBuilder_ $ auxing aux $ FOT.transformSOAC pat soac
+      fmap concat . localScope (scopeOf stms) $
+        mapM (optimiseStm (onHostOp stage)) (stmsToList stms)
   | otherwise =
       -- Still sequentialise whatever's inside.
       pure <$> (Let pat aux . Op . GPU.OtherOp <$> mapSOACM optimise soac)

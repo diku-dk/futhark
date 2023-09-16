@@ -56,7 +56,7 @@ simplifySOACS =
   Simplify.simplifyProg simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyFun ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   ST.SymbolTable (Wise SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
@@ -75,12 +75,12 @@ simplifyStms stms = do
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers scope stms
 
 simplifyConsts ::
-  MonadFreshNames m => Stms SOACS -> m (Stms SOACS)
+  (MonadFreshNames m) => Stms SOACS -> m (Stms SOACS)
 simplifyConsts =
   Simplify.simplifyStms simpleSOACS soacRules Engine.noExtraHoistBlockers mempty
 
 simplifySOAC ::
-  Simplify.SimplifiableRep rep =>
+  (Simplify.SimplifiableRep rep) =>
   Simplify.SimplifyOp rep (SOAC (Wise rep))
 simplifySOAC (VJP lam arr vec) = do
   (lam', hoisted) <- Engine.simplifyLambda mempty lam
@@ -356,7 +356,7 @@ removeReplicateWrite vtable pat aux (Scatter w ivs lam as)
 removeReplicateWrite _ _ _ _ = Skip
 
 removeReplicateInput ::
-  Aliased rep =>
+  (Aliased rep) =>
   ST.SymbolTable rep ->
   Lambda rep ->
   [VName] ->
@@ -537,7 +537,7 @@ removeDeadReduction (_, used) pat aux (Screma w arrs form)
             (zip redlam_params $ map resSubExp $ redlam_res <> redlam_res)
             redlam_deps,
     let alive_mask = map ((`nameIn` necessary) . paramName) redlam_params,
-    not $ all (== True) (take (length nes) alive_mask) = Simplify $ do
+    not $ and (take (length nes) alive_mask) = Simplify $ do
       let fixDeadToNeutral lives ne = if lives then Nothing else Just ne
           dead_fix = zipWith fixDeadToNeutral alive_mask nes
           (used_red_pes, _, used_nes) =
@@ -627,7 +627,7 @@ simplifyClosedFormReduce vtable pat _ (Screma _ arrs form)
       Simplify $ foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
 simplifyClosedFormReduce _ _ _ _ = Skip
 
--- For now we just remove singleton SOACs.
+-- For now we just remove singleton SOACs and those with unroll attributes.
 simplifyKnownIterationSOAC ::
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
@@ -685,6 +685,19 @@ simplifyKnownIterationSOAC _ pat _ op
 
       forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+--
+simplifyKnownIterationSOAC _ pat aux op
+  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm [] [] map_lam)) <- asSOAC op,
+    "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
+      arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
+        map_lam' <- renameLambda map_lam
+        eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
+      forM_ (zip3 (patNames pat) arrs_elems (lambdaReturnType map_lam)) $
+        \(v, arr_elems, t) ->
+          certifying (mconcat (map resCerts arr_elems)) $
+            letBindNames [v] . BasicOp $
+              ArrayLit (map resSubExp arr_elems) t
+--
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
 data ArrayOp
@@ -737,9 +750,11 @@ arrayOps ::
   S.Set (Pat (LetDec rep), ArrayOp)
 arrayOps cs = mconcat . map onStm . stmsToList . bodyStms
   where
-    -- It is not safe to move everything out of branches (#1874);
-    -- probably we need to put some more intelligence in here somehow.
+    -- It is not safe to move everything out of branches (#1874) or
+    -- loops (#2015); probably we need to put some more intelligence
+    -- in here somehow.
     onStm (Let _ _ Match {}) = mempty
+    onStm (Let _ _ Loop {}) = mempty
     onStm (Let pat aux e) =
       case isArrayOp (cs <> stmAuxCerts aux) e of
         Just op -> S.singleton (pat, op)

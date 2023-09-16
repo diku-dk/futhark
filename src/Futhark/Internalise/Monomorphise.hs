@@ -460,7 +460,7 @@ transformRetTypeSizes argset (RetType dims ty) = do
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
 
-sizesForPat :: MonadFreshNames m => Pat ParamType -> m ([VName], Pat ParamType)
+sizesForPat :: (MonadFreshNames m) => Pat ParamType -> m ([VName], Pat ParamType)
 sizesForPat pat = do
   (params', sizes) <- runStateT (traverse (bitraverse onDim pure) pat) []
   pure (sizes, params')
@@ -528,7 +528,7 @@ transformAppExp (Apply fe args _) res =
     <*> transformAppRes res
   where
     onArg (Info (d, ext), e) = (d,ext,) <$> transformExp e
-transformAppExp (DoLoop sparams pat e1 form body loc) res = do
+transformAppExp (Loop sparams pat e1 form body loc) res = do
   e1' <- transformExp e1
 
   let dimArgs = S.fromList sparams
@@ -555,7 +555,7 @@ transformAppExp (DoLoop sparams pat e1 form body loc) res = do
   -- sizes for them.
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
-  pure $ AppExp (DoLoop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
+  pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
 transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
@@ -866,7 +866,7 @@ transformPat = traverse transformType
 type DimInst = M.Map VName Size
 
 dimMapping ::
-  Monoid a =>
+  (Monoid a) =>
   TypeBase Size a ->
   TypeBase Size a ->
   ExpReplacements ->
@@ -889,7 +889,8 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
         Just rexp -> onExps bound (unReplaced rexp) e
         Nothing -> pure ()
     onExps bound e (Var v _ _)
-      | Just rexp <- lookup (qualLeaf v) named2 = onExps bound e (unReplaced rexp)
+      | Just rexp <- lookup (qualLeaf v) named2 =
+          onExps bound e (unReplaced rexp)
     onExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ onExps bound) es
@@ -899,7 +900,7 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
 
 inferSizeArgs :: [TypeParam] -> StructType -> ExpReplacements -> StructType -> MonoM [Exp]
 inferSizeArgs tparams bind_t bind_r t = do
-  r <- get
+  r <- gets (<>) <*> asks envParametrized
   let dinst = dimMapping bind_t t bind_r r
   mapM (tparamArg dinst) tparams
   where
@@ -1142,7 +1143,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
         }
 
 typeSubstsM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   SrcLoc ->
   TypeBase () NoUniqueness ->
   MonoType ->
@@ -1309,7 +1310,7 @@ transformDecs (dec : _) =
 
 -- | Monomorphise a list of top-level declarations. A module-free input program
 -- is expected, so only value declarations and type declaration are accepted.
-transformProg :: MonadFreshNames m => [Dec] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [Dec] -> m [ValBind]
 transformProg decs =
   fmap (toList . fmap snd . snd) $
     modifyNameSource $ \namesrc ->

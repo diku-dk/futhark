@@ -352,20 +352,17 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - run: |
-        module load python/3.9.9
-        virtualenv virtualenv
-        source virtualenv/bin/activate
-        pip install jsonschema
-
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
           set -e
+          virtualenv virtualenv
+          source virtualenv/bin/activate
+          pip install jsonschema
+          module load cuda/11.8
           futhark test tests \
             --backend=opencl \
             --cache-extension=cache
-          source virtualenv/bin/activate
           FUTHARK_BACKEND=opencl make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
@@ -376,17 +373,14 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - run: |
-        module load python/3.9.9
-        virtualenv virtualenv
-        source virtualenv/bin/activate
-        pip install numpy pyopencl jsonschema
-
     - uses: ./.github/actions/futhark-slurm
       with:
         script: |
           set -e
+          virtualenv virtualenv
           source virtualenv/bin/activate
+          pip install numpy pyopencl jsonschema
+          module load cuda/11.8
           futhark test tests --no-terminal --backend=pyopencl
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
@@ -397,8 +391,29 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          set -e
+          virtualenv virtualenv
+          source virtualenv/bin/activate
+          pip install jsonschema
+          module load cuda/11.8
+          futhark test tests \
+            --backend=cuda \
+            --cache-extension=cache \
+            --concurrency=8
+          FUTHARK_BACKEND=cuda make -C tests_lib/c -j
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+
+  test-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
+
     - run: |
-        module load python/3.9.9
         virtualenv virtualenv
         source virtualenv/bin/activate
         pip install jsonschema
@@ -407,10 +422,9 @@ jobs:
       with:
         script: |
           set -e
-          futhark test tests --no-terminal --backend=cuda --concurrency=8
+          futhark test tests --no-terminal --backend=hip --concurrency=8
           source virtualenv/bin/activate
-          FUTHARK_BACKEND=cuda make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+          FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04

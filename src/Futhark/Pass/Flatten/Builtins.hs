@@ -37,7 +37,7 @@ repIotaName = builtinName "repiota"
 prefixSumName = builtinName "prefixsum"
 partitionName = builtinName "partition"
 
-segMap :: Traversable f => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
+segMap :: (Traversable f) => f SubExp -> (f SubExp -> Builder GPU Result) -> Builder GPU (Exp GPU)
 segMap segments f = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
@@ -50,7 +50,7 @@ segMap segments f = do
   where
     mkResult (SubExpRes cs se) = Returns ResultMaySimplify cs se
 
-genScanomap :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> (f SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
+genScanomap :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> (f SubExp -> Builder GPU [SubExp]) -> Builder GPU [VName]
 genScanomap desc segments lam nes m = do
   gtids <- traverse (const $ newVName "gtid") segments
   space <- mkSegSpace $ zip (toList gtids) (toList segments)
@@ -64,13 +64,13 @@ genScanomap desc segments lam nes m = do
   where
     lvl = SegThread SegVirt Nothing
 
-genScan :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genScan :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genScan desc segments lam nes arrs =
   genScanomap desc segments lam nes $ \gtids -> forM arrs $ \arr ->
     letSubExp (baseString arr <> "_elem") =<< eIndex arr (toList $ fmap eSubExp gtids)
 
 -- Also known as a prescan.
-genExScan :: Traversable f => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
+genExScan :: (Traversable f) => String -> f SubExp -> Lambda GPU -> [SubExp] -> [VName] -> Builder GPU [VName]
 genExScan desc segments lam nes arrs =
   genScanomap desc segments lam nes $ \gtids ->
     let Just (outerDims, innerDim) = unsnoc $ toList gtids
@@ -364,9 +364,7 @@ prefixSumBuiltin = buildingBuiltin $ do
         funDefAttrs = mempty,
         funDefName = prefixSumName,
         funDefRetType =
-          map
-            (,mempty)
-            [Array int64 (Shape [Free $ Var $ paramName np]) Unique],
+          [(Array int64 (Shape [Free $ Var $ paramName np]) Unique, mempty)],
         funDefParams = [np, nsp],
         funDefBody = body
       }

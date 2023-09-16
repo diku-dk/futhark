@@ -136,10 +136,6 @@ data SimpleOps rep = SimpleOps
     -- actually be used.
     protectHoistedOpS :: Protect (Builder (Wise rep)),
     opUsageS :: Op (Wise rep) -> UT.UsageTable,
-    simplifyPatFromExpS ::
-      Pat (LetDec rep) ->
-      Exp (Wise rep) ->
-      SimpleM rep (Pat (LetDec rep)),
     simplifyOpS :: SimplifyOp rep (Op (Wise rep))
   }
 
@@ -148,12 +144,11 @@ bindableSimpleOps ::
   SimplifyOp rep (Op (Wise rep)) ->
   SimpleOps rep
 bindableSimpleOps =
-  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty) simplifyPatFromExp
+  SimpleOps mkExpDecS' mkBodyS' protectHoistedOpS' (const mempty)
   where
     mkExpDecS' _ pat e = pure $ mkExpDec pat e
     mkBodyS' _ stms res = pure $ mkBody stms res
     protectHoistedOpS' _ _ _ = Nothing
-    simplifyPatFromExp pat _ = traverse simplify pat
 
 newtype SimpleM rep a
   = SimpleM
@@ -174,7 +169,7 @@ instance MonadFreshNames (SimpleM rep) where
   putNameSource src = modify $ \(_, b, c) -> (src, b, c)
   getNameSource = gets $ \(a, _, _) -> a
 
-instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
+instance (SimplifiableRep rep) => HasScope (Wise rep) (SimpleM rep) where
   askScope = ST.toScope <$> askVtable
   lookupType name = do
     vtable <- askVtable
@@ -187,7 +182,7 @@ instance SimplifiableRep rep => HasScope (Wise rep) (SimpleM rep) where
             ++ " in symbol table."
 
 instance
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   LocalScope (Wise rep) (SimpleM rep)
   where
   localScope types = localVtable (<> ST.fromScope types)
@@ -236,16 +231,16 @@ usedCerts cs = modify $ \(a, b, c) -> (a, b, cs <> c)
 enterLoop :: SimpleM rep a -> SimpleM rep a
 enterLoop = localVtable ST.deepen
 
-bindFParams :: SimplifiableRep rep => [FParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
+bindFParams :: (SimplifiableRep rep) => [FParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
 bindFParams params =
   localVtable $ ST.insertFParams params
 
-bindLParams :: SimplifiableRep rep => [LParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
+bindLParams :: (SimplifiableRep rep) => [LParam (Wise rep)] -> SimpleM rep a -> SimpleM rep a
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
 bindArrayLParams ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   [LParam (Wise rep)] ->
   SimpleM rep a ->
   SimpleM rep a
@@ -253,13 +248,13 @@ bindArrayLParams params =
   localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
 
 bindMerge ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp, SubExpRes)] ->
   SimpleM rep a ->
   SimpleM rep a
 bindMerge = localVtable . ST.insertLoopMerge
 
-bindLoopVar :: SimplifiableRep rep => VName -> IntType -> SubExp -> SimpleM rep a -> SimpleM rep a
+bindLoopVar :: (SimplifiableRep rep) => VName -> IntType -> SubExp -> SimpleM rep a -> SimpleM rep a
 bindLoopVar var it bound =
   localVtable $ ST.insertLoopVar var it bound
 
@@ -283,7 +278,7 @@ makeSafe (BasicOp (BinOp (UMod t _) x y)) =
 makeSafe _ =
   Nothing
 
-emptyOfType :: MonadBuilder m => [VName] -> Type -> m (Exp (Rep m))
+emptyOfType :: (MonadBuilder m) => [VName] -> Type -> m (Exp (Rep m))
 emptyOfType _ Mem {} =
   error "emptyOfType: Cannot hoist non-existential memory."
 emptyOfType _ Acc {} =
@@ -298,7 +293,7 @@ emptyOfType ctx_names (Array et shape _) = do
     zeroIfContext se = se
 
 protectIf ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   Protect m ->
   (Exp (Rep m) -> Bool) ->
   SubExp ->
@@ -339,7 +334,7 @@ protectIf _ _ _ stm =
 -- loops, but they must be protected by adding a branch on top of
 -- them.
 protectLoopHoisted ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp)] ->
   LoopForm (Wise rep) ->
   SimpleM rep (a, b, Stms (Wise rep)) ->
@@ -370,7 +365,7 @@ protectLoopHoisted merge form m = do
 -- Produces a true subexpression if the pattern (as in a 'Case')
 -- matches the subexpression.
 matching ::
-  BuilderOps rep =>
+  (BuilderOps rep) =>
   [(SubExp, Maybe PrimValue)] ->
   Builder rep SubExp
 matching = letSubExp "match" <=< eAll <=< sequence . mapMaybe cmp
@@ -383,7 +378,7 @@ matching = letSubExp "match" <=< eAll <=< sequence . mapMaybe cmp
     cmp (_, Nothing) = Nothing
 
 matchingExactlyThis ::
-  BuilderOps rep =>
+  (BuilderOps rep) =>
   [SubExp] ->
   [[Maybe PrimValue]] ->
   [Maybe PrimValue] ->
@@ -401,7 +396,7 @@ matchingExactlyThis ses prior this = do
 -- them.  (This means such hoisting is not worth it unless they are in
 -- turn hoisted out of a loop somewhere.)
 protectCaseHoisted ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   -- | Scrutinee.
   [SubExp] ->
   -- | Pattern of previosu cases.
@@ -426,21 +421,20 @@ protectCaseHoisted ses prior vs m = do
 -- | Statements that are not worth hoisting out of loops, because they
 -- are unsafe, and added safety (by 'protectLoopHoisted') may inhibit
 -- further optimisation.
-notWorthHoisting :: ASTRep rep => BlockPred rep
+notWorthHoisting :: (ASTRep rep) => BlockPred rep
 notWorthHoisting _ _ (Let pat _ e) =
   not (safeExp e) && any ((> 0) . arrayRank) (patTypes pat)
 
 -- Top-down simplify a statement (including copy propagation into the
 -- pattern and such).  Does not recurse into any sub-Bodies or Ops.
 nonrecSimplifyStm ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   SimpleM rep (Stm (Wise rep))
 nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
   cs' <- simplify cs
   e' <- simplifyExpBase e
-  simplifyPat <- asks $ simplifyPatFromExpS . fst
-  (pat', pat_cs) <- collectCerts $ simplifyPat (removePatWisdom pat) e'
+  (pat', pat_cs) <- collectCerts $ traverse simplify $ removePatWisdom pat
   let aux' = StmAux (cs' <> pat_cs) attrs dec
   pure $ mkWiseStm pat' aux' e'
 
@@ -449,7 +443,7 @@ nonrecSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) = do
 -- assumed 'nonrecSimplifyStm' has already touched it (and worst case,
 -- it'll get it on the next round of the overall fixpoint iteration.)
 recSimplifyStm ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Stm (Wise rep) ->
   UT.UsageTable ->
   SimpleM rep (Stms (Wise rep), Stm (Wise rep))
@@ -459,7 +453,7 @@ recSimplifyStm (Let pat (StmAux cs attrs (_, dec)) e) usage = do
   pure (e_hoisted, mkWiseStm (removePatWisdom pat) aux' e')
 
 hoistStms ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   RuleBook (Wise rep) ->
   BlockPred (Wise rep) ->
   Stms (Wise rep) ->
@@ -542,7 +536,7 @@ hoistStms rules block orig_stms final = do
                     process usageInStm stms_h'' stms_t' usage x
 
 blockUnhoistedDeps ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   [Either (Stm rep) (Stm rep)] ->
   [Either (Stm rep) (Stm rep)]
 blockUnhoistedDeps = snd . mapAccumL block mempty
@@ -559,7 +553,7 @@ provides :: Stm rep -> [VName]
 provides = patNames . stmPat
 
 expandUsage ::
-  Aliased rep =>
+  (Aliased rep) =>
   (Stm rep -> UT.UsageTable) ->
   ST.SymbolTable rep ->
   UT.UsageTable ->
@@ -608,7 +602,7 @@ isOp _ _ (Let _ _ Op {}) = True
 isOp _ _ _ = False
 
 constructBody ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Stms (Wise rep) ->
   Result ->
   SimpleM rep (Body (Wise rep))
@@ -618,7 +612,7 @@ constructBody stms res =
     pure res
 
 blockIf ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   BlockPred (Wise rep) ->
   Stms (Wise rep) ->
   SimpleM rep (a, UT.UsageTable) ->
@@ -627,24 +621,24 @@ blockIf block stms m = do
   rules <- asksEngineEnv envRules
   hoistStms rules block stms m
 
-hasFree :: ASTRep rep => Names -> BlockPred rep
+hasFree :: (ASTRep rep) => Names -> BlockPred rep
 hasFree ks _ _ need = ks `namesIntersect` freeIn need
 
-isNotSafe :: ASTRep rep => BlockPred rep
+isNotSafe :: (ASTRep rep) => BlockPred rep
 isNotSafe _ _ = not . safeExp . stmExp
 
-isConsuming :: Aliased rep => BlockPred rep
+isConsuming :: (Aliased rep) => BlockPred rep
 isConsuming _ _ = isUpdate . stmExp
   where
     isUpdate e = consumedInExp e /= mempty
 
-isNotCheap :: ASTRep rep => BlockPred rep
+isNotCheap :: (ASTRep rep) => BlockPred rep
 isNotCheap _ _ = not . cheapStm
 
-cheapStm :: ASTRep rep => Stm rep -> Bool
+cheapStm :: (ASTRep rep) => Stm rep -> Bool
 cheapStm = cheapExp . stmExp
 
-cheapExp :: ASTRep rep => Exp rep -> Bool
+cheapExp :: (ASTRep rep) => Exp rep -> Bool
 cheapExp (BasicOp BinOp {}) = True
 cheapExp (BasicOp SubExp {}) = True
 cheapExp (BasicOp UnOp {}) = True
@@ -654,7 +648,7 @@ cheapExp (BasicOp Assert {}) = True
 cheapExp (BasicOp Replicate {}) = False
 cheapExp (BasicOp Concat {}) = False
 cheapExp (BasicOp Manifest {}) = False
-cheapExp DoLoop {} = False
+cheapExp Loop {} = False
 cheapExp (Match _ cases defbranch _) =
   all (all cheapStm . bodyStms . caseBody) cases
     && all cheapStm (bodyStms defbranch)
@@ -662,12 +656,12 @@ cheapExp (Op op) = cheapOp op
 cheapExp _ = True -- Used to be False, but
 -- let's try it out.
 
-loopInvariantStm :: ASTRep rep => ST.SymbolTable rep -> Stm rep -> Bool
+loopInvariantStm :: (ASTRep rep) => ST.SymbolTable rep -> Stm rep -> Bool
 loopInvariantStm vtable =
   all (`nameIn` ST.availableAtClosestLoop vtable) . namesToList . freeIn
 
 matchBlocker ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   [SubExp] ->
   MatchDec rt ->
   SimpleM rep (BlockPred (Wise rep))
@@ -728,7 +722,7 @@ matchBlocker cond (MatchDec _ ifsort) = do
 
 -- | Simplify a single body.
 simplifyBody ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   BlockPred (Wise rep) ->
   UT.UsageTable ->
   [UT.Usages] ->
@@ -744,7 +738,7 @@ simplifyBody blocker usage res_usages (Body _ stms res) = do
 
 -- | Simplify a single body.
 simplifyBodyNoHoisting ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   UT.UsageTable ->
   [UT.Usages] ->
   Body (Wise rep) ->
@@ -758,7 +752,7 @@ usageFromDiet _ = mempty
 
 -- | Simplify a single 'Result'.
 simplifyResult ::
-  SimplifiableRep rep => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
+  (SimplifiableRep rep) => [UT.Usages] -> Result -> SimpleM rep (Result, UT.UsageTable)
 simplifyResult usages res = do
   res' <- mapM simplify res
   vtable <- askVtable
@@ -776,14 +770,14 @@ simplifyResult usages res = do
         <> more_usages
     )
 
-isDoLoopResult :: Result -> UT.UsageTable
-isDoLoopResult = mconcat . map checkForVar
+isLoopResult :: Result -> UT.UsageTable
+isLoopResult = mconcat . map checkForVar
   where
     checkForVar (SubExpRes _ (Var ident)) = UT.inResultUsage ident
     checkForVar _ = mempty
 
 simplifyStms ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Stms (Wise rep) ->
   SimpleM rep (Stms (Wise rep))
 simplifyStms stms = do
@@ -793,7 +787,7 @@ simplifyStms stms = do
       UT.usages (namesFromList (M.keys (scopeOf stms)))
 
 simplifyStmsWithUsage ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   UT.UsageTable ->
   Stms (Wise rep) ->
   SimpleM rep (Stms (Wise rep))
@@ -807,7 +801,7 @@ simplifyOp op = do
   f op
 
 simplifyExp ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   UT.UsageTable ->
   Pat (LetDec (Wise rep)) ->
   Exp (Wise rep) ->
@@ -833,7 +827,7 @@ simplifyExp usage (Pat pes) (Match ses cases defbody ifdec@(MatchDec ts ifsort))
         protectCaseHoisted ses' prior vs $
           simplifyBody block usage pes_usages body
       pure (hoisted, Case vs body')
-simplifyExp _ _ (DoLoop merge form loopbody) = do
+simplifyExp _ _ (Loop merge form loopbody) = do
   let (params, args) = unzip merge
   params' <- mapM (traverse simplify) params
   args' <- mapM simplify args
@@ -876,9 +870,9 @@ simplifyExp _ _ (DoLoop merge form loopbody) = do
                 (\p -> if unique (paramDeclType p) then UT.consumedU else mempty)
                 params'
         (res, uses) <- simplifyResult params_usages $ bodyResult loopbody
-        pure (res, uses <> isDoLoopResult res)
+        pure (res, uses <> isLoopResult res)
   loopbody' <- constructBody loopstms loopres
-  pure (DoLoop merge' form' loopbody', hoisted)
+  pure (Loop merge' form' loopbody', hoisted)
   where
     fparamnames =
       namesFromList (map (paramName . fst) merge)
@@ -909,7 +903,7 @@ simplifyExp _ _ e = do
 
 -- | Block hoisting of 'Index' statements introduced by migration.
 blockMigrated ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep)) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
 blockMigrated = local withMigrationBlocker
@@ -925,7 +919,7 @@ blockMigrated = local withMigrationBlocker
        in (ops, env')
 
 -- | Statement is a scalar read from a single element array of rank one.
-isDeviceMigrated :: SimplifiableRep rep => BlockPred (Wise rep)
+isDeviceMigrated :: (SimplifiableRep rep) => BlockPred (Wise rep)
 isDeviceMigrated vtable _ stm
   | BasicOp (Index arr slice) <- stmExp stm,
     [DimFix idx] <- unSlice slice,
@@ -939,7 +933,7 @@ isDeviceMigrated vtable _ stm
 
 -- The simple nonrecursive case that we can perform without bottom-up
 -- information.
-simplifyExpBase :: SimplifiableRep rep => Exp (Wise rep) -> SimpleM rep (Exp (Wise rep))
+simplifyExpBase :: (SimplifiableRep rep) => Exp (Wise rep) -> SimpleM rep (Exp (Wise rep))
 -- Special case for simplification of commutative BinOps where we
 -- arrange the operands in sorted order.  This can make expressions
 -- more identical, which helps CSE.
@@ -975,7 +969,7 @@ type SimplifiableRep rep =
   )
 
 class Simplifiable e where
-  simplify :: SimplifiableRep rep => e -> SimpleM rep e
+  simplify :: (SimplifiableRep rep) => e -> SimpleM rep e
 
 instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
   simplify (x, y) = (,) <$> simplify x <*> simplify y
@@ -990,11 +984,11 @@ instance
 instance Simplifiable Int where
   simplify = pure
 
-instance Simplifiable a => Simplifiable (Maybe a) where
+instance (Simplifiable a) => Simplifiable (Maybe a) where
   simplify Nothing = pure Nothing
   simplify (Just x) = Just <$> simplify x
 
-instance Simplifiable a => Simplifiable [a] where
+instance (Simplifiable a) => Simplifiable [a] where
   simplify = mapM simplify
 
 instance Simplifiable SubExp where
@@ -1032,7 +1026,7 @@ instance Simplifiable VName where
         pure v'
       _ -> pure v
 
-instance Simplifiable d => Simplifiable (ShapeBase d) where
+instance (Simplifiable d) => Simplifiable (ShapeBase d) where
   simplify = fmap Shape . simplify . shapeDims
 
 instance Simplifiable ExtSize where
@@ -1046,7 +1040,7 @@ instance Simplifiable Space where
 instance Simplifiable PrimType where
   simplify = pure
 
-instance Simplifiable shape => Simplifiable (TypeBase shape u) where
+instance (Simplifiable shape) => Simplifiable (TypeBase shape u) where
   simplify (Array et shape u) =
     Array <$> simplify et <*> simplify shape <*> pure u
   simplify (Acc acc ispace ts u) =
@@ -1056,15 +1050,15 @@ instance Simplifiable shape => Simplifiable (TypeBase shape u) where
   simplify (Prim bt) =
     pure $ Prim bt
 
-instance Simplifiable d => Simplifiable (DimIndex d) where
+instance (Simplifiable d) => Simplifiable (DimIndex d) where
   simplify (DimFix i) = DimFix <$> simplify i
   simplify (DimSlice i n s) = DimSlice <$> simplify i <*> simplify n <*> simplify s
 
-instance Simplifiable d => Simplifiable (Slice d) where
+instance (Simplifiable d) => Simplifiable (Slice d) where
   simplify = traverse simplify
 
 simplifyLambda ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Names ->
   Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
@@ -1073,14 +1067,14 @@ simplifyLambda extra_bound lam = do
   simplifyLambdaMaybeHoist (par_blocker `orIf` hasFree extra_bound) mempty lam
 
 simplifyLambdaNoHoisting ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep))
 simplifyLambdaNoHoisting lam =
   fst <$> simplifyLambdaMaybeHoist (isFalse False) mempty lam
 
 simplifyLambdaMaybeHoist ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   BlockPred (Wise rep) ->
   UT.UsageTable ->
   Lambda (Wise rep) ->
@@ -1088,7 +1082,7 @@ simplifyLambdaMaybeHoist ::
 simplifyLambdaMaybeHoist = simplifyLambdaWith id
 
 simplifyLambdaWith ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   (ST.SymbolTable (Wise rep) -> ST.SymbolTable (Wise rep)) ->
   BlockPred (Wise rep) ->
   UT.UsageTable ->
@@ -1118,7 +1112,7 @@ instance Simplifiable Certs where
           _ -> pure [idd]
 
 simplifyFun ::
-  SimplifiableRep rep =>
+  (SimplifiableRep rep) =>
   FunDef (Wise rep) ->
   SimpleM rep (FunDef (Wise rep))
 simplifyFun (FunDef entry attrs fname rettype params body) = do

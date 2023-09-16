@@ -26,7 +26,7 @@ import Futhark.CodeGen.ImpGen.GPU.Base
 import Futhark.Construct (fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
@@ -42,9 +42,7 @@ flattenArray k flat arr = do
   let flat_shape = Shape $ Var (tvVar flat) : drop k (memLocShape arr_loc)
   sArray (baseString arr ++ "_flat") pt flat_shape (memLocName arr_loc) $
     fromMaybe (error "flattenArray") $
-      IxFun.reshape (memLocIxFun arr_loc) $
-        map pe64 $
-          shapeDims flat_shape
+      LMAD.reshape (memLocLMAD arr_loc) (map pe64 $ shapeDims flat_shape)
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
 sliceArray start size arr = do
@@ -59,7 +57,7 @@ sliceArray start size arr = do
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
-    $ IxFun.slice ixfun slice
+    $ LMAD.slice ixfun slice
 
 -- | @applyLambda lam dests args@ emits code that:
 --
@@ -73,7 +71,7 @@ sliceArray start size arr = do
 -- provided @dest@s, again interpreted as the destination for a
 -- 'copyDWIM'.
 applyLambda ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Lambda rep ->
   [(VName, [DimIndex (Imp.TExp Int64)])] ->
   [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
@@ -92,7 +90,7 @@ applyLambda lam dests args = do
 -- anyway, but you have to be more careful - use this if you are in
 -- doubt.)
 applyRenamedLambda ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   Lambda rep ->
   [(VName, [DimIndex (Imp.TExp Int64)])] ->
   [(SubExp, [DimIndex (Imp.TExp Int64)])] ->
@@ -138,9 +136,9 @@ virtualisedGroupScan seg_flag w lam arrs = do
         carry_idx <- dPrimVE "carry_idx" $ sExt64 chunk_start - 1
         applyRenamedLambda
           lam
-          (zip arrs $ repeat [DimFix $ sExt64 chunk_start])
-          ( zip (map Var arrs) (repeat [DimFix carry_idx])
-              ++ zip (map Var arrs) (repeat [DimFix $ sExt64 chunk_start])
+          (map (,[DimFix $ sExt64 chunk_start]) arrs)
+          ( map ((,[DimFix carry_idx]) . Var) arrs
+              ++ map ((,[DimFix $ sExt64 chunk_start]) . Var) arrs
           )
 
     arrs_chunks <- mapM (sliceArray (sExt64 chunk_start) chunk_size) arrs
@@ -154,8 +152,8 @@ copyInGroup pt destloc srcloc = do
   dest_space <- entryMemSpace <$> lookupMemory (memLocName destloc)
   src_space <- entryMemSpace <$> lookupMemory (memLocName srcloc)
 
-  let src_ixfun = memLocIxFun srcloc
-      dims = IxFun.shape src_ixfun
+  let src_lmad = memLocLMAD srcloc
+      dims = LMAD.shape src_lmad
       rank = length dims
 
   case (dest_space, src_space) of
@@ -169,13 +167,13 @@ copyInGroup pt destloc srcloc = do
             Slice $
               replicate (rank - length srcds) (DimFix 0)
                 ++ takeLast (length srcds) (map fullDim dims)
-      copyElementWise
+      lmadCopy
         pt
         (sliceMemLoc destloc destslice')
         (sliceMemLoc srcloc srcslice')
     _ -> do
       groupCoverSpace (map sExt32 dims) $ \is ->
-        copyElementWise
+        lmadCopy
           pt
           (sliceMemLoc destloc (Slice $ map (DimFix . sExt64) is))
           (sliceMemLoc srcloc (Slice $ map (DimFix . sExt64) is))
@@ -229,7 +227,7 @@ prepareIntraGroupSegHist group_size =
 
           locks_mem <- sAlloc "locks_mem" (typeSize locks_t) $ Space "local"
           dArray locks int32 (arrayShape locks_t) locks_mem $
-            IxFun.iota . map pe64 . arrayDims $
+            LMAD.iota 0 . map pe64 . arrayDims $
               locks_t
 
           sComment "All locks start out unlocked" $
@@ -326,8 +324,17 @@ compileGroupExp (Pat [pe]) (BasicOp (Update safety _ slice se))
     slice' = fmap pe64 slice
     dims = map pe64 $ arrayDims $ patElemType pe
     write = copyDWIM (patElemName pe) (unSlice slice') se []
-compileGroupExp dest e =
+compileGroupExp dest e = do
+  -- It is a messy to jump into control flow for error handling.
+  -- Avoid that by always doing an error sync here.  Potential
+  -- improvement: only do this if any errors are pending (this could
+  -- also be handled in later codegen).
+  when (doSync e) $ sOp $ Imp.ErrorSync Imp.FenceLocal
   defCompileExp dest e
+  where
+    doSync Loop {} = True
+    doSync Match {} = True
+    doSync _ = False
 
 compileGroupOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileGroupOp pat (Alloc size space) =
@@ -421,9 +428,9 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
             forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
               applyRenamedLambda
                 (segBinOpLambda op)
-                (zip tmps $ repeat [DimFix $ sExt64 chunk_start])
-                ( zip (map (Var . patElemName) red_pes) (repeat [])
-                    ++ zip (map Var tmps) (repeat [DimFix $ sExt64 chunk_start])
+                (map (,[DimFix $ sExt64 chunk_start]) tmps)
+                ( map ((,[]) . Var . patElemName) red_pes
+                    ++ map ((,[DimFix $ sExt64 chunk_start]) . Var) tmps
                 )
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
@@ -434,8 +441,11 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
-        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-          copyDWIMFix (patElemName pe) [] (Var arr) [sExt64 chunk_start]
+        sComment "Save result of reduction." $
+          forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+            copyDWIMFix (patElemName pe) [] (Var arr) [sExt64 chunk_start]
+
+    --
     virtCase dims' tmps_for_ops = do
       dims_flat <- dPrimV "dims_flat" $ product dims'
       let segment_size = last dims'
@@ -452,29 +462,31 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIM
-          (patElemName pe)
-          []
-          (Var arr)
-          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIM
+            (patElemName pe)
+            []
+            (Var arr)
+            (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 
+    -- Nonsegmented case (or rather, a single segment) - this we can
+    -- handle directly with a group-level reduction.
     nonvirtCase [dim'] tmps_for_ops = do
-      -- Nonsegmented case (or rather, a single segment) - this we can
-      -- handle directly with a group-level reduction.
       forM_ (zip ops tmps_for_ops) $ \(op, tmps) ->
         groupReduce (sExt32 dim') (segBinOpLambda op) tmps
       sOp $ Imp.ErrorSync Imp.FenceLocal
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIMFix (patElemName pe) [] (Var arr) [0]
-    --
-    nonvirtCase dims' tmps_for_ops = do
-      -- Segmented intra-group reductions are turned into (regular)
-      -- segmented scans.  It is possible that this can be done
-      -- better, but at least this approach is simple.
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIMFix (patElemName pe) [] (Var arr) [0]
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
+    -- Segmented intra-group reductions are turned into (regular)
+    -- segmented scans.  It is possible that this can be done
+    -- better, but at least this approach is simple.
+    nonvirtCase dims' tmps_for_ops = do
       -- groupScan operates on flattened arrays.  This does not
       -- involve copying anything; merely playing with the index
       -- function.
@@ -494,12 +506,13 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
 
-      forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
-        copyDWIM
-          (patElemName pe)
-          []
-          (Var arr)
-          (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
+      sComment "Save result of reduction." $
+        forM_ (zip red_pes $ concat tmps_for_ops) $ \(pe, arr) ->
+          copyDWIM
+            (patElemName pe)
+            []
+            (Var arr)
+            (map (unitSlice 0) (init dims') ++ [DimFix $ last dims' - 1])
 
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
@@ -531,7 +544,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
         \(bin, op_vs, do_op, HistOp dest_shape _ _ _ shape lam) -> do
           let bin' = pe64 bin
               dest_shape' = map pe64 $ shapeDims dest_shape
-              bin_in_bounds = inBounds (Slice (map DimFix [bin'])) dest_shape'
+              bin_in_bounds = inBounds (Slice [DimFix bin']) dest_shape'
               bin_is = map Imp.le64 (init ltids) ++ [bin']
               vs_params = takeLast (length op_vs) $ lambdaParams lam
 
@@ -693,7 +706,7 @@ segOpSizes = onStms
       S.singleton $ arrayDims $ patElemType pe
     onStm (Let _ _ (Match _ cases defbody _)) =
       foldMap (onStms . bodyStms . caseBody) cases <> onStms (bodyStms defbody)
-    onStm (Let _ _ (DoLoop _ _ body)) =
+    onStm (Let _ _ (Loop _ _ body)) =
       onStms (bodyStms body)
     onStm _ = mempty
 

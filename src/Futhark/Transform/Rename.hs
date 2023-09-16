@@ -149,7 +149,7 @@ renamerSubstitutions = asks envNameMap
 -- | Perform a renaming using the 'Substitute' instance.  This only
 -- works if the argument does not itself perform any name binding, but
 -- it can save on boilerplate for simple types.
-substituteRename :: Substitute a => a -> RenameM a
+substituteRename :: (Substitute a) => a -> RenameM a
 substituteRename x = do
   substs <- renamerSubstitutions
   pure $ substituteNames substs x
@@ -164,7 +164,7 @@ class Rename a where
 instance Rename VName where
   rename name = asks (fromMaybe name . M.lookup name . envNameMap)
 
-instance Rename a => Rename [a] where
+instance (Rename a) => Rename [a] where
   rename = mapM rename
 
 instance (Rename a, Rename b) => Rename (a, b) where
@@ -177,7 +177,7 @@ instance (Rename a, Rename b, Rename c) => Rename (a, b, c) where
     c' <- rename c
     pure (a', b', c')
 
-instance Rename a => Rename (Maybe a) where
+instance (Rename a) => Rename (Maybe a) where
   rename = maybe (pure Nothing) (fmap Just . rename)
 
 instance Rename Bool where
@@ -207,7 +207,7 @@ renameBound vars body = do
 
 -- | Rename some statements, then execute an action with the name
 -- substitutions induced by the statements active.
-renamingStms :: Renameable rep => Stms rep -> (Stms rep -> RenameM a) -> RenameM a
+renamingStms :: (Renameable rep) => Stms rep -> (Stms rep -> RenameM a) -> RenameM a
 renamingStms stms m = descend mempty stms
   where
     descend stms' rem_stms = case stmsHead rem_stms of
@@ -216,7 +216,7 @@ renamingStms stms m = descend mempty stms
         stm' <- rename stm
         descend (stms' <> oneStm stm') rem_stms'
 
-instance Renameable rep => Rename (FunDef rep) where
+instance (Renameable rep) => Rename (FunDef rep) where
   rename (FunDef entry attrs fname ret params body) =
     renameBound (map paramName params) $ do
       params' <- mapM rename params
@@ -228,14 +228,14 @@ instance Rename SubExp where
   rename (Var v) = Var <$> rename v
   rename (Constant v) = pure $ Constant v
 
-instance Rename dec => Rename (Param dec) where
+instance (Rename dec) => Rename (Param dec) where
   rename (Param attrs name dec) =
     Param <$> rename attrs <*> rename name <*> rename dec
 
-instance Rename dec => Rename (Pat dec) where
+instance (Rename dec) => Rename (Pat dec) where
   rename (Pat xs) = Pat <$> rename xs
 
-instance Rename dec => Rename (PatElem dec) where
+instance (Rename dec) => Rename (PatElem dec) where
   rename (PatElem ident dec) = PatElem <$> rename ident <*> rename dec
 
 instance Rename Certs where
@@ -244,26 +244,26 @@ instance Rename Certs where
 instance Rename Attrs where
   rename = pure
 
-instance Rename dec => Rename (StmAux dec) where
+instance (Rename dec) => Rename (StmAux dec) where
   rename (StmAux cs attrs dec) =
     StmAux <$> rename cs <*> rename attrs <*> rename dec
 
 instance Rename SubExpRes where
   rename (SubExpRes cs se) = SubExpRes <$> rename cs <*> rename se
 
-instance Renameable rep => Rename (Body rep) where
+instance (Renameable rep) => Rename (Body rep) where
   rename (Body dec stms res) = do
     dec' <- rename dec
     renamingStms stms $ \stms' ->
       Body dec' stms' <$> rename res
 
-instance Renameable rep => Rename (Stm rep) where
+instance (Renameable rep) => Rename (Stm rep) where
   rename (Let pat dec e) = Let <$> rename pat <*> rename dec <*> rename e
 
-instance Renameable rep => Rename (Exp rep) where
+instance (Renameable rep) => Rename (Exp rep) where
   rename (WithAcc inputs lam) =
     WithAcc <$> rename inputs <*> rename lam
-  rename (DoLoop merge form loopbody) = do
+  rename (Loop merge form loopbody) = do
     let (params, args) = unzip merge
     args' <- mapM rename args
     case form of
@@ -280,7 +280,7 @@ instance Renameable rep => Rename (Exp rep) where
           i' <- rename i
           loopbody' <- rename loopbody
           pure $
-            DoLoop
+            Loop
               (zip params' args')
               (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
               loopbody'
@@ -289,7 +289,7 @@ instance Renameable rep => Rename (Exp rep) where
           params' <- mapM rename params
           loopbody' <- rename loopbody
           cond' <- rename cond
-          pure $ DoLoop (zip params' args') (WhileLoop cond') loopbody'
+          pure $ Loop (zip params' args') (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where
       mapper =
@@ -307,14 +307,14 @@ instance Renameable rep => Rename (Exp rep) where
 instance Rename PrimType where
   rename = pure
 
-instance Rename shape => Rename (TypeBase shape u) where
+instance (Rename shape) => Rename (TypeBase shape u) where
   rename (Array et size u) = Array <$> rename et <*> rename size <*> pure u
   rename (Prim t) = pure $ Prim t
   rename (Mem space) = pure $ Mem space
   rename (Acc acc ispace ts u) =
     Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
 
-instance Renameable rep => Rename (Lambda rep) where
+instance (Renameable rep) => Rename (Lambda rep) where
   rename (Lambda params body ret) =
     renameBound (map paramName params) $ do
       params' <- mapM rename params
@@ -328,7 +328,7 @@ instance Rename Names where
 instance Rename Rank where
   rename = pure
 
-instance Rename d => Rename (ShapeBase d) where
+instance (Rename d) => Rename (ShapeBase d) where
   rename (Shape l) = Shape <$> mapM rename l
 
 instance Rename ExtSize where
@@ -341,7 +341,7 @@ instance Rename () where
 instance Rename (NoOp rep) where
   rename NoOp = pure NoOp
 
-instance Rename d => Rename (DimIndex d) where
+instance (Rename d) => Rename (DimIndex d) where
   rename (DimFix i) = DimFix <$> rename i
   rename (DimSlice i n s) = DimSlice <$> rename i <*> rename n <*> rename s
 

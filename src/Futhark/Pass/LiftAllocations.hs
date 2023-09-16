@@ -74,9 +74,9 @@ liftInsideStm stm@(Let _ _ (Match cond_ses cases body dec)) = do
   cases' <- mapM (\(Case p b) -> Case p <$> liftAllocationsInBody b) cases
   body' <- liftAllocationsInBody body
   pure stm {stmExp = Match cond_ses cases' body' dec}
-liftInsideStm stm@(Let _ _ (DoLoop params form body)) = do
+liftInsideStm stm@(Let _ _ (Loop params form body)) = do
   body' <- liftAllocationsInBody body
-  pure stm {stmExp = DoLoop params form body'}
+  pure stm {stmExp = Loop params form body'}
 liftInsideStm stm = pure stm
 
 liftAllocationsInStms ::

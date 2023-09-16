@@ -47,7 +47,7 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-scratch :: MonadBuilder m => String -> PrimType -> [SubExp] -> m VName
+scratch :: (MonadBuilder m) => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- | Main helper function for Register-and-Block Tiling
@@ -149,10 +149,8 @@ kkLoopBody
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
-            q = length lmad_dims
-            last_perm = IxFun.ldPerm $ last lmad_dims
             stride = IxFun.ldStride $ last lmad_dims
-         in (last_perm == q - 1) && (stride == pe64 (intConst Int64 1))
+         in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
         -- the actual redomap.
@@ -713,7 +711,7 @@ matchesBlkRegTile seg_space kstms
 matchesBlkRegTile _ _ = Nothing
 
 -- ceiled division expression
-ceilDiv :: MonadBuilder m => SubExp -> SubExp -> m (Exp (Rep m))
+ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
 mkTileMemSizes ::
