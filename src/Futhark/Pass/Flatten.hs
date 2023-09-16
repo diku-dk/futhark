@@ -55,6 +55,7 @@ data IrregularRep = IrregularRep
     irregularOffsets :: VName,
     irregularElems :: VName
   }
+  deriving (Show)
 
 data ResRep
   = -- | This variable is represented
@@ -64,6 +65,7 @@ data ResRep
   | -- | The representation of an
     -- irregular array.
     Irregular IrregularRep
+  deriving (Show)
 
 newtype DistEnv = DistEnv {distResMap :: M.Map ResTag ResRep}
 
@@ -122,6 +124,9 @@ type Segments = NE.NonEmpty SubExp
 
 segmentsShape :: Segments -> Shape
 segmentsShape = Shape . toList
+
+segmentsRank :: Segments -> Int
+segmentsRank = shapeRank . segmentsShape
 
 segmentsDims :: Segments -> [SubExp]
 segmentsDims = shapeDims . segmentsShape
@@ -325,6 +330,43 @@ replicateIrreg segments env ns desc rep = do
         irregularElems = elems
       }
 
+rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
+rearrangeFlat perm dims i =
+  -- TODO?  Maybe we need to invert one of these permutations.
+  flattenIndex dims $
+    rearrangeShape perm $
+      unflattenIndex (rearrangeShape perm dims) i
+
+rearrangeIrreg ::
+  Segments ->
+  DistEnv ->
+  TypeBase Shape u ->
+  [Int] ->
+  IrregularRep ->
+  Builder GPU IrregularRep
+rearrangeIrreg segments env v_t perm (IrregularRep shape flags offsets elems) = do
+  m <- arraySize 0 <$> lookupType elems
+  (_, _, ii1_vss) <- doRepIota shape
+  (_, _, ii2_vss) <- doSegIota shape
+  elems' <- letExp "elems_rearrange" <=< renameExp <=< segMap (Solo m) $
+    \(Solo i) -> do
+      seg_i <- letSubExp "seg_i" =<< eIndex ii1_vss [eSubExp i]
+      offset <- letSubExp "offset" =<< eIndex offsets [eSubExp seg_i]
+      in_seg_i <- letSubExp "in_seg_i" =<< eIndex ii2_vss [eSubExp i]
+      let v_dims = map pe64 $ arrayDims v_t
+          in_seg_is_tr = rearrangeFlat perm v_dims $ pe64 in_seg_i
+      v' <-
+        letSubExp "v"
+          =<< eIndex elems [toExp $ pe64 offset + in_seg_is_tr]
+      pure [subExpRes v']
+  pure $
+    IrregularRep
+      { irregularSegments = shape,
+        irregularFlags = flags,
+        irregularOffsets = offsets,
+        irregularElems = elems'
+      }
+
 transformDistBasicOp ::
   Segments ->
   DistEnv ->
@@ -481,6 +523,32 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
           pure $ insertIrregular shape flags offsets (distResTag res) elems' env
       | otherwise ->
           error "Flattening update: destination is not input."
+    Rearrange perm v -> do
+      case lookup v inps of
+        Just (DistInputFree v' _) -> do
+          v'' <-
+            letExp (baseString v' <> "_tr") . BasicOp $
+              Rearrange perm v'
+          pure $ insertRegulars [distResTag res] [v''] env
+        Just (DistInput rt v_t) -> do
+          case resVar rt env of
+            Irregular rep -> do
+              rep' <-
+                certifying (distCerts inps aux env) $
+                  rearrangeIrreg segments env v_t perm rep
+              pure $ insertRep (distResTag res) (Irregular rep') env
+            Regular v' -> do
+              let r = segmentsRank segments
+              v'' <-
+                letExp (baseString v' <> "_tr") . BasicOp $
+                  Rearrange ([0 .. r - 1] ++ map (+ r) perm) v'
+              pure $ insertRegulars [distResTag res] [v''] env
+        Nothing -> do
+          let r = segmentsRank segments
+          v' <-
+            letExp (baseString v <> "_tr") . BasicOp $
+              Rearrange ([0 .. r - 1] ++ map (+ r) perm) v
+          pure $ insertRegulars [distResTag res] [v'] env
     _ -> error $ "Unhandled BasicOp:\n" ++ prettyString e
   where
     scalarCase =
