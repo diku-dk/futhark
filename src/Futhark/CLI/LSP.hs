@@ -22,7 +22,9 @@ main _prog _args = do
   _ <-
     runServer $
       ServerDefinition
-        { onConfigurationChange = const $ const $ Right (),
+        { onConfigChange = const $ pure (),
+          configSection = "Futhark",
+          parseConfig = const . const $ Right (),
           defaultConfig = (),
           doInitialize = \env _req -> pure $ Right env,
           staticHandlers = handlers state_mvar,
