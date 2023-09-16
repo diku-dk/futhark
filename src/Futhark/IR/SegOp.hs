@@ -1342,7 +1342,7 @@ bottomUpSegOp ::
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
+bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.  We have to be careful
@@ -1353,20 +1353,16 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
     localScope (scopeOfSegSpace space) $
       foldM distribute (kpes, kts, kres, mempty) kstms
 
-  when
-    (kpes' == kpes)
-    cannotSimplify
+  when (kpes' == kpes) cannotSimplify
 
   kbody' <-
-    localScope (scopeOfSegSpace space) $
-      mkKernelBodyM kstms' kres'
+    localScope (scopeOfSegSpace space) $ mkKernelBodyM kstms' kres'
 
   addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
   where
-    (kts, kbody@(KernelBody _ kstms kres), num_nonmap_results, mk_segop) =
+    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
     free_in_kstms = foldMap freeIn kstms
-    consumed_in_segop = consumedInKernelBody kbody
     space = segSpace segop
 
     sliceWithGtidsFixed stm
@@ -1395,13 +1391,9 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $
                     outer_slice <> remaining_slice
-          if (patElemName kpe `UT.isConsumed` used)
-            || (arr `nameIn` consumed_in_segop)
-            then do
-              precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
-              index kpe {patElemName = precopy}
-              letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
-            else index kpe
+          precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+          index kpe {patElemName = precopy}
+          letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
           pure
             ( kpes'',
               kts'',
