@@ -446,7 +446,7 @@ static int write_str_f16(FILE *out, uint16_t *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f16.inf");
   } else {
-    return fprintf(out, "%.6ff16", x);
+    return fprintf(out, "%.*ff16", FLT_DIG, x);
   }
 }
 
@@ -459,7 +459,7 @@ static int write_str_f32(FILE *out, float *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f32.inf");
   } else {
-    return fprintf(out, "%.6ff32", x);
+    return fprintf(out, "%.*ff32", FLT_DIG, x);
   }
 }
 
@@ -472,7 +472,7 @@ static int write_str_f64(FILE *out, double *src) {
   } else if (isinf(x)) {
     return fprintf(out, "-f64.inf");
   } else {
-    return fprintf(out, "%.6ff64", *src);
+    return fprintf(out, "%.*ff64", DBL_DIG, x);
   }
 }
 
