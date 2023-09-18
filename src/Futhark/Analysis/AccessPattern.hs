@@ -207,7 +207,7 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
   let (stm_ctx, res) = analyzeStm ctx expr
    in let ctx' = maybe ctx (\v -> extend ctx $ oneContext (patElemName . head $ patElems pats) v []) stm_ctx
        in M.union res $ analyzeStms ctx' stms
-analyzeStms _ _ [] = M.empty
+analyzeStms _ [] = M.empty
 
 -- Analyze a statement
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
