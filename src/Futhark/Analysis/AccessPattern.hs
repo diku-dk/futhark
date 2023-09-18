@@ -30,7 +30,7 @@ type Variance = S.IntMap (VName, Int)
 
 type ArrayName = VName
 
-type SegMapName = VName
+type SegMapName = (Int, VName)
 
 type IndexExprName = VName
 
@@ -139,7 +139,17 @@ data CtxVal = CtxVal
 
 -- | A mapping from patterns occuring in Let expressions to their corresponding
 -- variance.
-type Context = M.Map VName CtxVal
+data Context = Context {
+  assignments :: M.Map VName CtxVal,
+  lastSegMap :: [SegMapName]
+}
+
+instance Semigroup Context where
+  (<>)
+    (Context ass0 lastSegMap0)
+    (Context ass1 lastSegMap1)
+      = Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1)
+
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
@@ -155,18 +165,24 @@ instance Semigroup DimIdxPat where
 -- We never have to consider the case where VNames clash in the context, since
 -- they are unique.
 extend :: Context -> Context -> Context
-extend = M.union
+extend = (<>)
+
+oneContext :: VName -> CtxVal -> [SegMapName] -> Context
+oneContext name ctxValue segmaps = Context {assignments = M.singleton name ctxValue, lastSegMap = segmaps}
+
+zeroContext :: Context
+zeroContext = Context {assignments = mempty, lastSegMap = []}
 
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
-contextFromParam _i p = M.singleton (paramName p)
+contextFromParam _i p v = oneContext (paramName p) v []
 
 -- type t = loop | gpuOp | funcdef
 
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams i pp n =
-  foldl (<>) mempty $
+  foldl (<>) zeroContext $
     map (\p -> contextFromParam i p n) pp
 
 -- | TODO: CHANGE THIS COMMENT
@@ -186,7 +202,7 @@ analyzeFunction func =
 analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
 analyzeStms ctx ((Let pats _aux expr) : stms) =
   let (stm_ctx, res) = analyzeStm ctx expr
-   in let ctx' = maybe ctx (extend ctx . M.singleton (patElemName . head $ patElems pats)) stm_ctx
+   in let ctx' = maybe ctx (\v -> extend ctx $ oneContext (patElemName . head $ patElems pats) v []) stm_ctx
        in M.union res $ analyzeStms ctx' stms
 analyzeStms _ _ [] = M.empty
 
