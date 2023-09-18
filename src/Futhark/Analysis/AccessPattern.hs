@@ -33,6 +33,10 @@ type ArrayName = VName
 
 type SegMapName = (Int, VName)
 
+type LoopBodyName = (Int, VName)
+
+type CondBodyName = (Int, VName)
+
 type IndexExprName = VName
 
 -- | Collect all features of access to a specific dimension of an array.
@@ -139,6 +143,16 @@ data CtxVal = CtxVal
     iterationType :: IterationType
   }
 
+(><) :: Context -> CtxVal -> CtxVal -> CtxVal
+(><) ctx (CtxVal lnames ltype) (CtxVal rnames rtype) =
+  -- TODO: Do some lookups in context
+  CtxVal ((<>) lnames rnames) rtype
+
+data BodyType
+  = SegMapName SegMapName
+  | LoopBodyName LoopBodyName
+  | CondBodyName CondBodyName
+
 -- | Used during the analysis to keep track of the dependencies of patterns
 -- encountered so far.
 data Context = Context
@@ -147,7 +161,7 @@ data Context = Context
     assignments :: M.Map VName CtxVal,
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
-    lastSegMap :: [SegMapName],
+    lastBodyType :: [BodyType],
     -- | Current level of recursion
     currentLevel :: Int
   }
@@ -174,11 +188,11 @@ instance Semigroup DimIdxPat where
 extend :: Context -> Context -> Context
 extend = (<>)
 
-oneContext :: VName -> CtxVal -> [SegMapName] -> Context
+oneContext :: VName -> CtxVal -> [BodyType] -> Context
 oneContext name ctxValue segmaps =
   Context
     { assignments = M.singleton name ctxValue,
-      lastSegMap = segmaps,
+      lastBodyType = segmaps,
       currentLevel = 0
     }
 
@@ -186,7 +200,7 @@ zeroContext :: Context
 zeroContext =
   Context
     { assignments = mempty,
-      lastSegMap = [],
+      lastBodyType = [],
       currentLevel = 0
     }
 
@@ -234,7 +248,10 @@ analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let p _ e) =
   case e of
     (BasicOp (Index _n (Slice _e))) -> error "UNHANDLED: Index"
-    (BasicOp _) -> error "UNHANDLED: BasicOp"
+    (BasicOp op) ->
+      -- TODO: Lookup basicOp
+      let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
+       in (ctx', mempty)
     (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
     (Loop _bindings _loop _body) -> error "UNHANDLED: Loop"
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
@@ -254,20 +271,61 @@ analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
   let ctx'' =
         Context
           { assignments = mempty,
-            lastSegMap = [(currentLevel ctx, segmapname)],
+            lastBodyType = [SegMapName (currentLevel ctx, segmapname)],
             currentLevel = currentLevel ctx + 1
           }
    in let segSpaceContext =
             contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
-       -- `extend` is associative, so the order matters. (in regards to `lastSegMap`)
-       in let ctx' = extend ctx $ extend ctx'' segSpaceContext
+       in -- `extend` is associative, so the order matters. (in regards to `lastBodyType`)
+          let ctx' = extend ctx $ extend ctx'' segSpaceContext
            in analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
 -- In all other cases we just recurse, with extended context of the segspace
+-- TODO: Future improvement: Add other segmented operations to the context, to
+-- reveal more nested parallel patterns
 analyzeSegOp ctx segmapname segop =
   let segSpaceContext =
         contextFromSegSpace (currentLevel ctx, segmapname) $
           segSpace segop
    in analyzeStms (extend ctx segSpaceContext) . stmsToList . kernelBodyStms $ segBody segop
+
+getIterationType :: Context -> IterationType
+getIterationType (Context _ rec _) =
+  getIterationType' rec
+    where
+      getIterationType' [] = Sequential
+      getIterationType' rec =
+        case last rec of
+          SegMapName _ -> Parallel
+          LoopBodyName _ -> Sequential
+          -- We can't really trust cond/match to be sequential/parallel, so
+          -- recurse a bit ya kno
+          CondBodyName _ -> getIterationType $ init rec
+
+
+analyzeBasicOp :: Context -> BasicOp -> CtxVal
+analyzeBasicOp _ (SubExp (Constant _)) = CtxVal mempty Sequential
+analyzeBasicOp c (SubExp (Var v)) =
+  case M.lookup v (assignments c) of
+    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
+    (Just (CtxVal deps Sequential)) -> CtxVal mempty Sequential
+
+--    Opaque OpaqueOp SubExp
+--    ArrayLit [SubExp] Type
+--    UnOp UnOp SubExp
+--    BinOp BinOp SubExp SubExp
+--    CmpOp CmpOp SubExp SubExp
+--    ConvOp ConvOp SubExp
+--    Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
+--    Index VName (Slice SubExp)
+--    Update Safety VName (Slice SubExp) SubExp
+--    Concat Int (NonEmpty VName) SubExp
+--    Manifest [Int] VName
+--    Iota SubExp SubExp SubExp IntType
+--    Replicate Shape SubExp
+--    Scratch PrimType [SubExp]
+--    Reshape ReshapeKind Shape VName
+--    Rearrange [Int] VName
+--    UpdateAcc VName [SubExp] [SubExp]
 
 -- Pretty printing
 
