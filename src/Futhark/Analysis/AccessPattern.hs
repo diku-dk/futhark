@@ -12,6 +12,7 @@ module Futhark.Analysis.AccessPattern
   )
 where
 
+import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
@@ -181,6 +182,14 @@ zeroContext = Context {assignments = mempty, lastSegMap = []}
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
 
+-- | Create a singular context from a parameter
+contextFromSegSpace :: SegMapName -> SegSpace -> Context
+contextFromSegSpace segspaceName s =
+  foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
+    unSegSpace s
+  where
+    ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
+
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams i pp n =
@@ -203,31 +212,37 @@ analyzeFunction func =
 
 -- | Analyze each statement in a list of statements.
 analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
-analyzeStms ctx ((Let pats _aux expr) : stms) =
-  let (stm_ctx, res) = analyzeStm ctx expr
-   in let ctx' = maybe ctx (\v -> extend ctx $ oneContext (patElemName . head $ patElems pats) v []) stm_ctx
-       in M.union res $ analyzeStms ctx' stms
+analyzeStms ctx (stm : stms) =
+  let (stm_ctx, res) = analyzeStm ctx stm
+   in M.union res $ analyzeStms stm_ctx stms
 analyzeStms _ [] = M.empty
 
 -- Analyze a statement
-analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeStm _ctx (BasicOp (Index _n (Slice _e))) = error "UNHANDLED: Index"
-analyzeStm _ctx (BasicOp _) = error "UNHANDLED: BasicOp"
-analyzeStm _ctx (Match _subexps _cases _defaultBody _) = error "UNHANDLED: Match"
-analyzeStm _ctx (Loop _bindings _loop _body) = error "UNHANDLED: Loop"
-analyzeStm _ctx (Apply _name _ _ _) = error "UNHANDLED: Apply"
-analyzeStm _ctx (WithAcc _ _) = error "UNHANDLED: With"
-analyzeStm ctx (Op (SegOp o)) = analyzeSegOp ctx o
-analyzeStm _ctx (Op (SizeOp _)) = error "UNHANDLED: SizeOp"
-analyzeStm _ctx (Op (GPUBody _ _)) = error "UNHANDLED: GPUBody"
-analyzeStm _ctx (Op (OtherOp _)) = error "UNHANDLED: OtherOp"
+analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
+analyzeStm ctx (Let p _ e) =
+  case e of
+    ( BasicOp (Index _n (Slice _e))) -> error "UNHANDLED: Index"
+    (BasicOp _) -> error "UNHANDLED: BasicOp"
+    (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
+    (Loop _bindings _loop _body) -> error "UNHANDLED: Loop"
+    (Apply _name _ _ _) -> error "UNHANDLED: Apply"
+    (WithAcc _ _) -> error "UNHANDLED: With"
+    (Op (SegOp o)) -> analyzeSegOp ctx pp o
+    (Op (SizeOp _)) -> error "UNHANDLED: SizeOp"
+    (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
+    (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
+  where
+    pp = head $ patElems p
 
 -- Analyze a SegOp
-analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeSegOp _ctx (SegMap _lvl _idxSpace _types _kbody) = error "case SegMap"
-analyzeSegOp _ctx (SegRed _lvl _idxSpace _segOps _types _kbody) = error "case SegRed"
-analyzeSegOp _ctx (SegScan _lvl _idxSpace _segOps _types _kbody) = error "case SegScan"
-analyzeSegOp _ctx (SegHist _lvl _idxSpace _segHistOps _types _kbody) = error "case SegHist"
+analyzeSegOp :: Context -> PatElem dec -> SegOp lvl GPU -> (Context, ArrayIndexDescriptors)
+--analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types _kbody) =
+-- let segSpaceContext = contextFromSegSpace segmapname idxSpace
+--  in let ctx' = extend ctx segSpaceContext
+--      in (Nothing, analyzeStms ctx' _kbody)
+analyzeSegOp _ctx _p (SegRed _lvl _idxSpace _segOps _types _kbody) = error "case SegRed"
+analyzeSegOp _ctx _p (SegScan _lvl _idxSpace _segOps _types _kbody) = error "case SegScan"
+analyzeSegOp _ctx _p (SegHist _lvl _idxSpace _segHistOps _types _kbody) = error "case SegHist"
 
 -- Pretty printing
 
