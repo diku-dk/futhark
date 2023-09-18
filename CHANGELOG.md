@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   print enough digits to not hide information.  Binary output is
   unchanged.
 
+* Invalid CSE on constants could crash the compiler (#2021).
+
 ## [0.25.4]
 
 ### Fixed

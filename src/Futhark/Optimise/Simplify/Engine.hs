@@ -780,11 +780,16 @@ simplifyStms ::
   (SimplifiableRep rep) =>
   Stms (Wise rep) ->
   SimpleM rep (Stms (Wise rep))
-simplifyStms stms = do
-  simplifyStmsWithUsage all_used stms
+simplifyStms stms = simplifyStmsWithUsage usage stms
   where
-    all_used =
-      UT.usages (namesFromList (M.keys (scopeOf stms)))
+    -- XXX: treat everything as consumed, because when these are
+    -- constants it is otherwise complicated to ensure we do not
+    -- introduce more aliasing than specified by the return types.
+    -- CSE has the same problem.
+    all_bound = M.keys (scopeOf stms)
+    usage =
+      UT.usages (namesFromList all_bound)
+        <> foldMap UT.consumedUsage all_bound
 
 simplifyStmsWithUsage ::
   (SimplifiableRep rep) =>
