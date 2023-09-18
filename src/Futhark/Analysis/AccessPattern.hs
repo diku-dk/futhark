@@ -294,25 +294,25 @@ analyzeSegOp ctx segmapname segop =
    in analyzeStms (extend ctx segSpaceContext) . stmsToList . kernelBodyStms $ segBody segop
 
 getIterationType :: Context -> IterationType
-getIterationType (Context _ rec _) =
-  getIterationType' rec
-    where
-      getIterationType' [] = Sequential
-      getIterationType' rec =
-        case last rec of
-          SegMapName _ -> Parallel
-          LoopBodyName _ -> Sequential
-          -- We can't really trust cond/match to be sequential/parallel, so
-          -- recurse a bit ya kno
-          CondBodyName _ -> getIterationType $ init rec
-
+getIterationType (Context _ bodies _) =
+  getIteration_rec bodies
+  where
+    getIteration_rec [] = Sequential
+    getIteration_rec rec =
+      case last rec of
+        SegMapName _ -> Parallel
+        LoopBodyName _ -> Sequential
+        -- We can't really trust cond/match to be sequential/parallel, so
+        -- recurse a bit ya kno
+        CondBodyName _ -> getIteration_rec $ init rec
 
 analyzeBasicOp :: Context -> BasicOp -> CtxVal
 analyzeBasicOp _ (SubExp (Constant _)) = CtxVal mempty Sequential
 analyzeBasicOp c (SubExp (Var v)) =
   case M.lookup v (assignments c) of
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
-    (Just (CtxVal deps Sequential)) -> CtxVal mempty Sequential
+    -- If variable is found, the dependenies must be the superset
+    (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType c
 
 --    Opaque OpaqueOp SubExp
 --    ArrayLit [SubExp] Type
