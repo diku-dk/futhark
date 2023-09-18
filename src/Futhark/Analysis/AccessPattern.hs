@@ -34,10 +34,10 @@ type SegMapName = (Int, VName)
 
 type IndexExprName = VName
 
--- | Collect all features of memory access together
+-- | Collect all features of access to a specific dimension of an array.
 data DimIdxPat = DimIdxPat
   { -- | Set of gtid's that the access is variant to.
-    -- | Empty set means that the access is invariant.
+    -- An empty set indicates that the access is invariant.
     variances :: Variance,
     -- | Whether the acess is parallel or sequential
     iterType :: IterationType
@@ -50,10 +50,11 @@ isInv (DimIdxPat n _) = S.null n
 isVar :: DimIdxPat -> Bool
 isVar = not . isInv
 
--- | Each element in the list corresponds to a dimension in the given array
+-- | Each element in the list corresponds to an access to a dimension in the given array
+-- in the order of the dimensions.
 type MemoryEntry = [DimIdxPat]
 
--- | We map variable names of arrays to lists of memory access patterns.
+-- | Map variable names of arrays in a segmap to index expressions on those arrays.
 type ArrayIndexDescriptors =
   M.Map SegMapName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
 
@@ -137,10 +138,14 @@ data CtxVal = CtxVal
     iterationType :: IterationType
   }
 
--- | A mapping from patterns occuring in Let expressions to their corresponding
--- variance.
+-- | Used during the analysis to keep track of the dependencies of patterns
+-- encountered so far.
 data Context = Context
-  { assignments :: M.Map VName CtxVal,
+  { -- | A mapping from patterns occuring in Let expressions to their dependencies
+    --  and iteration types.
+    assignments :: M.Map VName CtxVal,
+    -- | A list of the segMaps encountered during the analysis in the order they
+    -- were encountered.
     lastSegMap :: [SegMapName]
   }
 
@@ -158,7 +163,7 @@ instance Semigroup DimIdxPat where
       | atypes == btypes =
           DimIdxPat ((<>) avars bvars) atypes
       | otherwise =
-          error "REEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+          error "Oh no!"
 
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
@@ -176,19 +181,17 @@ zeroContext = Context {assignments = mempty, lastSegMap = []}
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
 
--- type t = loop | gpuOp | funcdef
-
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams i pp n =
   foldl (<>) zeroContext $
     map (\p -> contextFromParam i p n) pp
 
--- | TODO: CHANGE THIS COMMENT
--- | For each `entry` we return a tuple of (function-name and AIDs)
+-- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
 analyzeDimIdxPats = foldMap analyzeFunction . progFuns
 
+-- | Analyze each statement in a function body.
 analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
 analyzeFunction func =
   let stms = stmsToList . bodyStms $ funDefBody func
@@ -198,6 +201,7 @@ analyzeFunction func =
               CtxVal {deps = mempty, iterationType = Sequential}
        in analyzeStms ctx stms
 
+-- | Analyze each statement in a list of statements.
 analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
 analyzeStms ctx ((Let pats _aux expr) : stms) =
   let (stm_ctx, res) = analyzeStm ctx expr
@@ -205,6 +209,7 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
        in M.union res $ analyzeStms ctx' stms
 analyzeStms _ _ [] = M.empty
 
+-- Analyze a statement
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
 analyzeStm _ctx (BasicOp (Index _n (Slice _e))) = error "UNHANDLED: Index"
 analyzeStm _ctx (BasicOp _) = error "UNHANDLED: BasicOp"
@@ -217,6 +222,7 @@ analyzeStm _ctx (Op (SizeOp _)) = error "UNHANDLED: SizeOp"
 analyzeStm _ctx (Op (GPUBody _ _)) = error "UNHANDLED: GPUBody"
 analyzeStm _ctx (Op (OtherOp _)) = error "UNHANDLED: OtherOp"
 
+-- Analyze a SegOp
 analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
 analyzeSegOp _ctx (SegMap _lvl _idxSpace _types _kbody) = error "case SegMap"
 analyzeSegOp _ctx (SegRed _lvl _idxSpace _segOps _types _kbody) = error "case SegRed"
