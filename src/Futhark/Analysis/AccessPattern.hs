@@ -16,6 +16,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
+import Futhark.IR.Syntax.Core
 import Futhark.Util.Pretty
 
 -- | Iteration type describes whether the index is iterated in a parallel or
@@ -306,31 +307,59 @@ getIterationType (Context _ bodies _) =
         -- recurse a bit ya kno
         CondBodyName _ -> getIteration_rec $ init rec
 
-analyzeBasicOp :: Context -> BasicOp -> CtxVal
-analyzeBasicOp _ (SubExp (Constant _)) = CtxVal mempty Sequential
-analyzeBasicOp c (SubExp (Var v)) =
+analyzeSubExpr :: Context -> SubExp -> CtxVal
+analyzeSubExpr c (Constant _) = CtxVal mempty $ getIterationType c
+analyzeSubExpr c (Var v) =
   case M.lookup v (assignments c) of
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
     -- If variable is found, the dependenies must be the superset
     (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType c
 
---    Opaque OpaqueOp SubExp
---    ArrayLit [SubExp] Type
---    UnOp UnOp SubExp
---    BinOp BinOp SubExp SubExp
---    CmpOp CmpOp SubExp SubExp
---    ConvOp ConvOp SubExp
---    Assert SubExp (ErrorMsg SubExp) (SrcLoc, [SrcLoc])
---    Index VName (Slice SubExp)
---    Update Safety VName (Slice SubExp) SubExp
---    Concat Int (NonEmpty VName) SubExp
---    Manifest [Int] VName
---    Iota SubExp SubExp SubExp IntType
---    Replicate Shape SubExp
---    Scratch PrimType [SubExp]
---    Reshape ReshapeKind Shape VName
---    Rearrange [Int] VName
---    UpdateAcc VName [SubExp] [SubExp]
+analyzeBasicOp :: Context -> BasicOp -> CtxVal
+analyzeBasicOp c (SubExp subexp) = analyzeSubExpr c subexp
+analyzeBasicOp c (Opaque _ subexp) = analyzeSubExpr c subexp
+analyzeBasicOp c (ArrayLit subexps _t) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal mempty $ getIterationType c)
+    subexps
+analyzeBasicOp c (UnOp _ subexp) = analyzeSubExpr c subexp
+analyzeBasicOp c (BinOp _ lsubexp rsubexp) = (><) c (analyzeSubExpr c lsubexp) $ analyzeSubExpr c rsubexp
+analyzeBasicOp c (CmpOp _ lsubexp rsubexp) = (><) c (analyzeSubExpr c lsubexp) $ analyzeSubExpr c rsubexp
+analyzeBasicOp c (ConvOp _ subexp) = analyzeSubExpr c subexp
+analyzeBasicOp c (Assert subexp _ _) = analyzeSubExpr c subexp
+analyzeBasicOp _ (Index name _) = error $ "unhandled: Index (Skill issue?)" ++ baseString name
+analyzeBasicOp _ (Update _ name _slice _subexp) = error $ "unhandled: Update (technically skill issue?)" ++ baseString name
+-- Technically, do we need this case?
+analyzeBasicOp c (Concat _ _ length_subexp) = analyzeSubExpr c length_subexp
+analyzeBasicOp _ (Manifest _dim _name) = error "unhandled: Manifest"
+analyzeBasicOp c (Iota end_subexp start_subexp stride_subexp _) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal mempty $ getIterationType c)
+    [end_subexp, start_subexp, stride_subexp]
+analyzeBasicOp c (Replicate (Shape shape_subexp) subexp) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal mempty $ getIterationType c)
+    (subexp : shape_subexp)
+analyzeBasicOp c (Scratch _ subexprs) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal mempty $ getIterationType c)
+    subexprs
+analyzeBasicOp c (Reshape _ (Shape shape_subexp) name) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal (oneName name) $ getIterationType c)
+    shape_subexp
+analyzeBasicOp c (Rearrange _ name) = CtxVal (oneName name) $ getIterationType c
+analyzeBasicOp c (UpdateAcc name lsubexprs rsubexprs) =
+  foldl'
+    (\a -> (><) c a . analyzeSubExpr c)
+    (CtxVal (oneName name) $ getIterationType c)
+    (lsubexprs ++ rsubexprs)
+analyzeBasicOp _ _ = error "unhandled: match-all"
 
 -- Pretty printing
 
