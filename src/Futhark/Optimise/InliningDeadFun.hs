@@ -83,7 +83,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             if any (`calledByConsts` cg) to_inline_now
               then do
                 consts' <-
-                  simplifyConsts . performCSEOnStms True
+                  simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
                 pure (ST.insertStms (informStms consts') mempty, consts')
               else pure (vtable, consts)

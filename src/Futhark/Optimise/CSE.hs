@@ -98,17 +98,11 @@ performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
---
--- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the rep has
--- memory information, since at that point arrays have identity beyond their
--- value.
 performCSEOnStms ::
   (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
-  Bool ->
   Stms rep ->
   Stms rep
-performCSEOnStms cse_arrays =
+performCSEOnStms =
   fmap removeStmAliases . f . fst . analyseStms mempty
   where
     f stms =
@@ -119,7 +113,9 @@ performCSEOnStms cse_arrays =
               (stmsToList stms)
               (pure ())
           )
-          (newCSEState cse_arrays)
+          -- It is never safe to CSE arrays in stms in isolation,
+          -- because we might introduce additional aliasing.
+          (newCSEState False)
 
 cseInFunDef ::
   (Aliased rep, CSEInOp (Op rep)) =>
