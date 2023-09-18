@@ -135,6 +135,11 @@ type ArrayIndexDescriptors =
 --     as_1:
 --       [q,p]
 
+-- OKAY, but what if
+-- let Bs = segmap () As
+-- let Cs = segmap () Bs
+-- How is Bs and Cs tracked to their respective segmaps?
+
 -- | Only used during the analysis to keep track of the dependencies of each
 -- pattern. For example, a pattern might depend on a function parameter, a
 -- gtid, or some other pattern.
