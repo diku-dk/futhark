@@ -158,9 +158,9 @@ analyzeFunction func =
        in analyzeStms ctx stms
 
 analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
-analyzeStms c ((Let pats _aux expr) : stms) =
-  let (ctx, res) = analyzeStm c expr
-   in let ctx' = maybe c (extend c . M.singleton (patElemName . head $ patElems pats)) ctx
+analyzeStms ctx ((Let pats _aux expr) : stms) =
+  let (stm_ctx, res) = analyzeStm ctx expr
+   in let ctx' = maybe ctx (extend ctx . M.singleton (patElemName . head $ patElems pats)) stm_ctx
        in M.union res $ analyzeStms ctx' stms
 analyzeStms _ [] = M.empty
 
