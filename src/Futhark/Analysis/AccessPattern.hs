@@ -116,8 +116,8 @@ type ArrayIndexDescriptors =
 
 -- ctx: [segmap_0, segmap_1, segmap_2]
 
--- segmap_0:
---   A:
+-- segmap_0:      -- it is a false positive[VERIFICATION NEEDED], since segmap_0
+--   A:           -- does not directly provide variables to index into `as_1`
 --     as_1:
 --       [q,p]
 -- segmap_1:
@@ -139,17 +139,16 @@ data CtxVal = CtxVal
 
 -- | A mapping from patterns occuring in Let expressions to their corresponding
 -- variance.
-data Context = Context {
-  assignments :: M.Map VName CtxVal,
-  lastSegMap :: [SegMapName]
-}
+data Context = Context
+  { assignments :: M.Map VName CtxVal,
+    lastSegMap :: [SegMapName]
+  }
 
 instance Semigroup Context where
   (<>)
     (Context ass0 lastSegMap0)
-    (Context ass1 lastSegMap1)
-      = Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1)
-
+    (Context ass1 lastSegMap1) =
+      Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1)
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
