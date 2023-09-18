@@ -197,11 +197,8 @@ contextFromParam _i p v = oneContext (paramName p) v []
 -- | Create a singular context from a segspace
 contextFromSegSpace :: SegMapName -> SegSpace -> Context
 contextFromSegSpace segspaceName s =
-  -- This will add segspaceName `n` times, where `n = |unSegSpace s|`
-  let ctx'' = Context {assignments = mempty, lastSegMap = [segspaceName], currentLevel = 0}
-   in extend ctx'' $
-        foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
-          unSegSpace s
+  foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
+    unSegSpace s
   where
     ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
 
@@ -232,7 +229,7 @@ analyzeStms ctx (stm : stms) =
    in M.union res $ analyzeStms stm_ctx stms
 analyzeStms _ [] = M.empty
 
--- Analyze a statement
+-- | Analyze a statement
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let p _ e) =
   case e of
@@ -242,28 +239,35 @@ analyzeStm ctx (Let p _ e) =
     (Loop _bindings _loop _body) -> error "UNHANDLED: Loop"
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
-    -- | analyzeSegOp does not extend ctx
-    (Op (SegOp o)) -> (ctx, analyzeSegOp ctx pattern o)
+    -- \| analyzeSegOp does not extend ctx
+    (Op (SegOp o)) -> (ctx, analyzeSegOp ctx pat o)
     (Op (SizeOp _)) -> error "UNHANDLED: SizeOp"
     (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
-    pattern = patElemName . head $ patElems p
+    pat = patElemName . head $ patElems p
 
--- Analyze a SegOp
+-- | Analyze a SegOp
 analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
 analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
   -- Add segmapname to ctx
-  let segSpaceContext = contextFromSegSpace (currentLevel ctx , segmapname) idxSpace
-   in let ctx' = extend ctx segSpaceContext
-       in analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
-
--- In all other cases we just recurse
-analyzeSegOp ctx _ segop =
-  case segop of
-    (SegRed _lvl _idxSpace _segOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
-    (SegScan _lvl _idxSpace _segOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
-    (SegHist _lvl _idxSpace _segHistOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
+  let ctx'' =
+        Context
+          { assignments = mempty,
+            lastSegMap = [(currentLevel ctx, segmapname)],
+            currentLevel = currentLevel ctx + 1
+          }
+   in let segSpaceContext =
+            contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
+       -- `extend` is associative, so the order matters. (in regards to `lastSegMap`)
+       in let ctx' = extend ctx $ extend ctx'' segSpaceContext
+           in analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
+-- In all other cases we just recurse, with extended context of the segspace
+analyzeSegOp ctx segmapname segop =
+  let segSpaceContext =
+        contextFromSegSpace (currentLevel ctx, segmapname) $
+          segSpace segop
+   in analyzeStms (extend ctx segSpaceContext) . stmsToList . kernelBodyStms $ segBody segop
 
 -- Pretty printing
 
