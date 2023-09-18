@@ -60,6 +60,7 @@ type ArrayIndexDescriptors =
 -- segmap(pattern) => A(pattern) => indexExpressionName(pattern) => [DimIdxPat]
 --
 
+-- ================ EXAMPLE 1 ================
 -- segmap_0 (p)
 --   ...
 --   segmap_1 (q)
@@ -72,14 +73,17 @@ type ArrayIndexDescriptors =
 -- ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
 --
 -- segmap_0:
+--   A:
+--     as_1:
+--       [q,p,i] -> [i,p,q]
 -- ...
---  segmap_1:
+-- segmap_1:
 --   A:
 --     as_1:
 --       [q,p,i] -> [i,p,q]
 --       [x,z,q]
 --     as_2:
---       [[x,y],z,q]
+--       [[x 0,y 1],z 1337 ,q 1]
 --     as_3:
 --       [0,0,0]
 --     res_2:
@@ -100,6 +104,30 @@ type ArrayIndexDescriptors =
 --  loop l < n
 --    seg (x,y)
 --      A[i,j,l,x,y]
+
+-- ================ EXAMPLE 2 ================
+
+-- segmap_0 (x,y):
+--  segmap_1 (p):
+--    segmap_2 (q):
+--      let as_1 = A[q,p]
+
+-- ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+-- ctx: [segmap_0, segmap_1, segmap_2]
+
+-- segmap_0:
+--   A:
+--     as_1:
+--       [q,p]
+-- segmap_1:
+--   A:
+--     as_1:
+--       [q,p]
+-- segmap_2:
+--   A:
+--     as_1:
+--       [q,p]
 
 -- | Only used during the analysis to keep track of the dependencies of each
 -- pattern. For example, a pattern might depend on a function parameter, a
@@ -160,23 +188,23 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
   let (stm_ctx, res) = analyzeStm ctx expr
    in let ctx' = maybe ctx (extend ctx . M.singleton (patElemName . head $ patElems pats)) stm_ctx
        in M.union res $ analyzeStms ctx' stms
-analyzeStms _ [] = M.empty
+analyzeStms _ _ [] = M.empty
 
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeStm _c (BasicOp (Index _n (Slice _e))) = error "UNHANDLED: Index"
-analyzeStm _c (BasicOp _) = error "UNHANDLED: BasicOp"
-analyzeStm _c (Match _subexps _cases _defaultBody _) = error "UNHANDLED: Match"
-analyzeStm _c (Loop _bindings _loop _body) = error "UNHANDLED: Loop"
-analyzeStm _c (Apply _name _ _ _) = error "UNHANDLED: Apply"
-analyzeStm _c (WithAcc _ _) = error "UNHANDLED: With"
+analyzeStm _ctx (BasicOp (Index _n (Slice _e))) = error "UNHANDLED: Index"
+analyzeStm _ctx (BasicOp _) = error "UNHANDLED: BasicOp"
+analyzeStm _ctx (Match _subexps _cases _defaultBody _) = error "UNHANDLED: Match"
+analyzeStm _ctx (Loop _bindings _loop _body) = error "UNHANDLED: Loop"
+analyzeStm _ctx (Apply _name _ _ _) = error "UNHANDLED: Apply"
+analyzeStm _ctx (WithAcc _ _) = error "UNHANDLED: With"
 analyzeStm ctx (Op (SegOp o)) = analyzeSegOp ctx o
-analyzeStm _c (Op (SizeOp _)) = error "sizeop"
-analyzeStm _c (Op (GPUBody _ _)) = error "gpubody"
-analyzeStm _c (Op (OtherOp _)) = error "otherop"
+analyzeStm _ctx (Op (SizeOp _)) = error "UNHANDLED: SizeOp"
+analyzeStm _ctx (Op (GPUBody _ _)) = error "UNHANDLED: GPUBody"
+analyzeStm _ctx (Op (OtherOp _)) = error "UNHANDLED: OtherOp"
 
 analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeSegOp _ctx (SegMap _lvl  _idxSpace _types _kbody) = error "case SegMap"
-analyzeSegOp _ctx (SegRed _lvl  _idxSpace _segOps _types _kbody) = error "case SegRed"
+analyzeSegOp _ctx (SegMap _lvl _idxSpace _types _kbody) = error "case SegMap"
+analyzeSegOp _ctx (SegRed _lvl _idxSpace _segOps _types _kbody) = error "case SegRed"
 analyzeSegOp _ctx (SegScan _lvl _idxSpace _segOps _types _kbody) = error "case SegScan"
 analyzeSegOp _ctx (SegHist _lvl _idxSpace _segHistOps _types _kbody) = error "case SegHist"
 
