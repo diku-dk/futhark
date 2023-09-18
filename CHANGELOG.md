@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Textual floating-point numbers printed by executables now always
+  print enough digits to not hide information.  Binary output is
+  unchanged.
+
 ## [0.25.4]
 
 ### Fixed
