@@ -9,16 +9,12 @@ module Futhark.Analysis.AccessPattern
     SegMapName,
     IndexExprName,
     DimIdxPat,
-    -- names,
   )
 where
 
-import Control.Monad
 import Data.IntMap.Strict qualified as S
--- import Data.Set qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.IR.GPU
-import Futhark.IR.Prop.Names
 import Futhark.Util.Pretty
 
 -- | Iteration type describes whether the index is iterated in a parallel or
