@@ -147,14 +147,16 @@ data Context = Context
     assignments :: M.Map VName CtxVal,
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
-    lastSegMap :: [SegMapName]
+    lastSegMap :: [SegMapName],
+    -- | Current level of recursion
+    currentLevel :: Int
   }
 
 instance Semigroup Context where
   (<>)
-    (Context ass0 lastSegMap0)
-    (Context ass1 lastSegMap1) =
-      Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1)
+    (Context ass0 lastSegMap0 lvl0)
+    (Context ass1 lastSegMap1 lvl1) =
+      Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1) $ max lvl0 lvl1
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
@@ -173,20 +175,33 @@ extend :: Context -> Context -> Context
 extend = (<>)
 
 oneContext :: VName -> CtxVal -> [SegMapName] -> Context
-oneContext name ctxValue segmaps = Context {assignments = M.singleton name ctxValue, lastSegMap = segmaps}
+oneContext name ctxValue segmaps =
+  Context
+    { assignments = M.singleton name ctxValue,
+      lastSegMap = segmaps,
+      currentLevel = 0
+    }
 
 zeroContext :: Context
-zeroContext = Context {assignments = mempty, lastSegMap = []}
+zeroContext =
+  Context
+    { assignments = mempty,
+      lastSegMap = [],
+      currentLevel = 0
+    }
 
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
 
--- | Create a singular context from a parameter
+-- | Create a singular context from a segspace
 contextFromSegSpace :: SegMapName -> SegSpace -> Context
 contextFromSegSpace segspaceName s =
-  foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
-    unSegSpace s
+  -- This will add segspaceName `n` times, where `n = |unSegSpace s|`
+  let ctx'' = Context {assignments = mempty, lastSegMap = [segspaceName], currentLevel = 0}
+   in extend ctx'' $
+        foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
+          unSegSpace s
   where
     ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
 
@@ -221,28 +236,34 @@ analyzeStms _ [] = M.empty
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let p _ e) =
   case e of
-    ( BasicOp (Index _n (Slice _e))) -> error "UNHANDLED: Index"
+    (BasicOp (Index _n (Slice _e))) -> error "UNHANDLED: Index"
     (BasicOp _) -> error "UNHANDLED: BasicOp"
     (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
     (Loop _bindings _loop _body) -> error "UNHANDLED: Loop"
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
-    (Op (SegOp o)) -> analyzeSegOp ctx pp o
+    -- | analyzeSegOp does not extend ctx
+    (Op (SegOp o)) -> (ctx, analyzeSegOp ctx pattern o)
     (Op (SizeOp _)) -> error "UNHANDLED: SizeOp"
     (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
-    pp = head $ patElems p
+    pattern = patElemName . head $ patElems p
 
 -- Analyze a SegOp
-analyzeSegOp :: Context -> PatElem dec -> SegOp lvl GPU -> (Context, ArrayIndexDescriptors)
---analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types _kbody) =
--- let segSpaceContext = contextFromSegSpace segmapname idxSpace
---  in let ctx' = extend ctx segSpaceContext
---      in (Nothing, analyzeStms ctx' _kbody)
-analyzeSegOp _ctx _p (SegRed _lvl _idxSpace _segOps _types _kbody) = error "case SegRed"
-analyzeSegOp _ctx _p (SegScan _lvl _idxSpace _segOps _types _kbody) = error "case SegScan"
-analyzeSegOp _ctx _p (SegHist _lvl _idxSpace _segHistOps _types _kbody) = error "case SegHist"
+analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
+analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
+  -- Add segmapname to ctx
+  let segSpaceContext = contextFromSegSpace (currentLevel ctx , segmapname) idxSpace
+   in let ctx' = extend ctx segSpaceContext
+       in analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
+
+-- In all other cases we just recurse
+analyzeSegOp ctx _ segop =
+  case segop of
+    (SegRed _lvl _idxSpace _segOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
+    (SegScan _lvl _idxSpace _segOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
+    (SegHist _lvl _idxSpace _segHistOps _types kbody) -> analyzeStms ctx $ stmsToList $ kernelBodyStms kbody
 
 -- Pretty printing
 
