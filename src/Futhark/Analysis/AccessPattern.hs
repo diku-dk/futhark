@@ -130,7 +130,7 @@ extend = M.union
 
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
-contextFromParam i p = M.singleton (paramName p)
+contextFromParam _i p = M.singleton (paramName p)
 
 -- type t = loop | gpuOp | funcdef
 
@@ -162,14 +162,17 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
 analyzeStms _ [] = M.empty
 
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeStm _c (BasicOp (Index n (Slice e))) = error "UNHANDLED: Index"
+analyzeStm _c (BasicOp (Index _n (Slice _e))) = error "UNHANDLED: Index"
 analyzeStm _c (BasicOp _) = error "UNHANDLED: BasicOp"
-analyzeStm _c (Match _subexps cases defaultBody _) = error "UNHANDLED: Match"
-analyzeStm _c (Loop bindings loop body) = error "UNHANDLED: Loop"
-analyzeStm _c (Apply name _ _ _) = error "UNHANDLED: Apply"
+analyzeStm _c (Match _subexps _cases _defaultBody _) = error "UNHANDLED: Match"
+analyzeStm _c (Loop _bindings _loop _body) = error "UNHANDLED: Loop"
+analyzeStm _c (Apply _name _ _ _) = error "UNHANDLED: Apply"
 analyzeStm _c (WithAcc _ _) = error "UNHANDLED: With"
-analyzeStm _c (Op op) = error "UNHANDLED: Op"
+analyzeStm ctx (Op (SegOp o)) = analyzeSegOp ctx o
 analyzeStm _ _ = error "skill issue"
+
+analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
+analyzeSegOp = error "UNHANDLED: Op"
 
 -- Pretty printing
 
@@ -182,7 +185,7 @@ instance Pretty ArrayIndexDescriptors where
       mapprint (m : mm) = memoryEntryPrint m </> mapprint mm
 
       -- memoryEntryPrint = hsep . map pretty
-      memoryEntryPrint (name, b) = pretty $ baseName name
+      memoryEntryPrint (name, _b) = pretty $ baseName name
       f (name, maps) = pretty name </> indent 2 (mapprint $ M.toList maps)
 
 instance Pretty DimIdxPat where
