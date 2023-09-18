@@ -101,11 +101,12 @@ type ArrayIndexDescriptors =
 --    seg (x,y)
 --      A[i,j,l,x,y]
 
-data Entry = Entry
-
+-- | Only used during the analysis to keep track of the dependencies of each
+-- pattern. For example, a pattern might depend on a function parameter, a
+-- gtid, or some other pattern.
 data CtxVal = CtxVal
-  { deps :: Either Names Entry,
-    iterrationType :: IterationType
+  { deps :: Names,
+    iterationType :: IterationType
   }
 
 -- | A mapping from patterns occuring in Let expressions to their corresponding
@@ -151,7 +152,7 @@ analyzeFunction func =
    in let ctx =
             contextFromParams Sequential (funDefParams func) $
               -- All entries are "sequential" in nature.
-              CtxVal {deps = Right Entry, iterrationType = Sequential}
+              CtxVal {deps = mempty, iterationType = Sequential}
        in analyzeStms ctx stms
 
 analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
