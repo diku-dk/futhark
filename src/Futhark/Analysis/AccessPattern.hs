@@ -163,6 +163,7 @@ analyzeStms _ [] = M.empty
 
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
 analyzeStm _c (BasicOp (Index n (Slice e))) = error "UNHANDLED: Index"
+analyzeStm _c (BasicOp _) = error "UNHANDLED: BasicOp"
 analyzeStm _c (Match _subexps cases defaultBody _) = error "UNHANDLED: Match"
 analyzeStm _c (Loop bindings loop body) = error "UNHANDLED: Loop"
 analyzeStm _c (Apply name _ _ _) = error "UNHANDLED: Apply"
