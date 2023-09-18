@@ -205,7 +205,7 @@ contextFromSegSpace segspaceName s =
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams i pp n =
-  foldl (<>) zeroContext $
+  foldl extend zeroContext $
     map (\p -> contextFromParam i p n) pp
 
 -- | Analyze each `entry` and accumulate the results.
