@@ -71,16 +71,17 @@ performCSE cse_arrays =
       . aliasAnalysis
       $ prog
   where
-    onConsts free_in_funs stms =
-      pure $
-        fst $
-          runReader
-            ( cseInStms
-                (free_in_funs <> consumedInStms stms)
-                (stmsToList stms)
-                (pure ())
-            )
-            (newCSEState cse_arrays)
+    onConsts free_in_funs stms = do
+      let free_list = namesToList free_in_funs
+          (res_als, stms_cons) = mkStmsAliases stms $ varsRes free_list
+      pure . fst $
+        runReader
+          ( cseInStms
+              (mconcat res_als <> stms_cons)
+              (stmsToList stms)
+              (pure ())
+          )
+          (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
