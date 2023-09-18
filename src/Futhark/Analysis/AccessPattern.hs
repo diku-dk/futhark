@@ -170,7 +170,9 @@ analyzeStm _c (Loop _bindings _loop _body) = error "UNHANDLED: Loop"
 analyzeStm _c (Apply _name _ _ _) = error "UNHANDLED: Apply"
 analyzeStm _c (WithAcc _ _) = error "UNHANDLED: With"
 analyzeStm ctx (Op (SegOp o)) = analyzeSegOp ctx o
-analyzeStm _ _ = error "skill issue"
+analyzeStm _c (Op (SizeOp _)) = error "sizeop"
+analyzeStm _c (Op (GPUBody _ _)) = error "gpubody"
+analyzeStm _c (Op (OtherOp _)) = error "otherop"
 
 analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
 analyzeSegOp = error "UNHANDLED: Op"
