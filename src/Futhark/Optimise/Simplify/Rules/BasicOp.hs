@@ -239,11 +239,9 @@ ruleBasicOp vtable pat _ (CmpOp (CmpEq t) se1 se2)
 ruleBasicOp _ pat _ (Replicate _ se)
   | [Acc {}] <- patTypes pat =
       Simplify $ letBind pat $ BasicOp $ SubExp se
-ruleBasicOp _ pat _ (Replicate (Shape []) se) = Simplify $ do
-  se_t <- subExpType se
-  if primType se_t
-    then letBind pat $ BasicOp $ SubExp se
-    else cannotSimplify
+ruleBasicOp _ pat _ (Replicate (Shape []) se)
+  | [Prim _] <- patTypes pat =
+      Simplify $ letBind pat $ BasicOp $ SubExp se
 ruleBasicOp vtable pat _ (Replicate shape (Var v))
   | Just (BasicOp (Replicate shape2 se), cs) <- ST.lookupExp v vtable,
     ST.subExpAvailable se vtable =
