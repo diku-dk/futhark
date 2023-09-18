@@ -175,7 +175,10 @@ analyzeStm _c (Op (GPUBody _ _)) = error "gpubody"
 analyzeStm _c (Op (OtherOp _)) = error "otherop"
 
 analyzeSegOp :: Context -> SegOp lvl GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeSegOp = error "UNHANDLED: Op"
+analyzeSegOp ctx (SegMap lvl SegSpace _types _kbody) = error "case SegMap"
+analyzeSegOp ctx (SegRed lvl SegSpace [SegBinOp rep] _types _kbody) = error "case SegRed"
+analyzeSegOp ctx (SegScan lvl SegSpace [SegBinOp rep] _types _kbody) = error "case SegScan"
+analyzeSegOp ctx (SegHist lvl SegSpace [HistOp rep] _types _kbody) = error "case SegHist"
 
 -- Pretty printing
 
