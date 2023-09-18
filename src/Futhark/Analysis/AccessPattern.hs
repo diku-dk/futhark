@@ -120,7 +120,7 @@ instance Semigroup DimIdxPat where
       | atypes == btypes =
           DimIdxPat ((<>) avars bvars) atypes
       | otherwise =
-          undefined
+          error "REEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
 
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
@@ -140,6 +140,7 @@ contextFromParams i pp n =
   foldl (<>) mempty $
     map (\p -> contextFromParam i p n) pp
 
+-- | TODO: CHANGE THIS COMMENT
 -- | For each `entry` we return a tuple of (function-name and AIDs)
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
 analyzeDimIdxPats = foldMap analyzeFunction . progFuns
@@ -161,7 +162,12 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
 analyzeStms _ [] = M.empty
 
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeStm _c (BasicOp (Index n (Slice e))) = undefined
+analyzeStm _c (BasicOp (Index n (Slice e))) = error "UNHANDLED: Index"
+analyzeStm _c (Match _subexps cases defaultBody _) = error "UNHANDLED: Match"
+analyzeStm _c (Loop bindings loop body) = error "UNHANDLED: Loop"
+analyzeStm _c (Apply name _ _ _) = error "UNHANDLED: Apply"
+analyzeStm _c (WithAcc _ _) = error "UNHANDLED: With"
+analyzeStm _c (Op op) = error "UNHANDLED: Op"
 analyzeStm _ _ = error "skill issue"
 
 -- Pretty printing
