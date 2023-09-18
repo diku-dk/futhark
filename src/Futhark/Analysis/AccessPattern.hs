@@ -161,7 +161,7 @@ analyzeStms ctx ((Let pats _aux expr) : stms) =
 analyzeStms _ [] = M.empty
 
 analyzeStm :: Context -> Exp GPU -> (Maybe CtxVal, ArrayIndexDescriptors)
-analyzeStm _c (BasicOp _o) = undefined
+analyzeStm _c (BasicOp (Index n (Slice e))) = undefined
 analyzeStm _ _ = error "skill issue"
 
 -- Pretty printing
