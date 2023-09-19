@@ -256,7 +256,7 @@ analyzeStm ctx (Let pats _ e) =
   case e of
     (BasicOp (Index name (Slice _e))) -> do
       let last_segmap = VName "REEEEE" 0
-      let memory_entries = []
+      let memory_entries = [[DimIdxPat mempty $ getIterationType ctx]]
       -- Index expression name
       let idx_expr_name = pat
       -- Map from index expression name to memory entries
