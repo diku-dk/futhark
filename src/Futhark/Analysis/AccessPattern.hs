@@ -455,13 +455,14 @@ instance Pretty DimIdxPat where
   pretty (DimIdxPat dependencies iterType) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies =" <+> "[" <+> pretty dependencies <+> "]" </> "iterType     =" <+> pretty iterType
+    vsep
+      [ "dependencies" <+> equals <+> align (prettyDeps dependencies),
+        "iterType    " <+> equals <+> align (pretty iterType)
+      ]
+    where
+      prettyDeps = encloseSep "[ " " ]" " | " . map (printPair . snd) . S.toList
+      printPair (name, lvl) = pretty name <+> pretty lvl
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
   pretty Parallel = "par"
-
-instance Pretty Dependencies where
-  pretty = (hsep . punctuate " |") . map (printPair . snd) . S.toList
-    where
-      printPair (name, lvl) = pretty name <+> pretty lvl
