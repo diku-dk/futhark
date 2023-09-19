@@ -312,21 +312,13 @@ analyzeStm ctx (Let pats _ e) =
       do
         let ctx' = case loop of
               (WhileLoop iterVar) ->
-                bindCtxVal iterVar (CtxVal (oneName pat) Sequential)
+                oneContext iterVar (CtxVal (oneName pat) Sequential) []
               (ForLoop iterVar _ numIter _params) ->
-                bindCtxVal iterVar $
-                  (><)
-                    ctx
-                    (CtxVal (oneName pat) Sequential)
-                    (analyzeSubExpr ctx numIter)
+                oneContext
+                  iterVar
+                  ((><) ctx (CtxVal (oneName pat) Sequential) (analyzeSubExpr ctx numIter))
+                  []
         analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
-      where
-        bindCtxVal name ctxVal =
-          Context
-            { assignments = M.singleton name ctxVal,
-              lastBodyType = [LoopBodyName (currentLevel ctx, pat)],
-              currentLevel = currentLevel ctx + 1
-            }
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
     (Op (SegOp op)) -> do
