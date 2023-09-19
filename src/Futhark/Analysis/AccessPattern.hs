@@ -273,7 +273,21 @@ analyzeStm ctx (Let pats _ e) =
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
        in (ctx', mempty)
     (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
-    (Loop _bindings _loop _body) -> error "UNHANDLED: Loop"
+    (Loop _bindings loop body) -> -- error "UNHANDLED: Loop"
+      do
+        let ctx' = case loop of
+                  (WhileLoop iterVar) -> bindCtxVal iterVar
+                  (ForLoop iterVar _ numIter loopParams) ->
+                    bindCtxVal iterVar
+        foldBody ctx' body
+
+      where
+        bindCtxVal name =
+          Context {
+            assignments = M.singleton name (CtxVal (oneName pat) Sequential),
+            lastBodyType = [LoopBodyName (currentLevel ctx, pat)],
+            currentLevel = currentLevel ctx + 1
+          }
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
     -- \| analyzeSegOp does not extend ctx
@@ -287,13 +301,37 @@ analyzeStm ctx (Let pats _ e) =
               (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
               _ -> ctx
       (ctx', mempty)
-    (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
+    (Op (GPUBody _ body)) -> foldBody ctx body
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
     pat = patElemName . head $ patElems pats
 
     concatCtxVal [] = mempty :: Context
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+
+    foldBody ctxExtended body =
+      do
+        -- 0. Recurse into body with ctx
+        (ctx'', aids) <-
+          pure
+            -- TODO: This does essentially the same thing as analyzeStms, but
+            -- without discarding the result. A nice fix would be to refactor
+            -- analyzeStms s.t. we can just reuse it here.
+            . foldl'
+              (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', M.union r r'))
+              (ctxExtended, mempty)
+            $ stmsToList
+            $ bodyStms body
+        -- 1. We do not want the returned context directly.
+        --    however, we do want pat to map to the names what was hit in body.
+        --    therefore we need to subtract the old context from the returned one,
+        --    and discard all the keys within it.
+        let ctxVals = M.difference (assignments ctx'') (assignments ctxExtended)
+        -- 2. We are ONLY interested in the rhs of assignments (ie. the
+        --    dependencies of pat :) )
+        let ctx' = concatCtxVal . map snd $ M.toList ctxVals
+        -- 3. Now we have the correct context and result
+        (ctx', aids)
 
 -- | Analyze a SegOp
 analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
