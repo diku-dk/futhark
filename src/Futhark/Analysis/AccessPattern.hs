@@ -4,7 +4,7 @@ module Futhark.Analysis.AccessPattern
     analyzeStm,
     ArrayIndexDescriptors,
     IterationType,
-    Variance,
+    Dependencies,
     ArrayName,
     SegMapName,
     IndexExprName,
@@ -28,7 +28,7 @@ data IterationType
 
 -- | Set of VNames of gtid's that some access is variant to.
 -- Tuple of patternName and nested `level` it is created at.
-type Variance = S.IntMap (VName, Int)
+type Dependencies = S.IntMap (VName, Int)
 
 type ArrayName = VName
 
@@ -44,14 +44,14 @@ type IndexExprName = VName
 data DimIdxPat = DimIdxPat
   { -- | Set of gtid's that the access is variant to.
     -- An empty set indicates that the access is invariant.
-    variances :: Variance,
+    dependencies :: Dependencies,
     -- | Whether the acess is parallel or sequential
     iterType :: IterationType
   }
   deriving (Eq, Ord, Show)
 
 isInv :: DimIdxPat -> Bool
-isInv (DimIdxPat vars _) = S.null vars
+isInv (DimIdxPat deps _) = S.null deps
 
 isVar :: DimIdxPat -> Bool
 isVar = not . isInv
@@ -190,10 +190,10 @@ instance Semigroup Context where
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
   (<>)
-    (DimIdxPat avars atypes)
-    (DimIdxPat bvars btypes)
+    (DimIdxPat adeps atypes)
+    (DimIdxPat bdeps btypes)
       | atypes == btypes =
-          DimIdxPat ((<>) avars bvars) atypes
+          DimIdxPat ((<>) adeps bdeps) atypes
       | otherwise =
           error "Oh no!"
 
@@ -448,16 +448,16 @@ instance Pretty ArrayIndexDescriptors where
       printDim m idx = pretty idx <+> ":" <+> indent 0 (pretty m)
 
 instance Pretty DimIdxPat where
-  pretty (DimIdxPat variances iterType) =
+  pretty (DimIdxPat dependencies iterType) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "variances =" <+> "[" <+> pretty variances <+> "]" </> "iterType  =" <+> pretty iterType
+    "dependencies =" <+> "[" <+> pretty dependencies <+> "]" </> "iterType     =" <+> pretty iterType
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
   pretty Parallel = "par"
 
-instance Pretty Variance where
+instance Pretty Dependencies where
   pretty = (hsep . punctuate " |") . map (printPair . snd) . S.toList
     where
       printPair (name, lvl) = pretty name <+> pretty lvl
