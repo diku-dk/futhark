@@ -241,14 +241,43 @@ analyzeFunction func =
             contextFromParams Sequential (funDefParams func) $
               -- All entries are "sequential" in nature.
               CtxVal {deps = mempty, iterationType = Sequential}
-       in analyzeStms ctx stms
+       in snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
-analyzeStms :: Context -> [Stm GPU] -> ArrayIndexDescriptors
-analyzeStms ctx (stm : stms) =
-  let (stm_ctx, res) = analyzeStm ctx stm
-   in M.union res $ analyzeStms stm_ctx stms
-analyzeStms _ [] = M.empty
+analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
+analyzeStmsPrimitive ctx =
+  -- Fold over statements in body
+  foldl'
+    (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', M.union r r'))
+    (ctx, mempty)
+
+-- | Same as analyzeStmsPrimitive, but change the resulting context into
+-- a ctxVal, mapped to pattern.
+analyzeStms :: Context -> Context -> ((Int, VName) -> BodyType) -> Pat dec -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
+analyzeStms ctx ctxExtended bodyConstructor pats body = do
+  -- 0. Recurse into body with ctx
+  let (ctx'', aids) = analyzeStmsPrimitive recContext body
+  -- 1. We do not want the returned context directly.
+  --    however, we do want pat to map to the names what was hit in body.
+  --    therefore we need to subtract the old context from the returned one,
+  --    and discard all the keys within it.
+  let ctxVals = M.difference (assignments ctx'') (assignments recContext)
+  -- 2. We are ONLY interested in the rhs of assignments (ie. the
+  --    dependencies of pat :) )
+  let ctx' = concatCtxVal . map snd $ M.toList ctxVals
+  -- 3. Now we have the correct context and result
+  (ctx', aids)
+  where
+    pat = patElemName . head $ patElems pats
+
+    concatCtxVal [] = oneContext pat (CtxVal mempty $ getIterationType ctx) []
+    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+
+    recContext = extend ctxExtended $ Context
+            { assignments = mempty,
+              lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
+              currentLevel = currentLevel ctx + 1
+            }
 
 -- | Analyze a statement
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
@@ -279,25 +308,29 @@ analyzeStm ctx (Let pats _ e) =
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
        in (ctx', mempty)
     (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
-    (Loop _bindings loop body) -> -- error "UNHANDLED: Loop"
+    (Loop _bindings loop body) ->
+      -- error "UNHANDLED: Loop"
       do
         let ctx' = case loop of
-                  (WhileLoop iterVar) -> bindCtxVal iterVar
-                  (ForLoop iterVar _ numIter loopParams) ->
-                    bindCtxVal iterVar
-        foldBody ctx' body
-
+              (WhileLoop iterVar) -> bindCtxVal iterVar
+              (ForLoop iterVar _ numIter loopParams) ->
+                bindCtxVal iterVar
+        analyzeStms ctx ctx' SegMapName pats $ stmsToList $ bodyStms body
       where
         bindCtxVal name =
-          Context {
-            assignments = M.singleton name (CtxVal (oneName pat) Sequential),
-            lastBodyType = [LoopBodyName (currentLevel ctx, pat)],
-            currentLevel = currentLevel ctx + 1
-          }
+          Context
+            { assignments = M.singleton name (CtxVal (oneName pat) Sequential),
+              lastBodyType = [LoopBodyName (currentLevel ctx, pat)],
+              currentLevel = currentLevel ctx + 1
+            }
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
-    -- \| analyzeSegOp does not extend ctx
-    (Op (SegOp op)) -> (ctx, analyzeSegOp ctx pat op)
+    (Op (SegOp op)) -> do
+       let segSpaceContext =
+            extend ctx
+            $ contextFromSegSpace (currentLevel ctx, pat)
+            $ segSpace op
+       analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
     (Op (SizeOp sizeop)) -> do
       let subexprsToContext =
             extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
@@ -307,61 +340,14 @@ analyzeStm ctx (Let pats _ e) =
               (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
               _ -> ctx
       (ctx', mempty)
-    (Op (GPUBody _ body)) -> foldBody ctx body
+    (Op (GPUBody _ body)) ->
+      analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
     pat = patElemName . head $ patElems pats
 
     concatCtxVal [] = mempty :: Context
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
-
-    foldBody ctxExtended body =
-      do
-        -- 0. Recurse into body with ctx
-        (ctx'', aids) <-
-          pure
-            -- TODO: This does essentially the same thing as analyzeStms, but
-            -- without discarding the result. A nice fix would be to refactor
-            -- analyzeStms s.t. we can just reuse it here.
-            . foldl'
-              (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', M.union r r'))
-              (ctxExtended, mempty)
-            $ stmsToList
-            $ bodyStms body
-        -- 1. We do not want the returned context directly.
-        --    however, we do want pat to map to the names what was hit in body.
-        --    therefore we need to subtract the old context from the returned one,
-        --    and discard all the keys within it.
-        let ctxVals = M.difference (assignments ctx'') (assignments ctxExtended)
-        -- 2. We are ONLY interested in the rhs of assignments (ie. the
-        --    dependencies of pat :) )
-        let ctx' = concatCtxVal . map snd $ M.toList ctxVals
-        -- 3. Now we have the correct context and result
-        (ctx', aids)
-
--- | Analyze a SegOp
-analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
-analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
-  -- Add segmapname to ctx
-  do
-    let ctx'' =
-          Context
-            { assignments = mempty,
-              lastBodyType = [SegMapName (currentLevel ctx, segmapname)],
-              currentLevel = currentLevel ctx + 1
-            }
-    let segSpaceContext = contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
-    -- `extend` is associative, so the order matters. (in regards to `lastBodyType`)
-    let ctx' = extend ctx $ extend ctx'' segSpaceContext
-    analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
--- In all other cases we just recurse, with extended context of the segspace
--- TODO: Future improvement: Add other segmented operations to the context, to
--- reveal more nested parallel patterns
-analyzeSegOp ctx segmapname segop =
-  let segSpaceContext =
-        contextFromSegSpace (currentLevel ctx, segmapname) $
-          segSpace segop
-   in analyzeStms (extend ctx segSpaceContext) . stmsToList . kernelBodyStms $ segBody segop
 
 getIterationType :: Context -> IterationType
 getIterationType (Context _ bodies _) =
