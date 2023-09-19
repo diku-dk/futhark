@@ -265,11 +265,22 @@ analyzeStm ctx (Let pats _ expr) =
     (WithAcc _ _) -> error "UNHANDLED: With"
     -- \| analyzeSegOp does not extend ctx
     (Op (SegOp op)) -> (ctx, analyzeSegOp ctx pat op)
-    (Op (SizeOp _)) -> error "UNHANDLED: SizeOp"
+    (Op (SizeOp sizeop)) -> do
+      let subexprsToContext =
+            extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
+      let ctx' =
+            case sizeop of
+              (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
+              (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
+              _ -> ctx
+      (ctx', mempty)
     (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
     pat = patElemName . head $ patElems pats
+
+    concatCtxVal [] = mempty :: Context
+    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
 
 -- | Analyze a SegOp
 analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
