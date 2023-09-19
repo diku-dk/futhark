@@ -3,13 +3,13 @@
 -- | @futhark repl@
 module Futhark.CLI.REPL (main) where
 
+import Control.Arrow (ArrowChoice (left))
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Char
-import Data.Either (partitionEithers)
 import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
@@ -438,13 +438,16 @@ printCommand input = do
     Left err -> liftIO $ T.putStrLn err
     Right (strs, exps) -> do
       prompt <- getPrompt
-      case partitionEithers $ map (parseExp prompt) exps of
-        ((SyntaxError _ err) : _, _) -> liftIO $ T.putStr err
-        (_, uncheckedExps) -> do
+      case mapM (\ex -> left (,ex) $ parseExp prompt ex) exps of
+        (Left (SyntaxError _ err, ex)) ->
+          liftIO $
+            T.putStr $
+              "Error in expression: \"" <> ex <> "\"\n" <> err
+        (Right uncheckedExps) -> do
           vals <- mapM onExp uncheckedExps
-          case partitionEithers vals of
-            (err : _, _) -> liftIO $ putDoc err
-            (_, vs) -> liftIO $ do
+          case sequenceA vals of
+            (Left err) -> liftIO $ putDoc err
+            (Right vs) -> liftIO $ do
               T.putStr $ head strs
               zipWithM_
                 (\v s -> putDoc $ I.prettyValue v <> pretty s)
@@ -536,9 +539,9 @@ any declarations entered at the REPL.
     ( "print",
       ( printCommand,
         [text|
-Print variables with formatting options. Usage:
+Print expressions with formatting options. Usage:
 
-  > :print The value in foo: {foo}. The value in bar: {bar}
+  > :print The value in foo: {foo}. The value in 2+2={2+2}
 |]
       )
     ),
