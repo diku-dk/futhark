@@ -256,13 +256,19 @@ analyzeStm ctx (Let pats _ e) =
   case e of
     (BasicOp (Index name (Slice _e))) -> do
       let last_segmap = VName "REEEEE" 0
-      let memory_entries = [[DimIdxPat mempty $ getIterationType ctx]]
+      let test_n = VName "gtid" 1337
+      let memory_entries =
+            [ [ DimIdxPat (S.fromList [(0, (VName "gtid" 1337, 42)), (1, (VName "gtid" 1234, 0)), (2, (VName "gtid" 0101, 5))]) $ getIterationType ctx,
+                DimIdxPat (S.fromList [(0, (VName "i" 1337, 0)), (1, (VName "j" 1337, 1)), (2, (VName "k" 1337, 2))]) $ getIterationType ctx,
+                DimIdxPat (S.fromList [(0, (VName "i" 1337, 2)), (1, (VName "j" 1337, 0)), (2, (VName "k" 1337, 1))]) $ getIterationType ctx
+              ]
+            ]
       -- Index expression name
       let idx_expr_name = pat
       -- Map from index expression name to memory entries
-      let map_ixd_expr = M.singleton idx_expr_name memory_entries
+      let map_ixd_expr = M.singleton idx_expr_name memory_entries <> M.singleton (VName "some_idx" 0) memory_entries
       -- Map from array name to index expression map
-      let map_array = (M.singleton name map_ixd_expr) <> (M.singleton name map_ixd_expr)
+      let map_array = M.singleton name map_ixd_expr <> M.singleton (VName "some_arr" 0) map_ixd_expr
       -- Map from segmap name to array map
       let res = M.singleton (42, last_segmap) map_array
       (ctx, res)
@@ -413,43 +419,45 @@ analyzeBasicOp ctx expression =
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
-      f ((_, name), maps) = "(segmap)" <+> pretty name <+> ": {" </> indent 2 (mapprintArray $ M.toList maps) </> "}"
+      f ((_, name), maps) = "(segmap)" <+> pretty name <+> ": {" </> indent 4 (mapprintArray $ M.toList maps) </> "}"
 
       mapprintArray :: [(ArrayName, M.Map IndexExprName [MemoryEntry])] -> Doc ann
       mapprintArray [] = ""
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
 
-      printArrayMap (name, maps) = "(arr)" <+> pretty (baseName name) <+> ": {" </> indent 2 (mapprintIdxExpr (M.toList maps)) </> "}"
+      printArrayMap (name, maps) = "(arr)" <+> pretty (baseName name) <+> ": {" </> indent 4 (mapprintIdxExpr (M.toList maps)) </> "}"
 
       mapprintIdxExpr :: [(IndexExprName, [MemoryEntry])] -> Doc ann
       mapprintIdxExpr [] = ""
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
-      printIdxExpMap (name, mems) = "(idx)" <+> pretty (baseName name) <+> ": {" </> indent 2 (printMemoryEntryList mems) </> "}"
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty (baseName name) <+> ":" </> indent 4 (printMemoryEntryList mems)
 
       printMemoryEntryList :: [MemoryEntry] -> Doc ann
       printMemoryEntryList [] = ""
-      printMemoryEntryList [m] = printMemoryEntry m
-      printMemoryEntryList (m : mm) = printMemoryEntry m </> printMemoryEntryList mm
+      printMemoryEntryList [m] = printMemoryEntry m 0
+      printMemoryEntryList (m : mm) = printMemoryEntry m 0 </> printMemoryEntryList mm
 
-      printMemoryEntry :: MemoryEntry -> Doc ann
-      printMemoryEntry [] = ""
-      printMemoryEntry [m] = pretty m
-      printMemoryEntry (m : mm) = pretty m </> printMemoryEntry mm
+      printMemoryEntry :: MemoryEntry -> Int -> Doc ann
+      printMemoryEntry [] _ = ""
+      printMemoryEntry [m] idx = printDim m idx
+      printMemoryEntry (m : mm) idx = printDim m idx </> printMemoryEntry mm (idx + 1)
+
+      printDim m idx = pretty idx <+> ":" <+> indent 0 (pretty m)
 
 instance Pretty DimIdxPat where
   pretty (DimIdxPat variances iterType) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "variances = " <+> "[" <+> pretty variances <+> "]" <+> "iterType = " <+> pretty iterType
-
--- "[" <+> pretty variances <+> "]" <+> pretty iterType
+    "variances =" <+> "[" <+> pretty variances <+> "]" </> "iterType  =" <+> pretty iterType
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
   pretty Parallel = "par"
 
 instance Pretty Variance where
-  pretty = stack . map pretty . S.toList
+  pretty = (hsep . punctuate " |") . map (printPair . snd) . S.toList
+    where
+      printPair (name, lvl) = pretty name <+> pretty lvl
