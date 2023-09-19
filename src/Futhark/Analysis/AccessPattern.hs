@@ -51,12 +51,6 @@ data DimIdxPat = DimIdxPat
   }
   deriving (Eq, Ord, Show)
 
-isInv :: DimIdxPat -> Bool
-isInv (DimIdxPat deps _) = S.null deps
-
-isVar :: DimIdxPat -> Bool
-isVar = not . isInv
-
 -- | Each element in the list corresponds to an access to a dimension in the given array
 -- in the order of the dimensions.
 type MemoryEntry = [DimIdxPat]
