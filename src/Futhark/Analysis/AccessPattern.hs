@@ -311,14 +311,19 @@ analyzeStm ctx (Let pats _ e) =
     (Loop _bindings loop body) ->
       do
         let ctx' = case loop of
-              (WhileLoop iterVar) -> bindCtxVal iterVar
-              (ForLoop iterVar _ numIter loopParams) ->
-                bindCtxVal iterVar
-        analyzeStms ctx ctx' SegMapName pats $ stmsToList $ bodyStms body
+              (WhileLoop iterVar) ->
+                bindCtxVal iterVar (CtxVal (oneName pat) Sequential)
+              (ForLoop iterVar _ numIter _params) ->
+                bindCtxVal iterVar $
+                  (><)
+                    ctx
+                    (CtxVal (oneName pat) Sequential)
+                    (analyzeSubExpr ctx numIter)
+        analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
       where
-        bindCtxVal name =
+        bindCtxVal name ctxVal =
           Context
-            { assignments = M.singleton name (CtxVal (oneName pat) Sequential),
+            { assignments = M.singleton name ctxVal,
               lastBodyType = [LoopBodyName (currentLevel ctx, pat)],
               currentLevel = currentLevel ctx + 1
             }
