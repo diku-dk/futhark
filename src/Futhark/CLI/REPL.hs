@@ -539,9 +539,9 @@ any declarations entered at the REPL.
     ( "format",
       ( formatCommand,
         [text|
-Print expressions with formatting options. Usage:
+Use format strings to print arbitrary futhark expressions. Usage:
 
-  > :print The value in foo: {foo}. The value in 2+2={2+2}
+  > :format The value of foo: {foo}. The value of 2+2={2+2}
 |]
       )
     ),
