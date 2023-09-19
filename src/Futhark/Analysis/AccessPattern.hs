@@ -302,28 +302,7 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let pats _ e) =
   case e of
-    (BasicOp (Index name (Slice ee))) -> do
-      -- TODO: Should we just take the latest segmap?
-      let last_segmap = lastSegMap ctx
-      let memory_entries = [mapMaybe f ee]
-            where
-              f dimIndex = case dimIndex of
-                -- TODO: Get nest level ----------------------------------,
-                -- TODO: Reduce "tmp" values to gtid's ----------------,  |
-                (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0))]) $ getIterationType ctx
-                (DimSlice offs n stride) -> Nothing -- TODO: How should we handle slices?
-
-      -- Index expression name
-      let idx_expr_name = pat
-      -- Map from index expression name to memory entries
-      let map_ixd_expr = M.singleton idx_expr_name memory_entries
-      -- Map from array name to index expression map
-      let map_array = M.singleton name map_ixd_expr
-      -- Map from segmap name to array map
-      let res = case last_segmap of
-            Nothing -> mempty
-            (Just segmap) -> M.singleton segmap map_array
-      (ctx, res)
+    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pat name ee
     (BasicOp op) ->
       -- TODO: Lookup basicOp
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
@@ -367,6 +346,26 @@ analyzeStm ctx (Let pats _ e) =
 
     concatCtxVal [] = mempty :: Context
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+
+analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
+analyzeIndex ctx pat arr_name dimIndexes = do
+  -- TODO: Expand context?
+  -- TODO: Should we just take the latest segmap?
+  let last_segmap = lastSegMap ctx
+  let memory_entries = [mapMaybe f dimIndexes]
+        where
+          f dimIndex = case dimIndex of
+            -- TODO: Get nest level ----------------------------------,
+            -- TODO: Reduce "tmp" values to gtid's ----------------,  |
+            (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0))]) $ getIterationType ctx
+            (DimSlice offs n stride) -> Nothing -- TODO: How should we handle slices?
+  let idx_expr_name = pat --                                         IndexExprName
+  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
+  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
+  let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
+        Nothing -> mempty
+        (Just segmap) -> M.singleton segmap map_array
+  (ctx, res)
 
 getIterationType :: Context -> IterationType
 getIterationType (Context _ bodies _) =
