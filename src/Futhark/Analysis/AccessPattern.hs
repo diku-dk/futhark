@@ -252,9 +252,22 @@ analyzeStms _ [] = M.empty
 
 -- | Analyze a statement
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
-analyzeStm ctx (Let pats _ expr) =
-  case expr of
-    (BasicOp (Index _name (Slice _exprs))) -> error "UNHANDLED: Index"
+analyzeStm ctx (Let pats _ e) =
+  case e of
+    (BasicOp (Index name (Slice _e))) -> do
+      let last_segmap = VName "REEEEE" 0
+      let memory_entries = []
+      -- Index expression name
+      let idx_expr_name = pat
+      -- Map from index expression name to memory entries
+      let map_ixd_expr = M.singleton idx_expr_name memory_entries
+      -- Map from array name to index expression map
+      let map_array = (M.singleton name map_ixd_expr) <> (M.singleton name map_ixd_expr)
+      -- Map from segmap name to array map
+      let res = M.singleton (42, last_segmap) map_array
+      (ctx, res)
+
+    -- error "UNHANDLED: Index"
     (BasicOp op) ->
       -- TODO: Lookup basicOp
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
