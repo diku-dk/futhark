@@ -12,7 +12,7 @@ import Data.List (find)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
 import Futhark.Internalise.TypesValues (internalisedTypeSize)
-import Futhark.Util.Pretty (prettyText, prettyTextOneLine)
+import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
 import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
 import Language.Futhark.Semantic qualified as E
@@ -56,7 +56,7 @@ typeExpOpaqueName = f . rootType
   where
     f (E.TEArray _ te _) =
       let (d, te') = withoutDims te
-       in "arr_" <> typeExpOpaqueName te' <> "_" <> nameFromText (prettyText (1 + d)) <> "d"
+       in nameFromText (mconcat (replicate (1 + d) "[]")) <> typeExpOpaqueName te'
     f te = nameFromText $ prettyTextOneLine te
 
 type GenOpaque = State I.OpaqueTypes
