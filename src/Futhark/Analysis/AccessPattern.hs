@@ -26,7 +26,8 @@ data IterationType
   | Parallel
   deriving (Eq, Ord, Show)
 
--- | Set of VNames of gtid's that some access is variant to
+-- | Set of VNames of gtid's that some access is variant to.
+-- Tuple of patternName and nested `level` it is created at.
 type Variance = S.IntMap (VName, Int)
 
 type ArrayName = VName
@@ -50,7 +51,7 @@ data DimIdxPat = DimIdxPat
   deriving (Eq, Ord, Show)
 
 isInv :: DimIdxPat -> Bool
-isInv (DimIdxPat n _) = S.null n
+isInv (DimIdxPat vars _) = S.null vars
 
 isVar :: DimIdxPat -> Bool
 isVar = not . isInv
@@ -149,8 +150,9 @@ data CtxVal = CtxVal
   }
 
 (><) :: Context -> CtxVal -> CtxVal -> CtxVal
-(><) ctx (CtxVal lnames ltype) (CtxVal rnames rtype) =
+(><) _ctx (CtxVal lnames _ltype) (CtxVal rnames rtype) =
   -- TODO: Do some lookups in context
+  -- TODO: Consider: do we need to do some combination of ltype and rtype?
   CtxVal ((<>) lnames rnames) rtype
 
 data BodyType
@@ -215,17 +217,17 @@ contextFromParam _i p v = oneContext (paramName p) v []
 
 -- | Create a singular context from a segspace
 contextFromSegSpace :: SegMapName -> SegSpace -> Context
-contextFromSegSpace segspaceName s =
-  foldl' (\acc n -> extend acc $ oneContext (fst n) ctxVal []) zeroContext $
-    unSegSpace s
+contextFromSegSpace segspaceName segspace =
+  foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) zeroContext $
+    unSegSpace segspace
   where
     ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
 
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
-contextFromParams i pp n =
+contextFromParams iterType pats name =
   foldl extend zeroContext $
-    map (\p -> contextFromParam i p n) pp
+    map (\pat -> contextFromParam iterType pat name) pats
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
@@ -250,9 +252,9 @@ analyzeStms _ [] = M.empty
 
 -- | Analyze a statement
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
-analyzeStm ctx (Let p _ e) =
-  case e of
-    (BasicOp (Index _n (Slice _e))) -> error "UNHANDLED: Index"
+analyzeStm ctx (Let pats _ expr) =
+  case expr of
+    (BasicOp (Index _name (Slice _exprs))) -> error "UNHANDLED: Index"
     (BasicOp op) ->
       -- TODO: Lookup basicOp
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
@@ -262,12 +264,12 @@ analyzeStm ctx (Let p _ e) =
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
     -- \| analyzeSegOp does not extend ctx
-    (Op (SegOp o)) -> (ctx, analyzeSegOp ctx pat o)
+    (Op (SegOp op)) -> (ctx, analyzeSegOp ctx pat op)
     (Op (SizeOp _)) -> error "UNHANDLED: SizeOp"
     (Op (GPUBody _ _)) -> error "UNHANDLED: GPUBody"
     (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
   where
-    pat = patElemName . head $ patElems p
+    pat = patElemName . head $ patElems pats
 
 -- | Analyze a SegOp
 analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
@@ -307,39 +309,42 @@ getIterationType (Context _ bodies _) =
         CondBodyName _ -> getIteration_rec $ init rec
 
 analyzeSubExpr :: Context -> SubExp -> CtxVal
-analyzeSubExpr c (Constant _) = CtxVal mempty $ getIterationType c
-analyzeSubExpr c (Var v) =
-  case M.lookup v (assignments c) of
+analyzeSubExpr ctx (Constant _) = CtxVal mempty $ getIterationType ctx
+analyzeSubExpr ctx (Var v) =
+  case M.lookup v (assignments ctx) of
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
     -- If variable is found, the dependenies must be the superset
-    (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType c
+    (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType ctx
 
 analyzeBasicOp :: Context -> BasicOp -> CtxVal
-analyzeBasicOp c expression =
+analyzeBasicOp ctx expression =
   case expression of
-    (SubExp subexp) -> analyzeSubExpr c subexp
-    (Opaque _ subexp) -> analyzeSubExpr c subexp
+    (SubExp subexp) -> analyzeSubExpr ctx subexp
+    (Opaque _ subexp) -> analyzeSubExpr ctx subexp
     (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-    (UnOp _ subexp) -> analyzeSubExpr c subexp
+    (UnOp _ subexp) -> analyzeSubExpr ctx subexp
     (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
     (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-    (ConvOp _ subexp) -> analyzeSubExpr c subexp
-    (Assert subexp _ _) -> analyzeSubExpr c subexp
-    (Index name _) -> error $ "unhandled: Index (Skill issue?)" ++ baseString name
-    (Update _ name _slice _subexp) -> error $ "unhandled: Update (technically skill issue?)" ++ baseString name
+    (ConvOp _ subexp) -> analyzeSubExpr ctx subexp
+    (Assert subexp _ _) -> analyzeSubExpr ctx subexp
+    (Index name _) ->
+      error $ "unhandled: Index (Skill issue?) " ++ baseString name
+    (Update _ name _slice _subexp) ->
+      error $ "unhandled: Update (technically skill issue?)" ++ baseString name
     -- Technically, do we need this case?
-    (Concat _ _ length_subexp) -> analyzeSubExpr c length_subexp
-    (Manifest _dim _name) -> error "unhandled: Manifest"
+    (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
+    (Manifest _dim _name) ->
+      error "unhandled: Manifest"
     (Iota end_subexp start_subexp stride_subexp _) -> concatCtxVals mempty [end_subexp, start_subexp, stride_subexp]
     (Replicate (Shape shape_subexp) subexp) -> concatCtxVals mempty (subexp : shape_subexp)
     (Scratch _ subexprs) -> concatCtxVals mempty subexprs
     (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
-    (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType c
+    (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
     (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
     _ -> error "unhandled: match-all"
   where
     concatCtxVals ne =
-      foldl' (\a -> (><) c a . analyzeSubExpr c) (CtxVal ne $ getIterationType c)
+      foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
 
 -- Pretty printing
 
