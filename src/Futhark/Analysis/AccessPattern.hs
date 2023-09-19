@@ -354,7 +354,9 @@ analyzeIndex ctx pat arr_name dimIndexes = do
             -- TODO: Get nest level ----------------------------------,
             -- TODO: Reduce "tmp" values to gtid's ----------------,  |
             (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0))]) $ getIterationType ctx
-            (DimSlice offs n stride) -> Nothing -- TODO: How should we handle slices?
+            -- Constants are invariant, i.e. ∅
+            (DimFix (Constant _)) -> Just $ DimIdxPat mempty $ getIterationType ctx
+            (DimSlice _offs _n _stride) -> Nothing -- TODO: How should we handle slices?
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
