@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
@@ -175,7 +177,7 @@ lastSegMap (Context _ bodies _) = safeLast $ getSegMaps bodies
   where
     getSegMaps =
       mapMaybe
-        ( \body -> case body of
+        ( \case
             (SegMapName segmap) -> Just segmap
             _ -> Nothing
         )
