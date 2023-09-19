@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
+import Data.Bifunctor (first)
 import Data.Char
 import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
@@ -18,7 +19,7 @@ import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
 import Futhark.MonadFreshNames
-import Futhark.Util (fancyTerminal)
+import Futhark.Util (fancyTerminal, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, italicized, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
@@ -223,7 +224,11 @@ readEvalPrint = do
       case parseDecOrExp prompt line of
         Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
-        Right (Right e) -> onExp e
+        Right (Right e) -> do
+          valOrErr <- onExp e
+          case valOrErr of
+            Left err -> liftIO $ putDoc err
+            Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
     inputLine prompt = do
@@ -274,22 +279,29 @@ onDec d = do
                   futharkiProg = prog {lpNameSource = src'}
                 }
 
-onExp :: UncheckedExp -> FutharkiM ()
+onExp :: UncheckedExp -> FutharkiM (Either (Doc AnsiStyle) I.Value)
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
+    (_, Left err) -> pure $ Left $ T.prettyTypeErrorNoLoc err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
-            Left err -> liftIO $ print err
-            Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
-      | otherwise -> liftIO $ do
-          putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e'))
-          T.putStrLn $
-            "The following types are ambiguous: "
-              <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
+            Left err -> pure $ Left $ pretty $ showText err
+            Right v -> pure $ Right v
+      | otherwise ->
+          pure $
+            Left $
+              ("Inferred type of expression: " <> align (pretty (typeOf e')))
+                <> hardline
+                <> pretty
+                  ( "The following types are ambiguous: "
+                      <> T.intercalate
+                        ", "
+                        (map (nameToText . toName . typeParamName) tparams)
+                  )
+                <> hardline
 
 prettyBreaking :: Breaking -> T.Text
 prettyBreaking b =
@@ -405,6 +417,44 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
+parseForFormat :: T.Text -> Either T.Text ([T.Text], [T.Text])
+parseForFormat printStr
+  | not balanced =
+      Left
+        "Parse error on print string. Likely due to mismatched braces {}."
+  | otherwise = Right (strs, exps)
+  where
+    firstSplit = T.split (== '{') printStr
+    splits = map (T.split (== '}')) $ tail firstSplit
+    balanced =
+      (T.count "{" printStr == T.count "}" printStr)
+        && all (\x -> length x == 2) splits
+    strs = head firstSplit : map last splits
+    exps = map head splits
+
+formatCommand :: Command
+formatCommand input = do
+  case parseForFormat input of
+    Left err -> liftIO $ T.putStrLn err
+    Right (strs, exps) -> do
+      prompt <- getPrompt
+      case mapM (\ex -> first (,ex) $ parseExp prompt ex) exps of
+        (Left (SyntaxError _ err, ex)) ->
+          liftIO $
+            T.putStr $
+              "Error in expression: \"" <> ex <> "\"\n" <> err
+        (Right uncheckedExps) -> do
+          vals <- mapM onExp uncheckedExps
+          case sequenceA vals of
+            (Left err) -> liftIO $ putDoc err
+            (Right vs) -> liftIO $ do
+              T.putStr $ head strs
+              zipWithM_
+                (\v s -> putDoc $ I.prettyValue v <> pretty s)
+                vs
+                $ tail strs
+              putStrLn ""
+
 unbreakCommand :: Command
 unbreakCommand _ = do
   top <- gets $ fmap (NE.head . breakingStack) . futharkiBreaking
@@ -483,6 +533,15 @@ Only one source file can be loaded at a time.  Using the :load command a
 second time will replace the previously loaded file.  It will also replace
 any declarations entered at the REPL.
 
+|]
+      )
+    ),
+    ( "format",
+      ( formatCommand,
+        [text|
+Use format strings to print arbitrary futhark expressions. Usage:
+
+  > :format The value of foo: {foo}. The value of 2+2={2+2}
 |]
       )
     ),
