@@ -3,12 +3,12 @@
 -- | @futhark repl@
 module Futhark.CLI.REPL (main) where
 
-import Control.Arrow (ArrowChoice (left))
 import Control.Exception
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
+import Data.Bifunctor (first)
 import Data.Char
 import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
@@ -417,8 +417,8 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
-parseForPrint :: T.Text -> Either T.Text ([T.Text], [T.Text])
-parseForPrint printStr
+parseForFormat :: T.Text -> Either T.Text ([T.Text], [T.Text])
+parseForFormat printStr
   | not balanced =
       Left
         "Parse error on print string. Likely due to mismatched braces {}."
@@ -432,13 +432,13 @@ parseForPrint printStr
     strs = head firstSplit : map last splits
     exps = map head splits
 
-printCommand :: Command
-printCommand input = do
-  case parseForPrint input of
+formatCommand :: Command
+formatCommand input = do
+  case parseForFormat input of
     Left err -> liftIO $ T.putStrLn err
     Right (strs, exps) -> do
       prompt <- getPrompt
-      case mapM (\ex -> left (,ex) $ parseExp prompt ex) exps of
+      case mapM (\ex -> first (,ex) $ parseExp prompt ex) exps of
         (Left (SyntaxError _ err, ex)) ->
           liftIO $
             T.putStr $
@@ -536,8 +536,8 @@ any declarations entered at the REPL.
 |]
       )
     ),
-    ( "print",
-      ( printCommand,
+    ( "format",
+      ( formatCommand,
         [text|
 Print expressions with formatting options. Usage:
 
