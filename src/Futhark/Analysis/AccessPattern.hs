@@ -273,11 +273,13 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
     concatCtxVal [] = oneContext pat (CtxVal mempty $ getIterationType ctx) []
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
 
-    recContext = extend ctxExtended $ Context
-            { assignments = mempty,
-              lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
-              currentLevel = currentLevel ctx + 1
-            }
+    recContext =
+      extend ctxExtended $
+        Context
+          { assignments = mempty,
+            lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
+            currentLevel = currentLevel ctx + 1
+          }
 
 -- | Analyze a statement
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
@@ -301,15 +303,12 @@ analyzeStm ctx (Let pats _ e) =
       -- Map from segmap name to array map
       let res = M.singleton (42, last_segmap) map_array
       (ctx, res)
-
-    -- error "UNHANDLED: Index"
     (BasicOp op) ->
       -- TODO: Lookup basicOp
       let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
        in (ctx', mempty)
     (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
     (Loop _bindings loop body) ->
-      -- error "UNHANDLED: Loop"
       do
         let ctx' = case loop of
               (WhileLoop iterVar) -> bindCtxVal iterVar
@@ -326,11 +325,13 @@ analyzeStm ctx (Let pats _ e) =
     (Apply _name _ _ _) -> error "UNHANDLED: Apply"
     (WithAcc _ _) -> error "UNHANDLED: With"
     (Op (SegOp op)) -> do
-       let segSpaceContext =
-            extend ctx
-            $ contextFromSegSpace (currentLevel ctx, pat)
-            $ segSpace op
-       analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
+      -- TODO: Consider whether we want to treat SegMap, SegRed, SegScan, and
+      -- SegHist the same way.
+      let segSpaceContext =
+            extend ctx $
+              contextFromSegSpace (currentLevel ctx, pat) $
+                segSpace op
+      analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
     (Op (SizeOp sizeop)) -> do
       let subexprsToContext =
             extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
