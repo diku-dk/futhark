@@ -338,11 +338,12 @@ analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
 analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
   -- Add segmapname to ctx
   do
-    let ctx'' = Context {
-            assignments = mempty,
-            lastBodyType = [SegMapName (currentLevel ctx, segmapname)],
-            currentLevel = currentLevel ctx + 1
-          }
+    let ctx'' =
+          Context
+            { assignments = mempty,
+              lastBodyType = [SegMapName (currentLevel ctx, segmapname)],
+              currentLevel = currentLevel ctx + 1
+            }
     let segSpaceContext = contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
     -- `extend` is associative, so the order matters. (in regards to `lastBodyType`)
     let ctx' = extend ctx $ extend ctx'' segSpaceContext
@@ -412,20 +413,39 @@ analyzeBasicOp ctx expression =
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
-      mapprint :: [(ArrayName, e)] -> Doc ann
-      mapprint [] = ""
-      mapprint [m] = memoryEntryPrint m
-      mapprint (m : mm) = memoryEntryPrint m </> mapprint mm
+      f ((_, name), maps) = "(segmap)" <+> pretty name <+> ": {" </> indent 2 (mapprintArray $ M.toList maps) </> "}"
 
-      -- memoryEntryPrint = hsep . map pretty
-      memoryEntryPrint (name, _b) = pretty $ baseName name
-      f (name, maps) = pretty name </> indent 2 (mapprint $ M.toList maps)
+      mapprintArray :: [(ArrayName, M.Map IndexExprName [MemoryEntry])] -> Doc ann
+      mapprintArray [] = ""
+      mapprintArray [m] = printArrayMap m
+      mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
+
+      printArrayMap (name, maps) = "(arr)" <+> pretty (baseName name) <+> ": {" </> indent 2 (mapprintIdxExpr (M.toList maps)) </> "}"
+
+      mapprintIdxExpr :: [(IndexExprName, [MemoryEntry])] -> Doc ann
+      mapprintIdxExpr [] = ""
+      mapprintIdxExpr [m] = printIdxExpMap m
+      mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
+
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty (baseName name) <+> ": {" </> indent 2 (printMemoryEntryList mems) </> "}"
+
+      printMemoryEntryList :: [MemoryEntry] -> Doc ann
+      printMemoryEntryList [] = ""
+      printMemoryEntryList [m] = printMemoryEntry m
+      printMemoryEntryList (m : mm) = printMemoryEntry m </> printMemoryEntryList mm
+
+      printMemoryEntry :: MemoryEntry -> Doc ann
+      printMemoryEntry [] = ""
+      printMemoryEntry [m] = pretty m
+      printMemoryEntry (m : mm) = pretty m </> printMemoryEntry mm
 
 instance Pretty DimIdxPat where
   pretty (DimIdxPat variances iterType) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "[\n variances = " <+> pretty variances <+> "\n iterType:" <+> pretty iterType <+> "]"
+    "variances = " <+> "[" <+> pretty variances <+> "]" <+> "iterType = " <+> pretty iterType
+
+-- "[" <+> pretty variances <+> "]" <+> pretty iterType
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
