@@ -173,6 +173,14 @@ data Context = Context
     currentLevel :: Int
   }
 
+instance Monoid Context where
+  mempty =
+    Context
+      { assignments = mempty,
+        lastBodyType = [],
+        currentLevel = 0
+      }
+
 instance Semigroup Context where
   (<>)
     (Context ass0 lastSegMap0 lvl0)
