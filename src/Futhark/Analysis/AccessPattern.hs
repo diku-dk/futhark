@@ -211,14 +211,6 @@ oneContext name ctxValue segmaps =
       currentLevel = 0
     }
 
-zeroContext :: Context
-zeroContext =
-  Context
-    { assignments = mempty,
-      lastBodyType = [],
-      currentLevel = 0
-    }
-
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
@@ -226,7 +218,7 @@ contextFromParam _i p v = oneContext (paramName p) v []
 -- | Create a singular context from a segspace
 contextFromSegSpace :: SegMapName -> SegSpace -> Context
 contextFromSegSpace segspaceName segspace =
-  foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) zeroContext $
+  foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) mempty $
     unSegSpace segspace
   where
     ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
@@ -234,7 +226,7 @@ contextFromSegSpace segspaceName segspace =
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
 contextFromParams iterType pats name =
-  foldl extend zeroContext $
+  foldl extend mempty $
     map (\pat -> contextFromParam iterType pat name) pats
 
 -- | Analyze each `entry` and accumulate the results.
@@ -283,17 +275,16 @@ analyzeStm ctx (Let pats _ expr) =
 analyzeSegOp :: Context -> VName -> SegOp lvl GPU -> ArrayIndexDescriptors
 analyzeSegOp ctx segmapname (SegMap _lvl idxSpace _types kbody) =
   -- Add segmapname to ctx
-  let ctx'' =
-        Context
-          { assignments = mempty,
+  do
+    let ctx'' = Context {
+            assignments = mempty,
             lastBodyType = [SegMapName (currentLevel ctx, segmapname)],
             currentLevel = currentLevel ctx + 1
           }
-   in let segSpaceContext =
-            contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
-       in -- `extend` is associative, so the order matters. (in regards to `lastBodyType`)
-          let ctx' = extend ctx $ extend ctx'' segSpaceContext
-           in analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
+    let segSpaceContext = contextFromSegSpace (currentLevel ctx, segmapname) idxSpace
+    -- `extend` is associative, so the order matters. (in regards to `lastBodyType`)
+    let ctx' = extend ctx $ extend ctx'' segSpaceContext
+    analyzeStms ctx' $ stmsToList $ kernelBodyStms kbody
 -- In all other cases we just recurse, with extended context of the segspace
 -- TODO: Future improvement: Add other segmented operations to the context, to
 -- reveal more nested parallel patterns
