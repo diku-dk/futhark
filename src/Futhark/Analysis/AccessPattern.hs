@@ -15,6 +15,7 @@ where
 import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
+import Data.Maybe (mapMaybe)
 import Futhark.IR.GPU
 import Futhark.Util.Pretty
 
@@ -173,6 +174,22 @@ data Context = Context
     currentLevel :: Int
   }
 
+-- | Get the last segmap encountered in the context.
+lastSegMap :: Context -> Maybe SegMapName
+lastSegMap (Context _ [] _) = Nothing
+lastSegMap (Context _ bodies _) = safeLast $ getSegMaps bodies
+  where
+    getSegMaps =
+      mapMaybe
+        ( \body -> case body of
+            (SegMapName segmap) -> Just segmap
+            _ -> Nothing
+        )
+
+    safeLast [] = Nothing
+    safeLast [x] = Just x
+    safeLast (_ : xs) = safeLast xs
+
 instance Monoid Context where
   mempty =
     Context
@@ -285,23 +302,27 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let pats _ e) =
   case e of
-    (BasicOp (Index name (Slice _e))) -> do
-      let last_segmap = VName "REEEEE" 0
-      let test_n = VName "gtid" 1337
-      let memory_entries =
-            [ [ DimIdxPat (S.fromList [(0, (VName "gtid" 1337, 42)), (1, (VName "gtid" 1234, 0)), (2, (VName "gtid" 0101, 5))]) $ getIterationType ctx,
-                DimIdxPat (S.fromList [(0, (VName "i" 1337, 0)), (1, (VName "j" 1337, 1)), (2, (VName "k" 1337, 2))]) $ getIterationType ctx,
-                DimIdxPat (S.fromList [(0, (VName "i" 1337, 2)), (1, (VName "j" 1337, 0)), (2, (VName "k" 1337, 1))]) $ getIterationType ctx
-              ]
-            ]
+    (BasicOp (Index name (Slice ee))) -> do
+      -- TODO: Should we just take the latest segmap?
+      let last_segmap = lastSegMap ctx
+      let memory_entries = [mapMaybe f ee]
+            where
+              f dimIndex = case dimIndex of
+                -- TODO: Get nest level ----------------------------------,
+                -- TODO: Reduce "tmp" values to gtid's ----------------,  |
+                (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0))]) $ getIterationType ctx
+                (DimSlice offs n stride) -> Nothing -- TODO: How should we handle slices?
+
       -- Index expression name
       let idx_expr_name = pat
       -- Map from index expression name to memory entries
-      let map_ixd_expr = M.singleton idx_expr_name memory_entries <> M.singleton (VName "some_idx" 0) memory_entries
+      let map_ixd_expr = M.singleton idx_expr_name memory_entries
       -- Map from array name to index expression map
-      let map_array = M.singleton name map_ixd_expr <> M.singleton (VName "some_arr" 0) map_ixd_expr
+      let map_array = M.singleton name map_ixd_expr
       -- Map from segmap name to array map
-      let res = M.singleton (42, last_segmap) map_array
+      let res = case last_segmap of
+            Nothing -> mempty
+            (Just segmap) -> M.singleton segmap map_array
       (ctx, res)
     (BasicOp op) ->
       -- TODO: Lookup basicOp
