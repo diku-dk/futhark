@@ -384,7 +384,8 @@ analyzeBasicOp ctx expression pats = do
   (ctx', mempty)
   where
     concatCtxVals ne nn =
-      fromNames ctx
+      fromNames
+        ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr ctx) ne nn)
 
 analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
@@ -451,10 +452,10 @@ analyzeSizeOp ctx op pats = do
 
 fromNames :: Context -> Names -> CtxVal
 fromNames ctx names =
-      CtxVal
-        names
-        (getIterationType ctx)
-        (currentLevel ctx)
+  CtxVal
+    names
+    (getIterationType ctx)
+    (currentLevel ctx)
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
