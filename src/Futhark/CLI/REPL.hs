@@ -8,7 +8,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Free.Church
 import Control.Monad.State
-import Data.Bifunctor (first)
 import Data.Char
 import Data.List (intersperse)
 import Data.List.NonEmpty qualified as NE
@@ -422,24 +421,18 @@ formatCommand :: Command
 formatCommand input = do
   case parseFormatString input of
     Left err -> liftIO $ T.putStrLn err
-    Right (strs, exps) -> do
+    Right parts -> do
       prompt <- getPrompt
-      case mapM (\ex -> first (,ex) $ parseExp prompt ex) exps of
-        (Left (SyntaxError _ err, ex)) ->
-          liftIO $
-            T.putStr $
-              "Error in expression: \"" <> ex <> "\"\n" <> err
-        (Right uncheckedExps) -> do
-          vals <- mapM onExp uncheckedExps
-          case sequenceA vals of
-            (Left err) -> liftIO $ putDoc err
-            (Right vs) -> liftIO $ do
-              T.putStr $ head strs
-              zipWithM_
-                (\v s -> putDoc $ I.prettyValue v <> pretty s)
-                vs
-                $ tail strs
-              putStrLn ""
+      case mapM (traverse $ parseExp prompt) parts of
+        Left (SyntaxError _ err) ->
+          liftIO $ T.putStr err
+        Right parts' -> do
+          parts'' <- mapM sequenceA <$> mapM (traverse onExp) parts'
+          case parts'' of
+            Left err -> liftIO $ putDoc err
+            Right parts''' ->
+              liftIO . T.putStrLn . mconcat $
+                map (either id (docText . I.prettyValue)) parts'''
 
 unbreakCommand :: Command
 unbreakCommand _ = do
