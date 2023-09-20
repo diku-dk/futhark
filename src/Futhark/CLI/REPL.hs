@@ -18,6 +18,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
+import Futhark.Format (parseFormatString)
 import Futhark.MonadFreshNames
 import Futhark.Util (fancyTerminal, showText)
 import Futhark.Util.Options
@@ -417,24 +418,9 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
 
-parseForFormat :: T.Text -> Either T.Text ([T.Text], [T.Text])
-parseForFormat printStr
-  | not balanced =
-      Left
-        "Invalid format string, possibly due to mismatched braces."
-  | otherwise = Right (strs, exps)
-  where
-    firstSplit = T.split (== '{') printStr
-    splits = map (T.split (== '}')) $ tail firstSplit
-    balanced =
-      (T.count "{" printStr == T.count "}" printStr)
-        && all (\x -> length x == 2) splits
-    strs = head firstSplit : map last splits
-    exps = map head splits
-
 formatCommand :: Command
 formatCommand input = do
-  case parseForFormat input of
+  case parseFormatString input of
     Left err -> liftIO $ T.putStrLn err
     Right (strs, exps) -> do
       prompt <- getPrompt
