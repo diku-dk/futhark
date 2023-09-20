@@ -92,7 +92,7 @@ gpuPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        tileLoops,
+        -- tileLoops,
         simplifyGPU,
         histAccsGPU,
         coalesceAccess,
