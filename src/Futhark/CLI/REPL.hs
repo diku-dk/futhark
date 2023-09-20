@@ -421,7 +421,7 @@ parseForFormat :: T.Text -> Either T.Text ([T.Text], [T.Text])
 parseForFormat printStr
   | not balanced =
       Left
-        "Parse error on print string. Likely due to mismatched braces {}."
+        "Invalid format string, possibly due to mismatched braces."
   | otherwise = Right (strs, exps)
   where
     firstSplit = T.split (== '{') printStr
