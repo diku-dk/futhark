@@ -32,7 +32,7 @@ data IterationType
 
 -- | Set of VNames of gtid's that some access is variant to.
 -- Tuple of patternName and nested `level` it is created at.
-type Dependencies = S.IntMap (VName, Int)
+type Dependencies = S.IntMap (VName, Int, IterationType)
 
 type ArrayName = VName
 
@@ -45,12 +45,11 @@ type CondBodyName = (Int, VName)
 type IndexExprName = VName
 
 -- | Collect all features of access to a specific dimension of an array.
-data DimIdxPat = DimIdxPat
+newtype DimIdxPat = DimIdxPat
   { -- | Set of gtid's that the access is variant to.
     -- An empty set indicates that the access is invariant.
-    dependencies :: Dependencies,
+    dependencies :: Dependencies
     -- | Whether the acess is parallel or sequential
-    iterType :: IterationType
   }
   deriving (Eq, Ord, Show)
 
@@ -203,13 +202,8 @@ instance Semigroup Context where
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
-  (<>)
-    (DimIdxPat adeps atypes)
-    (DimIdxPat bdeps btypes)
-      | atypes == btypes =
-          DimIdxPat ((<>) adeps bdeps) atypes
-      | otherwise =
-          error "Oh no!"
+  (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
+    DimIdxPat ((<>) adeps bdeps)
 
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
@@ -331,9 +325,9 @@ analyzeIndex ctx pats arr_name dimIndexes = do
           f dimIndex = case dimIndex of
             -- TODO: Get nest level ----------------------------------,
             -- TODO: Reduce "tmp" values to gtid's ----------------,  |
-            (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0))]) $ getIterationType ctx
+            (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0, getIterationType ctx))])
             -- Constants are invariant, i.e. ∅
-            (DimFix (Constant _)) -> Just $ DimIdxPat mempty $ getIterationType ctx
+            (DimFix (Constant _)) -> Just $ DimIdxPat mempty
             (DimSlice _offs _n _stride) -> Nothing -- TODO: How should we handle slices?
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
