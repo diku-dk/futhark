@@ -53,6 +53,11 @@ data DimIdxPat = DimIdxPat
   }
   deriving (Eq, Ord, Show)
 
+intersect :: DimIdxPat -> DimIdxPat -> DimIdxPat
+intersect (DimIdxPat adeps atype) (DimIdxPat bdeps btype)
+  | atype == btype = DimIdxPat (S.intersection adeps bdeps) btype
+intersect _ _ = error "Whoopsie daisy!"
+
 -- | Each element in the list corresponds to an access to a dimension in the given array
 -- in the order of the dimensions.
 type MemoryEntry = [DimIdxPat]
@@ -405,13 +410,14 @@ analyzeBasicOp ctx expression =
     (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
     (Manifest _dim _name) ->
       error "unhandled: Manifest"
-    (Iota end_subexp start_subexp stride_subexp _) -> concatCtxVals mempty [end_subexp, start_subexp, stride_subexp]
-    (Replicate (Shape shape_subexp) subexp) -> concatCtxVals mempty (subexp : shape_subexp)
+    (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
+    (Replicate (Shape shape) value) -> concatCtxVals mempty (value : shape)
     (Scratch _ subexprs) -> concatCtxVals mempty subexprs
     (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
     (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
     (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
     _ -> error "unhandled: match-all"
   where
+
     concatCtxVals ne =
       foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
