@@ -261,16 +261,16 @@ analyzeDimIdxPats prog =
         $ pTraceShow res
         $ pTrace
           "\n-------------------------------------------------------\n"
-            res
+          res
 
 -- | Analyze each statement in a function body.
 analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   let ctx =
-            contextFromParams Sequential (funDefParams func) $
-              -- All entries are "sequential" in nature.
-              CtxVal {deps = mempty, iterationType = Sequential}
+        contextFromParams Sequential (funDefParams func) $
+          -- All entries are "sequential" in nature.
+          CtxVal {deps = mempty, iterationType = Sequential}
   analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
@@ -306,11 +306,11 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
     recContext =
       extend ctx $
         extend tmp_ctx $
-        Context
-          { assignments = mempty,
-            lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
-            currentLevel = currentLevel ctx + 1
-          }
+          Context
+            { assignments = mempty,
+              lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
+              currentLevel = currentLevel ctx + 1
+            }
 
 -- | Analyze a GPU statement and return the updated context and array index
 -- descriptors.
