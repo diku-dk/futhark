@@ -145,15 +145,14 @@ type ArrayIndexDescriptors =
 -- gtid, or some other pattern.
 data CtxVal = CtxVal
   { deps :: Names,
-    iterationType :: IterationType
+    iterationType :: IterationType,
+    level :: Int
   }
   deriving (Show, Ord, Eq)
 
-(><) :: Context -> CtxVal -> CtxVal -> CtxVal
-(><) _ctx (CtxVal lnames _ltype) (CtxVal rnames rtype) =
-  -- TODO: Do some lookups in context
-  -- TODO: Consider: do we need to do some combination of ltype and rtype?
-  CtxVal ((<>) lnames rnames) rtype
+insertDep :: CtxVal -> Names -> CtxVal
+insertDep (CtxVal lnames itertype lvl) names =
+  CtxVal ((<>) lnames names) itertype lvl
 
 data BodyType
   = SegMapName SegMapName
@@ -237,12 +236,13 @@ contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
 
 -- | Create a singular context from a segspace
-contextFromSegSpace :: SegMapName -> SegSpace -> Context
-contextFromSegSpace segspaceName segspace =
+contextFromSegSpace :: Context -> SegMapName -> SegSpace -> Context
+contextFromSegSpace ctx segspaceName segspace =
+  -- TODO? make proper assignments in context depending on subexpr
   foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) mempty $
     unSegSpace segspace
   where
-    ctxVal = CtxVal (oneName $ snd segspaceName) Parallel
+    ctxVal = CtxVal (oneName $ snd segspaceName) Parallel $ currentLevel ctx
 
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
@@ -302,7 +302,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   where
     pat = firstPatElemName pats
 
-    concatCtxVal [] = oneContext pat (CtxVal mempty $ getIterationType ctx) []
+    concatCtxVal [] = oneContext pat (CtxVal mempty (getIterationType ctx) $ currentLevel ctx) []
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
 
     recContext =
@@ -343,11 +343,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let memory_entries = [mapMaybe f dimIndexes]
         where
           f dimIndex = case dimIndex of
-            -- TODO: Get nest level ----------------------------------,
-            -- TODO: Reduce "tmp" values to gtid's ----------------,  |
-            (DimFix (Var v)) -> Just $ DimIdxPat (S.fromList [(0, (v, 0, getIterationType ctx))])
-            -- Constants are invariant, i.e. ∅
-            (DimFix (Constant _)) -> Just $ DimIdxPat mempty
+            (DimFix subExpression) -> Just $ DimIdxPat $ consolidate ctx subExpression
             (DimSlice _offs _n _stride) -> Nothing -- TODO: How should we handle slices?
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
@@ -362,33 +358,34 @@ analyzeBasicOp ctx expression pats = do
   let pat = firstPatElemName pats
   -- TODO: Lookup basicOp
   let ctx_val = case expression of
-        (SubExp subexp) -> analyzeSubExpr ctx subexp
-        (Opaque _ subexp) -> analyzeSubExpr ctx subexp
+        (SubExp subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
+        (Opaque _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
         (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> analyzeSubExpr ctx subexp
+        (UnOp _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
         (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
         (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> analyzeSubExpr ctx subexp
-        (Assert subexp _ _) -> analyzeSubExpr ctx subexp
+        (ConvOp _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
+        (Assert subexp _ _) -> fromNames ctx $ analyzeSubExpr ctx subexp
         (Index name _) ->
           error $ "unhandled: Index (Skill issue?) " ++ baseString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (technically skill issue?)" ++ baseString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
+        (Concat _ _ length_subexp) -> fromNames ctx $ analyzeSubExpr ctx length_subexp
         (Manifest _dim _name) -> error "unhandled: Manifest"
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
         (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
-        (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
+        (Rearrange _ name) -> fromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         _ -> error "unhandled: match-all"
   let ctx' = extend ctx $ oneContext pat ctx_val []
   (ctx', mempty)
   where
-    concatCtxVals ne =
-      foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
+    concatCtxVals ne nn =
+      fromNames ctx
+        (foldl' (\a -> (<>) a . analyzeSubExpr ctx) ne nn)
 
 analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pats body bodies =
@@ -407,11 +404,16 @@ analyzeLoop ctx loop body pats = do
   let pat = firstPatElemName pats
   let ctx' = case loop of
         (WhileLoop iterVar) ->
-          oneContext iterVar (CtxVal (oneName pat) Sequential) []
+          oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) []
         (ForLoop iterVar _ numIter _params) ->
           oneContext
             iterVar
-            ((><) ctx (CtxVal (oneName pat) Sequential) (analyzeSubExpr ctx numIter))
+            ( CtxVal
+                ( (<>) (oneName pat) (analyzeSubExpr ctx numIter)
+                )
+                Sequential
+                $ currentLevel ctx
+            )
             []
   analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
@@ -428,7 +430,7 @@ analyzeSegOp ctx op pats = do
   -- SegHist the same way.
   let segSpaceContext =
         extend ctx $
-          contextFromSegSpace (currentLevel ctx, pat) $
+          contextFromSegSpace ctx (currentLevel ctx, pat) $
             segSpace op
   -- Analyze statements in the SegOp body
   analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
@@ -443,8 +445,16 @@ analyzeSizeOp ctx op pats = do
   (ctx', mempty)
   where
     pat = firstPatElemName pats
-    concatCtxVal [] = mempty :: Context
-    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+    concatCtxVal :: [Names] -> Context
+    concatCtxVal [] = mempty
+    concatCtxVal (ne : remainder) = oneContext pat (fromNames ctx $ foldl' (<>) ne remainder) []
+
+fromNames :: Context -> Names -> CtxVal
+fromNames ctx names =
+      CtxVal
+        names
+        (getIterationType ctx)
+        (currentLevel ctx)
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
@@ -468,17 +478,28 @@ getIterationType (Context _ bodies _) =
         -- recurse a bit ya kno
         CondBodyName _ -> getIteration_rec $ init rec
 
-analyzeSubExpr :: Context -> SubExp -> CtxVal
-analyzeSubExpr ctx (Constant _) = CtxVal mempty $ getIterationType ctx
+-- Returns an intmap of names, to be used as dependencies in construction of
+-- CtxVals.
+-- Throws an error if SubExp contains a name not in context. This behaviour
+-- might be thrown out in the future, as it is mostly just a very verbose way to
+-- ensure that we capture all necessary variables in the context at the moment
+-- of development.
+analyzeSubExpr :: Context -> SubExp -> Names
+analyzeSubExpr _ (Constant _) = mempty
 analyzeSubExpr ctx (Var v) =
   case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
-    -- If variable is found, the dependenies must be the superset
-    (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType ctx
+    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "\""
+    (Just _) -> oneName v
 
 -- Consolidates a dimfix into a set of dependencies
-consolidate :: Context -> SubExp -> [Dependencies]
-consolidate ctx dimfixExpression = undefined
+consolidate :: Context -> SubExp -> Dependencies
+consolidate _ctx (Constant _) = S.fromList []
+consolidate ctx (Var v) =
+  case M.lookup v (assignments ctx) of
+    Nothing -> error $ "Unable to find " ++ baseString v
+    Just (CtxVal deps itertype lvl) ->
+      -- TODO: Lookup the deps
+      S.fromList [(baseTag v, (v, lvl, itertype))]
 
 -- Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
