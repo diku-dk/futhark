@@ -51,6 +51,8 @@ newtype DimIdxPat = DimIdxPat
     -- An empty set indicates that the access is invariant.
     dependencies :: Dependencies
   }
+  -- \| Whether the access is parallel or sequential
+
   deriving (Eq, Ord, Show)
 
 -- | Each element in the list corresponds to an access to a dimension in the given array
@@ -473,6 +475,10 @@ analyzeSubExpr ctx (Var v) =
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
     -- If variable is found, the dependenies must be the superset
     (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType ctx
+
+-- Consolidates a dimfix into a set of dependencies
+consolidate :: Context -> SubExp -> [Dependencies]
+consolidate ctx dimfixExpression = undefined
 
 -- Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
