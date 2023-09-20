@@ -19,6 +19,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
+import Debug.Pretty.Simple
 import Futhark.IR.GPU
 
 -- | Iteration type describes whether the index is iterated in a parallel or
@@ -249,7 +250,12 @@ contextFromParams iterType pats name =
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
-analyzeDimIdxPats = foldMap analyzeFunction . progFuns
+analyzeDimIdxPats prog =
+  let res = (foldMap analyzeFunction . progFuns) prog
+   in pTrace "-------------------------------------------------------\n\n" $
+        pTraceShow res $
+          pTrace "\n-------------------------------------------------------\n" $
+            res
 
 -- | Analyze each statement in a function body.
 analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
@@ -299,57 +305,29 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
             currentLevel = currentLevel ctx + 1
           }
 
--- | Analyze a statement
+-- | Analyze a GPU statement and return the updated context and array index
+-- descriptors.
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let pats _ e) =
   case e of
-    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pat name ee
-    (BasicOp op) ->
-      -- TODO: Lookup basicOp
-      let ctx' = extend ctx $ oneContext pat (analyzeBasicOp ctx op) []
-       in (ctx', mempty)
-    (Match _subexps _cases _defaultBody _) -> error "UNHANDLED: Match"
-    (Loop _bindings loop body) ->
-      do
-        let ctx' = case loop of
-              (WhileLoop iterVar) ->
-                oneContext iterVar (CtxVal (oneName pat) Sequential) []
-              (ForLoop iterVar _ numIter _params) ->
-                oneContext
-                  iterVar
-                  ((><) ctx (CtxVal (oneName pat) Sequential) (analyzeSubExpr ctx numIter))
-                  []
-        analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
-    (Apply _name _ _ _) -> error "UNHANDLED: Apply"
-    (WithAcc _ _) -> error "UNHANDLED: With"
-    (Op (SegOp op)) -> do
-      -- TODO: Consider whether we want to treat SegMap, SegRed, SegScan, and
-      -- SegHist the same way.
-      let segSpaceContext =
-            extend ctx $
-              contextFromSegSpace (currentLevel ctx, pat) $
-                segSpace op
-      analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
-    (Op (SizeOp sizeop)) -> do
-      let subexprsToContext =
-            extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
-      let ctx' =
-            case sizeop of
-              (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
-              (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
-              _ -> ctx
-      (ctx', mempty)
-    (Op (GPUBody _ body)) ->
-      analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
-    (Op (OtherOp _)) -> error "UNHANDLED: OtherOp"
-  where
-    pat = patElemName . head $ patElems pats
+    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pats name ee
+    (BasicOp op) -> analyzeBasicOp ctx op pats
+    (Match _subexps _cases _defaultBody _) -> analyzeMatch ctx pats
+    (Loop _bindings loop body) -> analyzeLoop ctx loop body pats
+    (Apply _name _ _ _) -> analyzeApply ctx pats
+    (WithAcc _ _) -> analyzeWithAcc ctx pats
+    (Op (SegOp op)) -> analyzeSegOp ctx op pats
+    (Op (SizeOp op)) -> analyzeSizeOp ctx op pats
+    (Op (GPUBody _ body)) -> analyzeGPUBody ctx pats body
+    (Op (OtherOp _)) -> analyzeOtherOp ctx pats
 
-    concatCtxVal [] = mempty :: Context
-    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+-- | Get the name of the first element in a pattern
+firstPatElemName :: Pat dec -> VName
+firstPatElemName pat = patElemName . head $ patElems pat
 
-analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
-analyzeIndex ctx pat arr_name dimIndexes = do
+analyzeIndex :: Context -> Pat dec -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
+analyzeIndex ctx pats arr_name dimIndexes = do
+  let pat = firstPatElemName pats
   -- TODO: Expand context?
   -- TODO: Should we just take the latest segmap?
   let last_segmap = lastSegMap ctx
@@ -369,6 +347,94 @@ analyzeIndex ctx pat arr_name dimIndexes = do
         Nothing -> mempty
         (Just segmap) -> M.singleton segmap map_array
   (ctx, res)
+
+analyzeBasicOp :: Context -> BasicOp -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeBasicOp ctx expression pats = do
+  let pat = firstPatElemName pats
+  -- TODO: Lookup basicOp
+  let ctx_val = case expression of
+        (SubExp subexp) -> analyzeSubExpr ctx subexp
+        (Opaque _ subexp) -> analyzeSubExpr ctx subexp
+        (ArrayLit subexps _t) -> concatCtxVals mempty subexps
+        (UnOp _ subexp) -> analyzeSubExpr ctx subexp
+        (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
+        (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
+        (ConvOp _ subexp) -> analyzeSubExpr ctx subexp
+        (Assert subexp _ _) -> analyzeSubExpr ctx subexp
+        (Index name _) ->
+          error $ "unhandled: Index (Skill issue?) " ++ baseString name
+        (Update _ name _slice _subexp) ->
+          error $ "unhandled: Update (technically skill issue?)" ++ baseString name
+        -- Technically, do we need this case?
+        (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
+        (Manifest _dim _name) ->
+          error "unhandled: Manifest"
+        (Iota end_subexp start_subexp stride_subexp _) -> concatCtxVals mempty [end_subexp, start_subexp, stride_subexp]
+        (Replicate (Shape shape_subexp) subexp) -> concatCtxVals mempty (subexp : shape_subexp)
+        (Scratch _ subexprs) -> concatCtxVals mempty subexprs
+        (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
+        (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
+        (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
+        _ -> error "unhandled: match-all"
+  let ctx' = extend ctx $ oneContext pat ctx_val []
+  (ctx', mempty)
+  where
+    concatCtxVals ne =
+      foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
+
+analyzeMatch :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeMatch ctx pats = error "UNHANDLED: Match"
+
+analyzeLoop :: Context -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeLoop ctx loop body pats = do
+  let pat = firstPatElemName pats
+  let ctx' = case loop of
+        (WhileLoop iterVar) ->
+          oneContext iterVar (CtxVal (oneName pat) Sequential) []
+        (ForLoop iterVar _ numIter _params) ->
+          oneContext
+            iterVar
+            ((><) ctx (CtxVal (oneName pat) Sequential) (analyzeSubExpr ctx numIter))
+            []
+  analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
+
+analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeApply ctx pats = error "UNHANDLED: Apply"
+
+analyzeWithAcc :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeWithAcc ctx pats = error "UNHANDLED: WithAcc"
+
+analyzeSegOp :: Context -> SegOp lvl GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeSegOp ctx op pats = do
+  let pat = firstPatElemName pats
+  -- TODO: Consider whether we want to treat SegMap, SegRed, SegScan, and
+  -- SegHist the same way.
+  let segSpaceContext =
+        extend ctx $
+          contextFromSegSpace (currentLevel ctx, pat) $
+            segSpace op
+  -- Analyze statements in the SegOp body
+  analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
+
+analyzeSizeOp :: Context -> SizeOp -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeSizeOp ctx op pats = do
+  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
+  let ctx' = case op of
+        (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
+        (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
+        _ -> ctx
+  (ctx', mempty)
+  where
+    pat = firstPatElemName pats
+    concatCtxVal [] = mempty :: Context
+    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+
+-- | Analyze statements in a GPU body.
+analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
+analyzeGPUBody ctx pats body = analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
+
+analyzeOtherOp :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeOtherOp ctx pats = error "UNHANDLED: OtherOp"
 
 getIterationType :: Context -> IterationType
 getIterationType (Context _ bodies _) =
@@ -418,6 +484,5 @@ analyzeBasicOp ctx expression =
     (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
     _ -> error "unhandled: match-all"
   where
-
     concatCtxVals ne =
       foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
