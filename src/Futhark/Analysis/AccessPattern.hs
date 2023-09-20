@@ -325,7 +325,7 @@ analyzeStm ctx (Let pats _ e) =
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pats name ee
     (BasicOp op) -> analyzeBasicOp ctx op pats
     (Match _ cases defaultBody _) -> analyzeMatch ctx pats defaultBody $ map caseBody cases
-    (Loop _bindings loop body) -> analyzeLoop ctx loop body pats
+    (Loop bindings loop body) -> analyzeLoop ctx bindings loop body pats
     (Apply _name _ _ _) -> analyzeApply ctx pats
     (WithAcc _ _) -> analyzeWithAcc ctx pats
     (Op (SegOp op)) -> analyzeSegOp ctx op pats
@@ -403,22 +403,28 @@ analyzeMatch ctx pats body bodies =
     (ctx, mempty)
     (body : bodies)
 
-analyzeLoop :: Context -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
-analyzeLoop ctx loop body pats = do
+analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
+analyzeLoop ctx bindings loop body pats = do
   let pat = firstPatElemName pats
-  let ctx' = case loop of
-        (WhileLoop iterVar) ->
-          oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) []
-        (ForLoop iterVar _ numIter _params) ->
-          oneContext
-            iterVar
-            ( CtxVal
-                ( (<>) (oneName pat) (analyzeSubExpr ctx numIter)
-                )
-                Sequential
-                $ currentLevel ctx
-            )
-            []
+  let fromBindings itervar (param, subexpr) =
+        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr ctx subexpr)) Sequential $ currentLevel ctx) []
+  let ctx' =
+        case loop of
+          (WhileLoop iterVar) ->
+            (<>)
+              (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
+              ( oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
+          (ForLoop iterVar _ numIter params) -> do
+            let neutralElem =
+                  CtxVal ((<>) (oneName pat) (analyzeSubExpr ctx numIter)) Sequential $ currentLevel ctx
+            let fromParam (param, vname) =
+                  oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) []
+            (<>)
+              (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
+              (foldl'
+                (<>)
+                (oneContext iterVar neutralElem [])
+                (map fromParam params))
   analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
