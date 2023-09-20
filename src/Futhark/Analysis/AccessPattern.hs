@@ -272,7 +272,7 @@ analyzeFunction func = do
   let ctx =
         contextFromParams Sequential (funDefParams func) $
           -- All entries are "sequential" in nature.
-          CtxVal {deps = mempty, iterationType = Sequential}
+          CtxVal {deps = mempty, iterationType = Sequential, level = 0}
   analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
