@@ -287,7 +287,8 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
 
     recContext =
-      extend ctxExtended $
+      extend ctx $
+        extend tmp_ctx $
         Context
           { assignments = mempty,
             lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
