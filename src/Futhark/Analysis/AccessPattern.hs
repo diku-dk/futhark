@@ -54,11 +54,6 @@ data DimIdxPat = DimIdxPat
   }
   deriving (Eq, Ord, Show)
 
-intersect :: DimIdxPat -> DimIdxPat -> DimIdxPat
-intersect (DimIdxPat adeps atype) (DimIdxPat bdeps btype)
-  | atype == btype = DimIdxPat (S.intersection adeps bdeps) btype
-intersect _ _ = error "Whoopsie daisy!"
-
 -- | Each element in the list corresponds to an access to a dimension in the given array
 -- in the order of the dimensions.
 type MemoryEntry = [DimIdxPat]
@@ -367,10 +362,9 @@ analyzeBasicOp ctx expression pats = do
           error $ "unhandled: Update (technically skill issue?)" ++ baseString name
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
-        (Manifest _dim _name) ->
-          error "unhandled: Manifest"
-        (Iota end_subexp start_subexp stride_subexp _) -> concatCtxVals mempty [end_subexp, start_subexp, stride_subexp]
-        (Replicate (Shape shape_subexp) subexp) -> concatCtxVals mempty (subexp : shape_subexp)
+        (Manifest _dim _name) -> error "unhandled: Manifest"
+        (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
+        (Replicate (Shape shape) value) -> concatCtxVals mempty (value : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
         (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
         (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
@@ -456,33 +450,3 @@ analyzeSubExpr ctx (Var v) =
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
     -- If variable is found, the dependenies must be the superset
     (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType ctx
-
-analyzeBasicOp :: Context -> BasicOp -> CtxVal
-analyzeBasicOp ctx expression =
-  case expression of
-    (SubExp subexp) -> analyzeSubExpr ctx subexp
-    (Opaque _ subexp) -> analyzeSubExpr ctx subexp
-    (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-    (UnOp _ subexp) -> analyzeSubExpr ctx subexp
-    (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-    (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-    (ConvOp _ subexp) -> analyzeSubExpr ctx subexp
-    (Assert subexp _ _) -> analyzeSubExpr ctx subexp
-    (Index name _) ->
-      error $ "unhandled: Index (Skill issue?) " ++ baseString name
-    (Update _ name _slice _subexp) ->
-      error $ "unhandled: Update (technically skill issue?)" ++ baseString name
-    -- Technically, do we need this case?
-    (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
-    (Manifest _dim _name) ->
-      error "unhandled: Manifest"
-    (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
-    (Replicate (Shape shape) value) -> concatCtxVals mempty (value : shape)
-    (Scratch _ subexprs) -> concatCtxVals mempty subexprs
-    (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
-    (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
-    (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
-    _ -> error "unhandled: match-all"
-  where
-    concatCtxVals ne =
-      foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
