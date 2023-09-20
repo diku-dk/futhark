@@ -17,6 +17,7 @@ where
 
 import Data.Foldable
 import Data.IntMap.Strict qualified as S
+import Data.List ((\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
 import Debug.Pretty.Simple
@@ -49,7 +50,6 @@ newtype DimIdxPat = DimIdxPat
   { -- | Set of gtid's that the access is variant to.
     -- An empty set indicates that the access is invariant.
     dependencies :: Dependencies
-    -- | Whether the acess is parallel or sequential
   }
   deriving (Eq, Ord, Show)
 
@@ -145,6 +145,7 @@ data CtxVal = CtxVal
   { deps :: Names,
     iterationType :: IterationType
   }
+  deriving (Show, Ord, Eq)
 
 (><) :: Context -> CtxVal -> CtxVal -> CtxVal
 (><) _ctx (CtxVal lnames _ltype) (CtxVal rnames rtype) =
@@ -156,6 +157,7 @@ data BodyType
   = SegMapName SegMapName
   | LoopBodyName LoopBodyName
   | CondBodyName CondBodyName
+  deriving (Show, Ord, Eq)
 
 -- | Used during the analysis to keep track of the dependencies of patterns
 -- encountered so far.
@@ -169,6 +171,7 @@ data Context = Context
     -- | Current level of recursion
     currentLevel :: Int
   }
+  deriving (Show, Ord, Eq)
 
 -- | Get the last segmap encountered in the context.
 lastSegMap :: Context -> Maybe SegMapName
@@ -196,14 +199,22 @@ instance Monoid Context where
 
 instance Semigroup Context where
   (<>)
-    (Context ass0 lastSegMap0 lvl0)
-    (Context ass1 lastSegMap1 lvl1) =
-      Context ((<>) ass0 ass1) ((++) lastSegMap0 lastSegMap1) $ max lvl0 lvl1
+    (Context ass0 lastBody0 lvl0)
+    (Context ass1 lastBody1 lvl1) =
+      Context ((<>) ass0 ass1) ((++) lastBody0 lastBody1) $ max lvl0 lvl1
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
   (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
     DimIdxPat ((<>) adeps bdeps)
+
+-- | Intersect a context with another context.
+-- Only needed for debugging. Delete if not used.
+intersection :: Context -> Context -> Context
+intersection
+  (Context ass0 lastBody0 lvl0)
+  (Context ass1 lastBody1 lvl1) =
+    Context (M.intersection ass0 ass1) ((\\) lastBody0 lastBody1) $ max lvl0 lvl1
 
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
@@ -240,21 +251,27 @@ contextFromParams iterType pats name =
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
 analyzeDimIdxPats prog =
-  let res = (foldMap analyzeFunction . progFuns) prog
-   in pTrace "-------------------------------------------------------\n\n" $
-        pTraceShow res $
-          pTrace "\n-------------------------------------------------------\n" $
+  let (ctx, res) = (foldMap' analyzeFunction . progFuns) prog
+   in pTrace "============================ CONTEXT ===========================\n\n"
+        $ pTraceShow ctx
+        $ pTrace
+          "\n================================================================\n"
+        $ pTrace
+          "-------------------------------------------------------\n\n"
+        $ pTraceShow res
+        $ pTrace
+          "\n-------------------------------------------------------\n"
             res
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
-analyzeFunction func =
+analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
+analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
-   in let ctx =
+  let ctx =
             contextFromParams Sequential (funDefParams func) $
               -- All entries are "sequential" in nature.
               CtxVal {deps = mempty, iterationType = Sequential}
-       in snd $ analyzeStmsPrimitive ctx stms
+  analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
@@ -267,7 +284,7 @@ analyzeStmsPrimitive ctx =
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
 analyzeStms :: Context -> Context -> ((Int, VName) -> BodyType) -> Pat dec -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
-analyzeStms ctx ctxExtended bodyConstructor pats body = do
+analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
   -- 1. We do not want the returned context directly.
@@ -281,7 +298,7 @@ analyzeStms ctx ctxExtended bodyConstructor pats body = do
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
-    pat = patElemName . head $ patElems pats
+    pat = firstPatElemName pats
 
     concatCtxVal [] = oneContext pat (CtxVal mempty $ getIterationType ctx) []
     concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
@@ -334,7 +351,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
   let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
-        Nothing -> mempty
+        Nothing -> error "Index encountered before SegMap (skill issue)"
         (Just segmap) -> M.singleton segmap map_array
   (ctx, res)
 
