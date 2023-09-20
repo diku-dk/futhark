@@ -307,7 +307,7 @@ analyzeStm ctx (Let pats _ e) =
   case e of
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pats name ee
     (BasicOp op) -> analyzeBasicOp ctx op pats
-    (Match _subexps _cases _defaultBody _) -> analyzeMatch ctx pats
+    (Match _ cases defaultBody _) -> analyzeMatch ctx pats defaultBody $ map caseBody cases
     (Loop _bindings loop body) -> analyzeLoop ctx loop body pats
     (Apply _name _ _ _) -> analyzeApply ctx pats
     (WithAcc _ _) -> analyzeWithAcc ctx pats
@@ -364,7 +364,7 @@ analyzeBasicOp ctx expression pats = do
         (Concat _ _ length_subexp) -> analyzeSubExpr ctx length_subexp
         (Manifest _dim _name) -> error "unhandled: Manifest"
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
-        (Replicate (Shape shape) value) -> concatCtxVals mempty (value : shape)
+        (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
         (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
         (Rearrange _ name) -> CtxVal (oneName name) $ getIterationType ctx
@@ -376,8 +376,17 @@ analyzeBasicOp ctx expression pats = do
     concatCtxVals ne =
       foldl' (\a -> (><) ctx a . analyzeSubExpr ctx) (CtxVal ne $ getIterationType ctx)
 
-analyzeMatch :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
-analyzeMatch ctx pats = error "UNHANDLED: Match"
+analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
+analyzeMatch ctx pats body bodies =
+  foldl'
+    ( \(ctx', res) b ->
+        onSnd (M.union res)
+          . analyzeStms ctx ctx' CondBodyName pats
+          . stmsToList
+          $ bodyStms b
+    )
+    (ctx, mempty)
+    (body : bodies)
 
 analyzeLoop :: Context -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeLoop ctx loop body pats = do
@@ -425,7 +434,9 @@ analyzeSizeOp ctx op pats = do
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
-analyzeGPUBody ctx pats body = analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
+analyzeGPUBody ctx pats body =
+  -- TODO: Add dependencies to pat in ctx
+  analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
 analyzeOtherOp :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeOtherOp ctx pats = error "UNHANDLED: OtherOp"
@@ -450,3 +461,7 @@ analyzeSubExpr ctx (Var v) =
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v
     -- If variable is found, the dependenies must be the superset
     (Just (CtxVal deps _)) -> CtxVal (oneName v <> deps) $ getIterationType ctx
+
+-- Apply `f` to second/right part of tuple.
+onSnd :: (b -> c) -> (a, b) -> (a, c)
+onSnd f (x, y) = (x, f y)
