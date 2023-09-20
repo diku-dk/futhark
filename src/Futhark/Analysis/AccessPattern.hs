@@ -302,8 +302,11 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   where
     pat = firstPatElemName pats
 
-    concatCtxVal [] = oneContext pat (CtxVal mempty (getIterationType ctx) $ currentLevel ctx) []
-    concatCtxVal (ne : cvals) = oneContext pat (foldl' (ctx ><) ne cvals) []
+    -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This MAY throw away needed
+    -- information, but it was my best guess at a solution at the time of
+    -- writing.
+    concatCtxVal cvals =
+      oneContext pat (fromNames ctx $ foldl' (<>) mempty $ map deps cvals) []
 
     recContext =
       extend ctx $
