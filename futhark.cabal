@@ -179,6 +179,7 @@ library
       Futhark.Analysis.MemAlias
       Futhark.Analysis.Metrics
       Futhark.Analysis.Metrics.Type
+      Futhark.Analysis.Pretty
       Futhark.Analysis.PrimExp
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
