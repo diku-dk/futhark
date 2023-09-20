@@ -446,7 +446,15 @@ analyzeSizeOp ctx op pats = do
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
-  (ctx', mempty)
+  -- Add sizeOp to context
+  let ctxVal =
+        CtxVal
+          { deps = mempty,
+            iterationType = Sequential,
+            level = currentLevel ctx
+          }
+  let ctx'' = extend ctx' $ oneContext pat ctxVal []
+  (ctx'', mempty)
   where
     pat = firstPatElemName pats
     concatCtxVal :: [Names] -> Context
@@ -492,7 +500,8 @@ analyzeSubExpr :: Context -> SubExp -> Names
 analyzeSubExpr _ (Constant _) = mempty
 analyzeSubExpr ctx (Var v) =
   case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "\""
+    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v)
+    -- Nothing -> mempty
     (Just _) -> oneName v
 
 -- Consolidates a dimfix into a set of dependencies
