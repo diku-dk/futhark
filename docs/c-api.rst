@@ -32,7 +32,7 @@ non-zero value on error, as documented below.  Others return a
 Error codes
 -----------
 
-Most errors are result in a not otherwise specified nonzero return
+Most errors result in a not otherwise specified nonzero return
 code, but a few classes of errors have distinct error codes.
 
 .. c:macro:: FUTHARK_SUCCESS
