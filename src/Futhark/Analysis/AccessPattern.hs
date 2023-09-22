@@ -275,12 +275,15 @@ analyzeFunction func = do
           CtxVal {deps = mempty, iterationType = Sequential, level = 0}
   analyzeStmsPrimitive ctx stms
 
+unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
+unionArrayIndexDescriptors = M.unionWith (M.unionWith (M.unionWith (++)))
+
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
 analyzeStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
-    (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', M.union r r'))
+    (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', unionArrayIndexDescriptors r r'))
     (ctx, mempty)
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
