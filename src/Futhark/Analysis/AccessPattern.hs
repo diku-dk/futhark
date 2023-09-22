@@ -19,7 +19,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.List ((\\))
 import Data.Map.Strict qualified as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe
 import Debug.Pretty.Simple
 import Futhark.IR.GPU
 
@@ -279,7 +279,7 @@ analyzeFunction func = do
   let ctx =
         contextFromParams Sequential (funDefParams func) $
           -- All entries are "sequential" in nature.
-          CtxVal {deps = mempty, iterationType = Sequential, level = 0}
+          ctxValZeroDeps mempty Sequential
   analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
@@ -358,13 +358,12 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
   let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
-        -- If the index is outside of a segmap/loop, then there's no
-        -- result to add.
+  -- If the index is outside of a segmap/loop, then there's no
+  -- result to add.
         Nothing -> mempty
         (Just segmap) -> M.singleton segmap map_array
 
-  -- Extend context with the index expression
-  -- And add each DimIndex as a dependency to the index expression
+  -- Add each DimIndex as a dependency to the index expression
   let ctxVal =
         ctxValFromNames ctx $
           namesFromList $
@@ -377,6 +376,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
               )
               dimIndexes
 
+  -- Extend context with the index expression
   let ctx' = extend ctx $ oneContext pat ctxVal []
   (ctx', res)
 
