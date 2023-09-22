@@ -518,12 +518,22 @@ analyzeSubExpr ctx (Var v) =
 -- Consolidates a dimfix into a set of dependencies
 consolidate :: Context -> SubExp -> Dependencies
 consolidate _ctx (Constant _) = S.fromList []
-consolidate ctx (Var v) =
+consolidate ctx (Var v) = reduceDependencies ctx v
+
+reduceDependencies :: Context -> VName -> Dependencies
+reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Unable to find " ++ baseString v
     Just (CtxVal deps itertype lvl) ->
-      -- TODO: Lookup the deps
-      S.fromList [(baseTag v, (v, lvl, itertype))]
+      if null $ namesToList deps
+        then S.fromList [(baseTag v, (v, lvl, itertype))]
+        else
+          foldl' S.union mempty
+            $ map
+              ( \n ->
+                  reduceDependencies ctx n
+              )
+            $ namesToList deps
 
 -- Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
