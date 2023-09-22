@@ -358,7 +358,9 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
   let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
-        Nothing -> error "Index encountered before SegMap (skill issue)"
+        -- If the index is outside of a segmap/loop, then there's no
+        -- result to add.
+        Nothing -> mempty
         (Just segmap) -> M.singleton segmap map_array
 
   -- Extend context with the index expression
