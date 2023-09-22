@@ -354,7 +354,16 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
         Nothing -> error "Index encountered before SegMap (skill issue)"
         (Just segmap) -> M.singleton segmap map_array
-  (ctx, res)
+
+  -- Extend context with the index expression
+  let ctxVal =
+        CtxVal
+          { deps = mempty,
+            iterationType = Sequential,
+            level = currentLevel ctx
+          }
+  let ctx' = extend ctx $ oneContext pat ctxVal []
+  (ctx', res)
 
 analyzeBasicOp :: Context -> BasicOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeBasicOp ctx expression pats = do
@@ -413,7 +422,7 @@ analyzeLoop ctx bindings loop body pats = do
           (WhileLoop iterVar) ->
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              ( oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
+              (oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
           (ForLoop iterVar _ numIter params) -> do
             let neutralElem =
                   CtxVal ((<>) (oneName pat) (analyzeSubExpr ctx numIter)) Sequential $ currentLevel ctx
@@ -421,10 +430,7 @@ analyzeLoop ctx bindings loop body pats = do
                   oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) []
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (foldl'
-                (<>)
-                (oneContext iterVar neutralElem [])
-                (map fromParam params))
+              (foldl' (<>) (oneContext iterVar neutralElem []) (map fromParam params))
   analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
