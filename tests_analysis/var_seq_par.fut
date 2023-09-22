@@ -1,7 +1,7 @@
 def main [n][m] (xss: [n][m]i64) : [m]i64 =
     foldl (\acc xs -> map2 (\a x -> x+a) acc xs) (replicate m 0) xss
 
--- === Expected output of analysis: CONFIRMED
+-- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5450 : {
 --     (arr) acc_5428 : {
 --         (idx) eta_p_5453 :

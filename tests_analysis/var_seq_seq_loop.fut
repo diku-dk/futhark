@@ -9,5 +9,5 @@ def main [n][m] (xss: [n][m]i32) : i32 =
 
 
 
--- === Expected output of analysis: CONFIRMED
--- 
+-- === Expected output of analysis:
+--

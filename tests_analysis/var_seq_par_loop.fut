@@ -4,7 +4,7 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
     do
         map2 (\x r -> x+r) xss[i] res
 
--- === Expected output of analysis: CONFIRMED
+-- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5348 : {
 --     (arr) xss_5280 : {
 --         (idx) eta_p_5351 :

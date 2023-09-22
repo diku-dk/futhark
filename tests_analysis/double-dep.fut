@@ -4,3 +4,6 @@ def main [n] (xs: [n]i32) : [n]i32 =
       let t = i * 2 + p / 2 in
       ys[t] + ys[t / 2]
     ) (iota n)
+
+-- === Expected output of analysis:
+-- TBD
