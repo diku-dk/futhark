@@ -270,18 +270,7 @@ contextFromParams iterType pats name =
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
-analyzeDimIdxPats prog =
-  let (ctx, res) = (foldMap' analyzeFunction . progFuns) prog
-   in pTrace "============================ CONTEXT ===========================\n\n"
-        $ pTraceShow ctx
-        $ pTrace
-          "\n================================================================\n"
-        $ pTrace
-          "-------------------------------------------------------\n\n"
-        $ pTraceShow res
-        $ pTrace
-          "\n-------------------------------------------------------\n"
-          res
+analyzeDimIdxPats = snd . (foldMap' analyzeFunction . progFuns)
 
 -- | Analyze each statement in a function body.
 analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
