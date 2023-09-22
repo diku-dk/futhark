@@ -4,8 +4,10 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n]i64 =
   ) xsss
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_map_res_5381 => [
---     xsss_5238
---       [ gtid_5382 | ν par ] [ gtid_5383 | ν par ] [ xsss_5238 | ν seq ]
---   ]
+-- (segmap) defunc_0_map_res_5381 : {
+--     (arr) xsss_5238 : {
+--         (idx) eta_p_5385 :
+--             0 : dependencies = [ gtid_5382 0 par ]
+--             1 : dependencies = [ gtid_5383 0 par ]
+--     }
+-- }
