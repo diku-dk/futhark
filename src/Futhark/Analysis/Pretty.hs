@@ -10,7 +10,6 @@ import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Util.Pretty
-import Futhark.IR
 
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
@@ -23,14 +22,14 @@ instance Pretty ArrayIndexDescriptors where
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
 
-      printArrayMap (name, maps) = "(arr)" <+> pretty (baseName name) <+> colon <+> lbrace </> indent 4 (mapprintIdxExpr (M.toList maps)) </> rbrace
+      printArrayMap (name, maps) = "(arr)" <+> pretty name <+> colon <+> lbrace </> indent 4 (mapprintIdxExpr (M.toList maps)) </> rbrace
 
       mapprintIdxExpr :: [(IndexExprName, [MemoryEntry])] -> Doc ann
       mapprintIdxExpr [] = ""
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
-      printIdxExpMap (name, mems) = "(idx)" <+> pretty (baseName name) <+> ":" </> indent 4 (printMemoryEntryList mems)
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntryList mems)
 
       printMemoryEntryList :: [MemoryEntry] -> Doc ann
       printMemoryEntryList [] = ""
