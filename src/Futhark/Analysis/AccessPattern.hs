@@ -417,15 +417,21 @@ analyzeBasicOp ctx expression pats = do
 
 analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pats body bodies =
-  foldl'
-    ( \(ctx', res) b ->
-        onSnd (unionArrayIndexDescriptors res)
-          . analyzeStms ctx ctx' CondBodyName pats
-          . stmsToList
-          $ bodyStms b
-    )
-    (ctx, mempty)
-    (body : bodies)
+  let ctx' =
+        Context
+          { assignments = assignments ctx,
+            lastBodyType = lastBodyType ctx,
+            currentLevel = currentLevel ctx - 1
+          }
+   in foldl'
+        ( \(ctx', res) b ->
+            onSnd (unionArrayIndexDescriptors res)
+              . analyzeStms ctx ctx' CondBodyName pats
+              . stmsToList
+              $ bodyStms b
+        )
+        (ctx, mempty)
+        (body : bodies)
 
 analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeLoop ctx bindings loop body pats = do
@@ -461,8 +467,6 @@ analyzeWithAcc ctx pats = error "UNHANDLED: WithAcc"
 analyzeSegOp :: Context -> SegOp lvl GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeSegOp ctx op pats = do
   let pat = firstPatElemName pats
-  -- TODO: Consider whether we want to treat SegMap, SegRed, SegScan, and
-  -- SegHist the same way.
   let segSpaceContext =
         extend ctx $
           contextFromSegSpace ctx (currentLevel ctx, pat) $
@@ -522,11 +526,12 @@ analyzeSubExpr ctx (Var v) =
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v)
     (Just _) -> oneName v
 
--- Consolidates a dimfix into a set of dependencies
+-- | Consolidates a dimfix into a set of dependencies
 consolidate :: Context -> SubExp -> Dependencies
 consolidate _ctx (Constant _) = S.fromList []
 consolidate ctx (Var v) = reduceDependencies ctx v
 
+-- | Recursively lookup vnames until vars with no deps are reached.
 reduceDependencies :: Context -> VName -> Dependencies
 reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
