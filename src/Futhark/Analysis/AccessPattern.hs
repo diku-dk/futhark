@@ -60,11 +60,12 @@ newtype DimIdxPat = DimIdxPat
 type MemoryEntry = [DimIdxPat]
 
 -- | Map variable names of arrays in a segmap to index expressions on those arrays.
+-- segmap(pattern) |-> A(pattern) |-> indexExpressionName(pattern) |-> [[DimIdxPat]]
 type ArrayIndexDescriptors =
   M.Map SegMapName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
 
--- segmap(pattern) => A(pattern) => indexExpressionName(pattern) => [DimIdxPat]
---
+unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
+unionArrayIndexDescriptors = M.unionWith (M.unionWith (M.unionWith (++)))
 
 -- ================ EXAMPLE 1 ================
 -- segmap_0 (p)
@@ -231,6 +232,15 @@ oneContext name ctxValue segmaps =
       currentLevel = 0
     }
 
+-- | Create a singular ctxVal with no dependencies.
+ctxValZeroDeps :: Context -> CtxVal
+ctxValZeroDeps ctx =
+  CtxVal
+    { deps = mempty,
+      iterationType = Sequential,
+      level = currentLevel ctx
+    }
+
 -- | Create a singular context from a parameter
 contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
 contextFromParam _i p v = oneContext (paramName p) v []
@@ -274,9 +284,6 @@ analyzeFunction func = do
           -- All entries are "sequential" in nature.
           CtxVal {deps = mempty, iterationType = Sequential, level = 0}
   analyzeStmsPrimitive ctx stms
-
-unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
-unionArrayIndexDescriptors = M.unionWith (M.unionWith (M.unionWith (++)))
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
@@ -343,7 +350,6 @@ firstPatElemName pat = patElemName . head $ patElems pat
 analyzeIndex :: Context -> Pat dec -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
 analyzeIndex ctx pats arr_name dimIndexes = do
   let pat = firstPatElemName pats
-  -- TODO: Expand context?
   -- TODO: Should we just take the latest segmap?
   let last_segmap = lastSegMap ctx
   let memory_entries = [mapMaybe f dimIndexes]
@@ -359,12 +365,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
         (Just segmap) -> M.singleton segmap map_array
 
   -- Extend context with the index expression
-  let ctxVal =
-        CtxVal
-          { deps = mempty,
-            iterationType = Sequential,
-            level = currentLevel ctx
-          }
+  let ctxVal = ctxValZeroDeps ctx
   let ctx' = extend ctx $ oneContext pat ctxVal []
   (ctx', res)
 
@@ -462,12 +463,7 @@ analyzeSizeOp ctx op pats = do
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctxVal =
-        CtxVal
-          { deps = mempty,
-            iterationType = Sequential,
-            level = currentLevel ctx
-          }
+  let ctxVal = ctxValZeroDeps ctx
   let ctx'' = extend ctx' $ oneContext pat ctxVal []
   (ctx'', mempty)
   where
