@@ -8,10 +8,15 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n]i64 =
   ) xsss
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_map_res_5390 => [
---     xsss_5241
---       [ gtid_5391 | ν par ] [ gtid_5392 | ν par ] [ 0i64 | ν seq ]
---   ]
-
--- WARNING: This output may be wrong!!!
+-- (segmap) defunc_0_map_res_5390 : {
+--     (arr) xsss_5241 : {
+--         (idx) tmp_5395 :
+--             0 : dependencies = [ gtid_5391 0 par ]
+--             1 : dependencies = [ gtid_5392 0 par ]
+--             2 : dependencies = [  ]
+--         (idx) +_rhs_5399 :
+--             0 : dependencies = [ gtid_5391 0 par ]
+--             1 : dependencies = [ gtid_5392 0 par ]
+--             2 : dependencies = [ i_5397 1 seq ]
+--     }
+-- }
