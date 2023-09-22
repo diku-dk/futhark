@@ -7,4 +7,10 @@ def main [n][m] (k: i64) (xss: [n][m]i64) : [n]i64 =
   ) xss
 
 -- === Expected output of analysis:
--- TBD
+-- (segmap) defunc_0_map_res_5216 : {
+--     (arr) xss_5148 : {
+--         (idx) +_rhs_5224 :
+--             0 : dependencies = [ gtid_5217 0 par ]
+--             1 : dependencies = [ k_5147 0 seq | i_5221 1 seq ]
+--     }
+-- }
