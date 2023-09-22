@@ -440,7 +440,7 @@ analyzeLoop ctx bindings loop body pats = do
               (oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
           (ForLoop iterVar _ numIter params) -> do
             let neutralElem =
-                  CtxVal ((<>) (oneName pat) (analyzeSubExpr ctx numIter)) Sequential $ currentLevel ctx
+                  CtxVal (oneName pat) Sequential $ currentLevel ctx
             let fromParam (param, vname) =
                   oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) []
             (<>)
