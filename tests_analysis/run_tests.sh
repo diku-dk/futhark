@@ -225,6 +225,7 @@ do
         if [[ $expected_output_line_content == *"CONFIRMED"* ]]; then
             printf "\e[32m" # Green
             printf "PASSED\n"
+            printf "\e[0m" # Reset
 
         else
             printf "\e[33m" # Yellow
