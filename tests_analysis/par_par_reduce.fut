@@ -4,10 +4,27 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n]i64 =
   ) xsss
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_map_res_5336 => [
---     xsss_5239
---       [ gtid_5458 | ν par ] [ gtid_5459 | ν par ] [ gtid_5460 | ν par ]
---       [ gtid_5442 | ν par ] [ gtid_5443 | ν par ] [ i_5477 | ν seq ]
---       [ gtid_5362 | ν par ] [ i_5472 | ν seq ] [ i_5475 | ν seq ]
---   ]
+-- (segmap) defunc_0_map_res_5361 : {
+--     (arr) xsss_5239 : {
+--         (idx) x_5371 :
+--             0 : dependencies = [ gtid_5362 1 par ]
+--             1 : dependencies = [ i_5472 2 seq ]
+--             2 : dependencies = [ i_5475 3 seq ]
+--     }
+-- }
+-- (segmap) defunc_0_map_res_5441 : {
+--     (arr) xsss_5239 : {
+--         (idx) x_5450 :
+--             0 : dependencies = [ gtid_5442 2 par ]
+--             1 : dependencies = [ gtid_5443 2 par ]
+--             2 : dependencies = [ i_5477 3 seq ]
+--     }
+-- }
+-- (segred) defunc_0_map_res_5457 : {
+--     (arr) xsss_5239 : {
+--         (idx) x_5467 :
+--             0 : dependencies = [ gtid_5458 2 par ]
+--             1 : dependencies = [ gtid_5459 2 par ]
+--             2 : dependencies = [ gtid_5460 2 par ]
+--     }
+-- }
