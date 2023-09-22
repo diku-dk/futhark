@@ -8,4 +8,39 @@ def main [n] (xss: [n][n]i32) (yss: [n][n]i32) : [n][n]i32 =
     ) xss
 
 -- === Expected output of analysis:
--- TBD
+-- (segmap) defunc_0_map_res_5596 : {
+--     (arr) xss_5385 : {
+--         (idx) eta_p_5606 :
+--             0 : dependencies = [ gtid_5597 1 par ]
+--             1 : dependencies = [ i_5724 3 seq ]
+--     }
+--     (arr) yss_5386 : {
+--         (idx) eta_p_5607 :
+--             0 : dependencies = [ i_5724 3 seq ]
+--             1 : dependencies = [ i_5721 2 seq ]
+--     }
+-- }
+-- (segmap) defunc_0_map_res_5685 : {
+--     (arr) xss_5385 : {
+--         (idx) eta_p_5695 :
+--             0 : dependencies = [ gtid_5686 1 par ]
+--             1 : dependencies = [ i_5726 2 seq ]
+--     }
+--     (arr) yss_5386 : {
+--         (idx) eta_p_5696 :
+--             0 : dependencies = [ i_5726 2 seq ]
+--             1 : dependencies = [ gtid_5687 1 par ]
+--     }
+-- }
+-- (segmap) defunc_0_map_res_5704 : {
+--     (arr) xss_5385 : {
+--         (idx) eta_p_5714 :
+--             0 : dependencies = [ gtid_5705 2 par ]
+--             1 : dependencies = [ gtid_5707 2 par ]
+--     }
+--     (arr) yss_5386 : {
+--         (idx) eta_p_5715 :
+--             0 : dependencies = [ gtid_5707 2 par ]
+--             1 : dependencies = [ gtid_5706 2 par ]
+--     }
+-- }
