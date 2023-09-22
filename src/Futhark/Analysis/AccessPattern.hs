@@ -444,7 +444,12 @@ analyzeLoop ctx bindings loop body pats = do
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
               (foldl' (<>) (oneContext iterVar neutralElem []) (map fromParam params))
-  analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
+
+  let ctxVal = ctxValZeroDeps ctx Sequential -- TODO: There should be deps right?
+
+  -- Extend context with the loop expression
+  let ctx'' = extend ctx' $ oneContext pat ctxVal []
+  analyzeStms ctx ctx'' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeApply ctx pats = error "UNHANDLED: Apply"
