@@ -1,14 +1,14 @@
-def main [n] (xs: [n]i64) : [n]i64 =
-  let is = replicate n 0
-  in map (\i -> #[unsafe] xs[is[i]] ) (iota n)
+def main [n] (xs: [n]i64) (is: [n]i64): [n]i64 =
+  map (\i -> #[unsafe] xs[is[i]] ) (iota n)
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_map_res_5279 => [
---     defunc_0_map_res_5282
---       [ 0i64 :+ n_5240 * 1i64 | ψ ] [ 0i64 | ψ ]
---   ]
---   lifted_lambda_res_dev_5281 => [
---     xs_5241
---       [ 0i64 | ψ ]
---   ]
+-- (segmap) defunc_0_map_res_5253 : {
+--     (arr) xs_5191 : {
+--         (idx) lifted_lambda_res_5257 :
+--             0 : dependencies = [ gtid_5254 0 par ]
+--     }
+--     (arr) is_5192 : {
+--         (idx) is_elem_5256 :
+--             0 : dependencies = [ gtid_5254 0 par ]
+--     }
+-- }
