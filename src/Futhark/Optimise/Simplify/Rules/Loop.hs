@@ -2,8 +2,9 @@
 module Futhark.Optimise.Simplify.Rules.Loop (loopRules) where
 
 import Control.Monad
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.List (partition)
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.PrimExp.Convert
@@ -82,6 +83,79 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
       | otherwise = ([paramName p], BasicOp $ SubExp e)
 removeRedundantMergeVariables _ _ _ _ =
   Skip
+
+-- For a loop of the form
+--
+-- loop p = x ...
+--   ...stms...
+--   in res
+--
+-- we construct and simplify the body
+--
+--   let p = x
+--   ...stms...
+--   in res
+--
+-- and if that simplifies to 'x', then we conclude that the loop
+-- parameter 'p' must be invariant to the loop and simply bind it (and
+-- the loop result) to 'x'.
+--
+-- Complication: for multi-parameter loops, we must also check that
+-- the *original* computation of 'res' does *only* depends on other
+-- invariant loop parameters.  See tests/loops/invariant1.fut for an
+-- example.
+simplifyInvariantParams :: BuilderOps rep => TopDownRuleLoop rep
+simplifyInvariantParams _vtable pat aux (params, form, loopbody)
+  | consts <- filter constInit params,
+    not $ null consts = Simplify . auxing aux $
+      localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
+        loopbody_simpl <- subSimplify <=< buildBody_ $ do
+          mapM_ bindParam consts
+          bodyBind loopbody
+        let inv_pnames = determineInvariant $ bodyResult loopbody_simpl
+            invariant (_, (p, _), _) = paramName p `elem` inv_pnames
+            (inv, var) =
+              partition invariant $
+                zip3 (patElems pat) params (bodyResult loopbody)
+            (var_pes, var_params, var_res) = unzip3 var
+        when (null inv) cannotSimplify
+        mapM_ bindInv inv
+        loopbody' <- mkBodyM (bodyStms loopbody) var_res
+        letBind (Pat var_pes) $ Loop var_params form loopbody'
+  | otherwise = Skip
+  where
+    loopbody_deps = dataDependencies loopbody
+    resDep (Var v) = oneName v <> fromMaybe mempty (M.lookup v loopbody_deps)
+    resDep _ = mempty
+    res_deps = map (resDep . resSubExp) $ bodyResult loopbody
+
+    constInit (_, Constant {}) = True
+    constInit _ = False
+
+    bindParam (p, se) = letBindNames [paramName p] $ BasicOp $ SubExp se
+
+    bindInv (pe, (p, se), _) = do
+      letBindNames [patElemName pe] $ BasicOp $ SubExp se
+      letBindNames [paramName p] $ BasicOp $ SubExp se
+
+    resIsInvariant ((_, x), x') = x == resSubExp x'
+
+    depOnVar var (_, deps) = any (`nameIn` deps) var
+
+    noInvDepOnVar inv var
+      | (inv_var, inv') <- partition (depOnVar var) inv,
+        not $ null inv_var =
+          noInvDepOnVar inv' $ map fst inv_var <> var
+      | otherwise =
+          map fst inv
+
+    determineInvariant simpl_res =
+      let (inv, var) =
+            partition (resIsInvariant . fst) $
+              zip (zip (map (first paramName) params) simpl_res) res_deps
+       in noInvDepOnVar
+            (map (first (fst . fst)) inv)
+            (map (fst . fst . fst) var)
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
@@ -290,7 +364,8 @@ topDownRules =
   [ RuleLoop hoistLoopInvariantMergeVariables,
     RuleLoop simplifyClosedFormLoop,
     RuleLoop simplifyKnownIterationLoop,
-    RuleLoop simplifyLoopVariables
+    RuleLoop simplifyLoopVariables,
+    RuleLoop simplifyInvariantParams
   ]
 
 bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
