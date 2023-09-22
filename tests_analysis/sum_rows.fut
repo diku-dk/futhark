@@ -2,7 +2,7 @@
 def main [n] (xss: [n][n]i32) : [n]i32 =
     map i32.sum xss
 
--- === Expected output of analysis: CONFIRMED
+-- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5226 : {
 --     (arr) xss_5149 : {
 --         (idx) x_5234 :
