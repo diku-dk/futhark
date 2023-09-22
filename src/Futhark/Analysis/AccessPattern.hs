@@ -407,7 +407,7 @@ analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayI
 analyzeMatch ctx pats body bodies =
   foldl'
     ( \(ctx', res) b ->
-        onSnd (M.union res)
+        onSnd (unionArrayIndexDescriptors res)
           . analyzeStms ctx ctx' CondBodyName pats
           . stmsToList
           $ bodyStms b
