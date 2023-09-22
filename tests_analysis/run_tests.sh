@@ -243,6 +243,7 @@ do
         printf "\e[0m\n" # Reset
 
         $diffFunc "${expected_output}" "${output}"
+        printf "\n"
     fi
 done
 

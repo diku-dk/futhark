@@ -10,6 +10,3 @@ def main [n] (xss: [n][n]i32) (yss: [n][n]i32) : [n][n]i32 =
 
 -- === Expected output of analysis:
 -- TBD
-
-
--- TODO sum over rækker i matrix
