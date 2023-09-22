@@ -1,7 +1,5 @@
-def main [n] (xs: [n]i64) : [n]i64 =
-  let is = iota n
-  let is_2 = reverse is
-  in map (\i -> #[unsafe] xs[is[is_2[i]]]) (iota n)
+def main [n][m] (xs: [n]i64) (is_0: [m]i64) (is_1: [m]i64) : [n]i64 =
+  map (\i -> #[unsafe] xs[is_0[is_1[i]]]) (iota n)
 
 -- === Expected output of analysis:
 -- entry_main
@@ -9,5 +7,3 @@ def main [n] (xs: [n]i64) : [n]i64 =
 --     xs_5242
 --       [ slice_5325 | ν par ]
 --   ]
-
--- WARNING: This program gets optimized too much!
