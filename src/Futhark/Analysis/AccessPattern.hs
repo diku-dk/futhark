@@ -151,6 +151,13 @@ data CtxVal = CtxVal
   }
   deriving (Show, Ord, Eq)
 
+ctxValFromNames :: Context -> Names -> CtxVal
+ctxValFromNames ctx names =
+  CtxVal
+    names
+    (getIterationType ctx)
+    (currentLevel ctx)
+
 insertDep :: CtxVal -> Names -> CtxVal
 insertDep (CtxVal lnames itertype lvl) names =
   CtxVal ((<>) lnames names) itertype lvl
@@ -317,7 +324,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
     -- information, but it was my best guess at a solution at the time of
     -- writing.
     concatCtxVal cvals =
-      oneContext pat (fromNames ctx $ foldl' (<>) mempty $ map deps cvals) []
+      oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals) []
 
     recContext =
       extend ctx $
@@ -368,7 +375,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   -- Extend context with the index expression
   -- And add each DimIndex as a dependency to the index expression
   let ctxVal =
-        fromNames ctx $
+        ctxValFromNames ctx $
           namesFromList $
             mapMaybe
               ( \case
@@ -387,33 +394,33 @@ analyzeBasicOp ctx expression pats = do
   let pat = firstPatElemName pats
   -- TODO: Lookup basicOp
   let ctx_val = case expression of
-        (SubExp subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
-        (Opaque _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
+        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
+        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
         (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
+        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
         (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
         (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> fromNames ctx $ analyzeSubExpr ctx subexp
-        (Assert subexp _ _) -> fromNames ctx $ analyzeSubExpr ctx subexp
+        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
+        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
         (Index name _) ->
           error $ "unhandled: Index (Skill issue?) " ++ baseString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (technically skill issue?)" ++ baseString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> fromNames ctx $ analyzeSubExpr ctx length_subexp
+        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx length_subexp
         (Manifest _dim _name) -> error "unhandled: Manifest"
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
         (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
-        (Rearrange _ name) -> fromNames ctx $ oneName name
+        (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         _ -> error "unhandled: match-all"
   let ctx' = extend ctx $ oneContext pat ctx_val []
   (ctx', mempty)
   where
     concatCtxVals ne nn =
-      fromNames
+      ctxValFromNames
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr ctx) ne nn)
 
@@ -483,14 +490,7 @@ analyzeSizeOp ctx op pats = do
     pat = firstPatElemName pats
     concatCtxVal :: [Names] -> Context
     concatCtxVal [] = mempty
-    concatCtxVal (ne : remainder) = oneContext pat (fromNames ctx $ foldl' (<>) ne remainder) []
-
-fromNames :: Context -> Names -> CtxVal
-fromNames ctx names =
-  CtxVal
-    names
-    (getIterationType ctx)
-    (currentLevel ctx)
+    concatCtxVal (ne : remainder) = oneContext pat (ctxValFromNames ctx $ foldl' (<>) ne remainder) []
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
