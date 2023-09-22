@@ -2,7 +2,7 @@
 def main [n] (xs: [n]i64) : [n]i64 =
   map (\i ->  #[unsafe] xs[i*0] ) (iota n)
 
--- === Expected output of analysis: CONFIRMED
+-- === Expected output of analysis:
 -- entry_main
 --   defunc_0_map_res_5193 => [
 --     defunc_0_map_res_5198
