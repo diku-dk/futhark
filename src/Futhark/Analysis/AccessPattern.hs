@@ -437,9 +437,9 @@ analyzeLoop ctx bindings loop body pats = do
           (WhileLoop iterVar) ->
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
+              (oneContext iterVar (ctxValZeroDeps ctx Sequential) [])
           (ForLoop iterVar _ _ params) -> do
-            let neutralElem = CtxVal mempty Sequential $ currentLevel ctx
+            let neutralElem = ctxValZeroDeps ctx Sequential
             let fromParam (param, vname) =
                   oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) []
             (<>)
@@ -520,7 +520,6 @@ analyzeSubExpr _ (Constant _) = mempty
 analyzeSubExpr ctx (Var v) =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v)
-    -- Nothing -> mempty
     (Just _) -> oneName v
 
 -- Consolidates a dimfix into a set of dependencies
