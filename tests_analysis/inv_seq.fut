@@ -1,16 +1,16 @@
-def main [n][m] (xss: [n][m]i64) : i64 =
-  #[unsafe]
-  foldl (+) 0 xss[0]
+def main [l][n][m] (xsss: [l][n][m]i64) : [l]i64 =
+  map (\xss ->
+    loop res=0 for i < m do
+      #[unsafe]
+      res + xss[0][i]
+  ) xsss
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_foldl_res_5140 => [
---     defunc_0_foldl_res_dev_5145
---       [ 0i64 | ψ ]
---   ]
---   defunc_0_foldl_res_dev_5145 => [
---     xss_5120
---       [ 0i64 | ψ ] [ i_5141 | ν seq ]
---     acc_5147
---       [ 0i64 | ψ ]
---   ]
+-- (segmap) defunc_0_map_res_5224 : {
+--     (arr) xsss_5162 : {
+--         (idx) +_rhs_5231 :
+--             0 : dependencies = [ gtid_5225 0 par ]
+--             1 : dependencies = [  ]
+--             2 : dependencies = [ i_5229 1 seq ]
+--     }
+-- }
