@@ -133,6 +133,9 @@ function diff_strings() {
 }
 
 function wordDiff() {
+  [ -z "${1}" ] && echo "expected output is empty" && return
+  [ -z "${2}" ] && echo "output is empty" && return
+
   wdiff --start-delete="$(printf "\e[32m")" --end-delete="$(printf "\e[0m")" \
     --start-insert="$(printf "\e[31m")" --end-insert="$(printf "\e[0m")" \
     <(printf "${1}") \
