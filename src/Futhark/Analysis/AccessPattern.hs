@@ -366,7 +366,19 @@ analyzeIndex ctx pats arr_name dimIndexes = do
         (Just segmap) -> M.singleton segmap map_array
 
   -- Extend context with the index expression
-  let ctxVal = ctxValZeroDeps ctx Sequential
+  -- And add each DimIndex as a dependency to the index expression
+  let ctxVal =
+        fromNames ctx $
+          namesFromList $
+            mapMaybe
+              ( \case
+                  (DimFix subExpression) -> case subExpression of
+                    (Constant _) -> Nothing
+                    (Var v) -> Just v
+                  (DimSlice _offs _n _stride) -> Nothing
+              )
+              dimIndexes
+
   let ctx' = extend ctx $ oneContext pat ctxVal []
   (ctx', res)
 
