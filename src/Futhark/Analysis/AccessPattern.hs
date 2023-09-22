@@ -303,7 +303,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   let ctxVals = M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = concatCtxVal . map snd $ M.toList ctxVals
+  let ctx' = extend ctx . concatCtxVal . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
