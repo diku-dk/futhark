@@ -438,9 +438,8 @@ analyzeLoop ctx bindings loop body pats = do
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
               (oneContext iterVar (CtxVal (oneName pat) Sequential $ currentLevel ctx) [])
-          (ForLoop iterVar _ numIter params) -> do
-            let neutralElem =
-                  CtxVal (oneName pat) Sequential $ currentLevel ctx
+          (ForLoop iterVar _ _ params) -> do
+            let neutralElem = CtxVal mempty Sequential $ currentLevel ctx
             let fromParam (param, vname) =
                   oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) []
             (<>)
