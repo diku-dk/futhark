@@ -246,7 +246,7 @@ done
 # Get percentage of successful tests
 which wdiff &>/dev/null
 if [ $? -eq 0 ] ; then
-  success_percent=" ($(bc <<< "scale=1; ${successes} / ${test_n} * 100" )%)"
+  success_percent="($(echo "scale=2; $successes/$test_n*100" | bc)%)"
 fi
 
 # Print the number of successful tests.
