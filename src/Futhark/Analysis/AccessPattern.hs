@@ -233,11 +233,11 @@ oneContext name ctxValue segmaps =
     }
 
 -- | Create a singular ctxVal with no dependencies.
-ctxValZeroDeps :: Context -> CtxVal
-ctxValZeroDeps ctx =
+ctxValZeroDeps :: Context -> IterationType -> CtxVal
+ctxValZeroDeps ctx iterType =
   CtxVal
     { deps = mempty,
-      iterationType = Sequential,
+      iterationType = iterType,
       level = currentLevel ctx
     }
 
@@ -252,7 +252,8 @@ contextFromSegSpace ctx segspaceName segspace =
   foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) mempty $
     unSegSpace segspace
   where
-    ctxVal = CtxVal (oneName $ snd segspaceName) Parallel $ currentLevel ctx
+    -- ctxVal = CtxVal (oneName $ snd segspaceName) Parallel $ currentLevel ctx
+    ctxVal = ctxValZeroDeps ctx Parallel
 
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
@@ -365,7 +366,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
         (Just segmap) -> M.singleton segmap map_array
 
   -- Extend context with the index expression
-  let ctxVal = ctxValZeroDeps ctx
+  let ctxVal = ctxValZeroDeps ctx Sequential
   let ctx' = extend ctx $ oneContext pat ctxVal []
   (ctx', res)
 
@@ -463,7 +464,7 @@ analyzeSizeOp ctx op pats = do
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctxVal = ctxValZeroDeps ctx
+  let ctxVal = ctxValZeroDeps ctx Sequential
   let ctx'' = extend ctx' $ oneContext pat ctxVal []
   (ctx'', mempty)
   where
