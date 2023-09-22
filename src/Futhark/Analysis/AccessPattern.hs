@@ -528,12 +528,9 @@ reduceDependencies ctx v =
       if null $ namesToList deps
         then S.fromList [(baseTag v, (v, lvl, itertype))]
         else
-          foldl' S.union mempty
-            $ map
-              ( \n ->
-                  reduceDependencies ctx n
-              )
-            $ namesToList deps
+          foldl' S.union mempty $
+            map (reduceDependencies ctx) $
+              namesToList deps
 
 -- Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
