@@ -248,10 +248,6 @@ ctxValZeroDeps ctx iterType =
       level = currentLevel ctx
     }
 
--- | Create a singular context from a parameter
-contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
-contextFromParam _i p v = oneContext (paramName p) v []
-
 -- | Create a singular context from a segspace
 contextFromSegSpace :: Context -> SegMapName -> SegSpace -> Context
 contextFromSegSpace ctx segspaceName segspace =
@@ -261,6 +257,10 @@ contextFromSegSpace ctx segspaceName segspace =
   where
     -- ctxVal = CtxVal (oneName $ snd segspaceName) Parallel $ currentLevel ctx
     ctxVal = ctxValZeroDeps ctx Parallel
+
+-- | Create a singular context from a parameter
+contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
+contextFromParam _i p v = oneContext (paramName p) v []
 
 -- | Create a context from a list of parameters
 contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
@@ -424,13 +424,13 @@ analyzeMatch ctx pats body bodies =
             currentLevel = currentLevel ctx - 1
           }
    in foldl'
-        ( \(ctx', res) b ->
+        ( \(ctx'', res) b ->
             onSnd (unionArrayIndexDescriptors res)
-              . analyzeStms ctx ctx' CondBodyName pats
+              . analyzeStms ctx' ctx'' CondBodyName pats
               . stmsToList
               $ bodyStms b
         )
-        (ctx, mempty)
+        (ctx', mempty)
         (body : bodies)
 
 analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
