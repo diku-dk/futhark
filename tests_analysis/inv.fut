@@ -1,14 +1,17 @@
--- Make sure 'i*0' reduces to ψ
-def main [n] (xs: [n]i64) : [n]i64 =
-  map (\i ->  #[unsafe] xs[i*0] ) (iota n)
+def main [n][m] (xss: [n][m]i64) : [n]i64 =
+  map (\xs ->
+    #[unsafe]
+    loop s=0 for i < m
+    do
+      s + xs[ i*0 ]
+  ) xss
+
 
 -- === Expected output of analysis:
--- entry_main
---   defunc_0_map_res_5193 => [
---     defunc_0_map_res_5198
---       [ 0i64 :+ n_5161 * 1i64 | ψ ] [ 0i64 | ψ ]
---   ]
---   lifted_lambda_res_dev_5197 => [
---     xs_5162
---       [ 0i64 | ψ ]
---   ]
+-- (segmap) defunc_0_map_res_5194 : {
+--     (arr) xss_5134 : {
+--         (idx) x_5199 :
+--             0 : dependencies = [ gtid_5195 0 par ]
+--             1 : dependencies = [  ]
+--     }
+-- }
