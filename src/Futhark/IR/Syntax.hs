@@ -515,7 +515,7 @@ type FParam rep = Param (FParamInfo rep)
 -- | A lambda parameter.
 type LParam rep = Param (LParamInfo rep)
 
--- | Function Declarations
+-- | Function definitions.
 data FunDef rep = FunDef
   { -- | Contains a value if this function is
     -- an entry point.
