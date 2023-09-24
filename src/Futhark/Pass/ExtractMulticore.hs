@@ -131,10 +131,9 @@ transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 
 transformLambda :: Lambda SOACS -> ExtractM (Lambda MC)
-transformLambda (Lambda params body ret) =
-  Lambda params
+transformLambda (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody body)
-    <*> pure ret
 
 transformStms :: Stms SOACS -> ExtractM (Stms MC)
 transformStms stms =

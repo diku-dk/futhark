@@ -216,7 +216,7 @@ isAddOp _ = False
 --   if the lambda argument is a map, then returns
 --   just the map's lambda; otherwise nothing.
 mapOp :: Lambda SOACS -> Maybe (Lambda SOACS)
-mapOp (Lambda [pa1, pa2] lam_body _)
+mapOp (Lambda [pa1, pa2] _ lam_body)
   | [SubExpRes cs r] <- bodyResult lam_body,
     cs == mempty,
     [map_stm] <- stmsToList (bodyStms lam_body),

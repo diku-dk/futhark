@@ -1093,7 +1093,7 @@ simplifyLambdaWith ::
   UT.UsageTable ->
   Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
+simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   (hoisted, body') <-
@@ -1104,7 +1104,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
         (map (const mempty) rettype)
         body
   rettype' <- simplify rettype
-  pure (Lambda params' body' rettype', hoisted)
+  pure (Lambda params' rettype' body', hoisted)
 
 instance Simplifiable Certs where
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs

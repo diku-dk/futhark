@@ -218,11 +218,11 @@ mapOnLambda ::
   Mapper frep trep m ->
   Lambda frep ->
   m (Lambda trep)
-mapOnLambda tv (Lambda params body ret) = do
+mapOnLambda tv (Lambda params ret body) = do
   params' <- mapM (mapOnLParam tv) params
   Lambda params'
-    <$> mapOnBody tv (scopeOfLParams params') body
-    <*> mapM (mapOnType (mapOnSubExp tv)) ret
+    <$> mapM (mapOnType (mapOnSubExp tv)) ret
+    <*> mapOnBody tv (scopeOfLParams params') body
 
 -- | Like 'mapExpM', but in the 'Identity' monad.
 mapExp :: Mapper frep trep Identity -> Exp frep -> Exp trep
@@ -280,7 +280,7 @@ walkOnLoopForm tv (WhileLoop cond) =
   walkOnVName tv cond
 
 walkOnLambda :: (Monad m) => Walker rep m -> Lambda rep -> m ()
-walkOnLambda tv (Lambda params body ret) = do
+walkOnLambda tv (Lambda params ret body) = do
   mapM_ (walkOnLParam tv) params
   walkOnBody tv (scopeOfLParams params) body
   mapM_ (walkOnType tv) ret
@@ -370,5 +370,5 @@ class TraverseOpStms rep where
 
 -- | A helper for defining 'traverseOpStms'.
 traverseLambdaStms :: (Monad m) => OpStmsTraverser m (Lambda rep) rep
-traverseLambdaStms f (Lambda ps (Body dec stms res) ret) =
-  Lambda ps <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res) <*> pure ret
+traverseLambdaStms f (Lambda ps ret (Body dec stms res)) =
+  Lambda ps ret <$> (Body dec <$> f (scopeOfLParams ps) stms <*> pure res)

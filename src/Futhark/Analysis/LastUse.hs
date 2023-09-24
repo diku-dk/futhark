@@ -364,7 +364,7 @@ lastUseSegBinOp sbos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (SegBinOp _ l@(Lambda _ body _) neutral shp) = inScopeOf l $ do
+    helper (SegBinOp _ l@(Lambda _ _ body) neutral shp) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
@@ -378,7 +378,7 @@ lastUseHistOp hos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (HistOp shp rf dest neutral shp' l@(Lambda _ body _)) = inScopeOf l $ do
+    helper (HistOp shp rf dest neutral shp' l@(Lambda _ _ body)) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')

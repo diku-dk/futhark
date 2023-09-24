@@ -219,8 +219,8 @@ inlineInBody fdmap = onBody
     onSOAC =
       mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda}
 
-    onLambda (Lambda params body ret) =
-      Lambda params <$> onBody body <*> pure ret
+    onLambda (Lambda params ret body) =
+      Lambda params ret <$> onBody body
 
 -- Propagate source locations and attributes to the inlined
 -- statements.  Attributes are propagated only when applicable (this

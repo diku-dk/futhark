@@ -546,7 +546,7 @@ mkLambda params m = do
     res <- m
     ret <- mapM subExpResType res
     pure (res, ret)
-  pure $ Lambda params body ret
+  pure $ Lambda params ret body
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp
