@@ -283,8 +283,8 @@ subExpResVName _ = Nothing
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
 
--- | A body consists of a number of bindings, terminating in a result
--- (essentially a tuple literal).
+-- | A body consists of a sequence of statements, terminating in a
+-- list of result values.
 data Body rep = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
