@@ -1237,7 +1237,7 @@ internaliseStreamAcc desc dest op lam bs = do
         (lam_params, lam_body, lam_rettype) <-
           internaliseLambda op_lam $ ne_ts ++ ne_ts
         idxp <- newParam "idx" $ I.Prim int64
-        let op_lam' = I.Lambda (idxp : lam_params) lam_body lam_rettype
+        let op_lam' = I.Lambda (idxp : lam_params) lam_rettype lam_body
         pure $ Just (op_lam', ne')
       Nothing ->
         pure Nothing

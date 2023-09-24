@@ -499,8 +499,8 @@ data MatchSort
 -- | Anonymous function for use in a SOAC.
 data Lambda rep = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaBody :: Body rep,
-    lambdaReturnType :: [Type]
+    lambdaReturnType :: [Type],
+    lambdaBody :: Body rep
   }
 
 deriving instance (RepTypes rep) => Eq (Lambda rep)

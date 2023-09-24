@@ -235,7 +235,7 @@ isIdentityLambda lam =
 
 -- | A lambda with no parameters that returns no values.
 nilFn :: (Buildable rep) => Lambda rep
-nilFn = Lambda mempty (mkBody mempty mempty) mempty
+nilFn = Lambda mempty mempty (mkBody mempty mempty)
 
 -- | Construct a Screma with possibly multiple scans, and
 -- the given map function.
@@ -514,7 +514,7 @@ soacType (Stream outersize _ accs lam) =
   where
     nms = map paramName $ take (1 + length accs) params
     substs = M.fromList $ zip nms (outersize : accs)
-    Lambda params _ rtp = lam
+    Lambda params rtp _ = lam
 soacType (Scatter _w _ivs lam dests) =
   zipWith arrayOfShape (map (snd . head) rets) shapes
   where

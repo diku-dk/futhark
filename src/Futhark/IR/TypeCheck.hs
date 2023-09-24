@@ -1396,7 +1396,7 @@ consumeArgs paramts args =
 -- parameters.
 checkAnyLambda ::
   (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params body rettype) args = do
+checkAnyLambda soac (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do

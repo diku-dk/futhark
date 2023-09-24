@@ -340,10 +340,9 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
     MatchDec (staticShapes (patTypes pat)) MatchEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
-transformLambda path (Lambda params body ret) =
-  Lambda params
+transformLambda path (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody path body)
-    <*> pure ret
 
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm

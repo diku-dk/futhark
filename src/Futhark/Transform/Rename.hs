@@ -315,12 +315,9 @@ instance (Rename shape) => Rename (TypeBase shape u) where
     Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
 
 instance (Renameable rep) => Rename (Lambda rep) where
-  rename (Lambda params body ret) =
-    renameBound (map paramName params) $ do
-      params' <- mapM rename params
-      body' <- rename body
-      ret' <- mapM rename ret
-      pure $ Lambda params' body' ret'
+  rename (Lambda params ret body) =
+    renameBound (map paramName params) $
+      Lambda <$> mapM rename params <*> mapM rename ret <*> rename body
 
 instance Rename Names where
   rename = fmap namesFromList . mapM rename . namesToList

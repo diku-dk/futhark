@@ -571,7 +571,7 @@ iswim _ (SOAC.Screma w form arrs) ots
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
-          scan_fun' = Lambda scan_params scan_body scan_rettype
+          scan_fun' = Lambda scan_params scan_rettype scan_body
           nes' = map Var $ take (length map_nes) $ map paramName map_params
           arrs' = drop (length map_nes) $ map paramName map_params
 
@@ -586,7 +586,7 @@ iswim _ (SOAC.Screma w form arrs) ots
               )
               $ varsRes
               $ patNames map_pat
-          map_fun' = Lambda map_params map_body map_rettype
+          map_fun' = Lambda map_params map_rettype map_body
           perm = case lambdaReturnType scan_fun of -- instead of map_fun
             [] -> []
             t : _ -> 1 : 0 : [2 .. arrayRank t]
