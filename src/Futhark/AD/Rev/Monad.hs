@@ -328,7 +328,7 @@ tabNest = tabNest' []
         res <- tabNest' (paramName iparam : is) (n - 1) (map paramName params) f
         ret <- mapM lookupType res
         pure (ret, varsRes res)
-      let lam = Lambda (iparam : params) (Body () stms res) ret
+      let lam = Lambda (iparam : params) ret (Body () stms res)
       letTupExp "tab" $ Op $ Screma w (iota : vs) (mapSOAC lam)
 
 -- | Construct a lambda for adding two values of the given type.

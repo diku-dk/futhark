@@ -949,7 +949,7 @@ graphAcc i types op delayed = do
   st <- get
 
   -- Collect statistics about the operator statements.
-  let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
+  let lambda = fromMaybe (Lambda [] [] (Body () SQ.empty [])) op
   let m = graphBody (lambdaBody lambda)
   let stats = R.runReader (evalStateT (captureBodyStats m) st) env
   -- We treat GPUBody kernels as host-only to not bother rewriting them inside

@@ -54,7 +54,7 @@ internalisePartitionLambda internaliseLambda k lam args = do
   body' <-
     localScope (scopeOfLParams params) $
       lambdaWithIncrement body
-  pure $ I.Lambda params body' rettype
+  pure $ I.Lambda params rettype body'
   where
     rettype = replicate (k + 2) $ I.Prim int64
     result i =

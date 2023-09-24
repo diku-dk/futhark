@@ -146,7 +146,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
                 stmsToList code1
       (code1'', code1_tr_host) <- transposeFVs (freeIn kerstm) variance invar_gid code1'
       let map_lam_body = mkBody code1'' $ map (SubExpRes (Certs [])) acc_vals
-          map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] map_lam_body el_tps
+          map_lam0 = Lambda [Param mempty invar_gid (Prim int64)] el_tps map_lam_body
       map_lam <- renameLambda map_lam0
       (k1_res, ker1_stms) <- runBuilderT' $ do
         iota <- letExp "iota" $ BasicOp $ Iota inv_dim_len (intConst Int64 0) (intConst Int64 1) Int64

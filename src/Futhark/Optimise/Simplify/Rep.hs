@@ -318,7 +318,7 @@ informBody (Body dec stms res) = mkWiseBody dec (informStms stms) res
 
 -- | Construct a 'Wise' lambda.
 informLambda :: (Informing rep) => Lambda rep -> Lambda (Wise rep)
-informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
+informLambda (Lambda ps ret body) = Lambda ps ret (informBody body)
 
 -- | Construct a 'Wise' expression.
 informExp :: (Informing rep) => Exp rep -> Exp (Wise rep)

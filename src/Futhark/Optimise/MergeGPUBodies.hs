@@ -80,9 +80,9 @@ transformLambda ::
   AliasTable ->
   Lambda (Aliases GPU) ->
   PassM (Lambda GPU, Dependencies)
-transformLambda aliases (Lambda params body types) = do
+transformLambda aliases (Lambda params types body) = do
   (body', deps) <- transformBody aliases body
-  pure (Lambda params body' types, deps)
+  pure (Lambda params types body', deps)
 
 -- | Optimize a body and determine its dependencies.
 transformBody ::

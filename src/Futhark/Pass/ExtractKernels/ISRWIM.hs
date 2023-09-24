@@ -40,7 +40,7 @@ iswim res_pat w scan_fun scan_input
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
-          scan_fun' = Lambda scan_params scan_body scan_rettype
+          scan_fun' = Lambda scan_params scan_rettype scan_body
           scan_input' =
             map (first Var) $
               uncurry zip $
@@ -58,7 +58,7 @@ iswim res_pat w scan_fun scan_input
               )
               $ varsRes
               $ patNames map_pat
-          map_fun' = Lambda map_params map_body map_rettype
+          map_fun' = Lambda map_params map_rettype map_body
 
       res_pat' <-
         fmap basicPat $
@@ -113,7 +113,7 @@ irwim res_pat w comm red_fun red_input
           red_params = lambdaParams map_fun
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
-          red_fun' = Lambda red_params red_body red_rettype
+          red_fun' = Lambda red_params red_rettype red_body
           red_input' = zip accs' $ map paramName map_params
           red_pat = stripPatOuterDim map_pat
 
@@ -134,7 +134,7 @@ irwim res_pat w comm red_fun red_input
             map_body_stms <- collectStms_ m
             pure $ mkBody map_body_stms $ varsRes $ patNames map_pat
 
-      let map_fun' = Lambda map_params map_body map_rettype
+      let map_fun' = Lambda map_params map_rettype map_body
 
       addStm $
         Let res_pat (StmAux map_cs mempty ()) $

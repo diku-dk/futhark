@@ -378,12 +378,12 @@ transformLambda ::
   ) =>
   Lambda SOACS ->
   m (AST.Lambda rep)
-transformLambda (Lambda params body rettype) = do
+transformLambda (Lambda params rettype body) = do
   body' <-
     runBodyBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
-  pure $ Lambda params body' rettype
+  pure $ Lambda params rettype body'
 
 letwith :: (Transformer m) => [VName] -> SubExp -> [SubExp] -> m [VName]
 letwith ks i vs = do
@@ -401,7 +401,7 @@ bindLambda ::
   AST.Lambda (Rep m) ->
   [AST.Exp (Rep m)] ->
   m Result
-bindLambda (Lambda params body _) args = do
+bindLambda (Lambda params _ body) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if primType $ paramType param
       then letBindNames [paramName param] arg

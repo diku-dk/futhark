@@ -508,16 +508,14 @@ pLambda :: PR rep -> Parser (Lambda rep)
 pLambda pr =
   choice
     [ lexeme "\\"
-        $> lam
+        $> Lambda
         <*> pLParams pr
         <* pColon
         <*> pTypes
         <* pArrow
         <*> pBody pr,
-      keyword "nilFn" $> Lambda mempty (Body (pBodyDec pr) mempty []) []
+      keyword "nilFn" $> Lambda mempty [] (Body (pBodyDec pr) mempty [])
     ]
-  where
-    lam params ret body = Lambda params body ret
 
 pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =

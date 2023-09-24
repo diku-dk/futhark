@@ -572,7 +572,7 @@ soacToStream soac = do
               insstm = mkLet strm_resids $ Op insoac
               strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : strm_inpids
-              strmlam = Lambda strmpar strmbdy loutps
+              strmlam = Lambda strmpar loutps strmbdy
           -- map(f,a) creates a stream with NO accumulators
           pure (Stream w strmlam [] inps, [])
       | Just (scans, _) <- Futhark.isScanomapSOAC form,
@@ -671,7 +671,7 @@ soacToStream soac = do
                 mkBody (oneStm insstm <> addaccstm) $
                   addaccres ++ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : inpacc_ids ++ strm_inpids
-              strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
+              strmlam = Lambda strmpar (accrtps ++ loutps') strmbdy
           pure (Stream w strmlam nes inps, [])
 
     -- Otherwise it cannot become a stream.
@@ -695,7 +695,7 @@ soacToStream soac = do
               (bodyDec plus_bdy)
               (stmsFromList parstms <> bodyStms plus_bdy)
               (bodyResult plus_bdy)
-      renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
+      renameLambda $ Lambda rempars (lambdaReturnType plus) newlambdy
 
     mkPlusBnds ::
       (MonadFreshNames m, Buildable rep) =>
