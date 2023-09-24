@@ -1680,20 +1680,6 @@ negativeIshInt (Int16Value k) = k < 0
 negativeIshInt (Int32Value k) = k < 0
 negativeIshInt (Int64Value k) = k < 0
 
--- | The size of a value of a given primitive type in bits.
-primBitSize :: PrimType -> Int
-primBitSize = (* 8) . primByteSize
-
--- | The size of a value of a given primitive type in eight-bit bytes.
---
--- Warning: note that this is 0 for 'Unit', but a 'Unit' takes up a
--- byte in the binary data format.
-primByteSize :: (Num a) => PrimType -> a
-primByteSize (IntType t) = intByteSize t
-primByteSize (FloatType t) = floatByteSize t
-primByteSize Bool = 1
-primByteSize Unit = 0
-
 -- | The size of a value of a given integer type in eight-bit bytes.
 intByteSize :: (Num a) => IntType -> a
 intByteSize Int8 = 1
@@ -1706,6 +1692,20 @@ floatByteSize :: (Num a) => FloatType -> a
 floatByteSize Float16 = 2
 floatByteSize Float32 = 4
 floatByteSize Float64 = 8
+
+-- | The size of a value of a given primitive type in eight-bit bytes.
+--
+-- Warning: note that this is 0 for 'Unit', but a 'Unit' takes up a
+-- byte in the binary data format.
+primByteSize :: (Num a) => PrimType -> a
+primByteSize (IntType t) = intByteSize t
+primByteSize (FloatType t) = floatByteSize t
+primByteSize Bool = 1
+primByteSize Unit = 0
+
+-- | The size of a value of a given primitive type in bits.
+primBitSize :: PrimType -> Int
+primBitSize = (* 8) . primByteSize
 
 -- | True if the given binary operator is commutative.
 commutativeBinOp :: BinOp -> Bool
