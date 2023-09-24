@@ -104,7 +104,7 @@ prettyStringOneLine = T.unpack . prettyTextOneLine
 prettyText :: (Pretty a) => a -> Text
 prettyText = docText . pretty
 
--- | Convert a 'Doc' to text.  Thsi ignores any annotations (i.e. it
+-- | Convert a 'Doc' to text.  This ignores any annotations (i.e. it
 -- will be non-coloured output).
 docText :: Doc a -> T.Text
 docText = Prettyprinter.Render.Text.renderStrict . layouter
