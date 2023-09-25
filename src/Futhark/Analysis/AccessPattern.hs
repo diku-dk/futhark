@@ -70,24 +70,26 @@ type ArrayIndexDescriptors =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
 
 vnameFromSegOp :: SegOpName -> VName
-vnameFromSegOp (SegmentedMap (_,name)) = name
-vnameFromSegOp (SegmentedRed (_,name)) = name
-vnameFromSegOp (SegmentedScan (_,name)) = name
-vnameFromSegOp (SegmentedHist (_,name)) = name
+vnameFromSegOp (SegmentedMap (_, name)) = name
+vnameFromSegOp (SegmentedRed (_, name)) = name
+vnameFromSegOp (SegmentedScan (_, name)) = name
+vnameFromSegOp (SegmentedHist (_, name)) = name
 
 unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
 unionArrayIndexDescriptors lhs rhs = do
   -- Find all occurences of ArrayName's from rhs in lhs
   let lhsNames = M.fromList $ map (onFst vnameFromSegOp) $ M.toList lhs
   let rhs' =
-        M.map (\arraynames -> do
-          foldl' (M.unionWith M.union) arraynames . map (\arrayname ->
-            case M.lookup arrayname lhsNames of
-              Nothing -> mempty
-              Just someres -> someres
-            ) $ map fst $ M.toList arraynames
-        ) rhs
-  -- let existingSegmapResults = mapMaybe (\segname -> M.lookup segname lhs) $ map snd $ M.toList rhs
+        M.map
+          ( \arraynames ->
+              foldl'
+                (M.unionWith M.union)
+                arraynames
+                . map
+                  (fromMaybe mempty . flip M.lookup lhsNames . fst)
+                $ M.toList arraynames
+          )
+          rhs
   M.unionWith (M.unionWith M.union) lhs rhs'
 
 -- ================ EXAMPLE 1 ================
