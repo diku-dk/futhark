@@ -21,7 +21,6 @@ import Data.IntMap.Strict qualified as S
 import Data.List ((\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Pretty.Simple
 import Futhark.IR.GPU
 
 -- | Iteration type describes whether the index is iterated in a parallel or
@@ -164,6 +163,7 @@ ctxValFromNames ctx names =
     (getIterationType ctx)
     (currentLevel ctx)
 
+-- | Insert a dependency into a CtxVal.
 insertDep :: CtxVal -> Names -> CtxVal
 insertDep (CtxVal lnames itertype lvl) names =
   CtxVal ((<>) lnames names) itertype lvl
@@ -180,7 +180,7 @@ data Context = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
     assignments :: M.Map VName CtxVal,
-    -- | TODO: explain
+    -- | A list of all DimIndexes of type `Constant`.
     constants :: Names,
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
@@ -257,6 +257,7 @@ intersection
 extend :: Context -> Context -> Context
 extend = (<>)
 
+-- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal -> Names -> [BodyType] -> Context
 oneContext name ctxValue consts segmaps =
   Context
@@ -354,6 +355,8 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
 -- descriptors.
 analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let pats _ e) =
+  -- Construct the result and Context from the subexpression. If the subexpression
+  -- is a body, we recurse into it.
   case e of
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pats name ee
     (BasicOp op) -> analyzeBasicOp ctx op pats
@@ -365,10 +368,6 @@ analyzeStm ctx (Let pats _ e) =
     (Op (SizeOp op)) -> analyzeSizeOp ctx op pats
     (Op (GPUBody _ body)) -> analyzeGPUBody ctx body
     (Op (OtherOp _)) -> analyzeOtherOp ctx pats
-
--- | Get the name of the first element in a pattern
-firstPatElemName :: Pat dec -> VName
-firstPatElemName pat = patElemName . head $ patElems pat
 
 analyzeIndex :: Context -> Pat dec -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
 analyzeIndex ctx pats arr_name dimIndexes = do
@@ -412,6 +411,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
 analyzeBasicOp :: Context -> BasicOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeBasicOp ctx expression pats = do
   let pat = firstPatElemName pats
+  -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
         (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
@@ -481,8 +481,7 @@ analyzeLoop ctx bindings loop body pats = do
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
               (foldl' (<>) (oneContext iterVar neutralElem mempty []) (map fromParam params))
 
-  let ctxVal = ctxValZeroDeps ctx Sequential -- TODO: There should be deps right?
-
+  let ctxVal = ctxValZeroDeps ctx Sequential
   -- Extend context with the loop expression
   let ctx'' = extend ctx' $ oneContext pat ctxVal mempty []
   analyzeStms ctx ctx'' LoopBodyName pats $ stmsToList $ bodyStms body
@@ -528,12 +527,16 @@ analyzeSizeOp ctx op pats = do
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Body GPU -> (Context, ArrayIndexDescriptors)
 analyzeGPUBody ctx body =
-  -- TODO: Add dependencies to pat in ctx
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
 analyzeOtherOp :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeOtherOp _ctx _pats = error "UNHANDLED: OtherOp"
 
+-- | Get the name of the first element in a pattern
+firstPatElemName :: Pat dec -> VName
+firstPatElemName pat = patElemName . head $ patElems pat
+
+-- | Get the iteration type of the last SegOp encountered in the context.
 getIterationType :: Context -> IterationType
 getIterationType (Context _ _ bodies _) =
   getIteration_rec bodies
@@ -547,10 +550,10 @@ getIterationType (Context _ _ bodies _) =
         SegOpName (SegmentedHist _) -> Parallel
         LoopBodyName _ -> Sequential
         -- We can't really trust cond/match to be sequential/parallel, so
-        -- recurse a bit ya kno
+        -- recurse a bit
         CondBodyName _ -> getIteration_rec $ init rec
 
--- Returns an intmap of names, to be used as dependencies in construction of
+-- | Returns an intmap of names, to be used as dependencies in construction of
 -- CtxVals.
 -- Throws an error if SubExp contains a name not in context. This behaviour
 -- might be thrown out in the future, as it is mostly just a very verbose way to
@@ -564,7 +567,7 @@ analyzeSubExpr p ctx (Var v) =
         Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v) ++ "\npat: " ++ show pp ++ "\n\nContext\n" ++ show ctx
         (Just _) -> oneName v
 
--- | Consolidates a dimfix into a set of dependencies
+-- | Reduce a DimFix into its set of dependencies
 consolidate :: Context -> SubExp -> Dependencies
 consolidate _ (Constant _) = S.fromList []
 consolidate ctx (Var v) = reduceDependencies ctx v
@@ -584,6 +587,6 @@ reduceDependencies ctx v =
               map (reduceDependencies ctx) $
                 namesToList deps
 
--- Apply `f` to second/right part of tuple.
+-- | Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
 onSnd f (x, y) = (x, f y)
