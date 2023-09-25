@@ -169,8 +169,9 @@ do
 
     # Get filename without path
     filename=$(basename -- "$file")
+    numtests=$(echo -n "$test_n" | wc -c)
     printf "\e[1m" # Bold
-    printf "Running test %d/%d: " "$test_i" "$test_n"
+    printf "Running test %*d/%d: " $numtests "$test_i" "$test_n"
     printf "\e[34m" # Blue
     printf "%s" "$filename "
     printf "\e[0m" # White
