@@ -12,5 +12,6 @@ def main [l][m][n] (xsss: [l][m][n]i64) : [l][m]i64 =
 --         (idx) foldl_arg2_5619 :
 --             0 : dependencies = [ gtid_5612 0 par | gtid_5613 0 par ]
 --             1 : dependencies = [ gtid_5612 0 par | gtid_5613 0 par ]
+--             2 : dependencies = [  ]
 --     }
 -- }

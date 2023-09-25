@@ -17,6 +17,14 @@ entry main [m][n][o] (xsss: [m][n][o]i64) : [m]i64 =
 --             2 : dependencies = [ i_5775 1 seq ]
 --     }
 -- }
+-- (segmap) defunc_0_f_res_5789 : {
+--     (arr) xsss_5497 : {
+--         (idx) xsss_transformed_row_5803 :
+--             0 : dependencies = [ gtid_5790 0 par ]
+--             1 : dependencies = [ gtid_5798 2 par ]
+--             2 : dependencies = [ i_5794 1 seq ]
+--     }
+-- }
 -- (segmap) lifted_lambda_res_5886 : {
 --     (arr) xsss_5497 : {
 --         (idx) xsss_transformed_row_5896 :
