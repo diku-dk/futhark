@@ -374,11 +374,11 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let pat = firstPatElemName pats
   -- TODO: Should we just take the latest segmap?
   let segmaps = allSegMap ctx
-  let memory_entries = [mapMaybe f dimIndexes]
+  let memory_entries = [map f dimIndexes]
         where
-          f dimIndex = case dimIndex of
-            (DimFix subExpression) -> Just $ DimIdxPat $ consolidate ctx subExpression
-            (DimSlice _offs _n _stride) -> Nothing -- TODO: How should we handle slices?
+          f dimIndex = DimIdxPat $ case dimIndex of
+            (DimFix subExpression) -> consolidate ctx subExpression
+            (DimSlice _offs _n _stride) -> mempty
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
