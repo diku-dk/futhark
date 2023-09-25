@@ -71,7 +71,7 @@ type ArrayIndexDescriptors =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
 
 unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
-unionArrayIndexDescriptors = M.unionWith (M.unionWith (M.unionWith (++)))
+unionArrayIndexDescriptors = M.unionWith (M.unionWith M.union)
 
 -- ================ EXAMPLE 1 ================
 -- segmap_0 (p)
