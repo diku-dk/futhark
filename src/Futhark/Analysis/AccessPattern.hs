@@ -276,13 +276,11 @@ ctxValZeroDeps ctx iterType =
     }
 
 -- | Create a singular context from a segspace
-contextFromSegSpace :: Context -> SegOpName -> SegSpace -> Context
-contextFromSegSpace ctx segspaceName segspace =
-  -- TODO? make proper assignments in context depending on subexpr
+contextFromSegSpace :: Context -> SegSpace -> Context
+contextFromSegSpace ctx segspace =
   foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal mempty []) mempty $
     unSegSpace segspace
   where
-    -- ctxVal = CtxVal (oneName $ snd segspaceName) Parallel $ currentLevel ctx
     ctxVal = ctxValZeroDeps ctx Parallel
 
 -- | Create a singular context from a parameter
@@ -365,7 +363,7 @@ analyzeStm ctx (Let pats _ e) =
     (WithAcc _ _) -> analyzeWithAcc ctx pats
     (Op (SegOp op)) -> analyzeSegOp ctx op pats
     (Op (SizeOp op)) -> analyzeSizeOp ctx op pats
-    (Op (GPUBody _ body)) -> analyzeGPUBody ctx pats body
+    (Op (GPUBody _ body)) -> analyzeGPUBody ctx body
     (Op (OtherOp _)) -> analyzeOtherOp ctx pats
 
 -- | Get the name of the first element in a pattern
@@ -414,7 +412,6 @@ analyzeIndex ctx pats arr_name dimIndexes = do
 analyzeBasicOp :: Context -> BasicOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeBasicOp ctx expression pats = do
   let pat = firstPatElemName pats
-  -- TODO: Lookup basicOp
   let ctx_val = case expression of
         (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
@@ -491,10 +488,10 @@ analyzeLoop ctx bindings loop body pats = do
   analyzeStms ctx ctx'' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
-analyzeApply ctx pats = error "UNHANDLED: Apply"
+analyzeApply _ctx _pats = error "UNHANDLED: Apply"
 
 analyzeWithAcc :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
-analyzeWithAcc ctx pats = error "UNHANDLED: WithAcc"
+analyzeWithAcc _ctx _pats = error "UNHANDLED: WithAcc"
 
 segOpType :: SegOp lvl GPU -> (Int, VName) -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
@@ -504,10 +501,9 @@ segOpType (SegHist {}) = SegmentedHist
 
 analyzeSegOp :: Context -> SegOp lvl GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeSegOp ctx op pats = do
-  let pat = firstPatElemName pats
   let segSpaceContext =
         extend ctx $
-          contextFromSegSpace ctx (segOpType op (currentLevel ctx, pat)) $
+          contextFromSegSpace ctx $
             segSpace op
   -- Analyze statements in the SegOp body
   analyzeStms ctx segSpaceContext (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
@@ -530,13 +526,13 @@ analyzeSizeOp ctx op pats = do
     concatCtxVal (ne : remainder) = oneContext pat (ctxValFromNames ctx $ foldl' (<>) ne remainder) mempty []
 
 -- | Analyze statements in a GPU body.
-analyzeGPUBody :: Context -> Pat dec -> Body GPU -> (Context, ArrayIndexDescriptors)
-analyzeGPUBody ctx pats body =
+analyzeGPUBody :: Context -> Body GPU -> (Context, ArrayIndexDescriptors)
+analyzeGPUBody ctx body =
   -- TODO: Add dependencies to pat in ctx
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
 analyzeOtherOp :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
-analyzeOtherOp ctx pats = error "UNHANDLED: OtherOp"
+analyzeOtherOp _ctx _pats = error "UNHANDLED: OtherOp"
 
 getIterationType :: Context -> IterationType
 getIterationType (Context _ _ bodies _) =
@@ -570,7 +566,7 @@ analyzeSubExpr p ctx (Var v) =
 
 -- | Consolidates a dimfix into a set of dependencies
 consolidate :: Context -> SubExp -> Dependencies
-consolidate _ctx (Constant _) = S.fromList []
+consolidate _ (Constant _) = S.fromList []
 consolidate ctx (Var v) = reduceDependencies ctx v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
