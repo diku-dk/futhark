@@ -11,7 +11,7 @@ module Futhark.Analysis.AccessPattern
     IndexExprName,
     IterationType (Sequential, Parallel),
     MemoryEntry,
-    SegMapName,
+    SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
   )
 where
 
@@ -20,7 +20,6 @@ import Data.IntMap.Strict qualified as S
 import Data.List ((\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Pretty.Simple
 import Futhark.IR.GPU
 
 -- | Iteration type describes whether the index is iterated in a parallel or
@@ -37,7 +36,12 @@ type Dependencies = S.IntMap (VName, Int, IterationType)
 
 type ArrayName = VName
 
-type SegMapName = (Int, VName)
+data SegOpName
+  = SegmentedMap (Int, VName)
+  | SegmentedRed (Int, VName)
+  | SegmentedScan (Int, VName)
+  | SegmentedHist (Int, VName)
+  deriving (Eq, Ord, Show)
 
 type LoopBodyName = (Int, VName)
 
@@ -62,7 +66,7 @@ type MemoryEntry = [DimIdxPat]
 -- | Map variable names of arrays in a segmap to index expressions on those arrays.
 -- segmap(pattern) |-> A(pattern) |-> indexExpressionName(pattern) |-> [[DimIdxPat]]
 type ArrayIndexDescriptors =
-  M.Map SegMapName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
 
 unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
 unionArrayIndexDescriptors = M.unionWith (M.unionWith (M.unionWith (++)))
@@ -163,7 +167,7 @@ insertDep (CtxVal lnames itertype lvl) names =
   CtxVal ((<>) lnames names) itertype lvl
 
 data BodyType
-  = SegMapName SegMapName
+  = SegOpName SegOpName
   | LoopBodyName LoopBodyName
   | CondBodyName CondBodyName
   deriving (Show, Ord, Eq)
@@ -183,14 +187,14 @@ data Context = Context
   deriving (Show, Ord, Eq)
 
 -- | Get the last segmap encountered in the context.
-lastSegMap :: Context -> Maybe SegMapName
+lastSegMap :: Context -> Maybe SegOpName
 lastSegMap (Context _ [] _) = Nothing
 lastSegMap (Context _ bodies _) = safeLast $ getSegMaps bodies
   where
     getSegMaps =
       mapMaybe
         ( \case
-            (SegMapName segmap) -> Just segmap
+            (SegOpName s) -> Just s
             _ -> Nothing
         )
 
@@ -249,7 +253,7 @@ ctxValZeroDeps ctx iterType =
     }
 
 -- | Create a singular context from a segspace
-contextFromSegSpace :: Context -> SegMapName -> SegSpace -> Context
+contextFromSegSpace :: Context -> SegOpName -> SegSpace -> Context
 contextFromSegSpace ctx segspaceName segspace =
   -- TODO? make proper assignments in context depending on subexpr
   foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal []) mempty $
@@ -357,7 +361,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
-  let res = case last_segmap of --      SegMapName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
+  let res = case last_segmap of --      SegOpName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
   -- If the index is outside of a segmap/loop, then there's no
   -- result to add.
         Nothing -> mempty
@@ -385,20 +389,20 @@ analyzeBasicOp ctx expression pats = do
   let pat = firstPatElemName pats
   -- TODO: Lookup basicOp
   let ctx_val = case expression of
-        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
-        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
+        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
+        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
         (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
-        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr ctx subexp
+        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (Index name _) ->
           error $ "unhandled: Index (Skill issue?) " ++ baseString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (technically skill issue?)" ++ baseString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr ctx length_subexp
+        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp
         (Manifest _dim _name) -> error "unhandled: Manifest"
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
@@ -413,7 +417,7 @@ analyzeBasicOp ctx expression pats = do
     concatCtxVals ne nn =
       ctxValFromNames
         ctx
-        (foldl' (\a -> (<>) a . analyzeSubExpr ctx) ne nn)
+        (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
 
 analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pats body bodies =
@@ -437,7 +441,7 @@ analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> 
 analyzeLoop ctx bindings loop body pats = do
   let pat = firstPatElemName pats
   let fromBindings itervar (param, subexpr) =
-        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr ctx subexpr)) Sequential $ currentLevel ctx) []
+        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr pats ctx subexpr)) Sequential $ currentLevel ctx) []
   let ctx' =
         case loop of
           (WhileLoop iterVar) ->
@@ -464,19 +468,25 @@ analyzeApply ctx pats = error "UNHANDLED: Apply"
 analyzeWithAcc :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeWithAcc ctx pats = error "UNHANDLED: WithAcc"
 
+segOpType :: SegOp lvl GPU -> (Int, VName) -> SegOpName
+segOpType (SegMap _ _ _ _) = SegmentedMap
+segOpType (SegRed _ _ _ _ _) = SegmentedRed
+segOpType (SegScan _ _ _ _ _) = SegmentedScan
+segOpType (SegHist _ _ _ _ _) = SegmentedHist
+
 analyzeSegOp :: Context -> SegOp lvl GPU -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeSegOp ctx op pats = do
   let pat = firstPatElemName pats
   let segSpaceContext =
         extend ctx $
-          contextFromSegSpace ctx (currentLevel ctx, pat) $
+          contextFromSegSpace ctx (segOpType op (currentLevel ctx, pat)) $
             segSpace op
   -- Analyze statements in the SegOp body
-  analyzeStms ctx segSpaceContext SegMapName pats . stmsToList . kernelBodyStms $ segBody op
+  analyzeStms ctx segSpaceContext (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
 
 analyzeSizeOp :: Context -> SizeOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeSizeOp ctx op pats = do
-  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr ctx)
+  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr pats ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
@@ -507,7 +517,10 @@ getIterationType (Context _ bodies _) =
     getIteration_rec [] = Sequential
     getIteration_rec rec =
       case last rec of
-        SegMapName _ -> Parallel
+        SegOpName (SegmentedMap _) -> Parallel
+        SegOpName (SegmentedRed _) -> Parallel
+        SegOpName (SegmentedScan _) -> Parallel
+        SegOpName (SegmentedHist _) -> Parallel
         LoopBodyName _ -> Sequential
         -- We can't really trust cond/match to be sequential/parallel, so
         -- recurse a bit ya kno
@@ -519,12 +532,13 @@ getIterationType (Context _ bodies _) =
 -- might be thrown out in the future, as it is mostly just a very verbose way to
 -- ensure that we capture all necessary variables in the context at the moment
 -- of development.
-analyzeSubExpr :: Context -> SubExp -> Names
-analyzeSubExpr _ (Constant _) = mempty
-analyzeSubExpr ctx (Var v) =
-  case M.lookup v (assignments ctx) of
-    Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v)
-    (Just _) -> oneName v
+analyzeSubExpr :: Pat d -> Context -> SubExp -> Names
+analyzeSubExpr _ _ (Constant _) = mempty
+analyzeSubExpr p ctx (Var v) =
+  let pp = firstPatElemName p
+   in case M.lookup v (assignments ctx) of
+        Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v) ++ "\npat: " ++ show pp ++ "\n\nContext\n" ++ show ctx
+        (Just _) -> oneName v
 
 -- | Consolidates a dimfix into a set of dependencies
 consolidate :: Context -> SubExp -> Dependencies

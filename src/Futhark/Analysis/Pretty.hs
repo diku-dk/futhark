@@ -4,7 +4,8 @@ module Futhark.Analysis.Pretty
   ( prettyTuple,
     prettyTupleLines,
     prettyString,
-  ) where
+  )
+where
 
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
@@ -14,15 +15,30 @@ import Futhark.Util.Pretty
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
-      f ((_, name), maps) =
-        "(segmap)" <+> pretty name <+> colon <+> lbrace </> indent 4 (mapprintArray $ M.toList maps) </> rbrace
+      f (SegmentedMap (lvl, name), maps) = "(segmap)" <+> g lvl name maps
+      f (SegmentedRed (lvl, name), maps) = "(segred)" <+> g lvl name maps
+      f (SegmentedScan (lvl, name), maps) = "(segscan)" <+> g lvl name maps
+      f (SegmentedHist (lvl, name), maps) = "(seghist)" <+> g lvl name maps
+
+      g _lvl name maps =
+        pretty name
+          <+> colon
+          <+> lbrace
+          </> indent 4 (mapprintArray $ M.toList maps)
+          </> rbrace
 
       mapprintArray :: [(ArrayName, M.Map IndexExprName [MemoryEntry])] -> Doc ann
       mapprintArray [] = ""
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
 
-      printArrayMap (name, maps) = "(arr)" <+> pretty name <+> colon <+> lbrace </> indent 4 (mapprintIdxExpr (M.toList maps)) </> rbrace
+      printArrayMap (name, maps) =
+        "(arr)"
+          <+> pretty name
+          <+> colon
+          <+> lbrace
+          </> indent 4 (mapprintIdxExpr (M.toList maps))
+          </> rbrace
 
       mapprintIdxExpr :: [(IndexExprName, [MemoryEntry])] -> Doc ann
       mapprintIdxExpr [] = ""
@@ -43,12 +59,11 @@ instance Pretty ArrayIndexDescriptors where
 
       printDim m idx = pretty idx <+> ":" <+> indent 0 (pretty m)
 
-
 instance Pretty DimIdxPat where
   pretty (DimIdxPat dependencies) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-      "dependencies" <+> equals <+> align (prettyDeps dependencies)
+    "dependencies" <+> equals <+> align (prettyDeps dependencies)
     where
       prettyDeps = encloseSep "[ " " ]" " | " . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
