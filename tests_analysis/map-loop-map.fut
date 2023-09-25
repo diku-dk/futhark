@@ -41,7 +41,7 @@ entry main [m][n][o] (xsss: [m][n][o]i64) : [m]i64 =
 --             0 : dependencies = [ gtid_5902 1 par ]
 --     }
 -- }
--- (segmap) defunc_0_f_res_5797 : {
+-- (segred) defunc_0_f_res_5797 : {
 --     (arr) xsss_5497 : {
 --         (idx) xsss_transformed_row_5803 :
 --             0 : dependencies = [ gtid_5790 0 par ]
