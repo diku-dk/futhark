@@ -113,9 +113,8 @@ gpuPipeline =
 -- | Extend gpuPipeline by pretty-printing the true AST
 gpuPipelineDebug :: Pipeline SOACS GPU
 gpuPipelineDebug =
-  gpuPipeline >>>
-    onePass printASTstuffsDebuggingLol
-
+  gpuPipeline
+    >>> onePass printAST
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.
