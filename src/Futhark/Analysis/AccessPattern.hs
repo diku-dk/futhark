@@ -206,6 +206,15 @@ lastSegMap (Context _ _ bodies _) = safeLast $ getSegMaps bodies
     safeLast [x] = Just x
     safeLast (_ : xs) = safeLast xs
 
+allSegMap :: Context -> [SegOpName]
+allSegMap (Context _ _ bodies _) =
+  mapMaybe
+    ( \case
+        (SegOpName o) -> Just o
+        _ -> Nothing
+    )
+    bodies
+
 instance Monoid Context where
   mempty =
     Context
@@ -367,7 +376,7 @@ analyzeIndex :: Context -> Pat dec -> VName -> [DimIndex SubExp] -> (Context, Ar
 analyzeIndex ctx pats arr_name dimIndexes = do
   let pat = firstPatElemName pats
   -- TODO: Should we just take the latest segmap?
-  let last_segmap = lastSegMap ctx
+  let segmaps = allSegMap ctx
   let memory_entries = [mapMaybe f dimIndexes]
         where
           f dimIndex = case dimIndex of
@@ -376,11 +385,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
-  let res = case last_segmap of --      SegOpName |-> ArrayName |-> IndexExprName |-> [MemoryEntry]
-  -- If the index is outside of a segmap/loop, then there's no
-  -- result to add.
-        Nothing -> mempty
-        (Just segmap) -> M.singleton segmap map_array
+  let res = foldl' (\accumulator segmap -> unionArrayIndexDescriptors accumulator (M.singleton segmap map_array)) mempty segmaps
 
   -- Partition the DimIndexes into constants and non-constants
   let (subExprs, consts) =
@@ -571,7 +576,7 @@ consolidate ctx (Var v) = reduceDependencies ctx v
 -- | Recursively lookup vnames until vars with no deps are reached.
 reduceDependencies :: Context -> VName -> Dependencies
 reduceDependencies ctx v =
-  if nameIn v (constants ctx)
+  if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
       Nothing -> error $ "Unable to find " ++ baseString v
