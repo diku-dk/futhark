@@ -3,7 +3,6 @@
 module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
-    analyzeStm,
     ArrayIndexDescriptors,
     ArrayName,
     DimIdxPat (DimIdxPat),
@@ -104,80 +103,6 @@ unionArrayIndexDescriptors lhs rhs = do
           rhs
   M.unionWith (M.unionWith M.union) lhs rhs'
 
--- ================ EXAMPLE 1 ================
--- segmap_0 (p)
---   ...
---   segmap_1 (q)
---     let as_1  = A[q,p,i] + A[x,z,q]
---     let as_2  = A[x+y,z,q]
---     let as_3  = A[0,0,0] + B[1,1,1]
---     let res_2 = as + A[y,0,x]
---     in res_2
---
--- ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
---
--- segmap_0:
---   A:
---     as_1:
---       [q,p,i] -> [i,p,q]
--- ...
--- segmap_1:
---   A:
---     as_1:
---       [q,p,i] -> [i,p,q]
---       [x,z,q]
---     as_2:
---       [[x 0,y 1],z 1337 ,q 1]
---     as_3:
---       [0,0,0]
---     res_2:
---       [y,0,x]
---  B:
---    as_3:
---      [1,1,1]
-
--- A := ...
--- segmap_0 (x,y)
---  A[y,x]
---  ...
---  segmap_1 (i,j)
---  ...
---    A[j,i]
-
--- seg (i,j)
---  loop l < n
---    seg (x,y)
---      A[i,j,l,x,y]
-
--- ================ EXAMPLE 2 ================
-
--- segmap_0 (x,y):
---  segmap_1 (p):
---    segmap_2 (q):
---      let as_1 = A[q,p]
-
--- ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-
--- ctx: [segmap_0, segmap_1, segmap_2]
-
--- segmap_0:      -- it is a false positive[VERIFICATION NEEDED], since segmap_0
---   A:           -- does not directly provide variables to index into `as_1`
---     as_1:
---       [q,p]
--- segmap_1:
---   A:
---     as_1:
---       [q,p]
--- segmap_2:
---   A:
---     as_1:
---       [q,p]
-
--- OKAY, but what if
--- let Bs = segmap () As
--- let Cs = segmap () Bs
--- How is Bs and Cs tracked to their respective segmaps?
-
 --
 -- Helper types and functions to perform the analysis.
 --
@@ -275,19 +200,17 @@ contextFromNames ctx itertype =
   foldl' extend ctx
     . map (`oneContext` ctxValZeroDeps ctx itertype)
 
--- \$ unSegSpace segspace
-
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
-analyzeDimIdxPats = snd . (foldMap' analyzeFunction . progFuns)
+analyzeDimIdxPats = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
+analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
   let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
-  analyzeStmsPrimitive ctx stms
+  snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
