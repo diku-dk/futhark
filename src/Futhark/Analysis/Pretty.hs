@@ -37,14 +37,11 @@ instance Pretty ArrayIndexDescriptors where
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
-      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" <+> ss mems </> indent 4 (printMemoryEntry mems)
-
-      ss (MemoryEntry _ []) = "[]"
-      ss (MemoryEntry _ (b : bb)) = brackets $ commasep $ map pretty (b : bb)
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntry mems)
 
       printMemoryEntry :: MemoryEntry -> Doc ann
       printMemoryEntry (MemoryEntry dims _) =
-        stack $ [printDim i d | d <- dims, i <- [1 .. (length dims)]]
+        stack $ zipWith printDim [0 .. (length dims)] dims
 
       printDim idx m = pretty idx <+> ":" <+> indent 0 (pretty m)
 
