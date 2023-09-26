@@ -6,7 +6,6 @@ module Futhark.Analysis.AccessPattern
     analyzeStm,
     ArrayIndexDescriptors,
     ArrayName,
-    Dependencies,
     DimIdxPat (DimIdxPat),
     IndexExprName,
     IterationType (Sequential, Parallel),
@@ -19,10 +18,56 @@ where
 import Data.Either (partitionEithers)
 import Data.Foldable
 import Data.IntMap.Strict qualified as S
-import Data.List ((\\))
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.GPU
+
+-- | Map patterns of Segmented operations on arrays, to index expressions with
+-- their index descriptors.
+-- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimIdxPat]
+type ArrayIndexDescriptors =
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName MemoryEntry))
+
+data SegOpName
+  = SegmentedMap (Int, VName)
+  | SegmentedRed (Int, VName)
+  | SegmentedScan (Int, VName)
+  | SegmentedHist (Int, VName)
+  deriving (Eq, Ord, Show)
+
+vnameFromSegOp :: SegOpName -> VName
+vnameFromSegOp (SegmentedMap (_, name)) = name
+vnameFromSegOp (SegmentedRed (_, name)) = name
+vnameFromSegOp (SegmentedScan (_, name)) = name
+vnameFromSegOp (SegmentedHist (_, name)) = name
+
+type ArrayName = VName
+
+type IndexExprName = VName
+
+-- | Each element in `dimensions` corresponds to an access to a given dimension
+-- in the given array, in the same order of dimensions.
+data MemoryEntry = MemoryEntry
+  { dimensions :: [DimIdxPat],
+    nest :: [BodyType]
+  }
+
+-- | Collect all features of access to a specific dimension of an array.
+newtype DimIdxPat = DimIdxPat
+  { -- | Set of VNames of gtid's that some access is variant to.
+    -- An empty set indicates that the access is invariant.
+    -- Tuple of patternName and nested `level` it is created at.
+    dependencies :: S.IntMap (VName, Int, IterationType)
+  }
+  deriving (Eq, Ord, Show)
+
+instance Semigroup DimIdxPat where
+  (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
+  (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
+    DimIdxPat ((<>) adeps bdeps)
+
+instance Monoid DimIdxPat where
+  mempty = DimIdxPat {dependencies = mempty}
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -32,52 +77,15 @@ data IterationType
   | Parallel
   deriving (Eq, Ord, Show)
 
--- | Set of VNames of gtid's that some access is variant to.
--- Tuple of patternName and nested `level` it is created at.
-type Dependencies = S.IntMap (VName, Int, IterationType)
-
-type ArrayName = VName
-
-data SegOpName
-  = SegmentedMap (Int, VName)
-  | SegmentedRed (Int, VName)
-  | SegmentedScan (Int, VName)
-  | SegmentedHist (Int, VName)
-  deriving (Eq, Ord, Show)
+data BodyType
+  = SegOpName SegOpName
+  | LoopBodyName LoopBodyName
+  | CondBodyName CondBodyName
+  deriving (Show, Ord, Eq)
 
 type LoopBodyName = (Int, VName)
 
 type CondBodyName = (Int, VName)
-
-type IndexExprName = VName
-
--- | Collect all features of access to a specific dimension of an array.
-newtype DimIdxPat = DimIdxPat
-  { -- | Set of gtid's that the access is variant to.
-    -- An empty set indicates that the access is invariant.
-    dependencies :: Dependencies
-  }
-  -- \| Whether the access is parallel or sequential
-
-  deriving (Eq, Ord, Show)
-
--- | Each element in the list corresponds to an access to a dimension in the given array
--- in the order of the dimensions.
-data MemoryEntry = MemoryEntry
-  { dimensions :: [DimIdxPat],
-    nest :: [BodyType]
-  }
-
--- | Map variable names of arrays in a segmap to index expressions on those arrays.
--- segmap(pattern) |-> A(pattern) |-> indexExpressionName(pattern) |-> [[DimIdxPat]]
-type ArrayIndexDescriptors =
-  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName MemoryEntry))
-
-vnameFromSegOp :: SegOpName -> VName
-vnameFromSegOp (SegmentedMap (_, name)) = name
-vnameFromSegOp (SegmentedRed (_, name)) = name
-vnameFromSegOp (SegmentedScan (_, name)) = name
-vnameFromSegOp (SegmentedHist (_, name)) = name
 
 unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
 unionArrayIndexDescriptors lhs rhs = do
@@ -170,8 +178,62 @@ unionArrayIndexDescriptors lhs rhs = do
 -- let Cs = segmap () Bs
 -- How is Bs and Cs tracked to their respective segmaps?
 
--- | Only used during the analysis to keep track of the dependencies of each
--- pattern. For example, a pattern might depend on a function parameter, a
+--
+-- Helper types and functions to perform the analysis.
+--
+
+-- | Used during the analysis to keep track of the dependencies of patterns
+-- encountered so far.
+data Context = Context
+  { -- | A mapping from patterns occuring in Let expressions to their dependencies
+    --  and iteration types.
+    assignments :: M.Map VName CtxVal,
+    -- | A set of all DimIndexes of type `Constant`.
+    constants :: Names,
+    -- | A list of the segMaps encountered during the analysis in the order they
+    -- were encountered.
+    parents :: [BodyType],
+    -- | Current level of recursion
+    currentLevel :: Int
+  }
+  deriving (Show, Ord, Eq)
+
+instance Monoid Context where
+  mempty =
+    Context
+      { assignments = mempty,
+        constants = mempty,
+        parents = [],
+        currentLevel = 0
+      }
+
+instance Semigroup Context where
+  (<>)
+    (Context ass0 consts0 lastBody0 lvl0)
+    (Context ass1 consts1 lastBody1 lvl1) =
+      Context
+        ((<>) ass0 ass1)
+        ((<>) consts0 consts1)
+        ((++) lastBody0 lastBody1)
+        $ max lvl0 lvl1
+
+-- | Extend a context with another context.
+-- We never have to consider the case where VNames clash in the context, since
+-- they are unique.
+extend :: Context -> Context -> Context
+extend = (<>)
+
+allSegMap :: Context -> [SegOpName]
+allSegMap (Context _ _ bodies _) =
+  mapMaybe
+    ( \case
+        (SegOpName o) -> Just o
+        _ -> Nothing
+    )
+    bodies
+
+-- | Context Value (CtxVal) is the type used in the context to categorize
+-- assignments. For example, a pattern might depend on a function parameter, a
 -- gtid, or some other pattern.
 data CtxVal = CtxVal
   { deps :: Names,
@@ -187,107 +249,13 @@ ctxValFromNames ctx names =
     (getIterationType ctx)
     (currentLevel ctx)
 
--- | Insert a dependency into a CtxVal.
-insertDep :: CtxVal -> Names -> CtxVal
-insertDep (CtxVal lnames itertype lvl) names =
-  CtxVal ((<>) lnames names) itertype lvl
-
-data BodyType
-  = SegOpName SegOpName
-  | LoopBodyName LoopBodyName
-  | CondBodyName CondBodyName
-  deriving (Show, Ord, Eq)
-
--- | Used during the analysis to keep track of the dependencies of patterns
--- encountered so far.
-data Context = Context
-  { -- | A mapping from patterns occuring in Let expressions to their dependencies
-    --  and iteration types.
-    assignments :: M.Map VName CtxVal,
-    -- | A list of all DimIndexes of type `Constant`.
-    constants :: Names,
-    -- | A list of the segMaps encountered during the analysis in the order they
-    -- were encountered.
-    lastBodyType :: [BodyType],
-    -- | Current level of recursion
-    currentLevel :: Int
-  }
-  deriving (Show, Ord, Eq)
-
--- | Get the last segmap encountered in the context.
-lastSegMap :: Context -> Maybe SegOpName
-lastSegMap (Context _ _ [] _) = Nothing
-lastSegMap (Context _ _ bodies _) = safeLast $ getSegMaps bodies
-  where
-    getSegMaps =
-      mapMaybe
-        ( \case
-            (SegOpName s) -> Just s
-            _ -> Nothing
-        )
-
-    safeLast [] = Nothing
-    safeLast [x] = Just x
-    safeLast (_ : xs) = safeLast xs
-
-allSegMap :: Context -> [SegOpName]
-allSegMap (Context _ _ bodies _) =
-  mapMaybe
-    ( \case
-        (SegOpName o) -> Just o
-        _ -> Nothing
-    )
-    bodies
-
-instance Monoid Context where
-  mempty =
-    Context
-      { assignments = mempty,
-        constants = mempty,
-        lastBodyType = [],
-        currentLevel = 0
-      }
-
-instance Semigroup Context where
-  (<>)
-    (Context ass0 consts0 lastBody0 lvl0)
-    (Context ass1 consts1 lastBody1 lvl1) =
-      Context
-        ((<>) ass0 ass1)
-        ((<>) consts0 consts1)
-        ((++) lastBody0 lastBody1)
-        $ max lvl0 lvl1
-
-instance Semigroup DimIdxPat where
-  (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
-  (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
-    DimIdxPat ((<>) adeps bdeps)
-
--- | Intersect a context with another context.
--- Only needed for debugging. Delete if not used.
-intersection :: Context -> Context -> Context
-intersection
-  (Context ass0 consts0 lastBody0 lvl0)
-  (Context ass1 consts1 lastBody1 lvl1) =
-    Context
-      (M.intersection ass0 ass1)
-      (namesIntersection consts0 consts1)
-      ((\\) lastBody0 lastBody1)
-      $ max lvl0 lvl1
-
--- | Extend a context with another context.
--- We never have to consider the case where VNames clash in the context, since
--- they are unique.
-extend :: Context -> Context -> Context
-extend = (<>)
-
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal -> Names -> [BodyType] -> Context
 oneContext name ctxValue consts segmaps =
   Context
     { assignments = M.singleton name ctxValue,
       constants = consts,
-      lastBodyType = segmaps,
+      parents = segmaps,
       currentLevel = 0
     }
 
@@ -308,16 +276,6 @@ contextFromSegSpace ctx segspace =
   where
     ctxVal = ctxValZeroDeps ctx Parallel
 
--- | Create a singular context from a parameter
-contextFromParam :: IterationType -> FParam GPU -> CtxVal -> Context
-contextFromParam _i p v = oneContext (paramName p) v mempty []
-
--- | Create a context from a list of parameters
-contextFromParams :: IterationType -> [FParam GPU] -> CtxVal -> Context
-contextFromParams iterType pats name =
-  foldl extend mempty $
-    map (\pat -> contextFromParam iterType pat name) pats
-
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
 analyzeDimIdxPats = snd . (foldMap' analyzeFunction . progFuns)
@@ -326,11 +284,12 @@ analyzeDimIdxPats = snd . (foldMap' analyzeFunction . progFuns)
 analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
-  let ctx =
-        contextFromParams Sequential (funDefParams func) $
-          -- All entries are "sequential" in nature.
-          ctxValZeroDeps mempty Sequential
+  -- \| Create a context from a list of parameters
+  let ctx = foldl extend mempty $ map contextFromParam (funDefParams func)
   analyzeStmsPrimitive ctx stms
+  where
+    -- All entries are "sequential" in nature.
+    contextFromParam p = oneContext (paramName p) (ctxValZeroDeps mempty Sequential) mempty []
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
@@ -371,7 +330,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
           Context
             { assignments = mempty,
               constants = mempty,
-              lastBodyType = [bodyConstructor (currentLevel ctx, pat)],
+              parents = [bodyConstructor (currentLevel ctx, pat)],
               currentLevel = currentLevel ctx + 1
             }
 
@@ -398,9 +357,9 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let pat = firstPatElemName pats
   -- TODO: Should we just take the latest segmap?
   let segmaps = allSegMap ctx
-  let memory_entries = MemoryEntry (map f dimIndexes) (lastBodyType ctx)
+  let memory_entries = MemoryEntry (map f dimIndexes) (parents ctx)
         where
-          f dimIndex = DimIdxPat $ case dimIndex of
+          f dimIndex = case dimIndex of
             (DimFix subExpression) -> consolidate ctx subExpression
             (DimSlice _offs _n _stride) -> mempty
   let idx_expr_name = pat --                                         IndexExprName
@@ -473,7 +432,7 @@ analyzeMatch ctx pats body bodies =
         Context
           { assignments = assignments ctx,
             constants = constants ctx,
-            lastBodyType = lastBodyType ctx,
+            parents = parents ctx,
             currentLevel = currentLevel ctx - 1
           }
    in foldl'
@@ -588,16 +547,25 @@ analyzeSubExpr _ _ (Constant _) = mempty
 analyzeSubExpr p ctx (Var v) =
   let pp = firstPatElemName p
    in case M.lookup v (assignments ctx) of
-        Nothing -> error $ "Failed to lookup variable \"" ++ baseString v ++ "_" ++ show (baseTag v) ++ "\npat: " ++ show pp ++ "\n\nContext\n" ++ show ctx
         (Just _) -> oneName v
+        Nothing ->
+          error $
+            "Failed to lookup variable \""
+              ++ baseString v
+              ++ "_"
+              ++ show (baseTag v)
+              ++ "\npat: "
+              ++ show pp
+              ++ "\n\nContext\n"
+              ++ show ctx
 
 -- | Reduce a DimFix into its set of dependencies
-consolidate :: Context -> SubExp -> Dependencies
-consolidate _ (Constant _) = S.fromList []
+consolidate :: Context -> SubExp -> DimIdxPat
+consolidate _ (Constant _) = mempty
 consolidate ctx (Var v) = reduceDependencies ctx v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
-reduceDependencies :: Context -> VName -> Dependencies
+reduceDependencies :: Context -> VName -> DimIdxPat
 reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
@@ -605,11 +573,13 @@ reduceDependencies ctx v =
       Nothing -> error $ "Unable to find " ++ baseString v
       Just (CtxVal deps itertype lvl) ->
         if null $ namesToList deps
-          then S.fromList [(baseTag v, (v, lvl, itertype))]
+          then DimIdxPat $ S.fromList [(baseTag v, (v, lvl, itertype))]
           else
-            foldl' S.union mempty $
+            foldl' (<>) mempty $
               map (reduceDependencies ctx) $
                 namesToList deps
+
+-- Misc functions
 
 -- | Apply `f` to first/left part of tuple.
 onFst :: (a -> c) -> (a, b) -> (c, b)
