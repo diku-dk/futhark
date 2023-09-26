@@ -250,12 +250,12 @@ ctxValFromNames ctx names =
     (currentLevel ctx)
 
 -- | Wrapper around the constructur of Context.
-oneContext :: VName -> CtxVal -> Names -> [BodyType] -> Context
-oneContext name ctxValue consts segmaps =
+oneContext :: VName -> CtxVal -> Context
+oneContext name ctxValue =
   Context
     { assignments = M.singleton name ctxValue,
-      constants = consts,
-      parents = segmaps,
+      constants = mempty,
+      parents = [],
       currentLevel = 0
     }
 
@@ -271,10 +271,10 @@ ctxValZeroDeps ctx iterType =
 -- | Create a singular context from a segspace
 contextFromSegSpace :: Context -> SegSpace -> Context
 contextFromSegSpace ctx segspace =
-  foldl' (\acc (name, _subexpr) -> extend acc $ oneContext name ctxVal mempty []) mempty $
-    unSegSpace segspace
-  where
-    ctxVal = ctxValZeroDeps ctx Parallel
+  -- Create context from names in segspace
+  foldl' extend mempty
+    . map ((`oneContext` ctxValZeroDeps ctx Parallel) . fst)
+    $ unSegSpace segspace
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
@@ -289,14 +289,14 @@ analyzeFunction func = do
   analyzeStmsPrimitive ctx stms
   where
     -- All entries are "sequential" in nature.
-    contextFromParam p = oneContext (paramName p) (ctxValZeroDeps mempty Sequential) mempty []
+    contextFromParam p = oneContext (paramName p) (ctxValZeroDeps mempty Sequential)
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
 analyzeStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
-    (\(c, r) stm -> let (c', r') = analyzeStm c stm in (c', unionArrayIndexDescriptors r r'))
+    (\(c, r) stm -> onSnd (unionArrayIndexDescriptors r) $ analyzeStm c stm)
     (ctx, mempty)
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
@@ -322,17 +322,15 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
     -- information, but it was my best guess at a solution at the time of
     -- writing.
     concatCtxVal cvals =
-      oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals) mempty []
+      oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals)
 
+    -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
       extend ctx $
-        extend tmp_ctx $
-          Context
-            { assignments = mempty,
-              constants = mempty,
-              parents = [bodyConstructor (currentLevel ctx, pat)],
-              currentLevel = currentLevel ctx + 1
-            }
+        tmp_ctx
+          { parents = [bodyConstructor (currentLevel ctx, pat)],
+            currentLevel = currentLevel ctx + 1
+          }
 
 -- | Analyze a GPU statement and return the updated context and array index
 -- descriptors.
@@ -365,7 +363,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
-  let res = foldl' (\accumulator segmap -> unionArrayIndexDescriptors accumulator (M.singleton segmap map_array)) mempty segmaps
+  let res = foldl' unionArrayIndexDescriptors mempty $ map (`M.singleton` map_array) segmaps
 
   -- Partition the DimIndexes into constants and non-constants
   let (subExprs, consts) =
@@ -373,43 +371,38 @@ analyzeIndex ctx pats arr_name dimIndexes = do
           mapMaybe
             ( \case
                 (DimFix subExpression) -> case subExpression of
-                  (Constant _) -> Just (Right pat)
                   (Var v) -> Just (Left v)
+                  (Constant _) -> Just (Right pat)
                 (DimSlice _offs _n _stride) -> Nothing
             )
             dimIndexes
 
   -- Add each non-constant DimIndex as a dependency to the index expression
-  let ctxVal =
-        ctxValFromNames ctx $
-          namesFromList subExprs
+  let ctxVal = ctxValFromNames ctx $ namesFromList subExprs
 
   -- Add each constant DimIndex to the context
-  let constants = namesFromList consts
-
   -- Extend context with the dependencies and constants index expression
-  let ctx' = extend ctx $ oneContext pat ctxVal constants []
+  let ctx' = extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
   (ctx', res)
 
 analyzeBasicOp :: Context -> BasicOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeBasicOp ctx expression pats = do
-  let pat = firstPatElemName pats
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
+        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
         (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
         (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
         (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
+        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
         (Index name _) ->
           error $ "unhandled: Index (Skill issue?) " ++ baseString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (technically skill issue?)" ++ baseString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp
+        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx length_subexp
         (Manifest _dim _name) -> error "unhandled: Manifest"
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
@@ -418,23 +411,19 @@ analyzeBasicOp ctx expression pats = do
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         _ -> error "unhandled: match-all"
-  let ctx' = extend ctx $ oneContext pat ctx_val mempty []
+  let ctx' = extend ctx $ oneContext pat ctx_val
   (ctx', mempty)
   where
+    pat = firstPatElemName pats
+
     concatCtxVals ne nn =
       ctxValFromNames
         ctx
-        (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
+        (foldl' (\a -> (<>) a . analyzeSubExpr pat ctx) ne nn)
 
 analyzeMatch :: Context -> Pat dec -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pats body bodies =
-  let ctx' =
-        Context
-          { assignments = assignments ctx,
-            constants = constants ctx,
-            parents = parents ctx,
-            currentLevel = currentLevel ctx - 1
-          }
+  let ctx' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
         ( \(ctx'', res) b ->
             onSnd (unionArrayIndexDescriptors res)
@@ -449,24 +438,24 @@ analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> 
 analyzeLoop ctx bindings loop body pats = do
   let pat = firstPatElemName pats
   let fromBindings itervar (param, subexpr) =
-        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr pats ctx subexpr)) Sequential $ currentLevel ctx) mempty []
+        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr pat ctx subexpr)) Sequential $ currentLevel ctx)
   let ctx' =
         case loop of
           (WhileLoop iterVar) ->
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (oneContext iterVar (ctxValZeroDeps ctx Sequential) mempty [])
+              (oneContext iterVar (ctxValZeroDeps ctx Sequential))
           (ForLoop iterVar _ _ params) -> do
             let neutralElem = ctxValZeroDeps ctx Sequential
             let fromParam (param, vname) =
-                  oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx) mempty []
+                  oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx)
             (<>)
               (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (foldl' (<>) (oneContext iterVar neutralElem mempty []) (map fromParam params))
+              (foldl' (<>) (oneContext iterVar neutralElem) (map fromParam params))
 
   let ctxVal = ctxValZeroDeps ctx Sequential
   -- Extend context with the loop expression
-  let ctx'' = extend ctx' $ oneContext pat ctxVal mempty []
+  let ctx'' = extend ctx' $ oneContext pat ctxVal
   analyzeStms ctx ctx'' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> Pat dec -> (Context, ArrayIndexDescriptors)
@@ -492,20 +481,20 @@ analyzeSegOp ctx op pats = do
 
 analyzeSizeOp :: Context -> SizeOp -> Pat dec -> (Context, ArrayIndexDescriptors)
 analyzeSizeOp ctx op pats = do
-  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr pats ctx)
+  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr pat ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
   let ctxVal = ctxValZeroDeps ctx Sequential
-  let ctx'' = extend ctx' $ oneContext pat ctxVal mempty []
+  let ctx'' = extend ctx' $ oneContext pat ctxVal
   (ctx'', mempty)
   where
     pat = firstPatElemName pats
     concatCtxVal :: [Names] -> Context
     concatCtxVal [] = mempty
-    concatCtxVal (ne : remainder) = oneContext pat (ctxValFromNames ctx $ foldl' (<>) ne remainder) mempty []
+    concatCtxVal (ne : remainder) = oneContext pat (ctxValFromNames ctx $ foldl' (<>) ne remainder)
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Body GPU -> (Context, ArrayIndexDescriptors)
@@ -542,22 +531,19 @@ getIterationType (Context _ _ bodies _) =
 -- might be thrown out in the future, as it is mostly just a very verbose way to
 -- ensure that we capture all necessary variables in the context at the moment
 -- of development.
-analyzeSubExpr :: Pat d -> Context -> SubExp -> Names
+analyzeSubExpr :: VName -> Context -> SubExp -> Names
 analyzeSubExpr _ _ (Constant _) = mempty
-analyzeSubExpr p ctx (Var v) =
-  let pp = firstPatElemName p
-   in case M.lookup v (assignments ctx) of
-        (Just _) -> oneName v
-        Nothing ->
-          error $
-            "Failed to lookup variable \""
-              ++ baseString v
-              ++ "_"
-              ++ show (baseTag v)
-              ++ "\npat: "
-              ++ show pp
-              ++ "\n\nContext\n"
-              ++ show ctx
+analyzeSubExpr pp ctx (Var v) =
+  case M.lookup v (assignments ctx) of
+    (Just _) -> oneName v
+    Nothing ->
+      error $
+        "Failed to lookup variable \""
+          ++ prettyString v
+          ++ "\npat: "
+          ++ show pp
+          ++ "\n\nContext\n"
+          ++ show ctx
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context -> SubExp -> DimIdxPat
