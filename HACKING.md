@@ -165,13 +165,13 @@ There are also various shorthands for running entire standard pipelines:
 By default, `futhark dev` will print the resulting IR. You can switch to
 a different *action* with one of the following options:
 
-- `--compile-imperative`: generate sequential ImpCode and print it.
-- `--compile-imperative-kernels`: generate GPU ImpCode and print it.
-- `--compile-imperative-multicore`: generate multicore ImpCode and
+- `--compile-imp-seq`: generate sequential ImpCode and print it.
+- `--compile-imp-gpu`: generate GPU ImpCode and print it.
+- `--compile-imp-multicore`: generate multicore ImpCode and
   print it.
 
 You must use the appropriate pipeline as well (e.g. `--gpu-mem` for
-`--compile-imperative-kernels`).
+`--compile-imp-gpu`).
 
 You can also use e.g. `--backend=c` to run the same code generation
 and compilation as `futhark c`.  This is useful for experimenting with
