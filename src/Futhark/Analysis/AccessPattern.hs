@@ -10,7 +10,8 @@ module Futhark.Analysis.AccessPattern
     DimIdxPat (DimIdxPat),
     IndexExprName,
     IterationType (Sequential, Parallel),
-    MemoryEntry,
+    MemoryEntry (..),
+    BodyType (..),
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
   )
 where
@@ -62,12 +63,15 @@ newtype DimIdxPat = DimIdxPat
 
 -- | Each element in the list corresponds to an access to a dimension in the given array
 -- in the order of the dimensions.
-type MemoryEntry = [DimIdxPat]
+data MemoryEntry = MemoryEntry
+  { dimensions :: [DimIdxPat],
+    nest :: [BodyType]
+  }
 
 -- | Map variable names of arrays in a segmap to index expressions on those arrays.
 -- segmap(pattern) |-> A(pattern) |-> indexExpressionName(pattern) |-> [[DimIdxPat]]
 type ArrayIndexDescriptors =
-  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [MemoryEntry]))
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName MemoryEntry))
 
 vnameFromSegOp :: SegOpName -> VName
 vnameFromSegOp (SegmentedMap (_, name)) = name
@@ -394,14 +398,14 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let pat = firstPatElemName pats
   -- TODO: Should we just take the latest segmap?
   let segmaps = allSegMap ctx
-  let memory_entries = [map f dimIndexes]
+  let memory_entries = MemoryEntry (map f dimIndexes) (lastBodyType ctx)
         where
           f dimIndex = DimIdxPat $ case dimIndex of
             (DimFix subExpression) -> consolidate ctx subExpression
             (DimSlice _offs _n _stride) -> mempty
   let idx_expr_name = pat --                                         IndexExprName
-  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> [MemoryEntry]
-  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> [MemoryEntry]
+  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
+  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
   let res = foldl' (\accumulator segmap -> unionArrayIndexDescriptors accumulator (M.singleton segmap map_array)) mempty segmaps
 
   -- Partition the DimIndexes into constants and non-constants

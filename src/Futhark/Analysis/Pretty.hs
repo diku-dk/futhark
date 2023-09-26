@@ -15,19 +15,11 @@ import Futhark.Util.Pretty
 instance Pretty ArrayIndexDescriptors where
   pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
     where
-      f (SegmentedMap (lvl, name), maps) = "(segmap)" <+> g lvl name maps
-      f (SegmentedRed (lvl, name), maps) = "(segred)" <+> g lvl name maps
-      f (SegmentedScan (lvl, name), maps) = "(segscan)" <+> g lvl name maps
-      f (SegmentedHist (lvl, name), maps) = "(seghist)" <+> g lvl name maps
+      f (segop, arrayNameToIdxExprMap) = pretty segop <+> colon <+> g arrayNameToIdxExprMap
 
-      g _lvl name maps =
-        pretty name
-          <+> colon
-          <+> lbrace
-          </> indent 4 (mapprintArray $ M.toList maps)
-          </> rbrace
+      g maps = lbrace </> indent 4 (mapprintArray $ M.toList maps) </> rbrace
 
-      mapprintArray :: [(ArrayName, M.Map IndexExprName [MemoryEntry])] -> Doc ann
+      mapprintArray :: [(ArrayName, M.Map IndexExprName MemoryEntry)] -> Doc ann
       mapprintArray [] = ""
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
@@ -40,24 +32,21 @@ instance Pretty ArrayIndexDescriptors where
           </> indent 4 (mapprintIdxExpr (M.toList maps))
           </> rbrace
 
-      mapprintIdxExpr :: [(IndexExprName, [MemoryEntry])] -> Doc ann
+      mapprintIdxExpr :: [(IndexExprName, MemoryEntry)] -> Doc ann
       mapprintIdxExpr [] = ""
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
-      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntryList mems)
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" <+> ss mems </> indent 4 (printMemoryEntry mems)
 
-      printMemoryEntryList :: [MemoryEntry] -> Doc ann
-      printMemoryEntryList [] = ""
-      printMemoryEntryList [m] = printMemoryEntry m 0
-      printMemoryEntryList (m : mm) = printMemoryEntry m 0 </> printMemoryEntryList mm
+      ss (MemoryEntry _ []) = "[]"
+      ss (MemoryEntry _ (b : bb)) = brackets $ commasep $ map pretty (b : bb)
 
-      printMemoryEntry :: MemoryEntry -> Int -> Doc ann
-      printMemoryEntry [] _ = ""
-      printMemoryEntry [m] idx = printDim m idx
-      printMemoryEntry (m : mm) idx = printDim m idx </> printMemoryEntry mm (idx + 1)
+      printMemoryEntry :: MemoryEntry -> Doc ann
+      printMemoryEntry (MemoryEntry dims _) =
+        stack $ [printDim i d | d <- dims, i <- [1 .. (length dims)]]
 
-      printDim m idx = pretty idx <+> ":" <+> indent 0 (pretty m)
+      printDim idx m = pretty idx <+> ":" <+> indent 0 (pretty m)
 
 instance Pretty DimIdxPat where
   pretty (DimIdxPat dependencies) =
@@ -67,6 +56,20 @@ instance Pretty DimIdxPat where
     where
       prettyDeps = encloseSep "[ " " ]" " | " . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
+
+instance Pretty SegOpName where
+  pretty (SegmentedMap (_, name)) = "(segmap)" <+> pretty name
+  pretty (SegmentedRed (_, name)) = "(segred)" <+> pretty name
+  pretty (SegmentedScan (_, name)) = "(segscan)" <+> pretty name
+  pretty (SegmentedHist (_, name)) = "(seghist)" <+> pretty name
+
+instance Pretty BodyType where
+  pretty (SegOpName (SegmentedMap (_, name))) = pretty name <+> colon <+> "segmap"
+  pretty (SegOpName (SegmentedRed (_, name))) = pretty name <+> colon <+> "segred"
+  pretty (SegOpName (SegmentedScan (_, name))) = pretty name <+> colon <+> "segscan"
+  pretty (SegOpName (SegmentedHist (_, name))) = pretty name <+> colon <+> "seghist"
+  pretty (LoopBodyName (_, name)) = pretty name <+> colon <+> "loop"
+  pretty (CondBodyName (_, name)) = pretty name <+> colon <+> "cond"
 
 instance Pretty IterationType where
   pretty Sequential = "seq"
