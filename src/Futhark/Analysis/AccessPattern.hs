@@ -466,7 +466,9 @@ analyzeSegOp ctx op pat = do
 
 analyzeSizeOp :: Context -> SizeOp -> VName -> (Context, ArrayIndexDescriptors)
 analyzeSizeOp ctx op pat = do
-  let subexprsToContext = extend ctx . concatCtxVal . map (analyzeSubExpr pat ctx)
+  let subexprsToContext =
+        contextFromNames ctx Sequential
+          . concatMap (namesToList . analyzeSubExpr pat ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
@@ -474,10 +476,6 @@ analyzeSizeOp ctx op pat = do
   -- Add sizeOp to context
   let ctx'' = extend ctx' $ oneContext pat $ ctxValZeroDeps ctx Sequential
   (ctx'', mempty)
-  where
-    concatCtxVal :: [Names] -> Context
-    concatCtxVal [] = mempty
-    concatCtxVal (ne : remainder) = oneContext pat (ctxValFromNames ctx $ foldl' (<>) ne remainder)
 
 -- | Analyze statements in a GPU body.
 analyzeGPUBody :: Context -> Body GPU -> (Context, ArrayIndexDescriptors)
