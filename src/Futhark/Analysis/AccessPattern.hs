@@ -269,12 +269,13 @@ ctxValZeroDeps ctx iterType =
     }
 
 -- | Create a singular context from a segspace
-contextFromSegSpace :: Context -> SegSpace -> Context
-contextFromSegSpace ctx segspace =
+contextFromNames :: Context -> IterationType -> [VName] -> Context
+contextFromNames ctx itertype =
   -- Create context from names in segspace
-  foldl' extend mempty
-    . map ((`oneContext` ctxValZeroDeps ctx Parallel) . fst)
-    $ unSegSpace segspace
+  foldl' extend ctx
+    . map (`oneContext` ctxValZeroDeps ctx itertype)
+
+-- \$ unSegSpace segspace
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
@@ -285,11 +286,8 @@ analyzeFunction :: FunDef GPU -> (Context, ArrayIndexDescriptors)
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
-  let ctx = foldl extend mempty $ map contextFromParam (funDefParams func)
+  let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
   analyzeStmsPrimitive ctx stms
-  where
-    -- All entries are "sequential" in nature.
-    contextFromParam p = oneContext (paramName p) (ctxValZeroDeps mempty Sequential)
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
@@ -316,9 +314,9 @@ analyzeStms ctx tmp_ctx bodyConstructor pat body = do
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
-    -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This MAY throw away needed
-    -- information, but it was my best guess at a solution at the time of
-    -- writing.
+    -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
+    -- MAY throw away needed information, but it was my best guess at a solution
+    -- at the time of writing.
     concatCtxVal cvals =
       oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals)
 
@@ -433,26 +431,15 @@ analyzeMatch ctx pat body bodies =
 
 analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> VName -> (Context, ArrayIndexDescriptors)
 analyzeLoop ctx bindings loop body pat = do
-  let fromBindings itervar (param, subexpr) =
-        oneContext (paramName param) (CtxVal ((<>) (oneName itervar) (analyzeSubExpr pat ctx subexpr)) Sequential $ currentLevel ctx)
   let ctx' =
-        case loop of
-          (WhileLoop iterVar) ->
-            (<>)
-              (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (oneContext iterVar (ctxValZeroDeps ctx Sequential))
-          (ForLoop iterVar _ _ params) -> do
-            let neutralElem = ctxValZeroDeps ctx Sequential
-            let fromParam (param, vname) =
-                  oneContext (paramName param) (CtxVal ((<>) (oneName iterVar) (oneName vname)) Sequential $ currentLevel ctx)
-            (<>)
-              (foldl' (<>) mempty $ map (fromBindings iterVar) bindings)
-              (foldl' (<>) (oneContext iterVar neutralElem) (map fromParam params))
+        contextFromNames ctx Sequential $
+          case loop of
+            (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
+            (ForLoop iterVar _ _ params) ->
+              iterVar : map (paramName . fst) bindings ++ map (paramName . fst) params
 
-  let ctxVal = ctxValZeroDeps ctx Sequential
   -- Extend context with the loop expression
-  let ctx'' = extend ctx' $ oneContext pat ctxVal
-  analyzeStms ctx ctx'' LoopBodyName pat $ stmsToList $ bodyStms body
+  analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
 
 analyzeApply :: Context -> VName -> (Context, ArrayIndexDescriptors)
 analyzeApply _ctx _pat = error "UNHANDLED: Apply"
@@ -469,9 +456,11 @@ segOpType (SegHist {}) = SegmentedHist
 analyzeSegOp :: Context -> SegOp lvl GPU -> VName -> (Context, ArrayIndexDescriptors)
 analyzeSegOp ctx op pat = do
   let segSpaceContext =
-        extend ctx $
-          contextFromSegSpace ctx $
-            segSpace op
+        extend ctx
+          . contextFromNames ctx Parallel
+          . map fst
+          . unSegSpace
+          $ segSpace op
   -- Analyze statements in the SegOp body
   analyzeStms ctx segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
 
@@ -483,8 +472,7 @@ analyzeSizeOp ctx op pat = do
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctxVal = ctxValZeroDeps ctx Sequential
-  let ctx'' = extend ctx' $ oneContext pat ctxVal
+  let ctx'' = extend ctx' $ oneContext pat $ ctxValZeroDeps ctx Sequential
   (ctx'', mempty)
   where
     concatCtxVal :: [Names] -> Context
