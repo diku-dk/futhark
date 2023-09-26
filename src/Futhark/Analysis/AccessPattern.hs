@@ -19,7 +19,11 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.IR
 import Futhark.IR.GPU
+
+class Analyze rep where
+  analyzeOp :: Op rep -> (Context -> VName -> (Context, ArrayIndexDescriptors))
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
@@ -201,11 +205,11 @@ contextFromNames ctx itertype =
     . map (`oneContext` ctxValZeroDeps ctx itertype)
 
 -- | Analyze each `entry` and accumulate the results.
-analyzeDimIdxPats :: Prog GPU -> ArrayIndexDescriptors
+analyzeDimIdxPats :: (Analyze rep) => Prog rep -> ArrayIndexDescriptors
 analyzeDimIdxPats = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: FunDef GPU -> ArrayIndexDescriptors
+analyzeFunction :: (Analyze rep) => FunDef rep -> ArrayIndexDescriptors
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
@@ -213,7 +217,7 @@ analyzeFunction func = do
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
-analyzeStmsPrimitive :: Context -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
+analyzeStmsPrimitive :: (Analyze rep) => Context -> [Stm rep] -> (Context, ArrayIndexDescriptors)
 analyzeStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
@@ -222,7 +226,7 @@ analyzeStmsPrimitive ctx =
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: Context -> Context -> ((Int, VName) -> BodyType) -> VName -> [Stm GPU] -> (Context, ArrayIndexDescriptors)
+analyzeStms :: (Analyze rep) => Context -> Context -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context, ArrayIndexDescriptors)
 analyzeStms ctx tmp_ctx bodyConstructor pat body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
@@ -251,9 +255,9 @@ analyzeStms ctx tmp_ctx bodyConstructor pat body = do
             currentLevel = currentLevel ctx + 1
           }
 
--- | Analyze a GPU statement and return the updated context and array index
+-- | Analyze a rep statement and return the updated context and array index
 -- descriptors.
-analyzeStm :: Context -> Stm GPU -> (Context, ArrayIndexDescriptors)
+analyzeStm :: (Analyze rep) => Context -> Stm rep -> (Context, ArrayIndexDescriptors)
 analyzeStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
   let patternName = patElemName . head $ patElems pats
@@ -266,10 +270,7 @@ analyzeStm ctx (Let pats _ e) = do
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternName
     (Apply _name _ _ _) -> analyzeApply ctx patternName
     (WithAcc _ _) -> analyzeWithAcc ctx patternName
-    (Op (SegOp op)) -> analyzeSegOp ctx op patternName
-    (Op (SizeOp op)) -> analyzeSizeOp ctx op patternName
-    (Op (GPUBody _ body)) -> analyzeGPUBody ctx body
-    (Op (OtherOp _)) -> analyzeOtherOp ctx patternName
+    (Op op) -> analyzeOp op ctx patternName
 
 analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
 analyzeIndex ctx pat arr_name dimIndexes = do
@@ -339,7 +340,7 @@ analyzeBasicOp ctx expression pat = do
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pat ctx) ne nn)
 
-analyzeMatch :: Context -> VName -> Body GPU -> [Body GPU] -> (Context, ArrayIndexDescriptors)
+analyzeMatch :: (Analyze rep) => Context -> VName -> Body rep -> [Body rep] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pat body bodies =
   let ctx' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
@@ -352,7 +353,7 @@ analyzeMatch ctx pat body bodies =
         (ctx', mempty)
         (body : bodies)
 
-analyzeLoop :: Context -> [(FParam GPU, SubExp)] -> LoopForm GPU -> Body GPU -> VName -> (Context, ArrayIndexDescriptors)
+analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm rep -> Body rep -> VName -> (Context, ArrayIndexDescriptors)
 analyzeLoop ctx bindings loop body pat = do
   let ctx' =
         contextFromNames ctx Sequential $
@@ -370,14 +371,14 @@ analyzeApply _ctx _pat = error "UNHANDLED: Apply"
 analyzeWithAcc :: Context -> VName -> (Context, ArrayIndexDescriptors)
 analyzeWithAcc _ctx _pat = error "UNHANDLED: WithAcc"
 
-segOpType :: SegOp lvl GPU -> (Int, VName) -> SegOpName
+segOpType :: SegOp lvl rep -> (Int, VName) -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
 segOpType (SegRed {}) = SegmentedRed
 segOpType (SegScan {}) = SegmentedScan
 segOpType (SegHist {}) = SegmentedHist
 
-analyzeSegOp :: Context -> SegOp lvl GPU -> VName -> (Context, ArrayIndexDescriptors)
-analyzeSegOp ctx op pat = do
+analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context -> VName -> (Context, ArrayIndexDescriptors)
+analyzeSegOp op ctx pat = do
   let segSpaceContext =
         extend ctx
           . contextFromNames ctx Parallel
@@ -387,8 +388,8 @@ analyzeSegOp ctx op pat = do
   -- Analyze statements in the SegOp body
   analyzeStms ctx segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
 
-analyzeSizeOp :: Context -> SizeOp -> VName -> (Context, ArrayIndexDescriptors)
-analyzeSizeOp ctx op pat = do
+analyzeSizeOp :: SizeOp -> Context -> VName -> (Context, ArrayIndexDescriptors)
+analyzeSizeOp op ctx pat = do
   let subexprsToContext =
         contextFromNames ctx Sequential
           . concatMap (namesToList . analyzeSubExpr pat ctx)
@@ -400,9 +401,9 @@ analyzeSizeOp ctx op pat = do
   let ctx'' = extend ctx' $ oneContext pat $ ctxValZeroDeps ctx Sequential
   (ctx'', mempty)
 
--- | Analyze statements in a GPU body.
-analyzeGPUBody :: Context -> Body GPU -> (Context, ArrayIndexDescriptors)
-analyzeGPUBody ctx body =
+-- | Analyze statements in a rep body.
+analyzeGPUBody :: (Analyze rep) => Body rep -> Context -> (Context, ArrayIndexDescriptors)
+analyzeGPUBody body ctx =
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
 analyzeOtherOp :: Context -> VName -> (Context, ArrayIndexDescriptors)
@@ -474,3 +475,11 @@ onFst f (x, y) = (f x, y)
 -- | Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
 onSnd f (x, y) = (x, f y)
+
+-- Instances for AST types that we actually support
+instance (Analyze GPU) where
+  analyzeOp gpuOp
+    | (SegOp op) <- gpuOp = analyzeSegOp op
+    | (SizeOp op) <- gpuOp = analyzeSizeOp op
+    | (GPUBody _ body) <- gpuOp = pure . analyzeGPUBody body
+    | (OtherOp _) <- gpuOp = analyzeOtherOp
