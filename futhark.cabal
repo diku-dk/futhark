@@ -346,6 +346,7 @@ library
       Futhark.LSP.State
       Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
+      Futhark.Optimise.IntraSeq
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
