@@ -11,11 +11,11 @@ def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
 -- (segmap) defunc_0_map_res_5244 : {
 --     (arr) xss_5163 : {
 --         (idx) x_5249 :
---             0 : dependencies = [ gtid_5245 0 par ]
---             1 : dependencies = [  ]
+--             0 : dependencies = {gtid_5245 0 par}
+--             1 : dependencies = {}
 --     }
 --     (arr) +_rhs_dev_5254 : {
 --         (idx) +_rhs_5255 :
---             0 : dependencies = [  ]
+--             0 : dependencies = {}
 --     }
 -- }
