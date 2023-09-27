@@ -365,21 +365,27 @@ analyzeBasicOp ctx expression pat = do
 
 analyzeMatch :: (Analyze rep) => Context -> VName -> Body rep -> [Body rep] -> (Context, ArrayIndexDescriptors)
 analyzeMatch ctx pat body bodies =
-  let ctx' = ctx {currentLevel = currentLevel ctx - 1}
+  let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
-        ( \(ctx'', res) b ->
-            onSnd (unionArrayIndexDescriptors res)
-              . analyzeStms ctx' ctx'' CondBodyName pat
+        ( \(ctx', res) b ->
+            -- This Little Maneuver's Gonna Cost Us 51 Years
+            onFst constLevel
+              . onSnd (unionArrayIndexDescriptors res)
+              . analyzeStms ctx'' ctx' CondBodyName pat
               . stmsToList
               $ bodyStms b
         )
-        (ctx', mempty)
+        (ctx'', mempty)
         (body : bodies)
+  where
+    constLevel context = context {currentLevel = currentLevel ctx - 1}
 
 analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm rep -> Body rep -> VName -> (Context, ArrayIndexDescriptors)
 analyzeLoop ctx bindings loop body pat = do
+  let nextLevel = currentLevel ctx
+  let ctx'' = ctx {currentLevel = nextLevel}
   let ctx' =
-        contextFromNames ctx Sequential $
+        contextFromNames ctx'' Sequential $
           case loop of
             (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
             (ForLoop iterVar _ _ params) ->
@@ -402,14 +408,17 @@ segOpType (SegHist {}) = SegmentedHist
 
 analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context -> VName -> (Context, ArrayIndexDescriptors)
 analyzeSegOp op ctx pat = do
+  let nextLevel = currentLevel ctx + length (unSegSpace $ segSpace op) - 1
+  let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
-        extend ctx
-          . contextFromNames ctx Parallel
+        foldl' extend ctx'
+          . map (\(n, i) -> n `oneContext` CtxVal mempty Parallel (currentLevel ctx + i))
+          . (\segspaceParams -> zip segspaceParams [0 ..])
           . map fst
           . unSegSpace
           $ segSpace op
   -- Analyze statements in the SegOp body
-  analyzeStms ctx segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
+  analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
 
 analyzeSizeOp :: SizeOp -> Context -> VName -> (Context, ArrayIndexDescriptors)
 analyzeSizeOp op ctx pat = do
