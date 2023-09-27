@@ -14,11 +14,11 @@ def main [n][m] (xss: [n][m]i64) (is: [n]i64) : [n][m]i64 =
 -- (segmap) defunc_0_map_res_5658 : {
 --     (arr) xss_5482 : {
 --         (idx) eta_p_5662 :
---             0 : dependencies = [ i_5629 0 seq ]
---             1 : dependencies = [ gtid_5659 1 par ]
+--             0 : dependencies = {i_5629 0 seq}
+--             1 : dependencies = {gtid_5659 1 par}
 --     }
 --     (arr) s_5630 : {
 --         (idx) eta_p_5661 :
---             0 : dependencies = [ gtid_5659 1 par ]
+--             0 : dependencies = {gtid_5659 1 par}
 --     }
 -- }

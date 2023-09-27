@@ -11,8 +11,8 @@ def main (x: i64) (y: i64) : [x]i64 =
 -- (segmap) defunc_0_map_res_5603 : {
 --     (arr) defunc_0_map_res_5575 : {
 --         (idx) eta_p_5606 :
---             0 : dependencies = [ gtid_5604 0 par ]
+--             0 : dependencies = {gtid_5604 0 par}
 --         (idx) eta_p_5607 :
---             0 : dependencies = [ x_5411 0 seq | gtid_5604 0 par ]
+--             0 : dependencies = {x_5411 0 seq, gtid_5604 0 par}
 --     }
 -- }

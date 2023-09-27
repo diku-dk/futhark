@@ -9,8 +9,8 @@ def main [n] (xs: [n]i32) : [n]i32 =
 -- (segmap) defunc_0_map_res_5382 : {
 --     (arr) ys_5332 : {
 --         (idx) +_lhs_5392 :
---             0 : dependencies = [ i_5331 0 seq | gtid_5383 1 par ]
+--             0 : dependencies = {i_5331 0 seq, gtid_5383 1 par}
 --         (idx) +_rhs_5398 :
---             0 : dependencies = [ i_5331 0 seq | gtid_5383 1 par ]
+--             0 : dependencies = {i_5331 0 seq, gtid_5383 1 par}
 --     }
 -- }

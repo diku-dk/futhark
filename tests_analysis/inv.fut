@@ -11,7 +11,7 @@ def main [n][m] (xss: [n][m]i64) : [n]i64 =
 -- (segmap) defunc_0_map_res_5194 : {
 --     (arr) xss_5134 : {
 --         (idx) x_5199 :
---             0 : dependencies = [ gtid_5195 0 par ]
---             1 : dependencies = [  ]
+--             0 : dependencies = {gtid_5195 0 par}
+--             1 : dependencies = {}
 --     }
 -- }
