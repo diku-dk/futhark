@@ -34,7 +34,7 @@ dataDependencies' ::
 dataDependencies' startdeps = foldl grow startdeps . bodyStms
   where
     grow deps (Let pat _ (WithAcc inputs lam)) =
-      let input_deps = map (mconcat . depsOfWithAccInput) inputs
+      let input_deps = foldMap depsOfWithAccInput inputs
           -- Dependencies of each input reduction are concatenated.
           -- Input to lam is cert_1, ..., cert_n, acc_1, ..., acc_n.
           lam_deps = lambdaDependencies deps lam (input_deps <> input_deps)
