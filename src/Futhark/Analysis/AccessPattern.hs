@@ -3,6 +3,7 @@
 module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
+    Analyze,
     ArrayIndexDescriptors,
     ArrayName,
     DimIdxPat (DimIdxPat),
@@ -19,8 +20,14 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.IR
+import Futhark.IR.Aliases
 import Futhark.IR.GPU
+import Futhark.IR.GPUMem
+import Futhark.IR.MC
+import Futhark.IR.MCMem
+import Futhark.IR.SOACS
+import Futhark.IR.Seq
+import Futhark.IR.SeqMem
 
 class Analyze rep where
   analyzeOp :: Op rep -> (Context -> VName -> (Context, ArrayIndexDescriptors))
@@ -477,9 +484,31 @@ onSnd :: (b -> c) -> (a, b) -> (a, c)
 onSnd f (x, y) = (x, f y)
 
 -- Instances for AST types that we actually support
-instance (Analyze GPU) where
+instance Analyze GPU where
   analyzeOp gpuOp
     | (SegOp op) <- gpuOp = analyzeSegOp op
     | (SizeOp op) <- gpuOp = analyzeSizeOp op
     | (GPUBody _ body) <- gpuOp = pure . analyzeGPUBody body
-    | (OtherOp _) <- gpuOp = analyzeOtherOp
+    | (Futhark.IR.GPU.OtherOp _) <- gpuOp = analyzeOtherOp
+
+instance Analyze GPUMem where analyzeOp _ = error $ notImplementedYet "GPUMem"
+
+instance Analyze MC where
+  analyzeOp mcOp
+    | ParOp Nothing seqSegop <- mcOp = analyzeSegOp seqSegop
+    | ParOp (Just segop) seqSegop <- mcOp = \ctx name -> do
+        let (ctx', res') = analyzeSegOp segop ctx name
+        let (ctx'', res'') = analyzeSegOp seqSegop ctx name
+        (ctx' <> ctx'', unionArrayIndexDescriptors res' res'')
+    | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
+
+instance Analyze MCMem where analyzeOp _ = error $ notImplementedYet "MCMem"
+
+instance Analyze Seq where analyzeOp _ = error $ notImplementedYet "Seq"
+
+instance Analyze SeqMem where analyzeOp _ = error $ notImplementedYet "SeqMem"
+
+instance Analyze SOACS where analyzeOp _ = error $ notImplementedYet "SOACS"
+
+notImplementedYet :: String -> String
+notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."

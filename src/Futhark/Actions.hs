@@ -57,7 +57,6 @@ import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
 import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
 import Futhark.Compiler.CLI
 import Futhark.IR
-import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
@@ -138,7 +137,7 @@ printMemAliasGPU =
     }
 
 -- | Print result of memory access analysis on the IR
-printMemoryAccessAnalysis :: Action GPU
+printMemoryAccessAnalysis :: (Analyze rep) => Action rep
 printMemoryAccessAnalysis =
   Action
     { actionName = "call-graph",
