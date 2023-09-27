@@ -45,6 +45,7 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
+import Futhark.Optimise.IntraSeq
 import Futhark.Pipeline
 
 -- | A pipeline used by all current compilers.  Performs inlining,
@@ -105,7 +106,8 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        inPlaceLoweringGPU,
+        intraSeq
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
