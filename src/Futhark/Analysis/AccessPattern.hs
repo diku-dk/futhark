@@ -279,21 +279,27 @@ analyzeStm ctx (Let pats _ e) = do
     (WithAcc _ _) -> analyzeWithAcc ctx patternName
     (Op op) -> analyzeOp op ctx patternName
 
+getIndexDependencies :: Context -> [DimIndex SubExp] -> Maybe [DimIdxPat]
+getIndexDependencies ctx =
+  foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) . reverse
+  where
+    matchDimIndex idx accumulator =
+      case idx of
+        (DimFix subExpression) ->
+          Just $ consolidate ctx subExpression : accumulator
+        _ -> Nothing
+
 analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
 analyzeIndex ctx pat arr_name dimIndexes = do
   -- TODO: Should we just take the latest segmap?
-  let segmaps = allSegMap ctx
-  let memory_entries = MemoryEntry (map f dimIndexes) (parents ctx)
-        where
-          f dimIndex = case dimIndex of
-            (DimFix subExpression) -> consolidate ctx subExpression
-            (DimSlice _offs _n _stride) -> mempty
-  let idx_expr_name = pat --                                         IndexExprName
-  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
-  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
-  let res = foldl' unionArrayIndexDescriptors mempty $ map (`M.singleton` map_array) segmaps
+  let dimindices = getIndexDependencies ctx dimIndexes
+  maybe
+    (ctx, mempty)
+    (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pat) pat arr_name)
+    dimindices
 
-  -- Partition the DimIndexes into constants and non-constants
+analyzeIndexContextFromIndices :: Context -> [DimIndex SubExp] -> VName -> Context
+analyzeIndexContextFromIndices ctx dimIndexes pat = do
   let (subExprs, consts) =
         partitionEithers $
           mapMaybe
@@ -310,8 +316,18 @@ analyzeIndex ctx pat arr_name dimIndexes = do
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
-  let ctx' = extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
-  (ctx', res)
+  extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
+
+analyzeIndex' :: Context -> VName -> VName -> [DimIdxPat] -> (Context, ArrayIndexDescriptors)
+analyzeIndex' ctx pat arr_name dimIndexes = do
+  let segmaps = allSegMap ctx
+  let memory_entries = MemoryEntry dimIndexes $ parents ctx
+  let idx_expr_name = pat --                                         IndexExprName
+  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
+  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
+  let res = foldl' unionArrayIndexDescriptors mempty $ map (`M.singleton` map_array) segmaps
+
+  (ctx, res)
 
 analyzeBasicOp :: Context -> BasicOp -> VName -> (Context, ArrayIndexDescriptors)
 analyzeBasicOp ctx expression pat = do
