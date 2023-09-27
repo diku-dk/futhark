@@ -95,7 +95,6 @@ gpuPipeline =
         -- tileLoops,
         simplifyGPU,
         histAccsGPU,
-        coalesceAccess,
         simplifyGPU,
         unstreamGPU,
         performCSE True,
@@ -107,7 +106,8 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        inPlaceLoweringGPU,
+        coalesceAccess
       ]
 
 -- | Extend gpuPipeline by pretty-printing the true AST
