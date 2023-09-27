@@ -51,7 +51,7 @@ instance Pretty DimIdxPat where
     -- spacing between the enclosed elements
     "dependencies" <+> equals <+> align (prettyDeps dependencies)
     where
-      prettyDeps = encloseSep "[ " " ]" " | " . map (printPair . snd) . S.toList
+      prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
 
 instance Pretty SegOpName where
