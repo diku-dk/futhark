@@ -272,11 +272,12 @@ analyzeStm ctx (Let pats _ e) = do
   -- is a body, we recurse into it.
   case e of
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternName name ee
+    (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternName name subexp
     (BasicOp op) -> analyzeBasicOp ctx op patternName
     (Match _ cases defaultBody _) -> analyzeMatch ctx patternName defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternName
-    (Apply _name _ _ _) -> analyzeApply ctx patternName
-    (WithAcc _ _) -> analyzeWithAcc ctx patternName
+    (Apply _name _ _ _) -> (ctx, mempty) -- ignored
+    (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternName
 
 getIndexDependencies :: Context -> [DimIndex SubExp] -> Maybe [DimIdxPat]
@@ -342,12 +343,12 @@ analyzeBasicOp ctx expression pat = do
         (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
         (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
         (Index name _) ->
-          error $ "unhandled: Index (Skill issue?) " ++ baseString name
+          error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         (Update _ name _slice _subexp) ->
-          error $ "unhandled: Update (technically skill issue?)" ++ baseString name
+          error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx length_subexp
-        (Manifest _dim _name) -> error "unhandled: Manifest"
+        (Manifest _dim name) -> error $ "unhandled: Manifest for " ++ prettyString _name
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
@@ -393,12 +394,6 @@ analyzeLoop ctx bindings loop body pat = do
 
   -- Extend context with the loop expression
   analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
-
-analyzeApply :: Context -> VName -> (Context, ArrayIndexDescriptors)
-analyzeApply _ctx _pat = error "UNHANDLED: Apply"
-
-analyzeWithAcc :: Context -> VName -> (Context, ArrayIndexDescriptors)
-analyzeWithAcc _ctx _pat = error "UNHANDLED: WithAcc"
 
 segOpType :: SegOp lvl rep -> (Int, VName) -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
