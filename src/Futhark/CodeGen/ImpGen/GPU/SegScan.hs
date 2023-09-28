@@ -48,10 +48,25 @@ bodyHas f = any (f' . stmExp) . bodyStms
         { walkOnBody = const $ guard . not . bodyHas f
         }
 
+-- XXX: Currently single pass scans cannot handle construction of
+-- arrays in the kernel body (#2013), because of insufficient
+-- memory expansion.  This can in principle be fixed.
+kernelBodyHasFreshArrays :: KernelBody GPUMem -> Bool
+kernelBodyHasFreshArrays kbody =
+  bodyHas freshArray (Body () (kernelBodyStms kbody) [])
+    where
+      freshArray (BasicOp Manifest {})  = True
+      freshArray (BasicOp Iota {})      = True
+      freshArray (BasicOp Replicate {}) = True
+      freshArray (BasicOp Scratch {})   = True
+      freshArray (BasicOp Concat {})    = True
+      freshArray (BasicOp ArrayLit {})  = True
+      freshArray _ = False
+
 canBeSinglePass :: [SegBinOp GPUMem] -> KernelBody GPUMem -> Maybe (SegBinOp GPUMem)
 canBeSinglePass ops kbody
   | all ok ops,
-    not $ bodyHas freshArray (Body () (kernelBodyStms kbody) []) =
+    not $ kernelBodyHasFreshArrays kbody =
       Just $ combineScans ops
   | otherwise =
       Nothing
@@ -62,16 +77,8 @@ canBeSinglePass ops kbody
         && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
-    -- XXX: Currently single pass scans cannot handle construction of
-    -- arrays in the kernel body (#2013), because of insufficient
-    -- memory expansion.  This can in principle be fixed.
-    freshArray (BasicOp Manifest {}) = True
-    freshArray (BasicOp Iota {}) = True
-    freshArray (BasicOp Replicate {}) = True
-    freshArray (BasicOp Scratch {}) = True
-    freshArray (BasicOp Concat {}) = True
-    freshArray (BasicOp ArrayLit {}) = True
-    freshArray _ = False
+
+
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -85,14 +92,19 @@ compileSegScan ::
 compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
   emit $ Imp.DebugPrint "\n# SegScan" Nothing
   target <- hostTarget <$> askEnv
-  case target of
-    CUDA
-      | Just scan' <- canBeSinglePass scans kbody ->
-          SinglePass.compileSegScan pat lvl space scan' kbody
-    HIP
-      | Just scan' <- canBeSinglePass scans kbody ->
-          SinglePass.compileSegScan pat lvl space scan' kbody
+
+  case (canBeSinglePass scans kbody, targetSupportsSinglePass target) of
+    (Just scans', True) ->
+      -- TODO: are there more criteria for requiring block virtualization?
+      let requiresBlockVirt = kernelBodyHasFreshArrays kbody
+      in SinglePass.compileSegScan pat lvl space scans' kbody requiresBlockVirt
+
     _ -> TwoPass.compileSegScan pat lvl space scans kbody
+
   emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space
+    targetSupportsSinglePass CUDA = True
+    targetSupportsSinglePass HIP  = True
+    targetSupportsSinglePass _ = False
+
