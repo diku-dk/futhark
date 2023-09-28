@@ -27,7 +27,6 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.BasicOp
 import Futhark.Optimise.Simplify.Rules.Index
