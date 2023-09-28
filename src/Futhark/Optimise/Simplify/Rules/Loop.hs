@@ -11,10 +11,8 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.ClosedForm
-import Futhark.Optimise.Simplify.Rules.Index
 import Futhark.Transform.Rename
 
 -- This next one is tricky - it's easy enough to determine that some
