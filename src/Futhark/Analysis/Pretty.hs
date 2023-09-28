@@ -12,8 +12,8 @@ import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Util.Pretty
 
-instance Pretty ArrayIndexDescriptors where
-  pretty = stack . map f . M.toList :: ArrayIndexDescriptors -> Doc ann
+instance Pretty IndexTable where
+  pretty = stack . map f . M.toList :: IndexTable -> Doc ann
     where
       f (segop, arrayNameToIdxExprMap) = pretty segop <+> colon <+> g arrayNameToIdxExprMap
 
