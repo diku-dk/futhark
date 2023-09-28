@@ -402,7 +402,7 @@ doAllFusion =
 runInnerFusionOnContext :: DepContext -> FusionM DepContext
 runInnerFusionOnContext c@(incoming, node, nodeT, outgoing) = case nodeT of
   DoNode (Let pat aux (Loop params form body)) to_fuse ->
-    doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOf form) $ do
+    doFuseScans . localScope (scopeOfFParams (map fst params) <> scopeOfLoopForm form) $ do
       b <- doFusionWithDelayed body to_fuse
       pure (incoming, node, DoNode (Let pat aux (Loop params form b)) [], outgoing)
   MatchNode (Let pat aux (Match cond cases defbody dec)) to_fuse -> doFuseScans $ do

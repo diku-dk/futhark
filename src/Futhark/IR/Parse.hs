@@ -499,8 +499,7 @@ pLoop pr =
             <* lexeme ":"
             <*> pIntType
             <* lexeme "<"
-            <*> pSubExp
-            <*> many ((,) <$> pLParam pr <* keyword "in" <*> pVName),
+            <*> pSubExp,
           keyword "while" $> WhileLoop <*> pVName
         ]
 

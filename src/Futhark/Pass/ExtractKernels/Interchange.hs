@@ -34,7 +34,7 @@ import Futhark.Util (splitFromEnd)
 -- | An encoding of a sequential do-loop with no existential context,
 -- alongside its result pattern.
 data SeqLoop
-  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] (LoopForm SOACS) (Body SOACS)
+  = SeqLoop [Int] (Pat Type) [(FParam SOACS, SubExp)] LoopForm (Body SOACS)
 
 loopPerm :: SeqLoop -> [Int]
 loopPerm (SeqLoop perm _ _ _ _) = perm

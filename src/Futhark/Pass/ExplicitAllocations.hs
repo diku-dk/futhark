@@ -929,13 +929,12 @@ allocInExp ::
   AllocM fromrep torep (Exp torep)
 allocInExp (Loop merge form (Body () bodystms bodyres)) =
   allocInMergeParams merge $ \merge' mk_loop_val -> do
-    form' <- allocInLoopForm form
-    localScope (scopeOf form') $ do
+    localScope (scopeOfLoopForm form) $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
           (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
-      pure $ Loop merge' form' body'
+      pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
@@ -1028,28 +1027,6 @@ allocInExp e = mapExpM alloc e
             handle <- asks allocInOp
             handle op
         }
-
-allocInLoopForm ::
-  (Allocable fromrep torep inner) =>
-  LoopForm fromrep ->
-  AllocM fromrep torep (LoopForm torep)
-allocInLoopForm (WhileLoop v) = pure $ WhileLoop v
-allocInLoopForm (ForLoop i it n loopvars) =
-  ForLoop i it n <$> mapM allocInLoopVar loopvars
-  where
-    allocInLoopVar (p, a) = do
-      (mem, ixfun) <- lookupArraySummary a
-      case paramType p of
-        Array pt shape u -> do
-          dims <- map pe64 . arrayDims <$> lookupType a
-          let ixfun' = IxFun.slice ixfun $ fullSliceNum dims [DimFix $ le64 i]
-          pure (p {paramDec = MemArray pt shape u $ ArrayIn mem ixfun'}, a)
-        Prim bt ->
-          pure (p {paramDec = MemPrim bt}, a)
-        Mem space ->
-          pure (p {paramDec = MemMem space}, a)
-        Acc acc ispace ts u ->
-          pure (p {paramDec = MemAcc acc ispace ts u}, a)
 
 class SizeSubst op where
   opIsConst :: op -> Bool

@@ -336,7 +336,7 @@ protectIf _ _ _ stm =
 protectLoopHoisted ::
   (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp)] ->
-  LoopForm (Wise rep) ->
+  LoopForm ->
   SimpleM rep (a, b, Stms (Wise rep)) ->
   SimpleM rep (a, b, Stms (Wise rep))
 protectLoopHoisted merge form m = do
@@ -357,7 +357,7 @@ protectLoopHoisted merge form m = do
               find ((== cond) . paramName . fst) merge ->
               pure cond_init
           | otherwise -> pure $ constant True -- infinite loop
-        ForLoop _ it bound _ ->
+        ForLoop _ it bound ->
           letSubExp "loop_nonempty" $
             BasicOp $
               CmpOp (CmpSlt it) (intConst it 0) bound
@@ -838,18 +838,13 @@ simplifyExp _ _ (Loop merge form loopbody) = do
   args' <- mapM simplify args
   let merge' = zip params' args'
   (form', boundnames, wrapbody) <- case form of
-    ForLoop loopvar it boundexp loopvars -> do
+    ForLoop loopvar it boundexp -> do
       boundexp' <- simplify boundexp
-      let (loop_params, loop_arrs) = unzip loopvars
-      loop_params' <- mapM (traverse simplify) loop_params
-      loop_arrs' <- mapM simplify loop_arrs
-      let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
+      let form' = ForLoop loopvar it boundexp'
       pure
         ( form',
-          namesFromList (loopvar : map paramName loop_params') <> fparamnames,
-          bindLoopVar loopvar it boundexp'
-            . protectLoopHoisted merge' form'
-            . bindArrayLParams loop_params'
+          oneName loopvar <> fparamnames,
+          bindLoopVar loopvar it boundexp' . protectLoopHoisted merge' form'
         )
     WhileLoop cond -> do
       cond' <- simplify cond

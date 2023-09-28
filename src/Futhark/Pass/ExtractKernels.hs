@@ -363,15 +363,10 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToGPU) op)
 transformStm path (Let pat aux (Loop merge form body)) =
-  localScope (castScope (scopeOf form) <> scopeOfFParams params) $
-    oneStm . Let pat aux . Loop merge form' <$> transformBody path body
+  localScope (scopeOfLoopForm form <> scopeOfFParams params) $
+    oneStm . Let pat aux . Loop merge form <$> transformBody path body
   where
     params = map fst merge
-    form' = case form of
-      WhileLoop cond ->
-        WhileLoop cond
-      ForLoop i it bound ps ->
-        ForLoop i it bound ps
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
       onMap path $ MapLoop pat aux w lam arrs

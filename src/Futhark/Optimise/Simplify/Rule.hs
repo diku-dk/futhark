@@ -130,7 +130,7 @@ type RuleLoop rep a =
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   ( [(FParam rep, SubExp)],
-    LoopForm rep,
+    LoopForm,
     Body rep
   ) ->
   Rule rep

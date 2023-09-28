@@ -646,7 +646,7 @@ radixSort xs n w = do
   letTupExp "sorted" $
     Loop
       (zip params $ map Var xs)
-      (ForLoop i Int64 iters [])
+      (ForLoop i Int64 iters)
       loopbody
   where
     log2 :: SubExp -> ADM SubExp
