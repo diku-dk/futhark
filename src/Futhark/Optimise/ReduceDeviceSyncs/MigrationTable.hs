@@ -785,10 +785,6 @@ graphLoop (b : bs) params lform body = do
         WhileLoop _ -> pure ()
       graphBody body
       where
-        graphForInElem (p, arr) = do
-          when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
-          when (isArray p) $ (nameToId (paramName p), typeOf p) `reuses` arr
-
         graphParam ((_, t), p, arg, _) =
           do
             -- It is unknown whether a read can be delayed via the parameter
