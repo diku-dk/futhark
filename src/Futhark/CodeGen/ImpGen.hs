@@ -818,18 +818,9 @@ defCompileExp pat (Loop merge form body) = do
   let doBody = compileLoopBody params body
 
   case form of
-    ForLoop i _ bound loopvars -> do
-      let setLoopParam (p, a)
-            | Prim _ <- paramType p =
-                copyDWIM (paramName p) [] (Var a) [DimFix $ Imp.le64 i]
-            | otherwise =
-                pure ()
-
+    ForLoop i _ bound -> do
       bound' <- toExp bound
-
-      dLParams $ map fst loopvars
-      sFor' i bound' $
-        mapM_ setLoopParam loopvars >> doBody
+      sFor' i bound' doBody
     WhileLoop cond ->
       sWhile (TPrimExp $ Imp.var cond Bool) doBody
 

@@ -270,19 +270,16 @@ instance (Renameable rep) => Rename (Exp rep) where
       -- It is important that 'i' is renamed before the loop_vars, as
       -- 'i' may be used in the annotations for loop_vars (e.g. index
       -- functions).
-      ForLoop i it boundexp loop_vars -> renameBound [i] $ do
-        let (arr_params, loop_arrs) = unzip loop_vars
+      ForLoop i it boundexp -> renameBound [i] $ do
         boundexp' <- rename boundexp
-        loop_arrs' <- rename loop_arrs
-        renameBound (map paramName params ++ map paramName arr_params) $ do
+        renameBound (map paramName params) $ do
           params' <- mapM rename params
-          arr_params' <- mapM rename arr_params
           i' <- rename i
           loopbody' <- rename loopbody
           pure $
             Loop
               (zip params' args')
-              (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
+              (ForLoop i' it boundexp')
               loopbody'
       WhileLoop cond ->
         renameBound (map paramName params) $ do
