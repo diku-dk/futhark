@@ -51,7 +51,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpStms rep) => RuleBook rep
 standardRules =
   ruleBook topDownRules bottomUpRules
     <> loopRules

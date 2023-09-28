@@ -47,12 +47,9 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
 import Data.Map qualified as M
-import Data.Sequence ((<|))
-import Data.Sequence qualified as SQ
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder.Class
-import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -123,15 +120,6 @@ optimiseLoop onOp vtable sinking (merge, form, body0) =
       WhileLoop {} -> scopeOfFParams params
       ForLoop i it _ -> M.insert i (IndexName it) $ scopeOfFParams params
     vtable' = ST.fromScope scope <> vtable
-
-    inline i (x, arr) stms =
-      let pt = typeOf x
-          slice = Slice $ DimFix (Var i) : map sliceDim (arrayDims pt)
-          e = BasicOp (Index arr slice)
-          pat = mkExpPat [Ident (paramName x) pt] e
-          aux = StmAux mempty mempty (mkExpDec pat e)
-          stm = Let pat aux e
-       in stm <| stms
 
 optimiseStms ::
   (Constraints rep) =>
