@@ -239,14 +239,6 @@ bindLParams :: (SimplifiableRep rep) => [LParam (Wise rep)] -> SimpleM rep a -> 
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
-bindArrayLParams ::
-  (SimplifiableRep rep) =>
-  [LParam (Wise rep)] ->
-  SimpleM rep a ->
-  SimpleM rep a
-bindArrayLParams params =
-  localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
-
 bindMerge ::
   (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp, SubExpRes)] ->
