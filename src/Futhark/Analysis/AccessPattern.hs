@@ -262,6 +262,12 @@ analyzeStms ctx tmp_ctx bodyConstructor pat body = do
             currentLevel = currentLevel ctx + 1
           }
 
+getDeps :: SubExp -> Names
+getDeps subexp =
+  case subexp of
+    (Var v) -> oneName v
+    (Constant _) -> mempty
+
 -- | Analyze a rep statement and return the updated context and array index
 -- descriptors.
 analyzeStm :: (Analyze rep) => Context -> Stm rep -> (Context, ArrayIndexDescriptors)
@@ -276,7 +282,7 @@ analyzeStm ctx (Let pats _ e) = do
     (BasicOp op) -> analyzeBasicOp ctx op patternName
     (Match _ cases defaultBody _) -> analyzeMatch ctx patternName defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternName
-    (Apply _name _ _ _) -> (ctx, mempty) -- ignored
+    (Apply _name diets _ _) -> analyzeApply ctx patternName diets
     (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternName
 
@@ -348,7 +354,7 @@ analyzeBasicOp ctx expression pat = do
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx length_subexp
-        (Manifest _dim name) -> error $ "unhandled: Manifest for " ++ prettyString _name
+        (Manifest _dim name) -> error $ "unhandled: Manifest for " ++ prettyString name
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
@@ -394,6 +400,14 @@ analyzeLoop ctx bindings loop body pat = do
 
   -- Extend context with the loop expression
   analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
+
+analyzeApply :: Context -> VName -> [(SubExp, Diet)] -> (Context, ArrayIndexDescriptors)
+analyzeApply ctx pat diets =
+  onFst
+        ( \ctx' ->
+            extend ctx' $ oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets
+        )
+        (ctx, mempty)
 
 segOpType :: SegOp lvl rep -> (Int, VName) -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
@@ -484,7 +498,7 @@ reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
-      Nothing -> error $ "Unable to find " ++ baseString v
+      Nothing -> error $ "Unable to find " ++ prettyString v
       Just (CtxVal deps itertype lvl) ->
         if null $ namesToList deps
           then DimIdxPat $ S.fromList [(baseTag v, (v, lvl, itertype))]
