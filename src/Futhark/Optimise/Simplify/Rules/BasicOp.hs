@@ -15,7 +15,6 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.Loop
 import Futhark.Optimise.Simplify.Rules.Simple
@@ -380,5 +379,5 @@ bottomUpRules =
 
 -- | A set of simplification rules for t'BasicOp's.  Includes rules
 -- from "Futhark.Optimise.Simplify.Rules.Simple".
-basicOpRules :: (BuilderOps rep, Aliased rep) => RuleBook rep
+basicOpRules :: (BuilderOps rep) => RuleBook rep
 basicOpRules = ruleBook topDownRules bottomUpRules <> loopRules

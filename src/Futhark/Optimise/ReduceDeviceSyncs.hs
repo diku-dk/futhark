@@ -15,7 +15,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as IM
 import Data.List (transpose, zip4)
 import Data.Map.Strict qualified as M
-import Data.Sequence ((<|), (><), (|>))
+import Data.Sequence ((><), (|>))
 import Data.Text qualified as T
 import Futhark.Construct (fullSlice, mkBody, sliceDim)
 import Futhark.Error
