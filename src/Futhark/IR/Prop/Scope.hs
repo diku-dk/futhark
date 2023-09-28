@@ -23,6 +23,7 @@ module Futhark.IR.Prop.Scope
     inScopeOf,
     scopeOfLParams,
     scopeOfFParams,
+    scopeOfLoopForm,
     scopeOfPat,
     scopeOfPatElem,
     SameScope,
@@ -171,10 +172,10 @@ instance Scoped rep (FunDef rep) where
 instance Scoped rep (VName, NameInfo rep) where
   scopeOf = uncurry M.singleton
 
-instance Scoped rep (LoopForm rep) where
-  scopeOf (WhileLoop _) = mempty
-  scopeOf (ForLoop i it _ xs) =
-    M.insert i (IndexName it) $ scopeOfLParams (map fst xs)
+-- | The scope of a loop form.
+scopeOfLoopForm :: LoopForm -> Scope rep
+scopeOfLoopForm (WhileLoop _) = mempty
+scopeOfLoopForm (ForLoop i it _) = M.singleton i $ IndexName it
 
 -- | The scope of a pattern.
 scopeOfPat :: (LetDec rep ~ dec) => Pat dec -> Scope rep

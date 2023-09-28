@@ -184,7 +184,7 @@ mapExpM tv (WithAcc inputs lam) =
 mapExpM tv (Loop merge form loopbody) = do
   params' <- mapM (mapOnFParam tv) params
   form' <- mapOnLoopForm tv form
-  let scope = scopeOf form' <> scopeOfFParams params'
+  let scope = scopeOfLoopForm form' <> scopeOfFParams params'
   Loop
     <$> (zip params' <$> mapM (mapOnSubExp tv) args)
     <*> pure form'
@@ -200,16 +200,10 @@ mapOnShape tv (Shape ds) = Shape <$> mapM (mapOnSubExp tv) ds
 mapOnLoopForm ::
   (Monad m) =>
   Mapper frep trep m ->
-  LoopForm frep ->
-  m (LoopForm trep)
-mapOnLoopForm tv (ForLoop i it bound loop_vars) =
-  ForLoop
-    <$> mapOnVName tv i
-    <*> pure it
-    <*> mapOnSubExp tv bound
-    <*> (zip <$> mapM (mapOnLParam tv) loop_lparams <*> mapM (mapOnVName tv) loop_arrs)
-  where
-    (loop_lparams, loop_arrs) = unzip loop_vars
+  LoopForm ->
+  m LoopForm
+mapOnLoopForm tv (ForLoop i it bound) =
+  ForLoop <$> mapOnVName tv i <*> pure it <*> mapOnSubExp tv bound
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
@@ -268,14 +262,10 @@ walkOnType tv (Acc acc ispace ts _) = do
 walkOnType _ Mem {} = pure ()
 walkOnType tv (Array _ shape _) = walkOnShape tv shape
 
-walkOnLoopForm :: (Monad m) => Walker rep m -> LoopForm rep -> m ()
-walkOnLoopForm tv (ForLoop i _ bound loop_vars) =
+walkOnLoopForm :: (Monad m) => Walker rep m -> LoopForm -> m ()
+walkOnLoopForm tv (ForLoop i _ bound) = do
   walkOnVName tv i
-    >> walkOnSubExp tv bound
-    >> mapM_ (walkOnLParam tv) loop_lparams
-    >> mapM_ (walkOnVName tv) loop_arrs
-  where
-    (loop_lparams, loop_arrs) = unzip loop_vars
+  walkOnSubExp tv bound
 walkOnLoopForm tv (WhileLoop cond) =
   walkOnVName tv cond
 
@@ -351,7 +341,7 @@ walkExpM tv (Loop merge form loopbody) = do
   mapM_ (walkOnFParam tv) params
   walkOnLoopForm tv form
   mapM_ (walkOnSubExp tv) args
-  let scope = scopeOfFParams params <> scopeOf form
+  let scope = scopeOfFParams params <> scopeOfLoopForm form
   walkOnBody tv scope loopbody
   where
     (params, args) = unzip merge

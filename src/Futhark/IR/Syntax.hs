@@ -435,7 +435,7 @@ data Exp rep
     -- body/ is picked.
     Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    Loop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
+    Loop [(FParam rep, SubExp)] LoopForm (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
@@ -453,7 +453,7 @@ deriving instance (RepTypes rep) => Show (Exp rep)
 deriving instance (RepTypes rep) => Ord (Exp rep)
 
 -- | For-loop or while-loop?
-data LoopForm rep
+data LoopForm
   = ForLoop
       VName
       -- ^ The loop iterator var
@@ -461,14 +461,8 @@ data LoopForm rep
       -- ^ The type of the loop iterator var
       SubExp
       -- ^ The number of iterations.
-      [(LParam rep, VName)]
   | WhileLoop VName
-
-deriving instance (RepTypes rep) => Eq (LoopForm rep)
-
-deriving instance (RepTypes rep) => Show (LoopForm rep)
-
-deriving instance (RepTypes rep) => Ord (LoopForm rep)
+  deriving (Eq, Ord, Show)
 
 -- | Data associated with a branch.
 data MatchDec rt = MatchDec

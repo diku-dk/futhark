@@ -315,22 +315,12 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
       <+> equals
       <+> ppTuple' (map pretty args)
       </> ( case form of
-              ForLoop i it bound [] ->
+              ForLoop i it bound ->
                 "for"
                   <+> align
                     ( pretty i <> ":" <> pretty it
                         <+> "<"
                         <+> align (pretty bound)
-                    )
-              ForLoop i it bound loop_vars ->
-                "for"
-                  <+> align
-                    ( pretty i
-                        <> ":"
-                        <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
-                        </> stack (map prettyLoopVar loop_vars)
                     )
               WhileLoop cond ->
                 "while" <+> pretty cond
@@ -339,7 +329,6 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
       <+> nestedBlock "{" "}" (pretty loopbody)
     where
       (params, args) = unzip merge
-      prettyLoopVar (p, a) = pretty p <+> "in" <+> pretty a
   pretty (WithAcc inputs lam) =
     "with_acc"
       <> parens (braces (commastack $ map ppInput inputs) <> comma </> pretty lam)

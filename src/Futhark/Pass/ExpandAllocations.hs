@@ -732,7 +732,7 @@ offsetMemoryInExp (Loop merge form body) = do
   offsetMemoryInLoopParams merge $ \merge' -> do
     body' <-
       localScope
-        (scopeOfFParams (map fst merge') <> scopeOf form)
+        (scopeOfFParams (map fst merge') <> scopeOfLoopForm form)
         (offsetMemoryInBody body)
     pure $ Loop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e

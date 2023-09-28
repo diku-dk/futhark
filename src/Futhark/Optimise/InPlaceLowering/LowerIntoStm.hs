@@ -181,7 +181,7 @@ lowerUpdateIntoLoop ::
   [DesiredUpdate (LetDec rep)] ->
   Pat (LetDec rep) ->
   [(FParam rep, SubExp)] ->
-  LoopForm rep ->
+  LoopForm ->
   Body rep ->
   Maybe
     ( m

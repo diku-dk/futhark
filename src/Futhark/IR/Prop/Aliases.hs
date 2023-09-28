@@ -166,19 +166,11 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (Match _ cases defbody _) =
   foldMap (consumedInBody . caseBody) cases <> consumedInBody defbody
-consumedInExp (Loop merge form body) =
+consumedInExp (Loop merge _ _) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
-    <> consumedInForm form
-  where
-    body_consumed = consumedInBody body
-    varConsumed = (`nameIn` body_consumed) . paramName . fst
-    consumedInForm (ForLoop _ _ _ loopvars) =
-      namesFromList $ map snd $ filter varConsumed loopvars
-    consumedInForm WhileLoop {} =
-      mempty
 consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs)
     <> ( consumedByLambda lam

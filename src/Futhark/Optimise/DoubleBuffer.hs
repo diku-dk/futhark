@@ -161,7 +161,7 @@ optimiseStms (e : es) = do
 optimiseStm :: forall rep. (ASTRep rep) => Stm rep -> DoubleBufferM rep (Stms rep)
 optimiseStm (Let pat aux (Loop merge form body)) = do
   body' <-
-    localScope (scopeOf form <> scopeOfFParams (map fst merge)) $
+    localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $
       optimiseBody body
   opt_loop <- asks envOptimiseLoop
   (stms, pat', merge', body'') <- opt_loop pat merge body'

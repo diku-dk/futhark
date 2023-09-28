@@ -101,21 +101,16 @@ mkSegSpace w = do
   let space = SegSpace flat [(gtid, w)]
   pure (gtid, space)
 
-transformLoopForm :: LoopForm SOACS -> LoopForm MC
-transformLoopForm (WhileLoop cond) = WhileLoop cond
-transformLoopForm (ForLoop i it bound params) = ForLoop i it bound params
-
 transformStm :: Stm SOACS -> ExtractM (Stms MC)
 transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
 transformStm (Let pat aux (Loop merge form body)) = do
-  let form' = transformLoopForm form
   body' <-
-    localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
+    localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm form) $
       transformBody body
-  pure $ oneStm $ Let pat aux $ Loop merge form' body'
+  pure $ oneStm $ Let pat aux $ Loop merge form body'
 transformStm (Let pat aux (Match ses cases defbody ret)) =
   oneStm . Let pat aux
     <$> (Match ses <$> mapM transformCase cases <*> transformBody defbody <*> pure ret)

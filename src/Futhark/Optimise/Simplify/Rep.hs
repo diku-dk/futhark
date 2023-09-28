@@ -325,10 +325,7 @@ informExp :: (Informing rep) => Exp rep -> Exp (Wise rep)
 informExp (Match cond cases defbody (MatchDec ts ifsort)) =
   Match cond (map (fmap informBody) cases) (informBody defbody) (MatchDec ts ifsort)
 informExp (Loop merge form loopbody) =
-  let form' = case form of
-        ForLoop i it bound params -> ForLoop i it bound params
-        WhileLoop cond -> WhileLoop cond
-   in Loop merge form' $ informBody loopbody
+  Loop merge form $ informBody loopbody
 informExp e = runIdentity $ mapExpM mapper e
   where
     mapper =
