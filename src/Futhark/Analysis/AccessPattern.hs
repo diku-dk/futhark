@@ -4,7 +4,7 @@ module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
     Analyze,
-    ArrayIndexDescriptors,
+    IndexTable,
     ArrayName,
     DimIdxPat (DimIdxPat),
     IndexExprName,
@@ -30,12 +30,12 @@ import Futhark.IR.Seq
 import Futhark.IR.SeqMem
 
 class Analyze rep where
-  analyzeOp :: Op rep -> (Context -> VName -> (Context, ArrayIndexDescriptors))
+  analyzeOp :: Op rep -> (Context -> VName -> (Context, IndexTable))
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
 -- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimIdxPat]
-type ArrayIndexDescriptors =
+type IndexTable =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName MemoryEntry))
 
 data SegOpName
@@ -97,8 +97,8 @@ type LoopBodyName = (Int, VName)
 
 type CondBodyName = (Int, VName)
 
-unionArrayIndexDescriptors :: ArrayIndexDescriptors -> ArrayIndexDescriptors -> ArrayIndexDescriptors
-unionArrayIndexDescriptors lhs rhs = do
+unionIndexTables :: IndexTable -> IndexTable -> IndexTable
+unionIndexTables lhs rhs = do
   -- Find all occurences of ArrayName's from rhs in lhs
   let lhsNames = M.fromList $ map (onFst vnameFromSegOp) $ M.toList lhs
   let rhs' =
@@ -212,11 +212,11 @@ contextFromNames ctx itertype =
     . map (`oneContext` ctxValZeroDeps ctx itertype)
 
 -- | Analyze each `entry` and accumulate the results.
-analyzeDimIdxPats :: (Analyze rep) => Prog rep -> ArrayIndexDescriptors
+analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable
 analyzeDimIdxPats = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: (Analyze rep) => FunDef rep -> ArrayIndexDescriptors
+analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
@@ -224,16 +224,16 @@ analyzeFunction func = do
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
-analyzeStmsPrimitive :: (Analyze rep) => Context -> [Stm rep] -> (Context, ArrayIndexDescriptors)
+analyzeStmsPrimitive :: (Analyze rep) => Context -> [Stm rep] -> (Context, IndexTable)
 analyzeStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
-    (\(c, r) stm -> onSnd (unionArrayIndexDescriptors r) $ analyzeStm c stm)
+    (\(c, r) stm -> onSnd (unionIndexTables r) $ analyzeStm c stm)
     (ctx, mempty)
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: (Analyze rep) => Context -> Context -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context, ArrayIndexDescriptors)
+analyzeStms :: (Analyze rep) => Context -> Context -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context, IndexTable)
 analyzeStms ctx tmp_ctx bodyConstructor pat body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
@@ -270,7 +270,7 @@ getDeps subexp =
 
 -- | Analyze a rep statement and return the updated context and array index
 -- descriptors.
-analyzeStm :: (Analyze rep) => Context -> Stm rep -> (Context, ArrayIndexDescriptors)
+analyzeStm :: (Analyze rep) => Context -> Stm rep -> (Context, IndexTable)
 analyzeStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
   let patternName = patElemName . head $ patElems pats
@@ -296,7 +296,7 @@ getIndexDependencies ctx =
           Just $ consolidate ctx subExpression : accumulator
         _ -> Nothing
 
-analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, ArrayIndexDescriptors)
+analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, IndexTable)
 analyzeIndex ctx pat arr_name dimIndexes = do
   -- TODO: Should we just take the latest segmap?
   let dimindices = getIndexDependencies ctx dimIndexes
@@ -325,18 +325,18 @@ analyzeIndexContextFromIndices ctx dimIndexes pat = do
   -- Extend context with the dependencies and constants index expression
   extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
 
-analyzeIndex' :: Context -> VName -> VName -> [DimIdxPat] -> (Context, ArrayIndexDescriptors)
+analyzeIndex' :: Context -> VName -> VName -> [DimIdxPat] -> (Context, IndexTable)
 analyzeIndex' ctx pat arr_name dimIndexes = do
   let segmaps = allSegMap ctx
   let memory_entries = MemoryEntry dimIndexes $ parents ctx
   let idx_expr_name = pat --                                         IndexExprName
   let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
   let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
-  let res = foldl' unionArrayIndexDescriptors mempty $ map (`M.singleton` map_array) segmaps
+  let res = foldl' unionIndexTables mempty $ map (`M.singleton` map_array) segmaps
 
   (ctx, res)
 
-analyzeBasicOp :: Context -> BasicOp -> VName -> (Context, ArrayIndexDescriptors)
+analyzeBasicOp :: Context -> BasicOp -> VName -> (Context, IndexTable)
 analyzeBasicOp ctx expression pat = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
@@ -370,14 +370,14 @@ analyzeBasicOp ctx expression pat = do
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pat ctx) ne nn)
 
-analyzeMatch :: (Analyze rep) => Context -> VName -> Body rep -> [Body rep] -> (Context, ArrayIndexDescriptors)
+analyzeMatch :: (Analyze rep) => Context -> VName -> Body rep -> [Body rep] -> (Context, IndexTable)
 analyzeMatch ctx pat body bodies =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
         ( \(ctx', res) b ->
             -- This Little Maneuver's Gonna Cost Us 51 Years
             onFst constLevel
-              . onSnd (unionArrayIndexDescriptors res)
+              . onSnd (unionIndexTables res)
               . analyzeStms ctx'' ctx' CondBodyName pat
               . stmsToList
               $ bodyStms b
@@ -387,7 +387,7 @@ analyzeMatch ctx pat body bodies =
   where
     constLevel context = context {currentLevel = currentLevel ctx - 1}
 
-analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm rep -> Body rep -> VName -> (Context, ArrayIndexDescriptors)
+analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm rep -> Body rep -> VName -> (Context, IndexTable)
 analyzeLoop ctx bindings loop body pat = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
@@ -401,7 +401,7 @@ analyzeLoop ctx bindings loop body pat = do
   -- Extend context with the loop expression
   analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
 
-analyzeApply :: Context -> VName -> [(SubExp, Diet)] -> (Context, ArrayIndexDescriptors)
+analyzeApply :: Context -> VName -> [(SubExp, Diet)] -> (Context, IndexTable)
 analyzeApply ctx pat diets =
   onFst
         ( \ctx' ->
@@ -415,7 +415,7 @@ segOpType (SegRed {}) = SegmentedRed
 segOpType (SegScan {}) = SegmentedScan
 segOpType (SegHist {}) = SegmentedHist
 
-analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context -> VName -> (Context, ArrayIndexDescriptors)
+analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context -> VName -> (Context, IndexTable)
 analyzeSegOp op ctx pat = do
   let nextLevel = currentLevel ctx + length (unSegSpace $ segSpace op) - 1
   let ctx' = ctx {currentLevel = nextLevel}
@@ -429,7 +429,7 @@ analyzeSegOp op ctx pat = do
   -- Analyze statements in the SegOp body
   analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
 
-analyzeSizeOp :: SizeOp -> Context -> VName -> (Context, ArrayIndexDescriptors)
+analyzeSizeOp :: SizeOp -> Context -> VName -> (Context, IndexTable)
 analyzeSizeOp op ctx pat = do
   let subexprsToContext =
         contextFromNames ctx Sequential
@@ -443,11 +443,11 @@ analyzeSizeOp op ctx pat = do
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
-analyzeGPUBody :: (Analyze rep) => Body rep -> Context -> (Context, ArrayIndexDescriptors)
+analyzeGPUBody :: (Analyze rep) => Body rep -> Context -> (Context, IndexTable)
 analyzeGPUBody body ctx =
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
-analyzeOtherOp :: Context -> VName -> (Context, ArrayIndexDescriptors)
+analyzeOtherOp :: Context -> VName -> (Context, IndexTable)
 analyzeOtherOp _ctx _pat = error "UNHANDLED: OtherOp"
 
 -- | Get the iteration type of the last SegOp encountered in the context.
@@ -533,7 +533,7 @@ instance Analyze MC where
     | ParOp (Just segop) seqSegop <- mcOp = \ctx name -> do
         let (ctx', res') = analyzeSegOp segop ctx name
         let (ctx'', res'') = analyzeSegOp seqSegop ctx name
-        (ctx' <> ctx'', unionArrayIndexDescriptors res' res'')
+        (ctx' <> ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
 instance Analyze MCMem where analyzeOp _ = error $ notImplementedYet "MCMem"
