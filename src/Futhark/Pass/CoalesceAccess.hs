@@ -79,19 +79,18 @@ transformStm (ctx, expmap) stm@(Let pat aux (Op (SegOp op)))
 -- \| SegGroup {} <- segLevel op = pure (ctx, mempty) -- TODO: Handle this
 -- \| SegThreadInGroup {} <- segLevel op = pure (ctx, mempty) -- TODO: Handle this
 transformStm (ctx, expmap) (Let pat aux e) = do
-  e' <- mapExpM (transform expmap) e
+  e' <- mapExpM (transform ctx expmap) e
   let stm' = Let pat aux e'
   addStm stm'
   pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
---
-transform :: ExpMap -> Mapper GPU GPU CoalesceM
-transform expmap =
-  identityMapper {mapOnBody = \scope -> localScope scope . transformBody expmap}
+transform :: Ctx -> ExpMap -> Mapper GPU GPU CoalesceM
+transform ctx expmap =
+  identityMapper {mapOnBody = \scope -> localScope scope . transformBody ctx expmap}
 
-transformBody :: ExpMap -> Body GPU -> CoalesceM (Body GPU)
-transformBody expmap (Body () stms res) = do
-  stms' <- transformStms mempty expmap stms
+transformBody :: Ctx -> ExpMap -> Body GPU -> CoalesceM (Body GPU)
+transformBody ctx expmap (Body () stms res) = do
+  stms' <- transformStms ctx expmap stms
   pure $ Body () stms' res
 
 transformKernelBody ::
