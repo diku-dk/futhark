@@ -322,8 +322,9 @@ analyzeStm ctx (Let pats _ e) = do
     (Op op) -> analyzeOp op ctx patternName
 
 getIndexDependencies :: Context -> [DimIndex SubExp] -> Maybe [DimIdxPat]
-getIndexDependencies ctx =
-  foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) . reverse
+getIndexDependencies _ [_] = Nothing
+getIndexDependencies ctx dims =
+  foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) $ reverse dims
   where
     matchDimIndex idx accumulator =
       case idx of
