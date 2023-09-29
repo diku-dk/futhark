@@ -69,7 +69,42 @@ newtype DimIdxPat = DimIdxPat
     -- Tuple of patternName and nested `level` it is created at.
     dependencies :: S.IntMap (VName, Int, IterationType)
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
+
+data Lvls = Lvls Int Int
+  deriving (Eq, Show)
+
+data OrderedDep = OrderedDep VName Lvls IterationType
+  deriving (Eq, Show)
+
+instance Ord Lvls where
+  compare (Lvls l1 l'1) (Lvls l2 l'2) =
+    if l1 == l2
+      then l'1 `compare` l'2
+      else l1 `compare` l2
+
+instance Ord OrderedDep where
+  compare (OrderedDep _ lvls1 it1) (OrderedDep _ lvls2 it2) =
+    if it1 == it2
+      then lvls1 `compare` lvls2
+      else case (it1, it2) of
+        (Parallel, Sequential) -> GT
+        (Sequential, Parallel) -> LT
+
+instance Ord DimIdxPat where
+  compare (DimIdxPat deps1) (DimIdxPat deps2) = do
+    let n = VName "" 0
+    let lvls = (-1, -1)
+    let it = Sequential
+    let deps1' = map f (zip (map snd $ S.toList deps1) [0 :: Int ..])
+    let deps2' = map f (zip (map snd $ S.toList deps2) [0 :: Int ..])
+    let aggr1 = foldl max (n, lvls, it) deps1'
+    let aggr2 = foldl max (n, lvls, it) deps2'
+    compare aggr1 aggr2
+    where
+      f ((n, l, it), l') = (n, (l, l'), it)
+
+-- [ [ par (1,1)], [ par (1,0)] ]
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
