@@ -20,6 +20,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Futhark.FreshNames
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
@@ -61,6 +62,7 @@ data MemoryEntry = MemoryEntry
   { dimensions :: [DimIdxPat],
     nest :: [BodyType]
   }
+  deriving (Show)
 
 -- | Collect all features of access to a specific dimension of an array.
 newtype DimIdxPat = DimIdxPat
@@ -70,41 +72,6 @@ newtype DimIdxPat = DimIdxPat
     dependencies :: S.IntMap (VName, Int, IterationType)
   }
   deriving (Eq, Show)
-
-data Lvls = Lvls Int Int
-  deriving (Eq, Show)
-
-data OrderedDep = OrderedDep VName Lvls IterationType
-  deriving (Eq, Show)
-
-instance Ord Lvls where
-  compare (Lvls l1 l'1) (Lvls l2 l'2) =
-    if l1 == l2
-      then l'1 `compare` l'2
-      else l1 `compare` l2
-
-instance Ord OrderedDep where
-  compare (OrderedDep _ lvls1 it1) (OrderedDep _ lvls2 it2) =
-    if it1 == it2
-      then lvls1 `compare` lvls2
-      else case (it1, it2) of
-        (Parallel, Sequential) -> GT
-        (Sequential, Parallel) -> LT
-
-instance Ord DimIdxPat where
-  compare (DimIdxPat deps1) (DimIdxPat deps2) = do
-    let n = VName "" 0
-    let lvls = (-1, -1)
-    let it = Sequential
-    let deps1' = map f (zip (map snd $ S.toList deps1) [0 :: Int ..])
-    let deps2' = map f (zip (map snd $ S.toList deps2) [0 :: Int ..])
-    let aggr1 = foldl max (n, lvls, it) deps1'
-    let aggr2 = foldl max (n, lvls, it) deps2'
-    compare aggr1 aggr2
-    where
-      f ((n, l, it), l') = (n, (l, l'), it)
-
--- [ [ par (1,1)], [ par (1,0)] ]
 
 instance Semigroup DimIdxPat where
   (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
@@ -440,10 +407,10 @@ analyzeLoop ctx bindings loop body pat = do
 analyzeApply :: Context -> VName -> [(SubExp, Diet)] -> (Context, IndexTable)
 analyzeApply ctx pat diets =
   onFst
-        ( \ctx' ->
-            extend ctx' $ oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets
-        )
-        (ctx, mempty)
+    ( \ctx' ->
+        extend ctx' $ oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets
+    )
+    (ctx, mempty)
 
 segOpType :: SegOp lvl rep -> (Int, VName) -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
@@ -582,3 +549,35 @@ instance Analyze SOACS where analyzeOp _ = error $ notImplementedYet "SOACS"
 
 notImplementedYet :: String -> String
 notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."
+
+-- Sorting of DimIdxPat used to find optimal permutations of arrays in the CoalesceAccess pass
+data Lvls = Lvls Int Int
+  deriving (Eq, Show)
+
+data OrderedDep = OrderedDep VName Lvls IterationType
+  deriving (Eq, Show)
+
+instance Ord Lvls where
+  compare (Lvls l1 l'1) (Lvls l2 l'2) =
+    if l1 == l2
+      then l'1 `compare` l'2
+      else l1 `compare` l2
+
+instance Ord OrderedDep where
+  compare d1@(OrderedDep _ lvls1 it1) d2@(OrderedDep _ lvls2 it2) =
+    if it1 == it2
+      then lvls1 `compare` lvls2
+      else case (it1, it2) of
+        (Parallel, Sequential) -> GT
+        (Sequential, Parallel) -> LT
+
+instance Ord DimIdxPat where
+  compare (DimIdxPat deps1) (DimIdxPat deps2) = do
+    let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep]
+    let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep]
+    let neutral = OrderedDep (VName "" 0) (Lvls (-1) (-1)) Sequential -- Neutral element
+    let aggr1 = foldl max neutral deps1'
+    let aggr2 = foldl max neutral deps2'
+    compare aggr1 aggr2
+    where
+      f ((n, l, it), l') = OrderedDep n (Lvls l l') it

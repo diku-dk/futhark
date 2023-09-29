@@ -35,8 +35,7 @@ coalesceAccess =
     -- return
     $ \prog ->
       let analysisRes = analyzeDimIdxPats prog
-       in -- pTraceShow prog $ pTrace "\n------------------------\n" $ pTraceShow analysisRes $ pTrace "\n------------------------\n"
-          intraproceduralTransformation (onStms analysisRes) prog
+       in intraproceduralTransformation (onStms analysisRes) prog
   where
     onStms analysisRes scope stms = do
       -- let m = localScope scope $ transformStms mempty analysisRes stms
@@ -219,87 +218,86 @@ ensureCoalescedAccess
       Just arr' -> pure $ Just (arr', slice)
       -- We have not seen this array before.
       Nothing ->
-        pTrace "\n=====================================\n" $
-          pTraceShow arr $
-            pTrace "\n=====================================\n" $
-              case (isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
-                -- (False, Just typ)
-                --   -- We are fully indexing the array with thread IDs, but the
-                --   -- indices are in a permuted order.
-                --   | Just is <- sliceIndices slice,
-                --     length is == arrayRank typ,
-                --     Just is' <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is,
-                --     Just perm <- is' `isPermutationOf` is ->
-                --       replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
-                --   -- Check whether the access is already coalesced because of a
-                --   -- previous rearrange being applied to the current array:
-                --   -- 1. get the permutation of the source-array rearrange
-                --   -- 2. apply it to the slice
-                --   -- 3. check that the innermost index is actually the gid
-                --   --    of the innermost kernel dimension.
-                --   -- If so, the access is already coalesced, nothing to do!
-                --   -- (Cosmin's Heuristic.)
-                --   | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
-                --     not $ null perm,
-                --     not $ null thread_gids,
-                --     inner_gid <- last thread_gids,
-                --     length slice >= length perm,
-                --     slice' <- map (unSlice slice !!) perm,
-                --     DimFix inner_ind <- last slice',
-                --     not $ null thread_gids,
-                --     isGidVariant inner_gid inner_ind ->
-                --       pure Nothing
-                --   -- We are not fully indexing an array, but the remaining slice
-                --   -- is invariant to the innermost-kernel dimension. We assume
-                --   -- the remaining slice will be sequentially streamed, hence
-                --   -- tiling will be applied later and will solve coalescing.
-                --   -- Hence nothing to do at this point. (Cosmin's Heuristic.)
-                --   | (is, rem_slice) <- splitSlice slice,
-                --     not $ null rem_slice,
-                --     allDimAreSlice rem_slice,
-                --     Nothing <- M.lookup arr expmap,
-                --     pt <- elemType typ,
-                --     not $ tooSmallSlice (primByteSize pt) rem_slice,
-                --     is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
-                --     not (null thread_gids || null is),
-                --     last thread_gids `notNameIn` (freeIn is <> freeIn rem_slice) ->
-                --       pure Nothing
-                --   -- We are not fully indexing the array, and the indices are not
-                --   -- a proper prefix of the thread indices, and some indices are
-                --   -- thread local, so we assume (HEURISTIC!)  that the remaining
-                --   -- dimensions will be traversed sequentially.
-                --   | (is, rem_slice) <- splitSlice slice,
-                --     not $ null rem_slice,
-                --     pt <- elemType typ,
-                --     not $ tooSmallSlice (primByteSize pt) rem_slice,
-                --     is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
-                --     any isThreadLocal (namesToList $ freeIn is) -> do
-                --       let perm = coalescingPermutation (length is) $ arrayRank typ
-                --       replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+        case (isThreadLocal arr, typeOf <$> M.lookup arr outer_scope) of
+          -- (False, Just typ)
+          --   -- We are fully indexing the array with thread IDs, but the
+          --   -- indices are in a permuted order.
+          --   | Just is <- sliceIndices slice,
+          --     length is == arrayRank typ,
+          --     Just is' <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is,
+          --     Just perm <- is' `isPermutationOf` is ->
+          --       replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
+          --   -- Check whether the access is already coalesced because of a
+          --   -- previous rearrange being applied to the current array:
+          --   -- 1. get the permutation of the source-array rearrange
+          --   -- 2. apply it to the slice
+          --   -- 3. check that the innermost index is actually the gid
+          --   --    of the innermost kernel dimension.
+          --   -- If so, the access is already coalesced, nothing to do!
+          --   -- (Cosmin's Heuristic.)
+          --   | Just (Let _ _ (BasicOp (Rearrange perm _))) <- M.lookup arr expmap,
+          --     not $ null perm,
+          --     not $ null thread_gids,
+          --     inner_gid <- last thread_gids,
+          --     length slice >= length perm,
+          --     slice' <- map (unSlice slice !!) perm,
+          --     DimFix inner_ind <- last slice',
+          --     not $ null thread_gids,
+          --     isGidVariant inner_gid inner_ind ->
+          --       pure Nothing
+          --   -- We are not fully indexing an array, but the remaining slice
+          --   -- is invariant to the innermost-kernel dimension. We assume
+          --   -- the remaining slice will be sequentially streamed, hence
+          --   -- tiling will be applied later and will solve coalescing.
+          --   -- Hence nothing to do at this point. (Cosmin's Heuristic.)
+          --   | (is, rem_slice) <- splitSlice slice,
+          --     not $ null rem_slice,
+          --     allDimAreSlice rem_slice,
+          --     Nothing <- M.lookup arr expmap,
+          --     pt <- elemType typ,
+          --     not $ tooSmallSlice (primByteSize pt) rem_slice,
+          --     is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+          --     not (null thread_gids || null is),
+          --     last thread_gids `notNameIn` (freeIn is <> freeIn rem_slice) ->
+          --       pure Nothing
+          --   -- We are not fully indexing the array, and the indices are not
+          --   -- a proper prefix of the thread indices, and some indices are
+          --   -- thread local, so we assume (HEURISTIC!)  that the remaining
+          --   -- dimensions will be traversed sequentially.
+          --   | (is, rem_slice) <- splitSlice slice,
+          --     not $ null rem_slice,
+          --     pt <- elemType typ,
+          --     not $ tooSmallSlice (primByteSize pt) rem_slice,
+          --     is /= map Var (take (length is) thread_gids) || length is == length thread_gids,
+          --     any isThreadLocal (namesToList $ freeIn is) -> do
+          --       let perm = coalescingPermutation (length is) $ arrayRank typ
+          --       replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
-                --   -- Everything is fine... assuming that the array is in row-major
-                --   -- order!  Make sure that is the case.
-                --   | Just {} <- nonlinearInMemory arr expmap ->
-                --       case sliceIndices slice of
-                --         Just is
-                --           | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
-                --               replace =<< lift (rowMajorArray arr)
-                --           | otherwise ->
-                --               pure Nothing
-                --         _ -> replace =<< lift (rowMajorArray arr)
-                -- _ -> pure Nothing
-                (False, Just typ) -> do
-                  -- 1. Check if the array is  in the optimal permutation
-                  -- 2. If arr is not in the optimal permutation, replace it with the optimal permutation
+          --   -- Everything is fine... assuming that the array is in row-major
+          --   -- order!  Make sure that is the case.
+          --   | Just {} <- nonlinearInMemory arr expmap ->
+          --       case sliceIndices slice of
+          --         Just is
+          --           | Just _ <- coalescedIndexes free_ker_vars isGidVariant (map Var thread_gids) is ->
+          --               replace =<< lift (rowMajorArray arr)
+          --           | otherwise ->
+          --               pure Nothing
+          --         _ -> replace =<< lift (rowMajorArray arr)
+          -- _ -> pure Nothing
+          (False, Just typ) -> do
+            -- 1. Check if the array is in the optimal permutation
+            let (is_optimal_perm, perm) = optimalPermutation arr ctx
 
-                  -- 1.
-                  let (is_optimal_perm, optimal_perm) = optimalPermutation arr ctx
-
-                  -- 2.
-                  if is_optimal_perm
-                    then pTrace "\n----------------\n" $ pTraceShow optimal_perm $ pTrace "\n----------------\n" $ pure $ Just (arr, slice)
-                    else replace =<< lift (pure arr) -- TODO: Replace arr with optimal permutation
-                _ -> pure $ Just (arr, slice)
+            -- 2. If arr is not in the optimal permutation, replace it with the optimal permutation
+            if is_optimal_perm
+              then pure $ Just (arr, slice)
+              else replace =<< lift (manifest perm arr)
+            where
+              manifest perm arr =
+                letExp (baseString arr ++ "_coalesced") $
+                  BasicOp $
+                    Manifest perm arr
+          _ -> pure $ Just (arr, slice)
     where
       (thread_gids, _thread_gdims) = unzip thread_space
 
@@ -309,45 +307,49 @@ ensureCoalescedAccess
 
 optimalPermutation :: VName -> Ctx -> (Bool, [Int])
 optimalPermutation arr ctx = do
+  -- Example:
+  --   Initial ordering:
+  --     0: [par 1]
+  --     1: [par 2]
+  --     2: []
+  --     3: [par 0 | seq 1]
+  --   Optimal ordering:
+  --     0: []
+  --     1: [par 0 | seq 1]
+  --     2: [par 1]
+  --     3: [par 2]
+  --   perm' = [2,3,0,1]
+
+  -- If a dimension is dependent on two par with different levels, we take the highest level
+
+  -- We want two dims with deps of same type and same level to keep their original ordering
+  -- w.r.t to each other
+
+  -- For GPU, we want threads to be in the innermost dimension (i.e., highest number)
+  --    Given a dim with multiple deps of par and seq, we want the pars to take precedence
+  -- FOr CPU, we want loop counters to be in the innermost dimension (i.e. highest number)
+  --    Given a dim with multiple deps of par and seq, we want the seqs to take precedence
+
+  -- We want consts (empty list) to be outermost
+  -- =========================================================================================
   -- For each SegMap in ctx, look up the array.
   --    TODO: figure out what to do if there are multiple Indexes on the array
-  let idxs = head $ mapMaybe (\(_, m) -> M.lookup arr m) (M.toList ctx)
-  -- FIXME: For now, just take the first index.
-  let (_, mem_entry) = head (M.toList idxs)
+  let idx_e = mapMaybe (\(_, m) -> M.lookup arr m) (M.toList ctx)
+  case idx_e of
+    [] -> (True, [])
+    _ -> do
+      let idxs = last idx_e -- FIXME: Just take last for now
+      -- FIXME: For now, just take the first index.
+      let (_, mem_entry) = head (M.toList idxs)
 
-  let (lvls_par, lvls_seq) =
-        unzip $
-          map
-            ( \(DimIdxPat deps) ->
-                foldl max (0, 0) $
-                  map
-                    ( \(_, (_, lvl, var)) ->
-                        case var of
-                          Parallel -> (lvl, 0)
-                          Sequential -> (0, lvl)
-                    )
-                    (S.toList deps)
-            )
-            (dimensions mem_entry)
+      let dims = dimensions mem_entry
+      let sorted = L.sort dims
+      let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
+      let perm' = map snd $ L.sortOn fst (zip perm ([0 ..] :: [Int]))
 
-  let max_par_lvl = foldl max 0 lvls_par
-  let scanned = scanl (+) 0 lvls_seq
-  let adjusted = map (+ max_par_lvl) scanned -- Pull parallel accesses inside
-  let optimal_perm = [0 .. (length (dimensions mem_entry) - 1)]
-
-  -- Example:
-  -- 0: [par 1]
-  -- 1: [par 2]
-  -- 2: []
-  -- 3: [par 0 | seq 1]
-  -- par: [1,2,0,0] seq: [0,0,0,1]
-  -- Optimal permutation:
-  -- 0: []
-  -- 1: [par 0 | seq 1]
-  -- 2: [par 1]
-  -- 3: [par 2]
-
-  (True, [max_par_lvl] ++ [1337] ++ lvls_par ++ [1337] ++ lvls_seq ++ [1337] ++ adjusted)
+      -- Check if the existing ordering is alreadt optimal
+      let is_optimal = perm' == [0 ..]
+      (is_optimal, perm')
 
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
