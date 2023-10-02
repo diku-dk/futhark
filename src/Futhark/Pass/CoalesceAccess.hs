@@ -195,14 +195,16 @@ ensureCoalescedAccess
       Just arr' -> pure $ Just (arr', slice)
       -- We have not seen this array before.
       Nothing -> do
-        -- 1. Check if the array is in the optimal permutation
-        let (is_optimal_perm, perm) = optimalPermutation arr ctx
-
-        -- 2. If arr is not in the optimal permutation, replace it with the optimal permutation
-        if is_optimal_perm
-          then pure $ Just (arr, slice)
-          else replace =<< lift (manifest perm arr)
+        -- For each Index expression on the array, check if the array has the optimal layout in memory
+        foldl1 (>>) (map f (optimalPermutation arr ctx))
         where
+          f (is_optimal_perm, perm) = do
+            -- If arr does not have the optimal layout, replace it with a manifest
+            -- with the optimal permutation
+            if is_optimal_perm
+              then pure $ Just (arr, slice)
+              else replace =<< lift (manifest perm arr)
+
           manifest perm arr =
             letExp (baseString arr ++ "_coalesced") $
               BasicOp $
@@ -214,7 +216,7 @@ ensureCoalescedAccess
         modify $ M.insert (arr, slice) arr'
         pure $ Just (arr', slice)
 
-optimalPermutation :: VName -> Ctx -> (Bool, [Int])
+optimalPermutation :: VName -> Ctx -> [(Bool, [Int])]
 optimalPermutation arr ctx = do
   -- Example:
   --   Initial ordering:
@@ -242,19 +244,21 @@ optimalPermutation arr ctx = do
   -- We want consts (empty list) to be outermost
   -- =========================================================================================
   -- For each SegMap in ctx, look up the array.
-  --    TODO: figure out what to do if there are multiple Indexes on the array
   let idx_e = mapMaybe (\(_, m) -> M.lookup arr m) (M.toList ctx)
-  case idx_e of
-    [] -> (True, [])
-    _ -> do
-      let idxs = last idx_e -- FIXME: Just take last for now
+  map f idx_e
+  where
+    f idxs = do
+      -- case idx_e of
+      -- [] -> (True, [])
+      -- _ -> do
+      -- let idxs = last idx_e -- FIXME: Just take last for now
       -- FIXME: For now, just take the first index.
       let (_, mem_entry) = head (M.toList idxs)
 
       let dims = dimensions mem_entry
       let sorted = L.sort dims
       let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
-      let perm' = map snd $ L.sortOn fst (zip perm ([0 ..] :: [Int]))
+      -- let perm' = map snd $ L.sortOn fst (zip perm ([0 ..] :: [Int]))
 
       -- Check if the existing ordering is already optimal
       let is_optimal = perm' == [0 ..]
