@@ -1,5 +1,9 @@
-def main [n] (xs: [n]i64) (is: [n]i64): [n]i64 =
-  map (\i -> #[unsafe] xs[is[i]] ) (iota n)
+def main [m][n] (xs: [m][n]i64) (is: [m]i64) (is1: [n]i64) : [m][n]i64 =
+  map (\i ->
+    map (\j ->
+      #[unsafe] xs[is[i],is1[j]]
+      ) (iota n)
+    ) (iota m)
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5253 : {
