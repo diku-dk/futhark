@@ -7,6 +7,7 @@
 module Futhark.CodeGen.ImpGen.GPU
   ( compileProgOpenCL,
     compileProgCUDA,
+    compileProgHIP,
     Warnings,
   )
 where
@@ -23,19 +24,17 @@ import Futhark.CodeGen.ImpGen.GPU.SegHist
 import Futhark.CodeGen.ImpGen.GPU.SegMap
 import Futhark.CodeGen.ImpGen.GPU.SegRed
 import Futhark.CodeGen.ImpGen.GPU.SegScan
-import Futhark.CodeGen.ImpGen.GPU.Transpose
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (IntegralExp, divUp, quot, rem)
+import Futhark.Util.IntegralExp (divUp, rem)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
 callKernelOperations =
   Operations
     { opsExpCompiler = expCompiler,
-      opsCopyCompiler = callKernelCopy,
+      opsCopyCompiler = lmadCopy,
       opsOpCompiler = opCompiler,
       opsStmsCompiler = defCompileStms,
       opsAllocCompilers = mempty
@@ -72,7 +71,7 @@ openclAtomics, cudaAtomics :: AtomicBinOp
            ]
 
 compileProg ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   HostEnv ->
   Prog GPUMem ->
   m (Warnings, Imp.Program)
@@ -84,10 +83,12 @@ compileProg env =
 -- | Compile a 'GPUMem' program to low-level parallel code, with
 -- either CUDA or OpenCL characteristics.
 compileProgOpenCL,
-  compileProgCUDA ::
-    MonadFreshNames m => Prog GPUMem -> m (Warnings, Imp.Program)
+  compileProgCUDA,
+  compileProgHIP ::
+    (MonadFreshNames m) => Prog GPUMem -> m (Warnings, Imp.Program)
 compileProgOpenCL = compileProg $ HostEnv openclAtomics OpenCL mempty
 compileProgCUDA = compileProg $ HostEnv cudaAtomics CUDA mempty
+compileProgHIP = compileProg $ HostEnv cudaAtomics HIP mempty
 
 opCompiler ::
   Pat LetDecMem ->
@@ -231,14 +232,12 @@ expCompiler (Pat [pe]) (BasicOp (Iota n x s et)) = do
   s' <- toExp s
 
   sIota (patElemName pe) (pe64 n) x' s' et
-expCompiler (Pat [pe]) (BasicOp (Replicate _ se))
+expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
   | Acc {} <- patElemType pe = pure ()
   | otherwise =
-      sReplicate (patElemName pe) se
-expCompiler (Pat [pe]) (BasicOp (Rotate rs arr))
-  | Acc {} <- patElemType pe = pure ()
-  | otherwise =
-      sRotateKernel (patElemName pe) (map pe64 rs) arr
+      if shapeRank shape == 0
+        then copyDWIM (patElemName pe) [] se []
+        else sReplicate (patElemName pe) se
 -- Allocation in the "local" space is just a placeholder.
 expCompiler _ (Op (Alloc _ (Space "local"))) =
   pure ()
@@ -260,227 +259,3 @@ expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ Mat
     Just ok -> Imp.If (matches .&&. ok) tcode fcode
 expCompiler dest e =
   defCompileExp dest e
-
-callKernelCopy :: CopyCompiler GPUMem HostEnv Imp.HostOp
-callKernelCopy bt destloc@(MemLoc destmem _ destIxFun) srcloc@(MemLoc srcmem srcshape srcIxFun)
-  | Just (destoffset, srcoffset, num_arrays, size_x, size_y) <-
-      isMapTransposeCopy bt destloc srcloc = do
-      fname <- mapTransposeForType bt
-      emit $
-        Imp.Call
-          []
-          fname
-          [ Imp.MemArg destmem,
-            Imp.ExpArg $ untyped destoffset,
-            Imp.MemArg srcmem,
-            Imp.ExpArg $ untyped srcoffset,
-            Imp.ExpArg $ untyped num_arrays,
-            Imp.ExpArg $ untyped size_x,
-            Imp.ExpArg $ untyped size_y
-          ]
-  | bt_size <- primByteSize bt,
-    Just destoffset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just srcoffset <- IxFun.linearWithOffset srcIxFun bt_size = do
-      let num_elems = Imp.elements $ product $ map pe64 srcshape
-      srcspace <- entryMemSpace <$> lookupMemory srcmem
-      destspace <- entryMemSpace <$> lookupMemory destmem
-      sCopy
-        destmem
-        (sExt64 destoffset)
-        destspace
-        srcmem
-        (sExt64 srcoffset)
-        srcspace
-        num_elems
-        bt
-  | otherwise = sCopyKernel bt destloc srcloc
-
-mapTransposeForType :: PrimType -> CallKernelGen Name
-mapTransposeForType bt = do
-  let fname = nameFromString $ "builtin#" <> mapTransposeName bt
-
-  exists <- hasFunction fname
-  unless exists $ emitFunction fname $ mapTransposeFunction bt
-
-  pure fname
-
-mapTransposeName :: PrimType -> String
-mapTransposeName bt = "gpu_map_transpose_" ++ prettyString bt
-
-mapTransposeFunction :: PrimType -> Imp.Function Imp.HostOp
-mapTransposeFunction bt =
-  Imp.Function Nothing [] params $
-    Imp.DebugPrint ("\n# Transpose " <> prettyString bt) Nothing
-      <> Imp.DebugPrint "Number of arrays  " (Just $ untyped $ Imp.le64 num_arrays)
-      <> Imp.DebugPrint "X elements        " (Just $ untyped $ Imp.le64 x)
-      <> Imp.DebugPrint "Y elements        " (Just $ untyped $ Imp.le64 y)
-      <> Imp.DebugPrint "Source      offset" (Just $ untyped $ Imp.le64 srcoffset)
-      <> Imp.DebugPrint "Destination offset" (Just $ untyped $ Imp.le64 destoffset)
-      <> transpose_code
-      <> Imp.DebugPrint "" Nothing
-  where
-    params =
-      [ memparam destmem,
-        intparam destoffset,
-        memparam srcmem,
-        intparam srcoffset,
-        intparam num_arrays,
-        intparam x,
-        intparam y
-      ]
-
-    space = Space "device"
-    memparam v = Imp.MemParam v space
-    intparam v = Imp.ScalarParam v $ IntType Int64
-
-    [ destmem,
-      destoffset,
-      srcmem,
-      srcoffset,
-      num_arrays,
-      x,
-      y,
-      mulx,
-      muly,
-      block,
-      use_32b
-      ] =
-        zipWith
-          (VName . nameFromString)
-          [ "destmem",
-            "destoffset",
-            "srcmem",
-            "srcoffset",
-            "num_arrays",
-            "x_elems",
-            "y_elems",
-            -- The following is only used for low width/height
-            -- transpose kernels
-            "mulx",
-            "muly",
-            "block",
-            "use_32b"
-          ]
-          [0 ..]
-
-    block_dim_int = 16
-
-    block_dim :: IntegralExp a => a
-    block_dim = 16
-
-    -- When an input array has either width==1 or height==1, performing a
-    -- transpose will be the same as performing a copy.
-    can_use_copy =
-      let onearr = Imp.le64 num_arrays .==. 1
-          height_is_one = Imp.le64 y .==. 1
-          width_is_one = Imp.le64 x .==. 1
-       in onearr .&&. (width_is_one .||. height_is_one)
-
-    transpose_code =
-      Imp.If input_is_empty mempty $
-        mconcat
-          [ Imp.DeclareScalar muly Imp.Nonvolatile (IntType Int64),
-            Imp.SetScalar muly $ untyped $ block_dim `quot` Imp.le64 x,
-            Imp.DeclareScalar mulx Imp.Nonvolatile (IntType Int64),
-            Imp.SetScalar mulx $ untyped $ block_dim `quot` Imp.le64 y,
-            Imp.DeclareScalar use_32b Imp.Nonvolatile Bool,
-            Imp.SetScalar use_32b $
-              untyped $
-                (le64 destoffset + le64 num_arrays * le64 x * le64 y) .<=. 2 ^ (31 :: Int) - 1
-                  .&&. (le64 srcoffset + le64 num_arrays * le64 x * le64 y) .<=. 2 ^ (31 :: Int) - 1,
-            Imp.If can_use_copy copy_code $
-              Imp.If should_use_lowwidth (callTransposeKernel TransposeLowWidth) $
-                Imp.If should_use_lowheight (callTransposeKernel TransposeLowHeight) $
-                  Imp.If should_use_small (callTransposeKernel TransposeSmall) $
-                    callTransposeKernel TransposeNormal
-          ]
-
-    input_is_empty =
-      Imp.le64 num_arrays .==. 0 .||. Imp.le64 x .==. 0 .||. Imp.le64 y .==. 0
-
-    should_use_small =
-      Imp.le64 x .<=. (block_dim `quot` 2)
-        .&&. Imp.le64 y .<=. (block_dim `quot` 2)
-
-    should_use_lowwidth =
-      Imp.le64 x .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le64 y
-
-    should_use_lowheight =
-      Imp.le64 y .<=. (block_dim `quot` 2)
-        .&&. block_dim .<. Imp.le64 x
-
-    copy_code =
-      let num_bytes = sExt64 $ Imp.le64 x * Imp.le64 y * primByteSize bt
-       in Imp.Copy
-            bt
-            destmem
-            (Imp.Count $ Imp.le64 destoffset)
-            space
-            srcmem
-            (Imp.Count $ Imp.le64 srcoffset)
-            space
-            (Imp.Count num_bytes)
-
-    callTransposeKernel which =
-      Imp.If
-        (isBool (LeafExp use_32b Bool))
-        ( Imp.DebugPrint "Using 32-bit indexing" Nothing
-            <> callTransposeKernel32 which
-        )
-        ( Imp.DebugPrint "Using 64-bit indexing" Nothing
-            <> callTransposeKernel64 which
-        )
-
-    callTransposeKernel64 =
-      Imp.Op
-        . Imp.CallKernel
-        . mapTransposeKernel
-          (int64, le64)
-          (mapTransposeName bt)
-          block_dim_int
-          ( destmem,
-            le64 destoffset,
-            srcmem,
-            le64 srcoffset,
-            le64 x,
-            le64 y,
-            le64 mulx,
-            le64 muly,
-            le64 num_arrays,
-            block
-          )
-          bt
-
-    callTransposeKernel32 =
-      Imp.Op
-        . Imp.CallKernel
-        . mapTransposeKernel
-          (int32, le32)
-          (mapTransposeName bt)
-          block_dim_int
-          ( destmem,
-            sExt32 (le64 destoffset),
-            srcmem,
-            sExt32 (le64 srcoffset),
-            sExt32 (le64 x),
-            sExt32 (le64 y),
-            sExt32 (le64 mulx),
-            sExt32 (le64 muly),
-            sExt32 (le64 num_arrays),
-            block
-          )
-          bt
-
--- Note [32-bit transpositions]
---
--- Transposition kernels are much slower when they have to use 64-bit
--- arithmetic.  I observed about 0.67x slowdown on an A100 GPU when
--- transposing four-byte elements (much less when transposing 8-byte
--- elements).  Unfortunately, 64-bit arithmetic is a requirement for
--- large arrays (see #1953 for what happens otherwise).  We generate
--- both 32- and 64-bit index arithmetic versions of transpositions,
--- and dynamically pick between them at runtime.  This is an
--- unfortunate code bloat, and it would be preferable if we could
--- simply optimise the 64-bit version to make this distinction
--- unnecessary.  Fortunately these kernels are quite small.

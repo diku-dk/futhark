@@ -20,12 +20,12 @@ module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D) where
 
 import Control.Monad
 import Data.List qualified as L
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
@@ -47,7 +47,7 @@ se4 = intConst Int64 4
 se8 :: SubExp
 se8 = intConst Int64 8
 
-scratch :: MonadBuilder m => String -> PrimType -> [SubExp] -> m VName
+scratch :: (MonadBuilder m) => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- | Main helper function for Register-and-Block Tiling
@@ -143,16 +143,14 @@ kkLoopBody
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
           Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmads _ _) <- ixf_fn =
-            all innerHasStride1 $ NE.toList lmads
+          (IxFun.IxFun lmad _) <- ixf_fn =
+            innerHasStride1 lmad
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
-        let lmad_dims = IxFun.lmadDims lmad
-            q = length lmad_dims
-            last_perm = IxFun.ldPerm $ last lmad_dims
+        let lmad_dims = LMAD.dims lmad
             stride = IxFun.ldStride $ last lmad_dims
-         in (last_perm == q - 1) && (stride == pe64 (intConst Int64 1))
+         in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
         -- the actual redomap.
@@ -713,7 +711,7 @@ matchesBlkRegTile seg_space kstms
 matchesBlkRegTile _ _ = Nothing
 
 -- ceiled division expression
-ceilDiv :: MonadBuilder m => SubExp -> SubExp -> m (Exp (Rep m))
+ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
 mkTileMemSizes ::

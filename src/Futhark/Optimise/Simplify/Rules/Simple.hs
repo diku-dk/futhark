@@ -68,7 +68,7 @@ simplifyBinOp look _ (BinOp op1 (Constant x1) (Var y1))
     op1 == op2,
     Just res <- doBinOp op1 x1 x2 =
       Just (BinOp op1 (Constant res) y2, cs)
-simplifyBinOp look _ (BinOp Add {} e1 e2)
+simplifyBinOp look _ (BinOp (Add it ovf) e1 e2)
   | isCt0 e1 = resIsSubExp e2
   | isCt0 e2 = resIsSubExp e1
   -- x+(y-x) => y
@@ -76,13 +76,20 @@ simplifyBinOp look _ (BinOp Add {} e1 e2)
     Just (BasicOp (BinOp Sub {} e2_a e2_b), cs) <- look v2,
     e2_b == e1 =
       Just (SubExp e2_a, cs)
+  -- x+(-1*y) => x-y
+  | Var v2 <- e2,
+    Just (BasicOp (BinOp Mul {} (Constant (IntValue x)) e3), cs) <- look v2,
+    valueIntegral x == (-1 :: Int) =
+      Just (BinOp (Sub it ovf) e1 e3, cs)
 simplifyBinOp _ _ (BinOp FAdd {} e1 e2)
   | isCt0 e1 = resIsSubExp e2
   | isCt0 e2 = resIsSubExp e1
 simplifyBinOp look _ (BinOp sub@(Sub t _) e1 e2)
   | isCt0 e2 = resIsSubExp e1
-  -- Cases for simplifying (a+b)-b and permutations.
-
+  | e1 == e2 = Just (SubExp (intConst t 0), mempty)
+  --
+  -- Below are cases for simplifying (a+b)-b and permutations.
+  --
   -- (e1_a+e1_b)-e1_a == e1_b
   | Var v1 <- e1,
     Just (BasicOp (BinOp Add {} e1_a e1_b), cs) <- look v1,
@@ -339,13 +346,13 @@ simplifyUpdateReshape defOf seType (Update safety dest slice (Var v))
       Just (Update safety dest slice' $ Var v', v_cs)
 simplifyUpdateReshape _ _ _ = Nothing
 
--- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
--- itself.
-copyScratchToScratch :: SimpleRule rep
-copyScratchToScratch defOf seType (Copy src) = do
+-- | If we are replicating a scratch array (possibly indirectly), just
+-- turn it into a scratch by itself.
+repScratchToScratch :: SimpleRule rep
+repScratchToScratch defOf seType (Replicate shape (Var src)) = do
   t <- seType $ Var src
   cs <- isActuallyScratch src
-  pure (Scratch (elemType t) (arrayDims t), cs)
+  pure (Scratch (elemType t) (shapeDims shape <> arrayDims t), cs)
   where
     isActuallyScratch v =
       case defOf v of
@@ -356,7 +363,7 @@ copyScratchToScratch defOf seType (Copy src) = do
         Just (BasicOp (Reshape _ _ v'), cs) ->
           (cs <>) <$> isActuallyScratch v'
         _ -> Nothing
-copyScratchToScratch _ _ _ =
+repScratchToScratch _ _ _ =
   Nothing
 
 simpleRules :: [SimpleRule rep]
@@ -366,7 +373,7 @@ simpleRules =
     simplifyUnOp,
     simplifyConvOp,
     simplifyAssert,
-    copyScratchToScratch,
+    repScratchToScratch,
     simplifyIdentityReshape,
     simplifyReshapeReshape,
     simplifyReshapeScratch,

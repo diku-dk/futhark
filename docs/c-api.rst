@@ -22,6 +22,11 @@ non-zero value on error, as documented below.  Others return a
 ``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
 (possibly) more precise error message.
 
+Some functions take a C string (``const char*``) as argument.  Unless
+otherwise indicated, the string will be copied if necessary, meaning
+the argument string can always be modified (or freed) after the
+function returns.
+
 .. c:macro:: FUTHARK_BACKEND_foo
 
    A preprocessor macro identifying that the backend *foo* was used to
@@ -32,7 +37,7 @@ non-zero value on error, as documented below.  Others return a
 Error codes
 -----------
 
-Most errors are result in a not otherwise specified nonzero return
+Most errors result in a not otherwise specified nonzero return
 code, but a few classes of errors have distinct error codes.
 
 .. c:macro:: FUTHARK_SUCCESS
@@ -60,6 +65,7 @@ changes to the configuration must be made *before* calling
 :c:func:`futhark_context_new`.  A configuration object must not be
 freed before any context objects for which it is used.  The same
 configuration may *not* be used for multiple concurrent contexts.
+Configuration objects are cheap to create and destroy.
 
 .. c:struct:: futhark_context_config
 
@@ -274,8 +280,9 @@ will not result in a double free.
 .. c:function:: int futhark_values_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr, int32_t *data)
 
    Asynchronously copy data from the value into ``data``, which must
-   be of sufficient size.  Multi-dimensional arrays are written in
-   row-major form.
+   point to free memory, allocated by the caller, with sufficient
+   space to store the full array.  Multi-dimensional arrays are
+   written in row-major form.
 
 .. c:function:: const int64_t *futhark_shape_i32_1d(struct futhark_context *ctx, struct futhark_i32_1d *arr)
 
@@ -293,7 +300,7 @@ Each instance of a complex type in an entry point (records, nested
 tuples, etc) is represented by an opaque C struct named
 ``futhark_opaque_foo``.  In the general case, ``foo`` will be a hash
 of the internal representation.  However, if you insert an explicit
-type annotations in the entry point (and the type name contains only
+type annotation in the entry point (and the type name contains only
 characters valid in C identifiers), that name will be used.  Note that
 arrays contain brackets, which are not valid in identifiers.  Defining
 a type abbreviation is the best way around this.
@@ -439,8 +446,8 @@ permitted on a consumed value.
 GPU
 ---
 
-The following API functions are available when using the ``opencl`` or
-``cuda`` backends.
+The following API functions are available when using the ``opencl``,
+``cuda``, or ``hip`` backends.
 
 .. c:function:: void futhark_context_config_set_device(struct futhark_context_config *cfg, const char *s)
 
@@ -469,15 +476,15 @@ The following functions are not interesting to most users.
    Set the default tile size used when executing kernels that have
    been block tiled.
 
-.. c:function:: void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: const char* futhark_context_config_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the OpenCL or CUDA
-   program source to the given file.
+   Retrieve the embedded GPU program.  The context configuration keeps
+   ownership, so don't free the string.
 
-.. c:function:: void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *program)
 
-   During :c:func:`futhark_context_new`, read OpenCL or CUDA program
-   source from the given file instead of using the embedded program.
+   Instead of using the embedded GPU program, use the provided string,
+   which is copied by this function.
 
 OpenCL
 ------
@@ -520,10 +527,9 @@ advanced usage.
    Add a build option to the OpenCL kernel compiler.  See the OpenCL
    specification for `clBuildProgram` for available options.
 
-.. c:function:: void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: cl_program futhark_context_get_program(struct futhark_context_config *cfg)
 
-   During :c:func:`futhark_context_new`, dump the compiled OpenCL
-   binary to the given file.
+   Retrieve the compiled OpenCL program.
 
 .. c:function:: void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char *path)
 
@@ -547,7 +553,7 @@ advanced usage.
    Add a build option to the NVRTC compiler.  See the CUDA
    documentation for ``nvrtcCompileProgram`` for available options.
 
-.. c:function:: void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
+.. c:function:: void futhark_context_dump_ptx_to(struct futhark_context_config *cfg, const char *path)
 
    During :c:func:`futhark_context_new`, dump the generated PTX code
    to the given file.

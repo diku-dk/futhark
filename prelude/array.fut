@@ -54,7 +54,7 @@ def drop [n] 't (i: i64) (x: [n]t): [n-i]t = x[i:]
 -- | Statically change the size of an array.  Fail at runtime if the
 -- imposed size does not match the actual size.  Essentially syntactic
 -- sugar for a size coercion.
-def resize [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
+def sized [m] 't (n: i64) (xs: [m]t) : [n]t = xs :> [n]t
 
 -- | Split an array at a given position.
 --
@@ -82,20 +82,6 @@ def (++) [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = intrinsics.concat xs ys
 #[inline]
 def concat [n] [m] 't (xs: [n]t) (ys: [m]t): *[n+m]t = xs ++ ys
 
--- | Rotate an array some number of elements to the left.  A negative
--- rotation amount is also supported.
---
--- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
---
--- **Work:** O(n).
---
--- **Span:** O(1).
---
--- Note: In most cases, `rotate` will be fused with subsequent
--- operations such as `map`, in which case it is free.
-#[inline]
-def rotate [n] 't (r: i64) (xs: [n]t): [n]t = intrinsics.rotate r xs
-
 -- | Construct an array of consecutive integers of the given length,
 -- starting at 0.
 --
@@ -115,6 +101,21 @@ def iota (n: i64): *[n]i64 =
 #[inline]
 def indices [n] 't (_: [n]t) : *[n]i64 =
   iota n
+
+-- | Rotate an array some number of elements to the left.  A negative
+-- rotation amount is also supported.
+--
+-- For example, if `b==rotate r a`, then `b[x] = a[x+r]`.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+--
+-- Note: In most cases, `rotate` will be fused with subsequent
+-- operations such as `map`, in which case it is free.
+#[inline]
+def rotate [n] 't (r: i64) (a: [n]t) =
+  map (\i -> #[unsafe] a[(i+r)%n]) (iota n)
 
 -- | Construct an array of the given length containing the given
 -- value.
@@ -157,7 +158,7 @@ def flatten_4d [n][m][l][k] 't (xs: [n][m][l][k]t): [n*m*l*k]t =
 -- **Complexity:** O(1).
 #[inline]
 def unflatten 't [n][m] (xs: [n*m]t): [n][m]t =
-  intrinsics.unflatten n m xs :> [n][m]t
+  intrinsics.unflatten n m xs
 
 -- | Like `unflatten`, but produces three dimensions.
 #[inline]
@@ -218,7 +219,7 @@ def tabulate 'a (n: i64) (f: i64 -> a): *[n]a =
 
 -- | Create a value for each point in a two-dimensional index space.
 --
--- **Work:** *O(n ✕ W(f))*
+-- **Work:** *O(n ✕ m ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
 def tabulate_2d 'a (n: i64) (m: i64) (f: i64 -> i64 -> a): *[n][m]a =
@@ -226,7 +227,7 @@ def tabulate_2d 'a (n: i64) (m: i64) (f: i64 -> i64 -> a): *[n][m]a =
 
 -- | Create a value for each point in a three-dimensional index space.
 --
--- **Work:** *O(n ✕ W(f))*
+-- **Work:** *O(n ✕ m ✕ o ✕ W(f))*
 --
 -- **Span:** *O(S(f))*
 def tabulate_3d 'a (n: i64) (m: i64) (o: i64) (f: i64 -> i64 -> i64 -> a): *[n][m][o]a =

@@ -25,8 +25,11 @@ let
     packageOverrides = pkgs: rec {
       haskellPackages = pkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          versions =
-            haskellPackagesNew.callPackage ./nix/versions.nix { };
+          lsp =
+            haskellPackagesNew.callPackage ./nix/lsp.nix { };
+
+          lsp-types =
+            haskellPackagesNew.callPackage ./nix/lsp-types.nix { };
 
           futhark-data =
             haskellPackagesNew.callPackage ./nix/futhark-data.nix { };

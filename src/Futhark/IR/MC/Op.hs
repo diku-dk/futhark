@@ -50,7 +50,7 @@ data MCOp op rep
   deriving (Eq, Ord, Show)
 
 traverseMCOpStms ::
-  Monad m =>
+  (Monad m) =>
   OpStmsTraverser m (op rep) rep ->
   OpStmsTraverser m (MCOp op rep) rep
 traverseMCOpStms _ f (ParOp par_op op) =
@@ -78,7 +78,7 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (MCOp op rep) where
   cheapOp (ParOp _ op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
 
-instance TypedOp (op rep) => TypedOp (MCOp op rep) where
+instance (TypedOp (op rep)) => TypedOp (MCOp op rep) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
@@ -89,13 +89,13 @@ instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (MCOp op rep) where
   consumedInOp (ParOp _ op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
 
-instance CanBeAliased op => CanBeAliased (MCOp op) where
+instance (CanBeAliased op) => CanBeAliased (MCOp op) where
   addOpAliases aliases (ParOp par_op op) =
     ParOp (addOpAliases aliases <$> par_op) (addOpAliases aliases op)
   addOpAliases aliases (OtherOp op) =
     OtherOp $ addOpAliases aliases op
 
-instance CanBeWise op => CanBeWise (MCOp op) where
+instance (CanBeWise op) => CanBeWise (MCOp op) where
   addOpWisdom (ParOp par_op op) =
     ParOp (addOpWisdom <$> par_op) (addOpWisdom op)
   addOpWisdom (OtherOp op) =
@@ -118,13 +118,13 @@ instance (OpMetrics (Op rep), OpMetrics (op rep)) => OpMetrics (MCOp op rep) whe
   opMetrics (ParOp par_op op) = opMetrics par_op >> opMetrics op
   opMetrics (OtherOp op) = opMetrics op
 
-instance RephraseOp op => RephraseOp (MCOp op) where
+instance (RephraseOp op) => RephraseOp (MCOp op) where
   rephraseInOp r (ParOp par_op op) =
     ParOp <$> traverse (rephraseInOp r) par_op <*> rephraseInOp r op
   rephraseInOp r (OtherOp op) = OtherOp <$> rephraseInOp r op
 
 typeCheckMCOp ::
-  TC.Checkable rep =>
+  (TC.Checkable rep) =>
   (op (Aliases rep) -> TC.TypeM rep ()) ->
   MCOp op (Aliases rep) ->
   TC.TypeM rep ()

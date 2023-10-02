@@ -28,8 +28,8 @@ import Language.Futhark.Query
     atPos,
     boundLoc,
   )
+import Language.LSP.Protocol.Types
 import Language.LSP.Server (LspM, getVirtualFile)
-import Language.LSP.Types
 import Language.LSP.VFS (VirtualFile, virtualFileText, virtualFileVersion)
 
 -- | Retrieve hover info for the definition referenced at the given
@@ -43,8 +43,8 @@ getHoverInfoFromState state (Just path) l c = do
           BoundModule {} -> "module"
           BoundModuleType {} -> "module type"
           BoundType {} -> "type"
-      ms = HoverContents $ MarkupContent MkPlainText msg
-  Just $ Hover ms (Just (rangeFromLoc loc))
+      ms = MarkupContent MarkupKind_PlainText msg
+  Just $ Hover (InL ms) (Just (rangeFromLoc loc))
 getHoverInfoFromState _ _ _ _ = Nothing
 
 -- | Find the location of the definition referenced at the given file

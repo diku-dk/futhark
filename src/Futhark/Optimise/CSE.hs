@@ -34,7 +34,6 @@ where
 
 import Control.Monad.Reader
 import Data.Map.Strict qualified as M
-import Data.Maybe (isJust)
 import Futhark.Analysis.Alias
 import Futhark.IR
 import Futhark.IR.Aliases
@@ -72,16 +71,17 @@ performCSE cse_arrays =
       . aliasAnalysis
       $ prog
   where
-    onConsts free_in_funs stms =
-      pure $
-        fst $
-          runReader
-            ( cseInStms
-                (free_in_funs <> consumedInStms stms)
-                (stmsToList stms)
-                (pure ())
-            )
-            (newCSEState cse_arrays)
+    onConsts free_in_funs stms = do
+      let free_list = namesToList free_in_funs
+          (res_als, stms_cons) = mkStmsAliases stms $ varsRes free_list
+      pure . fst $
+        runReader
+          ( cseInStms
+              (mconcat res_als <> stms_cons)
+              (stmsToList stms)
+              (pure ())
+          )
+          (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
@@ -99,17 +99,11 @@ performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
---
--- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the rep has
--- memory information, since at that point arrays have identity beyond their
--- value.
 performCSEOnStms ::
   (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
-  Bool ->
   Stms rep ->
   Stms rep
-performCSEOnStms cse_arrays =
+performCSEOnStms =
   fmap removeStmAliases . f . fst . analyseStms mempty
   where
     f stms =
@@ -120,7 +114,9 @@ performCSEOnStms cse_arrays =
               (stmsToList stms)
               (pure ())
           )
-          (newCSEState cse_arrays)
+          -- It is never safe to CSE arrays in stms in isolation,
+          -- because we might introduce additional aliasing.
+          (newCSEState False)
 
 cseInFunDef ::
   (Aliased rep, CSEInOp (Op rep)) =>
@@ -133,16 +129,12 @@ cseInFunDef cse_arrays fundec =
         runReader (cseInBody ds $ funDefBody fundec) $ newCSEState cse_arrays
     }
   where
-    -- XXX: we treat every non-entry result as a consumption here, because we
-    -- our core language is not strong enough to fully capture the
-    -- aliases we want, so we are turning some parts off (see #803,
-    -- #1241, and the related comment in TypeCheck.hs).  This is not a
+    -- XXX: we treat every array result as a consumption here, because
+    -- it is otherwise complicated to ensure we do not introduce more
+    -- aliasing than specified by the return type. This is not a
     -- practical problem while we still perform such aggressive
     -- inlining.
-    ds
-      | isJust $ funDefEntryPoint fundec =
-          map (diet . declExtTypeOf . fst) $ funDefRetType fundec
-      | otherwise = map (retDiet . fst) $ funDefRetType fundec
+    ds = map (retDiet . fst) $ funDefRetType fundec
     retDiet t
       | primType $ declExtTypeOf t = Observe
       | otherwise = Consume
@@ -193,7 +185,7 @@ cseInStms consumed (stm : stms) m =
     nestedCSE stm' = do
       let ds =
             case stmExp stm' of
-              DoLoop merge _ _ -> map (diet . declTypeOf . fst) merge
+              Loop merge _ _ -> map (diet . declTypeOf . fst) merge
               _ -> map patElemDiet $ patElems $ stmPat stm'
       e <- mapExpM (cse ds) $ stmExp stm'
       pure stm' {stmExp = e}
@@ -216,7 +208,7 @@ normExp (Apply fname args ret (safety, _, _)) =
 normExp e = e
 
 cseInStm ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Names ->
   Stm rep ->
   ([Stm rep] -> CSEM rep a) ->
@@ -225,7 +217,7 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = normExp $ substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any (bad cse_arrays) $ patElems pat
+  if not (alreadyAliases e) && any (bad cse_arrays) (patElems pat)
     then m [Let pat' (StmAux cs attrs edec) e']
     else case M.lookup (edec, e') esubsts of
       Just (subcs, subpat) -> do
@@ -244,6 +236,9 @@ cseInStm consumed (Let pat (StmAux cs attrs edec) e) m = do
         local (addExpSubst pat' edec cs e') $
           m [Let pat' (StmAux cs attrs edec) e']
   where
+    alreadyAliases (BasicOp Index {}) = True
+    alreadyAliases (BasicOp Reshape {}) = True
+    alreadyAliases _ = False
     bad cse_arrays pe
       | Mem {} <- patElemType pe = True
       | Array {} <- patElemType pe, not cse_arrays = True
@@ -273,7 +268,7 @@ addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (esubsts, mkSubsts pat subpat `M.union` nsubsts) cse_arrays
 
 addExpSubst ::
-  ASTRep rep =>
+  (ASTRep rep) =>
   Pat (LetDec rep) ->
   ExpDec rep ->
   Certs ->
@@ -338,7 +333,7 @@ cseInKernelBody (GPU.KernelBody bodydec stms res) = do
   Body _ stms' _ <- cseInBody (map (const Observe) res) $ Body bodydec stms []
   pure $ GPU.KernelBody bodydec stms' res
 
-instance CSEInOp (op rep) => CSEInOp (Memory.MemOp op rep) where
+instance (CSEInOp (op rep)) => CSEInOp (Memory.MemOp op rep) where
   cseInOp o@Memory.Alloc {} = pure o
   cseInOp (Memory.Inner k) = Memory.Inner <$> subCSE (cseInOp k)
 

@@ -16,7 +16,7 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-eReverse :: MonadBuilder m => VName -> m VName
+eReverse :: (MonadBuilder m) => VName -> m VName
 eReverse arr = do
   arr_t <- lookupType arr
   let w = arraySize 0 arr_t
@@ -26,9 +26,6 @@ eReverse arr = do
   let stride = intConst Int64 (-1)
       slice = fullSlice arr_t [DimSlice start w stride]
   letExp (baseString arr <> "_rev") $ BasicOp $ Index arr slice
-
-eRotate :: MonadBuilder m => [SubExp] -> VName -> m VName
-eRotate rots arr = letExp (baseString arr <> "_rot") $ BasicOp $ Rotate rots arr
 
 scanExc ::
   (MonadBuilder m, Rep m ~ SOACS) =>
@@ -40,34 +37,27 @@ scanExc desc scan arrs = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   form <- scanSOAC [scan]
   res_incl <- letTupExp (desc <> "_incl") $ Op $ Screma w arrs form
-  res_incl_rot <- mapM (eRotate [intConst Int64 (-1)]) res_incl
 
   iota <-
     letExp "iota" . BasicOp $
       Iota w (intConst Int64 0) (intConst Int64 1) Int64
 
   iparam <- newParam "iota_param" $ Prim int64
-  vparams <- mapM (newParam "vp") ts
-  let params = iparam : vparams
 
-  body <- runBodyBuilder . localScope (scopeOfLParams params) $ do
+  lam <- mkLambda [iparam] $ do
     let first_elem =
           eCmpOp
             (CmpEq int64)
             (eSubExp (Var (paramName iparam)))
             (eSubExp (intConst Int64 0))
-    eBody
-      [ eIf
-          first_elem
-          (resultBodyM nes)
-          (resultBodyM $ map (Var . paramName) vparams)
-      ]
+        prev = toExp $ le64 (paramName iparam) - 1
+    fmap subExpsRes . letTupExp' "scan_ex_res"
+      =<< eIf
+        first_elem
+        (resultBodyM $ scanNeutral scan)
+        (eBody $ map (`eIndex` [prev]) res_incl)
 
-  let lam = Lambda params body ts
-  letTupExp desc $ Op $ Screma w (iota : res_incl_rot) (mapSOAC lam)
-  where
-    nes = scanNeutral scan
-    ts = lambdaReturnType $ scanLambda scan
+  letTupExp desc $ Op $ Screma w [iota] (mapSOAC lam)
 
 mkF :: Lambda SOACS -> ADM ([VName], Lambda SOACS)
 mkF lam = do

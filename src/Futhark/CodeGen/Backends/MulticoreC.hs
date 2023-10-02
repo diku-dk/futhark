@@ -45,7 +45,7 @@ import Language.C.Syntax qualified as C
 
 -- | Compile the program to ImpCode with multicore operations.
 compileProg ::
-  MonadFreshNames m => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
+  (MonadFreshNames m) => T.Text -> Prog MCMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version =
   traverse
     ( GC.compileProg
@@ -122,7 +122,7 @@ compileRetvalStructFields = zipWith field
       [C.csdecl|$ty:defaultMemBlockType $id:(closureRetvalStructField name);|]
 
 compileSetStructValues ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -137,7 +137,7 @@ compileSetStructValues struct = zipWith field
       [C.cstm|$id:struct.$id:(closureFreeStructField name)=$id:name;|]
 
 compileSetRetvalStructValues ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -154,7 +154,7 @@ compileSetRetvalStructValues struct vnames we = concat $ zipWith field vnames we
     field name (_, RawMem) =
       [C.cstms|$id:struct.$id:(closureRetvalStructField name)=$id:name;|]
 
-compileGetRetvalStructVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
+compileGetRetvalStructVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.InitGroup]
 compileGetRetvalStructVals struct = zipWith field
   where
     field name (ty, Prim pt) =
@@ -167,7 +167,7 @@ compileGetRetvalStructVals struct = zipWith field
                  .size = 0, .references = NULL};|]
 
 compileGetStructVals ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   a ->
   [VName] ->
   [(C.Type, ValueType)] ->
@@ -183,7 +183,7 @@ compileGetStructVals struct = zipWith field
                   .mem = $id:struct->$id:(closureFreeStructField name),
                   .size = 0, .references = NULL};|]
 
-compileWriteBackResVals :: C.ToIdent a => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
+compileWriteBackResVals :: (C.ToIdent a) => a -> [VName] -> [(C.Type, ValueType)] -> [C.Stm]
 compileWriteBackResVals struct = zipWith field
   where
     field name (_, Prim pt) =
@@ -341,7 +341,7 @@ multicoreDef s f = do
   pure s'
 
 generateParLoopFn ::
-  C.ToIdent a =>
+  (C.ToIdent a) =>
   M.Map VName Space ->
   String ->
   MCCode ->

@@ -16,21 +16,21 @@ internaliseTypeTests =
     "internaliseType"
     [ mkTest
         "[0]()"
-        [["[0i64]unit"]],
+        [Free [Pure "[0i64]unit"]],
       mkTest
         "{a: [t_7447][n_7448](f32, f32), b: i64, c: i64}"
-        [["[t_7447][n_7448]f32", "[t_7447][n_7448]f32"], ["i64"], ["i64"]],
+        [Free [Pure "[t_7447][n_7448]f32", Pure "[t_7447][n_7448]f32"], Pure "i64", Pure "i64"],
       mkTest
         "([0]i32, {a: f32, b: f32, c: f32, d: [0]((f32, f32), (f32, f32))})"
-        [ ["[0i64]i32"],
-          ["f32"],
-          ["f32"],
-          ["f32"],
-          ["[0i64]f32", "[0i64]f32", "[0i64]f32", "[0i64]f32"]
+        [ Free [Pure "[0i64]i32"],
+          Pure "f32",
+          Pure "f32",
+          Pure "f32",
+          Free [Pure "[0i64]f32", Pure "[0i64]f32", Pure "[0i64]f32", Pure "[0i64]f32"]
         ],
       mkTest
         "[0]([1]i32, f32)"
-        [["[0i64][1i64]i32", "[0i64]f32"]]
+        [Free [Free [Pure "[0i64][1i64]i32"], Pure "[0i64]f32"]]
     ]
   where
     mkTest x y =
@@ -117,27 +117,28 @@ inferAliasesTests =
           ]
         ],
       mkTest
-        [Free [Free [Pure "[0i64][1i64]i32", Pure "[0i64][1i64]i32"]]]
+        [Free [Pure "[0i64][1i64]i32", Pure "[0i64][1i64]i32"]]
         [Free [Pure "[?0]i32", Pure "[?0]i32"]]
         [ [ ("[?0]i32", RetAls [0] [0]),
             ("[?0]i32", RetAls [1] [1])
           ]
         ],
+      -- Basically unzip.
       mkTest
-        [Free [Free [Pure "[n_0][n_1]i32"], Free [Pure "[n_0][n_1]i32"]]]
+        [Free [Pure "[n_0][n_1]i32", Pure "[n_0][n_1]i32"]]
         [Free [Pure "[?0]i32"], Free [Pure "[?0]i32"]]
-        [ [("[?0]i32", RetAls [0, 1] [0, 1])],
-          [("[?0]i32", RetAls [0, 1] [0, 1])]
+        [ [("[?0]i32", RetAls [] [0, 1])],
+          [("[?0]i32", RetAls [] [0, 1])]
         ],
       mkTest
-        [ Free [Free [Pure "*[n_0][n_1]i32"]],
+        [ Free [Pure "*[n_0][n_1]i32"],
           Free [Pure "[n_2]i64"],
           Free [Pure "[n_3]i64"]
         ]
-        [Free [Free [Pure "*[n_0][n_1]i32"]]]
+        [Free [Pure "*[n_0][n_1]i32"]]
         [[("*[n_0][n_1]i32", RetAls [] [])]],
       mkTest
-        [Free [Pure "[n_0]i32", Free [Free [Pure "[n_0][n_1]i32"]]]]
+        [Free [Pure "[n_0]i32", Free [Pure "[n_0][n_1]i32"]]]
         [Free [Pure "[n_0]i32"]]
         [[("[n_0]i32", RetAls [1] [0])]],
       mkTest
@@ -145,8 +146,13 @@ inferAliasesTests =
         [ Free [Pure "[n_0]i32", Free [Pure "[n_0][n_1]i32"]],
           Free [Pure "[n_0]i32"]
         ]
-        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1, 2])],
+        [ [("[n_0]i32", RetAls [] [0]), ("[n_0][n_1]i32", RetAls [] [1])],
           [("[n_0]i32", RetAls [] [1, 2])]
+        ],
+      mkTest
+        [Free [Pure "[n_0]i32"]]
+        [Free [Pure "[m_1][m_1]i32"]]
+        [ [("[m_1][m_1]i32", RetAls [0] [0])]
         ]
     ]
   where

@@ -239,7 +239,7 @@ transformName :: VName -> TransformM VName
 transformName v = lookupSubst v . scopeSubsts <$> askScope
 
 -- | A general-purpose substitution of names.
-transformNames :: ASTMappable x => x -> TransformM x
+transformNames :: (ASTMappable x) => x -> TransformM x
 transformNames x = do
   scope <- askScope
   pure $ runIdentity $ astMap (substituter scope) x
@@ -247,12 +247,10 @@ transformNames x = do
     substituter scope =
       ASTMapper
         { mapOnExp = onExp scope,
-          mapOnName = \v ->
-            pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
+          mapOnName = \v -> pure $ fst $ lookupSubstInScope v {qualQuals = []} scope,
           mapOnStructType = astMap (substituter scope),
-          mapOnPatType = astMap (substituter scope),
-          mapOnStructRetType = astMap (substituter scope),
-          mapOnPatRetType = astMap (substituter scope)
+          mapOnParamType = astMap (substituter scope),
+          mapOnResRetType = astMap (substituter scope)
         }
     onExp scope e =
       -- One expression is tricky, because it interacts with scoping rules.
@@ -269,6 +267,9 @@ transformTypeExp = transformNames
 
 transformStructType :: StructType -> TransformM StructType
 transformStructType = transformNames
+
+transformResType :: ResType -> TransformM ResType
+transformResType = transformNames
 
 transformExp :: Exp -> TransformM Exp
 transformExp = transformNames
@@ -287,19 +288,17 @@ transformValBind (ValBind entry name tdecl (Info (RetType dims t)) tparams param
   entry' <- traverse (traverse transformEntry) entry
   name' <- transformName name
   tdecl' <- traverse transformTypeExp tdecl
-  t' <- transformStructType t
+  t' <- transformResType t
   e' <- transformExp e
-  tparams' <- traverse transformNames tparams
   params' <- traverse transformNames params
-  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams' params' e' doc attrs loc
+  emit $ ValDec $ ValBind entry' name' tdecl' (Info (RetType dims t')) tparams params' e' doc attrs loc
 
 transformTypeBind :: TypeBind -> TransformM ()
 transformTypeBind (TypeBind name l tparams te (Info (RetType dims t)) doc loc) = do
   name' <- transformName name
   emit . TypeDec
-    =<< ( TypeBind name' l
-            <$> traverse transformNames tparams
-            <*> transformTypeExp te
+    =<< ( TypeBind name' l tparams
+            <$> transformTypeExp te
             <*> (Info . RetType dims <$> transformStructType t)
             <*> pure doc
             <*> pure loc
@@ -371,7 +370,7 @@ transformImports ((name, imp) : imps) = do
     maybeHideEntryPoint d = d
 
 -- | Perform defunctorisation.
-transformProg :: MonadFreshNames m => Imports -> m [Dec]
+transformProg :: (MonadFreshNames m) => Imports -> m [Dec]
 transformProg prog = modifyNameSource $ \namesrc ->
   let ((), namesrc', prog') = runTransformM namesrc $ transformImports prog
    in (DL.toList prog', namesrc')

@@ -36,7 +36,7 @@ class (Show rt, Eq rt, Ord rt, ExtTyped rt, DeclExtTyped rt) => IsRetType rt whe
   -- and the arguments for a concrete call, return the instantiated
   -- return type for the concrete call, if valid.
   applyRetType ::
-    Typed dec =>
+    (Typed dec) =>
     [rt] ->
     [Param dec] ->
     [(SubExp, Type)] ->
@@ -44,7 +44,7 @@ class (Show rt, Eq rt, Ord rt, ExtTyped rt, DeclExtTyped rt) => IsRetType rt whe
 
 -- | Given shape parameter names and types, produce the types of
 -- arguments accepted.
-expectedTypes :: Typed t => [VName] -> [t] -> [SubExp] -> [Type]
+expectedTypes :: (Typed t) => [VName] -> [t] -> [SubExp] -> [Type]
 expectedTypes shapes value_ts args = map (correctDims . typeOf) value_ts
   where
     parammap :: M.Map VName SubExp

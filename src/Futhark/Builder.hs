@@ -38,7 +38,7 @@ import Futhark.IR
 -- | A 'BuilderT' (and by extension, a 'Builder') is only an instance of
 -- 'MonadBuilder' for representations that implement this type class,
 -- which contains methods for constructing statements.
-class ASTRep rep => BuilderOps rep where
+class (ASTRep rep) => BuilderOps rep where
   mkExpDecB ::
     (MonadBuilder m, Rep m ~ rep) =>
     Pat (LetDec rep) ->
@@ -91,7 +91,7 @@ instance MonadTrans (BuilderT rep) where
 -- | The most commonly used binder monad.
 type Builder rep = BuilderT rep (State VNameSource)
 
-instance MonadFreshNames m => MonadFreshNames (BuilderT rep m) where
+instance (MonadFreshNames m) => MonadFreshNames (BuilderT rep m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
@@ -141,7 +141,7 @@ instance
 -- | Run a binder action given an initial scope, returning a value and
 -- the statements added ('addStm') during the action.
 runBuilderT ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   BuilderT rep m a ->
   Scope rep ->
   m (a, Stms rep)
@@ -151,7 +151,7 @@ runBuilderT (BuilderT m) scope = do
 
 -- | Like 'runBuilderT', but return only the statements.
 runBuilderT_ ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   BuilderT rep m () ->
   Scope rep ->
   m (Stms rep)
@@ -222,13 +222,13 @@ runLambdaBuilder params m = do
     res <- m
     ret <- mapM subExpResType res
     pure (res, ret)
-  pure $ Lambda params (mkBody stms res) ret
+  pure $ Lambda params ret $ mkBody stms res
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.
 
 mapInner ::
-  Monad m =>
+  (Monad m) =>
   ( m (a, (Stms rep, Scope rep)) ->
     m (b, (Stms rep, Scope rep))
   ) ->
@@ -240,15 +240,15 @@ mapInner f (BuilderT m) = BuilderT $ do
   put s'
   pure x
 
-instance MonadReader r m => MonadReader r (BuilderT rep m) where
+instance (MonadReader r m) => MonadReader r (BuilderT rep m) where
   ask = BuilderT $ lift ask
   local f = mapInner $ local f
 
-instance MonadState s m => MonadState s (BuilderT rep m) where
+instance (MonadState s m) => MonadState s (BuilderT rep m) where
   get = BuilderT $ lift get
   put = BuilderT . lift . put
 
-instance MonadWriter w m => MonadWriter w (BuilderT rep m) where
+instance (MonadWriter w m) => MonadWriter w (BuilderT rep m) where
   tell = BuilderT . lift . tell
   pass = mapInner $ \m -> pass $ do
     ((x, f), s) <- m
@@ -257,7 +257,7 @@ instance MonadWriter w m => MonadWriter w (BuilderT rep m) where
     ((x, s), y) <- listen m
     pure ((x, y), s)
 
-instance MonadError e m => MonadError e (BuilderT rep m) where
+instance (MonadError e m) => MonadError e (BuilderT rep m) where
   throwError = lift . throwError
   catchError (BuilderT m) f =
     BuilderT $ catchError m $ unBuilder . f

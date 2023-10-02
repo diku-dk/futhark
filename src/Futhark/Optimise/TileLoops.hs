@@ -164,7 +164,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               poststms'
               stms_res
       -- Tiling inside for-loop.
-      | DoLoop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | Loop merge (ForLoop i it bound) loopbody <- stmExp stm_to_tile,
         not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
@@ -191,7 +191,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
             Nothing -> next
             Just tiled ->
               Just
-                <$> tileDoLoop
+                <$> tileLoop
                   initial_space
                   variance
                   prestms'
@@ -296,7 +296,6 @@ partitionPrelude variance prestms private used_after =
 
     mustBeInlinedExp (BasicOp (Index _ slice)) = not $ null $ sliceDims slice
     mustBeInlinedExp (BasicOp Iota {}) = True
-    mustBeInlinedExp (BasicOp Rotate {}) = True
     mustBeInlinedExp (BasicOp Rearrange {}) = True
     mustBeInlinedExp (BasicOp Reshape {}) = True
     mustBeInlinedExp _ = False
@@ -351,7 +350,7 @@ injectPrelude initial_space variance prestms used (host_stms, tiling, tiledBody)
 
       tiledBody private' (prelude_privstms <> privstms)
 
-tileDoLoop ::
+tileLoop ::
   SegSpace ->
   VarianceTable ->
   Stms GPU ->
@@ -367,7 +366,7 @@ tileDoLoop ::
   Stms GPU ->
   Result ->
   TileM (Stms GPU, Tiling, TiledBody)
-tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
+tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBody) res_ts pat aux merge i it bound poststms poststms_res = do
   let prestms_used = used_in_body <> freeIn poststms <> freeIn poststms_res
       ( invariant_prestms,
         precomputed_variant_prestms,
@@ -433,7 +432,7 @@ tileDoLoop initial_space variance prestms used_in_body (host_stms, tiling, tiled
             resultBody . map Var <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            DoLoop merge' (ForLoop i it bound []) loopbody'
+            Loop merge' (ForLoop i it bound) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -455,7 +454,7 @@ doPrelude tiling privstms prestms prestms_live =
       addStms prestms
       pure $ varsRes prestms_live
 
-liveSet :: FreeIn a => Stms GPU -> a -> Names
+liveSet :: (FreeIn a) => Stms GPU -> a -> Names
 liveSet stms after =
   namesFromList (concatMap (patNames . stmPat) stms)
     `namesIntersection` freeIn after
@@ -474,7 +473,8 @@ tileable stm
     lambdaReturnType map_lam == lambdaReturnType red_lam, -- No mapout arrays.
     not $ null arrs,
     all primType $ lambdaReturnType map_lam,
-    all (primType . paramType) $ lambdaParams map_lam =
+    all (primType . paramType) $ lambdaParams map_lam,
+    not $ "unroll" `inAttrs` stmAuxAttrs (stmAux stm) =
       Just (w, arrs, (red_comm, red_lam, red_nes, map_lam))
   | otherwise =
       Nothing
@@ -509,7 +509,7 @@ inputsToTiles _ _ = []
 -- The atual tile size may be smaller for the last tile, so we have to
 -- be careful now.
 sliceUntiled ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   VName ->
   SubExp ->
   SubExp ->
@@ -699,22 +699,21 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
           <*> pure (Var mergeinit)
 
       tile_id <- newVName "tile_id"
-      let loopform = ForLoop tile_id Int64 num_whole_tiles []
+      let loopform = ForLoop tile_id Int64 num_whole_tiles
       loopbody <- renameBody <=< runBodyBuilder $
-        inScopeOf loopform $
-          localScope (scopeOfFParams $ map fst merge) $ do
-            -- Collectively read a tile.
-            tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) inputs
+        localScope (scopeOfLoopForm loopform <> scopeOfFParams (map fst merge)) $ do
+          -- Collectively read a tile.
+          tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) inputs
 
-            -- Now each thread performs a traversal of the tile and
-            -- updates its accumulator.
-            let accs =
-                  map (paramName . fst) merge
-                tile_args =
-                  ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
-            resultBody . map Var <$> tilingProcessTile tiling tile_args
+          -- Now each thread performs a traversal of the tile and
+          -- updates its accumulator.
+          let accs =
+                map (paramName . fst) merge
+              tile_args =
+                ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
+          resultBody . map Var <$> tilingProcessTile tiling tile_args
 
-      accs <- letTupExp "accs" $ DoLoop merge loopform loopbody
+      accs <- letTupExp "accs" $ Loop merge loopform loopbody
 
       -- We possibly have to traverse a residual tile.
       red_lam' <- renameLambda red_lam
@@ -1050,7 +1049,7 @@ readTile2D (kdim_x, kdim_y) (gtid_x, gtid_y) (gid_x, gid_y) tile_size kind privs
           TileFull ->
             mapM readTileElem arrs_and_perms
 
-findTileSize :: HasScope rep m => [InputTile] -> m SubExp
+findTileSize :: (HasScope rep m) => [InputTile] -> m SubExp
 findTileSize tiles =
   case mapMaybe isTiled tiles of
     v : _ -> arraySize 0 <$> lookupType v

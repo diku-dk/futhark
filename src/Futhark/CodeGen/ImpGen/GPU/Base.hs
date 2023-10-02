@@ -19,7 +19,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     sKernelThread,
     KernelAttrs (..),
     defKernelAttrs,
-    sCopyKernel,
     lvlKernelAttrs,
     allocLocal,
     kernelAlloc,
@@ -34,8 +33,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     -- * Host-level bulk operations
     sReplicate,
     sIota,
-    sRotateKernel,
-    sCopy,
 
     -- * Atomics
     AtomicBinOp,
@@ -54,7 +51,7 @@ import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
@@ -65,7 +62,7 @@ import Prelude hiding (quot, rem)
 -- of the kernels code is the same, there are some cases where we
 -- generate special code based on the ultimate low-level API we are
 -- targeting.
-data Target = CUDA | OpenCL
+data Target = CUDA | OpenCL | HIP
 
 -- | Information about the locks available for accumulators.
 data Locks = Locks
@@ -190,7 +187,7 @@ compileThreadExp dest e =
 -- The body must contain thread-level code.  For multidimensional
 -- loops, use 'groupCoverSpace'.
 kernelLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   Imp.TExp t ->
   Imp.TExp t ->
@@ -210,7 +207,7 @@ kernelLoop tid num_threads n f =
 -- passed-in function is invoked with the (symbolic) iteration.  For
 -- multidimensional loops, use 'groupCoverSpace'.
 groupLoop ::
-  IntExp t =>
+  (IntExp t) =>
   Imp.TExp t ->
   (Imp.TExp t -> InKernelGen ()) ->
   InKernelGen ()
@@ -226,7 +223,7 @@ groupLoop n f = do
 -- all threads in the group participate.  The passed-in function is
 -- invoked with a (symbolic) point in the index space.
 groupCoverSpace ::
-  IntExp t =>
+  (IntExp t) =>
   [Imp.TExp t] ->
   ([Imp.TExp t] -> InKernelGen ()) ->
   InKernelGen ()
@@ -412,6 +409,12 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         | otherwise =
             sOp $ Imp.Barrier fence
 
+      errorsync
+        | array_scan =
+            sOp $ Imp.ErrorSync Imp.FenceGlobal
+        | otherwise =
+            sOp $ Imp.ErrorSync Imp.FenceLocal
+
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
       writeBlockResult p arr
@@ -455,7 +458,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
-  barrier
+  errorsync
 
   when array_scan $ do
     sComment "move correct values for first block back a block" $
@@ -530,19 +533,18 @@ groupReduceWithOffset offset w lam arrs = do
   constants <- kernelConstants <$> askEnv
 
   let local_tid = kernelLocalThreadId constants
-      global_tid = kernelGlobalThreadId constants
 
       barrier
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
         | otherwise = sOp $ Imp.Barrier Imp.FenceGlobal
 
-      readReduceArgument param arr
-        | Prim _ <- paramType param = do
-            let i = local_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
-        | otherwise = do
-            let i = global_tid + tvExp offset
-            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+      errorsync
+        | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
+        | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
+
+      readReduceArgument param arr = do
+        let i = local_tid + tvExp offset
+        copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
       writeReduceOpResult param arr
         | Prim _ <- paramType param =
@@ -550,7 +552,14 @@ groupReduceWithOffset offset w lam arrs = do
         | otherwise =
             pure ()
 
-  let (reduce_acc_params, reduce_arr_params) = splitAt (length arrs) $ lambdaParams lam
+      writeArrayOpResult param arr
+        | Prim _ <- paramType param =
+            pure ()
+        | otherwise =
+            copyDWIMFix arr [0] (Var $ paramName param) []
+
+  let (reduce_acc_params, reduce_arr_params) =
+        splitAt (length arrs) $ lambdaParams lam
 
   skip_waves <- dPrimV "skip_waves" (1 :: Imp.TExp Int32)
   dLParams $ lambdaParams lam
@@ -558,10 +567,10 @@ groupReduceWithOffset offset w lam arrs = do
   offset <-- (0 :: Imp.TExp Int32)
 
   comment "participating threads read initial accumulator" $
-    sWhen (local_tid .<. w) $
+    localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
-  let do_reduce = do
+  let do_reduce = localOps threadOperations $ do
         comment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
         comment "apply reduction operation" $
@@ -602,13 +611,17 @@ groupReduceWithOffset offset w lam arrs = do
         sWhile doing_cross_wave_reductions $ do
           barrier
           offset <-- tvExp skip_waves * wave_size
-          sWhen
-            apply_in_cross_wave_iteration
-            do_reduce
+          sWhen apply_in_cross_wave_iteration do_reduce
           skip_waves <-- tvExp skip_waves * 2
 
   in_wave_reductions
   cross_wave_reductions
+  errorsync
+
+  sComment "Copy array-typed operands to result array" $ do
+    sWhen (local_tid .==. 0) $
+      localOps threadOperations $
+        zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
@@ -849,7 +862,7 @@ atomicUpdateCAS space t arr old bucket x do_op = do
     sWhen (isBool won) (run_loop <-- false)
 
 computeKernelUses ::
-  FreeIn a =>
+  (FreeIn a) =>
   a ->
   [VName] ->
   CallKernelGen [Imp.KernelUse]
@@ -1197,7 +1210,7 @@ sKernelFailureTolerant tol ops constants name m = do
 threadOperations :: Operations GPUMem KernelEnv Imp.KernelOp
 threadOperations =
   (defaultOperations compileThreadOp)
-    { opsCopyCompiler = copyElementWise,
+    { opsCopyCompiler = lmadCopy,
       opsExpCompiler = compileThreadExp,
       opsStmsCompiler = \_ -> defCompileStms mempty,
       opsAllocCompilers =
@@ -1248,7 +1261,7 @@ replicateForType bt = do
         shape = Shape [Var num_elems]
     function fname [] params $ do
       arr <-
-        sArray "arr" bt shape mem $ IxFun.iota $ map pe64 $ shapeDims shape
+        sArray "arr" bt shape mem $ LMAD.iota 0 $ map pe64 $ shapeDims shape
       sReplicateKernel arr $ Var val
 
   pure fname
@@ -1259,7 +1272,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | IxFun.isLinear arr_ixfun -> pure $
+      | LMAD.isDirect arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1344,9 +1357,7 @@ iotaForType bt = do
     function fname [] params $ do
       arr <-
         sArray "arr" (IntType bt) shape mem $
-          IxFun.iota $
-            map pe64 $
-              shapeDims shape
+          LMAD.iota 0 (map pe64 (shapeDims shape))
       sIotaKernel arr (sExt64 n') x' s' bt
 
   pure fname
@@ -1361,7 +1372,7 @@ sIota ::
   CallKernelGen ()
 sIota arr n x s et = do
   ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if IxFun.isLinear arr_ixfun
+  if LMAD.isDirect arr_ixfun
     then do
       fname <- iotaForType et
       emit $
@@ -1370,55 +1381,6 @@ sIota arr n x s et = do
           fname
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
     else sIotaKernel arr n x s et
-
-sCopyKernel :: CopyCompiler GPUMem HostEnv Imp.HostOp
-sCopyKernel pt destloc@(MemLoc destmem _ _) srcloc@(MemLoc srcmem srcdims _) = do
-  -- Note that the shape of the destination and the source are
-  -- necessarily the same.
-  let shape = map pe64 srcdims
-      kernel_size = product shape
-
-  (virtualise, constants) <- simpleKernelConstants kernel_size "copy"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "copy_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> do
-      is <- dIndexSpace' "copy_i" shape gtid
-
-      (_, destspace, destidx) <- fullyIndexArray' destloc is
-      (_, srcspace, srcidx) <- fullyIndexArray' srcloc is
-
-      sWhen (gtid .<. kernel_size) $ do
-        tmp <- tvVar <$> dPrim "tmp" pt
-        emit $ Imp.Read tmp srcmem srcidx pt srcspace Imp.Nonvolatile
-        emit $ Imp.Write destmem destidx pt destspace Imp.Nonvolatile $ Imp.var tmp pt
-
--- | Perform a Rotate with a kernel.
-sRotateKernel :: VName -> [Imp.TExp Int64] -> VName -> CallKernelGen ()
-sRotateKernel dest rs src = do
-  t <- lookupType src
-  let ds = map pe64 $ arrayDims t
-  n <- dPrimVE "rotate_n" $ product ds
-  (virtualise, constants) <- simpleKernelConstants n "rotate"
-
-  fname <- askFunction
-  let name =
-        keyWithEntryPoint fname $
-          nameFromString $
-            "rotate_" ++ show (baseTag $ kernelGlobalThreadIdVar constants)
-
-  sKernelFailureTolerant True threadOperations constants name $
-    virtualise $ \gtid -> sWhen (gtid .<. n) $ do
-      is' <- dIndexSpace' "rep_i" ds gtid
-      is'' <- sequence $ zipWith3 rotate ds rs is'
-      copyDWIMFix dest is' (Var src) is''
-  where
-    rotate d r i = dPrimVE "rot_i" $ rotateIndex d r i
 
 compileThreadResult ::
   SegSpace ->

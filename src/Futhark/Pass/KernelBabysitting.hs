@@ -126,7 +126,7 @@ type ArrayIndexTransform m =
 
 traverseKernelBodyArrayIndexes ::
   forall f.
-  Monad f =>
+  (Monad f) =>
   Names ->
   Names ->
   Scope GPU ->
@@ -195,7 +195,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope f (Kerne
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 ensureCoalescedAccess ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   ExpMap ->
   [(VName, SubExp)] ->
   ArrayIndexTransform (StateT Replacements m)
@@ -360,7 +360,7 @@ coalescingPermutation num_is rank =
   [num_is .. rank - 1] ++ [0 .. num_is - 1]
 
 rearrangeInput ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   Maybe (Maybe [Int]) ->
   [Int] ->
   VName ->
@@ -384,7 +384,7 @@ rearrangeInput manifest perm arr = do
       Manifest perm manifested
 
 rowMajorArray ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   VName ->
   m VName
 rowMajorArray arr = do

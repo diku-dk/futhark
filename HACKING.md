@@ -73,6 +73,23 @@ Note that GHCs code generator is sometimes slightly buggy in its
 handling of profiled code.  If you encounter a compiler crash with an
 error message like "PAP object entered", then this is a GHC bug.
 
+## Testing
+
+### Only internal compilation
+
+This command tests compilation *without* compiling the generated C
+code, which speeds up testing for internal compiler errors:
+
+    futhark test -C tests --pass-compiler-option=--library
+
+### Running only a single unit test
+
+    cabal run unit -- -p '/reshape . fix . iota 3d/'
+
+The argument to `-p` is the name of the test that fails, as reported
+by `cabal test`.  You may have to scroll through the output a bit to
+find it.
+
 ## Debugging Internal Type Errors
 
 The Futhark compiler uses a typed core language, and the type checker
@@ -148,13 +165,13 @@ There are also various shorthands for running entire standard pipelines:
 By default, `futhark dev` will print the resulting IR. You can switch to
 a different *action* with one of the following options:
 
-- `--compile-imperative`: generate sequential ImpCode and print it.
-- `--compile-imperative-kernels`: generate GPU ImpCode and print it.
-- `--compile-imperative-multicore`: generate multicore ImpCode and
+- `--compile-imp-seq`: generate sequential ImpCode and print it.
+- `--compile-imp-gpu`: generate GPU ImpCode and print it.
+- `--compile-imp-multicore`: generate multicore ImpCode and
   print it.
 
 You must use the appropriate pipeline as well (e.g. `--gpu-mem` for
-`--compile-imperative-kernels`).
+`--compile-imp-gpu`).
 
 You can also use e.g. `--backend=c` to run the same code generation
 and compilation as `futhark c`.  This is useful for experimenting with

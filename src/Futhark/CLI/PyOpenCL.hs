@@ -12,6 +12,6 @@ main = compilerMain
   []
   "Compile PyOpenCL"
   "Generate Python + OpenCL code from optimised Futhark program."
-  gpuPipeline
+  gpumemPipeline
   $ \fcfg () mode outpath prog ->
     actionProcedure (compilePyOpenCLAction fcfg mode outpath) prog

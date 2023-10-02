@@ -62,10 +62,10 @@ newtype LastUseM rep a = LastUseM (StateT AliasTab (Reader (LastUseReader rep)) 
       MonadState AliasTab
     )
 
-instance RepTypes (Aliases rep) => HasScope (Aliases rep) (LastUseM rep) where
+instance (RepTypes (Aliases rep)) => HasScope (Aliases rep) (LastUseM rep) where
   askScope = asks scope
 
-instance RepTypes (Aliases rep) => LocalScope (Aliases rep) (LastUseM rep) where
+instance (RepTypes (Aliases rep)) => LocalScope (Aliases rep) (LastUseM rep) where
   localScope sc (LastUseM m) = LastUseM $ do
     local (\rd -> rd {scope = scope rd <> sc}) m
 
@@ -84,7 +84,7 @@ aliasLookup vname =
   gets $ fromMaybe mempty . M.lookup vname
 
 lastUseProg ::
-  Constraints rep =>
+  (Constraints rep) =>
   Prog (Aliases rep) ->
   LastUseM rep LUTabProg
 lastUseProg prog =
@@ -100,7 +100,7 @@ lastUseProg prog =
         pure (consts_lu, M.fromList $ zip (map funDefName funs) lus)
 
 lastUseFun ::
-  Constraints rep =>
+  (Constraints rep) =>
   Names ->
   FunDef (Aliases rep) ->
   LastUseM rep LUTabFun
@@ -126,7 +126,7 @@ lastUseMCMem = runLastUseM (lastUseMemOp lastUseMCOp) . lastUseProg
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   -- | The body of statements
   Body (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -156,7 +156,7 @@ lastUseBody bdy@(Body _ stms result) (lutab, used_nms) =
 -- difference between the free-variables in that stmt and the set of variables
 -- known to be used after that statement.
 lastUseKernelBody ::
-  Constraints rep =>
+  (Constraints rep) =>
   -- | The body of statements
   KernelBody (Aliases rep) ->
   -- | The current last-use table, tupled with the known set of already used names
@@ -177,7 +177,7 @@ lastUseKernelBody bdy@(KernelBody _ stms result) (lutab, used_nms) =
     pure (lutab', used_nms <> used_in_body)
 
 lastUseStms ::
-  Constraints rep =>
+  (Constraints rep) =>
   Stms (Aliases rep) ->
   (LUTabFun, Names) ->
   [VName] ->
@@ -199,7 +199,7 @@ lastUseStms (stm@(Let pat _ e) :<| stms) (lutab, nms) res_nms =
     pure (lutab'', nms'')
 
 lastUseStm ::
-  Constraints rep =>
+  (Constraints rep) =>
   Stm (Aliases rep) ->
   (LUTabFun, Names) ->
   LastUseM rep (LUTabFun, Names)
@@ -229,7 +229,7 @@ lastUseStm (Let pat _ e) (lutab, used_nms) = do
 
 -- | Last-Use Analysis for an expression.
 lastUseExp ::
-  Constraints rep =>
+  (Constraints rep) =>
   -- | The expression to analyse
   Exp (Aliases rep) ->
   -- | The set of used names "after" this expression
@@ -253,7 +253,7 @@ lastUseExp (Match _ cases body _) used_nms = do
   let used_nms' = used_cases <> body_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
   pure (lutab_cases <> lutab', last_used_arrs, used_nms')
-lastUseExp (DoLoop var_ses lf body) used_nms0 = inScopeOf lf $ do
+lastUseExp (Loop var_ses form body) used_nms0 = localScope (scopeOfLoopForm form) $ do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses
   var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
@@ -304,7 +304,7 @@ lastUseMemOp _ (Alloc se sp) used_nms = do
 lastUseMemOp onInner (Inner op) used_nms = onInner op used_nms
 
 lastUseSegOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   SegOp lvl (Aliases rep) ->
   Names ->
   LastUseM rep (LUTabFun, Names, Names)
@@ -356,7 +356,7 @@ lastUseMCOp (MC.ParOp par_op op) used_nms = do
     )
 
 lastUseSegBinOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   [SegBinOp (Aliases rep)] ->
   Names ->
   LastUseM rep (LUTabFun, Names, Names)
@@ -364,13 +364,13 @@ lastUseSegBinOp sbos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (SegBinOp _ l@(Lambda _ body _) neutral shp) = inScopeOf l $ do
+    helper (SegBinOp _ l@(Lambda _ _ body) neutral shp) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
 
 lastUseHistOp ::
-  Constraints rep =>
+  (Constraints rep) =>
   [HistOp (Aliases rep)] ->
   Names ->
   LastUseM rep (LUTabFun, Names, Names)
@@ -378,7 +378,7 @@ lastUseHistOp hos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (HistOp shp rf dest neutral shp' l@(Lambda _ body _)) = inScopeOf l $ do
+    helper (HistOp shp rf dest neutral shp' l@(Lambda _ _ body)) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
@@ -430,7 +430,7 @@ aliasTransitiveClosure args = do
 -- | For each 'PatElem' in the 'Pat', add its aliases to the 'AliasTab' in
 -- 'LastUseM'. Additionally, 'Names' are added as aliases of all the 'PatElemT'.
 updateAliasing ::
-  AliasesOf dec =>
+  (AliasesOf dec) =>
   -- | Extra names that all 'PatElem' should alias.
   Names ->
   -- | Pattern to process
@@ -439,7 +439,7 @@ updateAliasing ::
 updateAliasing extra_aliases =
   mapM_ update . patElems
   where
-    update :: AliasesOf dec => PatElem dec -> LastUseM rep ()
+    update :: (AliasesOf dec) => PatElem dec -> LastUseM rep ()
     update (PatElem name dec) = do
       let aliases = aliasesOf dec
       aliases' <- aliasTransitiveClosure $ extra_aliases <> aliases

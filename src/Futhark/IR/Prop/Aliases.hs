@@ -71,9 +71,7 @@ basicOpAliases Replicate {} = [mempty]
 basicOpAliases Scratch {} = [mempty]
 basicOpAliases (Reshape _ _ e) = [vnameAliases e]
 basicOpAliases (Rearrange _ e) = [vnameAliases e]
-basicOpAliases (Rotate _ e) = [vnameAliases e]
 basicOpAliases Concat {} = [mempty]
-basicOpAliases Copy {} = [mempty]
 basicOpAliases Manifest {} = [mempty]
 basicOpAliases Assert {} = [mempty]
 basicOpAliases UpdateAcc {} = [mempty]
@@ -96,20 +94,9 @@ funcallAliases pes args = map onType
     res_als = map (oneName . patElemName) pes
     onType (_t, RetAls pals rals) = getAls arg_als pals <> getAls res_als rals
 
--- | The aliases of an expression, one for each pattern element.
---
--- The pattern is important because some aliasing might be through
--- variables that are no longer in scope (consider the aliases for a
--- body that returns the same value multiple times).
-expAliases :: (Aliased rep) => [PatElem dec] -> Exp rep -> [Names]
-expAliases pes (Match _ cases defbody _) =
-  -- Repeat mempty in case the pattern has more elements (this
-  -- implies a type error).
-  zipWith grow (map patElemName pes) $ als ++ repeat mempty
+mutualAliases :: Names -> [PatElem dec] -> [Names] -> [Names]
+mutualAliases bound pes als = zipWith grow (map patElemName pes) als
   where
-    als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
-    onBody body = (bodyAliases body, consumedInBody body)
-    bound = foldMap boundInBody $ defbody : map caseBody cases
     bound_als = map (`namesIntersection` bound) als
     grow v names = (names <> pe_names) `namesSubtract` bound
       where
@@ -119,14 +106,29 @@ expAliases pes (Match _ cases defbody _) =
             . map (patElemName . fst)
             . filter (namesIntersect names . snd)
             $ zip pes bound_als
+
+-- | The aliases of an expression, one for each pattern element.
+--
+-- The pattern is important because some aliasing might be through
+-- variables that are no longer in scope (consider the aliases for a
+-- body that returns the same value multiple times).
+expAliases :: (Aliased rep) => [PatElem dec] -> Exp rep -> [Names]
+expAliases pes (Match _ cases defbody _) =
+  -- Repeat mempty in case the pattern has more elements (this
+  -- implies a type error).
+  mutualAliases bound pes $ als ++ repeat mempty
+  where
+    als = matchAliases $ onBody defbody : map (onBody . caseBody) cases
+    onBody body = (bodyAliases body, consumedInBody body)
+    bound = foldMap boundInBody $ defbody : map caseBody cases
 expAliases _ (BasicOp op) = basicOpAliases op
-expAliases _ (DoLoop merge _ loopbody) = do
-  (p, als) <-
-    transitive . zip params $ zipWith mappend arg_aliases (bodyAliases loopbody)
-  let als' = als `namesSubtract` param_names
-  if unique $ paramDeclType p
-    then pure mempty
-    else pure $ als' `namesSubtract` bound
+expAliases pes (Loop merge _ loopbody) =
+  mutualAliases (bound <> param_names) pes $ do
+    (p, als) <-
+      transitive . zip params $ zipWith (<>) arg_aliases (bodyAliases loopbody)
+    if unique $ paramDeclType p
+      then pure mempty
+      else pure als
   where
     bound = boundInBody loopbody
     arg_aliases = map (subExpAliases . snd) merge
@@ -152,7 +154,7 @@ expAliases _ (WithAcc inputs lam) =
 expAliases _ (Op op) = opAliases op
 
 -- | The variables consumed in this statement.
-consumedInStm :: Aliased rep => Stm rep -> Names
+consumedInStm :: (Aliased rep) => Stm rep -> Names
 consumedInStm = consumedInExp . stmExp
 
 -- | The variables consumed in this expression.
@@ -164,19 +166,11 @@ consumedInExp (Apply _ args _ _) =
     consumeArg _ = mempty
 consumedInExp (Match _ cases defbody _) =
   foldMap (consumedInBody . caseBody) cases <> consumedInBody defbody
-consumedInExp (DoLoop merge form body) =
+consumedInExp (Loop merge _ _) =
   mconcat
     ( map (subExpAliases . snd) $
         filter (unique . paramDeclType . fst) merge
     )
-    <> consumedInForm form
-  where
-    body_consumed = consumedInBody body
-    varConsumed = (`nameIn` body_consumed) . paramName . fst
-    consumedInForm (ForLoop _ _ _ loopvars) =
-      namesFromList $ map snd $ filter varConsumed loopvars
-    consumedInForm WhileLoop {} =
-      mempty
 consumedInExp (WithAcc inputs lam) =
   mconcat (map inputConsumed inputs)
     <> ( consumedByLambda lam
@@ -191,11 +185,11 @@ consumedInExp (BasicOp _) = mempty
 consumedInExp (Op op) = consumedInOp op
 
 -- | The variables consumed by this lambda.
-consumedByLambda :: Aliased rep => Lambda rep -> Names
+consumedByLambda :: (Aliased rep) => Lambda rep -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
 -- | The aliases of each pattern element.
-patAliases :: AliasesOf dec => Pat dec -> [Names]
+patAliases :: (AliasesOf dec) => Pat dec -> [Names]
 patAliases = map aliasesOf . patElems
 
 -- | Something that contains alias information.
@@ -206,11 +200,11 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-instance AliasesOf dec => AliasesOf (PatElem dec) where
+instance (AliasesOf dec) => AliasesOf (PatElem dec) where
   aliasesOf = aliasesOf . patElemDec
 
 -- | Also includes the name itself.
-lookupAliases :: AliasesOf (LetDec rep) => VName -> Scope rep -> Names
+lookupAliases :: (AliasesOf (LetDec rep)) => VName -> Scope rep -> Names
 lookupAliases root scope =
   -- We must be careful to handle circular aliasing properly (this
   -- can happen due to Match and Loop).
@@ -227,7 +221,7 @@ lookupAliases root scope =
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.
-class IsOp op => AliasedOp op where
+class (IsOp op) => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 

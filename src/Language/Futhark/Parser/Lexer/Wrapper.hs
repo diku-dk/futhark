@@ -1,27 +1,18 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 -- | Utility definitions used by the lexer.  None of the default Alex
--- "wrappers" are precisely what we need.  The code here is based on
--- the "monad-bytestring" wrapper.  The code here is completely
--- Futhark-agnostic, and perhaps it can even serve as inspiration for
--- other Alex lexer wrappers.
+-- "wrappers" are precisely what we need.  The code here is highly
+-- minimalistic.  Lexers should not be complicated!
 module Language.Futhark.Parser.Lexer.Wrapper
-  ( runAlex,
-    Alex,
+  ( initialLexerState,
     AlexInput,
     alexInputPrevChar,
-    Byte,
     LexerError (..),
-    alexSetInput,
-    alexGetInput,
     alexGetByte,
-    alexGetStartCode,
-    alexError,
     alexGetPos,
   )
 where
 
-import Control.Applicative (liftA)
 import Data.ByteString.Internal qualified as BS (w2c)
 import Data.ByteString.Lazy qualified as BS
 import Data.Int (Int64)
@@ -61,6 +52,9 @@ alexGetByte (p, _, cs, n) =
           n' = n + 1
        in p' `seq` cs' `seq` n' `seq` Just (b, (p', c, cs', n'))
 
+alexGetPos :: AlexInput -> Pos
+alexGetPos (pos, _, _, _) = pos
+
 tabSize :: Int
 tabSize = 8
 
@@ -70,71 +64,11 @@ alexMove (Pos !f !l !c !a) '\t' = Pos f l (c + tabSize - ((c - 1) `mod` tabSize)
 alexMove (Pos !f !l _ !a) '\n' = Pos f (l + 1) 1 (a + 1)
 alexMove (Pos !f !l !c !a) _ = Pos f l (c + 1) (a + 1)
 
-data AlexState = AlexState
-  { alex_pos :: !Pos, -- position at current input location
-    alex_bpos :: !Int64, -- bytes consumed so far
-    alex_inp :: BS.ByteString, -- the current input
-    alex_chr :: !Char, -- the character before the input
-    alex_scd :: !Int -- the current startcode
-  }
-
-runAlex :: Pos -> BS.ByteString -> Alex a -> Either LexerError a
-runAlex start_pos input (Alex f) =
-  case f
-    ( AlexState
-        { alex_pos = start_pos,
-          alex_bpos = 0,
-          alex_inp = input,
-          alex_chr = '\n',
-          alex_scd = 0
-        }
-    ) of
-    Left msg -> Left msg
-    Right (_, a) -> Right a
-
-newtype Alex a = Alex {unAlex :: AlexState -> Either LexerError (AlexState, a)}
+initialLexerState :: Pos -> BS.ByteString -> AlexInput
+initialLexerState start_pos input =
+  (start_pos, '\n', input, 0)
 
 data LexerError = LexerError Loc T.Text
 
 instance Show LexerError where
   show (LexerError _ s) = T.unpack s
-
-instance Functor Alex where
-  fmap = liftA
-
-instance Applicative Alex where
-  pure a = Alex $ \s -> Right (s, a)
-  fa <*> a = Alex $ \s -> case unAlex fa s of
-    Left msg -> Left msg
-    Right (s', f) -> case unAlex a s' of
-      Left msg -> Left msg
-      Right (s'', b) -> Right (s'', f b)
-
-instance Monad Alex where
-  m >>= k = Alex $ \s -> case unAlex m s of
-    Left msg -> Left msg
-    Right (s', a) -> unAlex (k a) s'
-
-alexGetInput :: Alex AlexInput
-alexGetInput =
-  Alex $ \s@AlexState {alex_pos = pos, alex_bpos = bpos, alex_chr = c, alex_inp = inp} ->
-    Right (s, (pos, c, inp, bpos))
-
-alexSetInput :: AlexInput -> Alex ()
-alexSetInput (pos, c, inp, bpos) =
-  Alex $ \s -> case s
-    { alex_pos = pos,
-      alex_bpos = bpos,
-      alex_chr = c,
-      alex_inp = inp
-    } of
-    state@AlexState {} -> Right (state, ())
-
-alexError :: Loc -> T.Text -> Alex a
-alexError loc message = Alex $ const $ Left $ LexerError loc message
-
-alexGetStartCode :: Alex Int
-alexGetStartCode = Alex $ \s@AlexState {alex_scd = sc} -> Right (s, sc)
-
-alexGetPos :: Alex Pos
-alexGetPos = Alex $ \s -> Right (s, alex_pos s)

@@ -64,8 +64,6 @@ data KernelArg
     ValueKArg Exp PrimType
   | -- | Pass this pointer as argument.
     MemKArg VName
-  | -- | Create this much local memory per workgroup.
-    SharedMemoryKArg (Count Bytes Exp)
   deriving (Show)
 
 -- | Whether a kernel can potentially fail (because it contains bounds
@@ -95,7 +93,7 @@ numFailureParams SafetyFull = 3
 
 -- | Host-level OpenCL operation.
 data OpenCL
-  = LaunchKernel KernelSafety KernelName [KernelArg] [Exp] [GroupDim]
+  = LaunchKernel KernelSafety KernelName (Count Bytes (TExp Int64)) [KernelArg] [Exp] [GroupDim]
   | GetSize VName Name
   | CmpSizeLe VName Name Exp
   | GetSizeMax VName SizeClass
@@ -105,6 +103,7 @@ data OpenCL
 data KernelTarget
   = TargetOpenCL
   | TargetCUDA
+  | TargetHIP
   deriving (Eq)
 
 instance Pretty OpenCL where

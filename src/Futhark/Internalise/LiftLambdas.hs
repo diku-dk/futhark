@@ -13,13 +13,17 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
+import Futhark.Util (nubOrd)
 import Language.Futhark
 import Language.Futhark.Traversals
 
-newtype Env = Env {envReplace :: M.Map VName Exp}
+data Env = Env
+  { envReplace :: M.Map VName Exp,
+    envVtable :: M.Map VName StructType
+  }
 
 initialEnv :: Env
-initialEnv = Env mempty
+initialEnv = Env mempty mempty
 
 data LiftState = State
   { stateNameSource :: VNameSource,
@@ -53,59 +57,64 @@ replacing :: VName -> Exp -> LiftM a -> LiftM a
 replacing v e = local $ \env ->
   env {envReplace = M.insert v e $ envReplace env}
 
-existentials :: Exp -> S.Set VName
-existentials e =
-  let onArg (Info (_, pdim), _) =
-        maybeToList pdim
-      here = case e of
-        AppExp (Apply _ args _) (Info res) ->
-          S.fromList (foldMap onArg args <> appResExt res)
-        AppExp _ (Info res) ->
-          S.fromList (appResExt res)
-        _ ->
-          mempty
+bindingParams :: [VName] -> [Pat ParamType] -> LiftM a -> LiftM a
+bindingParams sizes params = local $ \env ->
+  env
+    { envVtable =
+        M.fromList (map (second toStruct) (foldMap patternMap params) <> map (,i64) sizes)
+          <> envVtable env
+    }
+  where
+    i64 = Scalar $ Prim $ Signed Int64
 
-      m = identityMapper {mapOnExp = \e' -> modify (<> existentials e') >> pure e'}
-   in execState (astMap m e) here
+bindingLetPat :: [VName] -> Pat StructType -> LiftM a -> LiftM a
+bindingLetPat sizes pat = local $ \env ->
+  env
+    { envVtable =
+        M.fromList (map (second toStruct) (patternMap pat) <> map (,i64) sizes)
+          <> envVtable env
+    }
+  where
+    i64 = Scalar $ Prim $ Signed Int64
 
-liftFunction :: VName -> [TypeParam] -> [Pat] -> StructRetType -> Exp -> LiftM Exp
+bindingForm :: LoopFormBase Info VName -> LiftM a -> LiftM a
+bindingForm (For i _) = bindingLetPat [] (Id (identName i) (identType i) mempty)
+bindingForm (ForIn p _) = bindingLetPat [] p
+bindingForm While {} = id
+
+toRet :: TypeBase Size u -> TypeBase Size Uniqueness
+toRet = second (const Nonunique)
+
+liftFunction :: VName -> [TypeParam] -> [Pat ParamType] -> ResRetType -> Exp -> LiftM Exp
 liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
-  global <- gets stateGlobal
-  let bound =
-        global
-          <> foldMap patNames params
-          <> S.fromList (map typeParamName tparams)
-          <> S.fromList dims
+  vtable <- asks envVtable
+  let isFree v = (v,) <$> M.lookup v vtable
+      withTypes = mapMaybe isFree . S.toList . fvVars
 
-      free =
-        let immediate_free = freeInExp funbody `freeWithout` (bound <> existentials funbody)
-            sizes_in_free =
-              foldMap freeInType $ M.elems $ unFV immediate_free
+  let free =
+        let immediate_free = withTypes $ freeInExp funbody
+            sizes_in_free = foldMap (freeInType . snd) immediate_free
             sizes =
-              FV $
-                M.map (const (Scalar $ Prim $ Signed Int64)) $
-                  unFV $
-                    sizes_in_free
-                      <> foldMap freeInPat params
-                      <> freeInType ret
-         in M.toList $ unFV $ immediate_free <> (sizes `freeWithout` bound)
+              withTypes $
+                sizes_in_free
+                  <> foldMap freeInPat params
+                  <> freeInType ret
+         in nubOrd $ immediate_free <> sizes
 
       -- Those parameters that correspond to sizes must come first.
       sizes_in_types =
-        foldMap freeInType (ret : map snd free ++ map patternStructType params)
-      isSize (v, _) = v `M.member` unFV sizes_in_types
+        foldMap freeInType (toStruct ret : map snd free ++ map patternStructType params)
+      isSize (v, _) = v `S.member` fvVars sizes_in_types
       (free_dims, free_nondims) = partition isSize free
 
-      free_params =
-        map (mkParam . second (`setUniqueness` Nonunique)) $
-          free_dims ++ free_nondims
+      free_ts = map (second (`setUniqueness` Nonunique)) $ free_dims ++ free_nondims
 
   addValBind $
     ValBind
       { valBindName = fname,
         valBindTypeParams = tparams,
-        valBindParams = free_params ++ params,
+        valBindParams = map mkParam free_ts ++ params,
         valBindRetDecl = Nothing,
         valBindRetType = Info (RetType dims ret),
         valBindBody = funbody,
@@ -117,49 +126,69 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
 
   pure
     $ apply
-      (Var (qualName fname) (Info (augType $ free_dims ++ free_nondims)) mempty)
+      (Var (qualName fname) (Info (augType free_ts)) mempty)
     $ free_dims ++ free_nondims
   where
     orig_type = funType params $ RetType dims ret
-    mkParam (v, t) = Id v (Info (fromStruct t)) mempty
-    freeVar (v, t) = Var (qualName v) (Info (fromStruct t)) mempty
-    augType rem_free = fromStruct $ funType (map mkParam rem_free) $ RetType [] orig_type
+    mkParam (v, t) = Id v (Info (toParam Observe t)) mempty
+    freeVar (v, t) = Var (qualName v) (Info t) mempty
+    augType rem_free = funType (map mkParam rem_free) $ RetType [] $ toRet orig_type
 
     apply :: Exp -> [(VName, StructType)] -> Exp
     apply f [] = f
     apply f (p : rem_ps) =
-      let inner_ret = AppRes (fromStruct (augType rem_ps)) mempty
+      let inner_ret = AppRes (augType rem_ps) mempty
           inner = mkApply f [(Observe, Nothing, freeVar p)] inner_ret
        in apply inner rem_ps
 
+transformSubExps :: ASTMapper LiftM
+transformSubExps = identityMapper {mapOnExp = transformExp}
+
 transformExp :: Exp -> LiftM Exp
 transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body _) _) = do
-  funbody' <- transformExp funbody
+  funbody' <- bindingParams (map typeParamName tparams) params $ transformExp funbody
   fname' <- newVName $ "lifted_" ++ baseString fname
   lifted_call <- liftFunction fname' tparams params ret funbody'
   replacing fname lifted_call $ transformExp body
-transformExp (Lambda params body _ (Info (_, ret)) _) = do
-  body' <- transformExp body
+transformExp (Lambda params body _ (Info ret) _) = do
+  body' <- bindingParams [] params $ transformExp body
   fname <- newVName "lifted_lambda"
   liftFunction fname [] params ret body'
+transformExp (AppExp (LetPat sizes pat e body loc) appres) = do
+  e' <- transformExp e
+  body' <- bindingLetPat (map sizeName sizes) pat $ transformExp body
+  pure $ AppExp (LetPat sizes pat e' body' loc) appres
+transformExp (AppExp (Match e cases loc) appres) = do
+  e' <- transformExp e
+  cases' <- mapM transformCase cases
+  pure $ AppExp (Match e' cases' loc) appres
+  where
+    transformCase (CasePat case_pat case_e case_loc) =
+      CasePat case_pat
+        <$> bindingLetPat [] case_pat (transformExp case_e)
+        <*> pure case_loc
+transformExp (AppExp (Loop sizes pat args form body loc) appres) = do
+  args' <- transformExp args
+  form' <- astMap transformSubExps form
+  body' <- bindingParams sizes [pat] $ bindingForm form' $ transformExp body
+  pure $ AppExp (Loop sizes pat args' form' body' loc) appres
 transformExp e@(Var v _ _) =
   -- Note that function-typed variables can only occur in expressions,
   -- not in other places where VNames/QualNames can occur.
   asks (fromMaybe e . M.lookup (qualLeaf v) . envReplace)
-transformExp e =
-  astMap m e
-  where
-    m = identityMapper {mapOnExp = transformExp}
+transformExp e = astMap transformSubExps e
 
 transformValBind :: ValBind -> LiftM ()
 transformValBind vb = do
-  e <- transformExp $ valBindBody vb
+  e <-
+    bindingParams (map typeParamName $ valBindTypeParams vb) (valBindParams vb) $
+      transformExp (valBindBody vb)
   addValBind $ vb {valBindBody = e}
 
 {-# NOINLINE transformProg #-}
 
 -- | Perform the transformation.
-transformProg :: MonadFreshNames m => [ValBind] -> m [ValBind]
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg vbinds =
   modifyNameSource $ \namesrc ->
     runLiftM namesrc $ mapM_ transformValBind vbinds

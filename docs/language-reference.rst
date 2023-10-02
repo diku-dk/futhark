@@ -30,25 +30,45 @@ Identifiers and Keywords
 ------------------------
 
 .. productionlist::
-   id: `letter` `constituent`* | "_" `constituent`*
+   name: `letter` `constituent`* | "_" `constituent`*
    constituent: `letter` | `digit` | "_" | "'"
-   quals: (`id` ".")+
-   qualid: `id` | `quals` `id`
-   binop: `opstartchar` `opchar`*
-   qualbinop: `binop` | `quals` `binop` | "`" `qualid` "`"
-   fieldid: `decimal` | `id`
-   opstartchar: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
-   opchar: `opstartchar` | "."
-   constructor: "#" `id`
+   quals: (`name` ".")+
+   qualname: `name` | `quals` `name`
+   symbol: `symstartchar` `symchar`*
+   qualsymbol: `symbol` | `quals` `symbol` | "`" `qualname` "`"
+   fieldid: `decimal` | `name`
+   symstartchar: "+" | "-" | "*" | "/" | "%" | "=" | "!" | ">" | "<" | "|" | "&" | "^"
+   symchar: `symstartchar` | "."
+   constructor: "#" `name`
 
 Many things in Futhark are named. When we are defining something, we
-give it an unqualified name (`id`).  When referencing something inside
-a module, we use a qualified name (`qualid`).  The constructor names
-of a sum type are identifiers prefixed with ``#``, with no space
-afterwards.  The fields of a record are named with `fieldid`.  Note
-that a `fieldid` can be a decimal number.  Futhark has three distinct
-name spaces: terms, module types, and types.  Modules (including
-parametric modules) and values both share the term namespace.
+give it an unqualified name (`name`).  When referencing something
+inside a module, we use a qualified name (`qualname`).  We can also
+use symbols (`symbol`, `qualsymbol`), which are treated as infix by
+the grammar.
+
+The constructor names of a sum type are identifiers prefixed with
+``#``, with no space afterwards.  The fields of a record are named
+with `fieldid`.  Note that a `fieldid` can be a decimal number.
+Futhark has three distinct name spaces: terms, module types, and
+types.  Modules (including parametric modules) and values both share
+the term namespace.
+
+.. _reserved:
+
+Reserved names and symbols
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A reserved name or symbol may be used only when explicitly present in
+the grammar.  In particular, they cannot be bound in definitions.
+
+The following identifier are reserved: ``true``, ``false``, ``if``,
+``then``, ``else``, ``def``, ``let``, ``loop``, ``in``, ``val``,
+``for``, ``do``, ``with``, ``local``, ``open``, ``include``,
+``import``, ``type``, ``entry``, ``module``, ``while``, ``assert``,
+``match``, ``case``.
+
+The following symbols are reserved: ``=``.
 
 .. _primitives:
 
@@ -106,7 +126,7 @@ Compound Types and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   type:   `qualid`
+   type:   `qualname`
        : | `array_type`
        : | `tuple_type`
        : | `record_type`
@@ -197,7 +217,7 @@ presently not allowed.  See `Type Abbreviations`_ for further details.
 
 .. productionlist::
    function_type: `param_type` "->" `type`
-   param_type: `type` | "(" `id` ":" `type` ")"
+   param_type: `type` | "(" `name` ":" `type` ")"
 
 Functions are classified via function types, but they are not fully
 first class.  See :ref:`hofs` for the details.
@@ -214,7 +234,7 @@ Futhark, but character literals are interpreted as integers of the
 corresponding Unicode code point.
 
 .. productionlist::
-   existential_size: "?" ("[" `id` "]")+ "." `type`
+   existential_size: "?" ("[" `name` "]")+ "." `type`
 
 An existential size quantifier brings an unknown size into scope
 within a type.  This can be used to encode constraints for statically
@@ -253,8 +273,8 @@ Declaring Functions and Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   val_bind:   ("def" | "entry" | "let") (`id` | "(" `binop` ")") `type_param`* `pat`* [":" `type`] "=" `exp`
-           : | ("def" | "entry" | "let") `pat` `binop` `pat` [":" `type`] "=" `exp`
+   val_bind:   ("def" | "entry" | "let") (`name` | "(" `symbol` ")") `type_param`* `pat`* [":" `type`] "=" `exp`
+           : | ("def" | "entry" | "let") `pat` `symbol` `pat` [":" `type`] "=" `exp`
 
 **Note:** using ``let`` to define top-level bindings is deprecated.
 
@@ -375,8 +395,8 @@ Type Abbreviations
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   type_bind: ("type" | "type^" | "type~") `id` `type_param`* "=" `type`
-   type_param: "[" `id` "]" | "'" `id` | "'~" `id` | "'^" `id`
+   type_bind: ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
+   type_param: "[" `name` "]" | "'" `name` | "'~" `name` | "'^" `name`
 
 Type abbreviations function as shorthands for the purpose of
 documentation or brevity.  After a type binding ``type t1 = t2``, the
@@ -433,7 +453,7 @@ literals and variables, but also more complicated forms.
 
 .. productionlist::
    atom:   `literal`
-       : | `qualid` ("." `fieldid`)*
+       : | `qualname` ("." `fieldid`)*
        : | `stringlit`
        : | `charlit`
        : | "(" ")"
@@ -441,19 +461,18 @@ literals and variables, but also more complicated forms.
        : | "(" `exp` ("," `exp`)* ")"
        : | "{" "}"
        : | "{" `field` ("," `field`)* "}"
-       : | `qualid` "[" `index` ("," `index`)* "]"
+       : | `qualname` "[" `index` ("," `index`)* "]"
        : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
        : | `quals` "." "(" `exp` ")"
        : | "[" `exp` ("," `exp`)* "]"
-       : | "[" `exp` [".." `exp`] "..." `exp` "]"
-       : | "(" `qualbinop` ")"
-       : | "(" `exp` `qualbinop` ")"
-       : | "(" `qualbinop` `exp` ")"
+       : | "(" `qualsymbol` ")"
+       : | "(" `exp` `qualsymbol` ")"
+       : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
        : | "(" "." "[" `index` ("," `index`)* "]" ")"
        : | "???"
    exp:   `atom`
-      : | `exp` `qualbinop` `exp`
+      : | `exp` `qualsymbol` `exp`
       : | `exp` `exp`
       : | "!" `exp`
       : | "-" `exp`
@@ -465,8 +484,8 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
-      : | "let" `id` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
-      : | "let" `id` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
+      : | "let" `name` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
+      : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
@@ -476,9 +495,9 @@ literals and variables, but also more complicated forms.
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
    field:   `fieldid` "=" `exp`
-        : | `id`
-   size : "[" `id` "]"
-   pat:   `id`
+        : | `name`
+   size : "[" `name` "]"
+   pat:   `name`
       : | `pat_literal`
       : | "_"
       : | "(" ")"
@@ -494,7 +513,7 @@ literals and variables, but also more complicated forms.
               : | `charlit`
               : | "true"
               : | "false"
-   loopform :   "for" `id` "<" `exp`
+   loopform :   "for" `name` "<" `exp`
             : | "for" `pat` "in" `exp`
             : | "while" `exp`
    index:   `exp` [":" [`exp`]] [":" [`exp`]]
@@ -524,7 +543,7 @@ in natural text.
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
 
-* In ``f [x]``, there is am ambiguity between indexing the array ``f``
+* In ``f [x]``, there is an ambiguity between indexing the array ``f``
   at position ``x``, or calling the function ``f`` with the singleton
   array ``x``.  We resolve this the following way:
 
@@ -537,16 +556,20 @@ in natural text.
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
 
-* Function and type application, and prefix operators, bind more
-  tightly than any infix operator.  Note that the only prefix
-  operators are the builtin ``!`` and ``-``, and more cannot be
-  defined.  In particular, a user-defined operator beginning with
-  ``!`` binds as ``!=``, as on the table below, not as the prefix
+* Prefix operators bind more tighly than infix operators.  Note that
+  the only prefix operators are the builtin ``!`` and ``-``, and more
+  cannot be defined.  In particular, a user-defined operator beginning
+  with ``!`` binds as ``!=``, as on the table below, not as the prefix
   operator ``!``
+
+* Function and type application binds more tightly than infix
+  operators.
 
 * ``#foo #bar`` is interpreted as a constructor with a ``#bar``
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
   semantically invalid anyway).
+
+* `Attributes`_ bind less tightly than any other syntactic construct.
 
 * A type application ``pt [n]t`` is parsed as an application of the
   type constructor ``pt`` to the size argument ``[n]`` and the type
@@ -565,7 +588,7 @@ in natural text.
   =================  =============
   left               ``,``
   left               ``:``, ``:>``
-  left               ```op```
+  left               ```symbol```
   left               ``||``
   left               ``&&``
   left               ``<=`` ``>=`` ``>`` ``<`` ``==`` ``!=`` ``!`` ``=``
@@ -576,6 +599,7 @@ in natural text.
   left               ``|>``
   right              ``<|``
   right              ``->``
+  left               ``**``
   left               juxtaposition
   =================  =============
 
@@ -603,8 +627,8 @@ Semantics of Simple Expressions
 
 Evaluates to itself.
 
-`qualid`
-........
+`qualname`
+..........
 
 A variable name; evaluates to its value in the current environment.
 
@@ -812,9 +836,9 @@ are:
 
     Company any two values of numeric type for equality.
 
-  ```op```
+  ```symbol```
 
-    Use ``op``, which may be any non-operator function name, as an
+    Use ``symbol``, which may be any non-operator function name, as an
     infix operator.
 
 ``x && y``
@@ -935,6 +959,10 @@ Evaluate ``e`` and bind the result to the irrefutable pattern ``pat``
 is optional if ``body`` is a ``let`` expression.  The binding is not
 let-generalised, meaning it has a monomorphic type.  This can be
 significant if ``e`` is of functional type.
+
+If ``e`` is of type ``i64`` and ``pat`` binds only a single name
+``v``, then the type of the overall expression is the type of
+``body``, but with any occurence of ``v`` replaced by ``e``.
 
 ``let [n] pat = e in body``
 ...........................
@@ -1156,11 +1184,11 @@ sizes.
 Size going out of scope
 .......................
 
-An unknown size is created when the proper size of an array refers to
-a name that has gone out of scope::
+An unknown size is created in some cases when the a type references a
+name that has gone out of scope::
 
-  let c = a + b
-  in replicate c 0
+  match ...
+  case #some c -> replicate c 0
 
 The type of ``replicate c 0`` is ``[c]i32``, but since ``c`` is
 locally bound, the type of the entire expression is ``[k]i32`` for
@@ -1467,9 +1495,9 @@ Modules
 -------
 
 .. productionlist::
-   mod_bind: "module" `id` `mod_param`* "=" [":" `mod_type_exp`] "=" `mod_exp`
-   mod_param: "(" `id` ":" `mod_type_exp` ")"
-   mod_type_bind: "module" "type" `id` "=" `mod_type_exp`
+   mod_bind: "module" `name` `mod_param`* "=" [":" `mod_type_exp`] "=" `mod_exp`
+   mod_param: "(" `name` ":" `mod_type_exp` ")"
+   mod_type_bind: "module" "type" `name` "=" `mod_type_exp`
 
 Futhark supports an ML-style higher-order module system.  *Modules*
 can contain types, functions, and other modules and module types.
@@ -1511,9 +1539,9 @@ Module Expressions
 ~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   mod_exp:   `qualid`
+   mod_exp:   `qualname`
           : | `mod_exp` ":" `mod_type_exp`
-          : | "\" "(" `id` ":" `mod_type_exp` ")" [":" `mod_type_exp`] "->" `mod_exp`
+          : | "\" "(" `mod_param`* ")" [":" `mod_type_exp`] "->" `mod_exp`
           : | `mod_exp` `mod_exp`
           : | "(" `mod_exp` ")"
           : | "{" `dec`* "}"
@@ -1523,8 +1551,8 @@ A module expression produces a module.  Modules are collections of
 bindings produced by declarations (`dec`).  In particular, a module
 may contain other modules or module types.
 
-``qualid``
-..........
+``qualname``
+............
 
 Evaluates to the module of the given name.
 
@@ -1572,20 +1600,20 @@ Module Type Expressions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   mod_type_exp:   `qualid`
+   mod_type_exp:   `qualname`
              : | "{" `spec`* "}"
-             : | `mod_type_exp` "with" `qualid` `type_param`* "=" `type`
+             : | `mod_type_exp` "with" `qualname` `type_param`* "=" `type`
              : | "(" `mod_type_exp` ")"
-             : | "(" `id` ":" `mod_type_exp` ")" "->" `mod_type_exp`
+             : | "(" `name` ":" `mod_type_exp` ")" "->" `mod_type_exp`
              : | `mod_type_exp` "->" `mod_type_exp`
 
 
 .. productionlist::
-   spec:   "val" `id` `type_param`* ":" `type`
-       : | "val" `binop` `type_param`* ":" `type`
-       : | ("type" | "type^" | "type~") `id` `type_param`* "=" `type`
-       : | ("type" | "type^" | "type~") `id` `type_param`*
-       : | "module" `id` ":" `mod_type_exp`
+   spec:   "val" `name` `type_param`* ":" `type`
+       : | "val" `symbol` `type_param`* ":" `type`
+       : | ("type" | "type^" | "type~") `name` `type_param`* "=" `type`
+       : | ("type" | "type^" | "type~") `name` `type_param`*
+       : | "module" `name` ":" `mod_type_exp`
        : | "include" `mod_type_exp`
        : | "#[" `attr` "]" `spec`
 
@@ -1653,9 +1681,9 @@ Attributes
 ----------
 
 .. productionlist::
-   attr:   `id`
+   attr:   `name`
        : | `decimal`
-       : | `id` "(" [`attr` ("," `attr`)*] ")"
+       : | `name` "(" [`attr` ("," `attr`)*] ")"
 
 An expression, declaration, pattern, or module type spec can be
 prefixed with an attribute, written as ``#[attr]``.  This may affect

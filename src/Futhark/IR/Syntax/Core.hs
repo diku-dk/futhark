@@ -12,7 +12,6 @@ module Futhark.IR.Syntax.Core
     -- * Types
     Commutativity (..),
     Uniqueness (..),
-    NoUniqueness (..),
     ShapeBase (..),
     Shape,
     stripDims,
@@ -221,16 +220,6 @@ data Space
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
--- | A fancier name for @()@ - encodes no uniqueness information.
-data NoUniqueness = NoUniqueness
-  deriving (Eq, Ord, Show)
-
-instance Semigroup NoUniqueness where
-  NoUniqueness <> NoUniqueness = NoUniqueness
-
-instance Monoid NoUniqueness where
-  mempty = NoUniqueness
-
 -- | The type of a value.  When comparing types for equality with
 -- '==', shapes must match.
 data TypeBase shape u
@@ -401,12 +390,12 @@ sliceDims = mapMaybe dimSlice . unSlice
     dimSlice DimFix {} = Nothing
 
 -- | A slice with a stride of one.
-unitSlice :: Num d => d -> d -> DimIndex d
+unitSlice :: (Num d) => d -> d -> DimIndex d
 unitSlice offset n = DimSlice offset n 1
 
 -- | Fix the 'DimSlice's of a slice.  The number of indexes must equal
 -- the length of 'sliceDims' for the slice.
-fixSlice :: Num d => Slice d -> [d] -> [d]
+fixSlice :: (Num d) => Slice d -> [d] -> [d]
 fixSlice = fixSlice' . unSlice
   where
     fixSlice' (DimFix j : mis') is' =
@@ -417,7 +406,7 @@ fixSlice = fixSlice' . unSlice
 
 -- | Further slice the 'DimSlice's of a slice.  The number of slices
 -- must equal the length of 'sliceDims' for the slice.
-sliceSlice :: Num d => Slice d -> Slice d -> Slice d
+sliceSlice :: (Num d) => Slice d -> Slice d -> Slice d
 sliceSlice (Slice jslice) (Slice islice) = Slice $ sliceSlice' jslice islice
   where
     sliceSlice' (DimFix j : js') is' =

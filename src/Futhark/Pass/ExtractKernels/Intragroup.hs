@@ -106,7 +106,7 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
       addStms w_stms
       read_input_stms <- runBuilder_ $ mapM readGroupKernelInput used_inps
-      space <- mkSegSpace ispace
+      space <- SegSpace <$> newVName "phys_group_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
   let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
@@ -138,7 +138,7 @@ readGroupKernelInput inp
   | Array {} <- kernelInputType inp = do
       v <- newVName $ baseString $ kernelInputName inp
       readKernelInput inp {kernelInputName = v}
-      letBindNames [kernelInputName inp] $ BasicOp $ Copy v
+      letBindNames [kernelInputName inp] $ BasicOp $ Replicate mempty $ Var v
   | otherwise =
       readKernelInput inp
 
@@ -184,28 +184,38 @@ intraGroupBody body = do
   stms <- collectStms_ $ intraGroupStms $ bodyStms body
   pure $ mkBody stms $ bodyResult body
 
+intraGroupLambda :: Lambda SOACS -> IntraGroupM (Lambda GPU)
+intraGroupLambda lam =
+  mkLambda (lambdaParams lam) $
+    bodyBind =<< intraGroupBody (lambdaBody lam)
+
+intraGroupWithAccInput :: WithAccInput SOACS -> IntraGroupM (WithAccInput GPU)
+intraGroupWithAccInput (shape, arrs, Nothing) =
+  pure (shape, arrs, Nothing)
+intraGroupWithAccInput (shape, arrs, Just (lam, nes)) = do
+  lam' <- intraGroupLambda lam
+  pure (shape, arrs, Just (lam', nes))
+
 intraGroupStm :: Stm SOACS -> IntraGroupM ()
 intraGroupStm stm@(Let pat aux e) = do
   scope <- askScope
   let lvl = SegThread SegNoVirt Nothing
 
   case e of
-    DoLoop merge form loopbody ->
-      localScope (scopeOf form') $
-        localScope (scopeOfFParams $ map fst merge) $ do
-          loopbody' <- intraGroupBody loopbody
-          certifying (stmAuxCerts aux) $
-            letBind pat $
-              DoLoop merge form' loopbody'
-      where
-        form' = case form of
-          ForLoop i it bound inps -> ForLoop i it bound inps
-          WhileLoop cond -> WhileLoop cond
+    Loop merge form loopbody ->
+      localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $ do
+        loopbody' <- intraGroupBody loopbody
+        certifying (stmAuxCerts aux) . letBind pat $
+          Loop merge form loopbody'
     Match cond cases defbody ifdec -> do
       cases' <- mapM (traverse intraGroupBody) cases
       defbody' <- intraGroupBody defbody
       certifying (stmAuxCerts aux) . letBind pat $
         Match cond cases' defbody' ifdec
+    WithAcc inputs lam -> do
+      inputs' <- mapM intraGroupWithAccInput inputs
+      lam' <- intraGroupLambda lam
+      certifying (stmAuxCerts aux) . letBind pat $ WithAcc inputs' lam'
     Op soac
       | "sequential_outer" `inAttrs` stmAuxAttrs aux ->
           intraGroupStms . fmap (certify (stmAuxCerts aux))

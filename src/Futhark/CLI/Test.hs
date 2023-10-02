@@ -42,7 +42,7 @@ type TestM = ExceptT [T.Text] IO
 eitherToErrors :: Either e a -> Errors e a
 eitherToErrors = either failure Pure
 
-throwError :: MonadError [e] m => e -> m a
+throwError :: (MonadError [e] m) => e -> m a
 throwError e = E.throwError [e]
 
 runTestM :: TestM () -> IO TestResult
@@ -57,7 +57,7 @@ context s = withExceptT $
     [] -> []
     (e : es') -> (s <> ":\n" <> e) : es'
 
-context1 :: Monad m => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
+context1 :: (Monad m) => T.Text -> ExceptT T.Text m a -> ExceptT T.Text m a
 context1 s = withExceptT $ \e -> s <> ":\n" <> e
 
 accErrors :: [TestM a] -> TestM [a]
@@ -107,6 +107,8 @@ data TestMode
     TypeCheck
   | -- | Only compile (do not run).
     Compile
+  | -- | Only internalise (do not run).
+    Internalise
   | -- | Test compiled code.
     Compiled
   | -- | Test interpreted code.
@@ -247,7 +249,7 @@ runTestCase (TestCase mode program testcase progs) = do
           ]
   case testAction testcase of
     CompileTimeFailure expected_error ->
-      context checkctx $ do
+      unless (mode == Internalise) . context checkctx $ do
         (code, _, err) <-
           liftIO $ readProcessWithExitCode futhark ["check", program] ""
         case code of
@@ -255,15 +257,23 @@ runTestCase (TestCase mode program testcase progs) = do
           ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
           ExitFailure 1 -> throwError $ T.decodeUtf8 err
           ExitFailure _ -> liftExcept $ checkError expected_error $ T.decodeUtf8 err
-    RunCases {} | mode == TypeCheck -> do
-      let options = ["check", program] ++ configExtraCompilerOptions progs
-      context checkctx $ do
-        (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
-
-        case code of
-          ExitSuccess -> pure ()
-          ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
-          ExitFailure _ -> throwError $ T.decodeUtf8 err
+    RunCases {}
+      | mode == TypeCheck -> do
+          let options = ["check", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
+      | mode == Internalise -> do
+          let options = ["dev", program] ++ configExtraCompilerOptions progs
+          context checkctx $ do
+            (code, _, err) <- liftIO $ readProcessWithExitCode futhark options ""
+            case code of
+              ExitSuccess -> pure ()
+              ExitFailure 127 -> throwError $ progNotFound $ T.pack futhark
+              ExitFailure _ -> throwError $ T.decodeUtf8 err
     RunCases ios structures warnings -> do
       -- Compile up-front and reuse same executable for several entry points.
       let backend = configBackend progs
@@ -348,7 +358,7 @@ runCompiledEntry futhark server program (InputOutputs entry run_cases) = do
 
         compareResult entry index program expected res
 
-checkError :: MonadError T.Text m => ExpectedError -> T.Text -> m ()
+checkError :: (MonadError T.Text m) => ExpectedError -> T.Text -> m ()
 checkError (ThisError regex_s regex) err
   | not (match regex $ T.unpack err) =
       E.throwError $
@@ -694,12 +704,17 @@ commandLineOptions =
       "c"
       ["compiled"]
       (NoArg $ Right $ \config -> config {configTestMode = Compiled})
-      "Only run compiled code",
+      "Only run compiled code (the default)",
     Option
       "C"
       ["compile"]
       (NoArg $ Right $ \config -> config {configTestMode = Compile})
       "Only compile, do not run.",
+    Option
+      "I"
+      ["internalise"]
+      (NoArg $ Right $ \config -> config {configTestMode = Internalise})
+      "Only run the compiler frontend.",
     Option
       []
       ["no-terminal", "notty"]

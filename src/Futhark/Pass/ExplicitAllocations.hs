@@ -43,7 +43,6 @@ import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
 import Data.List (foldl', transpose, zip4)
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -131,7 +130,7 @@ askDefaultSpace :: AllocM fromrep torep Space
 askDefaultSpace = asks allocSpace
 
 runAllocM ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Space ->
   (Op fromrep -> AllocM fromrep torep (Op torep)) ->
   (Exp torep -> AllocM fromrep torep [ExpHint]) ->
@@ -149,14 +148,14 @@ runAllocM space handleOp hints (AllocM m) =
           envExpHints = hints
         }
 
-elemSize :: Num a => Type -> a
+elemSize :: (Num a) => Type -> a
 elemSize = primByteSize . elemType
 
 arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   untyped $ foldl' (*) (elemSize t) $ map pe64 (arrayDims t)
 
-arraySizeInBytesExpM :: MonadBuilder m => Type -> m (PrimExp VName)
+arraySizeInBytesExpM :: (MonadBuilder m) => Type -> m (PrimExp VName)
 arraySizeInBytesExpM t = do
   let dim_prod_i64 = product $ map pe64 (arrayDims t)
       elm_size_i64 = elemSize t
@@ -165,7 +164,7 @@ arraySizeInBytesExpM t = do
       untyped $
         dim_prod_i64 * elm_size_i64
 
-arraySizeInBytes :: MonadBuilder m => Type -> m SubExp
+arraySizeInBytes :: (MonadBuilder m) => Type -> m SubExp
 arraySizeInBytes = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM
 
 allocForArray' ::
@@ -179,12 +178,46 @@ allocForArray' t space = do
 
 -- | Allocate memory for a value of the given type.
 allocForArray ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   Type ->
   Space ->
   AllocM fromrep torep VName
 allocForArray t space = do
   allocForArray' t space
+
+-- | Repair an expression that cannot be assigned an index function.
+-- There is a simple remedy for this: normalise the input arrays and
+-- try again.
+repairExpression ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep (Exp torep)
+repairExpression (BasicOp (Reshape k shape v)) = do
+  v_mem <- fst <$> lookupArraySummary v
+  space <- lookupMemSpace v_mem
+  v' <- snd <$> ensureDirectArray (Just space) v
+  pure $ BasicOp $ Reshape k shape v'
+repairExpression e =
+  error $ "repairExpression:\n" <> prettyString e
+
+expReturns' ::
+  (Allocable fromrep torep inner) =>
+  Exp torep ->
+  AllocM fromrep torep ([ExpReturns], Exp torep)
+expReturns' e = do
+  maybe_rts <- expReturns e
+  case maybe_rts of
+    Just rts -> pure (rts, e)
+    Nothing -> do
+      e' <- repairExpression e
+      let bad =
+            error . unlines $
+              [ "expReturns': impossible index transformation",
+                prettyString e,
+                prettyString e'
+              ]
+      rts <- fromMaybe bad <$> expReturns e'
+      pure (rts, e')
 
 allocsForStm ::
   (Allocable fromrep torep inner) =>
@@ -194,10 +227,10 @@ allocsForStm ::
 allocsForStm idents e = do
   def_space <- askDefaultSpace
   hints <- expHints e
-  rts <- expReturns e
+  (rts, e') <- expReturns' e
   pes <- allocsForPat def_space idents rts hints
-  dec <- mkExpDecM (Pat pes) e
-  pure $ Let (Pat pes) (defAux dec) e
+  dec <- mkExpDecM (Pat pes) e'
+  pure $ Let (Pat pes) (defAux dec) e'
 
 patWithAllocations ::
   (MonadBuilder m, Mem (Rep m) inner) =>
@@ -209,10 +242,10 @@ patWithAllocations ::
 patWithAllocations def_space names e hints = do
   ts' <- instantiateShapes' names <$> expExtType e
   let idents = zipWith Ident names ts'
-  rts <- expReturns e
+  rts <- fromMaybe (error "patWithAllocations: ill-typed") <$> expReturns e
   Pat <$> allocsForPat def_space idents rts hints
 
-mkMissingIdents :: MonadFreshNames m => [Ident] -> [ExpReturns] -> m [Ident]
+mkMissingIdents :: (MonadFreshNames m) => [Ident] -> [ExpReturns] -> m [Ident]
 mkMissingIdents idents rts =
   reverse <$> zipWithM f (reverse rts) (map Just (reverse idents) ++ repeat Nothing)
   where
@@ -268,7 +301,7 @@ allocsForPat def_space some_idents rts hints = do
         inst (Free v) = v
         inst (Ext i) = getIdent idents i
 
-instantiateIxFun :: Monad m => ExtIxFun -> m IxFun
+instantiateIxFun :: (Monad m) => ExtIxFun -> m IxFun
 instantiateIxFun = traverse $ traverse inst
   where
     inst Ext {} = error "instantiateIxFun: not yet"
@@ -344,11 +377,8 @@ ensureRowMajorArray space_ok v = do
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if numLMADs ixfun == 1
-    && ixFunPerm ixfun == [0 .. IxFun.rank ixfun - 1]
-    && length (IxFun.base ixfun) == IxFun.rank ixfun
+  if length (IxFun.base ixfun) == IxFun.rank ixfun
     && maybe True (== mem_space) space_ok
-    && IxFun.contiguous ixfun
     then pure (mem, v)
     else allocLinearArray space (baseString v) v
 
@@ -483,7 +513,8 @@ arrayWithIxFun space ixfun v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseString v <> "_scalcopy"
-  letBind (Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]) $ BasicOp $ Copy v
+  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun
+  letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
 
 ensureDirectArray ::
@@ -525,6 +556,21 @@ allocPermArray space perm s v = do
       pure (mem, v')
     _ ->
       error $ "allocPermArray: " ++ prettyString t
+
+ensurePermArray ::
+  (Allocable fromrep torep inner) =>
+  Maybe Space ->
+  [Int] ->
+  VName ->
+  AllocM fromrep torep (VName, VName)
+ensurePermArray space_ok perm v = do
+  (mem, ixfun) <- lookupArraySummary v
+  mem_space <- lookupMemSpace mem
+  default_space <- askDefaultSpace
+  if length (IxFun.base ixfun) == length (IxFun.shape ixfun)
+    && maybe True (== mem_space) space_ok
+    then pure (mem, v)
+    else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
 
 allocLinearArray ::
   (Allocable fromrep torep inner) =>
@@ -582,7 +628,7 @@ explicitAllocationsGeneric space handleOp hints =
 
     allocInFun consts (FunDef entry attrs fname rettype params fbody) =
       runAllocM space handleOp hints . inScopeOf consts $
-        allocInFParams (zip params $ repeat space) $ \params' -> do
+        allocInFParams (map (,space) params) $ \params' -> do
           (fbody', mem_rets) <-
             allocInFunBody (map (const $ Just space) rettype) fbody
           let num_extra_params = length params' - length params
@@ -702,32 +748,23 @@ allocInStm (Let (Pat pes) _ e) =
   addStm =<< allocsForStm (map patElemIdent pes) =<< allocInExp e
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
 allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
-numLMADs :: IxFun -> Int
-numLMADs = length . IxFun.ixfunLMADs
-
-ixFunPerm :: IxFun -> [Int]
-ixFunPerm = map IxFun.ldPerm . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
-
-ixFunMon :: IxFun -> [IxFun.Monotonicity]
-ixFunMon = map IxFun.ldMon . IxFun.lmadDims . NE.head . IxFun.ixfunLMADs
-
 data MemReq
-  = MemReq Space [Int] [IxFun.Monotonicity] Rank Bool
-  | NeedsLinearisation Space
+  = MemReq Space Rank
+  | NeedsNormalisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
-combMemReqs x@NeedsLinearisation {} _ = x
-combMemReqs _ y@NeedsLinearisation {} = y
-combMemReqs x@(MemReq x_space _ _ _ _) y@MemReq {} =
-  if x == y then x else NeedsLinearisation x_space
+combMemReqs x@NeedsNormalisation {} _ = x
+combMemReqs _ y@NeedsNormalisation {} = y
+combMemReqs x@(MemReq x_space _) y@MemReq {} =
+  if x == y then x else NeedsNormalisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
 
@@ -737,13 +774,13 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space _ _ (Rank base_rank) _)) =
+contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
   -- Memory + offset + base_rank + (stride,size)*rank.
   MemMem space
     : MemPrim int64
     : replicate base_rank (MemPrim int64)
     ++ replicate (2 * shapeRank shape) (MemPrim int64)
-contextRets (MemArray _ shape _ (NeedsLinearisation space)) =
+contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
   -- Memory + offset + (base,stride,size)*rank.
   MemMem space
     : MemPrim int64
@@ -770,15 +807,7 @@ allocInMatchBody rets (Body _ stms res) =
         (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
           space <- lookupMemSpace mem
           pure . MemArray pt shape u $
-            if numLMADs ixfun == 1
-              then
-                MemReq
-                  space
-                  (ixFunPerm ixfun)
-                  (ixFunMon ixfun)
-                  (Rank $ length $ IxFun.base ixfun)
-                  (IxFun.contiguous ixfun)
-              else NeedsLinearisation space
+            MemReq space (Rank $ length $ IxFun.base ixfun)
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -799,17 +828,16 @@ mkBranchRet reqs =
         res_rets_acc ++ [inspect ctx_offset req]
       )
 
-    arrayInfo rank (NeedsLinearisation space) =
-      (space, [0 .. rank - 1], repeat IxFun.Inc, rank, True)
-    arrayInfo _ (MemReq space perm mon (Rank base_rank) contig) =
-      (space, perm, mon, base_rank, contig)
+    arrayInfo rank (NeedsNormalisation space) =
+      (space, rank)
+    arrayInfo _ (MemReq space (Rank base_rank)) =
+      (space, base_rank)
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, perm, mon, base_rank, contig) = arrayInfo (shapeRank shape) req
+          (space, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert
-              <$> IxFun.mkExistential base_rank (zip perm mon) contig (ctx_offset + 1)
+            convert <$> IxFun.mkExistential base_rank (shapeRank shape) (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -827,13 +855,14 @@ addCtxToMatchBody ::
   Body torep ->
   AllocM fromrep torep (Body torep)
 addCtxToMatchBody reqs body = buildBody_ $ do
-  res <- zipWithM linearIfNeeded reqs =<< bodyBind body
+  res <- zipWithM normaliseIfNeeded reqs =<< bodyBind body
   ctx <- concat <$> mapM resCtx res
   pure $ ctx ++ res
   where
-    linearIfNeeded (MemArray _ _ _ (NeedsLinearisation space)) (SubExpRes cs (Var v)) =
-      SubExpRes cs . Var . snd <$> ensureRowMajorArray (Just space) v
-    linearIfNeeded _ res =
+    normaliseIfNeeded (MemArray _ shape _ (NeedsNormalisation space)) (SubExpRes cs (Var v)) =
+      SubExpRes cs . Var . snd
+        <$> ensurePermArray (Just space) [0 .. shapeRank shape - 1] v
+    normaliseIfNeeded _ res =
       pure res
 
     resCtx (SubExpRes _ Constant {}) =
@@ -857,7 +886,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
 -- Futhark.Optimise.EntryPointMem for a very specialised version of
 -- the idea, but which could perhaps be generalised.
 simplifyMatch ::
-  Mem rep inner =>
+  (Mem rep inner) =>
   [Case (Body rep)] ->
   Body rep ->
   [BranchTypeMem] ->
@@ -898,15 +927,14 @@ allocInExp ::
   (Allocable fromrep torep inner) =>
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
-allocInExp (DoLoop merge form (Body () bodystms bodyres)) =
+allocInExp (Loop merge form (Body () bodystms bodyres)) =
   allocInMergeParams merge $ \merge' mk_loop_val -> do
-    form' <- allocInLoopForm form
-    localScope (scopeOf form') $ do
+    localScope (scopeOfLoopForm form) $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
           (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
-      pure $ DoLoop merge' form' body'
+      pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
@@ -1000,39 +1028,17 @@ allocInExp e = mapExpM alloc e
             handle op
         }
 
-allocInLoopForm ::
-  (Allocable fromrep torep inner) =>
-  LoopForm fromrep ->
-  AllocM fromrep torep (LoopForm torep)
-allocInLoopForm (WhileLoop v) = pure $ WhileLoop v
-allocInLoopForm (ForLoop i it n loopvars) =
-  ForLoop i it n <$> mapM allocInLoopVar loopvars
-  where
-    allocInLoopVar (p, a) = do
-      (mem, ixfun) <- lookupArraySummary a
-      case paramType p of
-        Array pt shape u -> do
-          dims <- map pe64 . arrayDims <$> lookupType a
-          let ixfun' = IxFun.slice ixfun $ fullSliceNum dims [DimFix $ le64 i]
-          pure (p {paramDec = MemArray pt shape u $ ArrayIn mem ixfun'}, a)
-        Prim bt ->
-          pure (p {paramDec = MemPrim bt}, a)
-        Mem space ->
-          pure (p {paramDec = MemMem space}, a)
-        Acc acc ispace ts u ->
-          pure (p {paramDec = MemAcc acc ispace ts u}, a)
-
 class SizeSubst op where
   opIsConst :: op -> Bool
   opIsConst = const False
 
 instance SizeSubst (NoOp rep)
 
-instance SizeSubst (op rep) => SizeSubst (MemOp op rep) where
+instance (SizeSubst (op rep)) => SizeSubst (MemOp op rep) where
   opIsConst (Inner op) = opIsConst op
   opIsConst _ = False
 
-stmConsts :: SizeSubst (Op rep) => Stm rep -> S.Set VName
+stmConsts :: (SizeSubst (Op rep)) => Stm rep -> S.Set VName
 stmConsts (Let pat _ (Op op))
   | opIsConst op = S.fromList $ patNames pat
 stmConsts _ = mempty
@@ -1079,7 +1085,7 @@ mkLetNamesB'' space names e = do
     nohints = map (const NoHint) names
 
 simplifyMemOp ::
-  Engine.SimplifiableRep rep =>
+  (Engine.SimplifiableRep rep) =>
   ( inner (Engine.Wise rep) ->
     Engine.SimpleM rep (inner (Engine.Wise rep), Stms (Engine.Wise rep))
   ) ->
@@ -1110,7 +1116,7 @@ simplifiable ::
   ) ->
   SimpleOps rep
 simplifiable innerUsage simplifyInnerOp =
-  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage simplifyPat (simplifyMemOp simplifyInnerOp)
+  SimpleOps mkExpDecS' mkBodyS' protectOp opUsage (simplifyMemOp simplifyInnerOp)
   where
     mkExpDecS' _ pat e =
       pure $ Engine.mkWiseExpDec pat () e
@@ -1133,26 +1139,6 @@ simplifiable innerUsage simplifyInnerOp =
       mempty
     opUsage (Inner inner) =
       innerUsage inner
-
-    simplifyPat (Pat pes) e = do
-      rets <- expReturns e
-      Pat <$> zipWithM update pes rets
-      where
-        names = map patElemName pes
-        update
-          (PatElem pe_v (MemArray pt shape u (ArrayIn mem _)))
-          (MemArray _ _ _ (Just (ReturnsInBlock _ ixfun)))
-            | Just ixfun' <- traverse (traverse inst) ixfun =
-                PatElem pe_v
-                  <$> ( MemArray pt
-                          <$> Engine.simplify shape
-                          <*> pure u
-                          <*> (ArrayIn <$> Engine.simplify mem <*> pure ixfun')
-                      )
-            where
-              inst (Ext i) = maybeNth i names
-              inst (Free v) = Just v
-        update pe _ = traverse Engine.simplify pe
 
 data ExpHint
   = NoHint

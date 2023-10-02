@@ -33,14 +33,15 @@ data IndexResult
 
 -- | Try to simplify an index operation.
 simplifyIndexing ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   ST.SymbolTable (Rep m) ->
   TypeLookup ->
   VName ->
   Slice SubExp ->
   Bool ->
+  (VName -> Bool) ->
   Maybe (m IndexResult)
-simplifyIndexing vtable seType idd (Slice inds) consuming =
+simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
     _
       | Just t <- seType (Var idd),
@@ -94,33 +95,17 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
               letSubExp "slice_iota" $
                 BasicOp $
                   Iota i_n i_offset'' i_stride'' to_it
-
-    -- A rotate cannot be simplified away if we are slicing a rotated dimension.
-    Just (Rotate offsets a, cs)
-      | not $ or $ zipWith rotateAndSlice offsets inds -> Just $ do
-          dims <- arrayDims <$> lookupType a
-          let adjustI i o d = do
-                i_p_o <- letSubExp "i_p_o" $ BasicOp $ BinOp (Add Int64 OverflowWrap) i o
-                letSubExp "rot_i" (BasicOp $ BinOp (SMod Int64 Unsafe) i_p_o d)
-              adjust (DimFix i, o, d) =
-                DimFix <$> adjustI i o d
-              adjust (DimSlice i n s, o, d) =
-                DimSlice <$> adjustI i o d <*> pure n <*> pure s
-          IndexResult cs a . Slice <$> mapM adjust (zip3 inds offsets dims)
-      where
-        rotateAndSlice r DimSlice {} = not $ isCt0 r
-        rotateAndSlice _ _ = False
     Just (Index aa ais, cs) ->
       Just $
         IndexResult cs aa
           <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix {}] <- inds,
-        not consuming,
         ST.available vv vtable ->
           Just $ pure $ SubExpResult cs $ Var vv
       | DimFix {} : is' <- inds,
         not consuming,
+        not $ consumed vv,
         ST.available vv vtable ->
           Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
@@ -143,9 +128,10 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
       where
         isIndex DimFix {} = True
         isIndex _ = False
-    Just (Copy src, cs)
+    Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
+        not $ consumed src,
         -- It is generally not safe to simplify a slice of a copy,
         -- because the result may be used in an in-place update of the
         -- original.  But we know this can only happen if the original

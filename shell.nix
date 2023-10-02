@@ -14,10 +14,10 @@ pkgs.stdenv.mkDerivation {
       file
       git
       parallel
-      haskell.compiler.ghc927
-      haskell.packages.ghc927.ormolu
-      haskell.packages.ghc927.weeder
-      haskell.packages.ghc927.haskell-language-server
+      haskell.compiler.ghc94
+      ormolu
+      haskell.packages.ghc94.weeder
+      #haskell.packages.ghc94.haskell-language-server
       haskellPackages.graphmod
       haskellPackages.apply-refact
       xdot
@@ -43,6 +43,7 @@ pkgs.stdenv.mkDerivation {
       [ opencl-headers
         ocl-icd
         oclgrind
+        hip
       ]
   ;
 }

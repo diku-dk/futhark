@@ -25,7 +25,7 @@ type IndexSubstitution = (Certs, VName, Type, Slice SubExp)
 -- should be replaced with.
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
-typeEnvFromSubstitutions :: LParamInfo rep ~ Type => IndexSubstitutions -> Scope rep
+typeEnvFromSubstitutions :: (LParamInfo rep ~ Type) => IndexSubstitutions -> Scope rep
 typeEnvFromSubstitutions = M.fromList . map (fromSubstitution . snd)
   where
     fromSubstitution (_, name, t, _) =
@@ -58,20 +58,6 @@ substituteIndicesInStm ::
   IndexSubstitutions ->
   Stm (Rep m) ->
   m IndexSubstitutions
--- FIXME: we likely need to do something similar for all expressions
--- that produce aliases.  Ugh.  See issue #1460.  Or maybe we should
--- look at/copy all consumed arrays up front, instead of ad-hoc.
-substituteIndicesInStm substs (Let pat _ (BasicOp (Rotate rots v)))
-  | Just (cs, src, src_t, is) <- lookup v substs,
-    [v'] <- patNames pat = do
-      src' <-
-        letExp (baseString v' <> "_subst") $
-          BasicOp $
-            Rotate (replicate (arrayRank src_t - length rots) zero ++ rots) src
-      src_t' <- lookupType src'
-      pure $ (v', (cs, src', src_t', is)) : substs
-  where
-    zero = intConst Int64 0
 substituteIndicesInStm substs (Let pat _ (BasicOp (Rearrange perm v)))
   | Just (cs, src, src_t, is) <- lookup v substs,
     [v'] <- patNames pat = do
@@ -119,12 +105,13 @@ substituteIndicesInExp substs e = do
             | Just (cs2, src2, src2dec, is2) <- lookup v substs = do
                 row <-
                   certifying cs2 $
-                    letExp (baseString v ++ "_row") $
+                    letSubExp (baseString v ++ "_row") $
                       BasicOp $
                         Index src2 $
                           fullSlice (typeOf src2dec) (unSlice is2)
                 row_copy <-
-                  letExp (baseString v ++ "_row_copy") $ BasicOp $ Copy row
+                  letExp (baseString v ++ "_row_copy") . BasicOp $
+                    Replicate mempty row
                 pure $
                   update
                     v
@@ -143,7 +130,7 @@ substituteIndicesInExp substs e = do
        in foldM consumingSubst substs . namesToList . consumedInExp
 
 substituteIndicesInSubExp ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   IndexSubstitutions ->
   SubExp ->
   m SubExp
@@ -153,7 +140,7 @@ substituteIndicesInSubExp _ se =
   pure se
 
 substituteIndicesInVar ::
-  MonadBuilder m =>
+  (MonadBuilder m) =>
   IndexSubstitutions ->
   VName ->
   m VName

@@ -138,21 +138,23 @@ newNamesForMTy orig_mty = do
         substituteInTypeParam (TypeParamType l p loc) =
           TypeParamType l (substitute p) loc
 
-        substituteInType :: StructType -> StructType
-        substituteInType (Scalar (TypeVar () u (QualName qs v) targs)) =
-          Scalar $
-            TypeVar () u (QualName (map substitute qs) $ substitute v) $
-              map substituteInTypeArg targs
-        substituteInType (Scalar (Prim t)) =
-          Scalar $ Prim t
-        substituteInType (Scalar (Record ts)) =
-          Scalar $ Record $ fmap substituteInType ts
-        substituteInType (Scalar (Sum ts)) =
-          Scalar $ Sum $ (fmap . fmap) substituteInType ts
-        substituteInType (Array () u shape t) =
-          arrayOf u (substituteInShape shape) (substituteInType $ Scalar t)
-        substituteInType (Scalar (Arrow als v d1 t1 (RetType dims t2))) =
-          Scalar $ Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
+        substituteInScalarType :: ScalarTypeBase Size u -> ScalarTypeBase Size u
+        substituteInScalarType (TypeVar u (QualName qs v) targs) =
+          TypeVar u (QualName (map substitute qs) $ substitute v) $
+            map substituteInTypeArg targs
+        substituteInScalarType (Prim t) =
+          Prim t
+        substituteInScalarType (Record ts) =
+          Record $ fmap substituteInType ts
+        substituteInScalarType (Sum ts) =
+          Sum $ (fmap . fmap) substituteInType ts
+        substituteInScalarType (Arrow als v d1 t1 (RetType dims t2)) =
+          Arrow als v d1 (substituteInType t1) $ RetType dims $ substituteInType t2
+
+        substituteInType :: TypeBase Size u -> TypeBase Size u
+        substituteInType (Scalar t) = Scalar $ substituteInScalarType t
+        substituteInType (Array u shape t) =
+          Array u (substituteInShape shape) $ substituteInScalarType t
 
         substituteInShape (Shape ds) = Shape $ map (applySubst subst) ds
 
@@ -185,7 +187,7 @@ refineEnv ::
   StructType ->
   TypeM (QualName VName, TySet, Env)
 refineEnv loc tset env tname ps t
-  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar () _ (QualName qs v) _)))) <-
+  | Just (tname', TypeAbbr _ cur_ps (RetType _ (Scalar (TypeVar _ (QualName qs v) _)))) <-
       findTypeDef tname (ModEnv env),
     QualName (qualQuals tname') v `M.member` tset =
       if paramsMatch cur_ps ps
@@ -278,7 +280,8 @@ resolveAbsTypes mod_abs mod sig_abs loc = do
         "Module defines"
           </> indent 2 (ppTypeAbbr abs name mod_t)
           </> "but module type requires"
-          <+> what <> "."
+          <+> what
+          <> "."
       where
         what = case name_l of
           Unlifted -> "a non-lifted type"
@@ -330,17 +333,17 @@ resolveMTyNames = resolveMTyNames'
         resolve' name _ =
           M.lookup (namespace, baseName name) $ envNameMap mod_env
 
-missingType :: Pretty a => Loc -> a -> Either TypeError b
+missingType :: (Pretty a) => Loc -> a -> Either TypeError b
 missingType loc name =
   Left . TypeError loc mempty $
     "Module does not define a type named" <+> pretty name <> "."
 
-missingVal :: Pretty a => Loc -> a -> Either TypeError b
+missingVal :: (Pretty a) => Loc -> a -> Either TypeError b
 missingVal loc name =
   Left . TypeError loc mempty $
     "Module does not define a value named" <+> pretty name <> "."
 
-missingMod :: Pretty a => Loc -> a -> Either TypeError b
+missingMod :: (Pretty a) => Loc -> a -> Either TypeError b
 missingMod loc name =
   Left . TypeError loc mempty $
     "Module does not define a module named" <+> pretty name <> "."
@@ -361,7 +364,7 @@ mismatchedType loc abs quals name spec_t env_t =
       </> indent 2 (ppTypeAbbr abs (QualName quals name) spec_t)
 
 ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetType) -> Doc a
-ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar () _ tn args)))
+ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar _ tn args)))
   | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
       "type" <> pretty l
@@ -544,8 +547,7 @@ matchMTys orig_mty orig_mty_sig =
       let spec_t' = applySubst (`M.lookup` abs_subst_to_type) spec_t
           nonrigid = ps <> map (`TypeParamDim` mempty) (retDims t)
       case doUnification loc spec_ps nonrigid (retType spec_t') (retType t) of
-        Right t'
-          | noSizes t' `subtypeOf` noSizes (retType spec_t') -> pure (spec_name, name)
+        Right _ -> pure (spec_name, name)
         _ -> nomatch spec_t'
       where
         nomatch spec_t' =
@@ -575,18 +577,15 @@ matchMTys orig_mty orig_mty_sig =
                 </> indent 2 (ppValBind (QualName quals spec_name) spec_v)
                 </> "but module provides"
                 </> indent 2 (ppValBind (QualName quals spec_name) v)
-                </> fromMaybe mempty problem
+                </> problem
 
-    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Maybe (Doc ()))
+    matchValBinding :: Loc -> BoundV -> BoundV -> Maybe (Doc ())
     matchValBinding loc (BoundV spec_tps orig_spec_t) (BoundV tps orig_t) = do
       case doUnification loc spec_tps tps (toStruct orig_spec_t) (toStruct orig_t) of
         Left (TypeError _ notes msg) ->
-          Just $ Just $ msg <> pretty notes
-        -- Even if they unify, we still have to verify the uniqueness
-        -- properties.
-        Right t
-          | noSizes t `subtypeOf` noSizes orig_spec_t -> Nothing
-          | otherwise -> Just Nothing
+          Just $ msg <> pretty notes
+        Right _ ->
+          Nothing
 
     ppValBind v (BoundV tps t) =
       "val"

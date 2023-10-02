@@ -29,6 +29,7 @@ import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
+import Futhark.Internalise.ReplaceRecords as ReplaceRecords
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -240,7 +241,7 @@ mcMemProg name rep =
     "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
 
 typedPassOption ::
-  Checkable torep =>
+  (Checkable torep) =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
   (Prog torep -> UntypedPassState) ->
   Pass fromrep torep ->
@@ -638,7 +639,7 @@ commandLineOptions =
       "GPU"
       GPU
       "Run the default optimised kernels pipeline"
-      kernelsPipeline
+      gpuPipeline
       []
       ["gpu"],
     pipelineOption
@@ -646,7 +647,7 @@ commandLineOptions =
       "GPUMem"
       GPUMem
       "Run the full GPU compilation pipeline"
-      gpuPipeline
+      gpumemPipeline
       []
       ["gpu-mem"],
     pipelineOption
@@ -654,7 +655,7 @@ commandLineOptions =
       "Seq"
       Seq
       "Run the sequential CPU compilation pipeline"
-      sequentialPipeline
+      seqPipeline
       []
       ["seq"],
     pipelineOption
@@ -662,7 +663,7 @@ commandLineOptions =
       "SeqMem"
       SeqMem
       "Run the sequential CPU+memory compilation pipeline"
-      sequentialCpuPipeline
+      seqmemPipeline
       []
       ["seq-mem"],
     pipelineOption
@@ -678,7 +679,7 @@ commandLineOptions =
       "MCMem"
       MCMem
       "Run the multicore+memory compilation pipeline"
-      multicorePipeline
+      mcmemPipeline
       []
       ["mc-mem"]
   ]
@@ -763,6 +764,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
@@ -772,6 +774,7 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                 Defunctorise.transformProg imports
                   >>= FullNormalise.transformProg
                   >>= Monomorphise.transformProg
+                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do

@@ -2,7 +2,7 @@
 -- error: Cannot apply "bar" to "xs"
 
 def foo n =
-  let m = n+1
+  let (m,_) = (n+1,true)
   in (iota ((m+1)+1),
       \_ -> iota (m+1),
       \_ -> iota m)

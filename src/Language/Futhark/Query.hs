@@ -46,7 +46,7 @@ sizeDefs :: SizeBinder VName -> Defs
 sizeDefs (SizeBinder v loc) =
   M.singleton v $ DefBound $ BoundTerm (Scalar (Prim (Signed Int64))) (locOf loc)
 
-patternDefs :: Pat -> Defs
+patternDefs :: Pat (TypeBase Size u) -> Defs
 patternDefs (Id vn (Info t) loc) =
   M.singleton vn $ DefBound $ BoundTerm (toStruct t) (locOf loc)
 patternDefs (TuplePat pats _) =
@@ -88,13 +88,13 @@ expDefs e =
         Lambda params _ _ _ _ ->
           mconcat (map patternDefs params)
         AppExp (LetFun name (tparams, params, _, Info ret, _) _ loc) _ ->
-          let name_t = foldFunTypeFromParams params ret
+          let name_t = funType params ret
            in M.singleton name (DefBound $ BoundTerm name_t (locOf loc))
                 <> mconcat (map typeParamDefs tparams)
                 <> mconcat (map patternDefs params)
         AppExp (LetWith v _ _ _ _ _) _ ->
           identDefs v
-        AppExp (DoLoop _ merge _ form _ _) _ ->
+        AppExp (Loop _ merge _ form _ _) _ ->
           patternDefs merge
             <> case form of
               For i _ -> identDefs i
@@ -111,9 +111,7 @@ valBindDefs vbind =
       <> expDefs (valBindBody vbind)
   where
     vbind_t =
-      foldFunTypeFromParams (valBindParams vbind) $
-        unInfo $
-          valBindRetType vbind
+      funType (valBindParams vbind) $ unInfo $ valBindRetType vbind
 
 typeBindDefs :: TypeBind -> Defs
 typeBindDefs tbind =
@@ -200,7 +198,7 @@ allBindings imports = M.mapMaybe forward defs
 
 data RawAtPos = RawAtName (QualName VName) Loc
 
-contains :: Located a => a -> Pos -> Bool
+contains :: (Located a) => a -> Pos -> Bool
 contains a pos =
   case locOf a of
     Loc start end -> pos >= start && pos <= end
@@ -236,7 +234,7 @@ atPosInTypeExp te pos =
     inDim (SizeExp e _) = atPosInExp e pos
     inDim SizeExpAny {} = Nothing
 
-atPosInPat :: Pat -> Pos -> Maybe RawAtPos
+atPosInPat :: Pat (TypeBase Size u) -> Pos -> Maybe RawAtPos
 atPosInPat (Id vn _ loc) pos = do
   guard $ loc `contains` pos
   Just $ RawAtName (qualName vn) $ locOf loc
@@ -270,7 +268,7 @@ atPosInExp (AppExp (LetPat _ pat _ _ _) _) pos
 atPosInExp (AppExp (LetWith a b _ _ _ _) _) pos
   | a `contains` pos = Just $ RawAtName (qualName $ identName a) (locOf a)
   | b `contains` pos = Just $ RawAtName (qualName $ identName b) (locOf b)
-atPosInExp (AppExp (DoLoop _ merge _ _ _ _) _) pos
+atPosInExp (AppExp (Loop _ merge _ _ _ _) _) pos
   | merge `contains` pos = atPosInPat merge pos
 atPosInExp (Ascript _ te _) pos
   | te `contains` pos = atPosInTypeExp te pos

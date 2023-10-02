@@ -15,7 +15,7 @@ import Futhark.Pass.ExplicitAllocations
 instance SizeSubst (SegOp lvl rep)
 
 allocInKernelBody ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   KernelBody fromrep ->
   AllocM fromrep torep (KernelBody torep)
 allocInKernelBody (KernelBody () stms res) =
@@ -23,7 +23,7 @@ allocInKernelBody (KernelBody () stms res) =
     <$> collectStms (allocInStms stms (pure res))
 
 allocInLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   [LParam torep] ->
   Body fromrep ->
   AllocM fromrep torep (Lambda torep)
@@ -33,7 +33,7 @@ allocInLambda params body =
       bodyResult body
 
 allocInBinOpParams ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   TPrimExp Int64 VName ->
   TPrimExp Int64 VName ->
@@ -45,11 +45,10 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
     alloc x y =
       case paramType x of
         Array pt shape u -> do
+          let name = maybe "num_threads" baseString (subExpVar num_threads)
           twice_num_threads <-
-            letSubExp "twice_num_threads" $
-              BasicOp $
-                BinOp (Mul Int64 OverflowUndef) num_threads $
-                  intConst Int64 2
+            letSubExp ("twice_" <> name) . BasicOp $
+              BinOp (Mul Int64 OverflowUndef) num_threads (intConst Int64 2)
           let t = paramType x `arrayOfRow` twice_num_threads
           mem <- allocForArray t =<< askDefaultSpace
           -- XXX: this iota ixfun is a bit inefficient; leading to
@@ -84,7 +83,7 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
             )
 
 allocInBinOpLambda ::
-  Allocable fromrep torep inner =>
+  (Allocable fromrep torep inner) =>
   SubExp ->
   SegSpace ->
   Lambda fromrep ->

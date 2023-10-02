@@ -17,9 +17,8 @@ where
 
 import Data.Char (isAlpha)
 import Data.Functor
-import Data.List (singleton, zipWith4)
+import Data.List (singleton)
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -68,9 +67,6 @@ pVName = lexeme $ do
     pTag = "_" *> L.decimal <* notFollowedBy (satisfy constituent)
     exprBox = ("<{" <>) . (<> "}>") <$> (chunk "<{" *> manyTill anySingle (chunk "}>"))
 
-pBool :: Parser Bool
-pBool = choice [keyword "true" $> True, keyword "false" $> False]
-
 pInt :: Parser Int
 pInt = lexeme L.decimal
 
@@ -108,7 +104,7 @@ pNonArray =
     ]
 
 pTypeBase ::
-  ArrayShape shape =>
+  (ArrayShape shape) =>
   Parser shape ->
   Parser u ->
   Parser (TypeBase shape u)
@@ -263,7 +259,7 @@ pBasicOp =
       keyword "trace"
         $> uncurry (Opaque . OpaqueTrace)
         <*> parens ((,) <$> pStringLiteral <* pComma <*> pSubExp),
-      keyword "copy" $> Copy <*> parens pVName,
+      keyword "copy" $> Replicate mempty . Var <*> parens pVName,
       keyword "assert"
         *> parens
           ( Assert
@@ -273,9 +269,6 @@ pBasicOp =
               <* pComma
               <*> pErrorLoc
           ),
-      keyword "rotate"
-        *> parens
-          (Rotate <$> parens (pSubExp `sepBy` pComma) <* pComma <*> pVName),
       keyword "replicate"
         *> parens (Replicate <$> pShape <* pComma <*> pSubExp),
       keyword "reshape"
@@ -486,7 +479,7 @@ pApply pr =
 pLoop :: PR rep -> Parser (Exp rep)
 pLoop pr =
   keyword "loop"
-    $> DoLoop
+    $> Loop
     <*> pLoopParams
     <*> pLoopForm
     <* keyword "do"
@@ -506,8 +499,7 @@ pLoop pr =
             <* lexeme ":"
             <*> pIntType
             <* lexeme "<"
-            <*> pSubExp
-            <*> many ((,) <$> pLParam pr <* keyword "in" <*> pVName),
+            <*> pSubExp,
           keyword "while" $> WhileLoop <*> pVName
         ]
 
@@ -515,16 +507,14 @@ pLambda :: PR rep -> Parser (Lambda rep)
 pLambda pr =
   choice
     [ lexeme "\\"
-        $> lam
+        $> Lambda
         <*> pLParams pr
         <* pColon
         <*> pTypes
         <* pArrow
         <*> pBody pr,
-      keyword "nilFn" $> Lambda mempty (Body (pBodyDec pr) mempty []) []
+      keyword "nilFn" $> Lambda mempty [] (Body (pBodyDec pr) mempty [])
     ]
-  where
-    lam params ret body = Lambda params body ret
 
 pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =
@@ -978,24 +968,15 @@ pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
 pIxFunBase pNum =
   braces $ do
     base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
-    ct <- pLab "contiguous" $ pBool <* pSemi
-    lmads <- pLab "LMADs" $ brackets (pLMAD `sepBy1` pComma)
-    pure $ IxFun.IxFun (NE.fromList lmads) base ct
+    lmad <- pLab "LMAD" pLMAD
+    pure $ IxFun.IxFun lmad base
   where
     pLab s m = keyword s *> pColon *> m
-    pMon =
-      choice
-        [ "Inc" $> IxFun.Inc,
-          "Dec" $> IxFun.Dec,
-          "Unknown" $> IxFun.Unknown
-        ]
     pLMAD = braces $ do
       offset <- pLab "offset" pNum <* pSemi
       strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
-      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma) <* pSemi
-      perm <- pLab "permutation" $ brackets (pInt `sepBy` pComma) <* pSemi
-      mon <- pLab "monotonicity" $ brackets (pMon `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith4 IxFun.LMADDim strides shape perm mon
+      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma)
+      pure $ IxFun.LMAD offset $ zipWith IxFun.LMADDim strides shape
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName

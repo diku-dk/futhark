@@ -34,7 +34,7 @@ import Futhark.Transform.CopyPropagate
   )
 import Futhark.Transform.Rename
 
-parMapM :: MonadFreshNames m => (a -> State VNameSource b) -> [a] -> m [b]
+parMapM :: (MonadFreshNames m) => (a -> State VNameSource b) -> [a] -> m [b]
 -- The special-casing of [] is quite important here!  If 'as' is
 -- empty, then we might otherwise create an empty name source below,
 -- which can wreak all kinds of havoc.
@@ -52,7 +52,7 @@ parMapM f as =
 -- simplification rates used have been determined heuristically and
 -- are probably not optimal for any given program.
 inlineFunctions ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Int ->
   CallGraph ->
   S.Set Name ->
@@ -85,7 +85,7 @@ inlineFunctions simplify_rate cg what_should_be_inlined prog = do
             if any (`calledByConsts` cg) to_inline_now
               then do
                 consts' <-
-                  simplifyConsts . performCSEOnStms True
+                  simplifyConsts . performCSEOnStms
                     =<< inlineInStms inlinemap consts
                 pure (ST.insertStms (informStms consts') mempty, consts')
               else pure (vtable, consts)
@@ -156,7 +156,7 @@ withTransitiveCalls cg fs
   | otherwise = withTransitiveCalls cg fs'
   where
     look :: (Name, Used) -> M.Map Name Used
-    look (f, u) = M.fromList $ zip (S.toList (allCalledBy f cg)) $ repeat u
+    look (f, u) = M.fromList $ map (,u) (S.toList (allCalledBy f cg))
     fs' = foldr (M.unionWith max . look) fs $ M.toList fs
 
 calledInSOACs :: CallGraph -> Prog SOACS -> M.Map Name Used
@@ -183,20 +183,20 @@ inlineBecauseSOACs cg prog =
       any isArray (patTypes (stmPat stm)) || arrayInExp (stmExp stm)
     arrayInExp (Match _ cases defbody _) =
       any arrayInBody $ defbody : map caseBody cases
-    arrayInExp (DoLoop _ _ body) =
+    arrayInExp (Loop _ _ body) =
       arrayInBody body
     arrayInExp _ = False
 
 -- Conservative inlining of functions that are called just once, or
 -- have #[inline] on them.
-consInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+consInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 consInlineFunctions prog =
   inlineFunctions 4 cg (calledOnce cg <> inlineBecauseTiny prog) prog
   where
     cg = buildCallGraph prog
 
 -- Inline aggressively; in particular most things called from a SOAC.
-aggInlineFunctions :: MonadFreshNames m => Prog SOACS -> m (Prog SOACS)
+aggInlineFunctions :: (MonadFreshNames m) => Prog SOACS -> m (Prog SOACS)
 aggInlineFunctions prog =
   inlineFunctions 3 cg (inlineBecauseTiny prog <> inlineBecauseSOACs cg prog) prog
   where
@@ -208,7 +208,7 @@ aggInlineFunctions prog =
 -- importantly, the functions in @fdmap@ do not call any other
 -- functions.
 inlineInFunDef ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   FunDef SOACS ->
   m (FunDef SOACS)
@@ -216,7 +216,7 @@ inlineInFunDef fdmap (FunDef entry attrs name rtp args body) =
   FunDef entry attrs name rtp args <$> inlineInBody fdmap body
 
 inlineFunction ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   Pat Type ->
   StmAux dec ->
   [(SubExp, Diet)] ->
@@ -250,7 +250,7 @@ inlineFunction pat aux args (safety, loc, locs) fun = do
     notmempty = (/= mempty) . locOf
 
 inlineInStms ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Stms SOACS ->
   m (Stms SOACS)
@@ -258,7 +258,7 @@ inlineInStms fdmap stms =
   bodyStms <$> inlineInBody fdmap (mkBody stms [])
 
 inlineInBody ::
-  MonadFreshNames m =>
+  (MonadFreshNames m) =>
   M.Map Name (FunDef SOACS) ->
   Body SOACS ->
   m (Body SOACS)
@@ -289,8 +289,8 @@ inlineInBody fdmap = onBody
     onSOAC =
       mapSOACM identitySOACMapper {mapOnSOACLambda = onLambda}
 
-    onLambda (Lambda params body ret) =
-      Lambda params <$> onBody body <*> pure ret
+    onLambda (Lambda params ret body) =
+      Lambda params ret <$> onBody body
 
 -- Propagate source locations and attributes to the inlined
 -- statements.  Attributes are propagated only when applicable (this

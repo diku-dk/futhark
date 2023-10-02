@@ -15,7 +15,7 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as IM
 import Data.List (transpose, zip4)
 import Data.Map.Strict qualified as M
-import Data.Sequence ((<|), (><), (|>))
+import Data.Sequence ((><), (|>))
 import Data.Text qualified as T
 import Futhark.Construct (fullSlice, mkBody, sliceDim)
 import Futhark.Error
@@ -195,10 +195,7 @@ optimizeStm out stm = do
 
         -- Read migrated scalars that are used on host.
         foldM addRead (out |> stm') (zip pes pes')
-      DoLoop ps lf b -> do
-        -- Enable the migration of for-in loop variables.
-        (params, lform, body) <- rewriteForIn (ps, lf, b)
-
+      Loop params lform body -> do
         -- Update statement bound variables and parameters if their values
         -- have been migrated to device.
         let lmerge (res, stms, rebinds) (pe, param, StayOnHost) =
@@ -249,7 +246,7 @@ optimizeStm out stm = do
         let body3 = body2 {bodyStms = bstms, bodyResult = reverse res}
 
         -- Rewrite statement.
-        let e' = DoLoop params' lform body3
+        let e' = Loop params' lform body3
         let stm' = Let (Pat pes') (stmAux stm) e'
 
         -- Read migrated scalars that are used on host.
@@ -306,29 +303,6 @@ optimizeStm out stm = do
     addRead stms (pe@(PatElem n _), PatElem dev _)
       | n == dev = pure stms
       | otherwise = pe `migratedTo` (dev, stms)
-
--- | Rewrite a for-in loop such that relevant source array reads can be delayed.
-rewriteForIn ::
-  ([(FParam GPU, SubExp)], LoopForm GPU, Body GPU) ->
-  ReduceM ([(FParam GPU, SubExp)], LoopForm GPU, Body GPU)
-rewriteForIn loop@(_, WhileLoop {}, _) =
-  pure loop
-rewriteForIn (params, ForLoop i t n elems, body) = do
-  mt <- ask
-  let (elems', stms') = foldr (inline mt) ([], bodyStms body) elems
-  pure (params, ForLoop i t n elems', body {bodyStms = stms'})
-  where
-    inline mt (x, arr) (arrs, stms)
-      | pn <- paramName x,
-        not (usedOnHost pn mt) =
-          let pt = typeOf x
-              stm = bind (PatElem pn pt) (BasicOp $ index arr pt)
-           in (arrs, stm <| stms)
-      | otherwise =
-          ((x, arr) : arrs, stms)
-
-    index arr of_type =
-      Index arr $ Slice $ DimFix (Var i) : map sliceDim (arrayDims of_type)
 
 -- | Optimize an accumulator input. The 'VName' is the accumulator token.
 optimizeWithAccInput :: VName -> WithAccInput GPU -> ReduceM (WithAccInput GPU)
@@ -393,7 +367,7 @@ newtype ReduceM a = ReduceM (StateT State (Reader MigrationTable) a)
       MonadReader MigrationTable
     )
 
-runReduceM :: MonadFreshNames m => MigrationTable -> ReduceM a -> m a
+runReduceM :: (MonadFreshNames m) => MigrationTable -> ReduceM a -> m a
 runReduceM mt (ReduceM m) = modifyNameSource $ \src ->
   second stateNameSource (runReader (runStateT m (initialState src)) mt)
 

@@ -65,7 +65,7 @@ instance TraverseOpStms (Engine.Wise SeqMem) where
   traverseOpStms _ = pure
 
 simplifyProg :: Prog SeqMem -> PassM (Prog SeqMem)
-simplifyProg = simplifyProgGeneric simpleSeqMem
+simplifyProg = simplifyProgGeneric memRuleBook simpleSeqMem
 
 simpleSeqMem :: Engine.SimpleOps SeqMem
 simpleSeqMem =

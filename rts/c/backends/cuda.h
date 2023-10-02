@@ -79,7 +79,7 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  const char *cache_fname;
+  char* cache_fname;
   int num_tuning_params;
   int64_t *tuning_params;
   const char** tuning_param_names;
@@ -87,17 +87,15 @@ struct futhark_context_config {
   const char** tuning_param_classes;
   // Uniform fields above.
 
+  char* program;
   int num_nvrtc_opts;
-  const char **nvrtc_opts;
+  char* *nvrtc_opts;
 
-  const char *preferred_device;
+  char* preferred_device;
   int preferred_device_num;
 
-  const char *dump_program_to;
-  const char *load_program_from;
-
-  const char *dump_ptx_to;
-  const char *load_ptx_from;
+  char* dump_ptx_to;
+  char* load_ptx_from;
 
   size_t default_block_size;
   size_t default_grid_size;
@@ -112,13 +110,13 @@ struct futhark_context_config {
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_nvrtc_opts = 0;
-  cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
+  cfg->nvrtc_opts = (char**) malloc(sizeof(char*));
   cfg->nvrtc_opts[0] = NULL;
 
+  cfg->program = strconcat(gpu_program);
+
   cfg->preferred_device_num = 0;
-  cfg->preferred_device = "";
-  cfg->dump_program_to = NULL;
-  cfg->load_program_from = NULL;
+  cfg->preferred_device = strdup("");
 
   cfg->dump_ptx_to = NULL;
   cfg->load_ptx_from = NULL;
@@ -135,13 +133,20 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  for (int i = 0; i < cfg->num_nvrtc_opts; i++) {
+    free(cfg->nvrtc_opts[i]);
+  }
   free(cfg->nvrtc_opts);
+  free(cfg->dump_ptx_to);
+  free(cfg->load_ptx_from);
+  free(cfg->preferred_device);
+  free(cfg->program);
 }
 
 void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char *opt) {
-  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
+  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = strdup(opt);
   cfg->num_nvrtc_opts++;
-  cfg->nvrtc_opts = (const char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(const char *));
+  cfg->nvrtc_opts = (char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(char *));
   cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
 }
 
@@ -157,24 +162,28 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
       s++;
     }
   }
-  cfg->preferred_device = s;
+  free(cfg->preferred_device);
+  cfg->preferred_device = strdup(s);
   cfg->preferred_device_num = x;
 }
 
-void futhark_context_config_dump_program_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_program_to = path;
+const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
+  return cfg->program;
 }
 
-void futhark_context_config_load_program_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_program_from = path;
+void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  free(cfg->program);
+  cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_ptx_to = path;
+  free(cfg->dump_ptx_to);
+  cfg->dump_ptx_to = strdup(path);
 }
 
 void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_ptx_from = path;
+  free(cfg->load_ptx_from);
+  cfg->load_ptx_from = strdup(path);
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
@@ -235,8 +244,7 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
 // A record of something that happened.
 struct profiling_record {
   cudaEvent_t *events; // Points to two events.
-  int *runs;
-  int64_t *runtime;
+  const char *name;
 };
 
 struct futhark_context {
@@ -251,10 +259,10 @@ struct futhark_context {
   lock_t error_lock;
   FILE *log;
   struct constants *constants;
-  struct free_list cu_free_list;
+  struct free_list free_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
-  // Uniform above
+  // Uniform fields above.
 
   CUdeviceptr global_failure;
   CUdeviceptr global_failure_args;
@@ -270,14 +278,15 @@ struct futhark_context {
   CUdevice dev;
   CUcontext cu_ctx;
   CUmodule module;
+  CUstream stream;
 
-  struct free_list free_list;
+  struct free_list gpu_free_list;
 
-  size_t max_block_size;
+  size_t max_group_size;
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_shared_memory;
+  size_t max_local_memory;
   size_t max_bespoke;
 
   size_t lockstep_width;
@@ -285,6 +294,8 @@ struct futhark_context {
   struct profiling_record *profiling_records;
   int profiling_records_capacity;
   int profiling_records_used;
+
+  struct builtin_kernels* kernels;
 };
 
 #define CU_DEV_ATTR(x) (CU_DEVICE_ATTRIBUTE_##x)
@@ -307,8 +318,8 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
   char name[256];
   int count, chosen = -1, best_cc = -1;
-  int cc_major_best, cc_minor_best;
-  int cc_major, cc_minor;
+  int cc_major_best = 0, cc_minor_best = 0;
+  int cc_major = 0, cc_minor = 0;
   CUdevice dev;
 
   CUDA_SUCCEED_FATAL(cuDeviceGetCount(&count));
@@ -330,13 +341,13 @@ static int cuda_device_setup(struct futhark_context *ctx) {
     name[sizeof(name) - 1] = 0;
 
     if (cfg->logging) {
-      fprintf(stderr, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
+      fprintf(ctx->log, "Device #%d: name=\"%s\", compute capability=%d.%d\n",
               i, name, cc_major, cc_minor);
     }
 
     if (device_query(dev, COMPUTE_MODE) == CU_COMPUTEMODE_PROHIBITED) {
       if (cfg->logging) {
-        fprintf(stderr, "Device #%d is compute-prohibited, ignoring\n", i);
+        fprintf(ctx->log, "Device #%d is compute-prohibited, ignoring\n", i);
       }
       continue;
     }
@@ -359,37 +370,19 @@ static int cuda_device_setup(struct futhark_context *ctx) {
   if (chosen == -1) { return 1; }
 
   if (cfg->logging) {
-    fprintf(stderr, "Using device #%d\n", chosen);
+    fprintf(ctx->log, "Using device #%d\n", chosen);
   }
 
   CUDA_SUCCEED_FATAL(cuDeviceGet(&ctx->dev, chosen));
   return 0;
 }
 
-static char *concat_fragments(const char *src_fragments[]) {
-  size_t src_len = 0;
-  const char **p;
-
-  for (p = src_fragments; *p; p++) {
-    src_len += strlen(*p);
-  }
-
-  char *src = (char*) malloc(src_len + 1);
-  size_t n = 0;
-  for (p = src_fragments; *p; p++) {
-    strcpy(src + n, *p);
-    n += strlen(*p);
-  }
-
-  return src;
-}
-
 static const char *cuda_nvrtc_get_arch(CUdevice dev) {
-  struct {
+  static struct {
     int major;
     int minor;
     const char *arch_str;
-  } static const x[] = {
+  } const x[] = {
     { 3, 0, "compute_30" },
     { 3, 2, "compute_32" },
     { 3, 5, "compute_35" },
@@ -466,13 +459,13 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   }
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
-                        (int)ctx->max_block_size);
+                        (int)ctx->max_group_size);
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
-  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_block_size);
+  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_group_size);
 
   // Time for the best lines of the code in the entire compiler.
   if (getenv("CUDA_HOME") != NULL) {
@@ -490,6 +483,10 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   for (int j = 0; extra_opts[j] != NULL; j++) {
     opts[i++] = strdup(extra_opts[j]);
   }
+
+  opts[i++] = msgprintf("-DTR_BLOCK_DIM=%d", TR_BLOCK_DIM);
+  opts[i++] = msgprintf("-DTR_TILE_DIM=%d", TR_TILE_DIM);
+  opts[i++] = msgprintf("-DTR_ELEMS_PER_THREAD=%d", TR_ELEMS_PER_THREAD);
 
   *n_opts = i;
   *opts_out = opts;
@@ -556,13 +553,13 @@ static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
 static void cuda_size_setup(struct futhark_context *ctx)
 {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_block_size) {
+  if (cfg->default_block_size > ctx->max_group_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_block_size, cfg->default_block_size);
+              ctx->max_group_size, cfg->default_block_size);
     }
-    cfg->default_block_size = ctx->max_block_size;
+    cfg->default_block_size = ctx->max_group_size;
   }
   if (cfg->default_grid_size > ctx->max_grid_size) {
     if (cfg->default_grid_size_changed) {
@@ -595,7 +592,7 @@ static void cuda_size_setup(struct futhark_context *ctx)
     int64_t max_value = 0, default_value = 0;
 
     if (strstr(size_class, "group_size") == size_class) {
-      max_value = ctx->max_block_size;
+      max_value = ctx->max_group_size;
       default_value = cfg->default_block_size;
     } else if (strstr(size_class, "num_groups") == size_class) {
       max_value = ctx->max_grid_size;
@@ -630,29 +627,14 @@ static void cuda_size_setup(struct futhark_context *ctx)
 }
 
 static char* cuda_module_setup(struct futhark_context *ctx,
-                               const char *src_fragments[],
+                               const char *src,
                                const char *extra_opts[],
                                const char* cache_fname) {
-  char *ptx = NULL, *src = NULL;
+  char *ptx = NULL;
   struct futhark_context_config *cfg = ctx->cfg;
 
-  if (cfg->load_program_from == NULL) {
-    src = concat_fragments(src_fragments);
-  } else {
-    src = slurp_file(cfg->load_program_from, NULL);
-  }
-
   if (cfg->load_ptx_from) {
-    if (cfg->load_program_from != NULL) {
-      fprintf(stderr,
-              "WARNING: Using PTX from %s instead of C code from %s\n",
-              cfg->load_ptx_from, cfg->load_program_from);
-    }
     ptx = slurp_file(cfg->load_ptx_from, NULL);
-  }
-
-  if (cfg->dump_program_to != NULL) {
-    dump_file(cfg->dump_program_to, src, strlen(src));
   }
 
   char **opts;
@@ -694,7 +676,6 @@ static char* cuda_module_setup(struct futhark_context *ctx,
   if (ptx == NULL) {
     char* problem = cuda_nvrtc_build(src, (const char**)opts, n_opts, &ptx);
     if (problem != NULL) {
-      free(src);
       return problem;
     }
   }
@@ -721,58 +702,38 @@ static char* cuda_module_setup(struct futhark_context *ctx,
     free((char *)opts[i]);
   }
   free(opts);
-
   free(ptx);
-  if (src != NULL) {
-    free(src);
-  }
 
   return NULL;
 }
 
-static char* cuda_setup(struct futhark_context *ctx, const char *src_fragments[],
-                        const char *extra_opts[], const char* cache_fname) {
-  CUDA_SUCCEED_FATAL(cuInit(0));
-
-  if (cuda_device_setup(ctx) != 0) {
-    futhark_panic(-1, "No suitable CUDA device found.\n");
-  }
-  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
-
-  free_list_init(&ctx->cu_free_list);
-
-  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
-  ctx->max_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
-  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
-  ctx->max_tile_size = sqrt(ctx->max_block_size);
-  ctx->max_threshold = 0;
-  ctx->max_bespoke = 0;
-  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
-
-  cuda_size_setup(ctx);
-  return cuda_module_setup(ctx, src_fragments, extra_opts, cache_fname);
-}
-
 // Count up the runtime all the profiling_records that occured during execution.
 // Also clears the buffer of profiling_records.
-static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
-  cudaError_t err;
+static CUresult tally_profiling_records(struct futhark_context *ctx,
+                                        struct cost_centres* ccs) {
+  CUresult err;
   for (int i = 0; i < ctx->profiling_records_used; i++) {
     struct profiling_record record = ctx->profiling_records[i];
 
     float ms;
-    if ((err = cudaEventElapsedTime(&ms, record.events[0], record.events[1])) != cudaSuccess) {
+    if ((err = cuEventElapsedTime(&ms, record.events[0], record.events[1])) != CUDA_SUCCESS) {
       return err;
     }
 
-    // CUDA provides milisecond resolution, but we want microseconds.
-    *record.runs += 1;
-    *record.runtime += ms*1000;
+    if (ccs) {
+      // CUDA provides milisecond resolution, but we want microseconds.
+      struct cost_centre c = {
+        .name = record.name,
+        .runs = 1,
+        .runtime = ms*1000
+      };
+      cost_centres_add(ccs, c);
+    }
 
-    if ((err = cudaEventDestroy(record.events[0])) != cudaSuccess) {
+    if ((err = cuEventDestroy(record.events[0])) != CUDA_SUCCESS) {
       return err;
     }
-    if ((err = cudaEventDestroy(record.events[1])) != cudaSuccess) {
+    if ((err = cuEventDestroy(record.events[1])) != CUDA_SUCCESS) {
       return err;
     }
 
@@ -781,11 +742,11 @@ static cudaError_t cuda_tally_profiling_records(struct futhark_context *ctx) {
 
   ctx->profiling_records_used = 0;
 
-  return cudaSuccess;
+  return CUDA_SUCCESS;
 }
 
 // Returns pointer to two events.
-static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, int *runs, int64_t *runtime) {
+static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, const char* name) {
   if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
     ctx->profiling_records_capacity *= 2;
     ctx->profiling_records =
@@ -797,77 +758,9 @@ static cudaEvent_t* cuda_get_events(struct futhark_context *ctx, int *runs, int6
   cudaEventCreate(&events[0]);
   cudaEventCreate(&events[1]);
   ctx->profiling_records[ctx->profiling_records_used].events = events;
-  ctx->profiling_records[ctx->profiling_records_used].runs = runs;
-  ctx->profiling_records[ctx->profiling_records_used].runtime = runtime;
+  ctx->profiling_records[ctx->profiling_records_used].name = name;
   ctx->profiling_records_used++;
   return events;
-}
-
-static CUresult cuda_alloc(struct futhark_context *ctx, FILE *log,
-                           size_t min_size, const char *tag,
-                           CUdeviceptr *mem_out, size_t *size_out) {
-  if (min_size < sizeof(int)) {
-    min_size = sizeof(int);
-  }
-
-  if (free_list_find(&ctx->cu_free_list, min_size, tag, size_out, (fl_mem*)mem_out) == 0) {
-    if (*size_out >= min_size) {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "No need to allocate: Found a block in the free list.\n");
-      }
-      return CUDA_SUCCESS;
-    } else {
-      if (ctx->cfg->debugging) {
-        fprintf(log, "Found a free block, but it was too small.\n");
-      }
-
-      CUresult res = cuMemFree(*mem_out);
-      if (res != CUDA_SUCCESS) {
-        return res;
-      }
-    }
-  }
-
-  *size_out = min_size;
-
-  if (ctx->cfg->debugging) {
-    fprintf(log, "Actually allocating the desired block.\n");
-  }
-
-  CUresult res = cuMemAlloc(mem_out, min_size);
-  while (res == CUDA_ERROR_OUT_OF_MEMORY) {
-    CUdeviceptr mem;
-    if (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
-      res = cuMemFree(mem);
-      if (res != CUDA_SUCCESS) {
-        return res;
-      }
-    } else {
-      break;
-    }
-    res = cuMemAlloc(mem_out, min_size);
-  }
-
-  return res;
-}
-
-static CUresult cuda_free(struct futhark_context *ctx,
-                          CUdeviceptr mem, size_t size, const char *tag) {
-  free_list_insert(&ctx->cu_free_list, size, (fl_mem)mem, tag);
-  return CUDA_SUCCESS;
-}
-
-static CUresult cuda_free_all(struct futhark_context *ctx) {
-  CUdeviceptr mem;
-  free_list_pack(&ctx->cu_free_list);
-  while (free_list_first(&ctx->cu_free_list, (fl_mem*)&mem) == 0) {
-    CUresult res = cuMemFree(mem);
-    if (res != CUDA_SUCCESS) {
-      return res;
-    }
-  }
-
-  return CUDA_SUCCESS;
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {
@@ -902,9 +795,13 @@ int futhark_context_sync(struct futhark_context* ctx) {
       return FUTHARK_PROGRAM_ERROR;
     }
   }
+
   CUDA_SUCCEED_OR_RETURN(cuCtxPopCurrent(&ctx->cu_ctx));
   return 0;
 }
+
+struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
+void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->profiling_records_capacity = 200;
@@ -918,10 +815,30 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
 
-  ctx->error = cuda_setup(ctx, cuda_program, ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
+  CUDA_SUCCEED_FATAL(cuInit(0));
+  if (cuda_device_setup(ctx) != 0) {
+    futhark_panic(-1, "No suitable CUDA device found.\n");
+  }
+  CUDA_SUCCEED_FATAL(cuCtxCreate(&ctx->cu_ctx, 0, ctx->dev));
+
+  free_list_init(&ctx->gpu_free_list);
+
+  ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
+  ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
+  ctx->max_tile_size = sqrt(ctx->max_group_size);
+  ctx->max_threshold = 0;
+  ctx->max_bespoke = 0;
+  ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
+  CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
+  cuda_size_setup(ctx);
+  ctx->error = cuda_module_setup(ctx,
+                                 ctx->cfg->program,
+                                 (const char**)ctx->cfg->nvrtc_opts,
+                                 ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
-    futhark_panic(1, "%s\n", ctx->error);
+    futhark_panic(1, "During CUDA initialisation:\n%s\n", ctx->error);
   }
 
   int32_t no_error = -1;
@@ -929,17 +846,207 @@ int backend_context_setup(struct futhark_context* ctx) {
   CUDA_SUCCEED_FATAL(cuMemcpyHtoD(ctx->global_failure, &no_error, sizeof(no_error)));
   // The +1 is to avoid zero-byte allocations.
   CUDA_SUCCEED_FATAL(cuMemAlloc(&ctx->global_failure_args, sizeof(int64_t)*(max_failure_args+1)));
+
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+    return 1;
+  }
+
   return 0;
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
+  free_builtin_kernels(ctx, ctx->kernels);
   cuMemFree(ctx->global_failure);
   cuMemFree(ctx->global_failure_args);
-  CUDA_SUCCEED_FATAL(cuda_free_all(ctx));
-  (void)cuda_tally_profiling_records(ctx);
+  CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
+  (void)tally_profiling_records(ctx, NULL);
   free(ctx->profiling_records);
+  CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
   CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
   CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+}
+
+// GPU ABSTRACTION LAYER
+
+// Types.
+
+typedef CUfunction gpu_kernel;
+typedef CUdeviceptr gpu_mem;
+
+static void gpu_create_kernel(struct futhark_context *ctx,
+                              gpu_kernel* kernel,
+                              const char* name) {
+  if (ctx->debugging) {
+    fprintf(ctx->log, "Creating kernel %s.\n", name);
+  }
+  CUDA_SUCCEED_FATAL(cuModuleGetFunction(kernel, ctx->module, name));
+}
+
+static void gpu_free_kernel(struct futhark_context *ctx,
+                            gpu_kernel kernel) {
+  (void)ctx;
+  (void)kernel;
+}
+
+static int gpu_scalar_to_device(struct futhark_context* ctx,
+                                gpu_mem dst, size_t offset, size_t size,
+                                void *src) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_scalar_to_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyHtoD(dst + offset, src, size));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_scalar_from_device(struct futhark_context* ctx,
+                                  void *dst,
+                                  gpu_mem src, size_t offset, size_t size) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_scalar_from_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpyDtoH(dst, src + offset, size));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_memcpy(struct futhark_context* ctx,
+                      gpu_mem dst, int64_t dst_offset,
+                      gpu_mem src, int64_t src_offset,
+                      int64_t nbytes) {
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, "copy_dev_to_dev");
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+  CUDA_SUCCEED_OR_RETURN(cuMemcpy(dst+dst_offset, src+src_offset, nbytes));
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
+                           gpu_mem dst, int64_t dst_offset,
+                           const unsigned char* src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes > 0) {
+    CUevent* pevents = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      pevents = cuda_get_events(ctx, "copy_host_to_dev");
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+    }
+    if (sync) {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyHtoD(dst + dst_offset, src + src_offset, nbytes));
+    } else {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyHtoDAsync(dst + dst_offset, src + src_offset, nbytes, ctx->stream));
+    }
+    if (pevents != NULL) {
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
+                           unsigned char* dst, int64_t dst_offset,
+                           gpu_mem src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes > 0) {
+    CUevent* pevents = NULL;
+    if (ctx->profiling && !ctx->profiling_paused) {
+      pevents = cuda_get_events(ctx, "copy_dev_to_host");
+      CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+    }
+    if (sync) {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyDtoH(dst + dst_offset, src + src_offset, nbytes));
+    } else {
+      CUDA_SUCCEED_OR_RETURN
+        (cuMemcpyDtoHAsync(dst + dst_offset, src + src_offset, nbytes, ctx->stream));
+    }
+    if (sync &&
+        ctx->failure_is_an_option &&
+        futhark_context_sync(ctx) != 0) {
+      return 1;
+    }
+  }
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_launch_kernel(struct futhark_context* ctx,
+                             gpu_kernel kernel, const char *name,
+                             const int32_t grid[3],
+                             const int32_t block[3],
+                             unsigned int local_mem_bytes,
+                             int num_args,
+                             void* args[num_args],
+                             size_t args_sizes[num_args]) {
+  (void) args_sizes;
+  int64_t time_start = 0, time_end = 0;
+  if (ctx->logging) {
+    fprintf(ctx->log,
+            "Launching kernel %s with\n"
+            "  grid=(%d,%d,%d)\n"
+            "  block=(%d,%d,%d)\n"
+            "  local memory=%d\n",
+            name,
+            grid[0], grid[1], grid[2],
+            block[0], block[1], block[2],
+            local_mem_bytes);
+    time_start = get_wall_time();
+  }
+
+  CUevent *pevents = NULL;
+  if (ctx->profiling && !ctx->profiling_paused) {
+    pevents = cuda_get_events(ctx, name);
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[0], ctx->stream));
+  }
+
+  CUDA_SUCCEED_OR_RETURN
+    (cuLaunchKernel(kernel,
+                    grid[0], grid[1], grid[2],
+                    block[0], block[1], block[2],
+                    local_mem_bytes, ctx->stream,
+                    args, NULL));
+
+  if (pevents != NULL) {
+    CUDA_SUCCEED_FATAL(cuEventRecord(pevents[1], ctx->stream));
+  }
+
+  if (ctx->debugging) {
+    CUDA_SUCCEED_FATAL(cuCtxSynchronize());
+    time_end = get_wall_time();
+    long int time_diff = time_end - time_start;
+    fprintf(ctx->log, "  runtime: %ldus\n\n", time_diff);
+  }
+
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
+  CUresult res = cuMemAlloc(mem_out, size);
+  if (res == CUDA_ERROR_OUT_OF_MEMORY) {
+    return FUTHARK_OUT_OF_MEMORY;
+  }
+  CUDA_SUCCEED_OR_RETURN(res);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  CUDA_SUCCEED_OR_RETURN(cuMemFree(mem));
+  return FUTHARK_SUCCESS;
 }
 
 // End of backends/cuda.h.

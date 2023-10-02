@@ -80,7 +80,7 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
         ( buildBody_ $ do
             j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
             y_s <- forM ys_adj $ \y_ ->
-              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ (eSubExp j)
+              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ [eSubExp j]
             let zso = orderArgs s y_s
             let ido = orderArgs s $ case_jac k sc idmat
             pure $ subExpsRes $ concat $ zipWith (++) zso $ fmap concat ido
@@ -89,10 +89,10 @@ mkScanFusedMapLam ops w scn_lam xs ys ys_adj s d = do
             j <- letSubExp "j" =<< toExp (pe64 w - (le64 i + 1))
             j1 <- letSubExp "j1" =<< toExp (pe64 w - le64 i)
             y_s <- forM ys_adj $ \y_ ->
-              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ (eSubExp j)
+              letSubExp (baseString y_ ++ "_j") =<< eIndex y_ [eSubExp j]
 
             let args =
-                  map (`eIndex` eSubExp j) ys ++ map (`eIndex` eSubExp j1) xs
+                  map (`eIndex` [eSubExp j]) ys ++ map (`eIndex` [eSubExp j1]) xs
             lam_rs <- traverse (`eLambda` args) lams
 
             let yso = orderArgs s $ subExpsRes y_s
@@ -171,7 +171,7 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
 
       dj <-
         traverse
-          (\dd -> letExp (baseString dd ++ "_dj") =<< eIndex dd (eSubExp j))
+          (\dd -> letExp (baseString dd ++ "_dj") =<< eIndex dd [eSubExp j])
           ds
 
       fmap varsRes . letTupExp "scan_contribs"
@@ -182,9 +182,8 @@ mkScanFinalMap ops w scan_lam xs ys ds = do
               lam <- mkScanAdjointLam ops scan_lam WrtSecond $ fmap Var dj
 
               im1 <- letSubExp "im1" =<< toExp (le64 i - 1)
-              ys_im1 <- forM ys $ \y -> do
-                y_t <- lookupType y
-                letSubExp (baseString y ++ "_last") $ BasicOp $ Index y $ fullSlice y_t [DimFix im1]
+              ys_im1 <- forM ys $ \y ->
+                letSubExp (baseString y <> "_im1") =<< eIndex y [eSubExp im1]
 
               let args = map eSubExp $ ys_im1 ++ map (Var . paramName) par_x
               eLambda lam args
@@ -341,5 +340,5 @@ diffScanAdd _ops ys n lam' ne as = do
       mkLambda [par_i] $ do
         a <-
           letExp "ys_bar_rev"
-            =<< eIndex arr (toExp (pe64 n - le64 (paramName par_i) - 1))
+            =<< eIndex arr [toExp (pe64 n - le64 (paramName par_i) - 1)]
         pure [varRes a]

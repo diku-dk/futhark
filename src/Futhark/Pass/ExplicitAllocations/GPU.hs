@@ -40,19 +40,25 @@ handleSegOp ::
   AllocM GPU GPUMem (SegOp SegLevel GPUMem)
 handleSegOp outer_lvl op = do
   num_threads <-
-    letSubExp "num_threads"
-      =<< case maybe_grid of
-        Just grid ->
-          pure . BasicOp $
-            BinOp
-              (Mul Int64 OverflowUndef)
-              (unCount (gridNumGroups grid))
-              (unCount (gridGroupSize grid))
-        Nothing ->
-          foldBinOp
-            (Mul Int64 OverflowUndef)
-            (intConst Int64 1)
-            (segSpaceDims $ segSpace op)
+    case (outer_lvl, segLevel op) of
+      -- This implies we are in the intragroup parallelism situation.
+      -- Just allocate for a single group; memory expansion will
+      -- handle the rest later.
+      (Just (SegGroup _ (Just grid)), _) -> pure $ unCount $ gridGroupSize grid
+      _ ->
+        letSubExp "num_threads"
+          =<< case maybe_grid of
+            Just grid ->
+              pure . BasicOp $
+                BinOp
+                  (Mul Int64 OverflowUndef)
+                  (unCount (gridNumGroups grid))
+                  (unCount (gridGroupSize grid))
+            Nothing ->
+              foldBinOp
+                (Mul Int64 OverflowUndef)
+                (intConst Int64 1)
+                (segSpaceDims $ segSpace op)
   allocAtLevel (segLevel op) $ mapSegOpM (mapper num_threads) op
   where
     maybe_grid =

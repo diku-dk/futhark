@@ -1,7 +1,7 @@
 -- The #[unsafe] is just to avoid noisy assertions.  The bug here is
 -- the handling of the loop.
 -- ==
--- structure gpu { /SegMap/DoLoop/SegMap 2 }
+-- structure gpu { /SegMap/Loop/SegMap 2 }
 
 def dotprod [n] (a: [n]f64) (b: [n]f64): f64 =
   map2 (*) a b |> reduce (+) 0

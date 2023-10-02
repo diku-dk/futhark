@@ -64,7 +64,7 @@ type Consumption = IS.IntSet
 --------------------------------------------------------------------------------
 
 -- | All free variables of a construct as 'Dependencies'.
-depsOf :: FreeIn a => a -> Dependencies
+depsOf :: (FreeIn a) => a -> Dependencies
 depsOf = namesToSet . freeIn
 
 -- | Convert 'Names' to an integer set of name tags.
@@ -80,9 +80,9 @@ transformLambda ::
   AliasTable ->
   Lambda (Aliases GPU) ->
   PassM (Lambda GPU, Dependencies)
-transformLambda aliases (Lambda params body types) = do
+transformLambda aliases (Lambda params types body) = do
   (body', deps) <- transformBody aliases body
-  pure (Lambda params body' types, deps)
+  pure (Lambda params types body', deps)
 
 -- | Optimize a body and determine its dependencies.
 transformBody ::
@@ -181,21 +181,25 @@ transformExp aliases e =
       (defbody', defbody_deps) <- transformBody aliases defbody
       let deps = depsOf ses <> mconcat cases_deps <> defbody_deps <> depsOf dec
       pure (Match ses cases' defbody' dec, deps)
-    DoLoop merge lform body -> do
+    Loop merge lform body -> do
       -- What merge and lform aliases outside the loop is irrelevant as those
       -- cannot be consumed within the loop.
       (body', body_deps) <- transformBody aliases body
       let (params, args) = unzip merge
       let deps = body_deps <> depsOf params <> depsOf args <> depsOf lform
 
-      let scope = scopeOf lform <> scopeOfFParams params
+      let scope =
+            scopeOfLoopForm lform <> scopeOfFParams params ::
+              Scope (Aliases GPU)
       let bound = IS.fromList $ map baseTag (M.keys scope)
       let deps' = deps \\ bound
 
-      let dummy = DoLoop merge lform (Body (bodyDec body) SQ.empty [])
-      let DoLoop merge' lform' _ = removeExpAliases dummy
+      let dummy =
+            Loop merge lform (Body (bodyDec body) SQ.empty []) ::
+              Exp (Aliases GPU)
+      let Loop merge' lform' _ = removeExpAliases dummy
 
-      pure (DoLoop merge' lform' body', deps')
+      pure (Loop merge' lform' body', deps')
     WithAcc inputs lambda -> do
       accs <- mapM (transformWithAccInput aliases) inputs
       let (inputs', input_deps) = unzip accs
