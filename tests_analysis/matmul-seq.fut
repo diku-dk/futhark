@@ -11,11 +11,11 @@ def main [n] (xss: [n][n]i32) (yss: [n][n]i32) : [n][n]i32 =
 --     (arr) xss_5384 : {
 --         (idx) eta_p_5680 :
 --             0 : dependencies = {gtid_5676 0 par}
---             1 : dependencies = {gtid_5678 0 par}
+--             1 : dependencies = {gtid_5678 2 par}
 --     }
 --     (arr) yss_5385 : {
 --         (idx) eta_p_5681 :
---             0 : dependencies = {gtid_5678 0 par}
+--             0 : dependencies = {gtid_5678 2 par}
 --             1 : dependencies = {gtid_5677 0 par}
 --     }
 -- }

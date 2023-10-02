@@ -14,6 +14,6 @@ def main [n] (xss: [n][n]i32) : [n]i32 =
 --     (arr) xss_5149 : {
 --         (idx) x_5266 :
 --             0 : dependencies = {gtid_5259 0 par}
---             1 : dependencies = {gtid_5260 0 par}
+--             1 : dependencies = {gtid_5260 1 par}
 --     }
 -- }

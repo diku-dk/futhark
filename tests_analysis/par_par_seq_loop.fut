@@ -12,11 +12,11 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][n]i64 =
 --     (arr) xsss_5241 : {
 --         (idx) tmp_5395 :
 --             0 : dependencies = {gtid_5391 0 par}
---             1 : dependencies = {gtid_5392 0 par}
+--             1 : dependencies = {gtid_5392 1 par}
 --             2 : dependencies = {}
 --         (idx) +_rhs_5399 :
 --             0 : dependencies = {gtid_5391 0 par}
---             1 : dependencies = {gtid_5392 0 par}
---             2 : dependencies = {i_5397 1 seq}
+--             1 : dependencies = {gtid_5392 1 par}
+--             2 : dependencies = {i_5397 2 seq}
 --     }
 -- }
