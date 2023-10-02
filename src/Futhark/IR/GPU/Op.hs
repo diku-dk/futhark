@@ -196,6 +196,7 @@ instance Rename SizeOp where
 instance IsOp SizeOp where
   safeOp _ = True
   cheapOp _ = True
+  opDependencies op = [freeIn op]
 
 instance TypedOp SizeOp where
   opType (GetSize _ _) = pure [Prim int64]
@@ -290,6 +291,12 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (HostOp op rep) where
     -- Current GPUBody usage only benefits from hoisting kernels that
     -- transfer scalars to device.
     SQ.null (bodyStms body) && all ((== 0) . arrayRank) types
+
+  opDependencies (SegOp op) = opDependencies op
+  opDependencies (OtherOp op) = opDependencies op
+  opDependencies op@(SizeOp {}) = [freeIn op]
+  opDependencies (GPUBody _ body) =
+    replicate (length . bodyResult $ body) (freeIn body)
 
 instance (TypedOp (op rep)) => TypedOp (HostOp op rep) where
   opType (SegOp op) = opType op

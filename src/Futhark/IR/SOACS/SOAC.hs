@@ -58,6 +58,7 @@ import Data.List (intersperse)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.Alias qualified as Alias
+import Futhark.Analysis.DataDependencies
 import Futhark.Analysis.Metrics
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Analysis.SymbolTable qualified as ST
@@ -69,7 +70,7 @@ import Futhark.IR.TypeCheck qualified as TC
 import Futhark.Optimise.Simplify.Rep
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Util (chunks, maybeNth)
+import Futhark.Util (chunks, maybeNth, splitAt3)
 import Futhark.Util.Pretty (Doc, align, comma, commasep, docText, parens, ppTuple', pretty, (<+>), (</>))
 import Futhark.Util.Pretty qualified as PP
 import Prelude hiding (id, (.))
@@ -170,9 +171,13 @@ data Scan rep = Scan
   }
   deriving (Eq, Ord, Show)
 
+-- | What are the sizes of reduction results produced by these 'Scan's?
+scanSizes :: [Scan rep] -> [Int]
+scanSizes = map (length . scanNeutral)
+
 -- | How many reduction results are produced by these 'Scan's?
 scanResults :: [Scan rep] -> Int
-scanResults = sum . map (length . scanNeutral)
+scanResults = sum . scanSizes
 
 -- | Combine multiple scan operators to a single operator.
 singleScan :: (Buildable rep) => [Scan rep] -> Scan rep
@@ -189,9 +194,13 @@ data Reduce rep = Reduce
   }
   deriving (Eq, Ord, Show)
 
+-- | What are the sizes of reduction results produced by these 'Reduce's?
+redSizes :: [Reduce rep] -> [Int]
+redSizes = map (length . redNeutral)
+
 -- | How many reduction results are produced by these 'Reduce's?
 redResults :: [Reduce rep] -> Int
-redResults = sum . map (length . redNeutral)
+redResults = sum . redSizes
 
 -- | Combine multiple reduction operators to a single operator.
 singleReduce :: (Buildable rep) => [Reduce rep] -> Reduce rep
@@ -588,6 +597,61 @@ instance CanBeAliased SOAC where
 instance (ASTRep rep) => IsOp (SOAC rep) where
   safeOp _ = False
   cheapOp _ = False
+  opDependencies (Stream w arrs accs lam) =
+    let accs_deps = map depsOf' accs
+        arrs_deps = depsOfArrays w arrs
+     in lambdaDependencies mempty lam (arrs_deps <> accs_deps)
+  opDependencies (Hist w arrs ops lam) =
+    let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
+        -- Bucket function results are indices followed by values.
+        -- Reshape this to align with list of histogram operations.
+        ranks = [length (histShape op) | op <- ops]
+        value_lengths = [length (histNeutral op) | op <- ops]
+        (indices, values) = splitAt (sum ranks) bucket_fun_deps'
+        bucket_fun_deps =
+          zipWith
+            concatIndicesToEachValue
+            (chunks ranks indices)
+            (chunks value_lengths values)
+     in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+    where
+      depsOfHistOp (HistOp dest_shape rf dests nes op) =
+        let shape_deps = depsOfShape dest_shape
+            in_deps = map (\vn -> oneName vn <> shape_deps <> depsOf' rf) dests
+         in reductionDependencies mempty op nes in_deps
+      -- A histogram operation may use the same index for multiple values.
+      concatIndicesToEachValue is vs =
+        let is_flat = mconcat is
+         in map (is_flat <>) vs
+  opDependencies (Scatter w arrs lam outputs) =
+    let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
+     in map flattenGroups (groupScatterResults' outputs deps)
+    where
+      flattenGroups (indicess, values) = mconcat indicess <> values
+  opDependencies (JVP lam args vec) =
+    mconcat $
+      replicate 2 $
+        lambdaDependencies mempty lam $
+          zipWith (<>) (map depsOf' args) (map depsOf' vec)
+  opDependencies (VJP lam args vec) =
+    mconcat $
+      replicate 2 $
+        lambdaDependencies mempty lam $
+          zipWith (<>) (map depsOf' args) (map depsOf' vec)
+  opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
+    let (scans_in, reds_in, map_deps) =
+          splitAt3 (scanResults scans) (redResults reds) $
+            lambdaDependencies mempty map_lam (depsOfArrays w arrs)
+        scans_deps =
+          concatMap depsOfScan (zip scans $ chunks (scanSizes scans) scans_in)
+        reds_deps =
+          concatMap depsOfRed (zip reds $ chunks (redSizes reds) reds_in)
+     in scans_deps <> reds_deps <> map_deps
+    where
+      depsOfScan (Scan lam nes, deps_in) =
+        reductionDependencies mempty lam nes deps_in
+      depsOfRed (Reduce _ lam nes, deps_in) =
+        reductionDependencies mempty lam nes deps_in
 
 substNamesInType :: M.Map VName SubExp -> Type -> Type
 substNamesInType _ t@Prim {} = t
