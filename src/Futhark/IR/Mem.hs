@@ -239,6 +239,8 @@ instance (IsOp (inner rep)) => IsOp (MemOp inner rep) where
   safeOp (Inner k) = safeOp k
   cheapOp (Inner k) = cheapOp k
   cheapOp Alloc {} = True
+  opDependencies op@(Alloc {}) = [freeIn op]
+  opDependencies (Inner op) = opDependencies op
 
 instance (CanBeWise inner) => CanBeWise (MemOp inner) where
   addOpWisdom (Alloc size space) = Alloc size space

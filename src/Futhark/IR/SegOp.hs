@@ -1005,6 +1005,8 @@ instance
   where
   cheapOp _ = False
   safeOp _ = True
+  opDependencies op =
+    replicate (length . kernelBodyResult $ segBody op) (freeIn op)
 
 --- Simplification
 

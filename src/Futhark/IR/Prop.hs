@@ -191,9 +191,13 @@ class (ASTConstraints op, TypedOp op) => IsOp op where
   -- | Should we try to hoist this out of branches?
   cheapOp :: op -> Bool
 
+  -- | Compute the data dependencies of an operation.
+  opDependencies :: op -> [Names]
+
 instance IsOp (NoOp rep) where
   safeOp NoOp = True
   cheapOp NoOp = True
+  opDependencies NoOp = []
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.
