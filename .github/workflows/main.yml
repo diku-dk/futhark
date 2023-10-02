@@ -433,7 +433,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -470,7 +470,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -502,7 +502,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
