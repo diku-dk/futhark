@@ -39,8 +39,9 @@ simplifyIndexing ::
   VName ->
   Slice SubExp ->
   Bool ->
+  (VName -> Bool) ->
   Maybe (m IndexResult)
-simplifyIndexing vtable seType idd (Slice inds) consuming =
+simplifyIndexing vtable seType idd (Slice inds) consuming consumed =
   case defOf idd of
     _
       | Just t <- seType (Var idd),
@@ -100,11 +101,11 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
           <$> subExpSlice (sliceSlice (primExpSlice ais) (primExpSlice (Slice inds)))
     Just (Replicate (Shape [_]) (Var vv), cs)
       | [DimFix {}] <- inds,
-        not consuming,
         ST.available vv vtable ->
           Just $ pure $ SubExpResult cs $ Var vv
       | DimFix {} : is' <- inds,
         not consuming,
+        not $ consumed vv,
         ST.available vv vtable ->
           Just $ pure $ IndexResult cs vv $ Slice is'
     Just (Replicate (Shape [_]) val@(Constant _), cs)
@@ -130,6 +131,7 @@ simplifyIndexing vtable seType idd (Slice inds) consuming =
     Just (Replicate (Shape []) (Var src), cs)
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
+        not $ consumed src,
         -- It is generally not safe to simplify a slice of a copy,
         -- because the result may be used in an in-place update of the
         -- original.  But we know this can only happen if the original

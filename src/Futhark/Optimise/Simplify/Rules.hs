@@ -125,7 +125,7 @@ emptyArrayToScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
-  | Just m <- simplifyIndexing vtable seType idd inds consumed =
+  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
       Simplify $ certifying cs $ do
         res <- m
         attributing attrs $ case res of
@@ -134,7 +134,8 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
           IndexResult extra_cs idd' inds' ->
             certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
-    consumed = patElemName pe `UT.isConsumed` used
+    consuming = (`UT.isConsumed` used)
+    consumed = consuming $ patElemName pe
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip
