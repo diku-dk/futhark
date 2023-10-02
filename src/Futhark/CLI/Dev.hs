@@ -10,8 +10,8 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Actions
-import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.AccessPattern (Analyze)
+import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
 import Futhark.IR (Op, Prog, prettyString)
