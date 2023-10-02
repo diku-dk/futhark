@@ -261,5 +261,5 @@ optimalPermutation arr ctx = do
       -- let perm' = map snd $ L.sortOn fst (zip perm ([0 ..] :: [Int]))
 
       -- Check if the existing ordering is already optimal
-      let is_optimal = perm' == [0 ..]
-      (is_optimal, perm')
+      let is_optimal = perm == [0 ..]
+      (is_optimal, perm)
