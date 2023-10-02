@@ -20,7 +20,6 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.FreshNames
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
@@ -31,13 +30,13 @@ import Futhark.IR.Seq
 import Futhark.IR.SeqMem
 
 class Analyze rep where
-  analyzeOp :: Op rep -> (Context -> VName -> (Context, IndexTable))
+  analyzeOp :: Op rep -> (Context rep -> VName -> (Context rep, IndexTable rep))
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
 -- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimIdxPat]
-type IndexTable =
-  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName MemoryEntry))
+type IndexTable rep =
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName (MemoryEntry rep)))
 
 data SegOpName
   = SegmentedMap (Int, VName)
@@ -58,36 +57,36 @@ type IndexExprName = VName
 
 -- | Each element in `dimensions` corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
-data MemoryEntry = MemoryEntry
-  { dimensions :: [DimIdxPat],
+data MemoryEntry rep = MemoryEntry
+  { dimensions :: [DimIdxPat rep],
     nest :: [BodyType]
   }
   deriving (Show)
 
 -- | Collect all features of access to a specific dimension of an array.
-newtype DimIdxPat = DimIdxPat
+newtype DimIdxPat rep = DimIdxPat
   { -- | Set of VNames of gtid's that some access is variant to.
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it is created at.
-    dependencies :: S.IntMap (VName, Int, IterationType)
+    dependencies :: S.IntMap (VName, Int, IterationType rep)
   }
   deriving (Eq, Show)
 
-instance Semigroup DimIdxPat where
-  (<>) :: DimIdxPat -> DimIdxPat -> DimIdxPat
+instance Semigroup (DimIdxPat rep) where
+  (<>) :: DimIdxPat rep -> DimIdxPat rep -> DimIdxPat rep
   (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
     DimIdxPat ((<>) adeps bdeps)
 
-instance Monoid DimIdxPat where
+instance Monoid (DimIdxPat rep) where
   mempty = DimIdxPat {dependencies = mempty}
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
 -- parallel construct, like foldl or map.
-data IterationType
+data IterationType rep
   = Sequential
   | Parallel
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Show)
 
 data BodyType
   = SegOpName SegOpName
@@ -99,7 +98,7 @@ type LoopBodyName = (Int, VName)
 
 type CondBodyName = (Int, VName)
 
-unionIndexTables :: IndexTable -> IndexTable -> IndexTable
+unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables lhs rhs = do
   -- Find all occurences of ArrayName's from rhs in lhs
   let lhsNames = M.fromList $ map (onFst vnameFromSegOp) $ M.toList lhs
@@ -122,10 +121,10 @@ unionIndexTables lhs rhs = do
 
 -- | Used during the analysis to keep track of the dependencies of patterns
 -- encountered so far.
-data Context = Context
+data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
-    assignments :: M.Map VName CtxVal,
+    assignments :: M.Map VName (CtxVal rep),
     -- | A set of all DimIndexes of type `Constant`.
     constants :: Names,
     -- | A list of the segMaps encountered during the analysis in the order they
@@ -134,9 +133,9 @@ data Context = Context
     -- | Current level of recursion
     currentLevel :: Int
   }
-  deriving (Show, Ord, Eq)
+  deriving (Show, Eq)
 
-instance Monoid Context where
+instance Monoid (Context rep) where
   mempty =
     Context
       { assignments = mempty,
@@ -145,7 +144,7 @@ instance Monoid Context where
         currentLevel = 0
       }
 
-instance Semigroup Context where
+instance Semigroup (Context rep) where
   (<>)
     (Context ass0 consts0 lastBody0 lvl0)
     (Context ass1 consts1 lastBody1 lvl1) =
@@ -158,10 +157,10 @@ instance Semigroup Context where
 -- | Extend a context with another context.
 -- We never have to consider the case where VNames clash in the context, since
 -- they are unique.
-extend :: Context -> Context -> Context
+extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
-allSegMap :: Context -> [SegOpName]
+allSegMap :: Context rep -> [SegOpName]
 allSegMap (Context _ _ bodies _) =
   mapMaybe
     ( \case
@@ -173,14 +172,14 @@ allSegMap (Context _ _ bodies _) =
 -- | Context Value (CtxVal) is the type used in the context to categorize
 -- assignments. For example, a pattern might depend on a function parameter, a
 -- gtid, or some other pattern.
-data CtxVal = CtxVal
+data CtxVal rep = CtxVal
   { deps :: Names,
-    iterationType :: IterationType,
+    iterationType :: IterationType rep,
     level :: Int
   }
-  deriving (Show, Ord, Eq)
+  deriving (Show, Eq)
 
-ctxValFromNames :: Context -> Names -> CtxVal
+ctxValFromNames :: Context rep -> Names -> CtxVal rep
 ctxValFromNames ctx names =
   CtxVal
     names
@@ -188,7 +187,7 @@ ctxValFromNames ctx names =
     (currentLevel ctx)
 
 -- | Wrapper around the constructur of Context.
-oneContext :: VName -> CtxVal -> Context
+oneContext :: VName -> CtxVal rep -> Context rep
 oneContext name ctxValue =
   Context
     { assignments = M.singleton name ctxValue,
@@ -198,7 +197,7 @@ oneContext name ctxValue =
     }
 
 -- | Create a singular ctxVal with no dependencies.
-ctxValZeroDeps :: Context -> IterationType -> CtxVal
+ctxValZeroDeps :: Context rep -> IterationType rep -> CtxVal rep
 ctxValZeroDeps ctx iterType =
   CtxVal
     { deps = mempty,
@@ -207,18 +206,18 @@ ctxValZeroDeps ctx iterType =
     }
 
 -- | Create a singular context from a segspace
-contextFromNames :: Context -> IterationType -> [VName] -> Context
+contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
 contextFromNames ctx itertype =
   -- Create context from names in segspace
   foldl' extend ctx
     . map (`oneContext` ctxValZeroDeps ctx itertype)
 
 -- | Analyze each `entry` and accumulate the results.
-analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable
+analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable rep
 analyzeDimIdxPats = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable
+analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable rep
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
@@ -226,7 +225,7 @@ analyzeFunction func = do
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
-analyzeStmsPrimitive :: (Analyze rep) => Context -> [Stm rep] -> (Context, IndexTable)
+analyzeStmsPrimitive :: (Analyze rep) => Context rep -> [Stm rep] -> (Context rep, IndexTable rep)
 analyzeStmsPrimitive ctx =
   -- Fold over statements in body
   foldl'
@@ -235,7 +234,7 @@ analyzeStmsPrimitive ctx =
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: (Analyze rep) => Context -> Context -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context, IndexTable)
+analyzeStms :: (Analyze rep) => Context rep -> Context rep -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context rep, IndexTable rep)
 analyzeStms ctx tmp_ctx bodyConstructor pat body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
@@ -272,7 +271,7 @@ getDeps subexp =
 
 -- | Analyze a rep statement and return the updated context and array index
 -- descriptors.
-analyzeStm :: (Analyze rep) => Context -> Stm rep -> (Context, IndexTable)
+analyzeStm :: (Analyze rep) => Context rep -> Stm rep -> (Context rep, IndexTable rep)
 analyzeStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
   let patternName = patElemName . head $ patElems pats
@@ -288,7 +287,7 @@ analyzeStm ctx (Let pats _ e) = do
     (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternName
 
-getIndexDependencies :: Context -> [DimIndex SubExp] -> Maybe [DimIdxPat]
+getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
 getIndexDependencies _ [] = Nothing
 getIndexDependencies ctx dims =
   foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) $ reverse dims
@@ -299,7 +298,7 @@ getIndexDependencies ctx dims =
           Just $ consolidate ctx subExpression : accumulator
         _ -> Nothing
 
-analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, IndexTable)
+analyzeIndex :: Context rep -> VName -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
 analyzeIndex ctx pat arr_name dimIndexes = do
   let dimindices = getIndexDependencies ctx dimIndexes
   maybe
@@ -307,7 +306,7 @@ analyzeIndex ctx pat arr_name dimIndexes = do
     (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pat) pat arr_name)
     dimindices
 
-analyzeIndexContextFromIndices :: Context -> [DimIndex SubExp] -> VName -> Context
+analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> VName -> Context rep
 analyzeIndexContextFromIndices ctx dimIndexes pat = do
   let (subExprs, consts) =
         partitionEithers $
@@ -327,7 +326,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pat = do
   -- Extend context with the dependencies and constants index expression
   extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
 
-analyzeIndex' :: Context -> VName -> VName -> [DimIdxPat] -> (Context, IndexTable)
+analyzeIndex' :: Context rep -> VName -> VName -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx pat arr_name [_] = (ctx, mempty)
 analyzeIndex' ctx pat arr_name dimIndexes = do
   let segmaps = allSegMap ctx
@@ -339,7 +338,7 @@ analyzeIndex' ctx pat arr_name dimIndexes = do
 
   (ctx, res)
 
-analyzeBasicOp :: Context -> BasicOp -> VName -> (Context, IndexTable)
+analyzeBasicOp :: Context rep -> BasicOp -> VName -> (Context rep, IndexTable rep)
 analyzeBasicOp ctx expression pat = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
@@ -373,7 +372,7 @@ analyzeBasicOp ctx expression pat = do
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pat ctx) ne nn)
 
-analyzeMatch :: (Analyze rep) => Context -> VName -> Body rep -> [Body rep] -> (Context, IndexTable)
+analyzeMatch :: (Analyze rep) => Context rep -> VName -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pat body bodies =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
@@ -390,7 +389,7 @@ analyzeMatch ctx pat body bodies =
   where
     constLevel context = context {currentLevel = currentLevel ctx - 1}
 
-analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm -> Body rep -> VName -> (Context, IndexTable)
+analyzeLoop :: (Analyze rep) => Context rep -> [(FParam rep, SubExp)] -> LoopForm -> Body rep -> VName -> (Context rep, IndexTable rep)
 analyzeLoop ctx bindings loop body pat = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
@@ -403,7 +402,7 @@ analyzeLoop ctx bindings loop body pat = do
   -- Extend context with the loop expression
   analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
 
-analyzeApply :: Context -> VName -> [(SubExp, Diet)] -> (Context, IndexTable)
+analyzeApply :: Context rep -> VName -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
 analyzeApply ctx pat diets =
   onFst
     ( \ctx' ->
@@ -417,7 +416,7 @@ segOpType (SegRed {}) = SegmentedRed
 segOpType (SegScan {}) = SegmentedScan
 segOpType (SegHist {}) = SegmentedHist
 
-analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context -> VName -> (Context, IndexTable)
+analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context rep -> VName -> (Context rep, IndexTable rep)
 analyzeSegOp op ctx pat = do
   let nextLevel = currentLevel ctx + length (unSegSpace $ segSpace op) - 1
   let ctx' = ctx {currentLevel = nextLevel}
@@ -431,7 +430,7 @@ analyzeSegOp op ctx pat = do
   -- Analyze statements in the SegOp body
   analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
 
-analyzeSizeOp :: SizeOp -> Context -> VName -> (Context, IndexTable)
+analyzeSizeOp :: SizeOp -> Context rep -> VName -> (Context rep, IndexTable rep)
 analyzeSizeOp op ctx pat = do
   let subexprsToContext =
         contextFromNames ctx Sequential
@@ -445,15 +444,15 @@ analyzeSizeOp op ctx pat = do
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
-analyzeGPUBody :: (Analyze rep) => Body rep -> Context -> (Context, IndexTable)
+analyzeGPUBody :: (Analyze rep) => Body rep -> Context rep -> (Context rep, IndexTable rep)
 analyzeGPUBody body ctx =
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
-analyzeOtherOp :: Context -> VName -> (Context, IndexTable)
+analyzeOtherOp :: Context rep -> VName -> (Context rep, IndexTable rep)
 analyzeOtherOp _ctx _pat = error "UNHANDLED: OtherOp"
 
 -- | Get the iteration type of the last SegOp encountered in the context.
-getIterationType :: Context -> IterationType
+getIterationType :: Context rep -> IterationType rep
 getIterationType (Context _ _ bodies _) =
   getIteration_rec bodies
   where
@@ -475,7 +474,7 @@ getIterationType (Context _ _ bodies _) =
 -- might be thrown out in the future, as it is mostly just a very verbose way to
 -- ensure that we capture all necessary variables in the context at the moment
 -- of development.
-analyzeSubExpr :: VName -> Context -> SubExp -> Names
+analyzeSubExpr :: VName -> Context rep -> SubExp -> Names
 analyzeSubExpr _ _ (Constant _) = mempty
 analyzeSubExpr pp ctx (Var v) =
   case M.lookup v (assignments ctx) of
@@ -490,12 +489,12 @@ analyzeSubExpr pp ctx (Var v) =
           ++ show ctx
 
 -- | Reduce a DimFix into its set of dependencies
-consolidate :: Context -> SubExp -> DimIdxPat
+consolidate :: Context rep -> SubExp -> DimIdxPat rep
 consolidate _ (Constant _) = mempty
 consolidate ctx (Var v) = reduceDependencies ctx v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
-reduceDependencies :: Context -> VName -> DimIdxPat
+reduceDependencies :: Context rep -> VName -> DimIdxPat rep
 reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
@@ -550,33 +549,45 @@ notImplementedYet :: String -> String
 notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."
 
 -- Sorting of DimIdxPat used to find optimal permutations of arrays in the CoalesceAccess pass
-data Lvls = Lvls Int Int
-  deriving (Eq, Show)
-
-data OrderedDep = OrderedDep VName Lvls IterationType
-  deriving (Eq, Show)
-
-instance Ord Lvls where
-  compare (Lvls l1 l'1) (Lvls l2 l'2) =
-    if l1 == l2
-      then l'1 `compare` l'2
-      else l1 `compare` l2
-
-instance Ord OrderedDep where
-  compare d1@(OrderedDep _ lvls1 it1) d2@(OrderedDep _ lvls2 it2) =
-    if it1 == it2
-      then lvls1 `compare` lvls2
-      else case (it1, it2) of
+instance Ord (IterationType rep) where
+  compare lhs rhs =
+      case (lhs, rhs) of
         (Parallel, Sequential) -> GT
         (Sequential, Parallel) -> LT
+        _ -> EQ
 
-instance Ord DimIdxPat where
+--instance Ord (IterationType MC) where
+--  compare lhs rhs =
+--      case (lhs, rhs) of
+--        (Parallel, Sequential) -> LT
+--        (Sequential, Parallel) -> GT
+--        _ -> EQ
+
+type OrderedDep rep
+    = (Maybe (IterationType rep, (Int, Int), VName))
+
+instance Ord (DimIdxPat rep) where
   compare (DimIdxPat deps1) (DimIdxPat deps2) = do
-    let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep]
-    let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep]
-    let neutral = OrderedDep (VName "" 0) (Lvls (-1) (-1)) Sequential -- Neutral element
-    let aggr1 = foldl max neutral deps1'
-    let aggr2 = foldl max neutral deps2'
-    compare aggr1 aggr2
-    where
-      f ((n, l, it), l') = OrderedDep n (Lvls l l') it
+    let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep rep]
+    let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep rep]
+    let aggr1 = foldl maxIdxPat Nothing deps1' :: OrderedDep rep
+    let aggr2 = foldl maxIdxPat Nothing deps2' :: OrderedDep rep
+    cmpIdxPat aggr1 aggr2
+      where
+        cmpIdxPat :: OrderedDep rep -> OrderedDep rep -> Ordering
+        cmpIdxPat Nothing Nothing = EQ
+        cmpIdxPat Nothing (Just _) = LT
+        cmpIdxPat (Just _) Nothing = GT
+        cmpIdxPat (Just (liter, (llvl, lidx), _)) (Just (riter, (rlvl, ridx), _)) =
+          case liter `compare` riter of
+            EQ -> (llvl, lidx) `compare` (rlvl, ridx)
+            res -> res
+
+        maxIdxPat :: OrderedDep rep -> OrderedDep rep -> OrderedDep rep
+        maxIdxPat lhs rhs =
+          case cmpIdxPat lhs rhs of
+            LT -> rhs
+            _ -> lhs
+
+        f :: ((VName, Int, IterationType rep), Int) -> OrderedDep rep
+        f ((n, lvl, t), idx) = Just (t, (lvl,idx), n)

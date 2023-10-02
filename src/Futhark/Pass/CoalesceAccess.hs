@@ -47,7 +47,7 @@ coalesceAccess =
 
 type CoalesceM = Builder GPU
 
-type Ctx = IndexTable
+type Ctx = IndexTable GPU
 
 transformStms :: Ctx -> ExpMap -> Stms GPU -> CoalesceM (Stms GPU)
 transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap) stms

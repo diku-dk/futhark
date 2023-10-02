@@ -12,14 +12,14 @@ import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Util.Pretty
 
-instance Pretty IndexTable where
-  pretty = stack . map f . M.toList :: IndexTable -> Doc ann
+instance Pretty (IndexTable rep) where
+  pretty = stack . map f . M.toList :: IndexTable rep -> Doc ann
     where
       f (segop, arrayNameToIdxExprMap) = pretty segop <+> colon <+> g arrayNameToIdxExprMap
 
       g maps = lbrace </> indent 4 (mapprintArray $ M.toList maps) </> rbrace
 
-      mapprintArray :: [(ArrayName, M.Map IndexExprName MemoryEntry)] -> Doc ann
+      mapprintArray :: [(ArrayName, M.Map IndexExprName (MemoryEntry rep))] -> Doc ann
       mapprintArray [] = ""
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
@@ -32,20 +32,20 @@ instance Pretty IndexTable where
           </> indent 4 (mapprintIdxExpr (M.toList maps))
           </> rbrace
 
-      mapprintIdxExpr :: [(IndexExprName, MemoryEntry)] -> Doc ann
+      mapprintIdxExpr :: [(IndexExprName, MemoryEntry rep)] -> Doc ann
       mapprintIdxExpr [] = ""
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
       printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntry mems)
 
-      printMemoryEntry :: MemoryEntry -> Doc ann
+      printMemoryEntry :: MemoryEntry rep -> Doc ann
       printMemoryEntry (MemoryEntry dims _) =
         stack $ zipWith printDim [0 .. (length dims)] dims
 
       printDim idx m = pretty idx <+> ":" <+> indent 0 (pretty m)
 
-instance Pretty DimIdxPat where
+instance Pretty (DimIdxPat rep) where
   pretty (DimIdxPat dependencies) =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
@@ -68,6 +68,6 @@ instance Pretty BodyType where
   pretty (LoopBodyName (_, name)) = pretty name <+> colon <+> "loop"
   pretty (CondBodyName (_, name)) = pretty name <+> colon <+> "cond"
 
-instance Pretty IterationType where
+instance Pretty (IterationType rep) where
   pretty Sequential = "seq"
   pretty Parallel = "par"
