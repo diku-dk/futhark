@@ -1,4 +1,4 @@
-def main [l][m][n][o] (xsss: [l][m][n][o]i64) (is: [n]i64) (is2: [m]i64)=
+def main [l][m][n][o] (xsss: [l][m][n][o]i64) (is: [n]i64) (is2: [m]i64) =
     #[unsafe]
     map (\xss ->
         loop res=xss[0] for i < m do
