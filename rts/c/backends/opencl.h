@@ -122,7 +122,7 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  const char *cache_fname;
+  char *cache_fname;
   int num_tuning_params;
   int64_t *tuning_params;
   const char** tuning_param_names;
@@ -132,12 +132,12 @@ struct futhark_context_config {
 
   char* program;
   int preferred_device_num;
-  const char *preferred_platform;
-  const char *preferred_device;
+  char* preferred_platform;
+  char* preferred_device;
   int ignore_blacklist;
 
-  const char* dump_binary_to;
-  const char* load_binary_from;
+  char* dump_binary_to;
+  char* load_binary_from;
 
   size_t default_group_size;
   size_t default_num_groups;
@@ -148,7 +148,7 @@ struct futhark_context_config {
   int default_group_size_changed;
   int default_tile_size_changed;
   int num_build_opts;
-  const char **build_opts;
+  char* *build_opts;
 
   cl_command_queue queue;
   int queue_set;
@@ -156,11 +156,11 @@ struct futhark_context_config {
 
 static void backend_context_config_setup(struct futhark_context_config* cfg) {
   cfg->num_build_opts = 0;
-  cfg->build_opts = (const char**) malloc(sizeof(const char*));
+  cfg->build_opts = (char**) malloc(sizeof(const char*));
   cfg->build_opts[0] = NULL;
   cfg->preferred_device_num = 0;
-  cfg->preferred_platform = "";
-  cfg->preferred_device = "";
+  cfg->preferred_platform = strdup("");
+  cfg->preferred_device = strdup("");
   cfg->ignore_blacklist = 0;
   cfg->dump_binary_to = NULL;
   cfg->load_binary_from = NULL;
@@ -182,14 +182,21 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  for (int i = 0; i < cfg->num_build_opts; i++) {
+    free(cfg->build_opts[i]);
+  }
   free(cfg->build_opts);
+  free(cfg->dump_binary_to);
+  free(cfg->load_binary_from);
+  free(cfg->preferred_device);
+  free(cfg->preferred_platform);
   free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config* cfg, const char *opt) {
-  cfg->build_opts[cfg->num_build_opts] = opt;
+  cfg->build_opts[cfg->num_build_opts] = strdup(opt);
   cfg->num_build_opts++;
-  cfg->build_opts = (const char**) realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(const char*));
+  cfg->build_opts = (char**) realloc(cfg->build_opts, (cfg->num_build_opts+1) * sizeof(char*));
   cfg->build_opts[cfg->num_build_opts] = NULL;
 }
 
@@ -205,13 +212,15 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
       s++;
     }
   }
-  cfg->preferred_device = s;
+  free(cfg->preferred_device);
+  cfg->preferred_device = strdup(s);
   cfg->preferred_device_num = x;
   cfg->ignore_blacklist = 1;
 }
 
 void futhark_context_config_set_platform(struct futhark_context_config *cfg, const char *s) {
-  cfg->preferred_platform = s;
+  free(cfg->preferred_platform);
+  cfg->preferred_platform = strdup(s);
   cfg->ignore_blacklist = 1;
 }
 
@@ -409,15 +418,18 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 }
 
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  free(cfg->program);
   cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_binary_to = path;
+  free(cfg->dump_binary_to);
+  cfg->dump_binary_to = strdup(path);
 }
 
 void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_binary_from = path;
+  free(cfg->load_binary_from);
+  cfg->load_binary_from = strdup(path);
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
@@ -719,7 +731,7 @@ int futhark_context_sync(struct futhark_context* ctx) {
 // array must be NULL-terminated.
 static void setup_opencl_with_command_queue(struct futhark_context *ctx,
                                             cl_command_queue queue,
-                                            const char *extra_build_opts[],
+                                            const char* extra_build_opts[],
                                             const char* cache_fname) {
   int error;
 
@@ -1059,9 +1071,9 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->cur_mem_usage_device = 0;
 
   if (ctx->cfg->queue_set) {
-    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl_with_command_queue(ctx, ctx->cfg->queue, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
-    setup_opencl(ctx, ctx->cfg->build_opts, ctx->cfg->cache_fname);
+    setup_opencl(ctx, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
   }
 
   cl_int error;

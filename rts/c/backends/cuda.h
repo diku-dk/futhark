@@ -79,7 +79,7 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  const char *cache_fname;
+  char* cache_fname;
   int num_tuning_params;
   int64_t *tuning_params;
   const char** tuning_param_names;
@@ -89,13 +89,13 @@ struct futhark_context_config {
 
   char* program;
   int num_nvrtc_opts;
-  const char **nvrtc_opts;
+  char* *nvrtc_opts;
 
-  const char *preferred_device;
+  char* preferred_device;
   int preferred_device_num;
 
-  const char *dump_ptx_to;
-  const char *load_ptx_from;
+  char* dump_ptx_to;
+  char* load_ptx_from;
 
   size_t default_block_size;
   size_t default_grid_size;
@@ -110,13 +110,13 @@ struct futhark_context_config {
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_nvrtc_opts = 0;
-  cfg->nvrtc_opts = (const char**) malloc(sizeof(const char*));
+  cfg->nvrtc_opts = (char**) malloc(sizeof(char*));
   cfg->nvrtc_opts[0] = NULL;
 
   cfg->program = strconcat(gpu_program);
 
   cfg->preferred_device_num = 0;
-  cfg->preferred_device = "";
+  cfg->preferred_device = strdup("");
 
   cfg->dump_ptx_to = NULL;
   cfg->load_ptx_from = NULL;
@@ -133,13 +133,20 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  for (int i = 0; i < cfg->num_nvrtc_opts; i++) {
+    free(cfg->nvrtc_opts[i]);
+  }
   free(cfg->nvrtc_opts);
+  free(cfg->dump_ptx_to);
+  free(cfg->load_ptx_from);
+  free(cfg->preferred_device);
+  free(cfg->program);
 }
 
 void futhark_context_config_add_nvrtc_option(struct futhark_context_config *cfg, const char *opt) {
-  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = opt;
+  cfg->nvrtc_opts[cfg->num_nvrtc_opts] = strdup(opt);
   cfg->num_nvrtc_opts++;
-  cfg->nvrtc_opts = (const char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(const char *));
+  cfg->nvrtc_opts = (char **) realloc(cfg->nvrtc_opts, (cfg->num_nvrtc_opts + 1) * sizeof(char *));
   cfg->nvrtc_opts[cfg->num_nvrtc_opts] = NULL;
 }
 
@@ -155,7 +162,8 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
       s++;
     }
   }
-  cfg->preferred_device = s;
+  free(cfg->preferred_device);
+  cfg->preferred_device = strdup(s);
   cfg->preferred_device_num = x;
 }
 
@@ -164,15 +172,18 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 }
 
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  free(cfg->program);
   cfg->program = strdup(s);
 }
 
 void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, const char *path) {
-  cfg->dump_ptx_to = path;
+  free(cfg->dump_ptx_to);
+  cfg->dump_ptx_to = strdup(path);
 }
 
 void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char *path) {
-  cfg->load_ptx_from = path;
+  free(cfg->load_ptx_from);
+  cfg->load_ptx_from = strdup(path);
 }
 
 void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
@@ -821,8 +832,10 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
-  ctx->error = cuda_module_setup(ctx, ctx->cfg->program,
-                                 ctx->cfg->nvrtc_opts, ctx->cfg->cache_fname);
+  ctx->error = cuda_module_setup(ctx,
+                                 ctx->cfg->program,
+                                 (const char**)ctx->cfg->nvrtc_opts,
+                                 ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
     futhark_panic(1, "During CUDA initialisation:\n%s\n", ctx->error);
