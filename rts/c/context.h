@@ -96,6 +96,7 @@ struct futhark_context_config* futhark_context_config_new(void) {
 void futhark_context_config_free(struct futhark_context_config* cfg) {
   assert(!cfg->in_use);
   backend_context_config_teardown(cfg);
+  free(cfg->cache_fname);
   free(cfg->tuning_params);
   free(cfg);
 }
@@ -138,6 +139,7 @@ void futhark_context_free(struct futhark_context* ctx) {
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
   free(ctx->constants);
+  free(ctx->error);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
   ctx->cfg->in_use = 0;

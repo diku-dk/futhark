@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The various C API functions that accept strings now perform a copy,
+  meaning the caller does not have to keep the strings alive.
+
 ### Removed
 
 ### Changed
