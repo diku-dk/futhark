@@ -1679,6 +1679,9 @@ sComment s code = do
   code' <- collect code
   emit $ Imp.Comment s code'
 
+sComment_ :: T.Text -> ImpM rep r op ()
+sComment_ s = sComment s $ pure ()
+
 sIf :: Imp.TExp Bool -> ImpM rep r op () -> ImpM rep r op () -> ImpM rep r op ()
 sIf cond tbranch fbranch = do
   tbranch' <- collect tbranch

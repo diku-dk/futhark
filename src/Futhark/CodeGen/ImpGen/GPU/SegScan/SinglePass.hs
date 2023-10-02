@@ -222,7 +222,7 @@ maybeWrapVirtualizationLoop do_virt num_virtgroups_e _lvl kernel_body =
     then do constants <- kernelConstants <$> askEnv
             virt_factor <- dPrimVE "virt_factor" $ num_virtgroups_e
                              `divUp` sExt64 (kernelNumGroups constants)
-            sFor "_" virt_factor (const kernel_body)
+            sFor "_i" virt_factor (const kernel_body)
     else kernel_body
 
 
@@ -288,12 +288,6 @@ compileSegScan pat lvl space scan_op kbody requires_virt = do
   emit $ Imp.DebugPrint "Register constraint" $ Just $ untyped (fromIntegral reg_constraint :: Imp.TExp Int32)
   emit $ Imp.DebugPrint "sumT'" $ Just $ untyped (fromIntegral sumT' :: Imp.TExp Int32)
 
-  -- TODO: why do we (sometimes?) get illegal mem access errors when using sAllocArray?
-  global_id <- if do_virt then
-                sAllocArray "global_dynid" int32
-                  (Shape [constant (1 :: Int64)]) (Space "device")
-              else genZeroes "global_dynid" 1
-
 
   statusFlags <- sAllocArray "status_flags" int8 (Shape [unCount num_virtgroups]) (Space "device")
   (aggregateArrays, incprefixArrays) <-
@@ -304,6 +298,16 @@ compileSegScan pat lvl space scan_op kbody requires_virt = do
           <*> sAllocArray "incprefixes" ty (Shape [unCount num_virtgroups]) (Space "device")
 
   sReplicate statusFlags $ intConst Int8 statusX
+
+  -- if do_virt: allocate global_dynid initialize it before each kernel
+  -- invocation, similar to how status_flags is allocated and initialized.
+  -- if not do_virt: allocate and initialize it once in the kernel context, and
+  -- let last physical group reset it.
+  global_id <- if do_virt then
+                sAllocArray "global_dynid" int32
+                  (Shape [constant (1 :: Int64)]) (Space "device")
+              else genZeroes "global_dynid" 1
+  when do_virt $ sReplicate global_id $ intConst Int32 0
 
   sKernelThread "segscan" (segFlat space) (defKernelAttrs num_virtgroups group_size) $ do
 
@@ -346,19 +350,11 @@ compileSegScan pat lvl space scan_op kbody requires_virt = do
       copyDWIMFix (tvVar dyn_id) [] (Var sharedId) [0]
       sOp local_barrier -- TODO: necessary? don't think so, but ignore it for now.
 
-
-      -- TODO: the current method of resetting block id can *not* be guaranteed to
-      --       work, since if there are multiple "residual groups" then one might
-      --       read it after another has reset it!
-      let isInvalidDynamicId = if do_virt
-                                 then tvExp dyn_id .>=. num_virtgroups_e
-                                 else false
-      sIf isInvalidDynamicId (do copyDWIMFix global_id [0] (constant (0 :: Int32)) [])
-        $ do
-      -- let isValidDynamicId = if do_virt
-      --                          then tvExp dyn_id .<. num_virtgroups_e
-      --                          else true
-      -- sWhen isValidDynamicId $ do
+      -- if block virt is off, then dynamic ID's are always valid, since there
+      -- are no residual groups.
+      let isValidDynamicId = fromBool (not do_virt) .||.
+                             tvExp dyn_id .<. num_virtgroups_e
+      sWhen isValidDynamicId $ do
           blockOff <-
             dPrimV "blockOff" $
               sExt64 (tvExp dyn_id) * m * kernelGroupSize constants
