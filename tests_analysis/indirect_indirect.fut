@@ -8,17 +8,10 @@
     ) (iota m)
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5324 : {
---     (arr) xs_5241 : {
---         (idx) lifted_lambda_res_5329 :
---             0 : dependencies = {gtid_5325 0 par}
---     }
---     (arr) is_0_5242 : {
---         (idx) tmp_5328 :
---             0 : dependencies = {gtid_5325 0 par}
---     }
---     (arr) is_1_5243 : {
---         (idx) is_1_elem_5327 :
---             0 : dependencies = {gtid_5325 0 par}
+-- (segmap) defunc_0_map_res_5647 : {
+--     (arr) xs_5437 : {
+--         (idx) lifted_lambda_res_5654 :
+--             0 : dependencies = {gtid_5648 0 par}
+--             1 : dependencies = {gtid_5649 1 par}
 --     }
 -- }

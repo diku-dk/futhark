@@ -1,21 +1,17 @@
-def main [n][m] (is: [m]i64) (xss: [n][m]i64) : [n]i64 =
-  map (\xs ->
-    #[unsafe]
-    loop s=0 for _i < m
-    do
+def main [m][n] (xs: [m][n]i64) (is: [m]i64) (is1: [n]i64) : [m][n]i64 =
+  map (\i ->
+    map (\j ->
+      #[unsafe]
       let k = 5
-      in s + xs[ is[ k ] ]
-  ) xss
+      in xs[is[i*k],is1[j+k]]
+      ) (iota n)
+    ) (iota m)
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5244 : {
---     (arr) xss_5163 : {
---         (idx) x_5249 :
---             0 : dependencies = {gtid_5245 0 par}
---             1 : dependencies = {}
---     }
---     (arr) +_rhs_dev_5254 : {
---         (idx) +_rhs_5255 :
---             0 : dependencies = {}
+-- (segmap) defunc_0_map_res_5636 : {
+--     (arr) xs_5426 : {
+--         (idx) lifted_lambda_res_5644 :
+--             0 : dependencies = {gtid_5637 0 par}
+--             1 : dependencies = {gtid_5638 1 par}
 --     }
 -- }

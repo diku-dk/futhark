@@ -6,13 +6,10 @@ def main [m][n] (xs: [m][n]i64) (is: [m]i64) (is1: [n]i64) : [m][n]i64 =
     ) (iota m)
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5253 : {
---     (arr) xs_5191 : {
---         (idx) lifted_lambda_res_5257 :
---             0 : dependencies = {gtid_5254 0 par}
---     }
---     (arr) is_5192 : {
---         (idx) is_elem_5256 :
---             0 : dependencies = {gtid_5254 0 par}
+-- (segmap) defunc_0_map_res_5588 : {
+--     (arr) xs_5413 : {
+--         (idx) lifted_lambda_res_5594 :
+--             0 : dependencies = {gtid_5589 0 par}
+--             1 : dependencies = {gtid_5590 1 par}
 --     }
 -- }
