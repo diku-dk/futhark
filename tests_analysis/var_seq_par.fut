@@ -2,13 +2,10 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
     foldl (\acc xs -> map2 (\a x -> x+a) acc xs) (replicate m 0) xss
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5450 : {
---     (arr) acc_5428 : {
+-- (segmap) defunc_0_map_res_5449 : {
+--     (arr) xss_5346 : {
 --         (idx) eta_p_5453 :
---             0 : dependencies = {gtid_5451 1 par}
---     }
---     (arr) b_5429 : {
---         (idx) eta_p_5454 :
---             0 : dependencies = {gtid_5451 1 par}
+--             0 : dependencies = {i_5426 0 seq}
+--             1 : dependencies = {gtid_5450 1 par}
 --     }
 -- }

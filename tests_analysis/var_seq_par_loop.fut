@@ -11,8 +11,4 @@ def main [n][m] (xss: [n][m]i64) : [m]i64 =
 --             0 : dependencies = {i_5325 0 seq}
 --             1 : dependencies = {gtid_5349 1 par}
 --     }
---     (arr) res_5326 : {
---         (idx) eta_p_5352 :
---             0 : dependencies = {gtid_5349 1 par}
---     }
 -- }
