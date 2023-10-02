@@ -77,7 +77,7 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  const char *cache_fname;
+  char* cache_fname;
   int num_tuning_params;
   int64_t *tuning_params;
   const char** tuning_param_names;
@@ -87,9 +87,9 @@ struct futhark_context_config {
 
   char* program;
   int num_build_opts;
-  const char **build_opts;
+  char* *build_opts;
 
-  const char *preferred_device;
+  char* preferred_device;
   int preferred_device_num;
 
   size_t default_block_size;
@@ -105,10 +105,10 @@ struct futhark_context_config {
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_build_opts = 0;
-  cfg->build_opts = (const char**) malloc(sizeof(const char*));
+  cfg->build_opts = (char**) malloc(sizeof(char*));
   cfg->build_opts[0] = NULL;
   cfg->preferred_device_num = 0;
-  cfg->preferred_device = "";
+  cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
 
   cfg->default_block_size = 256;
@@ -123,14 +123,19 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  for (int i = 0; i < cfg->num_build_opts; i++) {
+    free(cfg->build_opts[i]);
+  }
+
   free(cfg->build_opts);
+  free(cfg->preferred_device);
   free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char *opt) {
-  cfg->build_opts[cfg->num_build_opts] = opt;
+  cfg->build_opts[cfg->num_build_opts] = strdup(opt);
   cfg->num_build_opts++;
-  cfg->build_opts = (const char **) realloc(cfg->build_opts, (cfg->num_build_opts + 1) * sizeof(const char *));
+  cfg->build_opts = (char **) realloc(cfg->build_opts, (cfg->num_build_opts + 1) * sizeof(char *));
   cfg->build_opts[cfg->num_build_opts] = NULL;
 }
 
@@ -146,7 +151,8 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
       s++;
     }
   }
-  cfg->preferred_device = s;
+  free(cfg->preferred_device);
+  cfg->preferred_device = strdup(s);
   cfg->preferred_device_num = x;
 }
 
@@ -156,6 +162,7 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 }
 
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  free(cfg->program);
   cfg->program = strdup(s);
 }
 
@@ -688,8 +695,10 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
-  ctx->error = hip_module_setup(ctx, ctx->cfg->program,
-                                ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  ctx->error = hip_module_setup(ctx,
+                                ctx->cfg->program,
+                                (const char**)ctx->cfg->build_opts,
+                                ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
     futhark_panic(1, "During HIP initialisation:\n%s\n", ctx->error);
