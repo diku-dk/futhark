@@ -390,7 +390,7 @@ analyzeMatch ctx pat body bodies =
   where
     constLevel context = context {currentLevel = currentLevel ctx - 1}
 
-analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm rep -> Body rep -> VName -> (Context, IndexTable)
+analyzeLoop :: (Analyze rep) => Context -> [(FParam rep, SubExp)] -> LoopForm -> Body rep -> VName -> (Context, IndexTable)
 analyzeLoop ctx bindings loop body pat = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
@@ -398,8 +398,7 @@ analyzeLoop ctx bindings loop body pat = do
         contextFromNames ctx'' Sequential $
           case loop of
             (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
-            (ForLoop iterVar _ _ params) ->
-              iterVar : map (paramName . fst) bindings ++ map (paramName . fst) params
+            (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
 
   -- Extend context with the loop expression
   analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
