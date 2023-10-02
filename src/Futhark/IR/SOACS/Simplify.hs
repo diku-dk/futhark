@@ -639,7 +639,7 @@ simplifyClosedFormReduce vtable pat _ (Screma _ arrs form)
       Simplify $ foldClosedForm (`ST.lookupExp` vtable) pat red_fun nes arrs
 simplifyClosedFormReduce _ _ _ _ = Skip
 
--- For now we just remove singleton SOACs.
+-- For now we just remove singleton SOACs and those with unroll attributes.
 simplifyKnownIterationSOAC ::
   (Buildable rep, BuilderOps rep, HasSOAC rep) =>
   TopDownRuleOp rep
@@ -697,6 +697,19 @@ simplifyKnownIterationSOAC _ pat _ op
 
       forM_ (zip (patNames pat) res) $ \(v, SubExpRes cs se) ->
         certifying cs $ letBindNames [v] $ BasicOp $ SubExp se
+--
+simplifyKnownIterationSOAC _ pat aux op
+  | Just (Screma (Constant (IntValue (Int64Value k))) arrs (ScremaForm [] [] map_lam)) <- asSOAC op,
+    "unroll" `inAttrs` stmAuxAttrs aux = Simplify $ do
+      arrs_elems <- fmap transpose . forM [0 .. k - 1] $ \i -> do
+        map_lam' <- renameLambda map_lam
+        eLambda map_lam' $ map (`eIndex` [eSubExp (constant i)]) arrs
+      forM_ (zip3 (patNames pat) arrs_elems (lambdaReturnType map_lam)) $
+        \(v, arr_elems, t) ->
+          certifying (mconcat (map resCerts arr_elems)) $
+            letBindNames [v] . BasicOp $
+              ArrayLit (map resSubExp arr_elems) t
+--
 simplifyKnownIterationSOAC _ _ _ _ = Skip
 
 data ArrayOp

@@ -543,7 +543,7 @@ in natural text.
 * A type ascription (``exp : type``) cannot appear as an array
   index, as it conflicts with the syntax for slicing.
 
-* In ``f [x]``, there is am ambiguity between indexing the array ``f``
+* In ``f [x]``, there is an ambiguity between indexing the array ``f``
   at position ``x``, or calling the function ``f`` with the singleton
   array ``x``.  We resolve this the following way:
 
@@ -556,16 +556,20 @@ in natural text.
   enclosed in parentheses, rather than an operator section partially
   applying the infix operator ``-``.
 
-* Function and type application, and prefix operators, bind more
-  tightly than any infix operator.  Note that the only prefix
-  operators are the builtin ``!`` and ``-``, and more cannot be
-  defined.  In particular, a user-defined operator beginning with
-  ``!`` binds as ``!=``, as on the table below, not as the prefix
+* Prefix operators bind more tighly than infix operators.  Note that
+  the only prefix operators are the builtin ``!`` and ``-``, and more
+  cannot be defined.  In particular, a user-defined operator beginning
+  with ``!`` binds as ``!=``, as on the table below, not as the prefix
   operator ``!``
+
+* Function and type application binds more tightly than infix
+  operators.
 
 * ``#foo #bar`` is interpreted as a constructor with a ``#bar``
   payload, not as applying ``#foo`` to ``#bar`` (the latter would be
   semantically invalid anyway).
+
+* `Attributes`_ bind less tightly than any other syntactic construct.
 
 * A type application ``pt [n]t`` is parsed as an application of the
   type constructor ``pt`` to the size argument ``[n]`` and the type

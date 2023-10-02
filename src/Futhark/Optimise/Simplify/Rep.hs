@@ -318,17 +318,14 @@ informBody (Body dec stms res) = mkWiseBody dec (informStms stms) res
 
 -- | Construct a 'Wise' lambda.
 informLambda :: (Informing rep) => Lambda rep -> Lambda (Wise rep)
-informLambda (Lambda ps body ret) = Lambda ps (informBody body) ret
+informLambda (Lambda ps ret body) = Lambda ps ret (informBody body)
 
 -- | Construct a 'Wise' expression.
 informExp :: (Informing rep) => Exp rep -> Exp (Wise rep)
 informExp (Match cond cases defbody (MatchDec ts ifsort)) =
   Match cond (map (fmap informBody) cases) (informBody defbody) (MatchDec ts ifsort)
 informExp (Loop merge form loopbody) =
-  let form' = case form of
-        ForLoop i it bound params -> ForLoop i it bound params
-        WhileLoop cond -> WhileLoop cond
-   in Loop merge form' $ informBody loopbody
+  Loop merge form $ informBody loopbody
 informExp e = runIdentity $ mapExpM mapper e
   where
     mapper =

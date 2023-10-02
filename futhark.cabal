@@ -285,6 +285,7 @@ library
       Futhark.Doc.Generator
       Futhark.Error
       Futhark.FreshNames
+      Futhark.Format
       Futhark.IR
       Futhark.IR.Aliases
       Futhark.IR.GPU
@@ -504,7 +505,7 @@ library
     , haskeline
     , language-c-quote >= 0.12
     , lens
-    , lsp >= 2.1.0.0
+    , lsp >= 2.2.0.0
     , lsp-types >= 2.0.1.0
     , mainland-pretty >=0.7.1
     , cmark-gfm >=0.2.1

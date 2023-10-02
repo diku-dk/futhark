@@ -1023,7 +1023,7 @@ checkExp (Loop merge form loopbody) = do
 
   checkLoopArgs
 
-  binding (scopeOf form) $ do
+  binding (scopeOfLoopForm form) $ do
     form_consumable <- checkForm mergeargs form
 
     let rettype = map paramDeclType mergepat
@@ -1059,38 +1059,15 @@ checkExp (Loop merge form loopbody) = do
           map (`namesSubtract` bound_here)
             <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
-    checkLoopVar (p, a) = do
-      a_t <- lookupType a
-      observe a
-      case peelArray 1 a_t of
-        Just a_t_r -> do
-          checkLParamDec (paramName p) $ paramDec p
-          unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
-            bad . TypeError $
-              "Loop parameter "
-                <> prettyText p
-                <> " not valid for element of "
-                <> prettyText a
-                <> ", which has row type "
-                <> prettyText a_t_r
-          als <- lookupAliases a
-          pure (paramName p, als)
-        _ ->
-          bad . TypeError $
-            "Cannot loop over "
-              <> prettyText a
-              <> " of type "
-              <> prettyText a_t
-    checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
+    checkForm mergeargs (ForLoop loopvar it boundexp) = do
       iparam <- primFParam loopvar $ IntType it
       let mergepat = map fst merge
           funparams = iparam : mergepat
           paramts = map paramDeclType funparams
 
-      consumable <- mapM checkLoopVar loopvars
       boundarg <- checkArg boundexp
       checkFuncall Nothing paramts $ boundarg : mergeargs
-      pure consumable
+      pure mempty
     checkForm mergeargs (WhileLoop cond) = do
       case find ((== cond) . paramName . fst) merge of
         Just (condparam, _) ->
@@ -1396,7 +1373,7 @@ consumeArgs paramts args =
 -- parameters.
 checkAnyLambda ::
   (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params body rettype) args = do
+checkAnyLambda soac (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do

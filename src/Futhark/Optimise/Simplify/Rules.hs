@@ -27,7 +27,6 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.BasicOp
 import Futhark.Optimise.Simplify.Rules.Index
@@ -51,7 +50,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpStms rep) => RuleBook rep
 standardRules =
   ruleBook topDownRules bottomUpRules
     <> loopRules

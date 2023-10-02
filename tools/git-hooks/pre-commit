@@ -22,10 +22,5 @@ fail() {
 echo Quality-checking commit...
 echo
 
-# Find files with trailing whitespace
-if git diff-index --cached --check HEAD | egrep -v '^[+-]'; then
-    fail
-fi
-
 make check-commit || fail
 make build || fail

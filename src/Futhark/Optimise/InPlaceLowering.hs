@@ -186,7 +186,7 @@ optimiseInStm (Let pat dec e) =
 
 optimiseExp :: (Constraints rep) => Exp (Aliases rep) -> ForwardingM rep (Exp (Aliases rep))
 optimiseExp (Loop merge form body) =
-  bindingScope (scopeOf form) . bindingFParams (map fst merge) $
+  bindingScope (scopeOfLoopForm form) . bindingFParams (map fst merge) $
     Loop merge form <$> optimiseBody body
 optimiseExp (Op op) = do
   f <- asks topOnOp

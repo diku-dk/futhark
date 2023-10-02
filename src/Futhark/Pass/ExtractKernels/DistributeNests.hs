@@ -566,23 +566,39 @@ maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
   scope <- asksScope scopeForSOACs
   distributeMapBodyStms acc . fmap (certify cs) . snd
     =<< runBuilderT (dissectScrema pat w form arrs) scope
-maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
-  | [t] <- patTypes pat = do
-      tmp <- newVName "tmp"
-      let rowt = rowType t
-          newstm = Let pat aux $ Op $ Screma d [] $ mapSOAC lam
-          tmpstm =
-            Let (Pat [PatElem tmp rowt]) aux $ BasicOp $ Replicate (Shape ds) v
-          lam =
-            Lambda
-              { lambdaReturnType = [rowt],
-                lambdaParams = [],
-                lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
-              }
-      maybeDistributeStm newstm acc
-maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate (Shape []) (Var stm_arr)))) acc =
-  distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
+maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc = do
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
+    if shape == mempty
+      then pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
+      else runBuilder_ $ auxing aux $ do
+        arr_t <- lookupType arr
+        let arr_r = arrayRank arr_t
+            nest_r = length (snd nest) + 1
+            res_r = arr_r + shapeRank shape
+        -- Move the to-be-replicated dimensions outermost.
+        arr_tr <-
+          letExp (baseString arr <> "_tr") . BasicOp $
+            Rearrange ([nest_r .. arr_r - 1] ++ [0 .. nest_r - 1]) arr
+        -- Replicate the now-outermost dimensions appropriately.
+        arr_tr_rep <-
+          letExp (baseString arr <> "_tr_rep") . BasicOp $
+            Replicate shape (Var arr_tr)
+        -- Move the replicated dimensions back where they belong.
+        letBind outerpat . BasicOp $
+          Rearrange ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1]) arr_tr_rep
+maybeDistributeStm (Let (Pat [pe]) aux (BasicOp (Replicate (Shape (d : ds)) v))) acc = do
+  tmp <- newVName "tmp"
+  let rowt = rowType $ patElemType pe
+      newstm = Let (Pat [pe]) aux $ Op $ Screma d [] $ mapSOAC lam
+      tmpstm =
+        Let (Pat [PatElem tmp rowt]) aux $ BasicOp $ Replicate (Shape ds) v
+      lam =
+        Lambda
+          { lambdaReturnType = [rowt],
+            lambdaParams = [],
+            lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
+          }
+  maybeDistributeStm newstm acc
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
 maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) acc
@@ -648,10 +664,9 @@ distributeSingleUnaryStm acc stm stm_arr f =
     Just (kernels, res, nest, acc')
       | map resSubExp res == map Var (patNames $ stmPat stm),
         (outer, _) <- nest,
-        [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest
-          `namesIntersection` freeIn stm
-          == oneName (paramName arr_p),
+        [(_, arr)] <- loopNestingParamsAndArrs outer,
+        boundInKernelNest nest `namesIntersection` freeIn stm
+          == oneName stm_arr,
         perfectlyMapped arr nest -> do
           addPostStms kernels
           let outerpat = loopNestingPat $ fst nest
@@ -842,12 +857,8 @@ segmentedUpdateKernel nest perm cs arr slice v = do
   ((res_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     v' <-
-      certifying cs $
-        letSubExp "v" $
-          BasicOp $
-            Index v $
-              Slice $
-                map (DimFix . Var) slice_gtids
+      certifying cs . letSubExp "v" . BasicOp . Index v $
+        Slice (map (DimFix . Var) slice_gtids)
     slice_is <-
       traverse (toSubExp "index") $
         fixSlice (fmap pe64 slice) $

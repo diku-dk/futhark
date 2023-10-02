@@ -56,13 +56,13 @@ forLoop' ::
   Builder GPU [VName]
 forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
-  let loop_form = ForLoop i Int64 i_bound []
+  let loop_form = ForLoop i Int64 i_bound
 
   merge_ts <- mapM lookupType merge
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBuilder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
+    runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
       body i $
         map paramName loop_inits
 

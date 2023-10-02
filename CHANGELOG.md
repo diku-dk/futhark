@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.5]
+
+### Added
+
+* `futhark repl` now has a `:format` command.  Work by Dominic
+  Kennedy.
+
+### Fixed
+
+* Textual floating-point numbers printed by executables now always
+  print enough digits to not hide information.  Binary output is
+  unchanged.
+
+* Invalid CSE on constants could crash the compiler (#2021).
+
+## [0.25.4]
+
+### Fixed
+
 * Invalid simplification (#2015).
 
 * Rarely occurring deadlock for fused map-scan compositions in CUDA
@@ -23,6 +42,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Compiler and interpreter crash for tricky interactions of abstract
   types and sizes (#2016).  Solved by banning such uses - in principle
   this could break code.
+
+* Incomplete alias tracking could cause removal of necessary copies,
+  leading to compiler crash (#2018).
 
 ## [0.25.3]
 

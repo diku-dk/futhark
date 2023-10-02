@@ -127,7 +127,7 @@ shouldMoveStm (Let (Pat ((PatElem n _) : _)) _ Apply {}) mt =
   statusOf n mt /= StayOnHost
 shouldMoveStm (Let _ _ (Match cond _ _ _)) mt =
   all ((== MoveToDevice) . (`statusOf` mt)) $ subExpVars cond
-shouldMoveStm (Let _ _ (Loop _ (ForLoop _ _ (Var n) _) _)) mt =
+shouldMoveStm (Let _ _ (Loop _ (ForLoop _ _ (Var n)) _)) mt =
   statusOf n mt == MoveToDevice
 shouldMoveStm (Let _ _ (Loop _ (WhileLoop n) _)) mt =
   statusOf n mt == MoveToDevice
@@ -200,9 +200,6 @@ checkFunDef fun = do
 
     checkPats = check isArray
 
-    checkLoopForm (ForLoop _ _ _ (_ : _)) = hostOnly
-    checkLoopForm _ = ok
-
     checkBody = checkStms . bodyStms
 
     checkStms stms = S.unions <$> mapM checkStm stms
@@ -216,9 +213,8 @@ checkFunDef fun = do
     checkExp (Apply fn _ _ _) = Just (S.singleton fn)
     checkExp (Match _ cases defbody _) =
       mconcat <$> mapM checkBody (defbody : map caseBody cases)
-    checkExp (Loop params lform body) = do
+    checkExp (Loop params _ body) = do
       checkLParams params
-      checkLoopForm lform
       checkBody body
     checkExp BasicOp {} = Just S.empty
 
@@ -675,7 +671,7 @@ type LoopValue = (Binding, Id, SubExp, SubExp)
 graphLoop ::
   [Binding] ->
   [(FParam GPU, SubExp)] ->
-  LoopForm GPU ->
+  LoopForm ->
   Body GPU ->
   Grapher ()
 graphLoop [] _ _ _ =
@@ -698,7 +694,7 @@ graphLoop (b : bs) params lform body = do
   -- as a whole or not. See 'shouldMoveStm'.
   let may_migrate = not (bodyHostOnly stats) && may_copy_results
   unless may_migrate $ case lform of
-    ForLoop _ _ (Var n) _ -> connectToSink (nameToId n)
+    ForLoop _ _ (Var n) -> connectToSink (nameToId n)
     WhileLoop n
       | Just (_, p, _, res) <- loopValueFor n -> do
           connectToSink p
@@ -738,7 +734,7 @@ graphLoop (b : bs) params lform body = do
   --
   -- For more details see the similar description for if statements.
   when may_migrate $ case lform of
-    ForLoop _ _ n _ ->
+    ForLoop _ _ n ->
       onlyGraphedScalarSubExp n >>= addEdges (ToNodes bindings Nothing)
     WhileLoop n
       | Just (_, _, arg, _) <- loopValueFor n ->
@@ -784,16 +780,11 @@ graphLoop (b : bs) params lform body = do
       -- TODO: Track memory reuse through merge parameters.
 
       case lform of
-        ForLoop _ _ n elems -> do
+        ForLoop _ _ n ->
           onlyGraphedScalarSubExp n >>= tellOperands
-          mapM_ graphForInElem elems
         WhileLoop _ -> pure ()
       graphBody body
       where
-        graphForInElem (p, arr) = do
-          when (isScalar p) $ addSource (nameToId $ paramName p, typeOf p)
-          when (isArray p) $ (nameToId (paramName p), typeOf p) `reuses` arr
-
         graphParam ((_, t), p, arg, _) =
           do
             -- It is unknown whether a read can be delayed via the parameter
@@ -949,7 +940,7 @@ graphAcc i types op delayed = do
   st <- get
 
   -- Collect statistics about the operator statements.
-  let lambda = fromMaybe (Lambda [] (Body () SQ.empty []) []) op
+  let lambda = fromMaybe (Lambda [] [] (Body () SQ.empty [])) op
   let m = graphBody (lambdaBody lambda)
   let stats = R.runReader (evalStateT (captureBodyStats m) st) env
   -- We treat GPUBody kernels as host-only to not bother rewriting them inside
@@ -1050,7 +1041,7 @@ graphedScalarOperands e =
           captureAcc a >> collectBasic ua
     collectStm stm = collect (stmExp stm)
 
-    collectLForm (ForLoop _ _ b _) = collectSubExp b
+    collectLForm (ForLoop _ _ b) = collectSubExp b
     -- WhileLoop condition is declared as a loop parameter.
     collectLForm (WhileLoop _) = pure ()
 
