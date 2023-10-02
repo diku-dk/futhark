@@ -289,7 +289,7 @@ analyzeStm ctx (Let pats _ e) = do
     (Op op) -> analyzeOp op ctx patternName
 
 getIndexDependencies :: Context -> [DimIndex SubExp] -> Maybe [DimIdxPat]
-getIndexDependencies _ [_] = Nothing
+getIndexDependencies _ [] = Nothing
 getIndexDependencies ctx dims =
   foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) $ reverse dims
   where
@@ -301,7 +301,6 @@ getIndexDependencies ctx dims =
 
 analyzeIndex :: Context -> VName -> VName -> [DimIndex SubExp] -> (Context, IndexTable)
 analyzeIndex ctx pat arr_name dimIndexes = do
-  -- TODO: Should we just take the latest segmap?
   let dimindices = getIndexDependencies ctx dimIndexes
   maybe
     (ctx, mempty)
@@ -329,6 +328,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pat = do
   extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
 
 analyzeIndex' :: Context -> VName -> VName -> [DimIdxPat] -> (Context, IndexTable)
+analyzeIndex' ctx pat arr_name [_] = (ctx, mempty)
 analyzeIndex' ctx pat arr_name dimIndexes = do
   let segmaps = allSegMap ctx
   let memory_entries = MemoryEntry dimIndexes $ parents ctx
