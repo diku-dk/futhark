@@ -6,9 +6,6 @@ module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.Bifunctor (first)
-import Data.Foldable
-import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -17,7 +14,6 @@ import Futhark.Analysis.AccessPattern
 import Futhark.IR.GPU
 import Futhark.Pass
 import Futhark.Tools
-import Futhark.Util
 
 printAST :: Pass GPU GPU
 printAST =
@@ -60,7 +56,7 @@ transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap)
 type ExpMap = M.Map VName (Stm GPU)
 
 transformStm :: (Ctx, ExpMap) -> Stm GPU -> CoalesceM (Ctx, ExpMap)
-transformStm (ctx, expmap) stm@(Let pat aux (Op (SegOp op)))
+transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
   -- FIXME: We only make coalescing optimisations for SegThread
   -- SegOps, because that's what the analysis assumes.  For SegGroup
   -- we should probably look at the component SegThreads, but it
@@ -69,7 +65,7 @@ transformStm (ctx, expmap) stm@(Let pat aux (Op (SegOp op)))
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody =
-                  transformKernelBody ctx expmap (segSpace op)
+                  transformKernelBody ctx
               }
       op' <- mapSegOpM mapper op
       let stm' = Let pat aux $ Op $ SegOp op'
@@ -94,39 +90,25 @@ transformBody ctx expmap (Body () stms res) = do
 
 transformKernelBody ::
   Ctx ->
-  ExpMap ->
-  SegSpace ->
   KernelBody GPU ->
   CoalesceM (KernelBody GPU)
-transformKernelBody ctx expmap space kbody = do
+transformKernelBody ctx kbody = do
   -- Go spelunking for accesses to arrays that are defined outside the
   -- kernel body and where the indices are kernel thread indices.
-  scope <- askScope
-  let thread_gids = map fst $ unSegSpace space
-      thread_local = namesFromList $ segFlat space : thread_gids
-      free_ker_vars = freeIn kbody `namesSubtract` getKerVariantIds space
   evalStateT
     ( traverseKernelBodyArrayIndexes
-        free_ker_vars
-        thread_local
-        (scope <> scopeOfSegSpace space)
-        (ensureCoalescedAccess ctx expmap (unSegSpace space))
+        (ensureCoalescedAccess ctx)
         kbody
     )
     mempty
-  where
-    getKerVariantIds = namesFromList . M.keys . scopeOfSegSpace
 
 traverseKernelBodyArrayIndexes ::
   forall f.
   (Monad f) =>
-  Names ->
-  Names ->
-  Scope GPU ->
   ArrayIndexTransform f ->
   KernelBody GPU ->
   f (KernelBody GPU)
-traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope coalesce (KernelBody () kstms kres) =
+traverseKernelBodyArrayIndexes coalesce (KernelBody () kstms kres) =
   KernelBody () . stmsFromList
     <$> mapM onStm (stmsToList kstms)
     <*> pure kres
@@ -141,7 +123,7 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope coalesce
       pure $ Body bdec stms' bres
 
     onStm (Let pat dec (BasicOp (Index arr is))) =
-      Let pat dec . oldOrNew <$> coalesce free_ker_vars outer_scope patternName arr is
+      Let pat dec . oldOrNew <$> coalesce patternName arr is
       where
         oldOrNew Nothing =
           BasicOp $ Index arr is
@@ -170,8 +152,6 @@ traverseKernelBodyArrayIndexes free_ker_vars thread_variant outer_scope coalesce
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 type ArrayIndexTransform m =
-  Names -> -- free_ker_vars
-  Scope GPU -> -- outer_scope (type environment)
   VName -> -- pat
   VName -> -- arr
   Slice SubExp -> -- slice
@@ -180,15 +160,9 @@ type ArrayIndexTransform m =
 ensureCoalescedAccess ::
   (MonadBuilder m) =>
   Ctx ->
-  ExpMap ->
-  [(VName, SubExp)] -> -- thread_space
   ArrayIndexTransform (StateT Replacements m)
 ensureCoalescedAccess
   ctx
-  expmap
-  thread_space
-  free_ker_vars
-  outer_scope
   pat
   arr
   slice = do
@@ -208,13 +182,11 @@ ensureCoalescedAccess
               then pure $ Just (arr, slice)
               else replace =<< lift (manifest perm arr)
 
-          manifest perm arr =
-            letExp (baseString arr ++ "_coalesced") $
+          manifest perm array =
+            letExp (baseString array ++ "_coalesced") $
               BasicOp $
-                Manifest perm arr
+                Manifest perm array
     where
-      (thread_gids, _thread_gdims) = unzip thread_space
-
       replace arr' = do
         modify $ M.insert (arr, slice) arr'
         pure $ Just (arr', slice)
@@ -257,9 +229,7 @@ optimalPermutation arr patName ctx =
         Nothing -> Nothing
         Just mem_entry -> do
           let dims = dimensions mem_entry
-          let sorted = L.sort dims
           let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
-          -- let perm' = map snd $ L.sortOn fst (zip perm ([0 ..] :: [Int]))
 
           -- Check if the existing ordering is already optimal
           let is_optimal = perm == [0 ..]
