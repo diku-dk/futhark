@@ -235,22 +235,27 @@ optimalPermutation arr_name idx_name seg_name ctx = do
   -- We want consts (empty list) to be outermost
   -- =========================================================================================
   let default_res = (True, [0 ..])
+
+  -- The result of the analysis a map in the following simplified form:
+  -- SegMap |-> Array |-> Index
+
   -- Look for the current SegMap in the result of the analysis
   case M.lookup seg_name (M.mapKeys vnameFromSegOp ctx) of
     Nothing -> default_res
     Just segmap ->
-      -- Look for Index expressions on the current array in the current SegMap
+      -- Look for the current array
       case M.lookup arr_name segmap of
         Nothing -> default_res
-        Just idxs -> do
-          -- Look for the current pattern in the Index expressions for the current array
+        Just idxs ->
+          -- Look for the current Index expression
           case M.lookup idx_name idxs of
             Nothing -> default_res
-            Just mem_entry -> do
-              -- Compute optimal permutation of the array w.r.t. the Index expression
-              let dims = dimensions mem_entry
-              let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
+            Just mem_entry ->
+              do
+                -- Compute optimal permutation of the array w.r.t. the Index expression
+                let dims = dimensions mem_entry
+                let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
 
-              -- Check if the existing ordering is already optimal
-              let is_optimal = perm == [0 ..]
-              (is_optimal, perm)
+                -- Check if the existing ordering is already optimal
+                let is_optimal = perm == [0 .. length perm - 1]
+                (is_optimal, perm)
