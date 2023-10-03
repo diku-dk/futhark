@@ -65,14 +65,23 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody =
-                  transformKernelBody ctx
+                  transformSegThreadKernelBody ctx
               }
       op' <- mapSegOpM mapper op
       let stm' = Let pat aux $ Op $ SegOp op'
       addStm stm'
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
--- \| SegGroup {} <- segLevel op = pure (ctx, mempty) -- TODO: Handle this
--- \| SegThreadInGroup {} <- segLevel op = pure (ctx, mempty) -- TODO: Handle this
+  | SegGroup {} <- segLevel op = do
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody =
+                  transformSegGroupKernelBody ctx expmap
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  | SegThreadInGroup {} <- segLevel op = undefined -- TODO: Handle this
 transformStm (ctx, expmap) (Let pat aux e) = do
   e' <- mapExpM (transform ctx expmap) e
   let stm' = Let pat aux e'
@@ -83,13 +92,21 @@ transform :: Ctx -> ExpMap -> Mapper GPU GPU CoalesceM
 transform ctx expmap =
   identityMapper {mapOnBody = \scope -> localScope scope . transformBody ctx expmap}
 
+-- | Recursively transform the statements in a body.
 transformBody :: Ctx -> ExpMap -> Body GPU -> CoalesceM (Body GPU)
 transformBody ctx expmap (Body () stms res) = do
   stms' <- transformStms ctx expmap stms
   pure $ Body () stms' res
 
-transformKernelBody :: Ctx -> KernelBody GPU -> CoalesceM (KernelBody GPU)
-transformKernelBody ctx kbody = do
+-- | Recursively transform the statements in the body of a SegGroup kernel.
+transformSegGroupKernelBody :: Ctx -> ExpMap -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegGroupKernelBody ctx expmap (KernelBody () stms res) = do
+  stms' <- transformStms ctx expmap stms
+  pure $ KernelBody () stms' res
+
+-- | Transform the statements in the body of a SegThread kernel.
+transformSegThreadKernelBody :: Ctx -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegThreadKernelBody ctx kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         (ensureCoalescedAccess ctx)
@@ -168,7 +185,10 @@ ensureCoalescedAccess
       -- We have not seen this array before.
       Nothing -> do
         -- For each Index expression on the array, check if the array has the optimal layout in memory
-        foldl1 (>>) (map f (optimalPermutation arr pat ctx))
+        case map f (optimalPermutation arr pat ctx) of
+          [] -> pure Nothing
+          [idx] -> idx
+          (idx : idxs) -> foldl (>>) idx idxs
         where
           f (is_optimal_perm, perm) = do
             -- If arr does not have the optimal layout in memory, replace it with
