@@ -88,13 +88,8 @@ transformBody ctx expmap (Body () stms res) = do
   stms' <- transformStms ctx expmap stms
   pure $ Body () stms' res
 
-transformKernelBody ::
-  Ctx ->
-  KernelBody GPU ->
-  CoalesceM (KernelBody GPU)
+transformKernelBody :: Ctx -> KernelBody GPU -> CoalesceM (KernelBody GPU)
 transformKernelBody ctx kbody = do
-  -- Go spelunking for accesses to arrays that are defined outside the
-  -- kernel body and where the indices are kernel thread indices.
   evalStateT
     ( traverseKernelBodyArrayIndexes
         (ensureCoalescedAccess ctx)
@@ -176,8 +171,8 @@ ensureCoalescedAccess
         foldl1 (>>) (map f (optimalPermutation arr pat ctx))
         where
           f (is_optimal_perm, perm) = do
-            -- If arr does not have the optimal layout, replace it with a manifest
-            -- with the optimal permutation
+            -- If arr does not have the optimal layout in memory, replace it with
+            -- a manifest to allocate it with the optimal layout
             if is_optimal_perm
               then pure $ Just (arr, slice)
               else replace =<< lift (manifest perm arr)
@@ -218,16 +213,17 @@ optimalPermutation arr patName ctx =
 
   -- We want consts (empty list) to be outermost
   -- =========================================================================================
-  -- For each SegMap in ctx, look up the array in the result of the analysis
+  -- For each SegMap in result of the analysis, look for accesses to the current array
   let arrays = mapMaybe (\(_, m) -> M.lookup arr m) (M.toList ctx)
    in mapMaybe mapFun arrays
   where
     mapFun :: M.Map VName (MemoryEntry GPU) -> Maybe (Bool, [Int])
     mapFun idxs = do
-      -- Look up the pattern name in the index expressions for the array
+      -- Look for the current pattern in the Index expressions for the current array
       case M.lookup patName idxs of
         Nothing -> Nothing
         Just mem_entry -> do
+          -- Compute optimal permutation of the array w.r.t. the Index expression
           let dims = dimensions mem_entry
           let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
 
