@@ -65,7 +65,7 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody =
-                  transformSegThreadKernelBody ctx
+                  transformSegThreadKernelBody ctx patternName
               }
       op' <- mapSegOpM mapper op
       let stm' = Let pat aux $ Op $ SegOp op'
@@ -82,6 +82,8 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
       addStm stm'
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
   | SegThreadInGroup {} <- segLevel op = undefined -- TODO: Handle this
+  where
+    patternName = patElemName . head $ patElems pat
 transformStm (ctx, expmap) (Let pat aux e) = do
   e' <- mapExpM (transform ctx expmap) e
   let stm' = Let pat aux e'
@@ -105,10 +107,11 @@ transformSegGroupKernelBody ctx expmap (KernelBody () stms res) = do
   pure $ KernelBody () stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
-transformSegThreadKernelBody :: Ctx -> KernelBody GPU -> CoalesceM (KernelBody GPU)
-transformSegThreadKernelBody ctx kbody = do
+transformSegThreadKernelBody :: Ctx -> VName -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegThreadKernelBody ctx seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
+        seg_name
         (ensureCoalescedAccess ctx)
         kbody
     )
@@ -117,10 +120,11 @@ transformSegThreadKernelBody ctx kbody = do
 traverseKernelBodyArrayIndexes ::
   forall f.
   (Monad f) =>
+  VName -> -- seg_name
   ArrayIndexTransform f ->
   KernelBody GPU ->
   f (KernelBody GPU)
-traverseKernelBodyArrayIndexes coalesce (KernelBody () kstms kres) =
+traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody () kstms kres) =
   KernelBody () . stmsFromList
     <$> mapM onStm (stmsToList kstms)
     <*> pure kres
@@ -135,7 +139,7 @@ traverseKernelBodyArrayIndexes coalesce (KernelBody () kstms kres) =
       pure $ Body bdec stms' bres
 
     onStm (Let pat dec (BasicOp (Index arr is))) =
-      Let pat dec . oldOrNew <$> coalesce patternName arr is
+      Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
       where
         oldOrNew Nothing =
           BasicOp $ Index arr is
@@ -164,8 +168,9 @@ traverseKernelBodyArrayIndexes coalesce (KernelBody () kstms kres) =
 type Replacements = M.Map (VName, Slice SubExp) VName
 
 type ArrayIndexTransform m =
-  VName -> -- pat
-  VName -> -- arr
+  VName -> -- seg_name (name of the SegThread expression's pattern)
+  VName -> -- idx_name (name of the Index expression's pattern)
+  VName -> -- arr (name of the array)
   Slice SubExp -> -- slice
   m (Maybe (VName, Slice SubExp))
 
@@ -175,7 +180,8 @@ ensureCoalescedAccess ::
   ArrayIndexTransform (StateT Replacements m)
 ensureCoalescedAccess
   ctx
-  pat
+  seg_name
+  idx_name
   arr
   slice = do
     seen <- gets $ M.lookup (arr, slice)
@@ -184,30 +190,25 @@ ensureCoalescedAccess
       Just arr' -> pure $ Just (arr', slice)
       -- We have not seen this array before.
       Nothing -> do
-        -- For each Index expression on the array, check if the array has the optimal layout in memory
-        case map f (optimalPermutation arr pat ctx) of
-          [] -> pure Nothing
-          [idx] -> idx
-          (idx : idxs) -> foldl (>>) idx idxs
-        where
-          f (is_optimal_perm, perm) = do
-            -- If arr does not have the optimal layout in memory, replace it with
-            -- a manifest to allocate it with the optimal layout
-            if is_optimal_perm
-              then pure $ Just (arr, slice)
-              else replace =<< lift (manifest perm arr)
-
-          manifest perm array =
-            letExp (baseString array ++ "_coalesced") $
-              BasicOp $
-                Manifest perm array
+        -- Check if the array has the optimal layout in memory.
+        -- If it does not, replace it with a manifest to allocate
+        -- it with the optimal layout
+        let (optimal, perm) = optimalPermutation arr idx_name seg_name ctx
+        if optimal
+          then pure $ Just (arr, slice)
+          else replace =<< lift (manifest perm arr)
     where
       replace arr' = do
         modify $ M.insert (arr, slice) arr'
         pure $ Just (arr', slice)
 
-optimalPermutation :: VName -> VName -> Ctx -> [(Bool, [Int])]
-optimalPermutation arr patName ctx =
+      manifest perm array =
+        letExp (baseString array ++ "_coalesced") $
+          BasicOp $
+            Manifest perm array
+
+optimalPermutation :: VName -> VName -> VName -> Ctx -> (Bool, [Int])
+optimalPermutation arr_name idx_name seg_name ctx = do
   -- Example:
   --   Initial ordering:
   --     0: [par 1]
@@ -233,20 +234,23 @@ optimalPermutation arr patName ctx =
 
   -- We want consts (empty list) to be outermost
   -- =========================================================================================
-  -- For each SegMap in result of the analysis, look for accesses to the current array
-  let arrays = mapMaybe (\(_, m) -> M.lookup arr m) (M.toList ctx)
-   in mapMaybe mapFun arrays
-  where
-    mapFun :: M.Map VName (MemoryEntry GPU) -> Maybe (Bool, [Int])
-    mapFun idxs = do
-      -- Look for the current pattern in the Index expressions for the current array
-      case M.lookup patName idxs of
-        Nothing -> Nothing
-        Just mem_entry -> do
-          -- Compute optimal permutation of the array w.r.t. the Index expression
-          let dims = dimensions mem_entry
-          let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
+  let default_res = (True, [0 ..])
+  -- Look for the current SegMap in the result of the analysis
+  case M.lookup seg_name (M.mapKeys vnameFromSegOp ctx) of
+    Nothing -> default_res
+    Just segmap ->
+      -- Look for Index expressions on the current array in the current SegMap
+      case M.lookup arr_name segmap of
+        Nothing -> default_res
+        Just idxs -> do
+          -- Look for the current pattern in the Index expressions for the current array
+          case M.lookup idx_name idxs of
+            Nothing -> default_res
+            Just mem_entry -> do
+              -- Compute optimal permutation of the array w.r.t. the Index expression
+              let dims = dimensions mem_entry
+              let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
 
-          -- Check if the existing ordering is already optimal
-          let is_optimal = perm == [0 ..]
-          Just (is_optimal, perm)
+              -- Check if the existing ordering is already optimal
+              let is_optimal = perm == [0 ..]
+              (is_optimal, perm)

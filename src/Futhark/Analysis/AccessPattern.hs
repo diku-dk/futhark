@@ -3,6 +3,7 @@
 module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
+    vnameFromSegOp,
     Analyze,
     IndexTable,
     ArrayName,
