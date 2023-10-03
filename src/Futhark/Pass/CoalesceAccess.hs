@@ -8,7 +8,6 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.IR.GPU
@@ -257,5 +256,5 @@ optimalPermutation arr_name idx_name seg_name ctx = do
                 let perm = map snd $ L.sortOn fst (zip dims ([0 ..] :: [Int]))
 
                 -- Check if the existing ordering is already optimal
-                let is_optimal = perm == [0 .. length perm - 1]
+                let is_optimal = perm `L.isPrefixOf` [0 ..]
                 (is_optimal, perm)
