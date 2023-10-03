@@ -32,6 +32,9 @@ import Futhark.IR.SeqMem
 class Analyze rep where
   analyzeOp :: Op rep -> (Context rep -> VName -> (Context rep, IndexTable rep))
 
+class Coalesce rep where
+  orderIterationType :: IterationType rep -> IterationType rep -> Ordering
+
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
 -- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimIdxPat]
@@ -549,45 +552,49 @@ notImplementedYet :: String -> String
 notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."
 
 -- Sorting of DimIdxPat used to find optimal permutations of arrays in the CoalesceAccess pass
-instance Ord (IterationType rep) where
+instance Ord (IterationType GPU) where
   compare lhs rhs =
-      case (lhs, rhs) of
-        (Parallel, Sequential) -> GT
-        (Sequential, Parallel) -> LT
-        _ -> EQ
+    case (lhs, rhs) of
+      (Parallel, Sequential) -> GT
+      (Sequential, Parallel) -> LT
+      _ -> EQ
 
---instance Ord (IterationType MC) where
---  compare lhs rhs =
---      case (lhs, rhs) of
---        (Parallel, Sequential) -> LT
---        (Sequential, Parallel) -> GT
---        _ -> EQ
+instance Ord (IterationType MC) where
+  compare lhs rhs =
+    case (lhs, rhs) of
+      (Parallel, Sequential) -> LT
+      (Sequential, Parallel) -> GT
+      _ -> EQ
 
-type OrderedDep rep
-    = (Maybe (IterationType rep, (Int, Int), VName))
+type OrderedDep rep =
+  (Maybe (IterationType rep, (Int, Int), VName))
 
-instance Ord (DimIdxPat rep) where
+instance Coalesce GPU where orderIterationType = compare
+
+instance Coalesce MC where orderIterationType = compare
+
+instance (Coalesce rep) => Ord (DimIdxPat rep) where
   compare (DimIdxPat deps1) (DimIdxPat deps2) = do
     let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep rep]
     let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep rep]
     let aggr1 = foldl maxIdxPat Nothing deps1' :: OrderedDep rep
     let aggr2 = foldl maxIdxPat Nothing deps2' :: OrderedDep rep
     cmpIdxPat aggr1 aggr2
-      where
-        cmpIdxPat :: OrderedDep rep -> OrderedDep rep -> Ordering
-        cmpIdxPat Nothing Nothing = EQ
-        cmpIdxPat Nothing (Just _) = LT
-        cmpIdxPat (Just _) Nothing = GT
-        cmpIdxPat (Just (liter, (llvl, lidx), _)) (Just (riter, (rlvl, ridx), _)) =
-          case liter `compare` riter of
-            EQ -> (llvl, lidx) `compare` (rlvl, ridx)
-            res -> res
+    where
+      cmpIdxPat :: OrderedDep rep -> OrderedDep rep -> Ordering
+      cmpIdxPat Nothing Nothing = EQ
+      cmpIdxPat Nothing (Just _) = LT
+      cmpIdxPat (Just _) Nothing = GT
+      cmpIdxPat (Just (liter, (llvl, lidx), _)) (Just (riter, (rlvl, ridx), _)) =
+        case liter `orderIterationType` riter of
+          EQ -> (llvl, lidx) `compare` (rlvl, ridx)
+          res -> res
 
-        maxIdxPat :: OrderedDep rep -> OrderedDep rep -> OrderedDep rep
-        maxIdxPat lhs rhs =
-          case cmpIdxPat lhs rhs of
-            LT -> rhs
-            _ -> lhs
+      maxIdxPat :: OrderedDep rep -> OrderedDep rep -> OrderedDep rep
+      maxIdxPat lhs rhs =
+        case cmpIdxPat lhs rhs of
+          LT -> rhs
+          _ -> lhs
 
-        f :: ((VName, Int, IterationType rep), Int) -> OrderedDep rep
-        f ((n, lvl, t), idx) = Just (t, (lvl,idx), n)
+      f :: ((VName, Int, IterationType rep), Int) -> OrderedDep rep
+      f ((n, lvl, t), idx) = Just (t, (lvl, idx), n)
