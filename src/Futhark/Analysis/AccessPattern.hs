@@ -32,8 +32,6 @@ import Futhark.IR.SeqMem
 
 class Analyze rep where
   analyzeOp :: Op rep -> (Context rep -> VName -> (Context rep, IndexTable rep))
-
-class Coalesce rep where
   orderIterationType :: IterationType rep -> IterationType rep -> Ordering
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
@@ -524,6 +522,7 @@ onSnd f (x, y) = (x, f y)
 
 -- Instances for AST types that we actually support
 instance Analyze GPU where
+  orderIterationType = compare
   analyzeOp gpuOp
     | (SegOp op) <- gpuOp = analyzeSegOp op
     | (SizeOp op) <- gpuOp = analyzeSizeOp op
@@ -533,6 +532,7 @@ instance Analyze GPU where
 instance Analyze GPUMem where analyzeOp _ = error $ notImplementedYet "GPUMem"
 
 instance Analyze MC where
+  orderIterationType = compare
   analyzeOp mcOp
     | ParOp Nothing seqSegop <- mcOp = analyzeSegOp seqSegop
     | ParOp (Just segop) seqSegop <- mcOp = \ctx name -> do
@@ -570,11 +570,7 @@ instance Ord (IterationType MC) where
 type OrderedDep rep =
   (Maybe (IterationType rep, (Int, Int), VName))
 
-instance Coalesce GPU where orderIterationType = compare
-
-instance Coalesce MC where orderIterationType = compare
-
-instance (Coalesce rep) => Ord (DimIdxPat rep) where
+instance (Analyze rep) => Ord (DimIdxPat rep) where
   compare (DimIdxPat deps1) (DimIdxPat deps2) = do
     let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep rep]
     let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep rep]
