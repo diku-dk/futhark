@@ -33,6 +33,7 @@ import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
+import Futhark.Optimise.IntraSeq
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
@@ -88,26 +89,30 @@ gpuPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
+      -- [ simplifyGPU,
+      --   optimiseGenRed,
+      --   simplifyGPU,
+      --   tileLoops,
+      --   simplifyGPU,
+      --   histAccsGPU,
+      --   babysitKernels,
+      --   simplifyGPU,
+      --   unstreamGPU,
+      --   performCSE True,
+      --   simplifyGPU,
+      --   sinkGPU, -- Sink reads before migrating them.
+      --   reduceDeviceSyncs,
+      --   simplifyGPU, -- Simplify and hoist storages.
+      --   performCSE True, -- Eliminate duplicate storages.
+      --   mergeGPUBodies,
+      --   simplifyGPU, -- Cleanup merged GPUBody kernels.
+      --   sinkGPU, -- Sink reads within GPUBody kernels.
+      --   inPlaceLoweringGPU,
+      --   intraSeq
+      -- ]
       [ simplifyGPU,
-        optimiseGenRed,
-        simplifyGPU,
-        tileLoops,
-        simplifyGPU,
-        histAccsGPU,
-        babysitKernels,
-        simplifyGPU,
-        unstreamGPU,
-        performCSE True,
-        simplifyGPU,
-        sinkGPU, -- Sink reads before migrating them.
-        reduceDeviceSyncs,
-        simplifyGPU, -- Simplify and hoist storages.
-        performCSE True, -- Eliminate duplicate storages.
-        mergeGPUBodies,
-        simplifyGPU, -- Cleanup merged GPUBody kernels.
-        sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU,
-        intraSeq
+        intraSeq,
+        simplifyGPU
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
