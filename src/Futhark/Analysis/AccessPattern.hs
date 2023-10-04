@@ -329,7 +329,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pat = do
   extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
 
 analyzeIndex' :: Context rep -> VName -> VName -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
-analyzeIndex' ctx pat arr_name [_] = (ctx, mempty)
+analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pat arr_name dimIndexes = do
   let segmaps = allSegMap ctx
   let memory_entries = MemoryEntry dimIndexes $ parents ctx
@@ -529,7 +529,9 @@ instance Analyze GPU where
     | (GPUBody _ body) <- gpuOp = pure . analyzeGPUBody body
     | (Futhark.IR.GPU.OtherOp _) <- gpuOp = analyzeOtherOp
 
-instance Analyze GPUMem where analyzeOp _ = error $ notImplementedYet "GPUMem"
+instance Analyze GPUMem where
+  orderIterationType = undefined
+  analyzeOp _ = error $ notImplementedYet "GPUMem"
 
 instance Analyze MC where
   orderIterationType = compare
@@ -541,13 +543,21 @@ instance Analyze MC where
         (ctx' <> ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
-instance Analyze MCMem where analyzeOp _ = error $ notImplementedYet "MCMem"
+instance Analyze MCMem where
+  orderIterationType = undefined
+  analyzeOp _ = error $ notImplementedYet "MCMem"
 
-instance Analyze Seq where analyzeOp _ = error $ notImplementedYet "Seq"
+instance Analyze Seq where
+  orderIterationType = undefined
+  analyzeOp _ = error $ notImplementedYet "Seq"
 
-instance Analyze SeqMem where analyzeOp _ = error $ notImplementedYet "SeqMem"
+instance Analyze SeqMem where
+  orderIterationType = undefined
+  analyzeOp _ = error $ notImplementedYet "SeqMem"
 
-instance Analyze SOACS where analyzeOp _ = error $ notImplementedYet "SOACS"
+instance Analyze SOACS where
+  orderIterationType = undefined
+  analyzeOp _ = error $ notImplementedYet "SOACS"
 
 notImplementedYet :: String -> String
 notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."
