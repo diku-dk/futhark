@@ -33,11 +33,12 @@ coalesceAccess =
        in intraproceduralTransformation (onStms analysisRes) prog
   where
     onStms analysisRes scope stms = do
+      let manifestTable = manifestTableFromIndexTable (const . const EQ) analysisRes
       -- let m = localScope scope $ transformStms mempty analysisRes stms
       -- modifyNameSource $ runState (runReaderT m M.empty)
       -- fmap fst $ modifyNameSource $ runState (runReaderT m M.empty)
       -- onStms scope stms = do
-      let m = localScope scope $ transformStms analysisRes mempty stms
+      let m = localScope scope $ transformStms manifestTable mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
 type CoalesceM = Builder GPU
