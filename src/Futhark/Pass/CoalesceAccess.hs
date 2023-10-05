@@ -48,7 +48,7 @@ type Ctx = IndexTable GPU
 -- is the permutation to be applied to the array, and the second
 -- element is the array name. The second element is used to indicate
 -- that we have already inserted a manifest for this array.
-type Manifest = [Int] (Maybe VName)
+type Manifest = ([Int], Maybe VName)
 
 type ManifestTable rep =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Manifest))
