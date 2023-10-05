@@ -8,11 +8,11 @@
 -- by the @fgl@ package ("Data.Graph.Inductive").  The graph provided
 -- by this package allows nodes and edges to have arbitrarily-typed
 -- "labels".  It is these labels ('EdgeT', 'NodeT') that we use to
--- contain Futhark-specific information.  An edge goes *from* uses of
--- variables to the node that produces that variable.  There are also
--- edges that do not represent normal data dependencies, but other
--- things.  This means that a node can have multiple edges for the
--- same name, indicating different kinds of dependencies.
+-- contain Futhark-specific information.  An edge goes *from*
+-- consumers to producers.  There are also edges that do not represent
+-- normal data dependencies, but other things.  This means that a node
+-- can have multiple edges for the same name, indicating different
+-- kinds of dependencies.
 module Futhark.Optimise.Fusion.GraphRep
   ( -- * Data structure
     EdgeT (..),
