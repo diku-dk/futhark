@@ -44,6 +44,8 @@ type CoalesceM = Builder GPU
 
 type Ctx = IndexTable GPU
 
+type Coalesce rep = Analyze rep
+
 -- | Resulting manifest to be inserted in the AST. The first element
 -- is the permutation to be applied to the array, and the second
 -- element is the array name. The second element is used to indicate
@@ -268,7 +270,7 @@ optimalPermutation arr_name idx_name seg_name ctx = do
                 let is_optimal = perm `L.isPrefixOf` [0 ..]
                 (is_optimal, perm)
 
-manifestTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable -> ManifestTable
+manifestTableFromIndexTable :: (Coalesce rep) => (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable
 manifestTableFromIndexTable = undefined
 
 lookupManifest :: ArrayName -> [DimIdxPat rep] -> Maybe Manifest
