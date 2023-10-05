@@ -270,8 +270,19 @@ optimalPermutation arr_name idx_name seg_name ctx = do
                 let is_optimal = perm `L.isPrefixOf` [0 ..]
                 (is_optimal, perm)
 
-manifestTableFromIndexTable :: (Coalesce rep) => (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable rep
-manifestTableFromIndexTable = undefined
+-- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
+-- a ManifestTable.
+manifestTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable
+manifestTableFromIndexTable sortCoalescing =
+  M.map (M.map (M.map convert))
+  where
+    convert indices =
+      let perm dims =
+            map snd
+              . L.sortBy (\a b -> sortCoalescing (fst a) (fst b))
+              . flip zip [0 :: Int ..]
+              $ dimensions dims
+       in (perm indices, Nothing)
 
 lookupManifest :: (Coalesce rep) => ManifestTable rep -> ArrayName -> [DimIdxPat rep] -> Maybe Manifest
 lookupManifest mTable arrayName permutation =
