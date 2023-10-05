@@ -267,3 +267,9 @@ optimalPermutation arr_name idx_name seg_name ctx = do
                 -- Check if the existing ordering is already optimal
                 let is_optimal = perm `L.isPrefixOf` [0 ..]
                 (is_optimal, perm)
+
+manifestTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable -> ManifestTable
+manifestTableFromIndexTable = undefined
+
+lookupManifest :: ArrayName -> [DimIdxPat rep] -> Maybe Manifest
+lookupManifest = undefined
