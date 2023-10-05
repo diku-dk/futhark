@@ -8,9 +8,11 @@ import Control.Monad
 import Control.Monad.State.Strict
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.IR.GPU
+import Futhark.IR.Prop.Rearrange
 import Futhark.Pass
 import Futhark.Tools
 
@@ -275,8 +277,38 @@ optimalPermutation arr_name idx_name seg_name ctx = do
 -- a ManifestTable.
 manifestTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable
 manifestTableFromIndexTable sortCoalescing =
-  M.map (M.map (M.map convert))
+  -- We effectively convert all the `MemoryEntry`s in the index table,
+  -- then, using mapMaybe, we discard all "rows" in the table which:
+  -- * contain no difference in the permutation, or
+  -- * is a permutation that we cannot achieve efficiently using transpositions.
+  -- recall that IndexTable is just a mapping of
+  -- SegOpName → ArrayName → IndexExprName → [DimIdxPat]
+  -- and ManifestTable is just a variation of IndexTable that maps to
+  -- a permutation instead of [DimIdxPat]
+  filterMap null $
+    filterMap null $
+      filterMap predManifest convert
+
   where
+    -- wraps a function in a mapMaybe, if the predicate is true then return
+    -- nothing. When sequenced as above, the "nothings" will then propagate and
+    -- ensure that we don't have entries in any of the maps that points to empty
+    -- maps.
+    filterMap predicate f =
+      M.mapMaybe
+        ( \imm ->
+            let res = f imm
+             in if predicate res
+                  then Nothing
+                  else Just res
+        )
+
+    -- Is the permutation just the identity permutation, or not a transposition?
+    predManifest (perm, _) =
+      perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
+
+    -- Sorts the dimensions in a given memory entry and returns it as
+    -- a permutation.
     convert indices =
       let perm dims =
             map snd
