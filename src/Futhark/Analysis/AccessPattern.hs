@@ -77,8 +77,7 @@ newtype DimIdxPat rep = DimIdxPat
 
 instance Semigroup (DimIdxPat rep) where
   (<>) :: DimIdxPat rep -> DimIdxPat rep -> DimIdxPat rep
-  (<>) (DimIdxPat adeps) (DimIdxPat bdeps) =
-    DimIdxPat ((<>) adeps bdeps)
+  DimIdxPat adeps <> DimIdxPat bdeps = DimIdxPat (adeps <> bdeps)
 
 instance Monoid (DimIdxPat rep) where
   mempty = DimIdxPat {dependencies = mempty}
