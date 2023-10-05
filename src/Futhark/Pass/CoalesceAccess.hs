@@ -270,8 +270,9 @@ optimalPermutation arr_name idx_name seg_name ctx = do
                 let is_optimal = perm `L.isPrefixOf` [0 ..]
                 (is_optimal, perm)
 
-manifestTableFromIndexTable :: (Coalesce rep) => (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable
+manifestTableFromIndexTable :: (Coalesce rep) => (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable rep
 manifestTableFromIndexTable = undefined
 
-lookupManifest :: ArrayName -> [DimIdxPat rep] -> Maybe Manifest
-lookupManifest = undefined
+lookupManifest :: (Coalesce rep) => ManifestTable rep -> ArrayName -> [DimIdxPat rep] -> Maybe Manifest
+lookupManifest mTable arrayName permutation =
+  undefined
