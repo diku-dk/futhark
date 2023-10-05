@@ -102,7 +102,7 @@ instance Show EdgeT where
 instance Show NodeT where
   show (StmNode (Let pat _ _)) = L.intercalate ", " $ map prettyString $ patNames pat
   show (SoacNode _ pat _ _) = prettyString pat
-  show (TransNode _ tr _) = prettyString (show tr)
+  show (TransNode _ tr _) = prettyString tr
   show (ResNode name) = prettyString $ "Res: " ++ prettyString name
   show (FreeNode name) = prettyString $ "Input: " ++ prettyString name
   show (MatchNode stm _) = "Match: " ++ L.intercalate ", " (map prettyString $ stmNames stm)

@@ -60,6 +60,7 @@ module Futhark.IR.Syntax.Core
     dimFix,
     sliceIndices,
     sliceDims,
+    sliceShape,
     unitSlice,
     fixSlice,
     sliceSlice,
@@ -388,6 +389,10 @@ sliceDims = mapMaybe dimSlice . unSlice
   where
     dimSlice (DimSlice _ d _) = Just d
     dimSlice DimFix {} = Nothing
+
+-- | The shape of the array produced by this slice.
+sliceShape :: Slice d -> ShapeBase d
+sliceShape = Shape . sliceDims
 
 -- | A slice with a stride of one.
 unitSlice :: (Num d) => d -> d -> DimIndex d
