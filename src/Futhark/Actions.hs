@@ -41,7 +41,6 @@ import Futhark.Analysis.Interference qualified as Interference
 import Futhark.Analysis.LastUse qualified as LastUse
 import Futhark.Analysis.MemAlias qualified as MemAlias
 import Futhark.Analysis.Metrics
-import Futhark.Analysis.Pretty
 import Futhark.CodeGen.Backends.CCUDA qualified as CCUDA
 import Futhark.CodeGen.Backends.COpenCL qualified as COpenCL
 import Futhark.CodeGen.Backends.HIP qualified as HIP
