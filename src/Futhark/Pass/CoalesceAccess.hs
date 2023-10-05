@@ -44,6 +44,15 @@ type CoalesceM = Builder GPU
 
 type Ctx = IndexTable GPU
 
+-- | Resulting manifest to be inserted in the AST. The first element
+-- is the permutation to be applied to the array, and the second
+-- element is the array name. The second element is used to indicate
+-- that we have already inserted a manifest for this array.
+type Manifest = [Int] (Maybe VName)
+
+type ManifestTable rep =
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Manifest))
+
 transformStms :: Ctx -> ExpMap -> Stms GPU -> CoalesceM (Stms GPU)
 transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap) stms
 
