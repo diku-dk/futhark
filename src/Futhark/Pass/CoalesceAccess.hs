@@ -1,22 +1,23 @@
-{-# LANGUAGE TypeFamilies #-}
-
 -- | Do various kernel optimisations - mostly related to coalescing.
 -- module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
 module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
 
+import Control.Monad
+import Control.Monad.State.Strict
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence.Internal qualified as S
-import Data.Set qualified as SS
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
+import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Syntax
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Util
 
 printAST :: Pass GPU GPU
 printAST =
@@ -42,11 +43,12 @@ coalesceAccess =
       intraproceduralTransformation (onStms permutationTable) prog
   where
     onStms permutationTable _ stms = do
-      let (_, stms') = transformStms permutationTable stms
+      let m = transformStms permutationTable stms
       -- let m = localScope scope $ stms'
-      -- fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
-      -- fmap fst $ modifyNameSource $ pure stms'
-      pure stms'
+      fmap snd $ modifyNameSource $ runState (runBuilderT m M.empty)
+
+-- fmap fst $ modifyNameSource $ pure stms'
+-- pure stms'
 
 type Ctx = PermutationTable
 
@@ -65,26 +67,22 @@ type PermutationTable =
 
 type ArrayNameReplacements = M.Map IndexExprName VName
 
-transformStms :: Ctx -> Stms GPU -> (Ctx, Stms GPU)
-transformStms ctx stms = do
-  let (ctx', stms') =
-        foldl
-          ( \(ctx_acc, stms_acc) stm -> do
-              let (new_ctx, new_stms) = transformStm ctx_acc stm
-              (new_ctx, stms_acc S.>< new_stms)
-          )
-          (ctx, mempty)
-          stms
-  (ctx', stms')
+transformStms :: Ctx -> Stms GPU -> CoalesceM (Ctx, Stms GPU)
+transformStms ctx =
+  foldM
+    ( \(ctx_acc, stms_acc) stm -> do
+        (new_ctx, new_stms) <- transformStm ctx_acc stm
+        pure (new_ctx, stms_acc S.>< new_stms)
+    )
+    (ctx, mempty)
 
-transformStm :: Ctx -> Stm GPU -> (Ctx, Stms GPU)
+transformStm :: Ctx -> Stm GPU -> CoalesceM (Ctx, Stms GPU)
 transformStm ctx stm@(Let pat aux e) = do
-  let (ctx', new_stms) = case e of
-        (Match s cases body m) -> transformMatch stm ctx s cases body m
-        (Loop bindings loop body) -> transformLoop stm ctx bindings loop body
-        (Op op) -> transformOp stm ctx op
-        _ -> (ctx, S.singleton stm)
-  (ctx', new_stms)
+  case e of
+    (Match s cases body m) -> transformMatch stm ctx s cases body m
+    (Loop bindings loop body) -> transformLoop stm ctx bindings loop body
+    (Op op) -> transformOp stm ctx op
+    _ -> pure (ctx, S.singleton stm)
 
 transformMatch ::
   Stm GPU ->
@@ -93,21 +91,23 @@ transformMatch ::
   [Case (Body GPU)] ->
   Body GPU ->
   MatchDec (BranchType GPU) ->
-  (Ctx, Stms GPU)
+  CoalesceM (Ctx, Stms GPU)
 transformMatch (Let pat aux _) ctx s cases body m = do
-  let bodies = map caseBody cases
-  let (ctx', body') = transformBody ctx body
-  let (ctx'', cases') =
-        foldl
-          ( \(ctx_acc, cases_acc) case' -> do
-              let body'' = caseBody case'
-              let (new_ctx, new_body) = transformBody ctx_acc body''
-              let new_case = Case (casePat case') new_body
-              (new_ctx, cases_acc ++ [new_case])
-          )
-          (ctx', mempty)
-          cases
-  (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
+  undefined
+
+--  let bodies = map caseBody cases
+--  let (ctx', body') = transformBody ctx body
+--  let (ctx'', cases') =
+--        foldl
+--          ( \(ctx_acc, cases_acc) case' -> do
+--              let body'' = caseBody case'
+--              let (new_ctx, new_body) = transformBody ctx_acc body''
+--              let new_case = Case (casePat case') new_body
+--              (new_ctx, cases_acc ++ [new_case])
+--          )
+--          (ctx', mempty)
+--          cases
+--  (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
 
 transformLoop ::
   Stm GPU ->
@@ -115,55 +115,60 @@ transformLoop ::
   [(FParam GPU, SubExp)] ->
   LoopForm ->
   Body GPU ->
-  (Ctx, Stms GPU)
+  CoalesceM (Ctx, Stms GPU)
 transformLoop (Let pat aux _) ctx bindings loop body = do
-  let (ctx', stms') = transformStms ctx (bodyStms body)
+  (ctx', stms') <- transformStms ctx (bodyStms body)
   let body' = Body (bodyDec body) stms' (bodyResult body)
-  (ctx', S.singleton $ Let pat aux (Loop bindings loop body'))
+  pure (ctx', S.singleton $ Let pat aux (Loop bindings loop body'))
 
-transformOp :: Stm GPU -> Ctx -> Op GPU -> (Ctx, Stms GPU)
+transformOp :: Stm GPU -> Ctx -> Op GPU -> CoalesceM (Ctx, Stms GPU)
 transformOp (Let pat aux _) ctx op = do
   let patternName = patElemName . head $ patElems pat
-  let (ctx', new_stms, op') = case op of
-        (SegOp segop) -> transformSegOp patternName ctx segop
-        (GPUBody types body) -> transformGPUBody ctx types body
-        _ -> (ctx, mempty, Op op)
-  (ctx', new_stms S.|> Let pat aux op')
+  (ctx', new_stms, op') <- case op of
+    (SegOp segop) -> transformSegOp patternName ctx segop
+    (GPUBody types body) -> transformGPUBody ctx types body
+    _ -> pure (ctx, mempty, Op op)
+  pure (ctx', new_stms S.|> Let pat aux op')
 
-transformBody :: Ctx -> Body GPU -> (Ctx, Body GPU)
+transformBody :: Ctx -> Body GPU -> CoalesceM (Ctx, Body GPU)
 transformBody ctx body = do
-  let (ctx', stms') = transformStms ctx (bodyStms body)
+  (ctx', stms') <- transformStms ctx (bodyStms body)
   let body' = Body (bodyDec body) stms' (bodyResult body)
-  (ctx', body')
+  pure (ctx', body')
 
-transformGPUBody :: Ctx -> [Type] -> Body GPU -> (Ctx, Stms GPU, Exp GPU)
-transformGPUBody ctx types body =
-  let (ctx', body') = transformBody ctx body
-   in (ctx', mempty, Op (GPUBody types body'))
+transformGPUBody :: Ctx -> [Type] -> Body GPU -> CoalesceM (Ctx, Stms GPU, Exp GPU)
+transformGPUBody ctx types body = do
+  (ctx', body') <- transformBody ctx body
+  pure (ctx', mempty, Op (GPUBody types body'))
 
-transformSegOp :: VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
+transformSegOp ::
+  VName ->
+  Ctx ->
+  SegOp SegLevel GPU ->
+  CoalesceM (Ctx, Stms GPU, Exp GPU)
 transformSegOp pat ctx op = do
   let body = segBody op
   case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
-    Nothing -> (ctx, mempty, Op $ SegOp op)
+    Nothing -> pure (ctx, mempty, Op $ SegOp op)
     (Just arrayNameMap) ->
       do
+        -- 1. Find all permutations in PermutationTable for this SegOp
         let arrayPermutationTuples =
               toPermutationSet $
                 M.toList $
                   M.map (map snd . M.toList) arrayNameMap
         -- create permutation expressions for the segOp
         let permutationExprs =
-              undefined
+              mapM manifestExpr arrayPermutationTuples
+        pure (ctx, permutationExprs, Op $ SegOp op)
         undefined
   where
     -- TODO:
-    -- 1. Find all permutations in PermutationTable for this SegOp
     -- 2. Insert permutations in the AST
 
     toPermutationSet arrayToPermutationMap =
       -- use a set to eliminate duplicate permutations
-      SS.fromList $
+      nubOrd $
         concat
           [ [(arrayName, permutation) | permutation <- permutations]
             | (arrayName, permutations) <- arrayToPermutationMap
