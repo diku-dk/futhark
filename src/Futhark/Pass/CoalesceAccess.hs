@@ -62,31 +62,24 @@ transformStms ctx stms = do
   let (ctx', stms') =
         foldl
           ( \(ctx', stms') stm' -> do
-              let (ctx'', stm'') = transformStm ctx' stm'
-              (ctx'', stms' S.|> stm'')
+              let (ctx'', new_stms) = transformStm ctx' stm'
+              (ctx'', stms' S.>< new_stms)
           )
           (ctx, mempty)
           stms
   (ctx', stms')
 
-transformStm :: Ctx -> Stm GPU -> (Ctx, Stm GPU)
-transformStm ctx (Let pat aux e) = do
-  let (ctx', e') = case e of
-        (Match s cases body m) -> transformMatch ctx s cases body m
-        (Loop bindings loop body) -> transformLoop ctx bindings loop body
-        (Op op) -> transformOp ctx op
-        _ -> (ctx, e)
-  let stm' = Let pat aux e'
-  (ctx', stm')
+transformStm :: Ctx -> Stm GPU -> (Ctx, Stms GPU)
+transformStm ctx stm@(Let pat aux e) = do
+  let (ctx', new_stms) = case e of
+        (Match s cases body m) -> transformMatch stm ctx s cases body m
+        (Loop bindings loop body) -> transformLoop stm ctx bindings loop body
+        (Op op) -> transformOp stm ctx op
+        _ -> (ctx, S.singleton stm)
+  (ctx', new_stms)
 
-transformBody :: Ctx -> Body GPU -> (Ctx, Body GPU)
-transformBody ctx body = do
-  let (ctx', stms') = transformStms ctx (bodyStms body)
-  let body' = Body (bodyDec body) stms' (bodyResult body)
-  (ctx', body')
-
-transformMatch :: Ctx -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> MatchDec (BranchType GPU) -> (Ctx, Exp GPU)
-transformMatch ctx s cases body m = do
+transformMatch :: Stm GPU -> Ctx -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> MatchDec (BranchType GPU) -> (Ctx, Stms GPU)
+transformMatch (Let pat aux _) ctx s cases body m = do
   let bodies = map caseBody cases
   let (ctx', body') = transformBody ctx body
   let (ctx'', cases') =
@@ -99,27 +92,36 @@ transformMatch ctx s cases body m = do
           )
           (ctx', mempty)
           cases
-  (ctx'', Match s cases' body' m)
+  (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
 
-transformLoop :: Ctx -> [(FParam GPU, SubExp)] -> LoopForm -> Body GPU -> (Ctx, Exp GPU)
-transformLoop ctx bindings loop body = do
+transformLoop :: Stm GPU -> Ctx -> [(FParam GPU, SubExp)] -> LoopForm -> Body GPU -> (Ctx, Stms GPU)
+transformLoop (Let pat aux _) ctx bindings loop body = do
   let (ctx', stms') = transformStms ctx (bodyStms body)
   let body' = Body (bodyDec body) stms' (bodyResult body)
-  (ctx', Loop bindings loop body')
+  (ctx', S.singleton $ Let pat aux (Loop bindings loop body'))
 
-transformOp :: Ctx -> Op GPU -> (Ctx, Exp GPU)
-transformOp ctx op = case op of
-  (SegOp segop) -> transformSegOp ctx segop
-  (GPUBody types body) -> transformGPUBody ctx types body
-  _ -> (ctx, Op op)
+transformOp :: Stm GPU -> Ctx -> Op GPU -> (Ctx, Stms GPU)
+transformOp (Let pat aux _) ctx op = do
+  let patternName = patElemName . head $ patElems pat
+  let (ctx', new_stms, op') = case op of
+        (SegOp segop) -> transformSegOp patternName ctx segop
+        (GPUBody types body) -> transformGPUBody ctx types body
+        _ -> (ctx, Op op)
+  (ctx', new_stms S.|> Let pat aux (Op op'))
 
-transformGPUBody :: Ctx -> [Type] -> Body GPU -> (Ctx, Exp GPU)
+transformBody :: Ctx -> Body GPU -> (Ctx, Body GPU)
+transformBody ctx body = do
+  let (ctx', stms') = transformStms ctx (bodyStms body)
+  let body' = Body (bodyDec body) stms' (bodyResult body)
+  (ctx', body')
+
+transformGPUBody :: Ctx -> [Type] -> Body GPU -> (Ctx, Stms GPU, Op GPU)
 transformGPUBody ctx types body =
-  let (ctx', body') = transformBody ctx body
-   in (ctx', Op (GPUBody types body'))
+  let (ctx', new_stms, body') = transformBody ctx body
+   in (ctx', new_stms, GPUBody types body')
 
-transformSegOp :: Ctx -> SegOp lvl GPU -> (Ctx, Exp GPU)
-transformSegOp ctx op = do
+transformSegOp :: VName -> Ctx -> SegOp lvl GPU -> (Ctx, Stms GPU, Op GPU)
+transformSegOp pat ctx op = do
   let body = segBody op
   -- TODO:
   -- 1. Find all manifests in ManifestTable for this SegOp
