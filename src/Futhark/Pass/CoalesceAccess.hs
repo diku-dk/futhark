@@ -14,6 +14,7 @@ import Futhark.Analysis.AccessPattern
 import Futhark.Construct
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Rearrange
+import Futhark.IR.Syntax
 import Futhark.Pass
 import Futhark.Tools
 
@@ -55,9 +56,9 @@ type Coalesce rep = Analyze rep
 -- is the permutation to be applied to the array, and the second
 -- element is the array name. The second element is used to indicate
 -- that we have already inserted a manifest for this array.
-type Manifest = [Int]
+type Permutation = [Int]
 
-type ManifestTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Manifest))
+type ManifestTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
 type ArrayNameReplacements = M.Map IndexExprName VName
 
@@ -124,7 +125,7 @@ transformGPUBody ctx types body =
   let (ctx', body') = transformBody ctx body
    in (ctx', mempty, Op (GPUBody types body'))
 
-transformSegOp :: (BuilderOps GPU) => VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
+transformSegOp :: VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
 transformSegOp pat ctx op = do
   let body = segBody op
   case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
@@ -137,14 +138,7 @@ transformSegOp pat ctx op = do
                   M.map (map snd . M.toList) arrayNameMap
         -- create manifest expressions for the segOp
         let manifestExprs =
-              map
-                ( \(arrayName, manifest) -> do
-                    -- let name = newNameFromString $ baseString arrayName ++ "_coalesced"
-                    -- let expr = BasicOp $ Manifest manifest arrayName
-                    -- Let name mempty expr
-                    letExp (baseString arrayName ++ "_coalesced") $ BasicOp $ Manifest manifest arrayName
-                )
-                $ SS.toList arrayManifestTuples
+              map manifestExpr $ SS.toList arrayManifestTuples
         undefined
   where
     -- TODO:
@@ -153,7 +147,13 @@ transformSegOp pat ctx op = do
 
     toManifestSet arrayToManifestMap =
       -- use a set to eliminate duplicate manifests
-      SS.fromList $ concat [[(arrayName, manifest) | manifest <- manifests] | (arrayName, manifests) <- arrayToManifestMap]
+      SS.fromList $
+        concat [[(arrayName, manifest) | manifest <- manifests] | (arrayName, manifests) <- arrayToManifestMap]
+
+manifestExpr :: (VName, Permutation) -> Stm GPU
+manifestExpr (arrayName, manifest) =
+  let aname' = arrayName
+   in mkLet [aname'] $ BasicOp $ Manifest manifest arrayName
 
 -- =================== Replace array names in AST ===================
 
@@ -278,7 +278,7 @@ manifestTableFromIndexTable sortCoalescing =
               $ dimensions dims
        in perm indices
 
-lookupManifest :: (Coalesce rep) => ManifestTable -> ArrayName -> [DimIdxPat rep] -> Maybe Manifest
+lookupManifest :: (Coalesce rep) => ManifestTable -> ArrayName -> [DimIdxPat rep] -> Maybe Permutation
 lookupManifest mTable arrayName permutation =
   undefined
 
