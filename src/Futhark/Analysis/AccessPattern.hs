@@ -4,7 +4,6 @@ module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
     vnameFromSegOp,
-    segOpNameTuple,
     Analyze,
     IndexTable,
     ArrayName,
@@ -48,12 +47,6 @@ data SegOpName
   | SegmentedScan (Int, VName)
   | SegmentedHist (Int, VName)
   deriving (Eq, Ord, Show)
-
-segOpNameTuple :: SegOpName -> (Int, VName)
-segOpNameTuple (SegmentedMap (level, segOpName)) = (level, segOpName)
-segOpNameTuple (SegmentedRed (level, segOpName)) = (level, segOpName)
-segOpNameTuple (SegmentedScan (level, segOpName)) = (level, segOpName)
-segOpNameTuple (SegmentedHist (level, segOpName)) = (level, segOpName)
 
 vnameFromSegOp :: SegOpName -> VName
 vnameFromSegOp (SegmentedMap (_, name)) = name
