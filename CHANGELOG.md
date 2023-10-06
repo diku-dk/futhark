@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Inefficient locking for certain segmented histograms (#2024).
+
 ## [0.25.5]
 
 ### Added

@@ -157,13 +157,14 @@ computeHistoUsage space op = do
 
 prepareAtomicUpdateGlobal ::
   Maybe Locking ->
+  Shape ->
   [VName] ->
   SegHistSlug ->
   CallKernelGen
     ( Maybe Locking,
       [Imp.TExp Int64] -> InKernelGen ()
     )
-prepareAtomicUpdateGlobal l dests slug =
+prepareAtomicUpdateGlobal l segments dests slug =
   -- We need a separate lock array if the operators are not all of a
   -- particularly simple form that permits pure atomic operations.
   case (l, slugAtomicUpdate slug) of
@@ -181,7 +182,8 @@ prepareAtomicUpdateGlobal l dests slug =
       let num_locks = 100151
           dims =
             map pe64 $
-              shapeDims (histOpShape (slugOp slug))
+              shapeDims segments
+                ++ shapeDims (histOpShape (slugOp slug))
                 ++ [tvSize (slugNumSubhistos slug)]
                 ++ shapeDims (histShape (slugOp slug))
 
@@ -202,6 +204,7 @@ bodyPassage kbody
 
 prepareIntermediateArraysGlobal ::
   Passage ->
+  Shape ->
   Imp.TExp Int32 ->
   Imp.TExp Int64 ->
   [SegHistSlug] ->
@@ -209,7 +212,7 @@ prepareIntermediateArraysGlobal ::
     ( Imp.TExp Int32,
       [[Imp.TExp Int64] -> InKernelGen ()]
     )
-prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
+prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
   -- The paper formulae assume there is only one histogram, but in our
   -- implementation there can be multiple that have been horisontally
   -- fused.  We do a bit of trickery with summings and averages to
@@ -379,7 +382,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
         pure $ subhistosArray info
 
-      (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
+      (l', do_op') <- prepareAtomicUpdateGlobal l segments dests slug
 
       pure (l', do_op')
 
@@ -492,6 +495,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   (hist_S, histograms) <-
     prepareIntermediateArraysGlobal
       (bodyPassage kbody)
+      (Shape (init space_sizes))
       num_threads
       (pe64 $ last space_sizes)
       slugs
