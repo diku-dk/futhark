@@ -129,6 +129,7 @@ data Token
   | DOC T.Text
   | EOF
   | HOLE
+  | ERROR T.Text
   deriving (Show, Eq, Ord)
 
 mkQualId :: T.Text -> ([Name], Name)

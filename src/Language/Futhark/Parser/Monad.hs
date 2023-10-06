@@ -194,6 +194,9 @@ parseError (L loc EOF, expected) =
 parseError (L loc DOC {}, _) =
   parseErrorAt (locOf loc) $
     Just "Documentation comments ('-- |') are only permitted when preceding declarations."
+parseError (L loc (ERROR "\""), _) =
+  parseErrorAt (locOf loc) $
+    Just "Unclosed string literal."
 parseError (L loc _, expected) = do
   input <- lift $ gets parserInput
   let ~(Loc (Pos _ _ _ beg) (Pos _ _ _ end)) = locOf loc
