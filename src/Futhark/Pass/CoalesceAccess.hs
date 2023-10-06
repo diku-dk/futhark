@@ -8,8 +8,10 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence.Internal qualified as S
+import Data.Set qualified as SS
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
+import Futhark.Construct
 import Futhark.IR.GPU
 import Futhark.IR.Prop.Rearrange
 import Futhark.Pass
@@ -53,7 +55,7 @@ type Coalesce rep = Analyze rep
 -- is the permutation to be applied to the array, and the second
 -- element is the array name. The second element is used to indicate
 -- that we have already inserted a manifest for this array.
-type Manifest = ([Int], Maybe VName)
+type Manifest = [Int]
 
 type ManifestTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Manifest))
 
@@ -122,16 +124,35 @@ transformGPUBody ctx types body =
   let (ctx', body') = transformBody ctx body
    in (ctx', mempty, Op (GPUBody types body'))
 
-transformSegOp :: VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
+transformSegOp :: BuilderOps GPU => VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
 transformSegOp pat ctx op = do
   let body = segBody op
   case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
     Nothing -> (ctx, mempty, Op $ SegOp op)
-    _ -> undefined
-
--- TODO:
--- 1. Find all manifests in ManifestTable for this SegOp
--- 2. Insert manifests in the AST
+    (Just arrayNameMap) ->
+      do
+        let arrayManifestTuples =
+              toManifestSet $
+                M.toList $
+                  M.map (map snd . M.toList) arrayNameMap
+        -- create manifest expressions for the segOp
+        let manifestExprs =
+              map
+                ( \(arrayName, manifest) -> do
+                  --let name = newNameFromString $ baseString arrayName ++ "_coalesced"
+                  --let expr = BasicOp $ Manifest manifest arrayName
+                  --Let name mempty expr
+                  letExp (baseString arrayName ++ "_coalesced") $ BasicOp $ Manifest manifest arrayName
+                )
+                $ SS.toList arrayManifestTuples
+        undefined
+        -- TODO:
+        -- 1. Find all manifests in ManifestTable for this SegOp
+        -- 2. Insert manifests in the AST
+  where
+    toManifestSet arrayToManifestMap =
+      -- use a set to eliminate duplicate manifests
+      SS.fromList $ concat [[(arrayName, manifest) | manifest <- manifests] | (arrayName, manifests) <- arrayToManifestMap]
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a ManifestTable.
@@ -163,7 +184,7 @@ manifestTableFromIndexTable sortCoalescing =
         )
 
     -- Is the permutation just the identity permutation, or not a transposition?
-    predManifest (perm, _) =
+    predManifest perm =
       perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
 
     -- Sorts the dimensions in a given memory entry and returns it as
@@ -174,7 +195,7 @@ manifestTableFromIndexTable sortCoalescing =
               . L.sortBy (\a b -> sortCoalescing (fst a) (fst b))
               . flip zip [0 :: Int ..]
               $ dimensions dims
-       in (perm indices, Nothing)
+       in perm indices
 
 lookupManifest :: (Coalesce rep) => ManifestTable -> ArrayName -> [DimIdxPat rep] -> Maybe Manifest
 lookupManifest mTable arrayName permutation =
