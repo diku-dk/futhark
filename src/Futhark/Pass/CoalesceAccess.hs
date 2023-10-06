@@ -61,9 +61,9 @@ transformStms :: Ctx -> Stms GPU -> (Ctx, Stms GPU)
 transformStms ctx stms = do
   let (ctx', stms') =
         foldl
-          ( \(ctx', stms') stm' -> do
-              let (ctx'', new_stms) = transformStm ctx' stm'
-              (ctx'', stms' S.>< new_stms)
+          ( \(ctx_acc, stms_acc) stm -> do
+              let (new_ctx, new_stms) = transformStm ctx_acc stm
+              (new_ctx, stms_acc S.>< new_stms)
           )
           (ctx, mempty)
           stms
@@ -86,9 +86,9 @@ transformMatch (Let pat aux _) ctx s cases body m = do
         foldl
           ( \(ctx_acc, cases_acc) case' -> do
               let body'' = caseBody case'
-              let (ctx''', body''') = transformBody ctx_acc body''
-              let case'' = Case (casePat case') body'''
-              (ctx''', cases_acc ++ [case''])
+              let (new_ctx, new_body) = transformBody ctx_acc body''
+              let new_case = Case (casePat case') new_body
+              (new_ctx, cases_acc ++ [new_case])
           )
           (ctx', mempty)
           cases
