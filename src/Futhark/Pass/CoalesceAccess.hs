@@ -35,30 +35,33 @@ coalesceAccess =
     $ \prog -> do
       -- Analyse the program
       let analysisRes = analyzeDimIdxPats prog
-      -- Compute manifests to acheive coalescence for all arrays
-      let manifestTable = manifestTableFromIndexTable compare analysisRes
-      -- let manifestTable = manifestTableFromIndexTable (const . const EQ) analysisRes
-      -- Insert manifests in the AST
-      intraproceduralTransformation (onStms manifestTable) prog
+      -- Compute permutations to acheive coalescence for all arrays
+      let permutationTable = permutationTableFromIndexTable compare analysisRes
+      -- let permutationTable = permutationTableFromIndexTable (const . const EQ) analysisRes
+      -- Insert permutations in the AST
+      intraproceduralTransformation (onStms permutationTable) prog
   where
-    onStms manifestTable _ stms = do
-      let (_, stms') = transformStms manifestTable stms
+    onStms permutationTable _ stms = do
+      let (_, stms') = transformStms permutationTable stms
       -- let m = localScope scope $ stms'
       -- fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
       -- fmap fst $ modifyNameSource $ pure stms'
       pure stms'
 
-type Ctx = ManifestTable
+type Ctx = PermutationTable
 
 type Coalesce rep = Analyze rep
 
--- | Resulting manifest to be inserted in the AST. The first element
+type CoalesceM = Builder GPU
+
+-- | Resulting permutation to be inserted in the AST. The first element
 -- is the permutation to be applied to the array, and the second
 -- element is the array name. The second element is used to indicate
--- that we have already inserted a manifest for this array.
+-- that we have already inserted a permutation for this array.
 type Permutation = [Int]
 
-type ManifestTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
+type PermutationTable =
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
 type ArrayNameReplacements = M.Map IndexExprName VName
 
@@ -83,7 +86,14 @@ transformStm ctx stm@(Let pat aux e) = do
         _ -> (ctx, S.singleton stm)
   (ctx', new_stms)
 
-transformMatch :: Stm GPU -> Ctx -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> MatchDec (BranchType GPU) -> (Ctx, Stms GPU)
+transformMatch ::
+  Stm GPU ->
+  Ctx ->
+  [SubExp] ->
+  [Case (Body GPU)] ->
+  Body GPU ->
+  MatchDec (BranchType GPU) ->
+  (Ctx, Stms GPU)
 transformMatch (Let pat aux _) ctx s cases body m = do
   let bodies = map caseBody cases
   let (ctx', body') = transformBody ctx body
@@ -99,7 +109,13 @@ transformMatch (Let pat aux _) ctx s cases body m = do
           cases
   (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
 
-transformLoop :: Stm GPU -> Ctx -> [(FParam GPU, SubExp)] -> LoopForm -> Body GPU -> (Ctx, Stms GPU)
+transformLoop ::
+  Stm GPU ->
+  Ctx ->
+  [(FParam GPU, SubExp)] ->
+  LoopForm ->
+  Body GPU ->
+  (Ctx, Stms GPU)
 transformLoop (Let pat aux _) ctx bindings loop body = do
   let (ctx', stms') = transformStms ctx (bodyStms body)
   let body' = Body (bodyDec body) stms' (bodyResult body)
@@ -132,34 +148,34 @@ transformSegOp pat ctx op = do
     Nothing -> (ctx, mempty, Op $ SegOp op)
     (Just arrayNameMap) ->
       do
-        let arrayManifestTuples =
-              toManifestSet $
+        let arrayPermutationTuples =
+              toPermutationSet $
                 M.toList $
                   M.map (map snd . M.toList) arrayNameMap
-        -- create manifest expressions for the segOp
-        let manifestExprs =
-              map manifestExpr $ SS.toList arrayManifestTuples
+        -- create permutation expressions for the segOp
+        let permutationExprs =
+              undefined
         undefined
   where
     -- TODO:
-    -- 1. Find all manifests in ManifestTable for this SegOp
-    -- 2. Insert manifests in the AST
+    -- 1. Find all permutations in PermutationTable for this SegOp
+    -- 2. Insert permutations in the AST
 
-    toManifestSet arrayToManifestMap =
-      -- use a set to eliminate duplicate manifests
+    toPermutationSet arrayToPermutationMap =
+      -- use a set to eliminate duplicate permutations
       SS.fromList $
-        concat [[(arrayName, manifest) | manifest <- manifests] | (arrayName, manifests) <- arrayToManifestMap]
-
-manifestExpr :: (VName, Permutation) -> Stm GPU
-manifestExpr (arrayName, manifest) =
-  let aname' = arrayName
-   in mkLet [aname'] $ BasicOp $ Manifest manifest arrayName
+        concat
+          [ [(arrayName, permutation) | permutation <- permutations]
+            | (arrayName, permutations) <- arrayToPermutationMap
+          ]
 
 -- =================== Replace array names in AST ===================
 
 replaceArrayNamesInBody :: ArrayNameReplacements -> Body GPU -> Body GPU
 replaceArrayNamesInBody arr_map body = do
-  let stms' = S.fromList $ map (replaceArrayNamesInStm arr_map) (stmsToList $ bodyStms body)
+  let stms' =
+        S.fromList $
+          map (replaceArrayNamesInStm arr_map) (stmsToList $ bodyStms body)
   Body (bodyDec body) stms' (bodyResult body)
 
 replaceArrayNamesInKernelBody :: ArrayNameReplacements -> KernelBody GPU -> KernelBody GPU
@@ -232,24 +248,24 @@ replaceArrayName arr_map idx_name op = do
       BasicOp op'
 
 -- TODO:
--- 1. Find all manifests in ManifestTable for this SegOp
--- 2. Insert manifests in the AST
+-- 1. Find all permutations in PermutationTable for this SegOp
+-- 2. Insert permutations in the AST
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
--- a ManifestTable.
-manifestTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> ManifestTable
-manifestTableFromIndexTable sortCoalescing =
+-- a PermutationTable.
+permutationTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> PermutationTable
+permutationTableFromIndexTable sortCoalescing =
   -- We effectively convert all the `MemoryEntry`s in the index table,
   -- then, using mapMaybe, we discard all "rows" in the table which:
   -- \* contain no difference in the permutation, or
   -- \* is a permutation that we cannot achieve efficiently using transpositions.
   -- recall that IndexTable is just a mapping of
   -- SegOpName → ArrayName → IndexExprName → [DimIdxPat]
-  -- and ManifestTable is just a variation of IndexTable that maps to
+  -- and PermutationTable is just a variation of IndexTable that maps to
   -- a permutation instead of [DimIdxPat]
   filterMap null $
     filterMap null $
-      filterMap predManifest convert
+      filterMap predPermutation convert
   where
     -- wraps a function in a mapMaybe, if the predicate is true then return
     -- nothing. When sequenced as above, the "nothings" will then propagate and
@@ -265,7 +281,7 @@ manifestTableFromIndexTable sortCoalescing =
         )
 
     -- Is the permutation just the identity permutation, or not a transposition?
-    predManifest perm =
+    predPermutation perm =
       perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
 
     -- Sorts the dimensions in a given memory entry and returns it as
@@ -278,8 +294,8 @@ manifestTableFromIndexTable sortCoalescing =
               $ dimensions dims
        in perm indices
 
-lookupManifest :: (Coalesce rep) => ManifestTable -> ArrayName -> [DimIdxPat rep] -> Maybe Permutation
-lookupManifest mTable arrayName permutation =
+lookupPermutation :: (Coalesce rep) => PermutationTable -> ArrayName -> [DimIdxPat rep] -> Maybe Permutation
+lookupPermutation mTable arrayName permutation =
   undefined
 
 -- | Apply `f` to second/right part of tuple.
