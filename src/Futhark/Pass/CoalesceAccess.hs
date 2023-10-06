@@ -124,7 +124,7 @@ transformGPUBody ctx types body =
   let (ctx', body') = transformBody ctx body
    in (ctx', mempty, Op (GPUBody types body'))
 
-transformSegOp :: BuilderOps GPU => VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
+transformSegOp :: (BuilderOps GPU) => VName -> Ctx -> SegOp SegLevel GPU -> (Ctx, Stms GPU, Exp GPU)
 transformSegOp pat ctx op = do
   let body = segBody op
   case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
@@ -139,20 +139,101 @@ transformSegOp pat ctx op = do
         let manifestExprs =
               map
                 ( \(arrayName, manifest) -> do
-                  --let name = newNameFromString $ baseString arrayName ++ "_coalesced"
-                  --let expr = BasicOp $ Manifest manifest arrayName
-                  --Let name mempty expr
-                  letExp (baseString arrayName ++ "_coalesced") $ BasicOp $ Manifest manifest arrayName
+                    -- let name = newNameFromString $ baseString arrayName ++ "_coalesced"
+                    -- let expr = BasicOp $ Manifest manifest arrayName
+                    -- Let name mempty expr
+                    letExp (baseString arrayName ++ "_coalesced") $ BasicOp $ Manifest manifest arrayName
                 )
                 $ SS.toList arrayManifestTuples
         undefined
-        -- TODO:
-        -- 1. Find all manifests in ManifestTable for this SegOp
-        -- 2. Insert manifests in the AST
   where
+    -- TODO:
+    -- 1. Find all manifests in ManifestTable for this SegOp
+    -- 2. Insert manifests in the AST
+
     toManifestSet arrayToManifestMap =
       -- use a set to eliminate duplicate manifests
       SS.fromList $ concat [[(arrayName, manifest) | manifest <- manifests] | (arrayName, manifests) <- arrayToManifestMap]
+
+-- =================== Replace array names in AST ===================
+
+replaceArrayNamesInBody :: ArrayNameReplacements -> Body GPU -> Body GPU
+replaceArrayNamesInBody arr_map body = do
+  let stms' = S.fromList $ map (replaceArrayNamesInStm arr_map) (stmsToList $ bodyStms body)
+  Body (bodyDec body) stms' (bodyResult body)
+
+replaceArrayNamesInKernelBody :: ArrayNameReplacements -> KernelBody GPU -> KernelBody GPU
+replaceArrayNamesInKernelBody arr_map body = do
+  let stms' = S.fromList $ map (replaceArrayNamesInStm arr_map) (stmsToList $ kernelBodyStms body)
+  KernelBody (kernelBodyDec body) stms' (kernelBodyResult body)
+
+replaceArrayNamesInStm :: ArrayNameReplacements -> Stm GPU -> Stm GPU
+replaceArrayNamesInStm arr_map (Let pat aux e) = do
+  let patternName = patElemName . head $ patElems pat
+  let e' = case e of
+        (Match s cases body m) -> replaceArrayNamesInMatch arr_map s cases body m
+        (Loop bindings loop body) -> replaceArrayNamesInLoop arr_map bindings loop body
+        (Op op) -> replaceArrayNamesInOp arr_map op
+        (BasicOp op) -> replaceArrayName arr_map patternName op
+        _ -> e
+  Let pat aux e'
+
+replaceArrayNamesInMatch :: ArrayNameReplacements -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> MatchDec (BranchType GPU) -> Exp GPU
+replaceArrayNamesInMatch arr_map s cases body m = do
+  let bodies = map caseBody cases
+  let body' = replaceArrayNamesInBody arr_map body
+  let cases' =
+        foldl
+          ( \cases_acc case' -> do
+              let body'' = caseBody case'
+              let new_body = replaceArrayNamesInBody arr_map body''
+              let new_case = Case (casePat case') new_body
+              cases_acc ++ [new_case]
+          )
+          mempty
+          cases
+  Match s cases' body' m
+
+replaceArrayNamesInLoop :: ArrayNameReplacements -> [(FParam GPU, SubExp)] -> LoopForm -> Body GPU -> Exp GPU
+replaceArrayNamesInLoop arr_map bindings loop body = Loop bindings loop (replaceArrayNamesInBody arr_map body)
+
+replaceArrayNamesInOp :: ArrayNameReplacements -> Op GPU -> Exp GPU
+replaceArrayNamesInOp arr_map op = do
+  let op' = case op of
+        (SegOp segop) -> replaceArrayNamesInSegOp arr_map segop
+        (GPUBody types body) -> replaceArrayNamesInGPUBody arr_map types body
+        _ -> op
+  Op op'
+
+replaceArrayNamesInSegOp :: ArrayNameReplacements -> SegOp SegLevel GPU -> Op GPU
+replaceArrayNamesInSegOp arr_map op = do
+  let body = segBody op
+  let body' = replaceArrayNamesInKernelBody arr_map body
+  let op' = case op of
+        (SegMap lvl segSpace types body) -> SegMap lvl segSpace types body'
+        (SegRed lvl segSpace o types body) -> SegRed lvl segSpace o types body'
+        (SegScan lvl segSpace o types body) -> SegScan lvl segSpace o types body'
+        (SegHist lvl segSpace o types body) -> SegHist lvl segSpace o types body'
+  SegOp op'
+
+replaceArrayNamesInGPUBody :: ArrayNameReplacements -> [Type] -> Body GPU -> Op GPU
+replaceArrayNamesInGPUBody arr_map types body = GPUBody types (replaceArrayNamesInBody arr_map body)
+
+replaceArrayName :: ArrayNameReplacements -> VName -> BasicOp -> Exp GPU
+replaceArrayName arr_map idx_name op = do
+  -- Look up the new array name
+  case M.lookup idx_name arr_map of
+    Nothing -> BasicOp op
+    Just arr_name' -> do
+      -- Replace the array name in the BasicOp
+      let op' = case op of
+            (Index _name slice) -> Index arr_name' slice
+            (Update safety _name slice subExp) -> Update safety arr_name' slice subExp
+      BasicOp op'
+
+-- TODO:
+-- 1. Find all manifests in ManifestTable for this SegOp
+-- 2. Insert manifests in the AST
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a ManifestTable.
