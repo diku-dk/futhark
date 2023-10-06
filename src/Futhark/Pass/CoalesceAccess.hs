@@ -106,8 +106,8 @@ transformOp (Let pat aux _) ctx op = do
   let (ctx', new_stms, op') = case op of
         (SegOp segop) -> transformSegOp patternName ctx segop
         (GPUBody types body) -> transformGPUBody ctx types body
-        _ -> (ctx, Op op)
-  (ctx', new_stms S.|> Let pat aux (Op op'))
+        _ -> (ctx, mempty, Op op)
+  (ctx', new_stms S.|> Let pat aux op')
 
 transformBody :: Ctx -> Body GPU -> (Ctx, Body GPU)
 transformBody ctx body = do
@@ -115,12 +115,12 @@ transformBody ctx body = do
   let body' = Body (bodyDec body) stms' (bodyResult body)
   (ctx', body')
 
-transformGPUBody :: Ctx -> [Type] -> Body GPU -> (Ctx, Stms GPU, Op GPU)
+transformGPUBody :: Ctx -> [Type] -> Body GPU -> (Ctx, Stms GPU, Exp GPU)
 transformGPUBody ctx types body =
-  let (ctx', new_stms, body') = transformBody ctx body
-   in (ctx', new_stms, GPUBody types body')
+  let (ctx', body') = transformBody ctx body
+   in (ctx', mempty, Op (GPUBody types body'))
 
-transformSegOp :: VName -> Ctx -> SegOp lvl GPU -> (Ctx, Stms GPU, Op GPU)
+transformSegOp :: VName -> Ctx -> SegOp lvl GPU -> (Ctx, Stms GPU, Exp GPU)
 transformSegOp pat ctx op = do
   let body = segBody op
   -- TODO:
