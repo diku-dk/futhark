@@ -57,6 +57,8 @@ type Manifest = ([Int], Maybe VName)
 
 type ManifestTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Manifest))
 
+type ArrayNameReplacements = M.Map IndexExprName VName
+
 transformStms :: Ctx -> Stms GPU -> (Ctx, Stms GPU)
 transformStms ctx stms = do
   let (ctx', stms') =
@@ -126,9 +128,10 @@ transformSegOp pat ctx op = do
   case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
     Nothing -> (ctx, mempty, Op $ SegOp op)
     _ -> undefined
-  -- TODO:
-  -- 1. Find all manifests in ManifestTable for this SegOp
-  -- 2. Insert manifests in the AST
+
+-- TODO:
+-- 1. Find all manifests in ManifestTable for this SegOp
+-- 2. Insert manifests in the AST
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a ManifestTable.
