@@ -14,16 +14,16 @@ import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam
 -- them together here.
-combineScans :: [SegBinOp GPUMem] -> SegBinOp GPUMem
-combineScans ops =
+combineScanOps :: [SegBinOp GPUMem] -> SegBinOp GPUMem
+combineScanOps scan_ops =
   SegBinOp
-    { segBinOpComm = mconcat (map segBinOpComm ops),
+    { segBinOpComm = mconcat (map segBinOpComm scan_ops),
       segBinOpLambda = lam',
-      segBinOpNeutral = concatMap segBinOpNeutral ops,
+      segBinOpNeutral = concatMap segBinOpNeutral scan_ops,
       segBinOpShape = mempty -- Assumed
     }
   where
-    lams = map segBinOpLambda ops
+    lams = map segBinOpLambda scan_ops
     xParams lam = take (length (lambdaReturnType lam)) (lambdaParams lam)
     yParams lam = drop (length (lambdaReturnType lam)) (lambdaParams lam)
     lam' =
@@ -48,26 +48,11 @@ bodyHas f = any (f' . stmExp) . bodyStms
         { walkOnBody = const $ guard . not . bodyHas f
         }
 
--- XXX: Currently single pass scans cannot handle construction of
--- arrays in the kernel body (#2013), because of insufficient
--- memory expansion.  This can in principle be fixed.
-kernelBodyHasFreshArrays :: KernelBody GPUMem -> Bool
-kernelBodyHasFreshArrays kbody =
-  bodyHas freshArray (Body () (kernelBodyStms kbody) [])
-    where
-      freshArray (BasicOp Manifest {})  = True
-      freshArray (BasicOp Iota {})      = True
-      freshArray (BasicOp Replicate {}) = True
-      freshArray (BasicOp Scratch {})   = True
-      freshArray (BasicOp Concat {})    = True
-      freshArray (BasicOp ArrayLit {})  = True
-      freshArray _ = False
-
 canBeSinglePass :: [SegBinOp GPUMem] -> KernelBody GPUMem -> Maybe (SegBinOp GPUMem)
-canBeSinglePass ops kbody
-  | all ok ops,
-    not $ kernelBodyHasFreshArrays kbody =
-      Just $ combineScans ops
+canBeSinglePass scan_ops map_kbody
+  | all ok scan_ops,
+    not $ bodyHas freshArray (Body () (kernelBodyStms map_kbody) []) =
+      Just $ combineScanOps scan_ops
   | otherwise =
       Nothing
   where
@@ -77,8 +62,16 @@ canBeSinglePass ops kbody
         && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
-
-
+    -- XXX: Currently single pass scans cannot handle construction of
+    -- arrays in the kernel body (#2013), because of insufficient
+    -- memory expansion.  This can in principle be fixed.
+    freshArray (BasicOp Manifest {}) = True
+    freshArray (BasicOp Iota {}) = True
+    freshArray (BasicOp Replicate {}) = True
+    freshArray (BasicOp Scratch {}) = True
+    freshArray (BasicOp Concat {}) = True
+    freshArray (BasicOp ArrayLit {}) = True
+    freshArray _ = False
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -89,22 +82,19 @@ compileSegScan ::
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
-  target <- hostTarget <$> askEnv
+compileSegScan pat lvl space scan_ops kbody =
+  sWhen (0 .<. n) $ do
+    emit $ Imp.DebugPrint "\n# SegScan" Nothing
+    target <- hostTarget <$> askEnv
 
-  case (canBeSinglePass scans kbody, targetSupportsSinglePass target) of
-    (Just scans', True) ->
-      -- TODO: are there more criteria for requiring block virtualization?
-      let requiresBlockVirt = kernelBodyHasFreshArrays kbody
-      in SinglePass.compileSegScan pat lvl space scans' kbody requiresBlockVirt
+    case (targetSupportsSinglePass target, canBeSinglePass scan_ops kbody) of
+      (True, Just scan_ops') ->
+        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
+      _ -> TwoPass.compileSegScan pat lvl space scan_ops map_kbody
 
-    _ -> TwoPass.compileSegScan pat lvl space scans kbody
-
-  emit $ Imp.DebugPrint "" Nothing
+    emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space
     targetSupportsSinglePass CUDA = True
     targetSupportsSinglePass HIP  = True
-    targetSupportsSinglePass _ = False
-
+    targetSupportsSinglePass _    = False
