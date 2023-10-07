@@ -669,6 +669,26 @@ pullRearrange soac ots = do
       pure (soac', ots')
     else fail "Cannot pull transpose"
 
+pullIndex ::
+  SOAC ->
+  SOAC.ArrayTransforms ->
+  TryFusion (SOAC, SOAC.ArrayTransforms)
+pullIndex (SOAC.Screma w form inps) ots
+  | SOAC.Index cs slice@(Slice (ds@(DimSlice _ w' _) : _))
+      SOAC.:< ots' <-
+      SOAC.viewf ots,
+    w /= w',
+    Just lam <- isMapSOAC form,
+    all
+      ((== stripDims 1 (sliceShape slice)) . arrayShape)
+      (lambdaReturnType lam) =
+      let sliceInput inp =
+            SOAC.addTransform
+              (SOAC.Index cs (fullSlice (SOAC.inputType inp) [ds]))
+              inp
+       in pure (SOAC.Screma w' form (map sliceInput inps), ots')
+pullIndex _ _ = fail "Cannot pull index"
+
 pushRearrange ::
   [VName] ->
   SOAC ->
@@ -790,6 +810,7 @@ exposeInputs ::
 exposeInputs inpIds ker =
   (exposeInputs' =<< pushRearrange')
     <|> (exposeInputs' =<< pullRearrange')
+    <|> (exposeInputs' =<< pullIndex')
     <|> exposeInputs' ker
   where
     ot = fsOutputTransform ker
@@ -812,6 +833,16 @@ exposeInputs inpIds ker =
             fsOutputTransform = SOAC.noTransforms
           }
 
+    pullIndex' = do
+      (soac', ot') <- pullIndex (fsSOAC ker) ot
+      unless (SOAC.nullTransforms ot') $
+        fail "pullIndex was not enough"
+      pure
+        ker
+          { fsSOAC = soac',
+            fsOutputTransform = SOAC.noTransforms
+          }
+
     exposeInputs' ker' =
       case commonTransforms inpIds $ inputs ker' of
         (ot', inps')
@@ -823,8 +854,12 @@ exposeInputs inpIds ker =
       | SOAC.nullTransforms ts = True
     exposed inp = SOAC.inputArray inp `notElem` inpIds
 
-outputTransformPullers :: [SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)]
-outputTransformPullers = [pullRearrange, pullReshape]
+outputTransformPullers ::
+  [ SOAC ->
+    SOAC.ArrayTransforms ->
+    TryFusion (SOAC, SOAC.ArrayTransforms)
+  ]
+outputTransformPullers = [pullRearrange, pullReshape, pullIndex]
 
 pullOutputTransforms ::
   SOAC ->
