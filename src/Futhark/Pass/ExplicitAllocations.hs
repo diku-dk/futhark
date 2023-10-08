@@ -50,6 +50,7 @@ import Futhark.Analysis.SymbolTable (IndexOp)
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
@@ -332,18 +333,6 @@ summaryForBindage _ t@(Array pt _ _) (Hint ixfun space) = do
   m <- letExp "mem" $ Op $ Alloc bytes space
   pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 
-allocInFParams ::
-  (Allocable fromrep torep inner) =>
-  [(FParam fromrep, Space)] ->
-  ([FParam torep] -> AllocM fromrep torep a) ->
-  AllocM fromrep torep a
-allocInFParams params m = do
-  (valparams, (memparams, ctxparams)) <-
-    runWriterT $ mapM (uncurry allocInFParam) params
-  let params' = memparams <> ctxparams <> valparams
-      summary = scopeOfFParams params'
-  localScope summary $ m params'
-
 allocInFParam ::
   (Allocable fromrep torep inner) =>
   FParam fromrep ->
@@ -355,10 +344,13 @@ allocInFParam ::
 allocInFParam param pspace =
   case paramDeclType param of
     Array pt shape u -> do
-      let memname = baseString (paramName param) <> "_mem"
-          ixfun = IxFun.iota $ map pe64 $ shapeDims shape
-      mem <- lift $ newVName memname
-      tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
+      offset <- lift $ newVName $ baseString (paramName param) <> "_offset"
+      mem <- lift $ newVName $ baseString (paramName param) <> "_mem"
+      let ixfun = IxFun.iotaOffset (le64 offset) $ map pe64 $ shapeDims shape
+      tell
+        ( [Param (paramAttrs param) mem $ MemMem pspace],
+          [Param (paramAttrs param) offset $ MemPrim int64]
+        )
       pure param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
     Prim pt ->
       pure param {paramDec = MemPrim pt}
@@ -366,6 +358,18 @@ allocInFParam param pspace =
       pure param {paramDec = MemMem space}
     Acc acc ispace ts u ->
       pure param {paramDec = MemAcc acc ispace ts u}
+
+allocInFParams ::
+  (Allocable fromrep torep inner) =>
+  [(FParam fromrep, Space)] ->
+  ([FParam torep] -> AllocM fromrep torep a) ->
+  AllocM fromrep torep a
+allocInFParams params m = do
+  (valparams, (memparams, ctxparams)) <-
+    runWriterT $ mapM (uncurry allocInFParam) params
+  let params' = memparams <> ctxparams <> valparams
+      summary = scopeOfFParams params'
+  localScope summary $ m params'
 
 ensureRowMajorArray ::
   (Allocable fromrep torep inner) =>
@@ -526,9 +530,10 @@ ensureDirectArray space_ok v = do
   (mem, ixfun) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
-  if IxFun.isDirect ixfun && maybe True (== mem_space) space_ok
-    then pure (mem, v)
-    else needCopy (fromMaybe default_space space_ok)
+  case LMAD.isDirect (IxFun.ixfunLMAD ixfun) of
+    Just _
+      | maybe True (== mem_space) space_ok -> pure (mem, v)
+    _ -> needCopy (fromMaybe default_space space_ok)
   where
     needCopy space =
       -- We need to do a new allocation, copy 'v', and make a new
@@ -665,11 +670,11 @@ memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
     addMem Mem {} = error "memoryInDeclExtType: too much memory"
     addMem (Array pt shape u) = do
       i <- get <* modify (+ 1)
+      j <- get <* modify (+ 1)
       let shape' = fmap shift shape
       pure . MemArray pt shape' u . ReturnsNewBlock space i $
-        IxFun.iota $
-          map convert $
-            shapeDims shape'
+        IxFun.iotaOffset (convert (Ext j)) $
+          map convert (shapeDims shape')
     addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
 
     convert (Ext i) = le64 $ Ext i
@@ -678,24 +683,30 @@ memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
     shift (Ext i) = Ext (i + k)
     shift (Free x) = Free x
 
-bodyReturnMemCtx ::
+funBodyReturnMemCtx ::
   (Allocable fromrep torep inner) =>
   SubExpRes ->
   AllocM fromrep torep [(SubExpRes, MemInfo ExtSize u MemReturn)]
-bodyReturnMemCtx (SubExpRes _ Constant {}) =
+funBodyReturnMemCtx (SubExpRes _ Constant {}) =
   pure []
-bodyReturnMemCtx (SubExpRes _ (Var v)) = do
+funBodyReturnMemCtx (SubExpRes _ (Var v)) = do
   info <- lookupMemInfo v
   case info of
     MemPrim {} -> pure []
     MemAcc {} -> pure []
     MemMem {} -> pure [] -- should not happen
-    MemArray _ _ _ (ArrayIn mem _) -> do
+    MemArray _ _ _ (ArrayIn mem ixfun) -> do
       mem_info <- lookupMemInfo mem
       case mem_info of
-        MemMem space ->
-          pure [(subExpRes $ Var mem, MemMem space)]
-        _ -> error $ "bodyReturnMemCtx: not a memory block: " ++ prettyString mem
+        MemMem space -> do
+          offset <-
+            letSubExp (baseString v <> "_offset") <=< toExp $
+              LMAD.offset (IxFun.ixfunLMAD ixfun)
+          pure
+            [ (subExpRes $ Var mem, MemMem space),
+              (subExpRes offset, MemPrim int64)
+            ]
+        _ -> error $ "funBodyReturnMemCtx: not a memory block: " ++ prettyString mem
 
 allocInFunBody ::
   (Allocable fromrep torep inner) =>
@@ -705,7 +716,7 @@ allocInFunBody ::
 allocInFunBody space_oks (Body _ stms res) =
   buildBody . allocInStms stms $ do
     res' <- zipWithM ensureDirect space_oks' res
-    (mem_ctx_res, mem_ctx_rets) <- unzip . concat <$> mapM bodyReturnMemCtx res'
+    (mem_ctx_res, mem_ctx_rets) <- unzip . concat <$> mapM funBodyReturnMemCtx res'
     pure (mem_ctx_res <> res', mem_ctx_rets)
   where
     num_vals = length space_oks

@@ -11,6 +11,7 @@
 -- error: Index \[1:0\] out of bounds for array of shape \[5\]
 -- input { empty([0]i32) 0 1 }
 -- error: Index \[0:1\] out of bounds for array of shape \[0\]
+-- structure { Manifest 0 Copy 0 }
 
 def main (as: []i32) (i: i32) (j: i32): []i32 =
   as[i64.i32 i:i64.i32 j]

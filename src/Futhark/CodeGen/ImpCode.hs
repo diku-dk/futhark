@@ -192,7 +192,7 @@ instance Semigroup (Constants a) where
 data ValueDesc
   = -- | An array with memory block memory space, element type,
     -- signedness of element type (if applicable), and shape.
-    ArrayValue VName Space PrimType Signedness [DimSize]
+    ArrayValue VName DimSize Space PrimType Signedness [DimSize]
   | -- | A scalar value with signedness if applicable.
     ScalarValue PrimType Signedness VName
   deriving (Eq, Show)
@@ -517,9 +517,9 @@ instance Pretty ValueDesc where
       ept' = case ept of
         Unsigned -> " (unsigned)"
         Signed -> mempty
-  pretty (ArrayValue mem space et ept shape) =
+  pretty (ArrayValue mem offset space et ept shape) =
     foldMap (brackets . pretty) shape
-      <> (pretty et <+> "at" <+> pretty mem <> pretty space <+> ept')
+      <> (pretty et <+> "at" <+> pretty mem <> "+" <> pretty offset <> pretty space <+> ept')
     where
       ept' = case ept of
         Unsigned -> " (unsigned)"
@@ -739,7 +739,7 @@ instance (FreeIn a) => FreeIn (Functions a) where
             namesFromList $ map paramName $ functionInput f <> functionOutput f
 
 instance FreeIn ValueDesc where
-  freeIn' (ArrayValue mem _ _ _ dims) = freeIn' mem <> freeIn' dims
+  freeIn' (ArrayValue mem offset _ _ _ dims) = freeIn' (mem, dims, offset)
   freeIn' ScalarValue {} = mempty
 
 instance FreeIn ExternalValue where

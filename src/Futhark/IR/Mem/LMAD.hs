@@ -537,7 +537,9 @@ equivalent lmad1 lmad2 =
     && map ldStride (dims lmad1) == map ldStride (dims lmad2)
 {-# NOINLINE equivalent #-}
 
--- | Is this is a row-major array with zero offset?
-isDirect :: (Eq num, IntegralExp num) => LMAD num -> Bool
-isDirect lmad = lmad == iota 0 (map ldShape $ dims lmad)
+-- | Is this is a row-major array with some offset?
+isDirect :: (Eq num, IntegralExp num) => LMAD num -> Maybe num
+isDirect lmad = do
+  guard $ lmad == iota (offset lmad) (map ldShape $ dims lmad)
+  pure $ offset lmad
 {-# NOINLINE isDirect #-}

@@ -72,6 +72,7 @@ arrayLibraryFunctions pub space pt signed rank = do
           [C.cexp|$exp:arr_size * $int:(primByteSize pt::Int)|]
           space
           [C.cstm|return NULL;|]
+        stm [C.cstm|arr->offset = 0;|]
         forM_ [0 .. rank - 1] $ \i ->
           let dim_s = "dim" ++ show i
            in stm [C.cstm|arr->shape[$int:i] = $id:dim_s;|]
@@ -110,7 +111,7 @@ arrayLibraryFunctions pub space pt signed rank = do
         [C.cexp|0|]
         DefaultSpace
         [C.cexp|arr->mem.mem|]
-        [C.cexp|0|]
+        [C.cexp|arr->offset * $int:(primByteSize pt ::Int)|]
         space
         [C.cexp|((size_t)$exp:arr_size_array) * $int:(primByteSize pt::Int)|]
 
@@ -541,7 +542,12 @@ generateArray ::
 generateArray space ((signed, pt, rank), pub) = do
   name <- publicName $ arrayName pt signed rank
   let memty = fatMemType space
-  libDecl [C.cedecl|struct $id:name { $ty:memty mem; typename int64_t shape[$int:rank]; };|]
+  libDecl
+    [C.cedecl|struct $id:name {
+                typename int64_t offset;
+                $ty:memty mem;
+                typename int64_t shape[$int:rank];
+              };|]
   ops <- arrayLibraryFunctions pub space pt signed rank
   let pt_name = prettySigned (signed == Unsigned) pt
       pretty_name = mconcat (replicate rank "[]") <> pt_name

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fusion across slicing is now possible in some cases.
 
+* Some copies eliminated, as the compiler no longer insists that an
+  array returned from a function must be located at the beginning of
+  its corresponding memory block.
+
 ### Removed
 
 ### Changed

@@ -331,7 +331,7 @@ allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
 
 packArrayOutput :: EntryOutput Imp.OpenCL ()
-packArrayOutput mem "device" bt ept dims = do
+packArrayOutput mem offset "device" bt ept dims = do
   mem' <- compileVar mem
   dims' <- mapM compileDim dims
   pure $
@@ -340,13 +340,14 @@ packArrayOutput mem "device" bt ept dims = do
       [ Arg $ Var "self.queue",
         Arg $ Tuple $ dims' <> [Integer 0 | bt == Imp.Unit],
         Arg $ Var $ compilePrimToExtNp bt ept,
-        ArgKeyword "data" mem'
+        ArgKeyword "data" mem',
+        ArgKeyword "offset" (BinOp "*" (Integer (Imp.primByteSize bt)) offset)
       ]
-packArrayOutput _ sid _ _ _ =
+packArrayOutput _ _ sid _ _ _ =
   error $ "Cannot return array from " ++ sid ++ " space."
 
 unpackArrayInput :: EntryInput Imp.OpenCL ()
-unpackArrayInput mem "device" t s dims e = do
+unpackArrayInput mem offset "device" t s dims e = do
   let type_is_ok =
         BinOp
           "and"
@@ -354,6 +355,7 @@ unpackArrayInput mem "device" t s dims e = do
           (BinOp "==" (Field e "dtype") (Var (compilePrimToExtNp t s)))
   stm $ Assert type_is_ok $ String "Parameter has unexpected type"
 
+  stm $ Assign offset $ simpleCall "np.int64" [Integer 0]
   zipWithM_ (unpackDim e) dims [0 ..]
 
   let memsize' = simpleCall "np.int64" [Field e "nbytes"]
@@ -377,7 +379,7 @@ unpackArrayInput mem "device" t s dims e = do
       (BinOp "==" (simpleCall "type" [e]) (Var "cl.array.Array"))
       pyOpenCLArrayCase
       numpyArrayCase
-unpackArrayInput _ sid _ _ _ _ =
+unpackArrayInput _ _ sid _ _ _ _ =
   error $ "Cannot accept array from " ++ sid ++ " space."
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt

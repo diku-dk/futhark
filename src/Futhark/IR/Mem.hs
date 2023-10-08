@@ -124,6 +124,7 @@ import Futhark.IR.Aliases
     removeScopeAliases,
   )
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
@@ -590,7 +591,7 @@ matchFunctionReturnType rettype result = do
         MemMem {} -> pure ()
         MemAcc {} -> pure ()
         MemArray _ _ _ (ArrayIn _ ixfun)
-          | IxFun.isDirect ixfun ->
+          | Just _ <- LMAD.isDirect $ IxFun.ixfunLMAD ixfun ->
               pure ()
           | otherwise ->
               TC.bad . TC.TypeError $

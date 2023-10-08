@@ -20,7 +20,7 @@ import Language.C.Syntax qualified as C
 valueDescToType :: ValueDesc -> ValueType
 valueDescToType (ScalarValue pt signed _) =
   ValueType signed (Rank 0) pt
-valueDescToType (ArrayValue _ _ pt signed shape) =
+valueDescToType (ArrayValue _ _ _ pt signed shape) =
   ValueType signed (Rank (length shape)) pt
 
 allTrue :: [C.Exp] -> C.Exp
@@ -36,7 +36,7 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
     arg_names = namesFromList $ concatMap evNames args
     evNames (OpaqueValue _ vds) = map vdName vds
     evNames (TransparentValue vd) = [vdName vd]
-    vdName (ArrayValue v _ _ _ _) = v
+    vdName (ArrayValue v _ _ _ _ _) = v
     vdName (ScalarValue _ _ v) = v
 
     prepare pno (TransparentValue vd) = do
@@ -64,9 +64,10 @@ prepareEntryInputs args = collect' $ zipWithM prepare [(0 :: Int) ..] args
           src' = fromStorage pt $ C.toExp src mempty
       stm [C.cstm|$id:name = $exp:src';|]
       pure (pt', [])
-    prepareValue pub src vd@(ArrayValue mem _ _ _ shape) = do
+    prepareValue pub src vd@(ArrayValue mem offset _ _ _ shape) = do
       ty <- valueTypeToCType pub $ valueDescToType vd
 
+      stm [C.cstm|$exp:offset = $exp:src->offset;|]
       stm [C.cstm|$exp:mem = $exp:src->mem;|]
 
       let rank = length shape
@@ -121,7 +122,8 @@ prepareEntryOutputs = collect' . zipWithM prepare [(0 :: Int) ..]
     prepareValue dest (ScalarValue t _ name) =
       let name' = toStorage t $ C.toExp name mempty
        in stm [C.cstm|$exp:dest = $exp:name';|]
-    prepareValue dest (ArrayValue mem _ _ _ shape) = do
+    prepareValue dest (ArrayValue mem offset _ _ _ shape) = do
+      stm [C.cstm|$exp:dest->offset = $exp:offset;|]
       stm [C.cstm|$exp:dest->mem = $id:mem;|]
 
       let rank = length shape
@@ -232,7 +234,7 @@ onEntryPoint get_consts relevant_params fname (Function (Just (EntryPoint ename 
 
     vdType (TransparentValue (ScalarValue pt signed _)) =
       prettySigned (signed == Unsigned) pt
-    vdType (TransparentValue (ArrayValue _ _ pt signed shape)) =
+    vdType (TransparentValue (ArrayValue _ _ _ pt signed shape)) =
       mconcat (replicate (length shape) "[]")
         <> prettySigned (signed == Unsigned) pt
     vdType (OpaqueValue name _) =

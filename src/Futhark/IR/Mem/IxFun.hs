@@ -9,6 +9,7 @@ module Futhark.IR.Mem.IxFun
     LMADDim (..),
     index,
     mkExistential,
+    iotaOffset,
     iota,
     permute,
     reshape,

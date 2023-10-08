@@ -523,6 +523,12 @@ compileInParam fparam = case paramDec fparam of
 
 data ArrayDecl = ArrayDecl VName PrimType MemLoc
 
+primExpAsDimSize :: Imp.TExp Int64 -> Imp.DimSize
+primExpAsDimSize (TPrimExp (LeafExp v _)) = Var v
+primExpAsDimSize (TPrimExp (ValueExp v)) = Constant v
+primExpAsDimSize pe =
+  error $ "Cannot convert PrimExp to DimSize: " <> prettyString pe
+
 compileInParams ::
   (Mem rep inner) =>
   OpaqueTypes ->
@@ -546,9 +552,10 @@ compileInParams types params eparams = do
 
       mkValueDesc fparam signedness =
         case (findArray $ paramName fparam, paramType fparam) of
-          (Just (ArrayDecl _ bt (MemLoc mem shape _)), _) -> do
+          (Just (ArrayDecl _ bt (MemLoc mem shape lmad)), _) -> do
             memspace <- findMemInfo mem
-            Just $ Imp.ArrayValue mem memspace bt signedness shape
+            let offset = primExpAsDimSize $ LMAD.offset lmad
+            Just $ Imp.ArrayValue mem offset memspace bt signedness shape
           (_, Prim bt) ->
             Just $ Imp.ScalarValue bt signedness $ paramName fparam
           _ ->
@@ -614,14 +621,29 @@ compileExternalValues types orig_rts orig_epts maybe_params = do
         Nothing -> error $ "Param " ++ show i ++ " does not exist."
 
       mkValueDesc _ signedness (MemArray t shape _ ret) = do
-        (mem, space) <-
+        (mem, space, offset) <-
           case ret of
-            ReturnsNewBlock space j _lmad ->
-              pure (nthOut j, space)
-            ReturnsInBlock mem _lmad -> do
+            ReturnsNewBlock space j ixfun ->
+              pure
+                ( nthOut j,
+                  space,
+                  case LMAD.offset $ IxFun.ixfunLMAD ixfun of
+                    TPrimExp (LeafExp l _) -> f $ Var <$> l
+                    TPrimExp (ValueExp v) -> Constant v
+                    _ -> error "mkValueDesc: bad offset"
+                )
+            ReturnsInBlock mem ixfun -> do
               space <- entryMemSpace <$> lookupMemory mem
-              pure (mem, space)
-        pure $ Imp.ArrayValue mem space t signedness $ map f $ shapeDims shape
+              pure
+                ( mem,
+                  space,
+                  case LMAD.offset $ IxFun.ixfunLMAD ixfun of
+                    TPrimExp (LeafExp l _) -> f $ Var <$> l
+                    TPrimExp (ValueExp v) -> Constant v
+                    _ -> error "mkValueDesc: bad offset"
+                )
+        pure . Imp.ArrayValue mem offset space t signedness $
+          map f (shapeDims shape)
         where
           f (Free v) = v
           f (Ext i) = Var $ nthOut i

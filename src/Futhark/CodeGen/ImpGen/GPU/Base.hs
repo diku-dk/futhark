@@ -1272,7 +1272,7 @@ replicateIsFill arr v = do
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | LMAD.isDirect arr_ixfun -> pure $
+      | Just 0 <- LMAD.isDirect arr_ixfun -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1372,15 +1372,15 @@ sIota ::
   CallKernelGen ()
 sIota arr n x s et = do
   ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if LMAD.isDirect arr_ixfun
-    then do
+  case LMAD.isDirect arr_ixfun of
+    Just 0 -> do
       fname <- iotaForType et
       emit $
         Imp.Call
           []
           fname
           [Imp.MemArg arr_mem, Imp.ExpArg $ untyped n, Imp.ExpArg x, Imp.ExpArg s]
-    else sIotaKernel arr n x s et
+    _ -> sIotaKernel arr n x s et
 
 compileThreadResult ::
   SegSpace ->

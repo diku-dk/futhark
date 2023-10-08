@@ -26,7 +26,7 @@ import Language.Futhark.Primitive
 import NeatInterpolation (text)
 
 extToString :: Imp.ExternalValue -> String
-extToString (Imp.TransparentValue (Imp.ArrayValue vn _ pt s dimSize)) =
+extToString (Imp.TransparentValue (Imp.ArrayValue vn _ _ pt s dimSize)) =
   concat (replicate (length dimSize) "[]") ++ extToString (Imp.TransparentValue (Imp.ScalarValue pt s vn))
 extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float16) _ _)) = "f16"
 extToString (Imp.TransparentValue (Imp.ScalarValue (FloatType Float32) _ _)) = "f32"
