@@ -25,12 +25,8 @@ build:
 	cabal build
 
 install: build
-ifeq ($(UNAME), Darwin)
-	install -d $(PREFIX)/bin/futhark
+	install -d $(PREFIX)/bin/
 	install "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
-else
-	install -D "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
-endif
 
 docs:
 	cabal haddock \
