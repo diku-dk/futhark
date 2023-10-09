@@ -174,6 +174,10 @@ transformSegOp pat ctx op = do
             | (arrayName, permutations) <- arrayToPermutationMap
           ]
 
+manifestExpr :: (MonadBuilder CoalesceM) => (VName, Permutation) -> CoalesceM VName
+manifestExpr (arrayName, manifest) =
+  letExp (baseString arrayName) $ BasicOp $ Manifest manifest arrayName
+
 -- =================== Replace array names in AST ===================
 
 replaceArrayNamesInBody :: ArrayNameReplacements -> Body GPU -> Body GPU
