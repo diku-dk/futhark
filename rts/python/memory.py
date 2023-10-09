@@ -3,12 +3,8 @@
 import ctypes as ct
 
 
-def addressOffset(x, offset, bt):
-    return ct.cast(ct.addressof(x.contents) + int(offset), ct.POINTER(bt))
-
-
 def allocateMem(size):
-    return ct.cast((ct.c_byte * max(0, size))(), ct.POINTER(ct.c_byte))
+    return np.empty(size, dtype=np.byte)
 
 
 # Copy an array if its is not-None.  This is important for treating
@@ -21,28 +17,15 @@ def normaliseArray(x):
 
 
 def unwrapArray(x):
-    return normaliseArray(x).ctypes.data_as(ct.POINTER(ct.c_byte))
-
-
-def createArray(x, shape, t):
-    # HACK: np.ctypeslib.as_array may fail if the shape contains zeroes,
-    # for some reason.
-    if any(map(lambda x: x == 0, shape)):
-        return np.ndarray(shape, dtype=t)
-    else:
-        return np.ctypeslib.as_array(x, shape=shape).view(t)
+    return x.ravel().view(np.byte)
 
 
 def indexArray(x, offset, bt):
-    return addressOffset(x, offset * ct.sizeof(bt), bt)[0]
+    return x.view(bt)[offset]
 
 
 def writeScalarArray(x, offset, v):
-    ct.memmove(
-        ct.addressof(x.contents) + int(offset) * ct.sizeof(v),
-        ct.addressof(v),
-        ct.sizeof(v),
-    )
+    x.view(type(v))[offset] = v
 
 
 # An opaque Futhark value.
@@ -149,7 +132,7 @@ def lmad_copy_elements(
             writeScalarArray(
                 dst,
                 dst_offset + i * dst_strides[0],
-                pt(indexArray(src, src_offset + i * src_strides[0], pt)),
+                indexArray(src, src_offset + i * src_strides[0], pt),
             )
     else:
         for i in range(shape[0]):
@@ -169,11 +152,13 @@ def lmad_copy(
     pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
 ):
     if lmad_memcpyable(dst_strides, src_strides, shape):
-        ct.memmove(
-            addressOffset(dst, dst_offset * ct.sizeof(pt), ct.c_byte),
-            addressOffset(src, src_offset * ct.sizeof(pt), ct.c_byte),
-            np.prod(shape) * ct.sizeof(pt),
-        )
+        dst[
+            dst_offset * ct.sizeof(pt) : dst_offset * ct.sizeof(pt)
+            + np.prod(shape) * ct.sizeof(pt)
+        ] = src[
+            src_offset * ct.sizeof(pt) : src_offset * ct.sizeof(pt)
+            + np.prod(shape) * ct.sizeof(pt)
+        ]
     else:
         lmad_copy_elements(
             pt,
