@@ -518,9 +518,9 @@ instance Pretty ValueDesc where
         Unsigned -> " (unsigned)"
         Signed -> mempty
   pretty (ArrayValue mem space et ept shape) =
-    foldr f (pretty et) shape <+> "at" <+> pretty mem <> pretty space <+> ept'
+    foldMap (brackets . pretty) shape
+      <> (pretty et <+> "at" <+> pretty mem <> pretty space <+> ept')
     where
-      f e s = brackets $ s <> comma <> pretty e
       ept' = case ept of
         Unsigned -> " (unsigned)"
         Signed -> mempty

@@ -39,7 +39,7 @@ jobs:
       # https://github.com/actions/runner-images/issues/7061
       run: sudo chown -R $USER /usr/local/.ghcup
 
-    - uses: haskell/actions/setup@v2
+    - uses: haskell-actions/setup@v2
       with:
         ghc-version: '9.4.4'
 
@@ -109,7 +109,7 @@ jobs:
     - uses: actions/checkout@v3
 
     - id: setup-haskell
-      uses: haskell/actions/setup@v2
+      uses: haskell-actions/setup@v2
       with:
         ghc-version: '9.4.4'
 
@@ -433,7 +433,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -470,7 +470,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -502,7 +502,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
