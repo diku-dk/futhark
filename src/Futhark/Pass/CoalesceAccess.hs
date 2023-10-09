@@ -43,8 +43,8 @@ coalesceAccess =
       intraproceduralTransformation (onStms permutationTable) prog
   where
     onStms permutationTable scope stms = do
-      let m = localScope scope $ transformStms permutationTable stms
-      fmap snd $ modifyNameSource $ runState (runBuilderT m M.empty)
+      let m = localScope scope $ transformStms permutationTable mempty stms
+      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
 -- fmap fst $ modifyNameSource $ pure stms'
 -- pure stms'
@@ -66,90 +66,173 @@ type PermutationTable =
 
 type ArrayNameReplacements = M.Map IndexExprName VName
 
-transformStms :: Ctx -> Stms GPU -> CoalesceM (Ctx, Stms GPU)
-transformStms ctx =
-  foldM
-    ( \(ctx_acc, stms_acc) stm -> do
-        (new_ctx, new_stms) <- transformStm ctx_acc stm
-        pure (new_ctx, stms_acc S.>< new_stms)
-    )
-    (ctx, mempty)
+transformStms :: Ctx -> ExpMap -> Stms GPU -> CoalesceM (Stms GPU)
+transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap) stms
 
-transformStm :: Ctx -> Stm GPU -> CoalesceM (Ctx, Stms GPU)
-transformStm ctx stm@(Let pat aux e) = do
-  case e of
-    (Match s cases body m) -> transformMatch stm ctx s cases body m
-    (Loop bindings loop body) -> transformLoop stm ctx bindings loop body
-    (Op op) -> transformOp stm ctx op
-    _ -> pure (ctx, S.singleton stm)
+-- | Map from variable names to defining expression.  We use this to
+-- hackily determine whether something is transposed or otherwise
+-- funky in memory (and we'd prefer it not to be).  If we cannot find
+-- it in the map, we just assume it's all good.  HACK and FIXME, I
+-- suppose.  We really should do this at the memory level.
+type ExpMap = M.Map VName (Stm GPU)
 
-transformMatch ::
-  Stm GPU ->
-  Ctx ->
-  [SubExp] ->
-  [Case (Body GPU)] ->
-  Body GPU ->
-  MatchDec (BranchType GPU) ->
-  CoalesceM (Ctx, Stms GPU)
-transformMatch (Let pat aux _) ctx s cases body m = do
-  (ctx', body') <- transformBody ctx body
-  (ctx'', cases') <- foldM handleCase (ctx', mempty) cases
-  pure (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
+transformStm :: (Ctx, ExpMap) -> Stm GPU -> CoalesceM (Ctx, ExpMap)
+transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
+  -- FIXME: We only make coalescing optimisations for SegThread
+  -- SegOps, because that's what the analysis assumes.  For SegGroup
+  -- we should probably look at the component SegThreads, but it
+  -- apparently hasn't come up in practice yet.
+  | SegThread {} <- segLevel op = do
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody =
+                  transformSegThreadKernelBody ctx patternName
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  | SegGroup {} <- segLevel op = do
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody =
+                  transformSegThreadKernelBody ctx patternName
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  | SegThreadInGroup {} <- segLevel op = undefined -- TODO: Handle this
   where
-    handleCase (_ctx, _cases) _case = do
-      let body'' = caseBody _case
-      (new_ctx, new_body) <- transformBody _ctx body''
-      let new_case = Case (casePat _case) new_body
-      pure (new_ctx, _cases <> [new_case])
+    patternName = patElemName . head $ patElems pat
+transformStm (ctx, expmap) (Let pat aux e) = do
+  e' <- mapExpM (transform ctx expmap) e
+  let stm' = Let pat aux e'
+  addStm stm'
+  pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
-transformLoop ::
-  Stm GPU ->
+transform :: Ctx -> ExpMap -> Mapper GPU GPU CoalesceM
+transform ctx expmap =
+  identityMapper {mapOnBody = \scope -> localScope scope . transformBody ctx expmap}
+
+-- | Recursively transform the statements in a body.
+transformBody :: Ctx -> ExpMap -> Body GPU -> CoalesceM (Body GPU)
+transformBody ctx expmap (Body () stms res) = do
+  stms' <- transformStms ctx expmap stms
+  pure $ Body () stms' res
+
+-- | Recursively transform the statements in the body of a SegGroup kernel.
+transformSegGroupKernelBody :: Ctx -> ExpMap -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegGroupKernelBody ctx expmap (KernelBody () stms res) = do
+  stms' <- transformStms ctx expmap stms
+  pure $ KernelBody () stms' res
+
+-- | Transform the statements in the body of a SegThread kernel.
+transformSegThreadKernelBody :: Ctx -> VName -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegThreadKernelBody ctx seg_name kbody = do
+  evalStateT
+    ( traverseKernelBodyArrayIndexes
+        seg_name
+        (ensureCoalescedAccess ctx)
+        kbody
+    )
+    mempty
+
+traverseKernelBodyArrayIndexes ::
+  forall f.
+  (Monad f) =>
+  VName -> -- seg_name
+  ArrayIndexTransform f ->
+  KernelBody GPU ->
+  f (KernelBody GPU)
+traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody () kstms kres) =
+  KernelBody () . stmsFromList
+    <$> mapM onStm (stmsToList kstms)
+    <*> pure kres
+  where
+    onLambda :: Lambda GPU -> f (Lambda GPU)
+    onLambda lam =
+      (\body' -> lam {lambdaBody = body'})
+        <$> onBody (lambdaBody lam)
+
+    onBody (Body bdec stms bres) = do
+      stms' <- stmsFromList <$> mapM onStm (stmsToList stms)
+      pure $ Body bdec stms' bres
+
+    onStm (Let pat dec (BasicOp (Index arr is))) =
+      Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
+      where
+        oldOrNew Nothing =
+          BasicOp $ Index arr is
+        oldOrNew (Just (arr', is')) =
+          BasicOp $ Index arr' is'
+        patternName = patElemName . head $ patElems pat
+    onStm (Let pat dec e) =
+      Let pat dec <$> mapExpM mapper e
+
+    onOp :: Op GPU -> f (Op GPU)
+    onOp (OtherOp soac) =
+      OtherOp <$> mapSOACM soacMapper soac
+    onOp op = pure op
+
+    soacMapper =
+      (identitySOACMapper @GPU)
+        { mapOnSOACLambda = onLambda
+        }
+
+    mapper =
+      (identityMapper @GPU)
+        { mapOnBody = const onBody,
+          mapOnOp = onOp
+        }
+
+type Replacements = M.Map (VName, Slice SubExp) VName
+
+type ArrayIndexTransform m =
+  VName -> -- seg_name (name of the SegThread expression's pattern)
+  VName -> -- idx_name (name of the Index expression's pattern)
+  VName -> -- arr (name of the array)
+  Slice SubExp -> -- slice
+  m (Maybe (VName, Slice SubExp))
+
+ensureCoalescedAccess ::
+  (MonadBuilder m) =>
   Ctx ->
-  [(FParam GPU, SubExp)] ->
-  LoopForm ->
-  Body GPU ->
-  CoalesceM (Ctx, Stms GPU)
-transformLoop (Let pat aux _) ctx bindings loop body = do
-  (ctx', stms') <- transformStms ctx (bodyStms body)
-  let body' = Body (bodyDec body) stms' (bodyResult body)
-  pure (ctx', S.singleton $ Let pat aux (Loop bindings loop body'))
+  ArrayIndexTransform (StateT Replacements m)
+ensureCoalescedAccess
+  ctx
+  seg_name
+  idx_name
+  arr
+  slice = do
+    seen <- gets $ M.lookup (arr, slice)
+    case seen of
+      -- Already took care of this case elsewhere.
+      Just arr' -> pure $ Just (arr', slice)
+      -- We have not seen this array before.
+      Nothing ->
+        -- Check if the array has the optimal layout in memory.
+        -- If it does not, replace it with a manifest to allocate
+        -- it with the optimal layout
+        case lookupPermutation ctx seg_name idx_name arr of
+          Nothing -> pTrace "\nNO PERMUTATION\n" $ pTraceShow ctx $ pTrace "\n" $ pure $ Just (arr, slice)
+          Just perm -> pTraceShow perm $ pTrace "\n----------------\n" $ replace =<< lift (manifest perm arr)
+    where
+      -- Just perm -> pure $ Just (arr, slice)
 
-transformOp :: Stm GPU -> Ctx -> Op GPU -> CoalesceM (Ctx, Stms GPU)
-transformOp (Let pat aux _) ctx op = do
-  let patternName = patElemName . head $ patElems pat
-  (ctx', new_stms, op') <- case op of
-    (SegOp segop) -> transformSegOp patternName ctx segop
-    (GPUBody types body) -> transformGPUBody ctx types body
-    _ -> pure (ctx, mempty, Op op)
-  pure (ctx', new_stms S.|> Let pat aux op')
+      -- let (optimal, perm) = optimalPermutation arr idx_name seg_name ctx
+      -- if optimal
+      --   then pure $ Just (arr, slice)
+      --   else replace =<< lift (manifest perm arr)
 
-transformBody :: Ctx -> Body GPU -> CoalesceM (Ctx, Body GPU)
-transformBody ctx body = do
-  (ctx', stms') <- transformStms ctx (bodyStms body)
-  let body' = Body (bodyDec body) stms' (bodyResult body)
-  pure (ctx', body')
+      replace arr' = do
+        modify $ M.insert (arr, slice) arr'
+        pure $ Just (arr', slice)
 
-transformGPUBody :: Ctx -> [Type] -> Body GPU -> CoalesceM (Ctx, Stms GPU, Exp GPU)
-transformGPUBody ctx types body = do
-  (ctx', body') <- transformBody ctx body
-  pure (ctx', mempty, Op (GPUBody types body'))
-
-transformSegOp ::
-  VName ->
-  Ctx ->
-  SegOp SegLevel GPU ->
-  CoalesceM (Ctx, Stms GPU, Exp GPU)
-transformSegOp pat ctx op = do
-  let body = segBody op
-  case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
-    Nothing -> pure (ctx, mempty, Op $ SegOp op)
-    (Just arrayNameMap) ->
-      do
-        -- create permutation expressions for the segOp
-        let permutationExprs =
-              mapM manifestExpr arrayPermutationTuples
-        pure (ctx, permutationExprs, Op $ SegOp op)
-        undefined
+      manifest perm array =
+        letExp (baseString array ++ "_coalesced") $
+          BasicOp $
+            Manifest perm array
 
 segOpPermutationSet :: Ctx -> VName -> [(ArrayName, Permutation)]
 segOpPermutationSet ctx pat =
@@ -164,92 +247,6 @@ segOpPermutationSet ctx pat =
           [ [(arrayName, permutation) | permutation <- permutations]
             | (arrayName, permutations) <- arrayToPermutationMap
           ]
-
-manifestExpr :: (MonadBuilder CoalesceM) => (VName, Permutation) -> CoalesceM VName
-manifestExpr (arrayName, manifest) =
-  letExp (baseString arrayName) $ BasicOp $ Manifest manifest arrayName
-
--- =================== Replace array names in AST ===================
-
-replaceArrayNamesInBody :: ArrayNameReplacements -> Body GPU -> Body GPU
-replaceArrayNamesInBody arr_map body = do
-  let stms' =
-        S.fromList $
-          map (replaceArrayNamesInStm arr_map) (stmsToList $ bodyStms body)
-  Body (bodyDec body) stms' (bodyResult body)
-
-replaceArrayNamesInKernelBody :: ArrayNameReplacements -> KernelBody GPU -> KernelBody GPU
-replaceArrayNamesInKernelBody arr_map body = do
-  let stms' = S.fromList $ map (replaceArrayNamesInStm arr_map) (stmsToList $ kernelBodyStms body)
-  KernelBody (kernelBodyDec body) stms' (kernelBodyResult body)
-
-replaceArrayNamesInStm :: ArrayNameReplacements -> Stm GPU -> Stm GPU
-replaceArrayNamesInStm arr_map (Let pat aux e) = do
-  let patternName = patElemName . head $ patElems pat
-  let e' = case e of
-        (Match s cases body m) -> replaceArrayNamesInMatch arr_map s cases body m
-        (Loop bindings loop body) -> replaceArrayNamesInLoop arr_map bindings loop body
-        (Op op) -> replaceArrayNamesInOp arr_map op
-        (BasicOp op) -> replaceArrayName arr_map patternName op
-        _ -> e
-  Let pat aux e'
-
-replaceArrayNamesInMatch :: ArrayNameReplacements -> [SubExp] -> [Case (Body GPU)] -> Body GPU -> MatchDec (BranchType GPU) -> Exp GPU
-replaceArrayNamesInMatch arr_map s cases body m = do
-  let bodies = map caseBody cases
-  let body' = replaceArrayNamesInBody arr_map body
-  let cases' =
-        foldl
-          ( \cases_acc case' -> do
-              let body'' = caseBody case'
-              let new_body = replaceArrayNamesInBody arr_map body''
-              let new_case = Case (casePat case') new_body
-              cases_acc ++ [new_case]
-          )
-          mempty
-          cases
-  Match s cases' body' m
-
-replaceArrayNamesInLoop :: ArrayNameReplacements -> [(FParam GPU, SubExp)] -> LoopForm -> Body GPU -> Exp GPU
-replaceArrayNamesInLoop arr_map bindings loop body = Loop bindings loop (replaceArrayNamesInBody arr_map body)
-
-replaceArrayNamesInOp :: ArrayNameReplacements -> Op GPU -> Exp GPU
-replaceArrayNamesInOp arr_map op = do
-  let op' = case op of
-        (SegOp segop) -> replaceArrayNamesInSegOp arr_map segop
-        (GPUBody types body) -> replaceArrayNamesInGPUBody arr_map types body
-        _ -> op
-  Op op'
-
-replaceArrayNamesInSegOp :: ArrayNameReplacements -> SegOp SegLevel GPU -> Op GPU
-replaceArrayNamesInSegOp arr_map op = do
-  let body = segBody op
-  let body' = replaceArrayNamesInKernelBody arr_map body
-  let op' = case op of
-        (SegMap lvl segSpace types body) -> SegMap lvl segSpace types body'
-        (SegRed lvl segSpace o types body) -> SegRed lvl segSpace o types body'
-        (SegScan lvl segSpace o types body) -> SegScan lvl segSpace o types body'
-        (SegHist lvl segSpace o types body) -> SegHist lvl segSpace o types body'
-  SegOp op'
-
-replaceArrayNamesInGPUBody :: ArrayNameReplacements -> [Type] -> Body GPU -> Op GPU
-replaceArrayNamesInGPUBody arr_map types body = GPUBody types (replaceArrayNamesInBody arr_map body)
-
-replaceArrayName :: ArrayNameReplacements -> VName -> BasicOp -> Exp GPU
-replaceArrayName arr_map idx_name op = do
-  -- Look up the new array name
-  case M.lookup idx_name arr_map of
-    Nothing -> BasicOp op
-    Just arr_name' -> do
-      -- Replace the array name in the BasicOp
-      let op' = case op of
-            (Index _name slice) -> Index arr_name' slice
-            (Update safety _name slice subExp) -> Update safety arr_name' slice subExp
-      BasicOp op'
-
--- TODO:
--- 1. Find all permutations in PermutationTable for this SegOp
--- 2. Insert permutations in the AST
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
@@ -294,9 +291,15 @@ permutationTableFromIndexTable sortCoalescing =
               $ dimensions dims
        in perm indices
 
-lookupPermutation :: (Coalesce rep) => PermutationTable -> ArrayName -> [DimIdxPat rep] -> Maybe Permutation
-lookupPermutation mTable arrayName permutation =
-  undefined
+lookupPermutation :: Ctx -> VName -> IndexExprName -> ArrayName -> Maybe Permutation
+lookupPermutation ctx segName idxName arrayName =
+  case M.lookup segName (M.mapKeys vnameFromSegOp ctx) of
+    Nothing -> Nothing
+    Just segmap ->
+      -- Look for the current array
+      case M.lookup arrayName segmap of
+        Nothing -> Nothing
+        Just idxs -> M.lookup idxName idxs
 
 -- | Apply `f` to second/right part of tuple.
 onSnd :: (b -> c) -> (a, b) -> (a, c)
