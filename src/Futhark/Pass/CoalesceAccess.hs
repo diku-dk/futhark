@@ -93,21 +93,15 @@ transformMatch ::
   MatchDec (BranchType GPU) ->
   CoalesceM (Ctx, Stms GPU)
 transformMatch (Let pat aux _) ctx s cases body m = do
-  undefined
-
---  let bodies = map caseBody cases
---  let (ctx', body') = transformBody ctx body
---  let (ctx'', cases') =
---        foldl
---          ( \(ctx_acc, cases_acc) case' -> do
---              let body'' = caseBody case'
---              let (new_ctx, new_body) = transformBody ctx_acc body''
---              let new_case = Case (casePat case') new_body
---              (new_ctx, cases_acc ++ [new_case])
---          )
---          (ctx', mempty)
---          cases
---  (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
+  (ctx', body') <- transformBody ctx body
+  (ctx'', cases') <- foldM handleCase (ctx', mempty) cases
+  pure (ctx'', S.singleton $ Let pat aux (Match s cases' body' m))
+  where
+    handleCase (_ctx, _cases) _case = do
+      let body'' = caseBody _case
+      (new_ctx, new_body) <- transformBody _ctx body''
+      let new_case = Case (casePat _case) new_body
+      pure (new_ctx, _cases <> [new_case])
 
 transformLoop ::
   Stm GPU ->
