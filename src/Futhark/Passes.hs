@@ -106,8 +106,9 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
-        -- ,coalesceAccess
+        inPlaceLoweringGPU,
+        coalesceAccess,
+        simplifyGPU -- Cleanup merged GPUBody kernels.
       ]
 
 -- | Extend gpuPipeline by pretty-printing the true AST

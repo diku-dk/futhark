@@ -77,12 +77,20 @@ transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap)
 type ExpMap = M.Map VName (Stm GPU)
 
 transformStm :: (Ctx, ExpMap) -> Stm GPU -> CoalesceM (Ctx, ExpMap)
-transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
-  -- FIXME: We only make coalescing optimisations for SegThread
-  -- SegOps, because that's what the analysis assumes.  For SegGroup
-  -- we should probably look at the component SegThreads, but it
-  -- apparently hasn't come up in practice yet.
-  | SegThread {} <- segLevel op = do
+transformStm (ctx, expmap) (Let pat aux (Op (SegOp op))) = do
+  case segLevel op of
+    SegGroup {} -> do
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody =
+                  transformSegGroupKernelBody ctx expmap
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+    _ -> do
+      -- SegThread and SegThreadInGroup
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody =
@@ -92,17 +100,6 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op)))
       let stm' = Let pat aux $ Op $ SegOp op'
       addStm stm'
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-  | SegGroup {} <- segLevel op = do
-      let mapper =
-            identitySegOpMapper
-              { mapOnSegOpBody =
-                  transformSegThreadKernelBody ctx patternName
-              }
-      op' <- mapSegOpM mapper op
-      let stm' = Let pat aux $ Op $ SegOp op'
-      addStm stm'
-      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-  | SegThreadInGroup {} <- segLevel op = undefined -- TODO: Handle this
   where
     patternName = patElemName . head $ patElems pat
 transformStm (ctx, expmap) (Let pat aux e) = do
@@ -215,8 +212,8 @@ ensureCoalescedAccess
         -- If it does not, replace it with a manifest to allocate
         -- it with the optimal layout
         case lookupPermutation ctx seg_name idx_name arr of
-          Nothing -> pTrace "\nNO PERMUTATION\n" $ pTraceShow ctx $ pTrace "\n" $ pure $ Just (arr, slice)
-          Just perm -> pTraceShow perm $ pTrace "\n----------------\n" $ replace =<< lift (manifest perm arr)
+          Nothing -> pure $ Just (arr, slice)
+          Just perm -> replace =<< lift (manifest perm arr)
     where
       -- Just perm -> pure $ Just (arr, slice)
 

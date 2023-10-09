@@ -1,4 +1,6 @@
 def main [l][n][m] (xsss: [l][n][m]i64) : [l][m]i64 =
+  -- #[incremental_flattening(no_intra)]
+  -- #[incremental_flattening(no_outer)]
   map (\xss ->
     #[unsafe]
     loop _=xss[0] for i < n do
