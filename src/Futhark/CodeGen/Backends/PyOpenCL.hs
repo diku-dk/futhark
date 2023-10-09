@@ -190,7 +190,6 @@ compileProg mode class_name prog = do
           opsWriteScalar = writeOpenCLScalar,
           opsReadScalar = readOpenCLScalar,
           opsAllocate = allocateOpenCLBuffer,
-          opsCopy = copyOpenCLMemory,
           opsCopies =
             M.insert (Imp.Space "device", Imp.Space "device") copygpu2gpu $
               opsCopies defaultOperations,
@@ -330,55 +329,6 @@ allocateOpenCLBuffer mem size "device" =
       simpleCall "opencl_alloc" [Var "self", size, String $ prettyText mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
-
-copyOpenCLMemory :: Copy Imp.OpenCL ()
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
-  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
-      end = BinOp "+" destidx divide
-      dest = Index destmem (IdxRange destidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg dest,
-            Arg srcmem,
-            ArgKeyword "device_offset" $ asLong srcidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
-  let end = BinOp "+" srcidx nbytes
-      src = Index (simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg src,
-            ArgKeyword "device_offset" $ asLong destidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg srcmem,
-            ArgKeyword "dst_offset" $ asLong destidx,
-            ArgKeyword "src_offset" $ asLong srcidx,
-            ArgKeyword "byte_count" $ asLong nbytes
-          ]
-  finishIfSynchronous
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace nbytes _ =
-  copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copyOpenCLMemory _ _ destspace _ _ srcspace _ _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 packArrayOutput :: EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do

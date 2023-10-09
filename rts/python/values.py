@@ -672,7 +672,7 @@ def read_array(f, expected_type, rank):
     )
     arr.shape = shape
 
-    return arr
+    return arr.copy()  # To ensure it is writeable.
 
 
 if sys.version_info >= (3, 0):
