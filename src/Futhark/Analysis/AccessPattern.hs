@@ -452,7 +452,7 @@ analyzeGPUBody body ctx =
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
 analyzeOtherOp :: Context rep -> VName -> (Context rep, IndexTable rep)
-analyzeOtherOp _ctx _pat = error "UNHANDLED: OtherOp"
+analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Get the iteration type of the last SegOp encountered in the context.
 getIterationType :: Context rep -> IterationType rep
