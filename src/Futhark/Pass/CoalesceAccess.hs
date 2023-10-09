@@ -42,9 +42,8 @@ coalesceAccess =
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutationTable) prog
   where
-    onStms permutationTable _ stms = do
-      let m = transformStms permutationTable stms
-      -- let m = localScope scope $ stms'
+    onStms permutationTable scope stms = do
+      let m = localScope scope $ transformStms permutationTable stms
       fmap snd $ modifyNameSource $ runState (runBuilderT m M.empty)
 
 -- fmap fst $ modifyNameSource $ pure stms'
@@ -146,22 +145,20 @@ transformSegOp pat ctx op = do
     Nothing -> pure (ctx, mempty, Op $ SegOp op)
     (Just arrayNameMap) ->
       do
-        -- 1. Find all permutations in PermutationTable for this SegOp
-        let arrayPermutationTuples =
-              toPermutationSet $
-                M.toList $
-                  M.map (map snd . M.toList) arrayNameMap
         -- create permutation expressions for the segOp
         let permutationExprs =
               mapM manifestExpr arrayPermutationTuples
         pure (ctx, permutationExprs, Op $ SegOp op)
         undefined
-  where
-    -- TODO:
-    -- 2. Insert permutations in the AST
 
+segOpPermutationSet :: Ctx -> VName -> [(ArrayName, Permutation)]
+segOpPermutationSet ctx pat =
+  case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
+    Nothing -> []
+    (Just arrayNameMap) -> toPermutationSet $ M.toList $ M.map (map snd . M.toList) arrayNameMap
+  where
     toPermutationSet arrayToPermutationMap =
-      -- use a set to eliminate duplicate permutations
+      -- use nubOrd to eliminate duplicate permutations
       nubOrd $
         concat
           [ [(arrayName, permutation) | permutation <- permutations]
