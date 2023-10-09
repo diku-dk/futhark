@@ -88,8 +88,7 @@ compileSegScan pat lvl space scan_ops kbody =
     target <- hostTarget <$> askEnv
 
     case (targetSupportsSinglePass target, canBeSinglePass scan_ops kbody) of
-      (True, Just scan_ops') ->
-        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
+      (True, Just scan_ops') -> SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
       _ -> TwoPass.compileSegScan pat lvl space scan_ops map_kbody
 
     emit $ Imp.DebugPrint "" Nothing
