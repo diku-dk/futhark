@@ -4,6 +4,7 @@ module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
 
 import Control.Monad
 import Control.Monad.State.Strict
+import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -16,9 +17,11 @@ import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.MC
 import Futhark.IR.MCMem
+import Futhark.IR.Prop.Rearrange
 import Futhark.IR.SOACS
 import Futhark.IR.Seq
 import Futhark.IR.SeqMem
+import Futhark.IR.Syntax
 import Futhark.Pass
 import Futhark.Util
 
@@ -40,7 +43,7 @@ coalesceAccess =
       -- Analyse the program
       let analysisRes = analyzeDimIdxPats prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable compare analysisRes
+      let permutationTable = permutationTableFromIndexTable sortGPU analysisRes
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutationTable) prog
   where
@@ -51,6 +54,47 @@ coalesceAccess =
 class (Analyze rep) => Coalesce rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
   transformOp :: Ctx -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (Ctx, ExpMap rep)
+
+sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
+sortGPU =
+  L.sortBy dimdexGPUcmp
+  where
+    dimdexGPUcmp a b = do
+      let depsA = dependencies a
+      let depsB = dependencies b
+      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
+      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
+      let aggr1 = foldl maxIdxPat Nothing deps1'
+      let aggr2 = foldl maxIdxPat Nothing deps2'
+      cmpIdxPat aggr1 aggr2
+      where
+        cmpIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Ordering
+        cmpIdxPat Nothing Nothing = EQ
+        cmpIdxPat (Just _) Nothing = GT
+        cmpIdxPat Nothing (Just _) = LT
+        cmpIdxPat
+          (Just (iterL, lvlL, originalLevelL))
+          (Just (iterR, lvlR, originalLevelR)) =
+            case (iterL, iterR) of
+              (Parallel, Sequential) -> GT
+              (Sequential, Parallel) -> LT
+              _ ->
+                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+
+        maxIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int)
+
+        maxIdxPat lhs rhs =
+          case cmpIdxPat lhs rhs of
+            LT -> rhs
+            _ -> lhs
+
+        f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
 type Ctx = PermutationTable
 
@@ -266,7 +310,7 @@ segOpPermutationSet ctx pat =
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
-permutationTableFromIndexTable :: (DimIdxPat rep -> DimIdxPat rep -> Ordering) -> IndexTable rep -> PermutationTable
+permutationTableFromIndexTable :: ([DimIdxPat rep] -> [DimIdxPat rep]) -> IndexTable rep -> PermutationTable
 permutationTableFromIndexTable sortCoalescing =
   -- We effectively convert all the `MemoryEntry`s in the index table,
   -- then, using mapMaybe, we discard all "rows" in the table which:
@@ -299,13 +343,7 @@ permutationTableFromIndexTable sortCoalescing =
 
     -- Sorts the dimensions in a given memory entry and returns it as
     -- a permutation.
-    convert indices =
-      let perm dims =
-            map snd
-              . L.sortBy (\a b -> sortCoalescing (fst a) (fst b))
-              . flip zip [0 :: Int ..]
-              $ dimensions dims
-       in perm indices
+    convert = map originalDimension . (sortCoalescing . dimensions)
 
 lookupPermutation :: Ctx -> VName -> IndexExprName -> ArrayName -> Maybe Permutation
 lookupPermutation ctx segName idxName arrayName =

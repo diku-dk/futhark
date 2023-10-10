@@ -7,7 +7,7 @@ module Futhark.Analysis.AccessPattern
     Analyze,
     IndexTable,
     ArrayName,
-    DimIdxPat (DimIdxPat),
+    DimIdxPat (..),
     IndexExprName,
     IterationType (Sequential, Parallel),
     MemoryEntry (..),
@@ -34,7 +34,6 @@ import Futhark.Util.Pretty
 
 class Analyze rep where
   analyzeOp :: Op rep -> (Context rep -> VName -> (Context rep, IndexTable rep))
-  orderIterationType :: IterationType rep -> IterationType rep -> Ordering
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
@@ -68,20 +67,23 @@ data MemoryEntry rep = MemoryEntry
   deriving (Show)
 
 -- | Collect all features of access to a specific dimension of an array.
-newtype DimIdxPat rep = DimIdxPat
+data DimIdxPat rep = DimIdxPat
   { -- | Set of VNames of gtid's that some access is variant to.
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it is created at.
-    dependencies :: S.IntMap (VName, Int, IterationType rep)
+    dependencies :: S.IntMap (VName, Int, IterationType rep),
+    originalDimension :: Int
   }
   deriving (Eq, Show)
 
 instance Semigroup (DimIdxPat rep) where
   (<>) :: DimIdxPat rep -> DimIdxPat rep -> DimIdxPat rep
-  DimIdxPat adeps <> DimIdxPat bdeps = DimIdxPat (adeps <> bdeps)
+  adeps <> bdeps =
+    DimIdxPat (dependencies adeps <> dependencies bdeps) $
+      max (originalDimension adeps) (originalDimension bdeps)
 
 instance Monoid (DimIdxPat rep) where
-  mempty = DimIdxPat {dependencies = mempty}
+  mempty = DimIdxPat {dependencies = mempty, originalDimension = 0}
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -294,12 +296,12 @@ analyzeStm ctx (Let pats _ e) = do
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
 getIndexDependencies _ [] = Nothing
 getIndexDependencies ctx dims =
-  foldl' (\a idx -> a >>= matchDimIndex idx) (Just []) $ reverse dims
+  fst . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Just [], length dims - 1) $ reverse dims
   where
-    matchDimIndex idx accumulator =
+    matchDimIndex idx i accumulator =
       case idx of
         (DimFix subExpression) ->
-          Just $ consolidate ctx subExpression : accumulator
+          Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
         _ -> Nothing
 
 analyzeIndex :: Context rep -> VName -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
@@ -360,7 +362,7 @@ analyzeBasicOp ctx expression pat = do
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx length_subexp
-        (Manifest _dim name) -> error $ "unhandled: Manifest for " ++ prettyString name
+        (Manifest _dim name) -> ctxValFromNames ctx $ oneName name -- error $ "unhandled: Manifest for " ++ prettyString name
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
@@ -506,7 +508,7 @@ reduceDependencies ctx v =
       Nothing -> error $ "Unable to find " ++ prettyString v
       Just (CtxVal deps itertype lvl) ->
         if null $ namesToList deps
-          then DimIdxPat $ S.fromList [(baseTag v, (v, lvl, itertype))]
+          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) $ currentLevel ctx
           else
             foldl' (<>) mempty $
               map (reduceDependencies ctx) $
@@ -524,7 +526,6 @@ onSnd f (x, y) = (x, f y)
 
 -- Instances for AST types that we actually support
 instance Analyze GPU where
-  orderIterationType = compare
   analyzeOp gpuOp
     | (SegOp op) <- gpuOp = analyzeSegOp op
     | (SizeOp op) <- gpuOp = analyzeSizeOp op
@@ -532,11 +533,9 @@ instance Analyze GPU where
     | (Futhark.IR.GPU.OtherOp _) <- gpuOp = analyzeOtherOp
 
 instance Analyze GPUMem where
-  orderIterationType = undefined
   analyzeOp _ = error $ notImplementedYet "GPUMem"
 
 instance Analyze MC where
-  orderIterationType = compare
   analyzeOp mcOp
     | ParOp Nothing seqSegop <- mcOp = analyzeSegOp seqSegop
     | ParOp (Just segop) seqSegop <- mcOp = \ctx name -> do
@@ -546,67 +545,19 @@ instance Analyze MC where
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
 instance Analyze MCMem where
-  orderIterationType = undefined
   analyzeOp _ = error $ notImplementedYet "MCMem"
 
 instance Analyze Seq where
-  orderIterationType = undefined
   analyzeOp _ = error $ notImplementedYet "Seq"
 
 instance Analyze SeqMem where
-  orderIterationType = undefined
   analyzeOp _ = error $ notImplementedYet "SeqMem"
 
 instance Analyze SOACS where
-  orderIterationType = undefined
   analyzeOp _ = error $ notImplementedYet "SOACS"
 
 notImplementedYet :: String -> String
 notImplementedYet s = "Access pattern analysis for the " ++ s ++ " backend is not implemented."
-
--- Sorting of DimIdxPat used to find optimal permutations of arrays in the CoalesceAccess pass
-instance Ord (IterationType GPU) where
-  compare lhs rhs =
-    case (lhs, rhs) of
-      (Parallel, Sequential) -> GT
-      (Sequential, Parallel) -> LT
-      _ -> EQ
-
-instance Ord (IterationType MC) where
-  compare lhs rhs =
-    case (lhs, rhs) of
-      (Parallel, Sequential) -> LT
-      (Sequential, Parallel) -> GT
-      _ -> EQ
-
-type OrderedDep rep =
-  (Maybe (IterationType rep, (Int, Int), VName))
-
-instance (Analyze rep) => Ord (DimIdxPat rep) where
-  compare (DimIdxPat deps1) (DimIdxPat deps2) = do
-    let deps1' = zipWith (curry f) (map snd $ S.toList deps1) [0 :: Int ..] :: [OrderedDep rep]
-    let deps2' = zipWith (curry f) (map snd $ S.toList deps2) [0 :: Int ..] :: [OrderedDep rep]
-    let aggr1 = foldl maxIdxPat Nothing deps1' :: OrderedDep rep
-    let aggr2 = foldl maxIdxPat Nothing deps2' :: OrderedDep rep
-    cmpIdxPat aggr1 aggr2
-    where
-      cmpIdxPat :: OrderedDep rep -> OrderedDep rep -> Ordering
-      cmpIdxPat Nothing Nothing = EQ
-      cmpIdxPat Nothing (Just _) = LT
-      cmpIdxPat (Just _) Nothing = GT
-      cmpIdxPat (Just (liter, (llvl, lidx), _)) (Just (riter, (rlvl, ridx), _)) =
-        case liter `orderIterationType` riter of
-          EQ -> (llvl, lidx) `compare` (rlvl, ridx)
-          res -> res
-
-      maxIdxPat :: OrderedDep rep -> OrderedDep rep -> OrderedDep rep
-      maxIdxPat lhs rhs =
-        case cmpIdxPat lhs rhs of
-          LT -> rhs
-          _ -> lhs
-
-      f :: ((VName, Int, IterationType rep), Int) -> OrderedDep rep
-      f ((n, lvl, t), idx) = Just (t, (lvl, idx), n)
 
 instance Pretty (IndexTable rep) where
   pretty = stack . map f . M.toList :: IndexTable rep -> Doc ann
@@ -637,15 +588,15 @@ instance Pretty (IndexTable rep) where
 
       printMemoryEntry :: MemoryEntry rep -> Doc ann
       printMemoryEntry (MemoryEntry dims _) =
-        stack $ zipWith printDim [0 .. (length dims)] dims
+        stack $ map printDim dims
 
-      printDim idx m = pretty idx <+> ":" <+> indent 0 (pretty m)
+      printDim m = pretty (originalDimension m) <+> ":" <+> indent 0 (pretty m)
 
 instance Pretty (DimIdxPat rep) where
-  pretty (DimIdxPat dependencies) =
+  pretty dimidx =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies" <+> equals <+> align (prettyDeps dependencies)
+    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
