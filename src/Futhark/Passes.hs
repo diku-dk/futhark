@@ -190,7 +190,9 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        inPlaceLoweringMC
+        inPlaceLoweringMC,
+        coalesceAccess,
+        simplifyMC
       ]
 
 -- | Run 'mcPipeline' and then add memory information.
