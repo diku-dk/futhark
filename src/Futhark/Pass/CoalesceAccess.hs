@@ -51,9 +51,57 @@ coalesceAccess =
 
 type Ctx = PermutationTable
 
-type Coalesce rep = Analyze rep
+class (Analyze rep) => Coalesce rep where
+  transformOp :: (Ctx, ExpMap rep) -> Stm rep -> Op rep -> CoalesceM rep (Ctx, ExpMap rep)
+  traverseKernelBodyArrayIndexes :: forall f. (Monad f) => VName -> ArrayIndexTransform f -> KernelBody rep -> f (KernelBody rep)
 
-type CoalesceM = Builder GPU
+instance Coalesce GPU where
+  transformOp (ctx, expmap) stm@(Let pat aux e) gpuOp
+    | (SegOp op) <- gpuOp = transformSegOp ctx expmap stm op
+    | _ <- gpuOp = transformRestOp ctx expmap stm
+
+  traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
+    KernelBody b . stmsFromList
+      <$> mapM onStm (stmsToList kstms)
+      <*> pure kres
+    where
+      -- onLambda :: (Coalesce rep) => Lambda rep -> f (Lambda rep)
+      onLambda lam =
+        (\body' -> lam {lambdaBody = body'})
+          <$> onBody (lambdaBody lam)
+
+      onBody (Body bdec stms bres) = do
+        stms' <- stmsFromList <$> mapM onStm (stmsToList stms)
+        pure $ Body bdec stms' bres
+
+      onStm (Let pat dec (BasicOp (Index arr is))) =
+        Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
+        where
+          oldOrNew Nothing =
+            BasicOp $ Index arr is
+          oldOrNew (Just (arr', is')) =
+            BasicOp $ Index arr' is'
+          patternName = patElemName . head $ patElems pat
+      onStm (Let pat dec e) =
+        Let pat dec <$> mapExpM mapper e
+
+      -- onOp :: Op rep -> f (Op rep)
+      -- onOp (OtherOp soac) =
+      --   OtherOp <$> mapSOACM soacMapper soac
+      onOp op = pure op
+
+      soacMapper =
+        (identitySOACMapper @GPU)
+          { mapOnSOACLambda = onLambda
+          }
+
+      mapper =
+        (identityMapper @GPU)
+          { mapOnBody = const onBody,
+            mapOnOp = onOp
+          }
+
+type CoalesceM rep = Builder rep
 
 -- | Resulting permutation to be inserted in the AST. The first element
 -- is the permutation to be applied to the array, and the second
@@ -64,9 +112,7 @@ type Permutation = [Int]
 type PermutationTable =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
-type ArrayNameReplacements = M.Map IndexExprName VName
-
-transformStms :: Ctx -> ExpMap -> Stms GPU -> CoalesceM (Stms GPU)
+transformStms :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Stms rep -> CoalesceM rep (Stms rep)
 transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap) stms
 
 -- | Map from variable names to defining expression.  We use this to
@@ -74,12 +120,19 @@ transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap)
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = M.Map VName (Stm GPU)
+type ExpMap rep = M.Map VName (Stm rep)
 
-transformStm :: (Ctx, ExpMap) -> Stm GPU -> CoalesceM (Ctx, ExpMap)
-transformStm (ctx, expmap) (Let pat aux (Op (SegOp op))) = do
-  case segLevel op of
-    SegGroup {} -> do
+transformStm :: (Coalesce rep, BuilderOps rep) => (Ctx, ExpMap rep) -> Stm rep -> CoalesceM rep (Ctx, ExpMap rep)
+transformStm (ctx, expmap) stm@(Let pat aux (Op op)) = transformOp (ctx, expmap) stm op
+transformStm (ctx, expmap) (Let pat aux e) = do
+  e' <- mapExpM (transform ctx expmap) e
+  let stm' = Let pat aux e'
+  addStm stm'
+  pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+
+transformSegOp :: Ctx -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (Ctx, ExpMap GPU)
+transformSegOp ctx expmap (Let pat aux _) op
+  | SegGroup {} <- segLevel op = do
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody =
@@ -89,7 +142,7 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op))) = do
       let stm' = Let pat aux $ Op $ SegOp op'
       addStm stm'
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-    _ -> do
+  | _ <- segLevel op = do
       -- SegThread and SegThreadInGroup
       let mapper =
             identitySegOpMapper
@@ -102,30 +155,32 @@ transformStm (ctx, expmap) (Let pat aux (Op (SegOp op))) = do
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
   where
     patternName = patElemName . head $ patElems pat
-transformStm (ctx, expmap) (Let pat aux e) = do
+
+transformRestOp :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Stm rep -> CoalesceM rep (Ctx, ExpMap rep)
+transformRestOp ctx expmap (Let pat aux e) = do
   e' <- mapExpM (transform ctx expmap) e
   let stm' = Let pat aux e'
   addStm stm'
   pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
-transform :: Ctx -> ExpMap -> Mapper GPU GPU CoalesceM
+transform :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Mapper rep rep (CoalesceM rep)
 transform ctx expmap =
   identityMapper {mapOnBody = \scope -> localScope scope . transformBody ctx expmap}
 
 -- | Recursively transform the statements in a body.
-transformBody :: Ctx -> ExpMap -> Body GPU -> CoalesceM (Body GPU)
-transformBody ctx expmap (Body () stms res) = do
+transformBody :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Body rep -> CoalesceM rep (Body rep)
+transformBody ctx expmap (Body b stms res) = do
   stms' <- transformStms ctx expmap stms
-  pure $ Body () stms' res
+  pure $ Body b stms' res
 
 -- | Recursively transform the statements in the body of a SegGroup kernel.
-transformSegGroupKernelBody :: Ctx -> ExpMap -> KernelBody GPU -> CoalesceM (KernelBody GPU)
-transformSegGroupKernelBody ctx expmap (KernelBody () stms res) = do
+transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegGroupKernelBody ctx expmap (KernelBody b stms res) = do
   stms' <- transformStms ctx expmap stms
-  pure $ KernelBody () stms' res
+  pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
-transformSegThreadKernelBody :: Ctx -> VName -> KernelBody GPU -> CoalesceM (KernelBody GPU)
+transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => Ctx -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
 transformSegThreadKernelBody ctx seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
@@ -135,53 +190,56 @@ transformSegThreadKernelBody ctx seg_name kbody = do
     )
     mempty
 
-traverseKernelBodyArrayIndexes ::
-  forall f.
-  (Monad f) =>
-  VName -> -- seg_name
-  ArrayIndexTransform f ->
-  KernelBody GPU ->
-  f (KernelBody GPU)
-traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody () kstms kres) =
-  KernelBody () . stmsFromList
-    <$> mapM onStm (stmsToList kstms)
-    <*> pure kres
-  where
-    onLambda :: Lambda GPU -> f (Lambda GPU)
-    onLambda lam =
-      (\body' -> lam {lambdaBody = body'})
-        <$> onBody (lambdaBody lam)
+-- traverseKernelBodyArrayIndexes ::
+--   forall f.
+--   forall rep.
+--   (Monad f, Coalesce rep, BuilderOps rep) =>
+--   VName -> -- seg_name
+--   ArrayIndexTransform f ->
+--   KernelBody rep ->
+--   f (KernelBody rep)
+-- traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
+--   KernelBody b . stmsFromList
+--     <$> mapM onStm (stmsToList kstms)
+--     <*> pure kres
+--   where
+--     -- onLambda :: (Coalesce rep) => Lambda rep -> f (Lambda rep)
+--     onLambda lam =
+--       (\body' -> lam {lambdaBody = body'})
+--         <$> onBody (lambdaBody lam)
 
-    onBody (Body bdec stms bres) = do
-      stms' <- stmsFromList <$> mapM onStm (stmsToList stms)
-      pure $ Body bdec stms' bres
+--     onBody (Body bdec stms bres) = do
+--       stms' <- stmsFromList <$> mapM onStm (stmsToList stms)
+--       pure $ Body bdec stms' bres
 
-    onStm (Let pat dec (BasicOp (Index arr is))) =
-      Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
-      where
-        oldOrNew Nothing =
-          BasicOp $ Index arr is
-        oldOrNew (Just (arr', is')) =
-          BasicOp $ Index arr' is'
-        patternName = patElemName . head $ patElems pat
-    onStm (Let pat dec e) =
-      Let pat dec <$> mapExpM mapper e
+--     onStm (Let pat dec (BasicOp (Index arr is))) =
+--       Let pat dec . oldOrNew <$> coalesce seg_name patternName arr is
+--       where
+--         oldOrNew Nothing =
+--           BasicOp $ Index arr is
+--         oldOrNew (Just (arr', is')) =
+--           BasicOp $ Index arr' is'
+--         patternName = patElemName . head $ patElems pat
+--     onStm (Let pat dec e) =
+--       Let pat dec <$> mapExpM mapper e
 
-    onOp :: Op GPU -> f (Op GPU)
-    onOp (OtherOp soac) =
-      OtherOp <$> mapSOACM soacMapper soac
-    onOp op = pure op
+--     onOp :: Op rep -> f (Op rep)
+--     onOp (OtherOp soac) =
+--       OtherOp <$> mapSOACM soacMapper soac
+--     onOp op = pure op
 
-    soacMapper =
-      (identitySOACMapper @GPU)
-        { mapOnSOACLambda = onLambda
-        }
+--     soacMapper =
+--       -- (identitySOACMapper @GPU)
+--       (identitySOACMapper)
+--         { mapOnSOACLambda = onLambda
+--         }
 
-    mapper =
-      (identityMapper @GPU)
-        { mapOnBody = const onBody,
-          mapOnOp = onOp
-        }
+--     mapper =
+--       -- (identityMapper @GPU)
+--       (identityMapper)
+--         { mapOnBody = const onBody,
+--           mapOnOp = onOp
+--         }
 
 type Replacements = M.Map (VName, Slice SubExp) VName
 
@@ -297,7 +355,3 @@ lookupPermutation ctx segName idxName arrayName =
       case M.lookup arrayName segmap of
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs
-
--- | Apply `f` to second/right part of tuple.
-onSnd :: (b -> c) -> (a, b) -> (a, c)
-onSnd f (x, y) = (x, f y)
