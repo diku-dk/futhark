@@ -466,10 +466,7 @@ getIterationType (Context _ _ bodies _) =
     getIteration_rec [] = Sequential
     getIteration_rec rec =
       case last rec of
-        SegOpName (SegmentedMap _) -> Parallel
-        SegOpName (SegmentedRed _) -> Parallel
-        SegOpName (SegmentedScan _) -> Parallel
-        SegOpName (SegmentedHist _) -> Parallel
+        SegOpName _ -> Parallel
         LoopBodyName _ -> Sequential
         -- We can't really trust cond/match to be sequential/parallel, so
         -- recurse a bit
