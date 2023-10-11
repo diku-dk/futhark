@@ -150,19 +150,18 @@ transformSegOpMC :: Ctx -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp (
 transformSegOpMC ctx expmap (Let pat aux _) maybeParSegOp seqSegOp
   | Nothing <- maybeParSegOp = add Nothing
   | Just parSegOp <- maybeParSegOp = do
+      -- Map the parallel part of the ParOp
       parSegOp' <- mapSegOpM mapper parSegOp
       add (Just parSegOp')
   where
-    mapper =
-      identitySegOpMapper {mapOnSegOpBody = transformKernelBody ctx expmap patternName}
-
     add maybeParSegOp' = do
-      -- TODO: Do we even need to map on the sequential body?
+      -- Map the sequential part of the ParOp
       seqSegOp' <- mapSegOpM mapper seqSegOp
       let stm' = Let pat aux $ Op $ ParOp maybeParSegOp' seqSegOp'
       addStm stm'
       pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-
+    mapper =
+      identitySegOpMapper {mapOnSegOpBody = transformKernelBody ctx expmap patternName}
     patternName = patElemName . head $ patElems pat
 
 transformRestOp :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Stm rep -> CoalesceM rep (Ctx, ExpMap rep)
