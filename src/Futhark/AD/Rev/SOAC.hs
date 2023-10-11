@@ -14,6 +14,7 @@ import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Util (chunks)
+import Debug.Trace (trace)
 
 -- We split any multi-op scan or reduction into multiple operations so
 -- we can detect special cases.  Post-AD, the result may be fused
@@ -158,25 +159,38 @@ vjpSOAC ops pat aux (Hist n as histops f) m
 vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
   | isIdentityLambda f,
     [x] <- patNames pat,
+    HistOp (Shape [w]) rf [dst] [Var ne] lam <- histop,
+    -- Note that the operator is vectorised, so `ne` cannot be a 'PrimValue'.
+    -- TODO handle nested maps?
+    Just op <- mapOp lam =
+      trace "\n\n#diffVecHist input" $
+        trace (prettyString (Hist n [is, vs] [histop] f)) $
+          trace "#diffVecHist result" $
+            diffVecHist ops x aux n op ne is vs w rf dst m
+  | isIdentityLambda f,
+    [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMinMaxOp op =
-      diffMinMaxHist ops x aux n op ne is vs w rf dst m
+      trace "#diffMinMaxHist" $ diffMinMaxHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMulOp op =
-      diffMulHist ops x aux n op ne is vs w rf dst m
+      trace "\n\n#diffMulHist input" $
+        trace (prettyString (Hist n [is, vs] [histop] f)) $
+          trace "#diffMulHist result" $
+            diffMulHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isAddOp op =
-      diffAddHist ops x aux n lam ne is vs w rf dst m
+      trace "#diffAddHist" $ diffAddHist ops x aux n lam ne is vs w rf dst m
 vjpSOAC ops pat aux (Hist n as [histop] f) m
   | isIdentityLambda f,
     HistOp (Shape w) rf dst ne lam <- histop = do

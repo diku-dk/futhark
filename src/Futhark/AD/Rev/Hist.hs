@@ -8,6 +8,7 @@ module Futhark.AD.Rev.Hist
   ( diffMinMaxHist,
     diffMulHist,
     diffAddHist,
+    diffVecHist,
     diffHist,
   )
 where
@@ -19,6 +20,8 @@ import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
+
+import Debug.Trace (trace, traceM)
 
 getBinOpPlus :: PrimType -> BinOp
 getBinOpPlus (IntType x) = Add x OverflowUndef
@@ -521,6 +524,67 @@ diffAddHist _ops x aux n add ne is vs w rf dst m = do
 
   vs_bar <- letExp (baseString vs <> "_bar") $ Op $ Screma n [is] $ mapSOAC lam_vsbar
   updateAdj vs vs_bar
+
+
+-- Special case for vectorised combining operator. Rewrite
+--   reduce_by_index dst (map2 op) nes is vss
+-- to
+--   map3 (\dst_col vss_col ne ->
+--           reduce_by_index dst_col op ne is vss_col
+--        ) (transpose dst) (transpose vss) nes |> transpose
+-- before differentiating.
+diffVecHist ::
+  VjpOps ->
+  VName ->
+  StmAux () ->
+  SubExp ->
+  Lambda SOACS ->
+  VName ->
+  VName ->
+  VName ->
+  SubExp ->
+  SubExp ->
+  VName ->
+  ADM () ->
+  ADM ()
+diffVecHist ops x aux n op nes is vss w rf dst m = do
+  stms <- collectStms_ $ do
+    rank <- arrayRank <$> lookupType vss
+    let dims = [1, 0] ++ drop 2 [0 .. rank - 1]
+
+    dstT <- letExp "dstT" $ BasicOp $ Rearrange dims dst
+    vssT <- letExp "vssT" $ BasicOp $ Rearrange dims vss
+    t_dstT <- lookupType dstT
+    t_vssT <- lookupType vssT
+    t_nes <- lookupType nes
+
+    dst_col <- newParam "dst_col" $ rowType t_dstT
+    vss_col <- newParam "vss_col" $ rowType t_vssT
+    ne <- newParam "ne" $ rowType t_nes
+
+    f <- mkIdentityLambda [Prim int64, Prim $ elemType t_dstT]
+    map_lam <-
+      mkLambda [dst_col, vss_col, ne] $ do
+        -- TODO is copying here the right solution??
+        dst_col_cpy <-
+          letExp "dst_col_cpy" . BasicOp $
+            Replicate mempty (Var $ paramName dst_col)
+        -- TODO fmap varsRes . letTupExp "col_res" $
+        fmap varsRes . fmap pure . letExp "col_res" $
+          Op $
+            Hist
+             n
+             [is, paramName vss_col]
+             [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
+             f
+    histT <- letExp "histT" $ Op $
+      Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $ mapSOAC map_lam
+    -- TODO If we change x to be of type Pat Type, use:
+    -- addStm $ Let x aux $ Op $
+    -- Just matching the style of other functions here:
+    auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
+  trace (prettyString stms) $ foldr (vjpStm ops) m stms
+
 
 --
 -- a step in the radix sort implementation
