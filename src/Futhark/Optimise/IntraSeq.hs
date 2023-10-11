@@ -13,8 +13,10 @@ import Debug.Trace
 import Futhark.Construct
 import Futhark.Analysis.PrimExp.Convert
 import Debug.Pretty.Simple
+import qualified Data.Map as M
 
 type SeqM = ReaderT (Scope GPU) (State VNameSource)
+type Env = M.Map SubExp SubExp
 -- HELPERS
 seqFactor :: SubExp
 seqFactor = intConst Int64 4
@@ -49,37 +51,48 @@ intraSeq =
       onStms scope stms =
         modifyNameSource $
           runState $
-            runReaderT (seqStms (VName "" 1 ) stms) scope
+            runReaderT (seqStms M.empty stms) scope
 
-seqStms :: VName -> Stms GPU -> SeqM (Stms GPU)
-seqStms seq_name stms =
+seqStms :: Env -> Stms GPU -> SeqM (Stms GPU)
+seqStms env stms =
   localScope (scopeOf stms) $
-    mconcat <$> mapM (seqStm seq_name) (stmsToList stms)
+    mconcat <$> mapM (seqStm env) (stmsToList stms)
 
-seqBody :: VName -> KernelBody GPU -> SeqM (KernelBody GPU)
-seqBody seq_name (KernelBody dec stms result) = do
-  stms' <- seqStms seq_name stms
+seqBody :: Env -> KernelBody GPU -> SeqM (KernelBody GPU)
+seqBody env (KernelBody dec stms result) = do
+  stms' <- seqStms env stms
   pure $ KernelBody dec stms' result
 
 -- seq outer map, divide group size by sequentialization factor
-seqStm :: VName -> Stm GPU -> SeqM (Stms GPU)
-seqStm seq_name (Let pat aux (Op (SegOp (SegMap
+seqStm :: Env -> Stm GPU -> SeqM (Stms GPU)
+seqStm env (Let pat aux (Op (SegOp (SegMap
         lvl@(SegGroup virt (Just (KernelGrid num_groups (Count group_size))))
         space ts kbody)))) = do
   (gr_name, gr_stm) <- runBuilder $ bindNewGroupSize group_size
   let lvl' = SegGroup virt (Just $ KernelGrid num_groups $ Count (Var gr_name))
-  kbody' <- seqBody seq_name kbody
+  kbody' <- seqBody (M.insert group_size (Var gr_name) env) kbody
   pure $ gr_stm <> oneStm (Let pat aux (Op (SegOp (SegMap lvl' space ts kbody'))))
 
-seqStm seq_name (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
+seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
   -- add segmap to perform the per thread reduction
-  -- TODO handle other TypeBase cases?? Should always be array tho
+  -- TODO handle other cases for arrays below, currently we always get head 
   let (Prim tp) = head ts
-  map_ident <- newIdent "inner_map" (Array tp (Shape [Var seq_name]) mempty)
-  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl space ts kbody)))
-  
+  let (SegSpace phys ((gtid, bound):ps)) = space
+  -- TODO monads??
+  phys' <- newName phys
+  gtid' <- newName gtid
+  let env' = M.insert (Var gtid) (Var gtid') env
+  -- TODO handle nothing
+  let Just sh_size = M.lookup bound env
+  let space' = SegSpace phys' ((gtid', sh_size) : ps)
+  map_ident <- newIdent "inner_map" (Array tp (Shape [sh_size]) mempty)
 
-  pure $ stmsFromList[map_stm, Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))]
+
+
+  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl space' ts kbody)))
+
+
+  pure $ stmsFromList [map_stm, Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))]
   -- runBuilder_ $ do
   -- let SegBinOp comm lamb neut _ = head binops
   -- wrap lambda body inside thread local reduce over chunk elements
@@ -92,12 +105,12 @@ seqStm seq_name (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts
   -- add map that loops over 1/4
   -- tid_map <- letExp "tid_map" $ Op (SegOp (SegMap lvl space ts kbody'))
 
-seqStm seq_name (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
+seqStm env (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
   pure $ oneStm $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))
 
-seqStm seq_name (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
+seqStm env (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
   pure $ oneStm $ Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody)))
 
-seqStm seq_name stm = pure $ oneStm stm
+seqStm env stm = pure $ oneStm stm
 
 
