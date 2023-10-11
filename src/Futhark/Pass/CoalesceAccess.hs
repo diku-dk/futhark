@@ -43,7 +43,7 @@ coalesceAccess =
       -- Analyse the program
       let analysisRes = analyzeDimIdxPats prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable sortGPU analysisRes
+      let permutationTable = permutationTableFromIndexTable sortFun analysisRes
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutationTable) prog
   where
@@ -54,47 +54,7 @@ coalesceAccess =
 class (Analyze rep) => Coalesce rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
   transformOp :: Ctx -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (Ctx, ExpMap rep)
-
-sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
-sortGPU =
-  L.sortBy dimdexGPUcmp
-  where
-    dimdexGPUcmp a b = do
-      let depsA = dependencies a
-      let depsB = dependencies b
-      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
-      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
-      let aggr1 = foldl maxIdxPat Nothing deps1'
-      let aggr2 = foldl maxIdxPat Nothing deps2'
-      cmpIdxPat aggr1 aggr2
-      where
-        cmpIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Ordering
-        cmpIdxPat Nothing Nothing = EQ
-        cmpIdxPat (Just _) Nothing = GT
-        cmpIdxPat Nothing (Just _) = LT
-        cmpIdxPat
-          (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) =
-            case (iterL, iterR) of
-              (Parallel, Sequential) -> GT
-              (Sequential, Parallel) -> LT
-              _ ->
-                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
-
-        maxIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int)
-
-        maxIdxPat lhs rhs =
-          case cmpIdxPat lhs rhs of
-            LT -> rhs
-            _ -> lhs
-
-        f og (_, lvl, itertype) = Just (itertype, lvl, og)
+  sortFun :: [DimIdxPat rep] -> [DimIdxPat rep]
 
 type Ctx = PermutationTable
 
@@ -123,6 +83,7 @@ instance Coalesce GPU where
   transformOp ctx expmap stm gpuOp
     | (SegOp op) <- gpuOp = transformSegOpGPU ctx expmap stm op
     | _ <- gpuOp = transformRestOp ctx expmap stm
+  sortFun = sortGPU
 
 instance Coalesce MC where
   onOp soacMapper (Futhark.IR.MC.OtherOp soac) = Futhark.IR.MC.OtherOp <$> mapSOACM soacMapper soac
@@ -130,6 +91,7 @@ instance Coalesce MC where
   transformOp ctx expmap stm mcOp
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC ctx expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp ctx expmap stm
+  sortFun = sortMC
 
 transformSegOpGPU :: Ctx -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (Ctx, ExpMap GPU)
 transformSegOpGPU ctx expmap (Let pat aux _) op = do
@@ -343,6 +305,88 @@ lookupPermutation ctx segName idxName arrayName =
       case M.lookup arrayName arrayNameMap of
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs
+
+sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
+sortGPU =
+  L.sortBy dimdexGPUcmp
+  where
+    dimdexGPUcmp a b = do
+      let depsA = dependencies a
+      let depsB = dependencies b
+      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
+      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
+      let aggr1 = foldl maxIdxPat Nothing deps1'
+      let aggr2 = foldl maxIdxPat Nothing deps2'
+      cmpIdxPat aggr1 aggr2
+      where
+        cmpIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Ordering
+        cmpIdxPat Nothing Nothing = EQ
+        cmpIdxPat (Just _) Nothing = GT
+        cmpIdxPat Nothing (Just _) = LT
+        cmpIdxPat
+          (Just (iterL, lvlL, originalLevelL))
+          (Just (iterR, lvlR, originalLevelR)) =
+            case (iterL, iterR) of
+              (Parallel, Sequential) -> GT
+              (Sequential, Parallel) -> LT
+              _ ->
+                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+
+        maxIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int)
+
+        maxIdxPat lhs rhs =
+          case cmpIdxPat lhs rhs of
+            LT -> rhs
+            _ -> lhs
+
+        f og (_, lvl, itertype) = Just (itertype, lvl, og)
+
+sortMC :: [DimIdxPat rep] -> [DimIdxPat rep]
+sortMC =
+  L.sortBy dimdexGPUcmp
+  where
+    dimdexGPUcmp a b = do
+      let depsA = dependencies a
+      let depsB = dependencies b
+      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
+      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
+      let aggr1 = foldl maxIdxPat Nothing deps1'
+      let aggr2 = foldl maxIdxPat Nothing deps2'
+      cmpIdxPat aggr1 aggr2
+      where
+        cmpIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Ordering
+        cmpIdxPat Nothing Nothing = EQ
+        cmpIdxPat (Just _) Nothing = GT
+        cmpIdxPat Nothing (Just _) = LT
+        cmpIdxPat
+          (Just (iterL, lvlL, originalLevelL))
+          (Just (iterR, lvlR, originalLevelR)) =
+            case (iterL, iterR) of
+              (Parallel, Sequential) -> LT
+              (Sequential, Parallel) -> GT
+              _ ->
+                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+
+        maxIdxPat ::
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int) ->
+          Maybe (IterationType rep, Int, Int)
+
+        maxIdxPat lhs rhs =
+          case cmpIdxPat lhs rhs of
+            LT -> rhs
+            _ -> lhs
+
+        f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
 instance Coalesce GPUMem where
   onOp _ _ = undefined
