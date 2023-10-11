@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unused-local-binds #-}
+{-# OPTIONS_GHC -Wno-unused-matches #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Futhark.Pass
@@ -6,41 +8,38 @@ import Futhark.Builder.Class
 
 import Control.Monad.Reader
 import Control.Monad.State
--- mkLet [Ident (VName (nameFromString "abc") 0) (Prim $ IntType Int32 )] 
---                              (BasicOp $ UnOp (Complement Int32) (Constant $ blankPrimValue (IntType Int32)))
-
---let stmts = [
---                        mkLet [Ident (VName (nameFromString "abc") 0) (Prim $ IntType Int32 )] 
---                             (BasicOp $ UnOp (Complement Int32) (Constant $ blankPrimValue (IntType Int32)))
---                        ]
---                in let newProg = Prog (OpaqueTypes []) (stmsFromList stmts) []
---                in pure newProg
-
--- transformProg :: Prog GPU -> PassM (Prog GPU)
-  -- transformProg prog =
-  --     let (Prog t0 t1 funs) = prog
-  --         funs' = map transformFuns funs
-  --     in pure $ Prog t0 t1 funs'
-
-  -- transformFuns ::  FunDef GPU -> FunDef GPU
-  -- transformFuns fun =
-  --     let (FunDef t0 t1 t2 t3 t4 body) = fun
-  --         body' = transformBody body
-  --     in FunDef t0 t1 t2 t3 t4 body'
-
-  -- transformBody :: Body GPU -> Body GPU
-  -- transformBody (Body t0 stmts t1) =
-  --     let stmts' = stmsFromList $ map transformStmt (stmsToList stmts)
-  --     in Body t0 stmts' t1
-
-  -- transformStmt :: Stm GPU -> Stm GPU
-  -- transformStmt _ =
-  --     mkLet [Ident (VName (nameFromString "best_stm") 0) (Prim $ IntType Int32 )]
---         (BasicOp $ UnOp (Complement Int32) (Constant $ blankPrimValue (IntType Int32)))
+import Debug.Trace
+import Futhark.Construct
+import Futhark.Analysis.PrimExp.Convert
+import Debug.Pretty.Simple
 
 type SeqM = ReaderT (Scope GPU) (State VNameSource)
+-- HELPERS
+seqFactor :: SubExp
+seqFactor = intConst Int64 4
 
+-- read in seq factor elements for a given thread
+getChunk :: (MonadBuilder m) => VName -> SubExp -> m VName
+getChunk arr tid = do
+  arr_t <- lookupType arr
+  slice_offset <- letSubExp "slice_offset" =<< toExp (pe64 tid * pe64 seqFactor)
+  let slice = DimSlice slice_offset seqFactor (intConst Int64 1)
+  letExp "chunk" $ BasicOp $ Index arr $ fullSlice arr_t [slice]
 
+-- bind the new group size
+bindNewGroupSize :: SubExp -> Builder GPU VName
+bindNewGroupSize group_size = do
+  name <- newVName "group_size"
+  letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
+  pure name
+
+-- NOTE uncomment this for pretty printing AST
+-- intraSeq :: Pass GPU GPU
+  -- intraSeq = Pass "test" "desc" printAst
+  -- printAst :: Prog GPU -> PassM (Prog GPU)
+-- printAst prog = pTrace (show prog) (pure prog)
+
+-- TODO handle when last thread does not have seqFactor elements to process
 intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
@@ -51,98 +50,40 @@ intraSeq =
           runState $
             runReaderT (seqStms stms) scope
 
--- seqStms :: Stms GPU -> SeqM (Stms GPU)
--- seqStms stms =
---   localScope (scopeOf stms) $ do
---     foldM foldfun mempty $ stmsToList stms
-  -- where
---     foldfun :: Stms GPU -> Stm GPU -> SeqM (Stms GPU)
---     foldfun ss s = do
---       s' <- seqStm s 
---       pure $ ss <> s'
-
--- seqStm :: Stm GPU -> SeqM (Stms GPU)
--- seqStm stm@(Let pat aux (Op (SegOp (SegMap lvl@SegGroup {} space ts kbody)))) = do
-
-
--- segStm stm = undefined
-
-
 seqStms :: Stms GPU -> SeqM (Stms GPU)
-seqStms stms = do
-  stmsMapped <- mapM seqStm $ stmsToList stms
-  pure $ stmsFromList stmsMapped
+seqStms stms =
+  localScope (scopeOf stms) $
+    mconcat <$> mapM seqStm (stmsToList stms)
 
--- We need to somehow now in which segmented operation we are.
--- e.g. when in a SegRed we should produce sequential reduce operations over
--- a chunk using the same operator
-
-seqStm :: Stm GPU -> SeqM (Stm GPU)
--- seqStm (Let pat aux (Op (SegOp segop))) =
---   case segLevel segop of
---     (SegGroup _ _)  -> do
---       kbody' <- seqBody $ segBody segop
---       pure $ case segop of
---               SegMap  lvl space       ts _ -> Let pat aux $ Op $ SegOp $ SegMap lvl space ts kbody'
---               SegRed  lvl space binop ts _ -> Let pat aux $ Op $ SegOp $ SegRed lvl space binop ts kbody'
---               SegScan lvl space binop ts _ -> Let pat aux $ Op $ SegOp $ SegScan lvl space binop ts kbody'
---               SegHist lvl space binop ts _ -> Let pat aux $ Op $ SegOp $ SegHist lvl space binop ts kbody'
---     (SegThread _ _) ->
---       case segop of
---         SegMap {} -> undefined
---         SegRed {} -> undefined
---         SegScan {} -> undefined
---         SegHist {} -> undefined
---     _ -> undefined
-
-seqStm (Let pat aux (Op (SegOp (SegMap lvl space ts kbody)))) =
-  case lvl of
-    SegGroup {} -> do
-      kbody' <- seqBody kbody
-      pure $ Let pat aux (Op (SegOp (SegMap lvl space ts kbody')))
-    SegThread {} -> undefined
-    _ -> undefined
-
-seqStm (Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))) =
-  case lvl of
-    SegGroup {} -> do
-      kbody' <- seqBody kbody
-      pure $ Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody')))
-    SegThread {} -> undefined
-    _ -> undefined
-
-seqStm (Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))) =
-  case lvl of
-    SegGroup {} -> do
-      kbody' <- seqBody kbody
-      pure $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody')))
-    SegThread {} -> undefined
-    _ -> undefined
-    
-seqStm (Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody)))) =
-  case lvl of
-    SegGroup {} -> do
-      kbody' <- seqBody kbody
-      pure $ Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody')))
-    SegThread {} -> undefined
-    _ -> undefined
-
-    
-seqStm (Let pat aux (Op op)) = undefined
-
--- The catch all base case for now
-seqStm _ = undefined
-
-
-
-
--- 
 seqBody :: KernelBody GPU -> SeqM (KernelBody GPU)
 seqBody (KernelBody dec stms result) = do
   stms' <- seqStms stms
   pure $ KernelBody dec stms' result
 
+-- seq outer map, divide group size by sequentialization factor
+seqStm :: Stm GPU -> SeqM (Stms GPU)
+seqStm (Let pat aux (Op (SegOp (SegMap
+        lvl@(SegGroup virt (Just (KernelGrid num_groups (Count group_size))))
+        space ts kbody)))) = do
+  (gr_name, gr_stm) <- runBuilder $ bindNewGroupSize group_size
+  let lvl' = SegGroup virt (Just $ KernelGrid num_groups $ Count (Var gr_name))
+  kbody' <- seqBody kbody
+  pure $ gr_stm <> oneStm (Let pat aux (Op (SegOp (SegMap lvl' space ts kbody'))))
 
--- Helper functions --
+seqStm (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
+  -- add segmap to perform the per thread reduction
+  map_name <- newVName "inner_map"
+  -- let map_stm = oneStm $ Let map_name aux (Op (SegOp (SegMap lvl space ts kbody)))
 
--- segOpType :: SegOp GPU -> 
+
+  pure $ oneStm $ Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))
+
+seqStm (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
+  pure $ oneStm $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))
+
+seqStm (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
+  pure $ oneStm $ Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody)))
+
+seqStm stm = pure $ oneStm stm
+
+
