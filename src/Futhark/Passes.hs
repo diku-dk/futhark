@@ -92,12 +92,13 @@ gpuPipeline =
       [ simplifyGPU,
         optimiseGenRed,
         simplifyGPU,
-        -- tileLoops,
+        tileLoops,
         simplifyGPU,
         histAccsGPU,
-        simplifyGPU,
         unstreamGPU,
         performCSE True,
+        simplifyGPU,
+        coalesceAccess,
         simplifyGPU,
         sinkGPU, -- Sink reads before migrating them.
         reduceDeviceSyncs,
@@ -106,9 +107,7 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU,
-        coalesceAccess,
-        simplifyGPU -- Cleanup merged GPUBody kernels.
+        inPlaceLoweringGPU
       ]
 
 -- | Extend gpuPipeline by pretty-printing the true AST
@@ -192,7 +191,8 @@ mcPipeline =
         sinkMC,
         inPlaceLoweringMC,
         coalesceAccess,
-        simplifyMC
+        simplifyMC,
+        performCSE True
       ]
 
 -- | Run 'mcPipeline' and then add memory information.
