@@ -98,8 +98,6 @@ gpuPipeline =
         unstreamGPU,
         performCSE True,
         simplifyGPU,
-        coalesceAccess,
-        simplifyGPU,
         sinkGPU, -- Sink reads before migrating them.
         reduceDeviceSyncs,
         simplifyGPU, -- Simplify and hoist storages.
@@ -107,7 +105,10 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        inPlaceLoweringGPU,
+        coalesceAccess,
+        simplifyGPU,
+        performCSE True
       ]
 
 -- | Extend gpuPipeline by pretty-printing the true AST
