@@ -11,10 +11,10 @@ def main [n][m] (xss: [n][m]i64) (is: [n]i64) : [n][m]i64 =
 
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5662 : {
+-- (segmap) defunc_0_map_res_5664 : {
 --     (arr) xss_5482 : {
---         (idx) eta_p_5666 :
+--         (idx) eta_p_5668 :
 --             0 : dependencies = {i_5629 0 seq}
---             1 : dependencies = {gtid_5663 1 par}
+--             1 : dependencies = {gtid_5665 1 par}
 --     }
 -- }

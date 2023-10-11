@@ -9,43 +9,43 @@ entry main [m][n][o] (xsss: [m][n][o]i64) : [m]i64 =
   ) <| iota m
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_f_res_5770 : {
+-- (segmap) defunc_0_f_res_5774 : {
 --     (arr) xsss_5497 : {
---         (idx) xsss_transformed_row_5782 :
---             0 : dependencies = {gtid_5771 0 par}
---             1 : dependencies = {i_5929 2 seq}
---             2 : dependencies = {i_5775 1 seq}
---     }
--- }
--- (segmap) defunc_0_f_res_5789 : {
---     (arr) xsss_5497 : {
---         (idx) xsss_transformed_row_5803 :
---             0 : dependencies = {gtid_5790 0 par}
---             1 : dependencies = {gtid_5798 2 par}
---             2 : dependencies = {i_5794 1 seq}
---     }
--- }
--- (segmap) lifted_lambda_res_5886 : {
---     (arr) xsss_5497 : {
---         (idx) xsss_transformed_row_5896 :
---             0 : dependencies = {gtid_5887 1 par}
---             1 : dependencies = {i_5931 2 seq}
---             2 : dependencies = {i_5878 0 seq}
---     }
--- }
--- (segmap) lifted_lambda_res_5901 : {
---     (arr) xsss_5497 : {
---         (idx) xsss_transformed_row_5911 :
---             0 : dependencies = {gtid_5902 1 par}
+--         (idx) xsss_transformed_row_5786 :
+--             0 : dependencies = {gtid_5775 0 par}
 --             1 : dependencies = {i_5933 2 seq}
---             2 : dependencies = {i_5878 0 seq}
+--             2 : dependencies = {i_5779 1 seq}
 --     }
 -- }
--- (segred) defunc_0_f_res_5797 : {
+-- (segmap) defunc_0_f_res_5793 : {
 --     (arr) xsss_5497 : {
---         (idx) xsss_transformed_row_5803 :
---             0 : dependencies = {gtid_5790 0 par}
---             1 : dependencies = {gtid_5798 2 par}
---             2 : dependencies = {i_5794 1 seq}
+--         (idx) xsss_transformed_row_5807 :
+--             0 : dependencies = {gtid_5794 0 par}
+--             1 : dependencies = {gtid_5802 2 par}
+--             2 : dependencies = {i_5798 1 seq}
+--     }
+-- }
+-- (segmap) lifted_lambda_res_5890 : {
+--     (arr) xsss_5497 : {
+--         (idx) xsss_transformed_row_5900 :
+--             0 : dependencies = {gtid_5891 1 par}
+--             1 : dependencies = {i_5935 2 seq}
+--             2 : dependencies = {i_5882 0 seq}
+--     }
+-- }
+-- (segmap) lifted_lambda_res_5905 : {
+--     (arr) xsss_5497 : {
+--         (idx) xsss_transformed_row_5915 :
+--             0 : dependencies = {gtid_5906 1 par}
+--             1 : dependencies = {i_5937 2 seq}
+--             2 : dependencies = {i_5882 0 seq}
+--     }
+-- }
+-- (segred) defunc_0_f_res_5801 : {
+--     (arr) xsss_5497 : {
+--         (idx) xsss_transformed_row_5807 :
+--             0 : dependencies = {gtid_5794 0 par}
+--             1 : dependencies = {gtid_5802 2 par}
+--             2 : dependencies = {i_5798 1 seq}
 --     }
 -- }

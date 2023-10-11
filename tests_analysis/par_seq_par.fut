@@ -8,27 +8,27 @@ def main [l][n][m] (xsss: [l][n][m]i64) : [l][m]i64 =
   ) xsss
 
 -- === Expected output of analysis:
--- (segmap) defunc_0_map_res_5333 : {
+-- (segmap) defunc_0_map_res_5337 : {
 --     (arr) xsss_5223 : {
---         (idx) eta_p_5347 :
---             0 : dependencies = {gtid_5334 0 par}
---             1 : dependencies = {i_5341 1 seq}
---             2 : dependencies = {gtid_5345 2 par}
+--         (idx) eta_p_5351 :
+--             0 : dependencies = {gtid_5338 0 par}
+--             1 : dependencies = {i_5345 1 seq}
+--             2 : dependencies = {gtid_5349 2 par}
 --     }
 -- }
--- (segmap) defunc_0_map_res_5344 : {
+-- (segmap) defunc_0_map_res_5348 : {
 --     (arr) xsss_5223 : {
---         (idx) eta_p_5347 :
---             0 : dependencies = {gtid_5334 0 par}
---             1 : dependencies = {i_5341 1 seq}
---             2 : dependencies = {gtid_5345 2 par}
+--         (idx) eta_p_5351 :
+--             0 : dependencies = {gtid_5338 0 par}
+--             1 : dependencies = {i_5345 1 seq}
+--             2 : dependencies = {gtid_5349 2 par}
 --     }
 -- }
--- (segmap) lifted_lambda_res_5412 : {
+-- (segmap) lifted_lambda_res_5416 : {
 --     (arr) xsss_5223 : {
---         (idx) eta_p_5416 :
---             0 : dependencies = {gtid_5413 1 par}
---             1 : dependencies = {i_5401 0 seq}
---             2 : dependencies = {gtid_5414 2 par}
+--         (idx) eta_p_5420 :
+--             0 : dependencies = {gtid_5417 1 par}
+--             1 : dependencies = {i_5405 0 seq}
+--             2 : dependencies = {gtid_5418 2 par}
 --     }
 -- }
