@@ -160,26 +160,29 @@ vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [Var ne] lam <- histop,
     -- Note that the operator is vectorised, so `ne` cannot be a 'PrimValue'.
-    -- TODO handle nested maps?
-    Just op <- mapOp lam = diffVecHist ops x aux n op ne is vs w rf dst m
+    Just op <- mapOp lam =
+      diffVecHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
-    isMinMaxOp op = diffMinMaxHist ops x aux n op ne is vs w rf dst m
+    isMinMaxOp op =
+      diffMinMaxHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
-    isMulOp op = diffMulHist ops x aux n op ne is vs w rf dst m
+    isMulOp op =
+      diffMulHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
-    isAddOp op = diffAddHist ops x aux n lam ne is vs w rf dst m
+    isAddOp op =
+      diffAddHist ops x aux n lam ne is vs w rf dst m
 vjpSOAC ops pat aux (Hist n as [histop] f) m
   | isIdentityLambda f,
     HistOp (Shape w) rf dst ne lam <- histop = do

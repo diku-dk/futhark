@@ -523,7 +523,6 @@ diffAddHist _ops x aux n add ne is vs w rf dst m = do
   vs_bar <- letExp (baseString vs <> "_bar") $ Op $ Screma n [is] $ mapSOAC lam_vsbar
   updateAdj vs vs_bar
 
-
 -- Special case for vectorised combining operator. Rewrite
 --   reduce_by_index dst (map2 op) nes is vss
 -- to
@@ -563,26 +562,24 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     f <- mkIdentityLambda [Prim int64, Prim $ elemType t_dstT]
     map_lam <-
       mkLambda [dst_col, vss_col, ne] $ do
-        -- TODO is copying here the right solution??
+        -- TODO Have to copy dst_col, but isn't it already unique?
         dst_col_cpy <-
           letExp "dst_col_cpy" . BasicOp $
             Replicate mempty (Var $ paramName dst_col)
-        -- TODO fmap varsRes . letTupExp "col_res" $
-        fmap varsRes . fmap pure . letExp "col_res" $
+        fmap (varsRes . pure) . letExp "col_res" $
           Op $
             Hist
-             n
-             [is, paramName vss_col]
-             [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
-             f
-    histT <- letExp "histT" $ Op $
-      Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $ mapSOAC map_lam
-    -- TODO If we change x to be of type Pat Type, use:
-    -- addStm $ Let x aux $ Op $
-    -- Just matching the style of other functions here:
+              n
+              [is, paramName vss_col]
+              [HistOp (Shape [w]) rf [dst_col_cpy] [Var $ paramName ne] op]
+              f
+    histT <-
+      letExp "histT" $
+        Op $
+          Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
+            mapSOAC map_lam
     auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
   foldr (vjpStm ops) m stms
-
 
 --
 -- a step in the radix sort implementation
