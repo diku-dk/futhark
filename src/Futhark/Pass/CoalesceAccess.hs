@@ -322,7 +322,7 @@ permutationTableFromIndexTable sortCoalescing =
   -- a permutation instead of [DimIdxPat]
   filterMap null $
     filterMap null $
-      filterMap predPermutation convert
+      filterMap predPermutation (permutationFromMemoryEntry sortCoalescing)
   where
     -- wraps a function in a mapMaybe, if the predicate is true then return
     -- nothing. When sequenced as above, the "nothings" will then propagate and
@@ -341,9 +341,8 @@ permutationTableFromIndexTable sortCoalescing =
     predPermutation perm =
       perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
 
-    -- Sorts the dimensions in a given memory entry and returns it as
-    -- a permutation.
-    convert = map originalDimension . (sortCoalescing . dimensions)
+permutationFromMemoryEntry :: ([DimIdxPat rep] -> [DimIdxPat rep]) -> MemoryEntry rep -> Permutation
+permutationFromMemoryEntry ordering = map originalDimension . (ordering . dimensions)
 
 lookupPermutation :: Ctx -> VName -> IndexExprName -> ArrayName -> Maybe Permutation
 lookupPermutation ctx segName idxName arrayName =
