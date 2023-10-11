@@ -253,7 +253,9 @@ traverseKernelBodyArrayIndexes seg_name coalesce (KernelBody b kstms kres) =
           mapOnOp = onOp soacMapper
         }
 
-type Replacements = M.Map (VName, Slice SubExp) VName
+-- | Used to keep track of which pairs of arrays and permutations we have
+-- already created manifests for, in order to avoid duplicates.
+type Replacements = M.Map (VName, Permutation) VName
 
 type ArrayIndexTransform m =
   VName -> -- seg_name (name of the SegThread expression's pattern)
@@ -272,41 +274,30 @@ ensureCoalescedAccess
   idx_name
   arr
   slice = do
-    seen <- gets $ M.lookup (arr, slice)
-    case seen of
-      -- Already took care of this case elsewhere.
-      Just arr' -> pure $ Just (arr', slice)
-      -- We have not seen this array before.
-      Nothing ->
-        -- Check if the array has the optimal layout in memory.
-        -- If it does not, replace it with a manifest to allocate
-        -- it with the optimal layout
-        case lookupPermutation ctx seg_name idx_name arr of
-          Nothing -> pure $ Just (arr, slice)
-          Just perm -> replace =<< lift (manifest perm arr)
+    -- Check if the array has the optimal layout in memory.
+    -- If it does not, replace it with a manifest to allocate
+    -- it with the optimal layout
+    case lookupPermutation ctx seg_name idx_name arr of
+      Nothing -> pure $ Just (arr, slice)
+      Just perm -> do
+        seen <- gets $ M.lookup (arr, perm)
+        case seen of
+          -- Already created a manifest for this array + permutation.
+          -- So, just replace the name and don't make a new manifest.
+          Just arr' -> pure $ Just (arr', slice)
+          Nothing -> do
+            -- Create a new manifest
+            arr' <- lift (manifest perm arr)
+            -- Store that we have seen this array + permutation
+            -- so we don't make duplicate manifests
+            modify $ M.insert (arr, perm) arr'
+            -- Return the new manifest
+            pure $ Just (arr', slice)
     where
-      replace arr' = do
-        modify $ M.insert (arr, slice) arr'
-        pure $ Just (arr', slice)
-
       manifest perm array =
         letExp (baseString array ++ "_coalesced") $
           BasicOp $
             Manifest perm array
-
-segOpPermutationSet :: Ctx -> VName -> [(ArrayName, Permutation)]
-segOpPermutationSet ctx pat =
-  case M.lookup pat (M.mapKeys vnameFromSegOp ctx) of
-    Nothing -> []
-    (Just arrayNameMap) -> toPermutationSet $ M.toList $ M.map (map snd . M.toList) arrayNameMap
-  where
-    toPermutationSet arrayToPermutationMap =
-      -- use nubOrd to eliminate duplicate permutations
-      nubOrd $
-        concat
-          [ [(arrayName, permutation) | permutation <- permutations]
-            | (arrayName, permutations) <- arrayToPermutationMap
-          ]
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
@@ -324,7 +315,7 @@ permutationTableFromIndexTable sortCoalescing =
     filterMap null $
       filterMap predPermutation (permutationFromMemoryEntry sortCoalescing)
   where
-    -- wraps a function in a mapMaybe, if the predicate is true then return
+    -- Wraps a function in a mapMaybe, if the predicate is true then return
     -- nothing. When sequenced as above, the "nothings" will then propagate and
     -- ensure that we don't have entries in any of the maps that points to empty
     -- maps.
@@ -348,9 +339,9 @@ lookupPermutation :: Ctx -> VName -> IndexExprName -> ArrayName -> Maybe Permuta
 lookupPermutation ctx segName idxName arrayName =
   case M.lookup segName (M.mapKeys vnameFromSegOp ctx) of
     Nothing -> Nothing
-    Just segmap ->
+    Just arrayNameMap ->
       -- Look for the current array
-      case M.lookup arrayName segmap of
+      case M.lookup arrayName arrayNameMap of
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs
 
