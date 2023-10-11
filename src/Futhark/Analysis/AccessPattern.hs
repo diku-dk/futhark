@@ -152,12 +152,12 @@ instance Monoid (Context rep) where
 
 instance Semigroup (Context rep) where
   (<>)
-    (Context ass0 consts0 lastBody0 lvl0)
-    (Context ass1 consts1 lastBody1 lvl1) =
+    (Context ass0 consts0 parents0 lvl0)
+    (Context ass1 consts1 parents1 lvl1) =
       Context
         ((<>) ass0 ass1)
         ((<>) consts0 consts1)
-        ((++) lastBody0 lastBody1)
+        ((++) parents0 parents1)
         $ max lvl0 lvl1
 
 -- | Extend a context with another context.
@@ -279,19 +279,26 @@ getDeps subexp =
 -- descriptors.
 analyzeStm :: (Analyze rep) => Context rep -> Stm rep -> (Context rep, IndexTable rep)
 analyzeStm ctx (Let pats _ e) = do
-  -- Get the name of the first element in a pattern
-  let patternName = patElemName . head $ patElems pats
-  -- Construct the result and Context from the subexpression. If the subexpression
-  -- is a body, we recurse into it.
-  case e of
-    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternName name ee
-    (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternName name subexp
-    (BasicOp op) -> analyzeBasicOp ctx op patternName
-    (Match _ cases defaultBody _) -> analyzeMatch ctx patternName defaultBody $ map caseBody cases
-    (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternName
-    (Apply _name diets _ _) -> analyzeApply ctx patternName diets
-    (WithAcc _ _) -> (ctx, mempty) -- ignored
-    (Op op) -> analyzeOp op ctx patternName
+  -- Get the names of the pattern elements
+  let patternNames = map patElemName $ patElems pats :: [VName]
+  foldl foldFun (ctx, mempty) $
+    map
+      ( \pat ->
+          -- Construct the result and Context from the subexpression. If the subexpression
+          -- is a body, we recurse into it.
+          case e of
+            (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx pat name ee
+            (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx pat name subexp
+            (BasicOp op) -> analyzeBasicOp ctx op pat
+            (Match _ cases defaultBody _) -> analyzeMatch ctx pat defaultBody $ map caseBody cases
+            (Loop bindings loop body) -> analyzeLoop ctx bindings loop body pat
+            (Apply _name diets _ _) -> analyzeApply ctx pat diets
+            (WithAcc _ _) -> (ctx, mempty) -- ignored
+            (Op op) -> analyzeOp op ctx pat
+      )
+      patternNames
+  where
+    foldFun (ctx', res') (ctx'', res'') = (ctx' <> ctx'', res' `unionIndexTables` res'')
 
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
 getIndexDependencies _ [] = Nothing
@@ -314,6 +321,7 @@ analyzeIndex ctx pat arr_name dimIndexes = do
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> VName -> Context rep
 analyzeIndexContextFromIndices ctx dimIndexes pat = do
+  -- Partition the DimIndexes into constants and non-constants
   let (subExprs, consts) =
         partitionEithers $
           mapMaybe
