@@ -1,25 +1,40 @@
 {-# OPTIONS_GHC -Wno-unused-local-binds #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
 import Futhark.Pass
 import Futhark.IR.GPU
 import Futhark.Builder.Class
+import Futhark.Construct
+import Futhark.Analysis.PrimExp.Convert
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Debug.Trace
-import Futhark.Construct
-import Futhark.Analysis.PrimExp.Convert
-import Debug.Pretty.Simple
 import qualified Data.Map as M
 
 type SeqM = ReaderT (Scope GPU) (State VNameSource)
+
+
+-- An Env is a mapping from SubExp to SubExp. The keys are subexpressions
+-- present in the original program and the value is a newly generated
+-- subexpression generated during the transformation
 type Env = M.Map SubExp SubExp
--- HELPERS
+
+-- The sequentialistion factor, i.e. how many elements each thread should
+-- process. This is not supposed to be a constant.
 seqFactor :: SubExp
 seqFactor = intConst Int64 4
+
+getTypes :: [Type] -> [PrimType]
+getTypes = map f
+  where
+    f x =
+      case x of
+          Prim t -> t
+          Array t shp u-> t
+          _ -> error "What to do here?"
 
 -- read in seq factor elements for a given thread
 getChunk :: (MonadBuilder m) => VName -> SubExp -> m VName
@@ -35,6 +50,47 @@ bindNewGroupSize group_size = do
   name <- newVName "group_size"
   letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
   pure name
+
+
+
+-- This function takes the SegBinOp array of e.g. a SegRed and produces a kernel
+-- body from it. It also takes a KernelBody as the result part is used to 
+-- determine exactly which statements of the BinOps needs to be inserted into
+-- the new KernelBody
+mkBodyFromBinops :: [SegBinOp GPU] -> KernelBody GPU -> KernelBody GPU
+mkBodyFromBinops bops kbody = do
+  let dec  = kernelBodyDec kbody
+  let stms = kernelBodyStms kbody
+  let res  = kernelBodyResult kbody
+
+  -- Figure out how many results of the original KernelBody are used in
+  -- the SegBinOps. This is done by, for each result, backtrack and see which
+  -- statements are needed to compute said result
+  -- let needed = filter (\(r,x) -> not $ null x) $ zip res $ map (backtrack stms) res
+  let stms' = mconcat $ map (backtrack stms) res
+  KernelBody dec stms' res
+
+  where
+    backtrack :: Stms GPU -> KernelResult -> Stms GPU
+    backtrack _ (WriteReturns {})   = error "How to handle WriteReturns"
+    backtrack _ (TileReturns {})    = error "How to handle TileReturns"
+    backtrack _ (RegTileReturns {}) = error "How to handle RegTileReturns"
+    backtrack stms (Returns manifest certs subexp) = do
+      -- If the returned value is constant there is nothing to do
+      case subexp of
+        Constant _ -> mempty
+        Var vname -> backtrack' vname (stmsToList stms)
+
+    backtrack' :: VName -> [Stm GPU] -> Stms GPU
+    backtrack' _ [] = mempty
+    backtrack' vname (stm:stms)= do
+      let pat = patElems $ stmPat stm
+      let used = any (\ x -> patElemName x == vname) pat
+      if used then oneStm stm <> backtrack' vname stms
+      else mempty
+
+
+
 
 -- NOTE uncomment this for pretty printing AST
 -- intraSeq :: Pass GPU GPU
@@ -53,6 +109,8 @@ intraSeq =
           runState $
             runReaderT (seqStms M.empty stms) scope
 
+-- TDOO: Are we sure that a mapM is fine here. Couldnt we get a case where
+-- we got a long line of simple let bindings that would the updated environment?
 seqStms :: Env -> Stms GPU -> SeqM (Stms GPU)
 seqStms env stms =
   localScope (scopeOf stms) $
@@ -73,26 +131,32 @@ seqStm env (Let pat aux (Op (SegOp (SegMap
   kbody' <- seqBody (M.insert group_size (Var gr_name) env) kbody
   pure $ gr_stm <> oneStm (Let pat aux (Op (SegOp (SegMap lvl' space ts kbody'))))
 
+
+-- When reaching a segred at thread level we need to create the segmap doing 
+-- the sequential work and modify the original segred to use the newly created
+-- intermediate array from the segmap
 seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
-  -- add segmap to perform the per thread reduction
-  -- TODO handle other cases for arrays below, currently we always get head 
-  let (Prim tp) = head ts
-  let (SegSpace phys ((gtid, bound):ps)) = space
-  -- TODO monads??
+  -- Extract different information from the original SegRed
+  let [Prim tp] = ts                              -- TODO: Always expects a single type
+  let phys = segFlat space                        -- The physical thread
+  let (gtid, bound):ps = unSegSpace space         -- (gtid < bound) TODO: What to do with ps?
+
+  -- Create new names for the to be created SegMap and update the Env
   phys' <- newName phys
   gtid' <- newName gtid
   let env' = M.insert (Var gtid) (Var gtid') env
-  -- TODO handle nothing
-  let Just sh_size = M.lookup bound env
-  let map_space = SegSpace phys' ((gtid', sh_size) : ps)
-  map_ident <- newIdent "inner_map" (Array tp (Shape [sh_size]) mempty)
+
+  let Just map_bound = M.lookup bound env       -- TODO handle nothing
+  let map_space = SegSpace phys' ((gtid', map_bound) : ps)
+  map_ident <- newIdent "map_res" (Array tp (Shape [map_bound]) mempty)
 
   -- TODO handle and update kernelbody
-  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts kbody)))
-  
-  let red_space = SegSpace phys ((gtid, sh_size) : ps)
+  let map_kbody = mkBodyFromBinops binops kbody
+  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts map_kbody)))
+
+  let red_space = SegSpace phys ((gtid, map_bound) : ps)
   let red_stm = Let pat aux (Op (SegOp (SegRed lvl red_space binops ts kbody)))
-  
+
   -- TODO let a = count number of statements in kernelbody
   -- let b = subtract accumulators from arugments to reduce lambda
   -- kernelbody stms not used in reduce = a - b 

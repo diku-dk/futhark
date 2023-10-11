@@ -111,8 +111,8 @@ gpuPipeline =
       --   intraSeq
       -- ]
       [ simplifyGPU,
-        intraSeq,
-        simplifyGPU
+        intraSeq
+        -- simplifyGPU
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all
