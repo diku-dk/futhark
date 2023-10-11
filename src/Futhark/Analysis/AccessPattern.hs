@@ -33,7 +33,7 @@ import Futhark.IR.SeqMem
 import Futhark.Util.Pretty
 
 class Analyze rep where
-  analyzeOp :: Op rep -> (Context rep -> VName -> (Context rep, IndexTable rep))
+  analyzeOp :: Op rep -> (Context rep -> [VName] -> (Context rep, IndexTable rep))
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
@@ -240,8 +240,8 @@ analyzeStmsPrimitive ctx =
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: (Analyze rep) => Context rep -> Context rep -> ((Int, VName) -> BodyType) -> VName -> [Stm rep] -> (Context rep, IndexTable rep)
-analyzeStms ctx tmp_ctx bodyConstructor pat body = do
+analyzeStms :: (Analyze rep) => Context rep -> Context rep -> ((Int, VName) -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
+analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
   -- 1. We do not want the returned context directly.
@@ -251,7 +251,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pat body = do
   let ctxVals = M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = extend ctx . concatCtxVal . map snd $ M.toList ctxVals
+  let ctx' = foldl extend ctx . concatCtxVal . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
@@ -259,13 +259,13 @@ analyzeStms ctx tmp_ctx bodyConstructor pat body = do
     -- MAY throw away needed information, but it was my best guess at a solution
     -- at the time of writing.
     concatCtxVal cvals =
-      oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals)
+      map (\pat -> oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals)) pats
 
     -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
       extend ctx $
         tmp_ctx
-          { parents = [bodyConstructor (currentLevel ctx, pat)],
+          { parents = concatMap (\pat -> [bodyConstructor (currentLevel ctx, pat)]) pats,
             currentLevel = currentLevel ctx + 1
           }
 
@@ -280,18 +280,18 @@ getDeps subexp =
 analyzeStm :: (Analyze rep) => Context rep -> Stm rep -> (Context rep, IndexTable rep)
 analyzeStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
-  let patternName = patElemName . head $ patElems pats
+  let patternNames = map patElemName $ patElems pats
   -- Construct the result and Context from the subexpression. If the subexpression
   -- is a body, we recurse into it.
   case e of
-    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternName name ee
-    (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternName name subexp
-    (BasicOp op) -> analyzeBasicOp ctx op patternName
-    (Match _ cases defaultBody _) -> analyzeMatch ctx patternName defaultBody $ map caseBody cases
-    (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternName
-    (Apply _name diets _ _) -> analyzeApply ctx patternName diets
+    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternNames name ee
+    (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternNames name subexp
+    (BasicOp op) -> analyzeBasicOp ctx op patternNames
+    (Match _ cases defaultBody _) -> analyzeMatch ctx patternNames defaultBody $ map caseBody cases
+    (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternNames
+    (Apply _name diets _ _) -> analyzeApply ctx patternNames diets
     (WithAcc _ _) -> (ctx, mempty) -- ignored
-    (Op op) -> analyzeOp op ctx patternName
+    (Op op) -> analyzeOp op ctx patternNames
 
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
 getIndexDependencies _ [] = Nothing
@@ -304,23 +304,23 @@ getIndexDependencies ctx dims =
           Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
         _ -> Nothing
 
-analyzeIndex :: Context rep -> VName -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
-analyzeIndex ctx pat arr_name dimIndexes = do
+analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
+analyzeIndex ctx pats arr_name dimIndexes = do
   let dimindices = getIndexDependencies ctx dimIndexes
   maybe
     (ctx, mempty)
-    (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pat) pat arr_name)
+    (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pats) pats arr_name)
     dimindices
 
-analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> VName -> Context rep
-analyzeIndexContextFromIndices ctx dimIndexes pat = do
+analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
+analyzeIndexContextFromIndices ctx dimIndexes pats = do
   let (subExprs, consts) =
         partitionEithers $
           mapMaybe
             ( \case
                 (DimFix subExpression) -> case subExpression of
                   (Var v) -> Just (Left v)
-                  (Constant _) -> Just (Right pat)
+                  (Constant _) -> Just (Right pats)
                 (DimSlice _offs _n _stride) -> Nothing
             )
             dimIndexes
@@ -330,38 +330,39 @@ analyzeIndexContextFromIndices ctx dimIndexes pat = do
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
-  extend ctx $ (oneContext pat ctxVal) {constants = namesFromList consts}
+  foldl extend ctx $ map (\pat -> (oneContext pat ctxVal) {constants = namesFromList $ concat consts}) pats
 
-analyzeIndex' :: Context rep -> VName -> VName -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
+analyzeIndex' :: Context rep -> [VName] -> VName -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
-analyzeIndex' ctx pat arr_name dimIndexes = do
+analyzeIndex' ctx pats arr_name dimIndexes = do
   let segmaps = allSegMap ctx
   let memory_entries = MemoryEntry dimIndexes $ parents ctx
-  let idx_expr_name = pat --                                         IndexExprName
-  let map_ixd_expr = M.singleton idx_expr_name memory_entries --     IndexExprName |-> MemoryEntry
-  let map_array = M.singleton arr_name map_ixd_expr -- ArrayName |-> IndexExprName |-> MemoryEntry
-  let res = foldl' unionIndexTables mempty $ map (`M.singleton` map_array) segmaps
+  let idx_expr_name = pats --                                                IndexExprName
+  let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> MemoryEntry
+  let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
+  let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
+  let res = foldl' unionIndexTables mempty results
 
   (ctx, res)
 
-analyzeBasicOp :: Context rep -> BasicOp -> VName -> (Context rep, IndexTable rep)
-analyzeBasicOp ctx expression pat = do
+analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable rep)
+analyzeBasicOp ctx expression pats = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
-        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
+        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
+        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
         (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
-        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx subexp
+        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
         (Index name _) ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pat ctx length_subexp
+        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp
         (Manifest _dim name) -> ctxValFromNames ctx $ oneName name -- error $ "unhandled: Manifest for " ++ prettyString name
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
@@ -370,23 +371,23 @@ analyzeBasicOp ctx expression pat = do
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         _ -> error "unhandled: match-all"
-  let ctx' = extend ctx $ oneContext pat ctx_val
+  let ctx' = foldl extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
     concatCtxVals ne nn =
       ctxValFromNames
         ctx
-        (foldl' (\a -> (<>) a . analyzeSubExpr pat ctx) ne nn)
+        (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
 
-analyzeMatch :: (Analyze rep) => Context rep -> VName -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
-analyzeMatch ctx pat body bodies =
+analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
+analyzeMatch ctx pats body bodies =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl'
         ( \(ctx', res) b ->
             -- This Little Maneuver's Gonna Cost Us 51 Years
             onFst constLevel
               . onSnd (unionIndexTables res)
-              . analyzeStms ctx'' ctx' CondBodyName pat
+              . analyzeStms ctx'' ctx' CondBodyName pats
               . stmsToList
               $ bodyStms b
         )
@@ -395,8 +396,8 @@ analyzeMatch ctx pat body bodies =
   where
     constLevel context = context {currentLevel = currentLevel ctx - 1}
 
-analyzeLoop :: (Analyze rep) => Context rep -> [(FParam rep, SubExp)] -> LoopForm -> Body rep -> VName -> (Context rep, IndexTable rep)
-analyzeLoop ctx bindings loop body pat = do
+analyzeLoop :: (Analyze rep) => Context rep -> [(FParam rep, SubExp)] -> LoopForm -> Body rep -> [VName] -> (Context rep, IndexTable rep)
+analyzeLoop ctx bindings loop body pats = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
   let ctx' =
@@ -406,13 +407,13 @@ analyzeLoop ctx bindings loop body pat = do
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
 
   -- Extend context with the loop expression
-  analyzeStms ctx ctx' LoopBodyName pat $ stmsToList $ bodyStms body
+  analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
-analyzeApply :: Context rep -> VName -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
-analyzeApply ctx pat diets =
+analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
+analyzeApply ctx pats diets =
   onFst
     ( \ctx' ->
-        extend ctx' $ oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets
+        foldl extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
     )
     (ctx, mempty)
 
@@ -422,8 +423,8 @@ segOpType (SegRed {}) = SegmentedRed
 segOpType (SegScan {}) = SegmentedScan
 segOpType (SegHist {}) = SegmentedHist
 
-analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context rep -> VName -> (Context rep, IndexTable rep)
-analyzeSegOp op ctx pat = do
+analyzeSegOp :: (Analyze rep) => SegOp lvl rep -> Context rep -> [VName] -> (Context rep, IndexTable rep)
+analyzeSegOp op ctx pats = do
   let nextLevel = currentLevel ctx + length (unSegSpace $ segSpace op) - 1
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
@@ -434,19 +435,19 @@ analyzeSegOp op ctx pat = do
           . unSegSpace
           $ segSpace op
   -- Analyze statements in the SegOp body
-  analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pat . stmsToList . kernelBodyStms $ segBody op
+  analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
 
-analyzeSizeOp :: SizeOp -> Context rep -> VName -> (Context rep, IndexTable rep)
-analyzeSizeOp op ctx pat = do
+analyzeSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
+analyzeSizeOp op ctx pats = do
   let subexprsToContext =
         contextFromNames ctx Sequential
-          . concatMap (namesToList . analyzeSubExpr pat ctx)
+          . concatMap (namesToList . analyzeSubExpr pats ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctx'' = extend ctx' $ oneContext pat $ ctxValZeroDeps ctx Sequential
+  let ctx'' = foldl extend ctx' $ map (\pat -> oneContext pat $ ctxValZeroDeps ctx Sequential) pats
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
@@ -454,7 +455,7 @@ analyzeGPUBody :: (Analyze rep) => Body rep -> Context rep -> (Context rep, Inde
 analyzeGPUBody body ctx =
   analyzeStmsPrimitive ctx $ stmsToList $ bodyStms body
 
-analyzeOtherOp :: Context rep -> VName -> (Context rep, IndexTable rep)
+analyzeOtherOp :: Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Get the iteration type of the last SegOp encountered in the context.
@@ -480,7 +481,7 @@ getIterationType (Context _ _ bodies _) =
 -- might be thrown out in the future, as it is mostly just a very verbose way to
 -- ensure that we capture all necessary variables in the context at the moment
 -- of development.
-analyzeSubExpr :: VName -> Context rep -> SubExp -> Names
+analyzeSubExpr :: [VName] -> Context rep -> SubExp -> Names
 analyzeSubExpr _ _ (Constant _) = mempty
 analyzeSubExpr pp ctx (Var v) =
   case M.lookup v (assignments ctx) of
