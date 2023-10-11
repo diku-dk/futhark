@@ -287,7 +287,7 @@ analyzeStm ctx (Let pats _ e) = do
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternNames name ee
     (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternNames name subexp
     (BasicOp op) -> analyzeBasicOp ctx op patternNames
-    (Match _ cases defaultBody _) -> analyzeMatch ctx patternNames defaultBody $ map caseBody cases
+    (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (getIterationType ctx) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternNames
     (Apply _name diets _ _) -> analyzeApply ctx patternNames diets
     (WithAcc _ _) -> (ctx, mempty) -- ignored
@@ -330,7 +330,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
-  foldl extend ctx $ map (\pat -> (oneContext pat ctxVal) {constants = namesFromList $ concat consts}) pats
+  foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal) {constants = namesFromList $ concat consts}) pats
 
 analyzeIndex' :: Context rep -> [VName] -> VName -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
@@ -371,7 +371,7 @@ analyzeBasicOp ctx expression pats = do
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         _ -> error "unhandled: match-all"
-  let ctx' = foldl extend ctx $ map (`oneContext` ctx_val) pats
+  let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
     concatCtxVals ne nn =
@@ -382,12 +382,12 @@ analyzeBasicOp ctx expression pats = do
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pats body bodies =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
-   in foldl'
+   in foldl
         ( \(ctx', res) b ->
             -- This Little Maneuver's Gonna Cost Us 51 Years
             onFst constLevel
               . onSnd (unionIndexTables res)
-              . analyzeStms ctx'' ctx' CondBodyName pats
+              . analyzeStms ctx' mempty CondBodyName pats
               . stmsToList
               $ bodyStms b
         )
@@ -413,7 +413,7 @@ analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, Inde
 analyzeApply ctx pats diets =
   onFst
     ( \ctx' ->
-        foldl extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
+        foldl' extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
     )
     (ctx, mempty)
 
@@ -447,7 +447,7 @@ analyzeSizeOp op ctx pats = do
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctx'' = foldl extend ctx' $ map (\pat -> oneContext pat $ ctxValZeroDeps ctx Sequential) pats
+  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ ctxValZeroDeps ctx Sequential) pats
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
