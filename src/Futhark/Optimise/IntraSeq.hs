@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
+import Language.Futhark.Core
 import Futhark.Pass
 import Futhark.IR.GPU
 import Futhark.Builder.Class
@@ -48,42 +49,55 @@ intraSeq =
       onStms scope stms =
         modifyNameSource $
           runState $
-            runReaderT (seqStms stms) scope
+            runReaderT (seqStms (VName "" 1 ) stms) scope
 
-seqStms :: Stms GPU -> SeqM (Stms GPU)
-seqStms stms =
+seqStms :: VName -> Stms GPU -> SeqM (Stms GPU)
+seqStms seq_name stms =
   localScope (scopeOf stms) $
-    mconcat <$> mapM seqStm (stmsToList stms)
+    mconcat <$> mapM (seqStm seq_name) (stmsToList stms)
 
-seqBody :: KernelBody GPU -> SeqM (KernelBody GPU)
-seqBody (KernelBody dec stms result) = do
-  stms' <- seqStms stms
+seqBody :: VName -> KernelBody GPU -> SeqM (KernelBody GPU)
+seqBody seq_name (KernelBody dec stms result) = do
+  stms' <- seqStms seq_name stms
   pure $ KernelBody dec stms' result
 
 -- seq outer map, divide group size by sequentialization factor
-seqStm :: Stm GPU -> SeqM (Stms GPU)
-seqStm (Let pat aux (Op (SegOp (SegMap
+seqStm :: VName -> Stm GPU -> SeqM (Stms GPU)
+seqStm seq_name (Let pat aux (Op (SegOp (SegMap
         lvl@(SegGroup virt (Just (KernelGrid num_groups (Count group_size))))
         space ts kbody)))) = do
   (gr_name, gr_stm) <- runBuilder $ bindNewGroupSize group_size
   let lvl' = SegGroup virt (Just $ KernelGrid num_groups $ Count (Var gr_name))
-  kbody' <- seqBody kbody
+  kbody' <- seqBody seq_name kbody
   pure $ gr_stm <> oneStm (Let pat aux (Op (SegOp (SegMap lvl' space ts kbody'))))
 
-seqStm (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
+seqStm seq_name (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
   -- add segmap to perform the per thread reduction
-  map_name <- newVName "inner_map"
-  -- let map_stm = oneStm $ Let map_name aux (Op (SegOp (SegMap lvl space ts kbody)))
+  -- TODO handle other TypeBase cases?? Should always be array tho
+  let (Prim tp) = head ts
+  map_ident <- newIdent "inner_map" (Array tp (Shape [Var seq_name]) mempty)
+  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl space ts kbody)))
+  
 
+  pure $ stmsFromList[map_stm, Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))]
+  -- runBuilder_ $ do
+  -- let SegBinOp comm lamb neut _ = head binops
+  -- wrap lambda body inside thread local reduce over chunk elements
+  -- might need to change types
+  -- vname <- newVName "iterator"
+  -- the body is just load in chunk and run the lambda body from binops i suppose
+  -- loopbody <- runBodyBuilder $ 
+  -- kbody' <- letExp "inner_red" $ 
+  --   Loop [] (ForLoop vname Int64 seqFactor []) loopbody 
+  -- add map that loops over 1/4
+  -- tid_map <- letExp "tid_map" $ Op (SegOp (SegMap lvl space ts kbody'))
 
-  pure $ oneStm $ Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))
-
-seqStm (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
+seqStm seq_name (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
   pure $ oneStm $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))
 
-seqStm (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
+seqStm seq_name (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
   pure $ oneStm $ Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody)))
 
-seqStm stm = pure $ oneStm stm
+seqStm seq_name stm = pure $ oneStm stm
 
 
