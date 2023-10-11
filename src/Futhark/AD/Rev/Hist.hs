@@ -21,8 +21,6 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-import Debug.Trace (trace, traceM)
-
 getBinOpPlus :: PrimType -> BinOp
 getBinOpPlus (IntType x) = Add x OverflowUndef
 getBinOpPlus (FloatType f) = FAdd f
@@ -583,7 +581,7 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     -- addStm $ Let x aux $ Op $
     -- Just matching the style of other functions here:
     auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
-  trace (prettyString stms) $ foldr (vjpStm ops) m stms
+  foldr (vjpStm ops) m stms
 
 
 --
