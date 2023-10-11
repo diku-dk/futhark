@@ -84,15 +84,20 @@ seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbod
   let env' = M.insert (Var gtid) (Var gtid') env
   -- TODO handle nothing
   let Just sh_size = M.lookup bound env
-  let space' = SegSpace phys' ((gtid', sh_size) : ps)
+  let map_space = SegSpace phys' ((gtid', sh_size) : ps)
   map_ident <- newIdent "inner_map" (Array tp (Shape [sh_size]) mempty)
 
+  -- TODO handle and update kernelbody
+  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts kbody)))
+  
+  let red_space = SegSpace phys ((gtid, sh_size) : ps)
+  let red_stm = Let pat aux (Op (SegOp (SegRed lvl red_space binops ts kbody)))
+  
+  -- TODO let a = count number of statements in kernelbody
+  -- let b = subtract accumulators from arugments to reduce lambda
+  -- kernelbody stms not used in reduce = a - b 
 
-
-  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl space' ts kbody)))
-
-
-  pure $ stmsFromList [map_stm, Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody)))]
+  pure $ stmsFromList [map_stm, red_stm]
   -- runBuilder_ $ do
   -- let SegBinOp comm lamb neut _ = head binops
   -- wrap lambda body inside thread local reduce over chunk elements
