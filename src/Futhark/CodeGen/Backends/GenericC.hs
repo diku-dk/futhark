@@ -70,7 +70,7 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
           2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
           4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
           8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
-          k -> error $ "lmadcopyCPU: " <> error (show k)
+          k -> error $ "lmadcopyCPU: " <> show k
       r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
