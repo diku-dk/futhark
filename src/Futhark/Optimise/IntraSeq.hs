@@ -152,13 +152,13 @@ seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbod
 
   -- TODO handle and update kernelbody
   let map_bodies = lambdaBody $ segBinOpLambda $ head binops    -- TODO: Handle multiple binops
-  let results = map (resToRes . resSubExp) (bodyResult map_bodies)
-  let stms = bodyStms map_bodies
-  let map_kbody = KernelBody mempty stms results
-  let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts map_kbody)))
+  let results    = map (resToRes . resSubExp) (bodyResult map_bodies)
+  stms <- runBuilder_ $ mkRedLoop (head ts) (head $ segBinOpNeutral $ head binops) (bodyStms map_bodies)
+  let map_kbody  = KernelBody mempty stms results
+  let map_stm    = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts map_kbody)))
 
   let red_space = SegSpace phys ((gtid, map_bound) : ps)
-  let red_stm = Let pat aux (Op (SegOp (SegRed lvl red_space binops ts kbody)))
+  let red_stm   = Let pat aux (Op (SegOp (SegRed lvl red_space binops ts kbody)))
 
   -- TODO let a = count number of statements in kernelbody
   -- let b = subtract accumulators from arugments to reduce lambda
@@ -178,3 +178,13 @@ seqStm env (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbo
 seqStm env stm = pure $ oneStm stm
 
 
+-- Make a loop that performs a reduction. 
+-- First argument is the neutral element, second is the statements that make
+-- up the opereation i.e. + in 'reduce (+) 0 arr'
+mkRedLoop :: Type -> SubExp -> Stms GPU -> Builder GPU ()
+mkRedLoop tp ne stms = do
+  i <- newVName "i"
+  let loop_body = mkBody stms $ varsRes [i]
+  params <- newParam "v" $ toDecl tp Unique
+  loop_exp <- letExp "loop_res" $ Loop [(params, ne)] (ForLoop i Int64 seqFactor []) loop_body
+  pure ()
