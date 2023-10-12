@@ -196,7 +196,7 @@ repairExpression ::
 repairExpression (BasicOp (Reshape k shape v)) = do
   v_mem <- fst <$> lookupArraySummary v
   space <- lookupMemSpace v_mem
-  v' <- snd <$> ensureDirectArray (Just space) v
+  (_, _, v') <- ensureDirectArray (Just space) v
   pure $ BasicOp $ Reshape k shape v'
 repairExpression e =
   error $ "repairExpression:\n" <> prettyString e
@@ -525,20 +525,23 @@ ensureDirectArray ::
   (Allocable fromrep torep inner) =>
   Maybe Space ->
   VName ->
-  AllocM fromrep torep (VName, VName)
+  AllocM fromrep torep (VName, SubExp, VName)
 ensureDirectArray space_ok v = do
   (mem, ixfun) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   case LMAD.isDirect (IxFun.ixfunLMAD ixfun) of
-    Just _
-      | maybe True (== mem_space) space_ok -> pure (mem, v)
+    Just offset
+      | maybe True (== mem_space) space_ok -> do
+          offset' <- letSubExp (baseString v <> "_offset") =<< toExp offset
+          pure (mem, offset', v)
     _ -> needCopy (fromMaybe default_space space_ok)
   where
-    needCopy space =
+    needCopy space = do
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
-      allocLinearArray space (baseString v) v
+      (mem, v') <- allocLinearArray space (baseString v) v
+      pure (mem, constant (0 :: Int64), v')
 
 allocPermArray ::
   (Allocable fromrep torep inner) =>
@@ -608,8 +611,8 @@ linearFuncallArg ::
   SubExp ->
   WriterT ([SubExp], [SubExp]) (AllocM fromrep torep) SubExp
 linearFuncallArg Array {} space (Var v) = do
-  (mem, arg') <- lift $ ensureDirectArray (Just space) v
-  tell ([Var mem], [])
+  (mem, offset, arg') <- lift $ ensureDirectArray (Just space) v
+  tell ([Var mem, offset], [])
   pure $ Var arg'
 linearFuncallArg _ _ arg =
   pure arg
@@ -731,7 +734,7 @@ ensureDirect space_ok (SubExpRes cs se) = do
   se_info <- subExpMemInfo se
   SubExpRes cs <$> case (se_info, se) of
     (MemArray {}, Var v) -> do
-      (_, v') <- ensureDirectArray space_ok v
+      (_, _, v') <- ensureDirectArray space_ok v
       pure $ Var v'
     _ ->
       pure se
@@ -950,15 +953,21 @@ allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
   -- We assume that every array is going to be in its own memory.
-  let num_extra_args = length args' - length args
+  let extra_rets = mems space
+      num_extra_args = length args' - length args
+      num_extra_rets = length extra_rets
       rettype' =
-        mems space
+        extra_rets
           ++ zip
-            (memoryInDeclExtType space num_arrays (map fst rettype))
-            (map (shiftRetAls num_extra_args num_arrays . snd) rettype)
+            (memoryInDeclExtType space num_extra_rets (map fst rettype))
+            (map (shiftRetAls num_extra_args num_extra_rets . snd) rettype)
   pure $ Apply fname args' rettype' loc
   where
-    mems space = replicate num_arrays (MemMem space, RetAls mempty mempty)
+    mems space =
+      concat . replicate num_arrays $
+        [ (MemMem space, RetAls mempty mempty),
+          (MemPrim int64, RetAls mempty mempty)
+        ]
     num_arrays = length $ filter ((> 0) . arrayRank . declExtTypeOf . fst) rettype
 allocInExp (Match ses cases defbody (MatchDec rets ifsort)) = do
   (defbody', def_reqs) <- allocInMatchBody rets defbody

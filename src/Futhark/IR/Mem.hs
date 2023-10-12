@@ -674,6 +674,10 @@ getExtMaps ctx_lst_ids =
         ctx_lst_ids
   )
 
+-- | Used for checking *function* returns; not other cases of bodies
+-- being returned.
+--
+-- In particular, we are lax regarding the base of the index function in some cases.
 matchReturnType ::
   (PP.Pretty u) =>
   [MemInfo ExtSize u MemReturn] ->
@@ -681,8 +685,7 @@ matchReturnType ::
   [MemInfo SubExp NoUniqueness MemBind] ->
   TC.TypeM rep ()
 matchReturnType rettype res ts = do
-  let existentialiseIxFun0 :: IxFun -> ExtIxFun
-      existentialiseIxFun0 = fmap $ fmap Free
+  let closeEnough f1 f2 = length (IxFun.shape f1) == length (IxFun.shape f2)
 
       fetchCtx i = case maybeNth i $ zip res ts of
         Nothing ->
@@ -717,7 +720,7 @@ matchReturnType rettype res ts = do
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
         | x_mem == y_mem =
-            unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+            unless (closeEnough x_ixfun y_ixfun) $
               throwError . T.unwords $
                 [ "Index function unification failed (ReturnsInBlock)",
                   "\nixfun of body result: ",
@@ -729,7 +732,7 @@ matchReturnType rettype res ts = do
         (ReturnsNewBlock x_space x_ext x_ixfun)
         (ArrayIn y_mem y_ixfun) = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
-          unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+          unless (closeEnough x_ixfun y_ixfun) $
             throwError . docText $
               "Index function unification failed (ReturnsNewBlock)"
                 </> "Ixfun of body result:"
