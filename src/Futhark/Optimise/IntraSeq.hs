@@ -151,7 +151,10 @@ seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbod
   map_ident <- newIdent "map_res" (Array tp (Shape [map_bound]) mempty)
 
   -- TODO handle and update kernelbody
-  let map_kbody = mkBodyFromBinops binops kbody
+  let map_bodies = lambdaBody $ segBinOpLambda $ head binops    -- TODO: Handle multiple binops
+  let results = map (resToRes . resSubExp) (bodyResult map_bodies)
+  let stms = bodyStms map_bodies
+  let map_kbody = KernelBody mempty stms results
   let map_stm = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts map_kbody)))
 
   let red_space = SegSpace phys ((gtid, map_bound) : ps)
@@ -162,17 +165,9 @@ seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbod
   -- kernelbody stms not used in reduce = a - b 
 
   pure $ stmsFromList [map_stm, red_stm]
-  -- runBuilder_ $ do
-  -- let SegBinOp comm lamb neut _ = head binops
-  -- wrap lambda body inside thread local reduce over chunk elements
-  -- might need to change types
-  -- vname <- newVName "iterator"
-  -- the body is just load in chunk and run the lambda body from binops i suppose
-  -- loopbody <- runBodyBuilder $ 
-  -- kbody' <- letExp "inner_red" $ 
-  --   Loop [] (ForLoop vname Int64 seqFactor []) loopbody 
-  -- add map that loops over 1/4
-  -- tid_map <- letExp "tid_map" $ Op (SegOp (SegMap lvl space ts kbody'))
+  where
+    resToRes :: SubExp -> KernelResult
+    resToRes = Returns ResultMaySimplify mempty
 
 seqStm env (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
   pure $ oneStm $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))
