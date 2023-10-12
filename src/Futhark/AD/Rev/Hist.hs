@@ -567,7 +567,7 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
     vss_col <- newParam "vss_col" $ rowType t_vssT
     ne <- newParam "ne" $ rowType t_nes
 
-    f <- mkIdentityLambda [Prim int64, Prim $ elemType t_dstT]
+    f <- mkIdentityLambda (Prim int64 : lambdaReturnType op)
     map_lam <-
       mkLambda [dst_col, vss_col, ne] $ do
         -- TODO Have to copy dst_col, but isn't it already unique?
