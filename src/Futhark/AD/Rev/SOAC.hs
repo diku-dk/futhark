@@ -14,6 +14,7 @@ import Futhark.Builder
 import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Util (chunks)
+import Debug.Trace (trace)
 
 -- We split any multi-op scan or reduction into multiple operations so
 -- we can detect special cases.  Post-AD, the result may be fused
@@ -108,7 +109,10 @@ vjpSOAC ops pat aux soac@(Screma w as form) m
       diffScanAdd ops x w lam ne a
   | Just [Scan lam ne] <- isScanSOAC form,
     Just op <- mapOp lam = do
-      diffScanVec ops (patNames pat) aux w op ne as m
+      trace "\n\n#diffScanVec input" $
+        trace (prettyString (Let pat aux $ Op soac)) $
+          trace "#diffScanVec result" $
+            diffScanVec ops (patNames pat) aux w op ne as m
   | Just scans <- isScanSOAC form,
     length scans > 1 =
       splitScanRed ops (scanSOAC, scanNeutral) (pat, aux, scans, w, as) m
@@ -160,29 +164,42 @@ vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [Var ne] lam <- histop,
     -- Note that the operator is vectorised, so `ne` cannot be a 'PrimValue'.
+    -- TODO handle nested maps?
     Just op <- mapOp lam =
-      diffVecHist ops x aux n op ne is vs w rf dst m
+      trace "\n\n#diffVecHist input" $
+        trace (prettyString (Let pat aux $ Op (Hist n [is, vs] [histop] f))) $
+          trace "#diffVecHist result" $
+            diffVecHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMinMaxOp op =
-      diffMinMaxHist ops x aux n op ne is vs w rf dst m
+      trace "\n\n#diffMinMaxHist input" $
+        trace (prettyString (Let pat aux $ Op (Hist n [is, vs] [histop] f))) $
+          trace "#diffMinMaxHist result" $
+            diffMinMaxHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isMulOp op =
-      diffMulHist ops x aux n op ne is vs w rf dst m
+      trace "\n\n#diffMulHist input" $
+        trace (prettyString (Hist n [is, vs] [histop] f)) $
+          trace "#diffMulHist result" $
+            diffMulHist ops x aux n op ne is vs w rf dst m
   | isIdentityLambda f,
     [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
     isAddOp op =
-      diffAddHist ops x aux n lam ne is vs w rf dst m
+      trace "\n\n#diffAddHist input" $
+        trace (prettyString (Let pat aux $ Op (Hist n [is, vs] [histop] f))) $
+          trace "#diffAddHist result" $
+            diffAddHist ops x aux n lam ne is vs w rf dst m
 vjpSOAC ops pat aux (Hist n as [histop] f) m
   | isIdentityLambda f,
     HistOp (Shape w) rf dst ne lam <- histop = do

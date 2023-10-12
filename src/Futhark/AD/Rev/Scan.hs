@@ -11,6 +11,8 @@ import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Util (chunk)
 
+import Debug.Trace (trace)
+
 data FirstOrSecond = WrtFirst | WrtSecond
 
 identityM :: Int -> Type -> ADM [[SubExp]]
@@ -314,7 +316,7 @@ diffScanVec ops ys aux w lam ne as m = do
       ys
       transp_ys
 
-  foldr (vjpStm ops) m stmts
+  trace (prettyString stmts) $ foldr (vjpStm ops) m stmts
 
 diffScanAdd :: VjpOps -> VName -> SubExp -> Lambda SOACS -> SubExp -> VName -> ADM ()
 diffScanAdd _ops ys n lam' ne as = do

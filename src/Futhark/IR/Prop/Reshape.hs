@@ -83,7 +83,7 @@ flattenIndex ::
   [num] ->
   num
 flattenIndex dims is
-  | length is /= length slicesizes = error "flattenIndex: length mismatch"
+  | length is /= length slicesizes = error ("flattenIndex: length mismatch @" ++ show (length dims) ++ " " ++ show (length is))
   | otherwise = sum $ zipWith (*) is slicesizes
   where
     slicesizes = drop 1 $ sliceSizes dims
