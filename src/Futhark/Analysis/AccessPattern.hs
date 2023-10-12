@@ -216,7 +216,8 @@ contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
 contextFromNames ctx itertype =
   -- Create context from names in segspace
   foldl' extend ctx
-    . map (`oneContext` ctxValZeroDeps ctx itertype)
+    . map (\(i, n) -> n `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype)
+    . zip [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable rep
