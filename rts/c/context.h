@@ -1,9 +1,5 @@
 // Start of context.h
 
-// Eventually it would be nice to move the context definition in here
-// instead of generating it in the compiler.  For now it defines
-// various helper functions that must be available.
-
 // Internal functions.
 
 static void set_error(struct futhark_context* ctx, char *error) {
