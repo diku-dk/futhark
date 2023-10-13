@@ -22,7 +22,6 @@ import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.MC
@@ -216,8 +215,13 @@ contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
 contextFromNames ctx itertype =
   -- Create context from names in segspace
   foldl' extend ctx
-    . map (\(i, n) -> n `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype)
-    . zip [0 ..]
+    . map (`oneContext` ctxValZeroDeps ctx itertype)
+  --  . zipWith
+  --    ( \i n ->
+  --        n
+  --          `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype
+  --    )
+  --    [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable rep
@@ -249,10 +253,10 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   --    however, we do want pat to map to the names what was hit in body.
   --    therefore we need to subtract the old context from the returned one,
   --    and discard all the keys within it.
-  let ctxVals = M.difference (assignments ctx'') (assignments recContext)
+  -- let ctxVals = M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = foldl extend ctx . concatCtxVal . map snd $ M.toList ctxVals
+  let ctx' = foldl extend ctx $ concatCtxVal [] -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
@@ -408,7 +412,7 @@ analyzeLoop ctx bindings loop body pats = do
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
 
   -- Extend context with the loop expression
-  analyzeStms ctx ctx' LoopBodyName pats $ stmsToList $ bodyStms body
+  analyzeStms ctx' mempty LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
 analyzeApply ctx pats diets =
@@ -432,11 +436,12 @@ analyzeSegOp op ctx pats = do
         foldl' extend ctx'
           . map (\(n, i) -> n `oneContext` CtxVal mempty Parallel (currentLevel ctx + i))
           . (\segspaceParams -> zip segspaceParams [0 ..])
+        --contextFromNames ctx' Parallel
           . map fst
           . unSegSpace
           $ segSpace op
   -- Analyze statements in the SegOp body
-  analyzeStms ctx' segSpaceContext (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+  analyzeStms segSpaceContext mempty (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
 
 analyzeSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeSizeOp op ctx pats = do
@@ -504,7 +509,7 @@ reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
-      Nothing -> error $ "Unable to find " ++ prettyString v
+      Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
       Just (CtxVal deps itertype lvl) ->
         if null $ namesToList deps
           then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) $ currentLevel ctx
