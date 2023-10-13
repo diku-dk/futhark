@@ -82,14 +82,17 @@ compileSegScan ::
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scan_ops kbody =
+compileSegScan pat lvl space scan_ops map_kbody =
   sWhen (0 .<. n) $ do
     emit $ Imp.DebugPrint "\n# SegScan" Nothing
     target <- hostTarget <$> askEnv
 
-    case (targetSupportsSinglePass target, canBeSinglePass scan_ops kbody) of
-      (True, Just scan_ops') -> SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
-      _ -> TwoPass.compileSegScan pat lvl space scan_ops map_kbody
+    case (targetSupportsSinglePass target, canBeSinglePass scan_ops map_kbody) of
+      (True, Just scan_ops') ->
+        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
+
+      _ ->
+        TwoPass.compileSegScan pat lvl space scan_ops map_kbody
 
     emit $ Imp.DebugPrint "" Nothing
   where
