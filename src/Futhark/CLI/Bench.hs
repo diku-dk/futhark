@@ -370,7 +370,8 @@ runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
 runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       pure Nothing
-runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+runBenchmarkCase server opts futhark program entry pad_to tr = do
+  let (TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = tr
   start_time <- liftIO getCurrentTime
   prompt <- mkProgressPrompt opts pad_to dataset_desc start_time
 
