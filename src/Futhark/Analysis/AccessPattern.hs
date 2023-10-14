@@ -216,12 +216,13 @@ contextFromNames ctx itertype =
   -- Create context from names in segspace
   foldl' extend ctx
     . map (`oneContext` ctxValZeroDeps ctx itertype)
-  --  . zipWith
-  --    ( \i n ->
-  --        n
-  --          `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype
-  --    )
-  --    [0 ..]
+
+--  . zipWith
+--    ( \i n ->
+--        n
+--          `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype
+--    )
+--    [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable rep
@@ -253,18 +254,22 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   --    however, we do want pat to map to the names what was hit in body.
   --    therefore we need to subtract the old context from the returned one,
   --    and discard all the keys within it.
-  -- let ctxVals = M.difference (assignments ctx'') (assignments recContext)
+
+  -- assignments :: M.Map VName (CtxVal rep),
+  let inScopeDependenciesFromBody =
+        rmOutOfScopeDeps ctx'' $
+          M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = foldl extend ctx $ concatCtxVal [] -- . map snd $ M.toList ctxVals
+  let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
   (ctx', aids)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
     -- at the time of writing.
-    concatCtxVal cvals =
-      map (\pat -> oneContext pat (ctxValFromNames ctx $ foldl' (<>) mempty $ map deps cvals)) pats
+    concatCtxVal dependencies =
+      map (\pat -> oneContext pat (ctxValFromNames ctx dependencies)) pats
 
     -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
@@ -273,6 +278,47 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
           { parents = concatMap (\pat -> [bodyConstructor (currentLevel ctx, pat)]) pats,
             currentLevel = currentLevel ctx + 1
           }
+
+    -- does the same thing as consolidate
+    rmOutOfScopeDeps :: Context rep -> M.Map VName (CtxVal rep) -> Names
+    rmOutOfScopeDeps ctx' newAssignments = do
+      let throwawayAssignments = assignments ctx'
+      let localAssignments = assignments ctx
+      let localConstants = constants ctx
+      M.foldlWithKey
+        ( \result a ctxval ->
+            let dependencies = deps ctxval
+             in -- if the VName of the assignment exists in the context, we are good
+                if a `M.member` localAssignments || a `nameIn` localConstants
+                  then result <> oneName a
+                  else -- Otherwise, recurse on its dependencies;
+                  -- 0. Add dependencies in ctx to result
+
+                    let (depsInCtx, depsNotInCtx) =
+                          partitionEithers
+                            $ map
+                              ( \d ->
+                                  if d `M.member` localAssignments
+                                    then Left d
+                                    else Right d
+                              )
+                            $ namesToList dependencies
+                     in let depsNotInCtx' =
+                              M.fromList $
+                                mapMaybe
+                                  ( \d -> case M.lookup d throwawayAssignments of
+                                      Just ctxval' -> Just (d, ctxval')
+                                      _ -> Nothing
+                                  )
+                                  depsNotInCtx
+                         in result
+                              <> namesFromList depsInCtx
+                              <> rmOutOfScopeDeps
+                                ctx'
+                                depsNotInCtx'
+        )
+        mempty
+        newAssignments
 
 getDeps :: SubExp -> Names
 getDeps subexp =
@@ -436,7 +482,7 @@ analyzeSegOp op ctx pats = do
         foldl' extend ctx'
           . map (\(n, i) -> n `oneContext` CtxVal mempty Parallel (currentLevel ctx + i))
           . (\segspaceParams -> zip segspaceParams [0 ..])
-        --contextFromNames ctx' Parallel
+          -- contextFromNames ctx' Parallel
           . map fst
           . unSegSpace
           $ segSpace op
