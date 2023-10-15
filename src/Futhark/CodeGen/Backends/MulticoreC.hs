@@ -209,7 +209,8 @@ benchmarkCode name code =
        event->bef = get_wall_time();
      }
      $items:code
-     if (event != NULL) { event->aft = get_wall_time(); }
+     if (event != NULL) {
+       event->aft = get_wall_time();
        lock_lock(&ctx->event_list_lock);
        add_event(ctx,
                  $string:(nameToString name),
@@ -217,6 +218,7 @@ benchmarkCode name code =
                  event,
                  (typename event_report_fn)mc_event_report);
        lock_unlock(&ctx->event_list_lock);
+     }
      }|]
 
 functionTiming :: Name -> C.Id
