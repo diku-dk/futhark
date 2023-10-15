@@ -81,7 +81,7 @@ seqStm stm = error $ "Expected a SegMap at Group level but got " ++ show stm
 -- Second SubExp is the gruup size
 seqBody :: SubExp -> SubExp -> KernelBody GPU -> SeqM (KernelBody GPU)
 seqBody grpId grpSize (KernelBody dec stms result) = do
-  stms' <- seqStms' grpId  grpSize stms
+  stms' <- localScope (scopeOf stms) $ runBuilder_ $ seqStms' grpId grpSize stms
   pure $ KernelBody dec stms' result
 
 
@@ -96,11 +96,9 @@ seqStms' ::
   SubExp ->             -- Group id
   SubExp ->             -- GroupSize
   Stms GPU -> 
-  Builder GPU (Stms GPU)
-seqStms' grpId grpSize stms =
-  localScope (scopeOf stms) $
-    mconcat <$> mapM (seqStm' grpId grpSize) (stmsToList stms)
-
+  Builder GPU ()
+seqStms' grpId grpSize stms = do
+  mapM_ (seqStm' grpId grpSize) $ stmsToList stms
 
 -- seqStm' is assumed to only match on statements encountered within some
 -- SegOp at group level
@@ -108,7 +106,7 @@ seqStm' ::
   SubExp ->             -- Group id
   SubExp ->             -- Group size
   Stm GPU -> 
-  Builder GPU (Stms GPU)
+  Builder GPU ()
 seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp 
                       (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
   -- Get the thread id
@@ -119,24 +117,20 @@ seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
   -- create tiles for these
   allScope <- askScope
   let fparams = M.toList $ M.filter isFParam allScope
-  tiles <- mapM (runBuilder . mkTile grpId grpSize) fparams
-  let (tileSub, tileStms) = unzip tiles
-
+  tiles <- mapM (mkTile grpId grpSize) fparams
+  let tileNames = map (\(Var x) -> x) tiles
   -- Remember to update the scope!
 
-  let tileNames = map (\(Var nm, _) -> nm) tiles
   -- For each BinOp extract the lambda and create a SegMap
-  reds <- mapM (localScope (scopeOf tileStms) .
-                   runBuilder . mkSegMapRed (head tileNames) grpSize) binops
+  reds <- mapM (mkSegMapRed (head tileNames) grpSize) binops
 
   -- Update the kbody to use the tile
   let [(gtid, _)] = unSegSpace space
   let space' = [(gtid, grpSize)]
-  -- kbody' <- 
 
-  -- let tileStms = mconcat $ map snd tiles
-  -- let redsStms = mconcat $ map snd reds
-  pure $ mconcat tileStms <> mconcat (map snd reds) <> oneStm stm
+  addStm stm
+
+  pure ()
   -- undefined
   where
     isFParam :: NameInfo GPU -> Bool
