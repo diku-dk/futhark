@@ -201,24 +201,24 @@ mcMemToCType v space = do
     )
 
 benchmarkCode :: Name -> [C.BlockItem] -> GC.CompilerM op s [C.BlockItem]
-benchmarkCode name code =
+benchmarkCode name code = do
+  event <- newVName "event"
   pure
-    [C.citems|{
-     struct mc_event* event = mc_event_new(ctx);
-     if (event != NULL) {
-       event->bef = get_wall_time();
+    [C.citems|
+     struct mc_event* $id:event = mc_event_new(ctx);
+     if ($id:event != NULL) {
+       $id:event->bef = get_wall_time();
      }
      $items:code
-     if (event != NULL) {
-       event->aft = get_wall_time();
+     if ($id:event != NULL) {
+       $id:event->aft = get_wall_time();
        lock_lock(&ctx->event_list_lock);
        add_event(ctx,
                  $string:(nameToString name),
                  strdup("nothing further"),
-                 event,
+                 $id:event,
                  (typename event_report_fn)mc_event_report);
        lock_unlock(&ctx->event_list_lock);
-     }
      }|]
 
 functionTiming :: Name -> C.Id

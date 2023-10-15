@@ -10,8 +10,6 @@ with_backend() {
     futhark profile prog.json
 }
 
-with_backend opencl
-
 with_backend c
 
 with_backend multicore
