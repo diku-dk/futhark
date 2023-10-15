@@ -13,5 +13,3 @@ with_backend() {
 with_backend c
 
 with_backend multicore
-
-with_backend ispc
