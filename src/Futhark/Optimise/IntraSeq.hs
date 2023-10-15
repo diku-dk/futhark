@@ -80,7 +80,7 @@ seqStm stm = error $ "Expected a SegMap at Group level but got " ++ show stm
 -- First SubExp is the group id (gtid)
 -- Second SubExp is the gruup size
 seqBody :: SubExp -> SubExp -> KernelBody GPU -> SeqM (KernelBody GPU)
-seqBody grpId grpSize  (KernelBody dec stms result) = do
+seqBody grpId grpSize (KernelBody dec stms result) = do
   stms' <- seqStms' grpId  grpSize stms
   pure $ KernelBody dec stms' result
 
@@ -92,18 +92,23 @@ seqBody grpId grpSize  (KernelBody dec stms result) = do
 
 
 -- Much the same as seqStms but takes the group size to pass along
--- First subExp is the group id (gtid)
--- Second is the group size
-seqStms' :: SubExp -> SubExp -> Stms GPU -> SeqM (Stms GPU)
+seqStms' :: 
+  SubExp ->             -- Group id
+  SubExp ->             -- GroupSize
+  Stms GPU -> 
+  Builder GPU (Stms GPU)
 seqStms' grpId grpSize stms =
   localScope (scopeOf stms) $
     mconcat <$> mapM (seqStm' grpId grpSize) (stmsToList stms)
 
 
--- seqStm' is asusmed to only match on Statements on the thread level
--- First SubExp is the group id (gtid)
--- Seconf SubSexp is the group size
-seqStm' :: SubExp -> SubExp -> Stm GPU -> SeqM (Stms GPU)
+-- seqStm' is assumed to only match on statements encountered within some
+-- SegOp at group level
+seqStm' :: 
+  SubExp ->             -- Group id
+  SubExp ->             -- Group size
+  Stm GPU -> 
+  Builder GPU (Stms GPU)
 seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp 
                       (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
   -- Get the thread id
