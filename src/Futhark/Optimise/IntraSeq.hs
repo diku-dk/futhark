@@ -92,22 +92,22 @@ seqBody grpId grpSize (KernelBody dec stms result) = do
 
 
 -- Much the same as seqStms but takes the group size to pass along
-seqStms' :: 
+seqStms' ::
   SubExp ->             -- Group id
   SubExp ->             -- GroupSize
-  Stms GPU -> 
+  Stms GPU ->
   Builder GPU ()
 seqStms' grpId grpSize stms = do
   mapM_ (seqStm' grpId grpSize) $ stmsToList stms
 
 -- seqStm' is assumed to only match on statements encountered within some
 -- SegOp at group level
-seqStm' :: 
+seqStm' ::
   SubExp ->             -- Group id
   SubExp ->             -- Group size
-  Stm GPU -> 
+  Stm GPU ->
   Builder GPU ()
-seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp 
+seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
                       (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
   -- Get the thread id
   let [(tid, _)] = unSegSpace space
@@ -119,15 +119,20 @@ seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
   let fparams = M.toList $ M.filter isFParam allScope
   tiles <- mapM (mkTile grpId grpSize) fparams
   let tileNames = map (\(Var x) -> x) tiles
-  -- Remember to update the scope!
 
   -- For each BinOp extract the lambda and create a SegMap
+  -- TODO: uses head.
   reds <- mapM (mkSegMapRed (head tileNames) grpSize) binops
 
   -- Update the kbody to use the tile
   let [(gtid, _)] = unSegSpace space
   let space' = [(gtid, grpSize)]
 
+  -- Each VName in fparams should be paired with the corresponding tile
+  -- created for the array of that VName
+
+
+  -- Temporary just to get the original statement along
   addStm stm
 
   pure ()
@@ -141,7 +146,10 @@ seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
     isArray (Array {}) = True
     isArray _ = False
 
-seqStm' _  _ _ = undefined
+      
+  
+
+seqStm' _ _ _ = undefined
 
 
 
