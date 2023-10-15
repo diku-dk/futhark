@@ -450,6 +450,7 @@ man_pages = [
         1,
     ),
     ("man/futhark-cuda", "futhark-cuda", "compile Futhark to CUDA", [], 1),
+    ("man/futhark-hip", "futhark-hip", "compile Futhark to HIP", [], 1),
     (
         "man/futhark-python",
         "futhark-python",
