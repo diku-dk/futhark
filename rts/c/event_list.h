@@ -32,7 +32,7 @@ static void add_event_to_list(struct event_list *l,
                               event_report_fn f) {
   if (l->num_events == l->capacity) {
     l->capacity *= 2;
-    l->events = reallocarray(l->events, l->capacity, sizeof(struct event));
+    l->events = realloc(l->events, l->capacity * sizeof(struct event));
   }
   l->events[l->num_events].name = name;
   l->events[l->num_events].description = description;
