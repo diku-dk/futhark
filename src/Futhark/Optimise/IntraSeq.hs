@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -Wno-unused-local-binds #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use join" #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -8,87 +9,19 @@ import Futhark.Pass
 import Futhark.IR.GPU
 import Futhark.Builder.Class
 import Futhark.Construct
-import Futhark.Analysis.PrimExp.Convert
 
 import Control.Monad.Reader
 import Control.Monad.State
 import qualified Data.Map as M
+import Futhark.Transform.Rename
+
+
+
 
 type SeqM = ReaderT (Scope GPU) (State VNameSource)
 
-
--- An Env is a mapping from SubExp to SubExp. The keys are subexpressions
--- present in the original program and the value is a newly generated
--- subexpression generated during the transformation
-type Env = M.Map SubExp SubExp
-
--- The sequentialistion factor, i.e. how many elements each thread should
--- process. This is not supposed to be a constant.
 seqFactor :: SubExp
 seqFactor = intConst Int64 4
-
-getTypes :: [Type] -> [PrimType]
-getTypes = map f
-  where
-    f x =
-      case x of
-          Prim t -> t
-          Array t shp u-> t
-          _ -> error "What to do here?"
-
--- read in seq factor elements for a given thread
-getChunk :: (MonadBuilder m) => VName -> SubExp -> m VName
-getChunk arr tid = do
-  arr_t <- lookupType arr
-  slice_offset <- letSubExp "slice_offset" =<< toExp (pe64 tid * pe64 seqFactor)
-  let slice = DimSlice slice_offset seqFactor (intConst Int64 1)
-  letExp "chunk" $ BasicOp $ Index arr $ fullSlice arr_t [slice]
-
--- bind the new group size
-bindNewGroupSize :: SubExp -> Builder GPU VName
-bindNewGroupSize group_size = do
-  name <- newVName "group_size"
-  letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
-  pure name
-
-
-
--- This function takes the SegBinOp array of e.g. a SegRed and produces a kernel
--- body from it. It also takes a KernelBody as the result part is used to 
--- determine exactly which statements of the BinOps needs to be inserted into
--- the new KernelBody
-mkBodyFromBinops :: [SegBinOp GPU] -> KernelBody GPU -> KernelBody GPU
-mkBodyFromBinops bops kbody = do
-  let dec  = kernelBodyDec kbody
-  let stms = kernelBodyStms kbody
-  let res  = kernelBodyResult kbody
-
-  -- Figure out how many results of the original KernelBody are used in
-  -- the SegBinOps. This is done by, for each result, backtrack and see which
-  -- statements are needed to compute said result
-  -- let needed = filter (\(r,x) -> not $ null x) $ zip res $ map (backtrack stms) res
-  let stms' = mconcat $ map (backtrack stms) res
-  KernelBody dec stms' res
-
-  where
-    backtrack :: Stms GPU -> KernelResult -> Stms GPU
-    backtrack _ (WriteReturns {})   = error "How to handle WriteReturns"
-    backtrack _ (TileReturns {})    = error "How to handle TileReturns"
-    backtrack _ (RegTileReturns {}) = error "How to handle RegTileReturns"
-    backtrack stms (Returns manifest certs subexp) = do
-      -- If the returned value is constant there is nothing to do
-      case subexp of
-        Constant _ -> mempty
-        Var vname -> backtrack' vname (stmsToList stms)
-
-    backtrack' :: VName -> [Stm GPU] -> Stms GPU
-    backtrack' _ [] = mempty
-    backtrack' vname (stm:stms)= do
-      let pat = patElems $ stmPat stm
-      let used = any (\ x -> patElemName x == vname) pat
-      if used then oneStm stm <> backtrack' vname stms
-      else mempty
-
 
 
 
@@ -107,84 +40,216 @@ intraSeq =
       onStms scope stms =
         modifyNameSource $
           runState $
-            runReaderT (seqStms M.empty stms) scope
+            runReaderT (seqStms stms) scope
 
--- TDOO: Are we sure that a mapM is fine here. Couldnt we get a case where
--- we got a long line of simple let bindings that would the updated environment?
-seqStms :: Env -> Stms GPU -> SeqM (Stms GPU)
-seqStms env stms =
+
+
+
+-- SeqStms is only to be used for top level statements. To sequentialize
+-- statements within a body use seqStms'
+seqStms :: Stms GPU -> SeqM (Stms GPU)
+seqStms stms =
   localScope (scopeOf stms) $
-    mconcat <$> mapM (seqStm env) (stmsToList stms)
+    mconcat <$> mapM seqStm (stmsToList stms)
 
-seqBody :: Env -> KernelBody GPU -> SeqM (KernelBody GPU)
-seqBody env (KernelBody dec stms result) = do
-  stms' <- seqStms env stms
+
+
+
+
+-- Like seqStms, segStm is only for top level statements
+seqStm :: Stm GPU -> SeqM (Stms GPU)
+seqStm (Let pat aux (Op (SegOp (
+            SegMap lvl@(SegGroup virt (Just grid)) space ts kbody)))) = do
+  -- Create the new group size
+  (groupSize, groupStms) <- runBuilder $ bindNewGroupSize $ unCount $ gridGroupSize grid
+  let grid' = Just $  KernelGrid (gridNumGroups grid) (Count groupSize)
+
+  -- Get the group id (gtid)
+  -- TODO: Assumes only a single space
+  let [(gtid, _)] = unSegSpace space
+
+  kbody' <- seqBody (Var gtid) groupSize kbody
+  pure $ groupStms <>
+     oneStm (Let pat aux (Op (SegOp (SegMap (SegGroup virt grid') space ts kbody'))))
+
+seqStm stm = error $ "Expected a SegMap at Group level but got " ++ show stm
+
+
+
+
+-- First SubExp is the group id (gtid)
+-- Second SubExp is the gruup size
+seqBody :: SubExp -> SubExp -> KernelBody GPU -> SeqM (KernelBody GPU)
+seqBody grpId grpSize  (KernelBody dec stms result) = do
+  stms' <- seqStms' grpId  grpSize stms
   pure $ KernelBody dec stms' result
 
--- seq outer map, divide group size by sequentialization factor
-seqStm :: Env -> Stm GPU -> SeqM (Stms GPU)
-seqStm env (Let pat aux (Op (SegOp (SegMap
-        lvl@(SegGroup virt (Just (KernelGrid num_groups (Count group_size))))
-        space ts kbody)))) = do
-  (gr_name, gr_stm) <- runBuilder $ bindNewGroupSize group_size
-  let lvl' = SegGroup virt (Just $ KernelGrid num_groups $ Count (Var gr_name))
-  kbody' <- seqBody (M.insert group_size (Var gr_name) env) kbody
-  pure $ gr_stm <> oneStm (Let pat aux (Op (SegOp (SegMap lvl' space ts kbody'))))
 
 
--- When reaching a segred at thread level we need to create the segmap doing 
--- the sequential work and modify the original segred to use the newly created
--- intermediate array from the segmap
-seqStm env (Let pat aux (Op (SegOp (SegRed lvl@SegThread {} space binops ts kbody)))) = do
-  -- Extract different information from the original SegRed
-  let [Prim tp] = ts                              -- TODO: Always expects a single type
-  let phys = segFlat space                        -- The physical thread
-  let (gtid, bound):ps = unSegSpace space         -- (gtid < bound) TODO: What to do with ps?
 
-  -- Create new names for the to be created SegMap and update the Env
-  phys' <- newName phys
-  gtid' <- newName gtid
-  let env' = M.insert (Var gtid) (Var gtid') env
 
-  let Just map_bound = M.lookup bound env       -- TODO handle nothing
-  let map_space = SegSpace phys' ((gtid', map_bound) : ps)
-  map_ident <- newIdent "map_res" (Array tp (Shape [map_bound]) mempty)
 
-  -- TODO handle and update kernelbody
-  let map_bodies = lambdaBody $ segBinOpLambda $ head binops    -- TODO: Handle multiple binops
-  let results    = map (resToRes . resSubExp) (bodyResult map_bodies)
-  stms <- runBuilder_ $ mkRedLoop (head ts) (head $ segBinOpNeutral $ head binops) (bodyStms map_bodies)
-  let map_kbody  = KernelBody mempty stms results
-  let map_stm    = mkLet' [map_ident] aux (Op (SegOp (SegMap lvl map_space ts map_kbody)))
 
-  let red_space = SegSpace phys ((gtid, map_bound) : ps)
-  let red_stm   = Let pat aux (Op (SegOp (SegRed lvl red_space binops ts kbody)))
 
-  -- TODO let a = count number of statements in kernelbody
-  -- let b = subtract accumulators from arugments to reduce lambda
-  -- kernelbody stms not used in reduce = a - b 
+-- Much the same as seqStms but takes the group size to pass along
+-- First subExp is the group id (gtid)
+-- Second is the group size
+seqStms' :: SubExp -> SubExp -> Stms GPU -> SeqM (Stms GPU)
+seqStms' grpId grpSize stms =
+  localScope (scopeOf stms) $
+    mconcat <$> mapM (seqStm' grpId grpSize) (stmsToList stms)
 
-  pure $ stmsFromList [map_stm, red_stm]
+
+-- seqStm' is asusmed to only match on Statements on the thread level
+-- First SubExp is the group id (gtid)
+-- Seconf SubSexp is the group size
+seqStm' :: SubExp -> SubExp -> Stm GPU -> SeqM (Stms GPU)
+seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp 
+                      (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
+  -- Get the thread id
+  let [(tid, _)] = unSegSpace space
+
+  -- Create a tile
+  -- TODO: Might be better to do an analysis on which arrays are read and then
+  -- create tiles for these
+  allScope <- askScope
+  let fparams = M.toList $ M.filter isFParam allScope
+  tiles <- mapM (runBuilder . mkTile grpId grpSize) fparams
+  let (tileSub, tileStms) = unzip tiles
+
+  -- Remember to update the scope!
+
+  let tileNames = map (\(Var nm, _) -> nm) tiles
+  -- For each BinOp extract the lambda and create a SegMap
+  reds <- mapM (localScope (scopeOf tileStms) .
+                   runBuilder . mkSegMapRed (head tileNames) grpSize) binops
+
+  -- Update the kbody to use the tile
+  let [(gtid, _)] = unSegSpace space
+  let space' = [(gtid, grpSize)]
+  -- kbody' <- 
+
+  -- let tileStms = mconcat $ map snd tiles
+  -- let redsStms = mconcat $ map snd reds
+  pure $ mconcat tileStms <> mconcat (map snd reds) <> oneStm stm
+  -- undefined
   where
-    resToRes :: SubExp -> KernelResult
-    resToRes = Returns ResultMaySimplify mempty
+    isFParam :: NameInfo GPU -> Bool
+    isFParam (FParamName typebase) = isArray typebase
+    isFParam _ = False
 
-seqStm env (Let pat aux (Op (SegOp (SegScan lvl@SegThread {} space binops ts kbody)))) = do
-  pure $ oneStm $ Let pat aux (Op (SegOp (SegScan lvl space binops ts kbody)))
+    isArray :: TypeBase shape u -> Bool
+    isArray (Array {}) = True
+    isArray _ = False
 
-seqStm env (Let pat aux (Op (SegOp (SegHist lvl@SegThread {} space binops ts kbody)))) = do
-  pure $ oneStm $ Let pat aux (Op (SegOp (SegHist lvl space binops ts kbody)))
-
-seqStm env stm = pure $ oneStm stm
+seqStm' _  _ _ = undefined
 
 
--- Make a loop that performs a reduction. 
--- First argument is the neutral element, second is the statements that make
--- up the opereation i.e. + in 'reduce (+) 0 arr'
-mkRedLoop :: Type -> SubExp -> Stms GPU -> Builder GPU ()
-mkRedLoop tp ne stms = do
-  i <- newVName "i"
-  let loop_body = mkBody stms $ varsRes [i]
-  params <- newParam "v" $ toDecl tp Unique
-  loop_exp <- letExp "loop_res" $ Loop [(params, ne)] (ForLoop i Int64 seqFactor []) loop_body
-  pure ()
+
+
+-- bind the new group size
+bindNewGroupSize :: SubExp -> Builder GPU SubExp
+bindNewGroupSize group_size = do
+  name <- newVName "group_size"
+  letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
+  pure $ Var name
+
+
+mkSegMapRed ::
+  VName ->                  -- The array to reduce over
+  SubExp ->                 -- The group size
+  SegBinOp GPU ->
+  Builder GPU SubExp
+mkSegMapRed arrName grpSize binop = do
+  let comm = segBinOpComm binop
+  lambda <- renameLambda $ segBinOpLambda binop
+  let neutral = segBinOpNeutral binop
+
+  let reduce = Reduce comm lambda neutral
+
+  screma <- reduceSOAC [reduce]
+
+  buildSegMapThread "red_intermediate" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      e <- letExp "chunk" $ BasicOp $
+              Index arrName (Slice [DimFix (Var tid),
+                            DimSlice (intConst Int64 0) seqFactor (intConst Int64 1)])
+      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma seqFactor [e] screma
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, grpSize)]
+      let types = scremaType seqFactor screma
+      pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
+
+
+
+
+-- | The making of a tile consists of a SegMap to load elements into local
+-- memory in a coalesced manner. Some intermediate instructions to modify
+-- the tile. Lastly another SegMap to load the correct values into registers
+-- 
+-- The first SubExp is the group id 
+-- The second SubExp is Var containing the groupsize
+-- Returns a SubExp that is the chunks variable
+mkTile :: SubExp -> SubExp -> (VName, NameInfo GPU) -> Builder GPU SubExp
+mkTile gid grpSize (arrName, arrInfo)= do
+  let (FParamName typebase) = arrInfo
+  let arrType = elemType typebase
+
+  segMap <- buildSegMapThread_ "tile" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      e <- letSubExp "slice" $ BasicOp $
+                Index arrName (Slice [DimFix gid, DimSlice (Var tid) seqFactor  grpSize])
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, grpSize)]
+      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
+      pure (Returns ResultMaySimplify mempty e, lvl, space, types)
+
+  tileTrans <- letExp "tile_T" $ BasicOp $ Rearrange [1,0] segMap
+  flatSize <- letSubExp "flat_size" $ BasicOp $
+                BinOp (Mul Int64 OverflowUndef) seqFactor grpSize
+  tileFlat <- letExp "tile_flat" $ BasicOp $
+                Reshape ReshapeArbitrary (Shape [flatSize]) tileTrans
+
+  -- SegMap to read the actual chunks the threads need
+  buildSegMapThread "chunks" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      start <- letSubExp "start" $ BasicOp $
+                BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
+      chunk <- letSubExp "chunk" $ BasicOp $
+                Index tileFlat (Slice [DimSlice start seqFactor (intConst Int64 1)])
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, grpSize)]
+      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
+      pure (Returns ResultPrivate mempty chunk, lvl, space, types)
+
+
+
+
+-- Builds a SegMap at thread level containing all bindings created in m
+-- and returns the subExp which is the variable containing the result
+buildSegMapThread ::
+  String ->
+  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
+  Builder GPU SubExp
+buildSegMapThread name  m = do
+  ((res, lvl, space, ts), stms) <- collectStms m
+  let kbody = KernelBody () stms [res]
+  letSubExp name $ Op $ SegOp $ SegMap lvl space ts kbody
+
+-- Like buildSegMapThread but returns the VName instead of the actual 
+-- SubExp. Just for convinience
+buildSegMapThread_ ::
+  String ->
+  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
+  Builder GPU VName
+buildSegMapThread_ name m = do
+  subExp <- buildSegMapThread name m
+  let (Var name') = subExp
+  pure name'
+
+
+
+
