@@ -61,8 +61,8 @@ The profiling information, including the log, is collected from a
 *final* run performed after all the measured runs.  Profiling
 information is not collected during the runs that contribute to the
 runtime measurement reported by ``futhark bench``.  However, enabling
-profiling may still affect performance slightly, as it changes the
-behaviour of the run time system slightly.
+profiling may still affect performance, as it changes the
+behaviour of the run time system.
 
 EXAMPLES
 ========
