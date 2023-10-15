@@ -5,7 +5,7 @@ set -e
 with_backend() {
     echo
     echo "Trying backend $1"
-    oclgrind futhark bench --backend=$1 --profile --json prog.json prog.fut
+    futhark bench --backend=$1 --profile --json prog.json prog.fut
     rm -rf prog.prof
     futhark profile prog.json
 }
