@@ -41,6 +41,12 @@ static bool lmad_contiguous(int r, int64_t strides[r], int64_t shape[r]);
 static bool lmad_memcpyable(int r,
                             int64_t dst_strides[r], int64_t src_strides[r], int64_t shape[r]);
 
+static void add_event(struct futhark_context* ctx,
+                      const char* name,
+                      char* description,
+                      void* data,
+                      event_report_fn f);
+
 // Functions that must be defined by the backend.
 static void backend_context_config_setup(struct futhark_context_config* cfg);
 static void backend_context_config_teardown(struct futhark_context_config* cfg);

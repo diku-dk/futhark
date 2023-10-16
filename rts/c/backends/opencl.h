@@ -486,12 +486,6 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
   return 1;
 }
 
-// A record of something that happened.
-struct profiling_record {
-  cl_event *event;
-  const char* name;
-};
-
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -505,6 +499,7 @@ struct futhark_context {
   FILE *log;
   struct constants *constants;
   struct free_list free_list;
+  struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
@@ -535,10 +530,6 @@ struct futhark_context {
   size_t max_local_memory;
 
   size_t lockstep_width;
-
-  struct profiling_record *profiling_records;
-  int profiling_records_capacity;
-  int profiling_records_used;
 
   struct builtin_kernels* kernels;
 };
@@ -628,61 +619,38 @@ static char* mk_compile_opts(struct futhark_context *ctx,
   return compile_opts;
 }
 
-
-// Count up the runtime all the profiling_records that occured during execution.
-// Also clears the buffer of profiling_records.
-static void tally_profiling_records(struct futhark_context *ctx,
-                                    struct cost_centres* ccs) {
-  cl_int err;
-  for (int i = 0; i < ctx->profiling_records_used; i++) {
-    struct profiling_record record = ctx->profiling_records[i];
-
-    cl_ulong start_t, end_t;
-
-    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
-                                                 CL_PROFILING_COMMAND_START,
-                                                 sizeof(start_t),
-                                                 &start_t,
-                                                 NULL));
-
-    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
-                                                 CL_PROFILING_COMMAND_END,
-                                                 sizeof(end_t),
-                                                 &end_t,
-                                                 NULL));
-
-    if (ccs) {
-      // Note that OpenCL provides nanosecond resolution, but we want
-      // microseconds.
-      struct cost_centre c = {
-        .name = record.name,
-        .runs = 1,
-        .runtime = (end_t - start_t)/1000
-      };
-      cost_centres_add(ccs, c);
-    }
-
-    OPENCL_SUCCEED_FATAL(clReleaseEvent(*record.event));
-    free(record.event);
+static cl_event* opencl_event_new(struct futhark_context* ctx) {
+  if (ctx->profiling && !ctx->profiling_paused) {
+    return malloc(sizeof(cl_event));
+  } else {
+    return NULL;
   }
-
-  ctx->profiling_records_used = 0;
 }
 
-// If profiling, produce an event associated with a profiling record.
-static cl_event* opencl_get_event(struct futhark_context *ctx, const char *name) {
-  if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
-    ctx->profiling_records_capacity *= 2;
-    ctx->profiling_records =
-      realloc(ctx->profiling_records,
-              ctx->profiling_records_capacity *
-              sizeof(struct profiling_record));
-  }
-  cl_event *event = malloc(sizeof(cl_event));
-  ctx->profiling_records[ctx->profiling_records_used].event = event;
-  ctx->profiling_records[ctx->profiling_records_used].name = name;
-  ctx->profiling_records_used++;
-  return event;
+static int opencl_event_report(struct str_builder* sb, cl_event* e) {
+  cl_int err;
+  cl_ulong start_t, end_t;
+
+  assert(e != NULL);
+  OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*e,
+                                               CL_PROFILING_COMMAND_START,
+                                               sizeof(start_t),
+                                               &start_t,
+                                               NULL));
+  OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*e,
+                                               CL_PROFILING_COMMAND_END,
+                                               sizeof(end_t),
+                                               &end_t,
+                                               NULL));
+
+  // OpenCL provides nanosecond resolution, but we want microseconds.
+  str_builder(sb, ",\"duration\":%f", (end_t - start_t)/1000.0);
+
+  OPENCL_SUCCEED_FATAL(clReleaseEvent(*e));
+
+  free(e);
+
+  return 0;
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {
@@ -1059,11 +1027,6 @@ void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* k
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
-  ctx->profiling_records_capacity = 200;
-  ctx->profiling_records_used = 0;
-  ctx->profiling_records =
-    malloc(ctx->profiling_records_capacity *
-           sizeof(struct profiling_record));
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
@@ -1104,8 +1067,6 @@ void backend_context_teardown(struct futhark_context* ctx) {
   free_builtin_kernels(ctx, ctx->kernels);
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
   OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)tally_profiling_records(ctx, NULL);
-  free(ctx->profiling_records);
   (void)gpu_free_all(ctx);
   (void)clReleaseProgram(ctx->clprogram);
   (void)clReleaseCommandQueue(ctx->queue);
@@ -1143,9 +1104,13 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 static int gpu_scalar_to_device(struct futhark_context* ctx,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, "copy_scalar_to_dev");
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_to_dev",
+              strdup(""),
+              event,
+              (event_report_fn)opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueWriteBuffer
@@ -1157,9 +1122,13 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 static int gpu_scalar_from_device(struct futhark_context* ctx,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, "copy_scalar_from_dev");
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_from_dev",
+              strdup(""),
+              event,
+              (event_report_fn)opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueReadBuffer
@@ -1173,9 +1142,13 @@ static int gpu_memcpy(struct futhark_context* ctx,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_dev_to_dev");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_dev_to_dev",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     // OpenCL swaps the usual order of operands for memcpy()-like
     // functions.  The order below is not a typo.
@@ -1195,9 +1168,13 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_host_to_dev");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_host_to_dev",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueWriteBuffer(ctx->queue,
@@ -1218,9 +1195,13 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_dev_to_host");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_dev_to_host",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueReadBuffer(ctx->queue, src,
@@ -1247,16 +1228,24 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
   int64_t time_start = 0, time_end = 0;
-  if (ctx->logging) {
-    fprintf(ctx->log,
-            "Launching kernel %s with\n"
-            "  grid=(%d,%d,%d)\n"
-            "  block=(%d,%d,%d)\n"
-            "  local memory=%d\n",
-            name,
-            grid[0], grid[1], grid[2],
-            block[0], block[1], block[2],
-            local_mem_bytes);
+
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              name,
+              msgprintf("Kernel %s with\n"
+                        "  grid=(%d,%d,%d)\n"
+                        "  block=(%d,%d,%d)\n"
+                        "  local memory=%d",
+                        name,
+                        grid[0], grid[1], grid[2],
+                        block[0], block[1], block[2],
+                        local_mem_bytes),
+              event,
+              (event_report_fn)opencl_event_report);
+  }
+
+  if (ctx->debugging) {
     time_start = get_wall_time();
   }
 
@@ -1280,11 +1269,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     {block[0],
      block[1],
      block[2]};
-
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, name);
-  }
 
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueNDRangeKernel(ctx->queue,

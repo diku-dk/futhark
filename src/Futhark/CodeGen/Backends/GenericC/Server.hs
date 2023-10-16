@@ -36,6 +36,13 @@ genericOptions =
         optionAction = [C.cstm|futhark_context_config_set_logging(cfg, 1);|]
       },
     Option
+      { optionLongName = "profile",
+        optionShortName = Just 'P',
+        optionArgument = NoArgument,
+        optionDescription = "Enable the collection of profiling information.",
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+      },
+    Option
       { optionLongName = "help",
         optionShortName = Just 'h',
         optionArgument = NoArgument,

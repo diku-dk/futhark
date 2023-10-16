@@ -61,6 +61,13 @@ genericOptions =
                   }|]
       },
     Option
+      { optionLongName = "profile",
+        optionShortName = Just 'P',
+        optionArgument = NoArgument,
+        optionDescription = "Enable the collection of profiling information.",
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
+      },
+    Option
       { optionLongName = "entry-point",
         optionShortName = Just 'e',
         optionArgument = RequiredArgument "NAME",

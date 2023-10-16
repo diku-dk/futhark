@@ -518,6 +518,13 @@ man_pages: List[Tuple[str, str, str, List[Any], int]] = [
         [],
         1,
     ),
+    (
+        "man/futhark-profile",
+        "futhark-profile",
+        "profile Futhark programs",
+        [],
+        1,
+    ),
 ]
 
 # If true, show URL addresses after external links.

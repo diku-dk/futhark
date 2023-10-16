@@ -49,6 +49,7 @@ extra-source-files:
     rts/c/timing.h
     rts/c/errors.h
     rts/c/free_list.h
+    rts/c/event_list.h
     rts/c/gpu.h
     rts/c/gpu_prototypes.h
     rts/c/tuning.h
@@ -209,6 +210,7 @@ library
       Futhark.CLI.MulticoreWASM
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
+      Futhark.CLI.Profile
       Futhark.CLI.PyOpenCL
       Futhark.CLI.Python
       Futhark.CLI.Query
@@ -415,6 +417,7 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
+      Futhark.Profile
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
@@ -545,6 +548,7 @@ test-suite unit
   other-modules:
       Futhark.AD.DerivativesTests
       Futhark.BenchTests
+      Futhark.ProfileTests
       Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Internalise.TypesValuesTests
