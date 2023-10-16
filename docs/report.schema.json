@@ -1,0 +1,24 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "title":"Futhark runtime report",
+    "type": "object",
+    "properties": {
+        "memory": {
+            "type": "object",
+            "patternProperties":{
+                "": {"type": "integer"}
+            }
+        },
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Name": {"type":"string"},
+                    "Start": {"type":"integer"},
+                    "End": {"type":"integer"}
+                },
+                "required": ["name", "start", "end"]
+            }}},
+    "required": ["memory", "events"]
+}

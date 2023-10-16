@@ -26,6 +26,7 @@ import Futhark.CLI.MulticoreISPC qualified as MulticoreISPC
 import Futhark.CLI.MulticoreWASM qualified as MulticoreWASM
 import Futhark.CLI.OpenCL qualified as OpenCL
 import Futhark.CLI.Pkg qualified as Pkg
+import Futhark.CLI.Profile qualified as Profile
 import Futhark.CLI.PyOpenCL qualified as PyOpenCL
 import Futhark.CLI.Python qualified as Python
 import Futhark.CLI.Query qualified as Query
@@ -81,7 +82,8 @@ commands =
       ("lsp", (LSP.main, "Run LSP server.")),
       ("thanks", (Misc.mainThanks, "Express gratitude.")),
       ("tokens", (Misc.mainTokens, "Print tokens from Futhark file.")),
-      ("benchcmp", (Benchcmp.main, "Compare two benchmark results."))
+      ("benchcmp", (Benchcmp.main, "Compare two benchmark results.")),
+      ("profile", (Profile.main, "Analyse profiling data."))
     ]
 
 msg :: String
