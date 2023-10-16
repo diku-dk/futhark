@@ -54,10 +54,6 @@ nomenclature ("group" instead of "thread block").
 
 The following additional options are accepted.
 
--h, --help
-
-  Print help text to standard output and exit.
-
 --default-group-size=INT
 
   The default size of thread blocks that are launched.  Capped to the
@@ -89,31 +85,12 @@ The following additional options are accepted.
   Instead of using the embedded HIP kernels, load them from the
   indicated file.
 
--n, --no-print-result
-
-  Do not print the program result.
-
 --build-option=OPT
 
   Add an additional build option to the string passed to the kernel
   compiler (HIPRTC).  Refer to the HIP documentation for which options
   are supported.  Be careful - some options can easily result in
   invalid results.
-
---param=ASSIGNMENT
-
-  Set a tuning parameter to the given
-  value. ``ASSIGNMENT`` must be of the form ``NAME=INT`` Use
-  ``--print-params`` to see which names are available.
-
---print-params
-
-  Print all tuning parameters that can be set with ``--param`` or
-  ``--tuning``.
-
---tuning=FILE
-
-  Read size=value assignments from the given file.
 
 ENVIRONMENT
 ===========
