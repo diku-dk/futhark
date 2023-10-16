@@ -117,23 +117,27 @@ seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
   -- create tiles for these
   allScope <- askScope
   let fparams = M.toList $ M.filter isFParam allScope
+  let fparamNames = map fst fparams
   tiles <- mapM (mkTile grpId grpSize) fparams
   let tileNames = map (\(Var x) -> x) tiles
 
   -- For each BinOp extract the lambda and create a SegMap
   -- TODO: uses head.
   reds <- mapM (mkSegMapRed (head tileNames) grpSize) binops
+  let redNames = map (\(Var x) -> x) reds
 
   -- Update the kbody to use the tile
+  let phys = segFlat space
   let [(gtid, _)] = unSegSpace space
-  let space' = [(gtid, grpSize)]
+  let space' = SegSpace phys [(gtid, grpSize)]
 
   -- Each VName in fparams should be paired with the corresponding tile
   -- created for the array of that VName
-
+  let kbody' = substituteIndexes kbody [(head fparamNames, head redNames)]
 
   -- Temporary just to get the original statement along
-  addStm stm
+  addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
+  -- addStm stm
 
   pure ()
   -- undefined
@@ -147,12 +151,21 @@ seqStm' grpId grpSize stm@(Let pat aux (Op (SegOp
     isArray _ = False
 
       
-  
 
 seqStm' _ _ _ = undefined
 
 
+substituteIndexes :: KernelBody GPU -> [(VName, VName)] -> KernelBody GPU
+substituteIndexes (KernelBody dec stms results) names = 
+  let stms' = stmsFromList $ map (substituteIndex names) $ stmsToList stms
+  in KernelBody dec stms' results
 
+substituteIndex :: [(VName, VName)] -> Stm GPU -> Stm GPU
+substituteIndex [(from, to)] stm@(Let pat aux (BasicOp (Index name slice)))
+  | from == name = do
+    let (_:slice') = unSlice slice
+    Let pat aux (BasicOp (Index to $ Slice slice'))
+substituteIndex _ stm = stm
 
 -- bind the new group size
 bindNewGroupSize :: SubExp -> Builder GPU SubExp
@@ -187,7 +200,6 @@ mkSegMapRed arrName grpSize binop = do
       let space = SegSpace phys [(tid, grpSize)]
       let types = scremaType seqFactor screma
       pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
-
 
 
 
