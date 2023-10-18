@@ -85,16 +85,13 @@ analyseProfileReport json_path bench_results = do
     escape '/' = '_'
     escape c = c
 
-    splitAtEntry name =
-      let (file, entry) = span (/= ':') name
-       in (file, drop 1 entry)
-
     problem prog_name name what =
       T.hPutStrLn stderr $ prog_name <> " dataset " <> name <> ": " <> what
 
     onBenchResult top_dir (BenchResult prog_path data_results) = do
-      let (prog_name, entry) = splitAtEntry $ drop (length prefix) prog_path
-          prog_dir = top_dir </> dropExtension prog_name </> entry
+      let (prog_path', entry) = span (/= ':') prog_path
+          prog_name = drop (length prefix) prog_path'
+          prog_dir = top_dir </> dropExtension prog_name </> drop 1 entry
       createDirectoryIfMissing True prog_dir
       mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
 
