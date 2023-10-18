@@ -12,18 +12,13 @@ import Futhark.Construct
 
 import Control.Monad.Reader
 import Control.Monad.State
-import qualified Data.Map as M
 import Futhark.Transform.Rename
-import Futhark.Transform.FirstOrderTransform
-
-
-
-
+-- import Debug.Pretty.Simple
+import Data.List
 type SeqM = ReaderT (Scope GPU) (State VNameSource)
 
 seqFactor :: SubExp
 seqFactor = intConst Int64 4
-
 
 
 -- NOTE uncomment this for pretty printing AST
@@ -32,7 +27,6 @@ seqFactor = intConst Int64 4
   -- printAst :: Prog GPU -> PassM (Prog GPU)
 -- printAst prog = pTrace (show prog) (pure prog)
 
--- TODO handle when last thread does not have seqFactor elements to process
 intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
@@ -74,25 +68,21 @@ seqStm (Let pat aux (Op (SegOp (
   pure $ groupStms <>
      oneStm (Let pat aux (Op (SegOp (SegMap (SegGroup virt grid') space ts kbody'))))
 
-seqStm stm = error $ "Expected a SegMap at Group level but got " ++ show stm
+seqStm stm = error $ "Expected a SegMap at Group level but got " Data.List.++ show stm
 
 
 
 
 -- First SubExp is the group id (gtid)
 -- Second SubExp is the gruup size
-seqBody :: 
+seqBody ::
   SubExp ->                 -- Group ID
   (SubExp, SubExp) ->       -- (old size, new size)
-  KernelBody GPU ->         
+  KernelBody GPU ->
   SeqM (KernelBody GPU)
 seqBody grpId sizes (KernelBody dec stms result) = do
   stms' <- localScope (scopeOf stms) $ runBuilder_ $ seqStms' grpId sizes stms
   pure $ KernelBody dec stms' result
-
-
-
-
 
 
 
@@ -113,40 +103,28 @@ seqStm' ::
   (SubExp, SubExp) ->   -- (old size, new size)
   Stm GPU ->
   Builder GPU ()
-seqStm' grpId sizes stm@(Let pat aux (Op (SegOp
-                      (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
+seqStm' gid sizes stm@(Let pat aux (Op (SegOp
+          (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
   -- Get the thread id
   let [(tid, _)] = unSegSpace space
 
-  -- Create a tile
-  -- TODO: Might be better to do an analysis on which arrays are read and then
-  -- create tiles for these
-  allScope <- askScope
-  let fparams = M.toList $ M.filter isFParam allScope
-  let fparamNames = map fst fparams
-  tiles <- mapM (mkTile grpId sizes) fparams
-  let tileNames = map (\(Var x) -> x) tiles
+  -- creates tiles for the arrays read
+  names <- tileSegKernelBody kbody sizes gid (Var tid)
+  let (vNames, tileNames) = Data.List.unzip names
+  -- For each BinOp extract the lambda and create a SegMap performing thread local reduction
+  reds <- mapM (mkSegMapRed tileNames sizes) binops
+  let redNames = Data.List.map (\(Var x) -> x) reds
 
-  -- For each BinOp extract the lambda and create a SegMap
-  -- TODO: uses head.
-  reds <- mapM (mkSegMapRed (head tileNames) sizes) binops
-  let redNames = map (\(Var x) -> x) reds
-
-  -- Update the kbody to use the tile
+  -- -- Update the kbody to use the tile
   let phys = segFlat space
   let [(gtid, _)] = unSegSpace space
   let space' = SegSpace phys [(gtid, snd sizes)]
 
-  -- Each VName in fparams should be paired with the corresponding tile
-  -- created for the array of that VName
-  let kbody' = substituteIndexes kbody [(head fparamNames, head redNames)]
-
-  -- Temporary just to get the original statement along
+  -- -- Each VName in fparams should be paired with the corresponding tile
+  -- -- created for the array of that VName
+  let kbody' = substituteIndexes kbody $ Data.List.zip vNames redNames
   addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
-  -- addStm stm
-
   pure ()
-  -- undefined
   where
     isFParam :: NameInfo GPU -> Bool
     isFParam (FParamName typebase) = isArray typebase
@@ -156,37 +134,37 @@ seqStm' grpId sizes stm@(Let pat aux (Op (SegOp
     isArray (Array {}) = True
     isArray _ = False
 
-      
-
 seqStm' _ _ _ = undefined
 
 
 substituteIndexes :: KernelBody GPU -> [(VName, VName)] -> KernelBody GPU
-substituteIndexes (KernelBody dec stms results) names = 
-  let stms' = stmsFromList $ map (substituteIndex names) $ stmsToList stms
+substituteIndexes (KernelBody dec stms results) names =
+  let stms' = stmsFromList $ Data.List.map (substituteIndex names) $ stmsToList stms
   in KernelBody dec stms' results
 
 substituteIndex :: [(VName, VName)] -> Stm GPU -> Stm GPU
-substituteIndex [(from, to)] stm@(Let pat aux (BasicOp (Index name slice)))
-  | from == name = do
-    let (_:slice') = unSlice slice
-    Let pat aux (BasicOp (Index to $ Slice slice'))
+substituteIndex names stm@(Let pat aux (BasicOp (Index name slice))) =
+  let (fromNames, toNames) = Data.List.unzip names
+      index = Data.List.elemIndex name fromNames
+      in case index of
+        Just i ->
+          let (_:slice') = unSlice slice
+          in Let pat aux (BasicOp (Index (toNames Data.List.!! i) $ Slice slice'))
+        Nothing -> stm
 substituteIndex _ stm = stm
 
--- bind the new group size
 bindNewGroupSize :: SubExp -> Builder GPU SubExp
 bindNewGroupSize group_size = do
   name <- newVName "group_size"
   letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
   pure $ Var name
 
-
 mkSegMapRed ::
-  VName ->                  -- The array to reduce over
+  [VName] ->                  -- The arrays to reduce over
   (SubExp, SubExp) ->                 -- (old size, new size)
   SegBinOp GPU ->
   Builder GPU SubExp
-mkSegMapRed arrName grpSize binop = do
+mkSegMapRed arrNames grpSizes binop = do
   let comm = segBinOpComm binop
   lambda <- renameLambda $ segBinOpLambda binop
   let neutral = segBinOpNeutral binop
@@ -198,17 +176,19 @@ mkSegMapRed arrName grpSize binop = do
   buildSegMapThread "red_intermediate" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
-      size <- mkChunkSize tid $ fst grpSize
-      e <- letExp "chunk" $ BasicOp $
-              Index arrName (Slice [DimFix (Var tid),
-                            DimSlice (intConst Int64 0) size (intConst Int64 1)])
-      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma size [e] screma
+      currentSize <- mkChunkSize tid $ fst grpSizes
+      es <- mapM (letChunkExp tid) arrNames
+      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma seqFactor es screma
       let lvl = SegThread SegNoVirt Nothing
-      let space = SegSpace phys [(tid, snd grpSize)]
+      let space = SegSpace phys [(tid, snd grpSizes)]
       let types = scremaType seqFactor screma
       pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
-
-
+  where
+    letChunkExp :: VName -> VName -> Builder GPU VName
+    letChunkExp tid arrName = do
+      letExp "chunk" $ BasicOp $
+        Index arrName (Slice [DimFix (Var tid),
+        DimSlice (intConst Int64 0) seqFactor (intConst Int64 1)])
 
 -- | The making of a tile consists of a SegMap to load elements into local
 -- memory in a coalesced manner. Some intermediate instructions to modify
@@ -217,19 +197,11 @@ mkSegMapRed arrName grpSize binop = do
 -- The first SubExp is the group id 
 -- The second SubExp is Var containing the groupsize
 -- Returns a SubExp that is the chunks variable
-mkTile :: 
-  SubExp ->                   -- Group id
-  (SubExp, SubExp) ->         -- (old size, new size)
-  (VName, NameInfo GPU) -> 
-  Builder GPU SubExp
-mkTile gid (oldSize, newSize) (arrName, arrInfo)= do
-  let (FParamName typebase) =  arrInfo
-  let arrType = elemType typebase
-
+mkTile :: SubExp -> (SubExp, SubExp) -> (VName, PrimType) -> Builder GPU SubExp
+mkTile gid (oldSize, newSize) (arrName, arrType) = do
   segMap <- buildSegMapThread_ "tile" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
-      -- size <- mkChunkSize tid oldSize
       e <- letSubExp "slice" $ BasicOp $
                 Index arrName (Slice [DimFix gid, DimSlice (Var tid) seqFactor newSize])
       let lvl = SegThread SegNoVirt Nothing
@@ -247,7 +219,6 @@ mkTile gid (oldSize, newSize) (arrName, arrInfo)= do
       phys <- newVName "phys_tid"
       start <- letSubExp "start" $ BasicOp $
                 BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
-      -- size <- mkChunkSize tid oldSize
       chunk <- letSubExp "chunk" $ BasicOp $
                 Index tileFlat (Slice [DimSlice start seqFactor (intConst Int64 1)])
       let lvl = SegThread SegNoVirt Nothing
@@ -259,42 +230,17 @@ mkTile gid (oldSize, newSize) (arrName, arrInfo)= do
 -- Generates statements that compute the pr. thread chunk size. This is needed
 -- as the last thread in a block might not have seqFactor amount of elements
 -- to read. 
-mkChunkSize :: 
+mkChunkSize ::
   VName ->               -- The thread id
   SubExp ->              -- old size 
   Builder GPU SubExp     -- Returns the SubExp in which the size is
-mkChunkSize tid sOld = do 
+mkChunkSize tid sOld = do
   offset <- letSubExp "offset" $ BasicOp $
               BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
   tmp <- letSubExp "tmp" $ BasicOp $
-              BinOp (Sub Int64 OverflowUndef) sOld offset 
+              BinOp (Sub Int64 OverflowUndef) sOld offset
   letSubExp "size" $ BasicOp $
               BinOp (SMin Int64) tmp seqFactor
-  
-
-  
-  -- cmp <- eCmpOp (CmpSle Int64) (eSubExp $ Var tid) (eSubExp seqFactor)
-  -- ifB <- eBody [eSubExp seqFactor]
-  -- elseB <- buildBody_  $ do
-  --     g <- letSubExp "global" $ BasicOp $ BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
-  --     l <- letSubExp "local" $ BasicOp $ BinOp (Sub Int64 OverflowUndef) grpSize g
-  --     pure [SubExpRes mempty l]
-  -- ifExp <- eIf (pure cmp) (pure ifB) (pure elseB)
-  -- letSubExp "sliceSize" =<< ifExp
-
-
-  -- cmp <- eCmpOp (CmpSle Int64) (eSubExp $ Var tid) (eSubExp grpSize)
-  -- ifBody <- eBody [eSubExp seqFactor]
-
-  -- -- The computations for the else body before the creation of the body
-  -- g <- eBinOp (Mul Int64 OverflowUndef) (eSubExp $ Var tid) (eSubExp seqFactor)
-  -- l <- eBinOp (Sub Int64 OverflowUndef) (eSubExp grpSize) (pure g)y
-  -- elseBody <- eBody [pure g, pure l]
-
-  -- ifRes <- eIf (cmp) (ifBody) (elseBody)
-
-  -- letSubExp "slice_sice" =<< ifRes
-
 
 
 -- Builds a SegMap at thread level containing all bindings created in m
@@ -309,7 +255,7 @@ buildSegMapThread name  m = do
   letSubExp name $ Op $ SegOp $ SegMap lvl space ts kbody
 
 -- Like buildSegMapThread but returns the VName instead of the actual 
--- SubExp. Just for convinience
+-- SubExp. Just for convenience
 buildSegMapThread_ ::
   String ->
   Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
@@ -320,5 +266,38 @@ buildSegMapThread_ name m = do
   pure name'
 
 
+-- create tiles for the arrays used in the segop kernelbody
+-- each entry in the returned list is a tuple of the name of the array and its tiled replacement
+tileSegKernelBody :: KernelBody GPU -> (SubExp, SubExp) -> SubExp -> SubExp
+                      -> Builder GPU [(VName, VName)]
+tileSegKernelBody (KernelBody _ stms _) grpSizes gid tid = do
+  -- let stmsToTile = filter shouldTile $ stmsToList stms
+  let stmsToTile = Data.List.foldr shouldTile [] $ stmsToList stms
+  let stmsInfos = Data.List.map getTileStmInfo stmsToTile
+  tiles <- mapM (mkTile gid grpSizes) stmsInfos
+  let (names, _) = Data.List.unzip stmsInfos
+  let tileNames = Data.List.map (\(Var x) -> x) tiles
+  pure $ Data.List.zip names tileNames
+  where
+    -- arrays to tile use the thread id and haven't been tiled in same kernelbody
+    shouldTile :: Stm GPU -> [Stm GPU] -> [Stm GPU]
+    shouldTile stm@(Let _ _ (BasicOp (Index _ slice))) acc =
+      let tidIndex = DimFix tid
+      in case unSlice slice of
+        (_:tid':_) -> if tid' == tidIndex && notTiled then stm:acc else acc
+        (tid':_) -> if tid' == tidIndex && notTiled then stm:acc else acc
+        _ -> acc
+      where
+        notTiled = stm `Data.List.notElem` acc
+    shouldTile _ acc = acc
 
-
+    getTileStmInfo :: Stm GPU -> (VName, PrimType)
+    getTileStmInfo stm@(Let pat _ (BasicOp (Index name _))) =
+      let pes = patElems pat
+      in case pes of
+        [PatElem _ dec] -> (name, elemType dec)
+        _ -> error
+              $ "Statements used for tiling should only contain a single VName " Data.List.++ show stm
+    getTileStmInfo stm =
+      error
+        $ "Invalid statement for tiling in IntraSeq " Data.List.++ show stm
