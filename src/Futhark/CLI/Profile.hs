@@ -93,7 +93,7 @@ analyseProfileReport json_path bench_results = do
     onBenchResult top_dir (BenchResult prog_path data_results) = do
       let prog_name = drop (length prefix) prog_path
           prog_dir = top_dir </> dropExtension prog_name
-      unless (prog_dir == top_dir) $ createDirectory prog_dir
+      unless (prog_dir == top_dir) $ createDirectoryIfMissing True prog_dir
       mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
 
     onDataResult _ prog_name (DataResult name (Left _)) =
