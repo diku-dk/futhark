@@ -38,7 +38,7 @@ JSON file ``prog.json``, this will create a *top level directory*
 ``prog.prof`` that contains files with human-readable profiling
 information.  A set of files will be created for each benchmark
 dataset.  If the original invocation of ``futhark bench`` included
-multiple programs, then ``futhark prof`` will create subdirectories
+multiple programs, then ``futhark profile`` will create subdirectories
 for each program (although all inside the same top level directory).
 
 Files produced
