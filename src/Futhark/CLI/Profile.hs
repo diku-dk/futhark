@@ -82,7 +82,6 @@ analyseProfileReport json_path bench_results = do
   mapM_ (onBenchResult top_dir) bench_results
   where
     prefix = longestCommonPrefix $ map benchResultProg bench_results
-    prefix_len = length prefix + 1
 
     -- Eliminate characters that are filesystem-meaningful.
     escape '/' = '_'
@@ -92,7 +91,7 @@ analyseProfileReport json_path bench_results = do
       T.hPutStrLn stderr $ prog_name <> " dataset " <> name <> ": " <> what
 
     onBenchResult top_dir (BenchResult prog_path data_results) = do
-      let prog_name = drop prefix_len prog_path
+      let prog_name = drop (length prefix) prog_path
           prog_dir = top_dir </> dropExtension prog_name
       unless (prog_dir == top_dir) $ createDirectory prog_dir
       mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
