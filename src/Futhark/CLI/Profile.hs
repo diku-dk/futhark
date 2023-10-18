@@ -1,7 +1,6 @@
 module Futhark.CLI.Profile (main) where
 
 import Control.Exception (catch)
-import Control.Monad
 import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Map qualified as M
 import Data.Text qualified as T
@@ -9,7 +8,7 @@ import Data.Text.IO qualified as T
 import Futhark.Bench
 import Futhark.Util (showText)
 import Futhark.Util.Options
-import System.Directory (createDirectory, createDirectoryIfMissing, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, removePathForcibly)
 import System.FilePath
 import System.IO
 import Text.Printf
@@ -78,7 +77,6 @@ analyseProfileReport json_path bench_results = do
   T.hPutStrLn stderr $ "Writing results to " <> T.pack top_dir <> "/"
   T.hPutStrLn stderr $ "Stripping '" <> T.pack prefix <> "' from program paths."
   removePathForcibly top_dir
-  createDirectoryIfMissing True top_dir
   mapM_ (onBenchResult top_dir) bench_results
   where
     prefix = longestCommonPrefix $ map benchResultProg bench_results
@@ -87,13 +85,17 @@ analyseProfileReport json_path bench_results = do
     escape '/' = '_'
     escape c = c
 
+    splitAtEntry name =
+      let (file, entry) = span (/= ':') name
+       in (file, drop 1 entry)
+
     problem prog_name name what =
       T.hPutStrLn stderr $ prog_name <> " dataset " <> name <> ": " <> what
 
     onBenchResult top_dir (BenchResult prog_path data_results) = do
-      let prog_name = drop (length prefix) prog_path
-          prog_dir = top_dir </> dropExtension prog_name
-      unless (prog_dir == top_dir) $ createDirectoryIfMissing True prog_dir
+      let (prog_name, entry) = splitAtEntry $ drop (length prefix) prog_path
+          prog_dir = top_dir </> dropExtension prog_name </> entry
+      createDirectoryIfMissing True prog_dir
       mapM_ (onDataResult prog_dir (T.pack prog_name)) data_results
 
     onDataResult _ prog_name (DataResult name (Left _)) =
