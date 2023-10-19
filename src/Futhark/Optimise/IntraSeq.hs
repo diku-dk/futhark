@@ -134,7 +134,78 @@ seqStm' gid sizes stm@(Let pat aux (Op (SegOp
     isArray (Array {}) = True
     isArray _ = False
 
+
+seqStm' gid grpSizes (Let pat aux (Op (SegOp 
+                      (SegScan lvl@(SegThread {}) space binops ts kbody)))) = do
+  -- Get the thread id
+  let [(tid, _)] = unSegSpace space
+
+  names <- tileSegKernelBody kbody grpSizes gid (Var tid)
+  let (vNames, tileNames) = unzip names
+
+  -- For each BinOp create segmap performin local scan
+  scans <- mapM (mkSegMapScan tileNames grpSizes) binops
+  let scanNames = map (\(Var x) -> x) scans
+
+  let phys = segFlat space
+  let [(gtid, _)] = unSegSpace space
+  let space' = SegSpace phys [(gtid, snd grpSizes)] 
+
+  let kbody' = substituteIndexes kbody $ zip vNames scanNames
+  addStm $ Let pat aux (Op $ SegOp (SegRed lvl space' binops ts kbody'))
+  pure ()
+
 seqStm' _ _ _ = undefined
+
+
+mkSegMapScan :: 
+  [VName] ->
+  (SubExp, SubExp) ->
+  SegBinOp GPU ->
+  Builder GPU SubExp
+mkSegMapScan arrNames grpSize binop = do
+
+  -- Create the reduction for intermediate result
+  redRes <- mkSegMapRed arrNames grpSize binop
+  let (Var redName) = redRes
+  
+  -- Create the middle scan part as a SegScan(thread)
+   
+  -- lambda <- renameLambda $ segBinOpLambda binop
+  -- let neutral = segBinOpNeutral binop
+
+  let types = lambdaReturnType $ segBinOpLambda binop
+
+  let lvl = SegThread SegNoVirt Nothing
+
+  tid <- newVName "tid"
+  phys <- newVName "phys_tid"
+  let space = SegSpace phys [(tid, snd grpSize)]
+
+  
+  letSubExp "scan_aggregate" $ Op $ SegOp $ SegScan lvl space binop types
+  
+  -- let scan = Scan lambda neutral
+  -- screma <- scanSOAC [scan]
+
+  -- buildSegMapThread "scan_aggregate" $ do
+  --     tid <- newVName "tid"
+  --     phys <- newVName "phys_tid"
+  --     -- currentsize <- ???
+  --     -- es <- mapM (letChunkExp tid) $ fst grpSize
+  --     tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma (snd grpSize) [redName] screma
+  --     let lvl = SegThread SegNoVirt Nothing
+  --     let space = SegSpace phys [(tid, snd grpSize)]
+  --     let types = scremaType seqFactor screma
+  --     pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
+      
+
+  
+  
+  
+  
+  
+
 
 
 substituteIndexes :: KernelBody GPU -> [(VName, VName)] -> KernelBody GPU
