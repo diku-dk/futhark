@@ -7,7 +7,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
 import Debug.Trace
 import Control.Monad
-import Data.List (zip5, zip7)
+import Data.List (zip4, zip5, zip7)
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -393,36 +393,64 @@ compileSegScan pat lvl space scan_op map_kbody = do
             copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
           sOp local_barrier
 
-      sComment "per thread scan" $ do
+      let fix_perthread_scan = False
+      if fix_perthread_scan then
+        sComment "per thread scan" $ do
+          accs <- mapM (dPrim "acc") tys
+          forM_ (zip accs scanop_nes) $ \(acc, ne) -> do
+            copyDWIMFix (tvVar acc) [] ne []
 
-        accs <- mapM (dPrim "acc") tys
-        forM_ (zip accs scanop_nes) $ \(acc, ne) -> do
-          copyDWIMFix (tvVar acc) [] ne []
+          globalIdx <-
+            dPrimVE "gidx" $ (kernelLocalThreadId constants * chunk)
 
-        globalIdx <-
-          dPrimVE "gidx" $ (kernelLocalThreadId constants * chunk) + 1
+          sFor "i" chunk $ \i -> do
+            new_sgm <- if segmented
+                       then dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary)
+                                                `mod` segsize_compact .==. 0
+                       else pure false
 
-        sFor "i" chunk $ \i -> do
-          new_sgm <- if segmented
-                     then dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary)
-                                              `mod` segsize_compact .==. 0
-                     else pure false
+            sUnless new_sgm $ do
+              let xs = map paramName $ xParams scan_op
+                  ys = map paramName $ yParams scan_op
+              forM_ (zip5 privateArrays accs xs ys tys) $ \(src, acc, x, y, ty) -> do
+                dPrim_ x ty
+                dPrim_ y ty
+                copyDWIMFix x [] (Var $ tvVar acc) []
+                copyDWIMFix y [] (Var src) [i]
 
-          sUnless new_sgm $ do
+              let scan_op_lambdabody = lambdaBody $ segBinOpLambda scan_op
+              compileStms mempty (bodyStms scan_op_lambdabody) $ do
+                let results = map resSubExp $ bodyResult scan_op_lambdabody
+                forM_ (zip3 accs privateArrays results) $ \(acc, dest, res) -> do
+                  copyDWIM (tvVar acc) [] res []
+                  copyDWIMFix dest [i] (Var $ tvVar acc) []
+
+      else
+        sComment "Per thread scan" $ do
+          -- We don't need to touch the first element, so only m-1
+          -- iterations here.
+          globalIdx <-
+            dPrimVE "gidx" $
+              (kernelLocalThreadId constants * chunk) + 1
+          sFor "i" (chunk - 1) $ \i -> do
             let xs = map paramName $ xParams scan_op
                 ys = map paramName $ yParams scan_op
-            forM_ (zip5 privateArrays accs xs ys tys) $ \(src, acc, x, y, ty) -> do
-              dPrim_ x ty
-              dPrim_ y ty
-              copyDWIMFix x [] (Var $ tvVar acc) []
-              copyDWIMFix y [] (Var src) [i]
+            -- determine if start of segment
+            new_sgm <-
+              if segmented
+                then dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+                else pure false
+            -- skip scan of first element in segment
+            sUnless new_sgm $ do
+              forM_ (zip4 privateArrays xs ys tys) $ \(src, x, y, ty) -> do
+                dPrim_ x ty
+                dPrim_ y ty
+                copyDWIMFix x [] (Var src) [i]
+                copyDWIMFix y [] (Var src) [i + 1]
 
-            let scan_op_lambdabody = lambdaBody $ segBinOpLambda scan_op
-            compileStms mempty (bodyStms scan_op_lambdabody) $ do
-              let results = map resSubExp $ bodyResult scan_op_lambdabody
-              forM_ (zip3 accs privateArrays results) $ \(acc, dest, res) -> do
-                copyDWIM (tvVar acc) [] res []
-                copyDWIMFix dest [i] (Var $ tvVar acc) []
+              compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
+                forM_ (zip privateArrays $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(dest, res) ->
+                  copyDWIMFix dest [i + 1] res []
 
 
       sComment "Publish results in shared memory" $ do

@@ -48,13 +48,11 @@ bodyHas f = any (f' . stmExp) . bodyStms
         { walkOnBody = const $ guard . not . bodyHas f
         }
 
-canBeSinglePass :: [SegBinOp GPUMem] -> KernelBody GPUMem -> Maybe (SegBinOp GPUMem)
-canBeSinglePass scan_ops map_kbody
-  | all ok scan_ops,
-    not $ bodyHas freshArray (Body () (kernelBodyStms map_kbody) []) =
-      Just $ combineScanOps scan_ops
-  | otherwise =
-      Nothing
+canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
+canBeSinglePass scan_ops =
+  if all ok scan_ops
+     then Just $ combineScanOps scan_ops
+     else Nothing
   where
     ok op =
       segBinOpShape op == mempty
@@ -62,16 +60,6 @@ canBeSinglePass scan_ops map_kbody
         && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
-    -- XXX: Currently single pass scans cannot handle construction of
-    -- arrays in the kernel body (#2013), because of insufficient
-    -- memory expansion.  This can in principle be fixed.
-    freshArray (BasicOp Manifest {}) = True
-    freshArray (BasicOp Iota {}) = True
-    freshArray (BasicOp Replicate {}) = True
-    freshArray (BasicOp Scratch {}) = True
-    freshArray (BasicOp Concat {}) = True
-    freshArray (BasicOp ArrayLit {}) = True
-    freshArray _ = False
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -87,7 +75,7 @@ compileSegScan pat lvl space scan_ops map_kbody =
     emit $ Imp.DebugPrint "\n# SegScan" Nothing
     target <- hostTarget <$> askEnv
 
-    case (targetSupportsSinglePass target, canBeSinglePass scan_ops map_kbody) of
+    case (targetSupportsSinglePass target, canBeSinglePass scan_ops) of
       (True, Just scan_ops') ->
         SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
 
