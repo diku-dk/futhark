@@ -177,18 +177,18 @@ mkSegMapRed arrNames grpSizes binop = do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       currentSize <- mkChunkSize tid $ fst grpSizes
-      es <- mapM (letChunkExp tid) arrNames
-      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma seqFactor es screma
+      es <- mapM (letChunkExp currentSize tid) arrNames
+      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma currentSize es screma
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, snd grpSizes)]
       let types = scremaType seqFactor screma
       pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
   where
-    letChunkExp :: VName -> VName -> Builder GPU VName
-    letChunkExp tid arrName = do
+    letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
+    letChunkExp size tid arrName = do
       letExp "chunk" $ BasicOp $
         Index arrName (Slice [DimFix (Var tid),
-        DimSlice (intConst Int64 0) seqFactor (intConst Int64 1)])
+        DimSlice (intConst Int64 0) size (intConst Int64 1)])
 
 -- | The making of a tile consists of a SegMap to load elements into local
 -- memory in a coalesced manner. Some intermediate instructions to modify
