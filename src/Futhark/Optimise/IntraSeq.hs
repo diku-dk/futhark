@@ -156,19 +156,66 @@ seqStm' gid grpSizes (Let pat aux e@(Op (SegOp
   -- IR generation
   
   -- Create the tiles
-  let [(tid, _)] = unSegSpace space
-  names <- tileSegKernelBody kbody grpSizes gid (Var tid)
+  let [(gtid, _)] = unSegSpace space
+  names <- tileSegKernelBody kbody grpSizes gid (Var gtid)
   let (vNames, tileNames) = unzip names
 
   -- Create the reduction part
   redRes <- mapM (mkSegMapRed tileNames grpSizes) binops
 
-  -- Scan of the pr. chunk reduction results
-  scanAgg <- mkSegScanThread grpSizes (head redRes) e
+  -- for each array of intermediate reduction results, create IR to scan it
+  scanAggs <- forM redRes $ \ redRes' -> do
+    buildSegScan "scan_agg" $ do
+      let (Var redName) = redRes'
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      binops' <- renameSegBinOp binops
 
-  -- Create the final SegMap scanning the chunks
-  res <- mkSegMapScan grpSizes (head names) scanAgg e
-  
+      -- TODO: Need some checks or filtering of the binops actually needed
+      -- maybe uneeded parts are removed by simplify?
+
+      e' <- letSubExp "elem" =<< eIndex redName (eSubExp $ Var tid)
+
+      let lvl' = SegThread SegNoVirt Nothing
+      let space' = SegSpace phys [(tid, snd grpSizes)]
+      pure ([Returns ResultMaySimplify mempty e'],
+            lvl', space', binops', ts) -- TODO: idk if ts is correct
+        
+
+  -- for each array of aggregate scan results we want to create a SegMap
+  -- containing a sequential scan over the chunks 
+  res <- forM scanAggs $ \ agg -> do
+    buildSegMapThread "res" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      let (Var aggName) = agg
+
+      -- TODO: uses only the first binop right now and assumes singular neutral
+      -- element
+      let binop = head binops
+      let neutral = head $ segBinOpNeutral binop
+      lambda <- renameLambda $ segBinOpLambda binop
+
+      idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
+                                        (eSubExp $ Var tid)
+                                        (eSubExp $ intConst Int64 1)
+      ne <- letSubExp "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
+                                      (eSubExp $ Var tid)
+                                      (eSubExp $ intConst Int64 0)
+                                   )
+                                   (eBody [toExp neutral])
+                                   (eBody [eIndex aggName (eSubExp idx)])
+      scan <- scanSOAC [Scan lambda [ne]]
+      chunkSize <- mkChunkSize tid $ fst grpSizes
+      es <- letChunkExp chunkSize tid (snd $ head names) -- TODO: head
+      res <- letSubExp "res" $ Op $ OtherOp $ Screma chunkSize [es] scan
+      let lvl' = SegThread SegNoVirt Nothing
+      let space' = SegSpace phys [(tid, snd grpSizes)]
+      let types' = scremaType seqFactor scan
+      -- TODO: Add the, and potentially modify, statements from the original
+      -- kbody
+      pure (Returns ResultMaySimplify mempty res, lvl', space', types')
+
   pure ()
   
 
@@ -367,6 +414,17 @@ buildSegMapThread_ name m = do
   subExp <- buildSegMapThread name m
   let (Var name') = subExp
   pure name'
+
+-- | The [KernelResult] from the input monad is what is being passed to the 
+-- segmented binops
+buildSegScan ::
+  String ->          -- SubExp name
+  Builder GPU ([KernelResult], SegLevel, SegSpace, [SegBinOp GPU], [Type]) ->
+  Builder GPU SubExp
+buildSegScan name m = do
+  ((results, lvl, space, bops, ts), stms) <- collectStms m
+  let kbody = KernelBody () stms results
+  letSubExp name $ Op $ SegOp $ SegScan lvl space bops ts kbody
 
 
 -- | The making of a tile consists of a SegMap to load elements into local
