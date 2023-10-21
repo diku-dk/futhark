@@ -87,6 +87,20 @@ seqBody grpId sizes (KernelBody dec stms result) = do
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 -- Much the same as seqStms but takes the group size to pass along
 seqStms' ::
   SubExp ->             -- Group id
@@ -96,7 +110,7 @@ seqStms' ::
 seqStms' grpId sizes stms = do
   mapM_ (seqStm' grpId sizes) $ stmsToList stms
 
--- seqStm' is assumed to only match on statements encountered within some
+-- | seqStm' is assumed to only match on statements encountered within some
 -- SegOp at group level
 seqStm' ::
   SubExp ->             -- Group id
@@ -161,6 +175,41 @@ seqStm' gid grpSizes (Let pat aux e@(Op (SegOp
 
 seqStm' _ _ _ = undefined
 
+
+
+
+
+
+
+
+
+mkSegMapRed ::
+  [VName] ->                  -- The arrays to reduce over
+  (SubExp, SubExp) ->                 -- (old size, new size)
+  SegBinOp GPU ->
+  Builder GPU SubExp
+mkSegMapRed arrNames grpSizes binop = do
+  let comm = segBinOpComm binop
+  lambda <- renameLambda $ segBinOpLambda binop
+  let neutral = segBinOpNeutral binop
+
+  let reduce = Reduce comm lambda neutral
+
+  screma <- reduceSOAC [reduce]
+
+  buildSegMapThread "red_intermediate" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      currentSize <- mkChunkSize tid $ fst grpSizes
+      es <- mapM (letChunkExp currentSize tid) arrNames
+      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma currentSize es screma
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, snd grpSizes)]
+      let types = scremaType seqFactor screma
+      pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
+
+
+      
 -- Creates a SegMap at thread level performing a sequnetial scan of the
 -- threads corresponding chunk
 mkSegMapScan ::
@@ -204,9 +253,7 @@ mkSegMapScan grpSizes tile agg (Op (SegOp (SegScan _ _ binops _ _))) = do
       pure (Returns ResultMaySimplify mempty res, lvl, space, types)
         
   
-  
-
--- Catch all
+ -- Catch all
 mkSegMapScan _ _ _ e = error $ "Expected a SegScan but got" ++ show e
 
 mkSegScanThread ::
@@ -275,72 +322,12 @@ bindNewGroupSize group_size = do
   letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
   pure $ Var name
 
-mkSegMapRed ::
-  [VName] ->                  -- The arrays to reduce over
-  (SubExp, SubExp) ->                 -- (old size, new size)
-  SegBinOp GPU ->
-  Builder GPU SubExp
-mkSegMapRed arrNames grpSizes binop = do
-  let comm = segBinOpComm binop
-  lambda <- renameLambda $ segBinOpLambda binop
-  let neutral = segBinOpNeutral binop
-
-  let reduce = Reduce comm lambda neutral
-
-  screma <- reduceSOAC [reduce]
-
-  buildSegMapThread "red_intermediate" $ do
-      tid <- newVName "tid"
-      phys <- newVName "phys_tid"
-      currentSize <- mkChunkSize tid $ fst grpSizes
-      es <- mapM (letChunkExp currentSize tid) arrNames
-      tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma currentSize es screma
-      let lvl = SegThread SegNoVirt Nothing
-      let space = SegSpace phys [(tid, snd grpSizes)]
-      let types = scremaType seqFactor screma
-      pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
   
 letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
 letChunkExp size tid arrName = do
   letExp "chunk" $ BasicOp $
     Index arrName (Slice [DimFix (Var tid),
     DimSlice (intConst Int64 0) size (intConst Int64 1)])
-
--- | The making of a tile consists of a SegMap to load elements into local
--- memory in a coalesced manner. Some intermediate instructions to modify
--- the tile. Lastly another SegMap to load the correct values into registers
--- 
--- The first SubExp is the group id 
--- The second SubExp is Var containing the groupsize
--- Returns a SubExp that is the chunks variable
-mkTile :: SubExp -> (SubExp, SubExp) -> (VName, PrimType) -> Builder GPU SubExp
-mkTile gid (oldSize, newSize) (arrName, arrType) = do
-  segMap <- buildSegMapThread_ "tile" $ do
-      tid <- newVName "tid"
-      phys <- newVName "phys_tid"
-      e <- letSubExp "slice" $ BasicOp $
-                Index arrName (Slice [DimFix gid, DimSlice (Var tid) seqFactor newSize])
-      let lvl = SegThread SegNoVirt Nothing
-      let space = SegSpace phys [(tid, newSize)]
-      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
-      pure (Returns ResultMaySimplify mempty e, lvl, space, types)
-
-  tileTrans <- letExp "tile_T" $ BasicOp $ Rearrange [1,0] segMap
-  tileFlat <- letExp "tile_flat" $ BasicOp $
-                Reshape ReshapeArbitrary (Shape [oldSize]) tileTrans
-
-  -- SegMap to read the actual chunks the threads need
-  buildSegMapThread "chunks" $ do
-      tid <- newVName "tid"
-      phys <- newVName "phys_tid"
-      start <- letSubExp "start" $ BasicOp $
-                BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
-      chunk <- letSubExp "chunk" $ BasicOp $
-                Index tileFlat (Slice [DimSlice start seqFactor (intConst Int64 1)])
-      let lvl = SegThread SegNoVirt Nothing
-      let space = SegSpace phys [(tid, newSize)]
-      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
-      pure (Returns ResultPrivate mempty chunk, lvl, space, types)
 
 
 -- Generates statements that compute the pr. thread chunk size. This is needed
@@ -380,6 +367,44 @@ buildSegMapThread_ name m = do
   subExp <- buildSegMapThread name m
   let (Var name') = subExp
   pure name'
+
+
+-- | The making of a tile consists of a SegMap to load elements into local
+-- memory in a coalesced manner. Some intermediate instructions to modify
+-- the tile. Lastly another SegMap to load the correct values into registers
+-- 
+-- The first SubExp is the group id 
+-- The second SubExp is Var containing the groupsize
+-- Returns a SubExp that is the chunks variable
+mkTile :: SubExp -> (SubExp, SubExp) -> (VName, PrimType) -> Builder GPU SubExp
+mkTile gid (oldSize, newSize) (arrName, arrType) = do
+  segMap <- buildSegMapThread_ "tile" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      e <- letSubExp "slice" $ BasicOp $
+                Index arrName (Slice [DimFix gid, DimSlice (Var tid) seqFactor newSize])
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, newSize)]
+      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
+      pure (Returns ResultMaySimplify mempty e, lvl, space, types)
+
+  tileTrans <- letExp "tile_T" $ BasicOp $ Rearrange [1,0] segMap
+  tileFlat <- letExp "tile_flat" $ BasicOp $
+                Reshape ReshapeArbitrary (Shape [oldSize]) tileTrans
+
+  -- SegMap to read the actual chunks the threads need
+  buildSegMapThread "chunks" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      start <- letSubExp "start" $ BasicOp $
+                BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
+      chunk <- letSubExp "chunk" $ BasicOp $
+                Index tileFlat (Slice [DimSlice start seqFactor (intConst Int64 1)])
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, newSize)]
+      let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
+      pure (Returns ResultPrivate mempty chunk, lvl, space, types)
+
 
 
 -- create tiles for the arrays used in the segop kernelbody
