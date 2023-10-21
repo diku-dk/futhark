@@ -194,7 +194,7 @@ mkSegMapScan grpSizes tile agg (Op (SegOp (SegScan _ _ binops _ _))) = do
 
       scan <- scanSOAC [Scan lambda [ne]]
       currentSize <- mkChunkSize tid $ fst grpSizes
-      es <- letChunkExp currentSize tid aggName  
+      es <- letChunkExp currentSize tid (snd tile)  
       res <- letSubExp "scan_res" $ Op $ OtherOp $ 
                 Screma currentSize [es] scan           
 
