@@ -208,14 +208,19 @@ seqStm' gid grpSizes (Let pat aux e@(Op (SegOp
       scan <- scanSOAC [Scan lambda [ne]]
       chunkSize <- mkChunkSize tid $ fst grpSizes
       es <- letChunkExp chunkSize tid (snd $ head names) -- TODO: head
-      res <- letSubExp "res" $ Op $ OtherOp $ Screma chunkSize [es] scan
+      res <- letExp "res" $ Op $ OtherOp $ Screma chunkSize [es] scan
+      res' <- letSubExp "res" $ BasicOp $ Reshape ReshapeArbitrary 
+                (Shape [seqFactor]) res
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, snd grpSizes)]
       let types' = scremaType seqFactor scan
-      -- TODO: Add the, and potentially modify, statements from the original
-      -- kbody
-      pure (Returns ResultMaySimplify mempty res, lvl', space', types')
+      pure (Returns ResultMaySimplify mempty res', lvl', space', types')
 
+  let (Var res') = head res -- TODO: head
+  let exp' = Reshape ReshapeArbitrary (Shape [fst grpSizes]) res'
+  addStm $ Let pat aux $ BasicOp exp'
+  -- exp' <- eSubExp $ head res -- TODO: head
+  -- addStm $ Let pat aux exp'
   pure ()
   
 
