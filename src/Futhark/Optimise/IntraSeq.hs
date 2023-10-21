@@ -135,76 +135,121 @@ seqStm' gid sizes stm@(Let pat aux (Op (SegOp
     isArray _ = False
 
 
-seqStm' gid grpSizes (Let pat aux (Op (SegOp 
-                      (SegScan lvl@(SegThread {}) space binops ts kbody)))) = do
-  -- Get the thread id
+seqStm' gid grpSizes (Let pat aux e@(Op (SegOp 
+                      (SegScan (SegThread {}) space binops ts kbody)))) = do
+  -- TODO: Right now this whole function assumes that only a single tile is
+  -- created and that there is only one single SegBinOp as this simplifies
+  -- IR generation
+  
+  -- Create the tiles
   let [(tid, _)] = unSegSpace space
-
   names <- tileSegKernelBody kbody grpSizes gid (Var tid)
   let (vNames, tileNames) = unzip names
 
-  -- For each BinOp create segmap performin local scan
-  scans <- mapM (mkSegMapScan tileNames grpSizes) binops
-  let scanNames = map (\(Var x) -> x) scans
+  -- Create the reduction part
+  redRes <- mapM (mkSegMapRed tileNames grpSizes) binops
 
-  let phys = segFlat space
-  let [(gtid, _)] = unSegSpace space
-  let space' = SegSpace phys [(gtid, snd grpSizes)] 
+  -- Scan of the pr. chunk reduction results
+  scanAgg <- mkSegScanThread grpSizes (head redRes) e
 
-  let kbody' = substituteIndexes kbody $ zip vNames scanNames
-  addStm $ Let pat aux (Op $ SegOp (SegRed lvl space' binops ts kbody'))
+  -- Create the final SegMap scanning the chunks
+  res <- mkSegMapScan grpSizes (head names) scanAgg e
+  
   pure ()
+  
+
 
 seqStm' _ _ _ = undefined
 
-
-mkSegMapScan :: 
-  [VName] ->
-  (SubExp, SubExp) ->
-  SegBinOp GPU ->
+-- Creates a SegMap at thread level performing a sequnetial scan of the
+-- threads corresponding chunk
+mkSegMapScan ::
+  (SubExp, SubExp) ->    -- (old size, new size)
+  (VName, VName) ->      -- (arr, tile)
+  SubExp ->              -- aggregates
+  Exp GPU ->             -- The SegOp
   Builder GPU SubExp
-mkSegMapScan arrNames grpSize binop = do
+mkSegMapScan grpSizes tile agg (Op (SegOp (SegScan _ _ binops _ _))) = do
+  -- Create the scan ScremaForm from the binop
+  let binop = head binops -- TODO: asumes one binop
+  lambda <- renameLambda $ segBinOpLambda binop
+  let neutral = head $ segBinOpNeutral binop -- TODO: head
+  let (Var aggName) = agg
 
-  -- Create the reduction for intermediate result
-  redRes <- mkSegMapRed arrNames grpSize binop
-  let (Var redName) = redRes
+   -- Create the actual SegMap operation
+  buildSegMapThread "res" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+
+      idx <- letSubExp "idx" 
+              =<< eBinOp (Sub Int64 OverflowUndef) 
+                        (eSubExp $ Var tid) 
+                        (eSubExp $ intConst Int64 1)
+      ne <- letSubExp "ne" 
+              =<< eIf (eCmpOp (CmpEq $ IntType Int64) 
+                              (eSubExp $ Var tid) 
+                              (eSubExp $ intConst Int64 0))
+                          (eBody [toExp neutral])
+                          (eBody [eIndex aggName (eSubExp idx)])
+
+      scan <- scanSOAC [Scan lambda [ne]]
+      currentSize <- mkChunkSize tid $ fst grpSizes
+      es <- letChunkExp currentSize tid aggName  
+      res <- letSubExp "scan_res" $ Op $ OtherOp $ 
+                Screma currentSize [es] scan           
+
+      let lvl = SegThread SegNoVirt Nothing
+      let space = SegSpace phys [(tid, snd grpSizes)]
+      let types = scremaType seqFactor scan
+      pure (Returns ResultMaySimplify mempty res, lvl, space, types)
+        
   
-  -- Create the middle scan part as a SegScan(thread)
-   
-  -- lambda <- renameLambda $ segBinOpLambda binop
-  -- let neutral = segBinOpNeutral binop
+  
 
-  let types = lambdaReturnType $ segBinOpLambda binop
+-- Catch all
+mkSegMapScan _ _ _ e = error $ "Expected a SegScan but got" ++ show e
 
-  let lvl = SegThread SegNoVirt Nothing
-
+mkSegScanThread ::
+  (SubExp, SubExp) ->      -- (old size, new size)
+  SubExp ->                -- The SubExp to scan
+  Exp GPU ->               -- The SegScan to "copy"
+  Builder GPU SubExp
+mkSegScanThread grpsizes arr (Op (SegOp (SegScan lvl space segbinops ts kbody))) = do
   tid <- newVName "tid"
   phys <- newVName "phys_tid"
-  let space = SegSpace phys [(tid, snd grpSize)]
+
+  -- Modify the segbinop 
+  segbinops' <- renameSegBinOp segbinops
+
+  -- Create the new kernelbody
+  kbody' <- buildKernelBody $ do
+          let (Var arrName) = arr
+          e <- letSubExp "elem" $ BasicOp (Index arrName (Slice [DimFix (Var tid)]))
+          pure $ Returns ResultMaySimplify mempty e 
+
+  let space'  = SegSpace phys [(tid, snd grpsizes)]
+  let segScan = SegScan lvl space' segbinops' ts kbody'
+
+  letSubExp "scan_agg" $ Op $ SegOp segScan
+  
+
+mkSegScanThread _ _ e = 
+  error $ "Expected a SegScan but got: " ++ show e
+
+
+buildKernelBody :: Builder GPU KernelResult -> Builder GPU (KernelBody GPU)
+buildKernelBody m = do
+  (kres, stms) <- collectStms m
+  pure $ KernelBody mempty stms [kres]
+
 
   
-  letSubExp "scan_aggregate" $ Op $ SegOp $ SegScan lvl space binop types
   
-  -- let scan = Scan lambda neutral
-  -- screma <- scanSOAC [scan]
-
-  -- buildSegMapThread "scan_aggregate" $ do
-  --     tid <- newVName "tid"
-  --     phys <- newVName "phys_tid"
-  --     -- currentsize <- ???
-  --     -- es <- mapM (letChunkExp tid) $ fst grpSize
-  --     tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma (snd grpSize) [redName] screma
-  --     let lvl = SegThread SegNoVirt Nothing
-  --     let space = SegSpace phys [(tid, snd grpSize)]
-  --     let types = scremaType seqFactor screma
-  --     pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
-      
-
-  
-  
-  
-  
-  
+renameSegBinOp :: [SegBinOp GPU] -> Builder GPU [SegBinOp GPU]
+renameSegBinOp segbinops =
+  forM segbinops $ \(SegBinOp comm lam ne shape) -> do
+    lam' <- renameLambda lam
+    pure $ SegBinOp comm lam' ne shape
 
 
 
@@ -254,12 +299,12 @@ mkSegMapRed arrNames grpSizes binop = do
       let space = SegSpace phys [(tid, snd grpSizes)]
       let types = scremaType seqFactor screma
       pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
-  where
-    letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
-    letChunkExp size tid arrName = do
-      letExp "chunk" $ BasicOp $
-        Index arrName (Slice [DimFix (Var tid),
-        DimSlice (intConst Int64 0) size (intConst Int64 1)])
+  
+letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
+letChunkExp size tid arrName = do
+  letExp "chunk" $ BasicOp $
+    Index arrName (Slice [DimFix (Var tid),
+    DimSlice (intConst Int64 0) size (intConst Int64 1)])
 
 -- | The making of a tile consists of a SegMap to load elements into local
 -- memory in a coalesced manner. Some intermediate instructions to modify
