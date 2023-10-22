@@ -359,6 +359,7 @@ jobs:
           virtualenv virtualenv
           source virtualenv/bin/activate
           pip install jsonschema
+          module unload cuda
           module load cuda/11.8
           futhark test tests \
             --backend=opencl \
@@ -380,6 +381,7 @@ jobs:
           virtualenv virtualenv
           source virtualenv/bin/activate
           pip install numpy pyopencl jsonschema
+          module unload cuda
           module load cuda/11.8
           futhark test tests --no-terminal --backend=pyopencl
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
@@ -398,6 +400,7 @@ jobs:
           virtualenv virtualenv
           source virtualenv/bin/activate
           pip install jsonschema
+          module unload cuda
           module load cuda/11.8
           futhark test tests \
             --backend=cuda \
