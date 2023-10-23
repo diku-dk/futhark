@@ -718,6 +718,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
                   copyDWIMFix acc (acc_is ++ vec_is) se []
 
     when (not is_comm) $ do
+      sComment "noncomm doTheReduction BEGIN" $ pure ()
       doTheReduction
       sComment "first thread keeps accumulator; others reset to neutral element" $ do
         let reset_to_neutral =
@@ -726,6 +727,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
                   sLoopNest (slugShape slug) $ \vec_is ->
                     copyDWIMFix acc (acc_is ++ vec_is) ne []
         sWhen (local_tid .>. 0) reset_to_neutral
+      sComment "noncomm doTheReduction END" $ pure ()
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
