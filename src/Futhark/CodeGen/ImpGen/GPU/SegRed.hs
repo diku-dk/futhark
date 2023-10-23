@@ -51,6 +51,7 @@ where
 import Control.Monad
 import Data.List (genericLength, zip7)
 import Data.Maybe
+import Debug.Trace
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
@@ -214,6 +215,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     slugs <-
       mapM (segBinOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
         zip3 reds reds_arrs reds_group_res_arrs
+    sComment "stage one BEGIN" $ pure ()
     reds_op_renamed <-
       reductionStageOne
         constants
@@ -225,31 +227,34 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
         slugs
         body
 
+    sComment "stage one END" $ pure ()
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
             patElems segred_pat
     forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
       \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
         let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
+        sComment ("stage two BEGIN") $ pure ()
         reductionStageTwo
-          constants
-          pes
-          (kernelGroupId constants)
-          0
-          [0]
-          0
-          (sExt64 $ kernelNumGroups constants)
-          slug
-          red_x_params
-          red_y_params
-          red_op_renamed
-          nes
-          1
-          counter
-          (fromInteger i)
-          sync_arr
-          group_res_arrs
-          red_arrs
+          constants                                -- constants
+          pes                                      -- segred_pes
+          (kernelGroupId constants)                -- group_id
+          0                                        -- flat_segment_id
+          [0]                                      -- segment_gtids
+          0                                        -- first_group_for_segment
+          (sExt64 $ kernelNumGroups constants)     -- groups_per_segment
+          slug                                     -- slug
+          red_x_params                             -- red_x_params
+          red_y_params                             -- red_y_params
+          red_op_renamed                           -- red_op_renamed
+          nes                                      -- nes
+          1                                        -- num_counters
+          counter                                  -- counter
+          (fromInteger i)                          -- counter_i
+          sync_arr                                 -- sync_arr
+          group_res_arrs                           -- group_res_arrs
+          red_arrs                                 -- red_arrs
+        sComment "stage two END" $ pure ()
 
 smallSegmentsReduction ::
   Pat LetDecMem ->
@@ -475,24 +480,24 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                 let (red_x_params, red_y_params) =
                       splitAt (length nes) $ lambdaParams red_op
                 reductionStageTwo
-                  constants
-                  pes
-                  group_id
-                  flat_segment_id
-                  (map Imp.le64 segment_gtids)
-                  (sExt64 first_group_for_segment)
-                  groups_per_segment
-                  slug
-                  red_x_params
-                  red_y_params
-                  red_op_renamed
-                  nes
-                  (fromIntegral num_counters)
-                  counter
-                  (fromInteger i)
-                  sync_arr
-                  group_res_arrs
-                  red_arrs
+                  constants                         -- constants
+                  pes                               -- segred_pes
+                  group_id                          -- group_id
+                  flat_segment_id                   -- flat_segment_id
+                  (map Imp.le64 segment_gtids)      -- segment_gtids
+                  (sExt64 first_group_for_segment)  -- first_group_for_segment
+                  groups_per_segment                -- groups_per_segment
+                  slug                              -- slug
+                  red_x_params                      -- red_x_params
+                  red_y_params                      -- red_y_params
+                  red_op_renamed                    -- red_op_renamed
+                  nes                               -- nes
+                  (fromIntegral num_counters)       -- num_counters
+                  counter                           -- counter
+                  (fromInteger i)                   -- counter_i
+                  sync_arr                          -- sync_arr
+                  group_res_arrs                    -- group_res_arrs
+                  red_arrs                          -- red_arrs
 
           one_group_per_segment =
             comment "first thread in group saves final result to memory" $
@@ -640,7 +645,8 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
 
   slugs_op_renamed <- mapM (renameLambda . segBinOpLambda . slugOp) slugs
 
-  let doTheReduction =
+  let doTheReduction = do
+        sComment "doTheReduction INNER BEGIN" $ pure ()
         forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
             comment "to reduce current chunk, first store our result in memory" $ do
@@ -660,6 +666,8 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
               sWhen (local_tid .==. 0) $
                 forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $ \((acc, acc_is), p) ->
                   copyDWIMFix acc (acc_is ++ vec_is) (Var $ paramName p) []
+
+        sComment "doTheReduction INNER END" $ pure ()
 
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
@@ -733,13 +741,20 @@ reductionStageOne ::
   DoSegBody ->
   InKernelGen [Lambda GPUMem]
 reductionStageOne constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
+  sComment "stage zero BEGIN" $ pure ()
   (slugs_op_renamed, doTheReduction) <-
     reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body
+  sComment "stage zero END" $ pure ()
 
   case slugsComm slugs of
-    Noncommutative -> pure ()
-    Commutative -> doTheReduction
+    Noncommutative -> sComment "(no doTheReduction (because noncomm))" $ pure ()
+    -- Noncommutative -> pure ()
+    Commutative -> do
+      sComment "doTheReduction BEGIN" $ pure ()
+      doTheReduction
+      sComment "doTheReduction END" $ pure ()
 
+  traceM $ "slugs_op_renamed: " ++ prettyString slugs_op_renamed
   pure slugs_op_renamed
 
 reductionStageTwo ::
