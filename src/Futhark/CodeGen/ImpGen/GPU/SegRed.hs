@@ -216,7 +216,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
       mapM (segBinOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
         zip3 reds reds_arrs reds_group_res_arrs
     sComment "stage one BEGIN" $ pure ()
-    reds_op_renamed <-
+    red_ops_renamed <-
       reductionStageOne
         constants
         (zip gtids dims')
@@ -231,7 +231,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
             patElems segred_pat
-    forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
+    forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs red_ops_renamed [0 ..]) $
       \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
         let (red_x_params, red_y_params) = splitAt (length nes) $ lambdaParams red_op
         sComment ("stage two BEGIN") $ pure ()
@@ -459,7 +459,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
       slugs <-
         mapM (segBinOpSlug local_tid group_id) $
           zip3 reds reds_arrs reds_group_res_arrs
-      reds_op_renamed <-
+      red_ops_renamed <-
         reductionStageOne
           constants
           (zip gtids dims')
@@ -475,7 +475,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
               patElems segred_pat
 
           multiple_groups_per_segment =
-            forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs reds_op_renamed [0 ..]) $
+            forM_ (zip7 reds reds_arrs reds_group_res_arrs segred_pes slugs red_ops_renamed [0 ..]) $
               \(SegBinOp _ red_op nes _, red_arrs, group_res_arrs, pes, slug, red_op_renamed, i) -> do
                 let (red_x_params, red_y_params) =
                       splitAt (length nes) $ lambdaParams red_op
@@ -610,7 +610,7 @@ computeThreadChunkSize Noncommutative _ thread_index elements_per_thread num_ele
         .<. (thread_index + 1)
           * Imp.unCount elements_per_thread
 
-reductionStageZero ::
+reductionStageOne ::
   KernelConstants ->
   [(VName, Imp.TExp Int64)] ->
   Imp.Count Imp.Elements (Imp.TExp Int64) ->
@@ -619,8 +619,8 @@ reductionStageZero ::
   Imp.TExp Int64 ->
   [SegBinOpSlug] ->
   DoSegBody ->
-  InKernelGen ([Lambda GPUMem], InKernelGen ())
-reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
+  InKernelGen [Lambda GPUMem]
+reductionStageOne constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
   let (gtids, _dims) = unzip ispace
       gtid = mkTV (last gtids) int64
       local_tid = sExt64 $ kernelLocalThreadId constants
@@ -673,6 +673,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
   -- loop the same number of iterations, because we will be performing
   -- a group-wide reduction in there.
   let comm = slugsComm slugs
+      is_comm = comm == Commutative
       (bound, check_bounds) =
         case comm of
           Commutative -> (tvExp chunk_size, id)
@@ -716,45 +717,20 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
                 $ \((acc, acc_is), se) ->
                   copyDWIMFix acc (acc_is ++ vec_is) se []
 
-    case comm of
-      Noncommutative -> do
-        doTheReduction
-        sComment "first thread keeps accumulator; others reset to neutral element" $ do
-          let reset_to_neutral =
-                forM_ slugs $ \slug ->
-                  forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
-                    sLoopNest (slugShape slug) $ \vec_is ->
-                      copyDWIMFix acc (acc_is ++ vec_is) ne []
-          sUnless (local_tid .==. 0) reset_to_neutral
-      _ -> pure ()
-  sOp $ Imp.ErrorSync Imp.FenceLocal
-  pure (slugs_op_renamed, doTheReduction)
-
-reductionStageOne ::
-  KernelConstants ->
-  [(VName, Imp.TExp Int64)] ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.TExp Int64 ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.TExp Int64 ->
-  [SegBinOpSlug] ->
-  DoSegBody ->
-  InKernelGen [Lambda GPUMem]
-reductionStageOne constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body = do
-  sComment "stage zero BEGIN" $ pure ()
-  (slugs_op_renamed, doTheReduction) <-
-    reductionStageZero constants ispace num_elements global_tid elems_per_thread threads_per_segment slugs body
-  sComment "stage zero END" $ pure ()
-
-  case slugsComm slugs of
-    Noncommutative -> sComment "(no doTheReduction (because noncomm))" $ pure ()
-    -- Noncommutative -> pure ()
-    Commutative -> do
-      sComment "doTheReduction BEGIN" $ pure ()
+    when (not is_comm) $ do
       doTheReduction
-      sComment "doTheReduction END" $ pure ()
+      sComment "first thread keeps accumulator; others reset to neutral element" $ do
+        let reset_to_neutral =
+              forM_ slugs $ \slug ->
+                forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+                  sLoopNest (slugShape slug) $ \vec_is ->
+                    copyDWIMFix acc (acc_is ++ vec_is) ne []
+        sWhen (local_tid .>. 0) reset_to_neutral
 
-  traceM $ "slugs_op_renamed: " ++ prettyString slugs_op_renamed
+  sOp $ Imp.ErrorSync Imp.FenceLocal
+
+  when is_comm doTheReduction
+
   pure slugs_op_renamed
 
 reductionStageTwo ::
