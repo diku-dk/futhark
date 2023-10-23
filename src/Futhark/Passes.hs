@@ -46,7 +46,6 @@ import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
 import Futhark.Pass.Simplify
-import Futhark.Optimise.IntraSeq
 import Futhark.Pipeline
 
 -- | A pipeline used by all current compilers.  Performs inlining,

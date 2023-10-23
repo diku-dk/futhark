@@ -185,7 +185,7 @@ seqStm' gid grpSizes (Let pat aux e@(Op (SegOp
   -- for each array of aggregate scan results we want to create a SegMap
   -- containing a sequential scan over the chunks 
   res <- forM scanAggs $ \ agg -> do
-    buildSegMapThread "res" $ do
+    buildSegMap "res" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       let (Var aggName) = agg
@@ -249,7 +249,7 @@ mkSegMapRed arrNames grpSizes binop = do
 
   screma <- reduceSOAC [reduce]
 
-  buildSegMapThread "red_intermediate" $ do
+  buildSegMap "red_intermediate" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       currentSize <- mkChunkSize tid $ fst grpSizes
@@ -278,7 +278,7 @@ mkSegMapScan grpSizes tile agg (Op (SegOp (SegScan _ _ binops _ _))) = do
   let (Var aggName) = agg
 
    -- Create the actual SegMap operation
-  buildSegMapThread "res" $ do
+  buildSegMap "res" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
 
@@ -398,38 +398,6 @@ mkChunkSize tid sOld = do
               BinOp (SMin Int64) tmp seqFactor
 
 
--- Builds a SegMap at thread level containing all bindings created in m
--- and returns the subExp which is the variable containing the result
-buildSegMapThread ::
-  String ->
-  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
-  Builder GPU SubExp
-buildSegMapThread name  m = do
-  ((res, lvl, space, ts), stms) <- collectStms m
-  let kbody = KernelBody () stms [res]
-  letSubExp name $ Op $ SegOp $ SegMap lvl space ts kbody
-
--- Like buildSegMapThread but returns the VName instead of the actual 
--- SubExp. Just for convenience
-buildSegMapThread_ ::
-  String ->
-  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
-  Builder GPU VName
-buildSegMapThread_ name m = do
-  subExp <- buildSegMapThread name m
-  let (Var name') = subExp
-  pure name'
-
--- | The [KernelResult] from the input monad is what is being passed to the 
--- segmented binops
-buildSegScan ::
-  String ->          -- SubExp name
-  Builder GPU ([KernelResult], SegLevel, SegSpace, [SegBinOp GPU], [Type]) ->
-  Builder GPU SubExp
-buildSegScan name m = do
-  ((results, lvl, space, bops, ts), stms) <- collectStms m
-  let kbody = KernelBody () stms results
-  letSubExp name $ Op $ SegOp $ SegScan lvl space bops ts kbody
 
 
 -- | The making of a tile consists of a SegMap to load elements into local
@@ -441,7 +409,7 @@ buildSegScan name m = do
 -- Returns a SubExp that is the chunks variable
 mkTile :: SubExp -> (SubExp, SubExp) -> (VName, PrimType) -> Builder GPU SubExp
 mkTile gid (oldSize, newSize) (arrName, arrType) = do
-  segMap <- buildSegMapThread_ "tile" $ do
+  segMap <- buildSegMap_ "tile" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       e <- letSubExp "slice" $ BasicOp $
@@ -456,7 +424,7 @@ mkTile gid (oldSize, newSize) (arrName, arrType) = do
                 Reshape ReshapeArbitrary (Shape [oldSize]) tileTrans
 
   -- SegMap to read the actual chunks the threads need
-  buildSegMapThread "chunks" $ do
+  buildSegMap "chunks" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       start <- letSubExp "start" $ BasicOp $
@@ -505,3 +473,41 @@ tileSegKernelBody (KernelBody _ stms _) grpSizes gid tid = do
     getTileStmInfo stm =
       error
         $ "Invalid statement for tiling in IntraSeq " Data.List.++ show stm
+
+
+
+-- Monadic builder functions
+
+
+-- Builds a SegMap at thread level containing all bindings created in m
+-- and returns the subExp which is the variable containing the result
+buildSegMap ::
+  String ->
+  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
+  Builder GPU SubExp
+buildSegMap name  m = do
+  ((res, lvl, space, ts), stms) <- collectStms m
+  let kbody = KernelBody () stms [res]
+  letSubExp name $ Op $ SegOp $ SegMap lvl space ts kbody
+
+-- Like buildSegMap but returns the VName instead of the actual 
+-- SubExp. Just for convenience
+buildSegMap_ ::
+  String ->
+  Builder GPU (KernelResult, SegLevel, SegSpace, [Type]) ->
+  Builder GPU VName
+buildSegMap_ name m = do
+  subExp <- buildSegMap name m
+  let (Var name') = subExp
+  pure name'
+
+-- | The [KernelResult] from the input monad is what is being passed to the 
+-- segmented binops
+buildSegScan ::
+  String ->          -- SubExp name
+  Builder GPU ([KernelResult], SegLevel, SegSpace, [SegBinOp GPU], [Type]) ->
+  Builder GPU SubExp
+buildSegScan name m = do
+  ((results, lvl, space, bops, ts), stms) <- collectStms m
+  let kbody = KernelBody () stms results
+  letSubExp name $ Op $ SegOp $ SegScan lvl space bops ts kbody
