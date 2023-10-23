@@ -207,8 +207,8 @@ seqStm' gid grpSizes (Let pat aux e@(Op (SegOp
                                    (eBody [eIndex aggName (eSubExp idx)])
       scan <- scanSOAC [Scan lambda [ne]]
       chunkSize <- mkChunkSize tid $ fst grpSizes
-      es <- letChunkExp chunkSize tid (snd $ head names) -- TODO: head
-      res <- letExp "res" $ Op $ OtherOp $ Screma chunkSize [es] scan
+      es <- letChunkExp seqFactor tid (snd $ head names) -- TODO: head
+      res <- letExp "res" $ Op $ OtherOp $ Screma seqFactor [es] scan
       res' <- letSubExp "res" $ BasicOp $ Reshape ReshapeArbitrary 
                 (Shape [seqFactor]) res
       let lvl' = SegThread SegNoVirt Nothing
