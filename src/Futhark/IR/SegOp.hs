@@ -874,9 +874,9 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
   pretty (SegBinOp comm lam nes shape) =
     PP.braces (PP.commasep $ map pretty nes)
       <> PP.comma
-      </> pretty shape
+        </> pretty shape
       <> PP.comma
-      </> comm'
+        </> comm'
       <> pretty lam
     where
       comm' = case comm of
@@ -887,47 +887,47 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
     "segmap"
       <> pretty lvl
-      </> PP.align (pretty space)
-      <+> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        <+> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegRed lvl space reds ts body) =
     "segred"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegScan lvl space scans ts body) =
     "segscan"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegHist lvl space ops ts body) =
     "seghist"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
     where
       ppOp (HistOp w rf dests nes shape op) =
         pretty w
           <> PP.comma
-          <+> pretty rf
+            <+> pretty rf
           <> PP.comma
-          </> PP.braces (PP.commasep $ map pretty dests)
+            </> PP.braces (PP.commasep $ map pretty dests)
           <> PP.comma
-          </> PP.braces (PP.commasep $ map pretty nes)
+            </> PP.braces (PP.commasep $ map pretty nes)
           <> PP.comma
-          </> pretty shape
+            </> pretty shape
           <> PP.comma
-          </> pretty op
+            </> pretty op
 
 instance CanBeAliased (SegOp lvl) where
   addOpAliases aliases = runIdentity . mapSegOpM alias

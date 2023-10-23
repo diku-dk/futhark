@@ -168,7 +168,8 @@ returnAliased :: Name -> SrcLoc -> CheckM ()
 returnAliased name loc =
   addError loc mempty . withIndexLink "return-aliased" $
     "Unique-typed return value is aliased to"
-      <+> dquotes (prettyName name) <> ", which is not consumable."
+      <+> dquotes (prettyName name)
+      <> ", which is not consumable."
 
 uniqueReturnAliased :: SrcLoc -> CheckM ()
 uniqueReturnAliased loc =
@@ -251,7 +252,7 @@ bindingPat p t = fmap (second (second (unscope (patNames p)))) . local bind
     bind env =
       env
         { envVtable =
-            foldr (uncurry M.insert) (envVtable env) (fmap f (matchPat p t))
+            foldr (uncurry M.insert . f) (envVtable env) (matchPat p t)
         }
       where
         f (v, (_, als)) = (v, Consumable $ second (S.insert (AliasBound v)) als)
@@ -264,7 +265,7 @@ bindingParam p m = do
     bind env =
       env
         { envVtable =
-            foldr (uncurry M.insert) (envVtable env) (fmap f (patternMap p))
+            foldr (uncurry M.insert . f) (envVtable env) (patternMap p)
         }
     f (v, t)
       | diet t == Consume = (v, Consumable $ t `setAliases` S.singleton (AliasBound v))
@@ -305,8 +306,10 @@ checkIfConsumed rloc als = do
     v' <- describeVar v
     addError rloc mempty . withIndexLink "use-after-consume" $
       "Using"
-        <+> v' <> ", but this was consumed at"
-        <+> pretty (locStrRel rloc wloc) <> ".  (Possibly through aliases.)"
+        <+> v'
+        <> ", but this was consumed at"
+          <+> pretty (locStrRel rloc wloc)
+        <> ".  (Possibly through aliases.)"
 
 consumed :: Consumed -> CheckM ()
 consumed vs = modify $ \s -> s {stateConsumed = stateConsumed s <> vs}
@@ -597,7 +600,8 @@ convergeLoopParam loop_loc param body_cons body_als = do
             "Return value for consuming loop parameter"
               <+> dquotes (prettyName pat_v)
               <+> "aliases"
-              <+> dquotes (prettyName v) <> "."
+              <+> dquotes (prettyName v)
+              <> "."
         (cons, obs) <- get
         unless (S.null $ aliases t `S.intersection` cons) $
           lift . addError loop_loc mempty $
@@ -668,7 +672,7 @@ checkLoop loop_loc (param, arg, form, body) = do
       "Loop body uses"
         <+> v'
         <> " (or an alias),"
-        </> "but this is consumed by the initial loop argument."
+          </> "but this is consumed by the initial loop argument."
 
   v <- VName "internal_loop_result" <$> incCounter
   modify $ \s -> s {stateNames = M.insert v (NameLoopRes (srclocOf loop_loc)) $ stateNames s}
@@ -959,9 +963,9 @@ checkGlobalAliases loc params body_t = do
       "Function result aliases the free variable "
         <> dquotes (prettyName v)
         <> "."
-        </> "Use"
-        <+> dquotes "copy"
-        <+> "to break the aliasing."
+          </> "Use"
+          <+> dquotes "copy"
+          <+> "to break the aliasing."
 
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.

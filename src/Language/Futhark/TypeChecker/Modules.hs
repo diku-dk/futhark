@@ -207,7 +207,10 @@ refineEnv loc tset env tname ps t
         else
           typeError loc mempty $
             "Cannot refine a type having"
-              <+> tpMsg ps <> " with a type having " <> tpMsg cur_ps <> "."
+              <+> tpMsg ps
+              <> " with a type having "
+              <> tpMsg cur_ps
+              <> "."
   | otherwise =
       typeError loc mempty $ dquotes (pretty tname) <+> "is not an abstract type in the module type."
   where
@@ -367,14 +370,16 @@ ppTypeAbbr :: [VName] -> QualName VName -> (Liftedness, [TypeParam], StructRetTy
 ppTypeAbbr abs name (l, ps, RetType [] (Scalar (TypeVar _ tn args)))
   | qualLeaf tn `elem` abs,
     map typeParamToArg ps == args =
-      "type" <> pretty l
-        <+> pretty name
-        <+> hsep (map pretty ps)
+      "type"
+        <> pretty l
+          <+> pretty name
+          <+> hsep (map pretty ps)
 ppTypeAbbr _ name (l, ps, t) =
-  "type" <> pretty l
-    <+> hsep (pretty name : map pretty ps)
-    <+> equals
-    <+> nest 2 (align (pretty t))
+  "type"
+    <> pretty l
+      <+> hsep (pretty name : map pretty ps)
+      <+> equals
+      <+> nest 2 (align (pretty t))
 
 -- | Return new renamed/abstracted env, as well as a mapping from
 -- names in the signature to names in the new env.  This is used for

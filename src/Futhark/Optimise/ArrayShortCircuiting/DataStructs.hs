@@ -119,14 +119,14 @@ type FreeVarSubsts = M.Map VName (TPrimExp Int64 VName)
 -- | Coalesced Access Entry
 data Coalesced
   = Coalesced
+      -- | the kind of coalescing
       CoalescedKind
-      -- ^ the kind of coalescing
-      ArrayMemBound
-      -- ^ destination mem_block info @f_m_x[i]@ (must be ArrayMem)
+      -- | destination mem_block info @f_m_x[i]@ (must be ArrayMem)
       -- (Maybe IxFun) -- the inverse ixfun of a coalesced array, such that
       --                     --  ixfuns can be correctly constructed for aliases;
+      ArrayMemBound
+      -- | substitutions for free vars in index function
       FreeVarSubsts
-      -- ^ substitutions for free vars in index function
 
 data CoalsEntry = CoalsEntry
   { -- | destination memory block
@@ -222,26 +222,27 @@ instance Pretty ArrayMemBound where
 instance Pretty Coalesced where
   pretty (Coalesced knd mbd _) =
     "(Kind:"
-      <+> pretty knd <> ", membds:"
-      <+> pretty mbd -- <> ", subs:" <+> pretty subs
-        <> ")"
-      <+> "\n"
+      <+> pretty knd
+      <> ", membds:"
+        <+> pretty mbd -- <> ", subs:" <+> pretty subs
+      <> ")"
+        <+> "\n"
 
 instance Pretty CoalsEntry where
   pretty etry =
     "{"
       <+> "Dstmem:"
       <+> pretty (dstmem etry)
-        <> ", AliasMems:"
-      <+> pretty (alsmem etry)
-      <+> ", optdeps:"
-      <+> pretty (M.toList $ optdeps etry)
-      <+> ", memrefs:"
-      <+> pretty (memrefs etry)
-      <+> ", vartab:"
-      <+> pretty (M.toList $ vartab etry)
-      <+> "}"
-      <+> "\n"
+      <> ", AliasMems:"
+        <+> pretty (alsmem etry)
+        <+> ", optdeps:"
+        <+> pretty (M.toList $ optdeps etry)
+        <+> ", memrefs:"
+        <+> pretty (memrefs etry)
+        <+> ", vartab:"
+        <+> pretty (M.toList $ vartab etry)
+        <+> "}"
+        <+> "\n"
 
 -- | Compute the union of two 'CoalsEntry'. If two 'CoalsEntry' do not refer to
 -- the same destination memory and use the same index function, the first

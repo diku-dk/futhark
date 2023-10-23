@@ -319,8 +319,8 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
               .>. 0
               .&&. isActive (init $ zip gtids dims)
               .&&. ltid
-                .<. segment_size
-                  * segments_per_group
+              .<. segment_size
+              * segments_per_group
           )
           in_bounds
           out_of_bounds
@@ -345,8 +345,8 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
           ( sExt64 group_id'
               * segments_per_group
               + sExt64 ltid
-              .<. num_segments
-              .&&. ltid
+                .<. num_segments
+                .&&. ltid
                 .<. segments_per_group
           )
         $ forM_ (zip segred_pes (concat reds_arrs))
@@ -603,7 +603,7 @@ computeThreadChunkSize Noncommutative _ thread_index elements_per_thread num_ele
     is_last_thread =
       Imp.unCount num_elements
         .<. (thread_index + 1)
-          * Imp.unCount elements_per_thread
+        * Imp.unCount elements_per_thread
 
 reductionStageZero ::
   KernelConstants ->
