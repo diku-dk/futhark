@@ -22,7 +22,7 @@ pkgs.stdenv.mkDerivation {
       haskellPackages.apply-refact
       xdot
       hlint
-      pkgconfig
+      pkg-config
       zlib
       zlib.out
       cabal2nix
@@ -43,7 +43,7 @@ pkgs.stdenv.mkDerivation {
       [ opencl-headers
         ocl-icd
         oclgrind
-        hip
+        rocmPackages.clr
       ]
   ;
 }
