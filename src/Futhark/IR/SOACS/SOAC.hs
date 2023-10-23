@@ -937,9 +937,9 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
         ( PP.align $
             pretty lam
               <> comma
-              </> PP.braces (commasep $ map pretty args)
+                </> PP.braces (commasep $ map pretty args)
               <> comma
-              </> PP.braces (commasep $ map pretty vec)
+                </> PP.braces (commasep $ map pretty vec)
         )
   pretty (JVP lam args vec) =
     "jvp"
@@ -947,9 +947,9 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
         ( PP.align $
             pretty lam
               <> comma
-              </> PP.braces (commasep $ map pretty args)
+                </> PP.braces (commasep $ map pretty args)
               <> comma
-              </> PP.braces (commasep $ map pretty vec)
+                </> PP.braces (commasep $ map pretty vec)
         )
   pretty (Stream size arrs acc lam) =
     ppStream size arrs acc lam
@@ -964,31 +964,31 @@ instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
           <> (parens . align)
             ( pretty w
                 <> comma
-                </> ppTuple' (map pretty arrs)
+                  </> ppTuple' (map pretty arrs)
                 <> comma
-                </> pretty map_lam
+                  </> pretty map_lam
             )
     | null scans =
         "redomap"
           <> (parens . align)
             ( pretty w
                 <> comma
-                </> ppTuple' (map pretty arrs)
+                  </> ppTuple' (map pretty arrs)
                 <> comma
-                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
+                  </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
                 <> comma
-                </> pretty map_lam
+                  </> pretty map_lam
             )
     | null reds =
         "scanomap"
           <> (parens . align)
             ( pretty w
                 <> comma
-                </> ppTuple' (map pretty arrs)
+                  </> ppTuple' (map pretty arrs)
                 <> comma
-                </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
+                  </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
                 <> comma
-                </> pretty map_lam
+                  </> pretty map_lam
             )
   pretty (Screma w arrs form) = ppScrema w arrs form
 
@@ -1000,13 +1000,13 @@ ppScrema w arrs (ScremaForm scans reds map_lam) =
     <> (parens . align)
       ( pretty w
           <> comma
-          </> ppTuple' (map pretty arrs)
+            </> ppTuple' (map pretty arrs)
           <> comma
-          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
+            </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty scans)
           <> comma
-          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
+            </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map pretty reds)
           <> comma
-          </> pretty map_lam
+            </> pretty map_lam
       )
 
 -- | Prettyprint the given Stream.
@@ -1017,11 +1017,11 @@ ppStream size arrs acc lam =
     <> (parens . align)
       ( pretty size
           <> comma
-          </> ppTuple' (map pretty arrs)
+            </> ppTuple' (map pretty arrs)
           <> comma
-          </> ppTuple' (map pretty acc)
+            </> ppTuple' (map pretty acc)
           <> comma
-          </> pretty lam
+            </> pretty lam
       )
 
 -- | Prettyprint the given Scatter.
@@ -1032,11 +1032,11 @@ ppScatter w arrs lam dests =
     <> (parens . align)
       ( pretty w
           <> comma
-          </> ppTuple' (map pretty arrs)
+            </> ppTuple' (map pretty arrs)
           <> comma
-          </> pretty lam
+            </> pretty lam
           <> comma
-          </> commasep (map pretty dests)
+            </> commasep (map pretty dests)
       )
 
 instance (PrettyRep rep) => Pretty (Scan rep) where
@@ -1052,7 +1052,7 @@ instance (PrettyRep rep) => Pretty (Reduce rep) where
     ppComm comm
       <> pretty red_lam
       <> comma
-      </> PP.braces (commasep $ map pretty red_nes)
+        </> PP.braces (commasep $ map pretty red_nes)
 
 -- | Prettyprint the given histogram operation.
 ppHist ::
@@ -1067,20 +1067,20 @@ ppHist w arrs ops bucket_fun =
     <> parens
       ( pretty w
           <> comma
-          </> ppTuple' (map pretty arrs)
+            </> ppTuple' (map pretty arrs)
           <> comma
-          </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppOp ops)
+            </> PP.braces (mconcat $ intersperse (comma <> PP.line) $ map ppOp ops)
           <> comma
-          </> pretty bucket_fun
+            </> pretty bucket_fun
       )
   where
     ppOp (HistOp dest_w rf dests nes op) =
       pretty dest_w
         <> comma
-        <+> pretty rf
+          <+> pretty rf
         <> comma
-        <+> PP.braces (commasep $ map pretty dests)
+          <+> PP.braces (commasep $ map pretty dests)
         <> comma
-        </> ppTuple' (map pretty nes)
+          </> ppTuple' (map pretty nes)
         <> comma
-        </> pretty op
+          </> pretty op

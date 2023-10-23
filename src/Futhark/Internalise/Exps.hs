@@ -1699,9 +1699,12 @@ isIntrinsicFunction qname args loc = do
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
       dim_ok <-
         letSubExp "dim_ok" <=< toExp $
-          pe64 old_dim .==. pe64 n' * pe64 m'
-            .&&. pe64 n' .>=. 0
-            .&&. pe64 m' .>=. 0
+          pe64 old_dim .==. pe64 n'
+            * pe64 m'
+              .&&. pe64 n'
+              .>=. 0
+              .&&. pe64 m'
+              .>=. 0
       dim_ok_cert <-
         assert
           "dim_ok_cert"
