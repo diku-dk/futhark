@@ -207,7 +207,7 @@ Context
 
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
-   Produce a human-readable C string with debug and profiling
+   Produce a C string encoding a JSON object with debug and profiling
    information collected during program runtime.  It is the caller's
    responsibility to free the returned string.  It is likely to only
    contain interesting information if

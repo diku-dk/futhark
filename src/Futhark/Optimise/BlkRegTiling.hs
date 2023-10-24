@@ -173,10 +173,16 @@ kkLoopBody
                           -- is garbage anyways and should not be written.
                           -- so fits_ij should be always true!!!
 
-                            le64 iii + le64 i + pe64 ry * le64 ltid_y
-                              .<. pe64 height_A
-                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                .<. pe64 width_B
+                            le64 iii
+                              + le64 i
+                              + pe64 ry
+                                * le64 ltid_y
+                                  .<. pe64 height_A
+                                  .&&. le64 jjj
+                              + le64 j
+                              + pe64 rx
+                                * le64 ltid_x
+                                  .<. pe64 width_B
                     )
                     ( do
                         a <- index "a" as [i]
@@ -255,7 +261,8 @@ kkLoopBody
               letSubExp (str_A ++ "_elem")
                 =<< eIf
                   ( toExp $
-                      le64 gtid .<. pe64 parlen_X
+                      le64 gtid
+                        .<. pe64 parlen_X
                         .&&. if epilogue
                           then le64 a_seqdim_idx .<. pe64 common_dim
                           else true
@@ -376,8 +383,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             letTupExp "redomap_res_if"
               =<< eIf
                 ( toExp $
-                    le64 full_tiles .==. pe64 rk
-                      .||. pe64 common_dim .==. (pe64 tk * le64 full_tiles + le64 ttt)
+                    le64 full_tiles
+                      .==. pe64 rk
+                      .||. pe64 common_dim
+                      .==. (pe64 tk * le64 full_tiles + le64 ttt)
                 )
                 (resultBodyM $ map Var prologue_res_list)
                 ( do
@@ -460,8 +469,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 letSubExp "res_elem"
                   =<< eIf
                     ( toExp $
-                        le64 gtid_y .<. pe64 height_A
-                          .&&. le64 gtid_x .<. pe64 width_B
+                        le64 gtid_y
+                          .<. pe64 height_A
+                          .&&. le64 gtid_x
+                          .<. pe64 width_B
                     )
                     ( do
                         addStms code2_subs
@@ -608,8 +619,10 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                       letSubExp "res_elem"
                         =<< eIf
                           ( toExp $
-                              le64 gtid_y .<. pe64 height_A
-                                .&&. le64 gtid_x .<. pe64 width_B
+                              le64 gtid_y
+                                .<. pe64 height_A
+                                .&&. le64 gtid_x
+                                .<. pe64 width_B
                           )
                           ( do
                               addStms code2'
@@ -1251,9 +1264,12 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     letTupExp' "res_elem"
                       =<< eIf
                         ( toExp $
-                            le64 gtid_y .<. pe64 d_Ky
-                              .&&. le64 gtid_x .<. pe64 d_Kx
-                              .&&. le64 gtid_z .<. pe64 d_M
+                            le64 gtid_y
+                              .<. pe64 d_Ky
+                              .&&. le64 gtid_x
+                              .<. pe64 d_Kx
+                              .&&. le64 gtid_z
+                              .<. pe64 d_M
                         )
                         ( do
                             addStms code2'

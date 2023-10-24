@@ -110,8 +110,11 @@ instance PP.Pretty SegVirt where
 
 instance PP.Pretty KernelGrid where
   pretty (KernelGrid num_groups group_size) =
-    "groups=" <> pretty num_groups <> PP.semi
-      <+> "groupsize=" <> pretty group_size
+    "groups="
+      <> pretty num_groups
+      <> PP.semi
+        <+> "groupsize="
+      <> pretty group_size
 
 instance PP.Pretty SegLevel where
   pretty (SegThread virt grid) =
@@ -219,9 +222,10 @@ instance PP.Pretty SizeOp where
   pretty (GetSizeMax size_class) =
     "get_size_max" <> parens (commasep [pretty size_class])
   pretty (CmpSizeLe name size_class x) =
-    "cmp_size" <> parens (commasep [pretty name, pretty size_class])
-      <+> "<="
-      <+> pretty x
+    "cmp_size"
+      <> parens (commasep [pretty name, pretty size_class])
+        <+> "<="
+        <+> pretty x
   pretty (CalcNumGroups w max_num_groups group_size) =
     "calc_num_groups" <> parens (commasep [pretty w, pretty max_num_groups, pretty group_size])
 

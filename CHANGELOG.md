@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+* Very large `iota`s now work.
+
+## [0.25.6]
+
+### Added
+
 * The various C API functions that accept strings now perform a copy,
   meaning the caller does not have to keep the strings alive.
 
@@ -16,9 +28,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Fusion across slicing is now possible in some cases.
 
-### Removed
-
-### Changed
+* New tool: `futhark profile`.
 
 ### Fixed
 

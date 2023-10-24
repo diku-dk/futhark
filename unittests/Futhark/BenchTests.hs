@@ -5,6 +5,7 @@ module Futhark.BenchTests (tests) where
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.Bench
+import Futhark.ProfileTests ()
 import Test.Tasty
 import Test.Tasty.QuickCheck
 
@@ -12,7 +13,7 @@ instance Arbitrary RunResult where
   arbitrary = RunResult . getPositive <$> arbitrary
 
 printable :: Gen String
-printable = getPrintableString <$> arbitrary
+printable = getASCIIString <$> arbitrary
 
 instance Arbitrary DataResult where
   arbitrary =
@@ -25,6 +26,7 @@ instance Arbitrary DataResult where
                     <$> arbitrary
                     <*> arbMap
                     <*> oneof [pure Nothing, Just <$> arbText]
+                    <*> arbitrary
                 )
         ]
     where

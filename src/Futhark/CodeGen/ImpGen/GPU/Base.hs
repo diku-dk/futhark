@@ -1345,7 +1345,7 @@ iotaForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam n int32,
+            Imp.ScalarParam n int64,
             Imp.ScalarParam x $ IntType bt,
             Imp.ScalarParam s $ IntType bt
           ]
@@ -1358,7 +1358,7 @@ iotaForType bt = do
       arr <-
         sArray "arr" (IntType bt) shape mem $
           LMAD.iota 0 (map pe64 (shapeDims shape))
-      sIotaKernel arr (sExt64 n') x' s' bt
+      sIotaKernel arr n' x' s' bt
 
   pure fname
 
