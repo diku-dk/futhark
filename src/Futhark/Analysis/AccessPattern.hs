@@ -421,7 +421,8 @@ analyzeBasicOp ctx expression pats = do
         (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
-        _ -> error "unhandled: match-all"
+        (FlatIndex name _) -> ctxValFromNames ctx $ oneName name
+        (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [ name , source ]
   let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
