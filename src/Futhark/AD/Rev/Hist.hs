@@ -21,8 +21,6 @@ import Futhark.IR.SOACS
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-import Debug.Trace (trace, traceM)
-
 getBinOpPlus :: PrimType -> BinOp
 getBinOpPlus (IntType x) = Add x OverflowUndef
 getBinOpPlus (FloatType f) = FAdd f
@@ -504,12 +502,6 @@ diffAddHist _ops x aux n add ne is vs w rf dst m = do
   f <- mkIdentityLambda [Prim int64, t]
   auxing aux . letBindNames [x] . Op $
     Hist n [is, vs] [HistOp (Shape [w]) rf [dst_cpy] [ne] add] f
-  -- ###
-  let stm = auxing aux . letBindNames [x] . Op $ Hist n [is, vs] [HistOp (Shape [w]) rf [dst_cpy] [ne] add] f
-  stm' <- collectStms stm
-  traceM (concatMap prettyString stm')
-  stm
-  -- ###
 
   m
 
@@ -587,7 +579,7 @@ diffVecHist ops x aux n op nes is vss w rf dst m = do
           Screma (arraySize 0 t_dstT) [dstT, vssT, nes] $
             mapSOAC map_lam
     auxing aux . letBindNames [x] . BasicOp $ Rearrange dims histT
-  trace (prettyString stms) $ foldr (vjpStm ops) m stms
+  foldr (vjpStm ops) m stms
 
 --
 -- a step in the radix sort implementation
