@@ -308,11 +308,13 @@ mkSegMapRed env mapping binop = do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
 
+      sz <- mkChunkSize tid env
+
       -- For each tile we can then get the corresponding chunk
-      chunks <- mapM (getChunk env tid) mapping
+      chunks <- mapM (getChunk env tid sz) mapping
 
       res <- letSubExp "res" $ Op $ OtherOp $
-                Screma (seqFactor env) chunks reduce
+                Screma sz chunks reduce
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
@@ -323,12 +325,13 @@ mkSegMapRed env mapping binop = do
 getChunk ::
   Env ->
   VName ->              -- thread Id
+  SubExp ->             -- size of chunk
   (VName, VName) ->     -- array to tile mapping
   Builder GPU VName
-getChunk env tid (_, tile) = do
+getChunk _ tid sz (_, tile) = do
   letExp "chunk" $ BasicOp $ Index tile
     (Slice [DimFix $ Var tid,
-            DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)])
+            DimSlice (intConst Int64 0) sz (intConst Int64 1)])
 
 
 flattenResults ::
@@ -628,17 +631,17 @@ letChunkExp size tid arrName = do
 -- Generates statements that compute the pr. thread chunk size. This is needed
 -- as the last thread in a block might not have seqFactor amount of elements
 -- to read. 
--- mkChunkSize ::
---   VName ->               -- The thread id
---   SubExp ->              -- old size 
---   Builder GPU SubExp     -- Returns the SubExp in which the size is
--- mkChunkSize tid sOld = do
---   offset <- letSubExp "offset" $ BasicOp $
---               BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
---   tmp <- letSubExp "tmp" $ BasicOp $
---               BinOp (Sub Int64 OverflowUndef) sOld offset
---   letSubExp "size" $ BasicOp $
---               BinOp (SMin Int64) tmp seqFactor
+mkChunkSize ::
+  VName ->               -- The thread id
+  Env ->
+  Builder GPU SubExp     -- Returns the SubExp in which the size is
+mkChunkSize tid env = do
+  offset <- letSubExp "offset" $ BasicOp $
+              BinOp (Mul Int64 OverflowUndef) (Var tid) (seqFactor env)
+  tmp <- letSubExp "tmp" $ BasicOp $
+              BinOp (Sub Int64 OverflowUndef) (grpsizeOld env) offset
+  letSubExp "size" $ BasicOp $
+              BinOp (SMin Int64) tmp (seqFactor env)
 
 
 
