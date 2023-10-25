@@ -124,7 +124,8 @@ OPTIONS
 
   Enable profiling for the binary (by passing ``--profiling`` and
   ``--logging``) and store the recorded information in the file
-  indicated by ``--json``, along with the other benchmarking results .
+  indicated by ``--json`` (which is required), along with the other
+  benchmarking results.
 
 --runner=program
 
