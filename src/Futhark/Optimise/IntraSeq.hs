@@ -99,8 +99,6 @@ seqStm (Let pat aux (Op (SegOp (
 
   let env = Env (Var grpId) sizeNew sizeOld mempty e
 
-
-
   exp' <- buildSegMap' $ do
     -- Update the env with mappings
     env' <- mkTiles env
@@ -170,28 +168,8 @@ seqStm' env (Let pat aux
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- forM binops $ \ binop -> do
-    let comm = segBinOpComm binop
-    let ne   = segBinOpNeutral binop
-    lambda <- renameLambda $ segBinOpLambda binop
-
-    reduce <- reduceSOAC [Reduce comm lambda ne]
-
-    buildSegMap_ "red_intermediate" $ do
-      tid <- newVName "tid"
-      phys <- newVName "phys_tid"
-
-      -- For each tile we can then get the corresponding chunk
-      chunks <- mapM (getChunk env tid) tilesUsed
-
-      res <- letSubExp "res" $ Op $ OtherOp $
-                Screma (seqFactor env) chunks reduce
-
-      let lvl' = SegThread SegNoVirt Nothing
-      let space' = SegSpace phys [(tid, grpSize env)]
-      let types' = scremaType (seqFactor env) reduce
-      pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
-
+  reds <- mapM (mkSegMapRed env tilesUsed) binops
+  
   -- Pair the original arrays with the intermediate results
   let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed reds
 
@@ -208,8 +186,60 @@ seqStm' env (Let pat aux
 
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
-  undefined
 
+  let free = IM.elems $ namesIntMap $ freeIn kbody
+  let tiles = M.toList $ tileMap env
+  let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
+
+  reds <- mapM (mkSegMapRed env tilesUsed) binops
+
+  scans <- forM reds $ \red -> buildSegScan "scan_agg" $ do
+    tid <- newVName "tid"
+    phys <- newVName "phys_tid"
+    binops' <- renameSegBinOp binops
+
+    e' <- letSubExp "elem" =<< eIndex red (eSubExp $ Var tid)
+
+    let lvl' = SegThread SegNoVirt Nothing
+    let space' = SegSpace phys [(tid, grpSize env)]
+    pure ([Returns ResultMaySimplify mempty e'], lvl', space', binops', ts)
+    
+  scans' <- forM scans $ \scan -> buildSegMap_ "scan_res" $ do
+    tid <- newVName "tid"
+    phys <- newVName "phys_tid"
+
+    -- TODO: Uses head
+    let binop = head binops
+    let neutral = head $ segBinOpNeutral binop
+    lambda <- renameLambda $ segBinOpLambda binop
+
+    let (Var scanName) = scan
+
+    idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
+                                    (eSubExp $ Var tid)
+                                    (eSubExp $ intConst Int64 1)
+    ne <- letSubExp "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
+                                  (eSubExp $ Var tid)
+                                  (eSubExp $ intConst Int64 0)
+                               )
+                               (eBody [toExp neutral])
+                               (eBody [eIndex scanName (eSubExp idx)])
+    scanSoac <- scanSOAC [Scan lambda [ne]]
+    es <- letChunkExp (seqFactor env) tid (snd $ head $ M.toList $ tileMap env)
+    res <- letSubExp "res" $ Op $ OtherOp $ Screma (seqFactor env) [es] scanSoac
+
+    let lvl' = SegThread SegNoVirt Nothing
+    let space' = SegSpace phys [(tid, grpSize env)]
+    let types' = scremaType (seqFactor env) scanSoac
+    pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
+    
+  let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
+  addStm $ Let pat aux $ BasicOp exp'
+    
+  pure ()
+
+
+  
 -- Catch all
 seqStm' _ stm = error $
                 "Encountered unhandled statement at thread level: " ++ show stm
@@ -256,6 +286,34 @@ seqStm'' env mapping tid stm@(Let pat aux (BasicOp (Index arr _))) =
 
 seqStm'' _ _ _ stm = addStm stm
 
+
+mkSegMapRed :: 
+  Env -> 
+  [(VName, VName)] ->
+  SegBinOp GPU -> 
+  Builder GPU VName
+mkSegMapRed env mapping binop = do
+  
+    let comm = segBinOpComm binop
+    let ne   = segBinOpNeutral binop
+    lambda <- renameLambda $ segBinOpLambda binop
+
+    reduce <- reduceSOAC [Reduce comm lambda ne]
+
+    buildSegMap_ "red_intermediate" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+
+      -- For each tile we can then get the corresponding chunk
+      chunks <- mapM (getChunk env tid) mapping
+
+      res <- letSubExp "res" $ Op $ OtherOp $
+                Screma (seqFactor env) chunks reduce
+
+      let lvl' = SegThread SegNoVirt Nothing
+      let space' = SegSpace phys [(tid, grpSize env)]
+      let types' = scremaType (seqFactor env) reduce
+      pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
 
 
 getChunk ::
