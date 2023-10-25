@@ -101,7 +101,7 @@ transformSegOpGPU ctx expmap (Let pat aux _) op = do
   let mapper =
         identitySegOpMapper
           { mapOnSegOpBody = case segLevel op of
-              SegGroup {} -> transformSegGroupKernelBody ctx expmap
+              SegGroup {} -> pure
               _ -> transformSegThreadKernelBody ctx patternName
           }
   op' <- mapSegOpM mapper op

@@ -87,9 +87,7 @@ instance Monoid (DimIdxPat rep) where
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
 -- parallel construct, like foldl or map.
-data IterationType rep
-  = Sequential
-  | Parallel
+data IterationType rep = Sequential | Parallel
   deriving (Eq, Show)
 
 data BodyType
