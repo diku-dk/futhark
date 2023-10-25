@@ -570,46 +570,6 @@ segBinOpSlug local_tid group_id (op, group_res_arrs, param_arrs) =
       | otherwise =
           pure (param_arr, [sExt64 local_tid, sExt64 group_id])
 
-computeThreadChunkSize ::
-  Commutativity ->
-  Imp.TExp Int64 ->
-  Imp.TExp Int64 ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  Imp.Count Imp.Elements (Imp.TExp Int64) ->
-  TV Int64 ->
-  ImpM rep r op ()
-computeThreadChunkSize Commutative threads_per_segment thread_index elements_per_thread num_elements chunk_var =
-  chunk_var
-    <-- sMin64
-      (Imp.unCount elements_per_thread)
-      ((Imp.unCount num_elements - thread_index) `divUp` threads_per_segment)
-computeThreadChunkSize Noncommutative _ thread_index elements_per_thread num_elements chunk_var = do
-  starting_point <-
-    dPrimV "starting_point" $
-      thread_index * Imp.unCount elements_per_thread
-  remaining_elements <-
-    dPrimV "remaining_elements" $
-      Imp.unCount num_elements - tvExp starting_point
-
-  let no_remaining_elements = tvExp remaining_elements .<=. 0
-      beyond_bounds = Imp.unCount num_elements .<=. tvExp starting_point
-
-  sIf
-    (no_remaining_elements .||. beyond_bounds)
-    (chunk_var <-- 0)
-    ( sIf
-        is_last_thread
-        (chunk_var <-- Imp.unCount last_thread_elements)
-        (chunk_var <-- Imp.unCount elements_per_thread)
-    )
-  where
-    last_thread_elements =
-      num_elements - Imp.elements thread_index * elements_per_thread
-    is_last_thread =
-      Imp.unCount num_elements
-        .<. (thread_index + 1)
-          * Imp.unCount elements_per_thread
-
 reductionStageOne ::
   KernelConstants ->
   [(VName, Imp.TExp Int64)] ->
@@ -624,16 +584,6 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
   let (gtids, _dims) = unzip ispace
       gtid = mkTV (last gtids) int64
       local_tid = sExt64 $ kernelLocalThreadId constants
-
-  -- Figure out how many elements this thread should process.
-  chunk_size <- dPrim "chunk_size" int64
-  computeThreadChunkSize
-    (slugsComm slugs)
-    threads_per_segment
-    (sExt64 global_tid)
-    elems_per_thread
-    num_elements
-    chunk_size
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
@@ -672,11 +622,20 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
   -- a group-wide reduction in there.
+  -- TODO: reduce and reduce-segmented benchmarks indicate that there is no
+  -- significant gain in performance from differentiating between commutative
+  -- and noncommutative here (the `Noncommutative` case can be used for both)
   let comm = slugsComm slugs
       is_comm = comm == Commutative
       (bound, check_bounds) =
         case comm of
-          Commutative -> (tvExp chunk_size, id)
+          Commutative ->
+            ( sMin64
+                (Imp.unCount elems_per_thread)
+                ((Imp.unCount num_elements - (sExt64 global_tid))
+                  `divUp` threads_per_segment),
+              id
+            )
           Noncommutative ->
             ( Imp.unCount elems_per_thread,
               sWhen (tvExp gtid .<. Imp.unCount num_elements)
