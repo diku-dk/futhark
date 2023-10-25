@@ -38,7 +38,6 @@ module Futhark.CodeGen.ImpGen
     hasFunction,
     collect,
     collect',
-    comment,
     VarEntry (..),
     ArrayEntry (..),
 
@@ -92,6 +91,7 @@ module Futhark.CodeGen.ImpGen
     sFor,
     sWhile,
     sComment,
+    sComment_,
     sIf,
     sWhen,
     sUnless,
@@ -391,12 +391,6 @@ collect' m = do
   modify $ \s -> s {stateCode = prev_code}
   pure (x, new_code)
 
--- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
-comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
-comment desc m = do
-  code <- collect m
-  emit $ Imp.Comment desc code
 
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM rep r op ()
@@ -870,7 +864,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
   copyDWIM (patElemName pe) [] se []
   case op of
     OpaqueNil -> pure ()
-    OpaqueTrace s -> comment ("Trace: " <> s) $ do
+    OpaqueTrace s -> sComment ("Trace: " <> s) $ do
       se_t <- subExpType se
       case se_t of
         Prim t -> tracePrim s t se
@@ -1665,6 +1659,8 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
+-- | Execute a code generation action, wrapping the generated code
+-- within a 'Imp.Comment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code

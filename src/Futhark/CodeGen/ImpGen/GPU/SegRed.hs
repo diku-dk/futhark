@@ -215,7 +215,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
     slugs <-
       mapM (segBinOpSlug (kernelLocalThreadId constants) (kernelGroupId constants)) $
         zip3 reds reds_arrs reds_group_res_arrs
-    sComment "stage one BEGIN" $ pure ()
+    sComment_ "stage one BEGIN"
     red_ops_renamed <-
       reductionStageOne
         constants
@@ -227,7 +227,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
         slugs
         body
 
-    sComment "stage one END" $ pure ()
+    sComment_ "stage one END"
     let segred_pes =
           chunks (map (length . segBinOpNeutral) reds) $
             patElems segred_pat
@@ -254,7 +254,7 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
           sync_arr                                 -- sync_arr
           group_res_arrs                           -- group_res_arrs
           red_arrs                                 -- red_arrs
-        sComment "stage two END" $ pure ()
+        sComment_ "stage two END"
 
 smallSegmentsReduction ::
   Pat LetDecMem ->
@@ -500,7 +500,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                   red_arrs                          -- red_arrs
 
           one_group_per_segment =
-            comment "first thread in group saves final result to memory" $
+            sComment "first thread in group saves final result to memory" $
               forM_ (zip slugs segred_pes) $ \(slug, pes) ->
                 sWhen (local_tid .==. 0) $
                   forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
@@ -596,10 +596,10 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
   slugs_op_renamed <- mapM (renameLambda . segBinOpLambda . slugOp) slugs
 
   let doTheReduction = do
-        sComment "doTheReduction INNER BEGIN" $ pure ()
+        sComment_ "doTheReduction INNER BEGIN"
         forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
-            comment "to reduce current chunk, first store our result in memory" $ do
+            sComment "to reduce current chunk, first store our result in memory" $ do
               forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
                 copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
 
@@ -617,7 +617,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
                 forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $ \((acc, acc_is), p) ->
                   copyDWIMFix acc (acc_is ++ vec_is) (Var $ paramName p) []
 
-        sComment "doTheReduction INNER END" $ pure ()
+        sComment_ "doTheReduction INNER END"
 
   -- If this is a non-commutative reduction, each thread must run the
   -- loop the same number of iterations, because we will be performing
@@ -677,7 +677,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
                   copyDWIMFix acc (acc_is ++ vec_is) se []
 
     when (not is_comm) $ do
-      sComment "noncomm doTheReduction BEGIN" $ pure ()
+      sComment_ "noncomm doTheReduction BEGIN"
       doTheReduction
       sComment "first thread keeps accumulator; others reset to neutral element" $ do
         let reset_to_neutral =
@@ -686,7 +686,7 @@ reductionStageOne constants ispace num_elements global_tid elems_per_thread thre
                   sLoopNest (slugShape slug) $ \vec_is ->
                     copyDWIMFix acc (acc_is ++ vec_is) ne []
         sWhen (local_tid .>. 0) reset_to_neutral
-      sComment "noncomm doTheReduction END" $ pure ()
+      sComment_ "noncomm doTheReduction END"
 
   sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -743,7 +743,7 @@ reductionStageTwo
             counter_i * num_counters
               + flat_segment_id `rem` num_counters
         ]
-    comment "first thread in group saves group result to global memory" $
+    sComment "first thread in group saves group result to global memory" $
       sWhen (local_tid .==. 0) $ do
         forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
           copyDWIMFix v [0, sExt64 group_id] (Var acc) acc_is
@@ -789,7 +789,7 @@ reductionStageTwo
         -- have to read multiple elements.  We do this in a sequential
         -- way that may induce non-coalesced accesses, but the total
         -- number of accesses should be tiny here.
-        comment "read in the per-group-results" $ do
+        sComment "read in the per-group-results" $ do
           read_per_thread <-
             dPrimVE "read_per_thread" $
               groups_per_segment `divUp` sExt64 group_size
