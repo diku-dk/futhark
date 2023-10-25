@@ -808,7 +808,7 @@ processDirective env (DirectiveGnuplot e script) = do
       void $ system "gnuplot" [] script'
 --
 processDirective env (DirectiveVideo e params) = do
-  when (format `notElem` ["webm", "gif"]) $
+  unless (format `elem` ["webm", "gif"]) $
     throwError $
       "Unknown video format: " <> format
 

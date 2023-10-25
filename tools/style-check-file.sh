@@ -31,7 +31,7 @@ exit=0
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -XNoCPP -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" -i "Too strict maybe" "$1"
+    hlint -XNoCPP -i "Use import/export shortcut" -i "Use const" -i "Use tuple-section" -i "Too strict maybe" -i "Functor law" "$1"
 }
 
 no_trailing_blank_lines() {
