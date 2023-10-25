@@ -71,7 +71,7 @@ seqStms ::
   SeqM (Stms GPU)
 seqStms stms =
   foldM (\ss s -> do
-      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm s
+      ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
       pure $ ss <> ss'
       ) mempty (stmsToList stms)
 
@@ -91,22 +91,29 @@ seqStm (Let pat aux (Op (SegOp (
   -- TODO: Somehow select what the seqFactor should be
   let e       = intConst Int64 4
   let grpId   = fst $ head $ unSegSpace space
-  let sizeOld = snd $ head $ unSegSpace space
+  -- let sizeOld = snd $ head $ unSegSpace space
+  let sizeOld = unCount $ gridGroupSize grid
   sizeNew <- letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                             (eSubExp sizeOld)
                                             (eSubExp e)
 
   let env = Env (Var grpId) sizeNew sizeOld mempty e
 
-  -- Update the env with mappings
-  env' <- mkTiles env
 
-  -- Create the new grid with the new group size
-  let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
-  kbody' <- runSeqM $ seqKernelBody env' kbody
 
-  addStm $ Let pat aux
-           (Op (SegOp (SegMap (SegThread virt grid') space ts kbody')))
+  exp' <- buildSegMap' $ do
+    -- Update the env with mappings
+    env' <- mkTiles env
+
+    -- Create the new grid with the new group size
+    let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
+    kresults <- seqKernelBody env' kbody
+
+    let lvl' = SegGroup virt grid'
+    pure (kresults, lvl', space, ts)
+
+
+  addStm $ Let pat aux exp'
   pure ()
 
 
@@ -121,10 +128,10 @@ seqStm stm = error $
 seqKernelBody ::
   Env ->
   KernelBody GPU ->
-  SeqM (KernelBody GPU)
-seqKernelBody env (KernelBody dec stms results) = do
-  stms' <- seqStms' env stms
-  pure $ KernelBody dec stms' results
+  Builder GPU [KernelResult]
+seqKernelBody env (KernelBody _ stms results) = do
+  seqStms' env stms
+  pure results
 
 
 
@@ -138,13 +145,13 @@ seqKernelBody env (KernelBody dec stms results) = do
 seqStms' ::
   Env ->
   Stms GPU ->
-  SeqM (Stms GPU)
+  Builder GPU ()
 seqStms' env stms = do
-  foldM (\ss s -> do
+  stms' <- foldM (\ss s -> do
       ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env s
       pure $ ss <> ss'
       ) mempty (stmsToList stms)
-
+  addStms stms'
 
 
 -- |Expects to only match on statements at thread level. That is SegOps at
@@ -175,7 +182,7 @@ seqStm' env (Let pat aux
       phys <- newVName "phys_tid"
 
       -- For each tile we can then get the corresponding chunk
-      chunks <- mapM (getChunk env) tilesUsed
+      chunks <- mapM (getChunk env tid) tilesUsed
 
       res <- letSubExp "res" $ Op $ OtherOp $
                 Screma (seqFactor env) chunks reduce
@@ -193,9 +200,11 @@ seqStm' env (Let pat aux
   let tid = fst $ head $ unSegSpace space
   kbody' <- runSeqM $ seqKernelBody' env mapping tid kbody
 
-  addStm $ Let pat aux (Op (SegOp (SegRed lvl space binops ts kbody')))
+  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env)]
 
-  
+  addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
+
+
 
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
@@ -211,16 +220,16 @@ seqKernelBody' ::
   Env ->
   Map VName VName -> -- mapping from global array to intermediate results
   VName ->            -- Thread id
-  KernelBody GPU -> 
+  KernelBody GPU ->
   SeqM (KernelBody GPU)
-seqKernelBody' env mapping tid (KernelBody dec stms results) = do 
+seqKernelBody' env mapping tid (KernelBody dec stms results) = do
   stms' <- seqStms'' env mapping tid stms
   pure $ KernelBody dec stms' results
 
 
 seqStms'' ::
   Env ->
-  Map VName VName -> 
+  Map VName VName ->
   VName ->            -- Thread id
   Stms GPU ->
   SeqM (Stms GPU)
@@ -237,26 +246,26 @@ seqStm'' ::
   VName ->            -- Thread id
   Stm GPU ->
   Builder GPU ()
-seqStm'' env mapping tid stm@(Let pat aux (BasicOp (Index arr _))) = 
+seqStm'' env mapping tid stm@(Let pat aux (BasicOp (Index arr _))) =
   if M.member arr mapping then do
-    let (Just arr') = M.lookup arr mapping 
-    let slice' = Slice [DimFix $ Var tid,
-                        DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+    let (Just arr') = M.lookup arr mapping
+    let slice' = Slice [DimFix $ Var tid]
     addStm $ Let pat aux (BasicOp (Index arr' slice'))
   else
     addStm stm
 
 seqStm'' _ _ _ stm = addStm stm
-  
+
 
 
 getChunk ::
   Env ->
+  VName ->              -- thread Id
   (VName, VName) ->     -- array to tile mapping
   Builder GPU VName
-getChunk env (_, tile) = do
+getChunk env tid (_, tile) = do
   letExp "chunk" $ BasicOp $ Index tile
-    (Slice [DimFix $ grpId env,
+    (Slice [DimFix $ Var tid,
             DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)])
 
 
@@ -625,8 +634,7 @@ mkTiles env = do
                                             (eSubExp $ Var tid)
                                             (eSubExp $ seqFactor env)
       es <- letSubExp "chunk" $ BasicOp $ Index tileFlat
-            (Slice [DimFix $ grpId env,
-                    DimSlice start (seqFactor env) (intConst Int64 1)])
+            (Slice [DimSlice start (seqFactor env) (intConst Int64 1)])
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
@@ -705,6 +713,14 @@ buildSegMap_ name m = do
   subExp <- buildSegMap name m
   let (Var name') = subExp
   pure name'
+
+buildSegMap' ::
+  Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
+  Builder GPU (Exp GPU)
+buildSegMap' m = do
+  ((res, lvl, space, ts), stms) <- collectStms m
+  let kbody' = KernelBody () stms res
+  pure $ Op $ SegOp $ SegMap lvl space ts kbody'
 
 -- | The [KernelResult] from the input monad is what is being passed to the 
 -- segmented binops
