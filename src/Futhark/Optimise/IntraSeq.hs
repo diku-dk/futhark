@@ -108,8 +108,10 @@ seqStm (Let pat aux (Op (SegOp (
     kresults <- seqKernelBody env' kbody
 
     let lvl' = SegGroup virt grid'
-    pure (kresults, lvl', space, ts)
 
+    kresults' <- flattenResults pat kresults
+
+    pure (kresults', lvl', space, ts)
 
   addStm $ Let pat aux exp'
   pure ()
@@ -169,7 +171,7 @@ seqStm' env (Let pat aux
 
   -- For each SegBinOp we should create an intermediate reduction result
   reds <- mapM (mkSegMapRed env tilesUsed) binops
-  
+
   -- Pair the original arrays with the intermediate results
   let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed reds
 
@@ -179,6 +181,8 @@ seqStm' env (Let pat aux
   kbody' <- runSeqM $ seqKernelBody' env mapping tid kbody
 
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env)]
+
+
 
   addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
 
@@ -203,7 +207,7 @@ seqStm' env (Let pat aux
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
     pure ([Returns ResultMaySimplify mempty e'], lvl', space', binops', ts)
-    
+
   scans' <- forM scans $ \scan -> buildSegMap_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
@@ -232,14 +236,14 @@ seqStm' env (Let pat aux
     let space' = SegSpace phys [(tid, grpSize env)]
     let types' = scremaType (seqFactor env) scanSoac
     pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
-    
+
   let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
   addStm $ Let pat aux $ BasicOp exp'
-    
+
   pure ()
 
 
-  
+
 -- Catch all
 seqStm' _ stm = error $
                 "Encountered unhandled statement at thread level: " ++ show stm
@@ -287,13 +291,13 @@ seqStm'' env mapping tid stm@(Let pat aux (BasicOp (Index arr _))) =
 seqStm'' _ _ _ stm = addStm stm
 
 
-mkSegMapRed :: 
-  Env -> 
+mkSegMapRed ::
+  Env ->
   [(VName, VName)] ->
-  SegBinOp GPU -> 
+  SegBinOp GPU ->
   Builder GPU VName
 mkSegMapRed env mapping binop = do
-  
+
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
@@ -326,6 +330,27 @@ getChunk env tid (_, tile) = do
     (Slice [DimFix $ Var tid,
             DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)])
 
+
+flattenResults ::
+  Pat (LetDec GPU)->
+  [KernelResult] ->
+  Builder GPU [KernelResult]
+flattenResults pat kresults = do
+  let types = Data.List.map patElemType (patElems pat)
+  subExps <- forM (zip kresults types) $ \(res, tp)-> do
+    let resSubExp = kernelResultSubExp res
+    case resSubExp of
+      (Constant _) -> letSubExp "const_res" $ BasicOp $ SubExp resSubExp
+      (Var name) -> do
+          resType <- lookupType name
+          if arrayRank resType == 0 then
+            letSubExp "scalar_res" $ BasicOp $ SubExp resSubExp
+          else
+            letSubExp "reshaped_res" $ BasicOp $ Reshape ReshapeArbitrary (arrayShape $ stripArray 1 tp) name
+
+  let kresults' = Data.List.map (Returns ResultMaySimplify mempty) subExps
+
+  pure kresults'
 
 
 -- | seqStm' is assumed to only match on statements encountered within some
