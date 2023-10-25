@@ -414,7 +414,7 @@ analyzeBasicOp ctx expression pats = do
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp
-        (Manifest _dim name) -> ctxValFromNames ctx $ oneName name -- error $ "unhandled: Manifest for " ++ prettyString name
+        (Manifest _dim name) -> ctxValFromNames ctx $ oneName name
         (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
         (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
         (Scratch _ subexprs) -> concatCtxVals mempty subexprs
@@ -422,7 +422,7 @@ analyzeBasicOp ctx expression pats = do
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         (FlatIndex name _) -> ctxValFromNames ctx $ oneName name
-        (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [ name , source ]
+        (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [name, source]
   let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where

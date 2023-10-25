@@ -43,7 +43,7 @@ coalesceAccess =
       -- Analyse the program
       let analysisRes = analyzeDimIdxPats prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable sortFun analysisRes
+      let permutationTable = permutationTableFromIndexTable analysisRes
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutationTable) prog
   where
@@ -54,7 +54,10 @@ coalesceAccess =
 class (Analyze rep) => Coalesce rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
   transformOp :: Ctx -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (Ctx, ExpMap rep)
-  sortFun :: [DimIdxPat rep] -> [DimIdxPat rep]
+
+  -- | Return a coalescing permutation that will be used to create a manifest of the array.
+  -- Returns the identity permutation [0..] if the array is already in the optimal layout
+  permutationFromMemoryEntry :: MemoryEntry rep -> Permutation
 
 type Ctx = PermutationTable
 
@@ -83,7 +86,7 @@ instance Coalesce GPU where
   transformOp ctx expmap stm gpuOp
     | (SegOp op) <- gpuOp = transformSegOpGPU ctx expmap stm op
     | _ <- gpuOp = transformRestOp ctx expmap stm
-  sortFun = sortGPU
+  permutationFromMemoryEntry = map originalDimension . (sortGPU . dimensions)
 
 instance Coalesce MC where
   onOp soacMapper (Futhark.IR.MC.OtherOp soac) = Futhark.IR.MC.OtherOp <$> mapSOACM soacMapper soac
@@ -91,7 +94,7 @@ instance Coalesce MC where
   transformOp ctx expmap stm mcOp
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC ctx expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp ctx expmap stm
-  sortFun = sortMC
+  permutationFromMemoryEntry = map originalDimension . (sortMC . dimensions)
 
 transformSegOpGPU :: Ctx -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (Ctx, ExpMap GPU)
 transformSegOpGPU ctx expmap (Let pat aux _) op = do
@@ -247,23 +250,24 @@ ensureCoalescedAccess
           -- So, just replace the name and don't make a new manifest.
           Just arr' -> pure $ Just (arr', slice)
           Nothing -> do
-            -- Create a new manifest
-            arr' <- lift (manifest perm arr)
-            -- Store that we have seen this array + permutation
-            -- so we don't make duplicate manifests
-            modify $ M.insert (arr, perm) arr'
-            -- Return the new manifest
-            pure $ Just (arr', slice)
+            replace perm =<< lift (manifest perm arr)
     where
-      manifest perm array =
+      replace perm arr' = do
+        -- Store the fact that we have seen this array + permutation
+        -- so we don't make duplicate manifests
+        modify $ M.insert (arr, perm) arr'
+        -- Return the new manifest
+        pure $ Just (arr', slice)
+
+      manifest perm array = do
         letExp (baseString array ++ "_coalesced") $
           BasicOp $
             Manifest perm array
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
-permutationTableFromIndexTable :: ([DimIdxPat rep] -> [DimIdxPat rep]) -> IndexTable rep -> PermutationTable
-permutationTableFromIndexTable sortCoalescing =
+permutationTableFromIndexTable :: (Coalesce rep) => IndexTable rep -> PermutationTable
+permutationTableFromIndexTable =
   -- We effectively convert all the `MemoryEntry`s in the index table,
   -- then, using mapMaybe, we discard all "rows" in the table which:
   -- \* contain no difference in the permutation, or
@@ -274,27 +278,25 @@ permutationTableFromIndexTable sortCoalescing =
   -- a permutation instead of [DimIdxPat]
   filterMap null $
     filterMap null $
-      filterMap predPermutation (permutationFromMemoryEntry sortCoalescing)
+      filterMap predPermutation permutationFromMemoryEntry
   where
     -- Wraps a function in a mapMaybe, if the predicate is true then return
     -- nothing. When sequenced as above, the "nothings" will then propagate and
     -- ensure that we don't have entries in any of the maps that points to empty
     -- maps.
-    filterMap predicate f =
+    filterMap :: (b -> Bool) -> (a -> b) -> M.Map k a -> M.Map k b
+    filterMap predicateFunc permFunc =
       M.mapMaybe
-        ( \imm ->
-            let res = f imm
-             in if predicate res
-                  then Nothing
-                  else Just res
+        ( \memEntry -> do
+            let res = permFunc memEntry
+            if predicateFunc res
+              then Nothing
+              else Just res
         )
 
     -- Is the permutation just the identity permutation, or not a transposition?
     predPermutation perm =
       perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
-
-permutationFromMemoryEntry :: ([DimIdxPat rep] -> [DimIdxPat rep]) -> MemoryEntry rep -> Permutation
-permutationFromMemoryEntry ordering = map originalDimension . (ordering . dimensions)
 
 lookupPermutation :: Ctx -> VName -> IndexExprName -> ArrayName -> Maybe Permutation
 lookupPermutation ctx segName idxName arrayName =
