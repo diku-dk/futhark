@@ -562,7 +562,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
-      when (s `notElem` known) $
+      unless (s `elem` known) $
         Left . Error [] . TypeError $
           "Opaque not defined before first use: " <> nameToText s
     checkEntryPointType _ (TypeTransparent _) = pure ()

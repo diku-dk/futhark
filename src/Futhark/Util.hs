@@ -447,9 +447,10 @@ atMostChars n s
 -- constructing a set of corresponding values.
 invertMap :: (Ord v, Ord k) => M.Map k v -> M.Map v (S.Set k)
 invertMap m =
-  M.toList m
-    & fmap (swap . first S.singleton)
-    & foldr (uncurry $ M.insertWith (<>)) mempty
+  foldr
+    (uncurry (M.insertWith (<>)) . swap . first S.singleton)
+    mempty
+    (M.toList m)
 
 -- | Compute the cartesian product of two foldable collections, using the given
 -- combinator function.
