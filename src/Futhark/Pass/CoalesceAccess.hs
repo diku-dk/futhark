@@ -101,7 +101,9 @@ transformSegOpGPU ctx expmap (Let pat aux _) op = do
   let mapper =
         identitySegOpMapper
           { mapOnSegOpBody = case segLevel op of
+              -- We don't want to coalesce anything defined inside a SegGroup
               SegGroup {} -> pure
+              -- In any other case, we want to coalesce and recurse
               _ -> transformSegThreadKernelBody ctx patternName
           }
   op' <- mapSegOpM mapper op
