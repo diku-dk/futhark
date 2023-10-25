@@ -158,6 +158,12 @@ vjpSOAC ops pat aux (Hist n as histops f) m
 vjpSOAC ops pat aux (Hist n [is, vs] [histop] f) m
   | isIdentityLambda f,
     [x] <- patNames pat,
+    HistOp (Shape [w]) rf [dst] [Var ne] lam <- histop,
+    -- Note that the operator is vectorised, so `ne` cannot be a 'PrimValue'.
+    Just op <- mapOp lam =
+      diffVecHist ops x aux n op ne is vs w rf dst m
+  | isIdentityLambda f,
+    [x] <- patNames pat,
     HistOp (Shape [w]) rf [dst] [ne] lam <- histop,
     lam' <- nestedMapOp lam,
     Just [(op, _, _, _)] <- lamIsBinOp lam',
