@@ -26,12 +26,11 @@ USAGE
 =====
 
 The first step is to run :ref:`futhark bench<futhark-bench(1)>` on
-your program, while passing ``--profile`` and ``--json``.  This will
+your program, while passing ``--profile`` and ``--json``. This will
 produce a JSON file containing runtime measurements, as well as
-collected profiling information.  If you neglect to pass
-``--profile``, the latter will be missing.  If you neglect to pass
-``--json``, no file will be created.  The information in the JSON file
-is complete, but it is difficult for humans to read.
+collected profiling information. If you neglect to pass ``--profile``,
+the profiling information will be missing. The information in the JSON
+file is complete, but it is difficult for humans to read.
 
 The next step is to run ``futhark profile`` on the JSON file.  For a
 JSON file ``prog.json``, this will create a *top level directory*
