@@ -95,8 +95,7 @@ instance Coalesce GPU where
     let nestSegOps = filter isUndesired nest
     let isInsideUndesired = not (null nestSegOps)
 
-    if -- isInsideUndesired ||
-    isIdentity || isNotTranspose
+    if isInsideUndesired || isIdentity || isNotTranspose
       then Nothing
       else Just perm
     where
