@@ -4,6 +4,7 @@ module Futhark.Analysis.AccessPattern
   ( analyzeDimIdxPats,
     analyzeFunction,
     vnameFromSegOp,
+    analysisPropagateByTransitivity,
     Analyze,
     IndexTable,
     ArrayName,
@@ -105,6 +106,27 @@ type CondBodyName = (Int, VName)
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables lhs rhs = do
   M.unionWith (M.unionWith M.union) lhs rhs
+
+-- | Make segops on arrays transitive, ie. if
+-- > let A = segmap (..) xs -- A indexes into xs
+-- > let B = segmap (..) A  -- B indexes into A
+-- Then B also derives all A's array-accesses, like xs.
+-- Runs in n²
+analysisPropagateByTransitivity :: IndexTable rep -> IndexTable rep
+analysisPropagateByTransitivity idxTable =
+  M.map
+    foldlArrayNameMap
+    idxTable
+  where
+    -- VName -> M.Map ArrayName (M.Map IndexExprName (MemoryEntry rep))
+    aggregateResults arrayName =
+      maybe
+        mempty
+        foldlArrayNameMap
+        ((M.!?) (M.mapKeys vnameFromSegOp idxTable) arrayName)
+
+    foldlArrayNameMap aMap =
+      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys fst aMap)
 
 --
 -- Helper types and functions to perform the analysis.
