@@ -86,12 +86,16 @@ instance Coalesce GPU where
   transformOp ctx expmap stm gpuOp
     | (SegOp op) <- gpuOp = transformSegOpGPU ctx expmap stm op
     | _ <- gpuOp = transformRestOp ctx expmap stm
+
   permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortGPU . dimensions)) memEntry
 
+    -- Don't manifest if the permutation is the identity permutation or is not
+    -- a transpose.
     let isIdentity = perm `L.isPrefixOf` [0 ..]
     let isNotTranspose = isNothing (isMapTranspose perm)
 
+    -- Don't manifest if the array is defined inside a segOp or loop body
     let nestSegOps = filter isUndesired nest
     let isInsideUndesired = not (null nestSegOps)
 
@@ -110,12 +114,27 @@ instance Coalesce MC where
   transformOp ctx expmap stm mcOp
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC ctx expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp ctx expmap stm
-  permutationFromMemoryEntry segOpName idxName arrayName memEntry = do
+
+  permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortMC . dimensions)) memEntry
-    -- Is the permutation just the identity permutation, or not a transposition?
-    if perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm)
+
+    -- Don't manifest if the permutation is the identity permutation or is not
+    -- a transpose.
+    let isIdentity = perm `L.isPrefixOf` [0 ..]
+    let isNotTranspose = isNothing (isMapTranspose perm)
+
+    -- Don't manifest if the array is defined inside a segOp or loop body
+    let nestSegOps = filter isUndesired nest
+    let isInsideUndesired = not (null nestSegOps)
+
+    if isInsideUndesired || isIdentity || isNotTranspose
       then Nothing
       else Just perm
+    where
+      isUndesired bodyType = case bodyType of
+        SegOpName _ -> True
+        LoopBodyName _ -> True
+        _ -> False
 
 transformSegOpGPU :: Ctx -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (Ctx, ExpMap GPU)
 transformSegOpGPU ctx expmap (Let pat aux _) op = do
@@ -289,16 +308,9 @@ ensureCoalescedAccess
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
 permutationTableFromIndexTable :: (Coalesce rep) => IndexTable rep -> PermutationTable
-permutationTableFromIndexTable indexTable = do
-  -- We effectively convert all the `MemoryEntry`s in the index table,
-  -- then, using mapMaybe, we discard all "rows" in the table which:
-  -- \* contain no difference in the permutation, or
-  -- \* is a permutation that we cannot achieve efficiently using transpositions.
-  -- recall that IndexTable is just a mapping of
-  -- SegOpName → ArrayName → IndexExprName → [DimIdxPat]
-  -- and PermutationTable is just a variation of IndexTable that maps to
-  -- a permutation instead of [DimIdxPat]
-
+permutationTableFromIndexTable indexTable =
+  -- Map each MemoryEntry in the IndexTable to a permutation in a generic way
+  -- that can be handled uniquely by each backend.
   M.fromList
     $ map
       ( \(segOpName, arrayMap) ->
@@ -321,33 +333,6 @@ permutationTableFromIndexTable indexTable = do
           )
       )
     $ M.toList indexTable
-  where
-
---   ( filterMap null $
---       filterMap null $
---         filterMap predPermutation permutationFromMemoryEntry
---   )
---   indexTable
-
--- (SegOpName, ArrayName, IndexExprName, Permutation)
-
--- Wraps a function in a mapMaybe, if the predicate is true then return
--- nothing. When sequenced as above, the "nothings" will then propagate and
--- ensure that we don't have entries in any of the maps that points to empty
--- maps.
--- filterMap :: (b -> Bool) -> (a -> b) -> M.Map k a -> M.Map k b
--- filterMap predicateFunc permFunc =
---   M.mapMaybe
---     ( \val -> do
---         let res = permFunc val
---         if predicateFunc res
---           then Just res
---           else Nothing
---     )
-
--- -- Is the permutation just the identity permutation, or not a transposition?
--- predPermutation perm =
---   not (perm `L.isPrefixOf` [0 ..] || isNothing (isMapTranspose perm))
 
 lookupPermutation :: Ctx -> VName -> IndexExprName -> VName -> Maybe Permutation
 lookupPermutation ctx segName idxName arrayName =
