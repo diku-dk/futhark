@@ -103,21 +103,7 @@ type CondBodyName = (Int, VName)
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables lhs rhs = do
-  -- Find all occurences of ArrayName's from rhs in lhs
-  let lhsNames = M.fromList $ map (onFst vnameFromSegOp) $ M.toList lhs
-  -- Propagate all results in lhs to rhs, if they occur in the lhs.
-  let rhs' =
-        M.map
-          ( \arraynames ->
-              foldl'
-                (M.unionWith M.union)
-                arraynames
-                . map
-                  (fromMaybe mempty . flip M.lookup lhsNames . fst)
-                $ M.toList arraynames
-          )
-          rhs
-  M.unionWith (M.unionWith M.union) lhs rhs'
+  M.unionWith (M.unionWith M.union) lhs rhs
 
 --
 -- Helper types and functions to perform the analysis.
@@ -389,7 +375,7 @@ analyzeIndex' ctx pats arr_name dimIndexes = do
   let memory_entries = MemoryEntry dimIndexes $ parents ctx
   let idx_expr_name = pats --                                                IndexExprName
   let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> MemoryEntry
-  let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
+  let map_array = map (M.singleton (arr_name, parents ctx)) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
   let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
   let res = foldl' unionIndexTables mempty results
 
