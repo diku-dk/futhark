@@ -50,15 +50,15 @@ data SegOpName
   | SegmentedHist (Int, VName)
   deriving (Eq, Ord, Show)
 
+type ArrayName = (VName, [BodyType])
+
+type IndexExprName = VName
+
 vnameFromSegOp :: SegOpName -> VName
 vnameFromSegOp (SegmentedMap (_, name)) = name
 vnameFromSegOp (SegmentedRed (_, name)) = name
 vnameFromSegOp (SegmentedScan (_, name)) = name
 vnameFromSegOp (SegmentedHist (_, name)) = name
-
-type ArrayName = (VName, [BodyType])
-
-type IndexExprName = VName
 
 -- | Each element in `dimensions` corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
@@ -405,7 +405,6 @@ analyzeIndex' ctx pats arr_name dimIndexes = do
   let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
   let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
   let res = foldl' unionIndexTables mempty results
-
   (ctx, res)
 
 analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable rep)
