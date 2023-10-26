@@ -40,6 +40,7 @@ class Analyze rep where
 type IndexTable rep =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName (MemoryEntry rep)))
 
+-- | SegOpName stores the nested "level" at which it is declared in the AST.
 data SegOpName
   = SegmentedMap (Int, VName)
   | SegmentedRed (Int, VName)
@@ -53,7 +54,7 @@ vnameFromSegOp (SegmentedRed (_, name)) = name
 vnameFromSegOp (SegmentedScan (_, name)) = name
 vnameFromSegOp (SegmentedHist (_, name)) = name
 
-type ArrayName = VName
+type ArrayName = (VName, [BodyType])
 
 type IndexExprName = VName
 
