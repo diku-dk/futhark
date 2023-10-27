@@ -39,7 +39,7 @@ coalesceAccess =
     -- return
     $ \prog -> do
       -- Analyse the program
-      let analysisRes = analyzeDimIdxPats prog
+      let analysisRes = analysisPropagateByTransitivity $ analyzeDimIdxPats prog
       -- Compute permutations to acheive coalescence for all arrays
       let permutationTable = permutationTableFromIndexTable analysisRes
       -- Insert permutations in the AST
