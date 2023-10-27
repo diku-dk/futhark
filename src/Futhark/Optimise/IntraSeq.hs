@@ -14,7 +14,7 @@ import Data.Map as M
 import Data.IntMap.Strict as IM
 
 import Debug.Pretty.Simple
-import Data.List
+import Data.List as L
 
 
 
@@ -136,11 +136,6 @@ seqKernelBody env (KernelBody _ stms results) = do
 
 
 
-
-
-
-
-
 -- | Much like seqStms but now carries an Env
 seqStms' ::
   Env ->
@@ -173,7 +168,8 @@ seqStm' env (Let pat aux
   reds <- mapM (mkSegMapRed env tilesUsed) binops
 
   -- Pair the original arrays with the intermediate results
-  let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed reds
+  -- TODO head in reds until multiple binops are supported
+  let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed $ head reds
 
   -- Modify the kernel body
   -- TODO: Assumes single dimension
@@ -196,8 +192,9 @@ seqStm' env (Let pat aux
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
   reds <- mapM (mkSegMapRed env tilesUsed) binops
-
-  scans <- forM reds $ \red -> buildSegScan "scan_agg" $ do
+  -- TODO: head until multiple binops
+  let redshead = head reds
+  scans <- forM redshead $ \red -> buildSegScan "scan_agg" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
@@ -208,7 +205,7 @@ seqStm' env (Let pat aux
     let space' = SegSpace phys [(tid, grpSize env)]
     pure ([Returns ResultMaySimplify mempty e'], lvl', space', binops', ts)
 
-  scans' <- forM scans $ \scan -> buildSegMap_ "scan_res" $ do
+  scans' <- forM scans $ \scan -> buildSegMapTup_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
 
@@ -237,7 +234,8 @@ seqStm' env (Let pat aux
     let types' = scremaType (seqFactor env) scanSoac
     pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
 
-  let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
+  -- TODO first head mult binops
+  let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head $ head scans')
   addStm $ Let pat aux $ BasicOp exp'
 
   pure ()
@@ -295,7 +293,7 @@ mkSegMapRed ::
   Env ->
   [(VName, VName)] ->
   SegBinOp GPU ->
-  Builder GPU VName
+  Builder GPU [VName]
 mkSegMapRed env mapping binop = do
 
     let comm = segBinOpComm binop
@@ -304,22 +302,22 @@ mkSegMapRed env mapping binop = do
 
     reduce <- reduceSOAC [Reduce comm lambda ne]
 
-    buildSegMap_ "red_intermediate" $ do
+    buildSegMapTup_ "red_intermediate" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
-
       sz <- mkChunkSize tid env
 
       -- For each tile we can then get the corresponding chunk
       chunks <- mapM (getChunk env tid sz) mapping
 
-      res <- letSubExp "res" $ Op $ OtherOp $
+      res <- letTupExp' "res" $ Op $ OtherOp $
                 Screma sz chunks reduce
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
       let types' = scremaType (seqFactor env) reduce
-      pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
+      let kres = L.map (Returns ResultMaySimplify mempty) res
+      pure (kres, lvl', space', types')
 
 
 getChunk ::
@@ -339,7 +337,7 @@ flattenResults ::
   [KernelResult] ->
   Builder GPU [KernelResult]
 flattenResults pat kresults = do
-  let types = Data.List.map patElemType (patElems pat)
+  let types = L.map patElemType (patElems pat)
   subExps <- forM (zip kresults types) $ \(res, tp)-> do
     let resSubExp = kernelResultSubExp res
     case resSubExp of
@@ -351,204 +349,10 @@ flattenResults pat kresults = do
           else
             letSubExp "reshaped_res" $ BasicOp $ Reshape ReshapeArbitrary (arrayShape $ stripArray 1 tp) name
 
-  let kresults' = Data.List.map (Returns ResultMaySimplify mempty) subExps
+  let kresults' = L.map (Returns ResultMaySimplify mempty) subExps
 
   pure kresults'
 
-
--- | seqStm' is assumed to only match on statements encountered within some
--- SegOp at group level
--- seqStm' ::
---   SubExp ->             -- Group id
---   (SubExp, SubExp) ->   -- (old size, new size)
---   Stm GPU ->
---   Builder GPU ()
--- seqStm' gid sizes stm@(Let pat aux (Op (SegOp
---           (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
---   -- Get the thread id
---   let [(tid, _)] = unSegSpace space
-
---   -- creates tiles for the arrays read
---   names <- tileSegKernelBody kbody sizes gid (Var tid)
---   let (vNames, tileNames) = unzip names
---   -- For each BinOp extract the lambda and create a SegMap performing thread local reduction
---   reds <- mapM (mkSegMapRed tileNames sizes) binops
---   let redNames = map (\(Var x) -> x) reds
-
---   -- -- Update the kbody to use the tile
---   let phys = segFlat space
---   let [(gtid, _)] = unSegSpace space
---   let space' = SegSpace phys [(gtid, snd sizes)]
-
---   -- -- Each VName in fparams should be paired with the corresponding tile
---   -- -- created for the array of that VName
---   let kbody' = substituteIndexes kbody $ Data.List.zip vNames redNames
---   addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
---   pure ()
---   where
---     isFParam :: NameInfo GPU -> Bool
---     isFParam (FParamName typebase) = isArray typebase
---     isFParam _ = False
-
---     isArray :: TypeBase shape u -> Bool
---     isArray (Array {}) = True
---     isArray _ = False
-
-
--- seqStm' gid grpSizes (Let pat aux e@(Op (SegOp 
---                       (SegScan (SegThread {}) space binops ts kbody)))) = do
---   -- TODO: Right now this whole function assumes that only a single tile is
---   -- created and that there is only one single SegBinOp as this simplifies
---   -- IR generation
-
---   -- Create the tiles
---   let [(gtid, _)] = unSegSpace space
---   names <- tileSegKernelBody kbody grpSizes gid (Var gtid)
---   let (vNames, tileNames) = unzip names
-
---   -- Create the reduction part
---   redRes <- mapM (mkSegMapRed tileNames grpSizes) binops
-
---   -- for each array of intermediate reduction results, create IR to scan it
---   scanAggs <- forM redRes $ \ redRes' -> do
---     buildSegScan "scan_agg" $ do
---       let (Var redName) = redRes'
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
---       binops' <- renameSegBinOp binops
-
---       -- TODO: Need some checks or filtering of the binops actually needed
---       -- maybe uneeded parts are removed by simplify?
-
---       e' <- letSubExp "elem" =<< eIndex redName (eSubExp $ Var tid)
-
---       let lvl' = SegThread SegNoVirt Nothing
---       let space' = SegSpace phys [(tid, snd grpSizes)]
---       pure ([Returns ResultMaySimplify mempty e'],
---             lvl', space', binops', ts) -- TODO: idk if ts is correct
-
-
---   -- for each array of aggregate scan results we want to create a SegMap
---   -- containing a sequential scan over the chunks 
---   res <- forM scanAggs $ \ agg -> do
---     buildSegMap "res" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
---       let (Var aggName) = agg
-
---       -- TODO: uses only the first binop right now and assumes singular neutral
---       -- element
---       let binop = head binops
---       let neutral = head $ segBinOpNeutral binop
---       lambda <- renameLambda $ segBinOpLambda binop
-
---       idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
---                                         (eSubExp $ Var tid)
---                                         (eSubExp $ intConst Int64 1)
---       ne <- letSubExp "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
---                                       (eSubExp $ Var tid)
---                                       (eSubExp $ intConst Int64 0)
---                                    )
---                                    (eBody [toExp neutral])
---                                    (eBody [eIndex aggName (eSubExp idx)])
---       scan <- scanSOAC [Scan lambda [ne]]
---       chunkSize <- mkChunkSize tid $ fst grpSizes
---       es <- letChunkExp seqFactor tid (snd $ head names) -- TODO: head
---       res <- letExp "res" $ Op $ OtherOp $ Screma seqFactor [es] scan
---       res' <- letSubExp "res" $ BasicOp $ Reshape ReshapeArbitrary 
---                 (Shape [seqFactor]) res
---       let lvl' = SegThread SegNoVirt Nothing
---       let space' = SegSpace phys [(tid, snd grpSizes)]
---       let types' = scremaType seqFactor scan
---       pure (Returns ResultMaySimplify mempty res', lvl', space', types')
-
---   let (Var res') = head res -- TODO: head
---   let exp' = Reshape ReshapeArbitrary (Shape [fst grpSizes]) res'
---   addStm $ Let pat aux $ BasicOp exp'
---   -- exp' <- eSubExp $ head res -- TODO: head
---   -- addStm $ Let pat aux exp'
---   pure ()
-
-
-
--- seqStm' _ _ _ = undefined
-
-
-
-
-
-
-
-
-
--- mkSegMapRed ::
---   [VName] ->                  -- The arrays to reduce over
---   (SubExp, SubExp) ->                 -- (old size, new size)
---   SegBinOp GPU ->
---   Builder GPU SubExp
--- mkSegMapRed arrNames grpSizes binop = do
---   let comm = segBinOpComm binop
---   lambda <- renameLambda $ segBinOpLambda binop
---   let neutral = segBinOpNeutral binop
-
---   let reduce = Reduce comm lambda neutral
-
---   screma <- reduceSOAC [reduce]
-
---   buildSegMap "red_intermediate" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
---       currentSize <- mkChunkSize tid $ fst grpSizes
---       es <- mapM (letChunkExp currentSize tid) arrNames
---       tmp <- letSubExp "tmp" $ Op $ OtherOp $ Screma currentSize es screma
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, snd grpSizes)]
---       let types = scremaType seqFactor screma
---       pure (Returns ResultMaySimplify mempty tmp, lvl, space, types)
-
-
-
--- Creates a SegMap at thread level performing a sequnetial scan of the
--- threads corresponding chunk
--- mkSegMapScan ::
---   (SubExp, SubExp) ->    -- (old size, new size)
---   (VName, VName) ->      -- (arr, tile)
---   SubExp ->              -- aggregates
---   Exp GPU ->             -- The SegOp
---   Builder GPU SubExp
--- mkSegMapScan grpSizes tile agg (Op (SegOp (SegScan _ _ binops _ _))) = do
---   -- Create the scan ScremaForm from the binop
---   let binop = head binops -- TODO: asumes one binop
---   lambda <- renameLambda $ segBinOpLambda binop
---   let neutral = head $ segBinOpNeutral binop -- TODO: head
---   let (Var aggName) = agg
-
---    -- Create the actual SegMap operation
---   buildSegMap "res" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
-
---       idx <- letSubExp "idx" 
---               =<< eBinOp (Sub Int64 OverflowUndef) 
---                         (eSubExp $ Var tid) 
---                         (eSubExp $ intConst Int64 1)
---       ne <- letSubExp "ne" 
---               =<< eIf (eCmpOp (CmpEq $ IntType Int64) 
---                               (eSubExp $ Var tid) 
---                               (eSubExp $ intConst Int64 0))
---                           (eBody [toExp neutral])
---                           (eBody [eIndex aggName (eSubExp idx)])
-
---       scan <- scanSOAC [Scan lambda [ne]]
---       currentSize <- mkChunkSize tid $ fst grpSizes
---       es <- letChunkExp currentSize tid (snd tile)  
---       res <- letSubExp "scan_res" $ Op $ OtherOp $ 
---                 Screma currentSize [es] scan           
-
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, snd grpSizes)]
---       let types = scremaType seqFactor scan
---       pure (Returns ResultMaySimplify mempty res, lvl, space, types)
 
 
  -- Catch all
@@ -605,15 +409,13 @@ renameSegBinOp segbinops =
 
 -- substituteIndex :: [(VName, VName)] -> Stm GPU -> Stm GPU
 -- substituteIndex names stm@(Let pat aux (BasicOp (Index name slice))) =
---   let (fromNames, toNames) = Data.List.unzip names
---       index = Data.List.elemIndex name fromNames
---       in case index of
+--   let (fromNames, toNames) = unzip names
+--       in case elemIndex name fromNames of
 --         Just i ->
---           let (_:slice') = unSlice slice
---           in Let pat aux (BasicOp (Index (toNames Data.List.!! i) $ Slice slice'))
+--           -- after tiling we only need the last index
+          -- let slice' = last $ unSlice slice
+--           in Let pat aux (BasicOp (Index (toNames !! i) $ Slice [slice']))
 --         Nothing -> stm
--- substituteIndex _ stm = stm
-
 -- bindNewGroupSize :: SubExp -> Builder GPU SubExp
 -- bindNewGroupSize group_size = do
 --   name <- newVName "group_size"
@@ -699,9 +501,10 @@ mkTiles env = do
     tile <- buildSegMap_ "tile" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
+      let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
       es <- letSubExp "elems" $ BasicOp $ Index arrName
-                  (Slice [DimFix $ grpId env,
-                         DimSlice (Var tid) (seqFactor env) (grpSize env)])
+                  (Slice $ outerDim ++
+                            [DimSlice (Var tid) (seqFactor env) (grpSize env)])
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
@@ -796,9 +599,37 @@ buildSegMap_ ::
   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
   Builder GPU VName
 buildSegMap_ name m = do
-  subExp <- buildSegMap name m
-  let (Var name') = subExp
-  pure name'
+  subExps <- buildSegMap name m
+  pure $ varFromExp subExps
+  where
+    varFromExp :: SubExp -> VName
+    varFromExp (Var nm) = nm
+    varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
+
+-- like buildSegMap but builds a tup exp
+buildSegMapTup ::
+  String ->
+  Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
+  Builder GPU [SubExp]
+buildSegMapTup name m = do
+  ((res, lvl, space, ts), stms) <- collectStms m
+  let kbody = KernelBody () stms res
+  letTupExp' name $ Op $ SegOp $ SegMap lvl space ts kbody
+
+-- Like buildSegMapTup but returns the VName instead of the actual 
+-- SubExp. Just for convenience
+buildSegMapTup_ ::
+  String ->
+  Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
+  Builder GPU [VName]
+buildSegMapTup_ name m = do
+  subExps <- buildSegMapTup name m
+  pure $ L.map varFromExp subExps
+  where
+    varFromExp :: SubExp -> VName
+    varFromExp (Var nm) = nm
+    varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
+
 
 buildSegMap' ::
   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
