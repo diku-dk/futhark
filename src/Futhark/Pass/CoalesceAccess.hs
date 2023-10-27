@@ -21,9 +21,7 @@ import Futhark.IR.MCMem
 import Futhark.IR.SOACS
 import Futhark.IR.Seq
 import Futhark.IR.SeqMem
-import Futhark.IR.Syntax
 import Futhark.Pass
-import Futhark.Util
 
 printAST :: (RepTypes rep) => Pass rep rep
 printAST =
@@ -65,6 +63,7 @@ type Permutation = [Int]
 
 type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
+-- | A map from the name of an expression to the expression that defines it.
 type ExpMap rep = M.Map VName (Stm rep)
 
 transformStms :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stms rep -> CoalesceM rep (Stms rep)
@@ -85,7 +84,7 @@ instance Coalesce GPU where
     | (SegOp op) <- gpuOp = transformSegOpGPU permTable expmap stm op
     | _ <- gpuOp = transformRestOp permTable expmap stm
 
-  permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
+  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortGPU . dimensions)) memEntry
 
     -- Don't manifest if the permutation is the identity permutation or is not
@@ -113,7 +112,7 @@ instance Coalesce MC where
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC permTable expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp permTable expmap stm
 
-  permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
+  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortMC . dimensions)) memEntry
 
     -- Don't manifest if the permutation is the identity permutation or is not
@@ -184,12 +183,6 @@ transformBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap re
 transformBody permTable expmap (Body b stms res) = do
   stms' <- transformStms permTable expmap stms
   pure $ Body b stms' res
-
--- | Recursively transform the statements in the body of a SegGroup kernel.
-transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
-transformSegGroupKernelBody permTable expmap (KernelBody b stms res) = do
-  stms' <- transformStms permTable expmap stms
-  pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
 transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
@@ -425,21 +418,26 @@ sortMC =
         f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
 instance Coalesce GPUMem where
-  onOp _ _ = undefined
+  onOp _ _ = error $ notImplementedYet "GPUMem"
   transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
+  permutationFromMemoryEntry = error $ notImplementedYet "GPUMem"
 
 instance Coalesce MCMem where
-  onOp _ _ = undefined
+  onOp _ _ = error $ notImplementedYet "MCMem"
   transformOp _ _ _ _ = error $ notImplementedYet "MCMem"
+  permutationFromMemoryEntry = error $ notImplementedYet "MCMem"
 
 instance Coalesce Seq where
-  onOp _ _ = undefined
+  onOp _ _ = error $ notImplementedYet "Seq"
   transformOp _ _ _ _ = error $ notImplementedYet "Seq"
+  permutationFromMemoryEntry = error $ notImplementedYet "Seq"
 
 instance Coalesce SeqMem where
-  onOp _ _ = undefined
+  onOp _ _ = error $ notImplementedYet "SeqMem"
   transformOp _ _ _ _ = error $ notImplementedYet "SeqMem"
+  permutationFromMemoryEntry = error $ notImplementedYet "SeqMem"
 
 instance Coalesce SOACS where
-  onOp _ _ = undefined
+  onOp _ _ = error $ notImplementedYet "SOACS"
   transformOp _ _ _ _ = error $ notImplementedYet "SOACS"
+  permutationFromMemoryEntry = error $ notImplementedYet "SOACS"
