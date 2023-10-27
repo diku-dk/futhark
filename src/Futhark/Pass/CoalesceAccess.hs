@@ -53,13 +53,11 @@ coalesceAccess =
 
 class (Analyze rep) => Coalesce rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
-  transformOp :: Ctx -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (Ctx, ExpMap rep)
+  transformOp :: PermutationTable -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (PermutationTable, ExpMap rep)
 
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
   -- Returns Nothing if the array is already in the optimal layout
   permutationFromMemoryEntry :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
-
-type Ctx = PermutationTable
 
 type CoalesceM rep = Builder rep
 
@@ -69,23 +67,23 @@ type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Pe
 
 type ExpMap rep = M.Map VName (Stm rep)
 
-transformStms :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Stms rep -> CoalesceM rep (Stms rep)
-transformStms ctx expmap stms = collectStms_ $ foldM_ transformStm (ctx, expmap) stms
+transformStms :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stms rep -> CoalesceM rep (Stms rep)
+transformStms permTable expmap stms = collectStms_ $ foldM_ transformStm (permTable, expmap) stms
 
-transformStm :: (Coalesce rep, BuilderOps rep) => (Ctx, ExpMap rep) -> Stm rep -> CoalesceM rep (Ctx, ExpMap rep)
-transformStm (ctx, expmap) (Let pat aux (Op op)) = transformOp ctx expmap (Let pat aux (Op op)) op
-transformStm (ctx, expmap) (Let pat aux e) = do
-  e' <- mapExpM (transform ctx expmap) e
+transformStm :: (Coalesce rep, BuilderOps rep) => (PermutationTable, ExpMap rep) -> Stm rep -> CoalesceM rep (PermutationTable, ExpMap rep)
+transformStm (permTable, expmap) (Let pat aux (Op op)) = transformOp permTable expmap (Let pat aux (Op op)) op
+transformStm (permTable, expmap) (Let pat aux e) = do
+  e' <- mapExpM (transform permTable expmap) e
   let stm' = Let pat aux e'
   addStm stm'
-  pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
 instance Coalesce GPU where
   onOp soacMapper (Futhark.IR.GPU.OtherOp soac) = Futhark.IR.GPU.OtherOp <$> mapSOACM soacMapper soac
   onOp _ op = pure op
-  transformOp ctx expmap stm gpuOp
-    | (SegOp op) <- gpuOp = transformSegOpGPU ctx expmap stm op
-    | _ <- gpuOp = transformRestOp ctx expmap stm
+  transformOp permTable expmap stm gpuOp
+    | (SegOp op) <- gpuOp = transformSegOpGPU permTable expmap stm op
+    | _ <- gpuOp = transformRestOp permTable expmap stm
 
   permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortGPU . dimensions)) memEntry
@@ -111,9 +109,9 @@ instance Coalesce GPU where
 instance Coalesce MC where
   onOp soacMapper (Futhark.IR.MC.OtherOp soac) = Futhark.IR.MC.OtherOp <$> mapSOACM soacMapper soac
   onOp _ op = pure op
-  transformOp ctx expmap stm mcOp
-    | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC ctx expmap stm maybeParSegOp seqSegOp
-    | _ <- mcOp = transformRestOp ctx expmap stm
+  transformOp permTable expmap stm mcOp
+    | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC permTable expmap stm maybeParSegOp seqSegOp
+    | _ <- mcOp = transformRestOp permTable expmap stm
 
   permutationFromMemoryEntry segOpName idxName (arrayName, nest) memEntry = do
     let perm = (map originalDimension . (sortMC . dimensions)) memEntry
@@ -136,25 +134,25 @@ instance Coalesce MC where
         LoopBodyName _ -> True
         _ -> False
 
-transformSegOpGPU :: Ctx -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (Ctx, ExpMap GPU)
-transformSegOpGPU ctx expmap (Let pat aux _) op = do
+transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (PermutationTable, ExpMap GPU)
+transformSegOpGPU permTable expmap (Let pat aux _) op = do
   let mapper =
         identitySegOpMapper
           { mapOnSegOpBody = case segLevel op of
               -- We don't want to coalesce anything defined inside a SegGroup
               SegGroup {} -> pure
               -- In any other case, we want to coalesce and recurse
-              _ -> transformSegThreadKernelBody ctx patternName
+              _ -> transformSegThreadKernelBody permTable patternName
           }
   op' <- mapSegOpM mapper op
   let stm' = Let pat aux $ Op $ SegOp op'
   addStm stm'
-  pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
   where
     patternName = patElemName . head $ patElems pat
 
-transformSegOpMC :: Ctx -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> CoalesceM MC (Ctx, ExpMap MC)
-transformSegOpMC ctx expmap (Let pat aux _) maybeParSegOp seqSegOp
+transformSegOpMC :: PermutationTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> CoalesceM MC (PermutationTable, ExpMap MC)
+transformSegOpMC permTable expmap (Let pat aux _) maybeParSegOp seqSegOp
   | Nothing <- maybeParSegOp = add Nothing
   | Just parSegOp <- maybeParSegOp = do
       -- Map the parallel part of the ParOp
@@ -166,52 +164,52 @@ transformSegOpMC ctx expmap (Let pat aux _) maybeParSegOp seqSegOp
       seqSegOp' <- mapSegOpM mapper seqSegOp
       let stm' = Let pat aux $ Op $ ParOp maybeParSegOp' seqSegOp'
       addStm stm'
-      pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
-    mapper = identitySegOpMapper {mapOnSegOpBody = transformKernelBody ctx expmap patternName}
+      pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+    mapper = identitySegOpMapper {mapOnSegOpBody = transformKernelBody permTable expmap patternName}
     patternName = patElemName . head $ patElems pat
 
-transformRestOp :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Stm rep -> CoalesceM rep (Ctx, ExpMap rep)
-transformRestOp ctx expmap (Let pat aux e) = do
-  e' <- mapExpM (transform ctx expmap) e
+transformRestOp :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stm rep -> CoalesceM rep (PermutationTable, ExpMap rep)
+transformRestOp permTable expmap (Let pat aux e) = do
+  e' <- mapExpM (transform permTable expmap) e
   let stm' = Let pat aux e'
   addStm stm'
-  pure (ctx, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+  pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
-transform :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Mapper rep rep (CoalesceM rep)
-transform ctx expmap =
-  identityMapper {mapOnBody = \scope -> localScope scope . transformBody ctx expmap}
+transform :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Mapper rep rep (CoalesceM rep)
+transform permTable expmap =
+  identityMapper {mapOnBody = \scope -> localScope scope . transformBody permTable expmap}
 
 -- | Recursively transform the statements in a body.
-transformBody :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> Body rep -> CoalesceM rep (Body rep)
-transformBody ctx expmap (Body b stms res) = do
-  stms' <- transformStms ctx expmap stms
+transformBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Body rep -> CoalesceM rep (Body rep)
+transformBody permTable expmap (Body b stms res) = do
+  stms' <- transformStms permTable expmap stms
   pure $ Body b stms' res
 
 -- | Recursively transform the statements in the body of a SegGroup kernel.
-transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
-transformSegGroupKernelBody ctx expmap (KernelBody b stms res) = do
-  stms' <- transformStms ctx expmap stms
+transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegGroupKernelBody permTable expmap (KernelBody b stms res) = do
+  stms' <- transformStms permTable expmap stms
   pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
-transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => Ctx -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
-transformSegThreadKernelBody ctx seg_name kbody = do
+transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegThreadKernelBody permTable seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureCoalescedAccess ctx)
+        (ensureCoalescedAccess permTable)
         kbody
     )
     mempty
 
-transformKernelBody :: (Coalesce rep, BuilderOps rep) => Ctx -> ExpMap rep -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
-transformKernelBody ctx expmap segName (KernelBody b stms res) = do
-  stms' <- transformStms ctx expmap stms
+transformKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformKernelBody permTable expmap segName (KernelBody b stms res) = do
+  stms' <- transformStms permTable expmap stms
   let kbody' = KernelBody b stms' res
   evalStateT
     ( traverseKernelBodyArrayIndexes
         segName
-        (ensureCoalescedAccess ctx)
+        (ensureCoalescedAccess permTable)
         kbody'
     )
     mempty
@@ -271,10 +269,10 @@ type ArrayIndexTransform m =
 
 ensureCoalescedAccess ::
   (MonadBuilder m) =>
-  Ctx ->
+  PermutationTable ->
   ArrayIndexTransform (StateT Replacements m)
 ensureCoalescedAccess
-  ctx
+  permTable
   seg_name
   idx_name
   arr
@@ -282,7 +280,7 @@ ensureCoalescedAccess
     -- Check if the array has the optimal layout in memory.
     -- If it does not, replace it with a manifest to allocate
     -- it with the optimal layout
-    case lookupPermutation ctx seg_name idx_name arr of
+    case lookupPermutation permTable seg_name idx_name arr of
       Nothing -> pure $ Just (arr, slice)
       Just perm -> do
         seen <- gets $ M.lookup (arr, perm)
@@ -334,9 +332,9 @@ permutationTableFromIndexTable indexTable =
       )
     $ M.toList indexTable
 
-lookupPermutation :: Ctx -> VName -> IndexExprName -> VName -> Maybe Permutation
-lookupPermutation ctx segName idxName arrayName =
-  case M.lookup segName (M.mapKeys vnameFromSegOp ctx) of
+lookupPermutation :: PermutationTable -> VName -> IndexExprName -> VName -> Maybe Permutation
+lookupPermutation permTable segName idxName arrayName =
+  case M.lookup segName (M.mapKeys vnameFromSegOp permTable) of
     Nothing -> Nothing
     Just arrayNameMap ->
       -- Look for the current array
