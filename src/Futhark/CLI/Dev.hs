@@ -236,6 +236,13 @@ seqMemProg name rep =
   externalErrorS $
     "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
 
+mcProg :: String -> UntypedPassState -> FutharkM (Prog MC.MC)
+mcProg _ (MC prog) =
+  pure prog
+mcProg name rep =
+  externalErrorS $
+    "Pass " ++ name ++ " expects MC representation, but got " ++ representation rep
+
 mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
 mcMemProg _ (MCMem prog) =
   pure prog
@@ -269,6 +276,13 @@ kernelsPassOption ::
   FutharkOption
 kernelsPassOption =
   typedPassOption kernelsProg GPU
+
+mcPassOption ::
+  Pass MC.MC MC.MC ->
+  String ->
+  FutharkOption
+mcPassOption =
+  typedPassOption mcProg MC
 
 seqMemPassOption ::
   Pass SeqMem.SeqMem SeqMem.SeqMem ->
@@ -372,6 +386,36 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
+coalesceOption :: String -> FutharkOption
+coalesceOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass coalesceAccess) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass coalesceAccess) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = coalesceAccess :: Pass GPU.GPU GPU.GPU
+
+sinkOption :: String -> FutharkOption
+sinkOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU <$> runPipeline (onePass sinkGPU) config prog
+    perform (MC prog) config =
+      MC <$> runPipeline (onePass sinkMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = sinkGPU
+
 pipelineOption ::
   (UntypedPassState -> Maybe (Prog fromrep)) ->
   String ->
@@ -402,6 +446,23 @@ soacsPipelineOption ::
   [String] ->
   FutharkOption
 soacsPipelineOption = pipelineOption getSOACSProg "SOACS" SOACS
+
+unstreamOption :: String -> FutharkOption
+unstreamOption short =
+  passOption (passDescription pass) (UntypedPass perform) short long
+  where
+    perform (GPU prog) config =
+      GPU
+        <$> runPipeline (onePass unstreamGPU) config prog
+    perform (MC prog) config =
+      MC
+        <$> runPipeline (onePass unstreamMC) config prog
+    perform s _ =
+      externalErrorS $
+        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+
+    long = [passLongOption pass]
+    pass = unstreamGPU
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -616,11 +677,10 @@ commandLineOptions =
     soacsPassOption applyAD [],
     soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
-    kernelsPassOption coalesceAccess [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
-    kernelsPassOption unstreamGPU [],
-    kernelsPassOption sinkGPU [],
+    unstreamOption [],
+    sinkOption [],
     kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
@@ -638,6 +698,7 @@ commandLineOptions =
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
     simplifyOption "e",
+    coalesceOption "c",
     soacsPipelineOption
       "Run the default optimised pipeline"
       standardPipeline
