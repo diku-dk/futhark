@@ -44,10 +44,10 @@ type IndexTable rep =
 
 -- | SegOpName stores the nested "level" at which it is declared in the AST.
 data SegOpName
-  = SegmentedMap (Int, VName)
-  | SegmentedRed (Int, VName)
-  | SegmentedScan (Int, VName)
-  | SegmentedHist (Int, VName)
+  = SegmentedMap VName
+  | SegmentedRed VName
+  | SegmentedScan VName
+  | SegmentedHist VName
   deriving (Eq, Ord, Show)
 
 type ArrayName = (VName, [BodyType])
@@ -55,10 +55,10 @@ type ArrayName = (VName, [BodyType])
 type IndexExprName = VName
 
 vnameFromSegOp :: SegOpName -> VName
-vnameFromSegOp (SegmentedMap (_, name)) = name
-vnameFromSegOp (SegmentedRed (_, name)) = name
-vnameFromSegOp (SegmentedScan (_, name)) = name
-vnameFromSegOp (SegmentedHist (_, name)) = name
+vnameFromSegOp (SegmentedMap name) = name
+vnameFromSegOp (SegmentedRed name) = name
+vnameFromSegOp (SegmentedScan name) = name
+vnameFromSegOp (SegmentedHist name) = name
 
 -- | Each element in `dimensions` corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
@@ -99,9 +99,9 @@ data BodyType
   | CondBodyName CondBodyName
   deriving (Show, Ord, Eq)
 
-type LoopBodyName = (Int, VName)
+type LoopBodyName = VName
 
-type CondBodyName = (Int, VName)
+type CondBodyName = VName
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables lhs rhs = do
@@ -254,7 +254,7 @@ analyzeStmsPrimitive ctx =
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: (Analyze rep) => Context rep -> Context rep -> ((Int, VName) -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
+analyzeStms :: (Analyze rep) => Context rep -> Context rep -> (VName -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
 analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
   let (ctx'', aids) = analyzeStmsPrimitive recContext body
@@ -283,7 +283,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
     recContext =
       extend ctx $
         tmp_ctx
-          { parents = concatMap (\pat -> [bodyConstructor (currentLevel ctx, pat)]) pats,
+          { parents = concatMap (\pat -> [bodyConstructor pat]) pats,
             currentLevel = currentLevel ctx + 1
           }
 
@@ -480,7 +480,7 @@ analyzeApply ctx pats diets =
     )
     (ctx, mempty)
 
-segOpType :: SegOp lvl rep -> (Int, VName) -> SegOpName
+segOpType :: SegOp lvl rep -> VName -> SegOpName
 segOpType (SegMap {}) = SegmentedMap
 segOpType (SegRed {}) = SegmentedRed
 segOpType (SegScan {}) = SegmentedScan
@@ -664,18 +664,18 @@ instance Pretty (DimIdxPat rep) where
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
 
 instance Pretty SegOpName where
-  pretty (SegmentedMap (_, name)) = "(segmap)" <+> pretty name
-  pretty (SegmentedRed (_, name)) = "(segred)" <+> pretty name
-  pretty (SegmentedScan (_, name)) = "(segscan)" <+> pretty name
-  pretty (SegmentedHist (_, name)) = "(seghist)" <+> pretty name
+  pretty (SegmentedMap name) = "(segmap)" <+> pretty name
+  pretty (SegmentedRed name) = "(segred)" <+> pretty name
+  pretty (SegmentedScan name) = "(segscan)" <+> pretty name
+  pretty (SegmentedHist name) = "(seghist)" <+> pretty name
 
 instance Pretty BodyType where
-  pretty (SegOpName (SegmentedMap (_, name))) = pretty name <+> colon <+> "segmap"
-  pretty (SegOpName (SegmentedRed (_, name))) = pretty name <+> colon <+> "segred"
-  pretty (SegOpName (SegmentedScan (_, name))) = pretty name <+> colon <+> "segscan"
-  pretty (SegOpName (SegmentedHist (_, name))) = pretty name <+> colon <+> "seghist"
-  pretty (LoopBodyName (_, name)) = pretty name <+> colon <+> "loop"
-  pretty (CondBodyName (_, name)) = pretty name <+> colon <+> "cond"
+  pretty (SegOpName (SegmentedMap name)) = pretty name <+> colon <+> "segmap"
+  pretty (SegOpName (SegmentedRed name)) = pretty name <+> colon <+> "segred"
+  pretty (SegOpName (SegmentedScan name)) = pretty name <+> colon <+> "segscan"
+  pretty (SegOpName (SegmentedHist name)) = pretty name <+> colon <+> "seghist"
+  pretty (LoopBodyName name) = pretty name <+> colon <+> "loop"
+  pretty (CondBodyName name) = pretty name <+> colon <+> "cond"
 
 instance Pretty (IterationType rep) where
   pretty Sequential = "seq"
