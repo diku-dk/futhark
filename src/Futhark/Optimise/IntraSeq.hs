@@ -494,46 +494,112 @@ mkTiles env = do
   scope <- askScope
   let arraysInScope = M.toList $  M.filter isArray scope
 
+  scratchSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
+                                               (eSubExp $ seqFactor env)
+                                               (eSubExp $ grpSize env)
+                                              
   tiles <- forM arraysInScope $ \ (arrName, arrInfo) -> do
-
     let tp = elemType $ typeOf arrInfo
-    -- Read coalesced
-    tile <- buildSegMap_ "tile" $ do
+    -- tile <- letExp "tile" $ BasicOp $ Scratch tp [scratchSize]
+
+    -- Build SegMap that will write to tile
+    tile <- buildSegMap_ "tile_staging" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
-      let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
-      es <- letSubExp "elems" $ BasicOp $ Index arrName
-                  (Slice $ outerDim ++
-                            [DimSlice (Var tid) (seqFactor env) (grpSize env)])
+
+      -- Allocate local scratch chunk
+      chunk <- letExp "chunk_scratch" $ BasicOp $ Scratch tp [seqFactor env]
+
+      -- Compute the chunk size of the current thread. Last thread might need to read less
+      sliceSize <- mkChunkSize tid env 
+      let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
+      slice <- letSubExp "slice" $ BasicOp $ Index arrName 
+                                  (Slice [DimFix $ grpId env,
+                                          sliceIdx])
+
+      -- Update the chunk
+      chunk' <- letSubExp "chunk" $ BasicOp $ Update Unsafe chunk
+                                    (Slice [DimSlice (intConst Int64 0) sliceSize (intConst Int64 1)]) slice
+      
+      -- let shape = Shape [grpSize env]
+
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
-      pure ([Returns ResultMaySimplify mempty es], lvl, space, types)
+      pure ([Returns ResultMaySimplify mempty chunk'], lvl, space, types)
+      -- pure ([WriteReturns mempty shape tile [(Slice [sliceIdx], chunk')]], lvl, space, types)
 
     -- transpose and flatten
     tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
     tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
-                ReshapeArbitrary (Shape [grpsizeOld env]) tileT
+                ReshapeArbitrary (Shape [scratchSize]) tileT
 
-    -- Read the pr. thread chunk into registers
+    -- Now each thread will read their actual chunk
     tile' <- buildSegMap_ "tile" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
+
       start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
                                             (eSubExp $ Var tid)
                                             (eSubExp $ seqFactor env)
-      es <- letSubExp "chunk" $ BasicOp $ Index tileFlat
-            (Slice [DimSlice start (seqFactor env) (intConst Int64 1)])
+      -- NOTE: Can jsut use seqFactor here as we read from the padded tile craeted above
+      let dimSlice = DimSlice start (seqFactor env) (intConst Int64 1)
+
+      chunk <- letSubExp "chunk" $ BasicOp $ Index tileFlat 
+                                    (Slice [dimSlice])
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
-      pure ([Returns ResultPrivate mempty es], lvl, space, types)
+      pure ([Returns ResultPrivate mempty chunk], lvl, space, types)
 
-    -- return the original arr name with the name of its local tile
     pure (arrName, tile')
-
+    
+  -- Update the env
   pure $ (\(Env gid gSize gSizeOld _ factor) ->
             Env gid gSize gSizeOld (M.fromList tiles) factor) env
+  
+  
+  
+  -- tiles <- forM arraysInScope $ \ (arrName, arrInfo) -> do
+
+  --   let tp = elemType $ typeOf arrInfo
+  --   -- Read coalesced
+  --   tile <- buildSegMap_ "tile" $ do
+  --     tid <- newVName "tid"
+  --     phys <- newVName "phys_tid"
+  --     let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
+  --     es <- letSubExp "elems" $ BasicOp $ Index arrName
+  --                 (Slice $ outerDim ++
+  --                           [DimSlice (Var tid) (seqFactor env) (grpSize env)])
+  --     let lvl = SegThread SegNoVirt Nothing
+  --     let space = SegSpace phys [(tid, grpSize env)]
+  --     let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
+  --     pure ([Returns ResultMaySimplify mempty es], lvl, space, types)
+
+  --   -- transpose and flatten
+  --   tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
+  --   tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
+  --               ReshapeArbitrary (Shape [grpsizeOld env]) tileT
+
+  --   -- Read the pr. thread chunk into registers
+  --   tile' <- buildSegMap_ "tile" $ do
+  --     tid <- newVName "tid"
+  --     phys <- newVName "phys_tid"
+  --     start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
+  --                                           (eSubExp $ Var tid)
+  --                                           (eSubExp $ seqFactor env)
+  --     es <- letSubExp "chunk" $ BasicOp $ Index tileFlat
+  --           (Slice [DimSlice start (seqFactor env) (intConst Int64 1)])
+  --     let lvl = SegThread SegNoVirt Nothing
+  --     let space = SegSpace phys [(tid, grpSize env)]
+  --     let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
+  --     pure ([Returns ResultPrivate mempty es], lvl, space, types)
+
+  --   -- return the original arr name with the name of its local tile
+  --   pure (arrName, tile')
+
+  -- pure $ (\(Env gid gSize gSizeOld _ factor) ->
+  --           Env gid gSize gSizeOld (M.fromList tiles) factor) env
 
   where
     isArray :: NameInfo GPU -> Bool
