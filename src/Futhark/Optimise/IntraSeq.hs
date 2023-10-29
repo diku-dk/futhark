@@ -167,7 +167,7 @@ seqStm' env (Let pat aux
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env' tilesUsed kbody) binops
+  reds <- mapM (mkSegMapRed env' tilesUsed kbody ts) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
@@ -193,7 +193,7 @@ seqStm' env (Let pat aux
   let tiles = M.toList $ tileMap env
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
-  reds <- mapM (mkSegMapRed env tilesUsed kbody) binops
+  reds <- mapM (mkSegMapRed env tilesUsed kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
   scans <- forM redshead $ \red -> buildSegScan "scan_agg" $ do
@@ -290,9 +290,10 @@ mkSegMapRed ::
   Env ->
   [(VName, VName)] ->         -- tiles used
   KernelBody GPU ->
+  [Type] ->                   -- segmap return types
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env mapping kbody binop = do
+mkSegMapRed env mapping kbody retTs binop = do
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
@@ -316,7 +317,6 @@ mkSegMapRed env mapping kbody binop = do
   where
     buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
     buildRedoMap reds = do
-      -- MAYBE NEED TO CHANGE THIS TO TS ARG FROM seqStm'
       let ts = concatMap (lambdaReturnType . redLambda) reds
       params <- mapM (newParam "par" ) ts
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
@@ -327,7 +327,7 @@ mkSegMapRed env mapping kbody binop = do
                   Lambda
                   { lambdaParams = params,
                     lambdaBody = body,
-                    lambdaReturnType = ts
+                    lambdaReturnType = retTs
                   }
       pure $ redomapSOAC reds lamb
 
@@ -463,10 +463,10 @@ mkTiles env = do
 
       -- Compute the chunk size of the current thread. Last thread might need to read less
       sliceSize <- mkChunkSize tid env 
+      let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
       slice <- letSubExp "slice" $ BasicOp $ Index arrName 
-                                  (Slice [DimFix $ grpId env,
-                                          sliceIdx])
+                                  (Slice $ outerDim ++ [sliceIdx])
 
       -- Update the chunk
       chunk' <- letSubExp "chunk" $ BasicOp $ Update Unsafe chunk
