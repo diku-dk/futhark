@@ -33,12 +33,13 @@ runSeqM m = do
 
 
 
--- | A structure for conveniant passing of different information needed at 
+-- | A structure for convenient passing of different information needed at 
 -- various stages during the pass.
 data Env = Env {
   grpId      :: SubExp,             -- The group id
   grpSize    :: SubExp,             -- The group size after seq
   grpsizeOld :: SubExp,             -- The group size before seq
+  threadId   :: Maybe VName,       -- the thread id if available at given stage
   tileMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
@@ -97,7 +98,7 @@ seqStm (Let pat aux (Op (SegOp (
                                             (eSubExp sizeOld)
                                             (eSubExp e)
 
-  let env = Env (Var grpId) sizeNew sizeOld mempty e
+  let env = Env (Var grpId) sizeNew sizeOld Nothing mempty e
 
   exp' <- buildSegMap' $ do
     -- Update the env with mappings
@@ -122,7 +123,6 @@ seqStm (Let pat aux (Op (SegOp (
 -- statement in a test program so that we know that we will have to handle it
 seqStm stm = error $
              "Encountered unhandled statement at group level: " ++ show stm
-
 
 
 seqKernelBody ::
@@ -158,25 +158,27 @@ seqStm' ::
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
+  let tid = fst $ head $ unSegSpace space
+  let env' = updateEnvTid env tid
   -- Find all free variables from the kbody and use that to filter out 
   -- unneeded tiles
   let free = IM.elems $ namesIntMap $ freeIn kbody
-  let tiles = M.toList $ tileMap env
+  let tiles = M.toList $ tileMap env'
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env tilesUsed) binops
+  reds <- mapM (mkSegMapRed env' tilesUsed kbody) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
-  let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed $ head reds
+  let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
+  let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed redExps
 
   -- Modify the kernel body
   -- TODO: Assumes single dimension
-  let tid = fst $ head $ unSegSpace space
-  kbody' <- runSeqM $ seqKernelBody' env mapping tid kbody
+  kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
 
-  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env)]
+  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
 
 
 
@@ -191,7 +193,7 @@ seqStm' env (Let pat aux
   let tiles = M.toList $ tileMap env
   let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
 
-  reds <- mapM (mkSegMapRed env tilesUsed) binops
+  reds <- mapM (mkSegMapRed env tilesUsed kbody) binops
   -- TODO: head until multiple binops
   let redshead = head reds
   scans <- forM redshead $ \red -> buildSegScan "scan_agg" $ do
@@ -250,75 +252,84 @@ seqStm' _ stm = error $
 
 seqKernelBody' ::
   Env ->
-  Map VName VName -> -- mapping from global array to intermediate results
-  VName ->            -- Thread id
+  Map VName (Exp GPU) -> -- mapping from global array to intermediate results
   KernelBody GPU ->
   SeqM (KernelBody GPU)
-seqKernelBody' env mapping tid (KernelBody dec stms results) = do
-  stms' <- seqStms'' env mapping tid stms
+seqKernelBody' env mapping (KernelBody dec stms results) = do
+  stms' <- seqStms'' env mapping stms
   pure $ KernelBody dec stms' results
-
 
 seqStms'' ::
   Env ->
-  Map VName VName ->
-  VName ->            -- Thread id
+  Map VName (Exp GPU) ->
   Stms GPU ->
   SeqM (Stms GPU)
-seqStms'' env mapping tid stms = do
+seqStms'' env mapping stms = do
   foldM (\ss s -> do
-      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env mapping tid s
+      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env mapping s
       pure $ ss <> ss'
       ) mempty (stmsToList stms)
 
-
 seqStm'' ::
   Env ->
-  Map VName VName ->
-  VName ->            -- Thread id
+  Map VName (Exp GPU) ->
   Stm GPU ->
   Builder GPU ()
-seqStm'' env mapping tid stm@(Let pat aux (BasicOp (Index arr _))) =
+seqStm'' _ mapping stm@(Let pat aux (BasicOp (Index arr _))) =
   if M.member arr mapping then do
-    let (Just arr') = M.lookup arr mapping
-    let slice' = Slice [DimFix $ Var tid]
-    addStm $ Let pat aux (BasicOp (Index arr' slice'))
+    let (Just op) = M.lookup arr mapping
+    -- let slice' = Slice [DimFix $ Var tid]
+    addStm $ Let pat aux op
+    -- addStm $ Let pat aux (BasicOp (Index arr' slice'))
   else
     addStm stm
-
-seqStm'' _ _ _ stm = addStm stm
+seqStm'' _ _ stm = addStm stm
 
 
 mkSegMapRed ::
   Env ->
-  [(VName, VName)] ->
+  [(VName, VName)] ->         -- tiles used
+  KernelBody GPU ->
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env mapping binop = do
-
+mkSegMapRed env mapping kbody binop = do
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
-
-    reduce <- reduceSOAC [Reduce comm lambda ne]
 
     buildSegMapTup_ "red_intermediate" $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       sz <- mkChunkSize tid env
-
+      screma <- buildRedoMap [Reduce comm lambda ne]
       -- For each tile we can then get the corresponding chunk
       chunks <- mapM (getChunk env tid sz) mapping
 
       res <- letTupExp' "res" $ Op $ OtherOp $
-                Screma sz chunks reduce
+                Screma sz chunks screma
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
-      let types' = scremaType (seqFactor env) reduce
+      let types' = scremaType (seqFactor env) screma
       let kres = L.map (Returns ResultMaySimplify mempty) res
       pure (kres, lvl', space', types')
-
+  where
+    buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
+    buildRedoMap reds = do
+      -- MAYBE NEED TO CHANGE THIS TO TS ARG FROM seqStm'
+      let ts = concatMap (lambdaReturnType . redLambda) reds
+      params <- mapM (newParam "par" ) ts
+      let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
+      let mapping' = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) mapping mapExps
+      kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+      let body = kbodyToBody kbody'
+      lamb <- renameLambda $
+                  Lambda
+                  { lambdaParams = params,
+                    lambdaBody = body,
+                    lambdaReturnType = ts
+                  }
+      pure $ redomapSOAC reds lamb
 
 getChunk ::
   Env ->
@@ -401,28 +412,6 @@ renameSegBinOp segbinops =
     pure $ SegBinOp comm lam' ne shape
 
 
-
--- substituteIndexes :: KernelBody GPU -> [(VName, VName)] -> KernelBody GPU
--- substituteIndexes (KernelBody dec stms results) names =
---   let stms' = stmsFromList $ Data.List.map (substituteIndex names) $ stmsToList stms
---   in KernelBody dec stms' results
-
--- substituteIndex :: [(VName, VName)] -> Stm GPU -> Stm GPU
--- substituteIndex names stm@(Let pat aux (BasicOp (Index name slice))) =
---   let (fromNames, toNames) = unzip names
---       in case elemIndex name fromNames of
---         Just i ->
---           -- after tiling we only need the last index
-          -- let slice' = last $ unSlice slice
---           in Let pat aux (BasicOp (Index (toNames !! i) $ Slice [slice']))
---         Nothing -> stm
--- bindNewGroupSize :: SubExp -> Builder GPU SubExp
--- bindNewGroupSize group_size = do
---   name <- newVName "group_size"
---   letBindNames [name] $ BasicOp $ BinOp (SDivUp Int64 Unsafe) group_size seqFactor
---   pure $ Var name
-
-
 letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
 letChunkExp size tid arrName = do
   letExp "chunk" $ BasicOp $
@@ -445,44 +434,6 @@ mkChunkSize tid env = do
   letSubExp "size" $ BasicOp $
               BinOp (SMin Int64) tmp (seqFactor env)
 
-
-
-
--- | The making of a tile consists of a SegMap to load elements into local
--- memory in a coalesced manner. Some intermediate instructions to modify
--- the tile. Lastly another SegMap to load the correct values into registers
--- 
--- The first SubExp is the group id 
--- The second SubExp is Var containing the groupsize
--- Returns a SubExp that is the chunks variable
--- mkTile :: SubExp -> (SubExp, SubExp) -> (VName, PrimType) -> Builder GPU SubExp
--- mkTile gid (oldSize, newSize) (arrName, arrType) = do
---   segMap <- buildSegMap_ "tile" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
---       e <- letSubExp "slice" $ BasicOp $
---                 Index arrName (Slice [DimFix gid, DimSlice (Var tid) seqFactor newSize])
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, newSize)]
---       let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
---       pure (Returns ResultMaySimplify mempty e, lvl, space, types)
-
---   tileTrans <- letExp "tile_T" $ BasicOp $ Rearrange [1,0] segMap
---   tileFlat <- letExp "tile_flat" $ BasicOp $
---                 Reshape ReshapeArbitrary (Shape [oldSize]) tileTrans
-
---   -- SegMap to read the actual chunks the threads need
---   buildSegMap "chunks" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
---       start <- letSubExp "start" $ BasicOp $
---                 BinOp (Mul Int64 OverflowUndef) (Var tid) seqFactor
---       chunk <- letSubExp "chunk" $ BasicOp $
---                 Index tileFlat (Slice [DimSlice start seqFactor (intConst Int64 1)])
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, newSize)]
---       let types = [Array arrType (Shape [seqFactor]) NoUniqueness]
---       pure (Returns ResultPrivate mempty chunk, lvl, space, types)
 
 -- | Creates a tile for each array in scope at the time of caling it.
 -- That is if called at the correct time it will create a tile for each
@@ -532,53 +483,12 @@ mkTiles env = do
     -- return the original arr name with the name of its local tile
     pure (arrName, tile')
 
-  pure $ (\(Env gid gSize gSizeOld _ factor) ->
-            Env gid gSize gSizeOld (M.fromList tiles) factor) env
+  pure $ (\(Env gid gSize gSizeOld tid _ factor) ->
+            Env gid gSize gSizeOld tid (M.fromList tiles) factor) env
 
   where
     isArray :: NameInfo GPU -> Bool
     isArray info = arrayRank (typeOf info) > 0
-
-
--- create tiles for the arrays used in the segop kernelbody
--- each entry in the returned list is a tuple of the name of the array and its tiled replacement
--- tileSegKernelBody :: KernelBody GPU -> (SubExp, SubExp) -> SubExp -> SubExp
---                       -> Builder GPU [(VName, VName)]
--- tileSegKernelBody (KernelBody _ stms _) grpSizes gid tid = do
---   -- let stmsToTile = filter shouldTile $ stmsToList stms
---   let stmsToTile = Data.List.foldr shouldTile [] $ stmsToList stms
---   let stmsInfos = Data.List.map getTileStmInfo stmsToTile
---   tiles <- mapM (mkTile gid grpSizes) stmsInfos
---   let (names, _) = Data.List.unzip stmsInfos
---   let tileNames = Data.List.map (\(Var x) -> x) tiles
---   pure $ Data.List.zip names tileNames
---   where
---     -- arrays to tile use the thread id and haven't been tiled in same kernelbody
---     shouldTile :: Stm GPU -> [Stm GPU] -> [Stm GPU]
---     shouldTile stm@(Let _ _ (BasicOp (Index _ slice))) acc =
---       let tidIndex = DimFix tid
---       in case unSlice slice of
---         (_:tid':_) -> if tid' == tidIndex && notTiled then stm:acc else acc
---         (tid':_) -> if tid' == tidIndex && notTiled then stm:acc else acc
---         _ -> acc
---       where
---         notTiled = stm `Data.List.notElem` acc
---     shouldTile _ acc = acc
-
---     getTileStmInfo :: Stm GPU -> (VName, PrimType)
---     getTileStmInfo stm@(Let pat _ (BasicOp (Index name _))) =
---       let pes = patElems pat
---       in case pes of
---         [PatElem _ dec] -> (name, elemType dec)
---         _ -> error
---               $ "Statements used for tiling should only contain a single VName " Data.List.++ show stm
---     getTileStmInfo stm =
---       error
---         $ "Invalid statement for tiling in IntraSeq " Data.List.++ show stm
-
-
-
--- Monadic builder functions
 
 
 -- Builds a SegMap at thread level containing all bindings created in m
@@ -649,3 +559,16 @@ buildSegScan name m = do
   ((results, lvl, space, bops, ts), stms) <- collectStms m
   let kbody = KernelBody () stms results
   letSubExp name $ Op $ SegOp $ SegScan lvl space bops ts kbody
+
+-- HELPERS
+kbodyToBody :: KernelBody GPU -> Body GPU
+kbodyToBody (KernelBody dec stms res) =
+  let res' = L.map (subExpRes . kernelResultSubExp) res
+  in Body
+    { bodyDec = dec,
+      bodyStms = stms,
+      bodyResult = res'
+    }
+
+updateEnvTid :: Env -> VName -> Env
+updateEnvTid (Env gid sz szo _ tm sq) tid = Env gid sz szo (Just tid) tm sq
