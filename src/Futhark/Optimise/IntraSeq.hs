@@ -16,6 +16,7 @@ import Data.IntMap.Strict as IM
 import Debug.Pretty.Simple
 import Data.List as L
 import Debug.Trace
+import Text.Pretty.Simple
 
 
 
@@ -165,12 +166,14 @@ seqStm' env (Let pat aux
   usedArrays <- arraysInScope env kbody
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env' usedArrays kbody ts) binops
+  reds <- mapM (mkSegMapRed env' (trace (show usedArrays) usedArrays) kbody ts) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
   let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
-  let mapping = M.fromList $ zip usedArrays redExps
+  -- let (arrs, tiles) = unzip $ M.toList $ tileMap env
+  -- let mapping = M.fromList $ zip arrs redExps <> zip tiles redExps
+  let mapping = M.fromList $ zip (trace (show usedArrays) usedArrays) redExps
   -- let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) usedArrays redExps
 
   -- Modify the kernel body
@@ -283,7 +286,7 @@ seqStm'' _ _ stm = addStm stm
 
 mkSegMapRed ::
   Env ->
-  [VName] ->         
+  [VName] ->
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
   SegBinOp GPU ->
@@ -316,17 +319,37 @@ mkSegMapRed env arrs kbody retTs binop = do
       let ts = concatMap (lambdaReturnType . redLambda) reds
       params <- mapM (newParam "par" ) ts
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      -- let mapping' = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) mapping mapExps
       let mapping' = M.fromList $ zip arrs mapExps
-      kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
-      let body = kbodyToBody kbody'
-      lamb <- renameLambda $
-                  Lambda
-                  { lambdaParams = params,
-                    lambdaBody = body,
-                    lambdaReturnType = retTs
-                  }
-      pure $ redomapSOAC reds lamb
+
+      reduceSOAC reds
+      -- if not $ kernelNeeded kbody mapping' then do
+      --   reduceSOAC reds
+      -- else do
+      --   kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+      --   let body = kbodyToBody kbody'
+      --   lamb <- renameLambda $
+      --               Lambda
+      --               { lambdaParams = params,
+      --                 lambdaBody = body,
+      --                 lambdaReturnType = retTs
+      --               }
+      --   pure $ redomapSOAC reds lamb
+
+
+kernelNeeded ::
+  KernelBody GPU ->
+  Map VName (Exp GPU) ->
+  Bool
+kernelNeeded (KernelBody _ stms _) mapping = needed $ stmsToList stms
+   where
+    needed [] = False
+    needed ((Let _ _ (BasicOp (Index arr _))):t) =
+       not (M.member arr mapping) || needed t
+    needed _ = True
+
+
+
+
 
 getChunk ::
   Env ->
@@ -335,11 +358,20 @@ getChunk ::
   -- (VName, VName) ->     -- array to tile mapping
   VName ->              -- Array to get chunk from
   Builder GPU VName
-getChunk _ tid sz arr = do
-  letExp "chunk" $ BasicOp $ Index arr
-    (Slice [DimFix $ Var tid,
-            DimSlice (intConst Int64 0) sz (intConst Int64 1)])
+getChunk env tid sz arr = do
+  tp <- lookupType arr
 
+  offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                          (eSubExp $ seqFactor env)
+                                          (eSubExp $ Var tid)
+
+  let dims =
+        case arrayRank tp of
+          1 -> [DimSlice offset sz (intConst Int64 1)]
+          2 -> [DimFix $ Var tid, DimSlice (intConst Int64 0) sz (intConst Int64 1)]
+          _ -> error "unhandled dims in getChunk"
+  
+  letExp "chunk" $ BasicOp $ Index arr (Slice dims)
 
 flattenResults ::
   Pat (LetDec GPU)->
@@ -460,10 +492,10 @@ mkTiles env = do
       chunk <- letExp "chunk_scratch" $ BasicOp $ Scratch tp [seqFactor env]
 
       -- Compute the chunk size of the current thread. Last thread might need to read less
-      sliceSize <- mkChunkSize tid env 
+      sliceSize <- mkChunkSize tid env
       let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
-      slice <- letSubExp "slice" $ BasicOp $ Index arrName 
+      slice <- letSubExp "slice" $ BasicOp $ Index arrName
                                   (Slice $ outerDim ++ [sliceIdx])
 
       -- Update the chunk
