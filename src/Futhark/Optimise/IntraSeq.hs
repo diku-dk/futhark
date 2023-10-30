@@ -1,3 +1,7 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use zipWith" #-}
+{-# HLINT ignore "Use uncurry" #-}
+{-# HLINT ignore "Use uncurry" #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -163,27 +167,36 @@ seqStm' env (Let pat aux
   let tid = fst $ head $ unSegSpace space
   let env' = updateEnvTid env tid
 
-  usedArrays <- arraysInScope env kbody
+  (orgArrays, usedArrays) <- arraysInScope env kbody
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env' (trace (show usedArrays) usedArrays) kbody ts) binops
+  reds <- mapM (mkSegMapRed env' (orgArrays, usedArrays) kbody ts) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
   let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
   -- let (arrs, tiles) = unzip $ M.toList $ tileMap env
   -- let mapping = M.fromList $ zip arrs redExps <> zip tiles redExps
-  let mapping = M.fromList $ zip (trace (show usedArrays) usedArrays) redExps
+  let mapping = M.fromList $ zip orgArrays redExps
+  -- let mapping = M.fromList $ zip (trace (show usedArrays) orgArrays) redExps
   -- let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) usedArrays redExps
 
   -- Modify the kernel body
   -- TODO: Assumes single dimension
   kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
+  let numResConsumed = numArgsConsumedBySegop binops
+  let fusedReds = L.drop numResConsumed $ head reds
+  kbody'' <- addFusedStmsToKbody env' kbody' fusedReds numResConsumed
 
+  -- Update remaining types
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
+  -- TODO: binop head
+  tps <- mapM lookupType $ head reds
+  let ts' = L.map (stripArray 1) tps
+  let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
+  let pat' = Pat $ patKeep ++ L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
 
-  addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
-
+  addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody'')))
 
 
 seqStm' env (Let pat aux
@@ -246,7 +259,25 @@ seqStm' env (Let pat aux
 seqStm' _ stm = error $
                 "Encountered unhandled statement at thread level: " ++ show stm
 
+-- resConsumed: num of kernels results used in the segop
+addFusedStmsToKbody :: Env -> KernelBody GPU -> [VName] -> Int -> Builder GPU (KernelBody GPU)
+addFusedStmsToKbody env (KernelBody dec stms res) names resConsumed =
+  case threadId env of
+    Just tid -> do
+      (resExp, stms') <- collectStms $ do
+        let slice = Slice [DimFix $ Var tid, DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+        mapM (\n -> letSubExp "fused" $ BasicOp $ Index n slice) names
+      let res' = L.take resConsumed res ++
+                  L.map (Returns ResultMaySimplify mempty) resExp
+      pure $ KernelBody dec (stms <> stms') res'
+    Nothing -> error "threadId required to add fused statements, but none given"
 
+numArgsConsumedBySegop :: [SegBinOp GPU] -> Int
+numArgsConsumedBySegop binops =
+  let numResUsed = L.foldl
+                    (\acc (SegBinOp _ (Lambda pars _ _) neuts _)
+                      -> acc + length pars - length neuts) 0 binops
+  in numResUsed
 
 seqKernelBody' ::
   Env ->
@@ -276,9 +307,7 @@ seqStm'' ::
 seqStm'' _ mapping stm@(Let pat aux (BasicOp (Index arr _))) =
   if M.member arr mapping then do
     let (Just op) = M.lookup arr mapping
-    -- let slice' = Slice [DimFix $ Var tid]
     addStm $ Let pat aux op
-    -- addStm $ Let pat aux (BasicOp (Index arr' slice'))
   else
     addStm stm
 seqStm'' _ _ stm = addStm stm
@@ -286,12 +315,12 @@ seqStm'' _ _ stm = addStm stm
 
 mkSegMapRed ::
   Env ->
-  [VName] ->
+  ([VName],[VName]) ->
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env arrs kbody retTs binop = do
+mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
@@ -302,11 +331,20 @@ mkSegMapRed env arrs kbody retTs binop = do
       sz <- mkChunkSize tid env
       screma <- buildRedoMap [Reduce comm lambda ne]
       -- For each tile we can then get the corresponding chunk
-      chunks <- mapM (getChunk env tid sz) arrs
+      chunks <- mapM (getChunk env tid sz) usedArrs
 
 
+      -- expandArr is only because we might need scratch arrays that are not used for reductions
+      -- const (0 :: Int64) is thus just a dummy
+      let chunkElems = expandArr ne (constant (0 :: Int64)) (length usedArrs - length ne)
+      chunksScratch <- mapM (letExp "chunk_scratch" . BasicOp .
+                              Replicate (Shape [seqFactor env])) chunkElems
+      chunks' <- mapM (\(scratch, chunk) ->
+        letExp "chunk" $ BasicOp $ Update Unsafe scratch
+          (Slice [DimSlice (intConst Int64 0) sz (intConst Int64 1)])
+          $ Var chunk) $ L.zip chunksScratch chunks
       res <- letTupExp' "res" $ Op $ OtherOp $
-                Screma sz chunks screma
+                Screma (seqFactor env) chunks' screma
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
@@ -319,21 +357,20 @@ mkSegMapRed env arrs kbody retTs binop = do
       let ts = concatMap (lambdaReturnType . redLambda) reds
       params <- mapM (newParam "par" ) ts
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      let mapping' = M.fromList $ zip arrs mapExps
+      let mapping' = M.fromList $ zip orgArrs mapExps
 
-      reduceSOAC reds
-      -- if not $ kernelNeeded kbody mapping' then do
-      --   reduceSOAC reds
-      -- else do
-      --   kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
-      --   let body = kbodyToBody kbody'
-      --   lamb <- renameLambda $
-      --               Lambda
-      --               { lambdaParams = params,
-      --                 lambdaBody = body,
-      --                 lambdaReturnType = retTs
-      --               }
-      --   pure $ redomapSOAC reds lamb
+      if not $ kernelNeeded kbody mapping' then do
+        reduceSOAC reds
+      else do
+        kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+        let body = kbodyToBody kbody'
+        lamb <- renameLambda $
+                    Lambda
+                    { lambdaParams = params,
+                      lambdaBody = body,
+                      lambdaReturnType = retTs
+                    }
+        pure $ redomapSOAC reds lamb
 
 
 kernelNeeded ::
@@ -346,6 +383,7 @@ kernelNeeded (KernelBody _ stms _) mapping = needed $ stmsToList stms
     needed ((Let _ _ (BasicOp (Index arr _))):t) =
        not (M.member arr mapping) || needed t
     needed _ = True
+
 
 
 
@@ -370,7 +408,7 @@ getChunk env tid sz arr = do
           1 -> [DimSlice offset sz (intConst Int64 1)]
           2 -> [DimFix $ Var tid, DimSlice (intConst Int64 0) sz (intConst Int64 1)]
           _ -> error "unhandled dims in getChunk"
-  
+
   letExp "chunk" $ BasicOp $ Index arr (Slice dims)
 
 flattenResults ::
@@ -378,8 +416,7 @@ flattenResults ::
   [KernelResult] ->
   Builder GPU [KernelResult]
 flattenResults pat kresults = do
-  let types = L.map patElemType (patElems pat)
-  subExps <- forM (zip kresults types) $ \(res, tp)-> do
+  subExps <- forM (zip kresults $ patTypes pat) $ \(res, tp)-> do
     let resSubExp = kernelResultSubExp res
     case resSubExp of
       (Constant _) -> letSubExp "const_res" $ BasicOp $ SubExp resSubExp
@@ -393,8 +430,6 @@ flattenResults pat kresults = do
   let kresults' = L.map (Returns ResultMaySimplify mempty) subExps
 
   pure kresults'
-
-
 
  -- Catch all
 mkSegMapScan _ _ _ e = error $ "Expected a SegScan but got" ++ show e
@@ -588,7 +623,7 @@ isArray info = arrayRank (typeOf info) > 0
 arraysInScope ::
   Env ->
   KernelBody GPU ->
-  Builder GPU [VName]
+  Builder GPU ([VName], [VName])
 arraysInScope env kbody = do
   scope <- askScope
   let (arrays, _) = unzip $ M.toList $  M.filter isArray scope
@@ -607,7 +642,7 @@ arraysInScope env kbody = do
             arr
         ) freeArrays
 
-  pure arrays'
+  pure (arrays, arrays')
 
   -- let free = IM.elems $ namesIntMap $ freeIn kbody
   -- let tiles = M.toList $ tileMap env
@@ -702,3 +737,6 @@ kbodyToBody (KernelBody dec stms res) =
 
 updateEnvTid :: Env -> VName -> Env
 updateEnvTid (Env gid sz szo _ tm sq) tid = Env gid sz szo (Just tid) tm sq
+
+expandArr :: [a] -> a -> Int -> [a]
+expandArr arr ele num = arr ++ replicate num ele
