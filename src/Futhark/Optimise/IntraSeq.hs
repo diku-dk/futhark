@@ -15,6 +15,7 @@ import Data.IntMap.Strict as IM
 
 import Debug.Pretty.Simple
 import Data.List as L
+import Debug.Trace
 
 
 
@@ -160,27 +161,23 @@ seqStm' env (Let pat aux
 
   let tid = fst $ head $ unSegSpace space
   let env' = updateEnvTid env tid
-  -- Find all free variables from the kbody and use that to filter out 
-  -- unneeded tiles
-  let free = IM.elems $ namesIntMap $ freeIn kbody
-  let tiles = M.toList $ tileMap env'
-  let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
+
+  usedArrays <- arraysInScope env kbody
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env' tilesUsed kbody ts) binops
+  reds <- mapM (mkSegMapRed env' usedArrays kbody ts) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
   let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
-  let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) tilesUsed redExps
+  let mapping = M.fromList $ zip usedArrays redExps
+  -- let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) usedArrays redExps
 
   -- Modify the kernel body
   -- TODO: Assumes single dimension
   kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
 
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
-
-
 
   addStm $ Let pat aux (Op (SegOp (SegRed lvl space' binops ts kbody')))
 
@@ -189,11 +186,9 @@ seqStm' env (Let pat aux
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
 
-  let free = IM.elems $ namesIntMap $ freeIn kbody
-  let tiles = M.toList $ tileMap env
-  let tilesUsed = intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
+  usedArrays <- arraysInScope env kbody
 
-  reds <- mapM (mkSegMapRed env tilesUsed kbody ts) binops
+  reds <- mapM (mkSegMapRed env usedArrays kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
   scans <- forM redshead $ \red -> buildSegScan "scan_agg" $ do
@@ -288,12 +283,12 @@ seqStm'' _ _ stm = addStm stm
 
 mkSegMapRed ::
   Env ->
-  [(VName, VName)] ->         -- tiles used
+  [VName] ->         
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env mapping kbody retTs binop = do
+mkSegMapRed env arrs kbody retTs binop = do
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
@@ -304,7 +299,8 @@ mkSegMapRed env mapping kbody retTs binop = do
       sz <- mkChunkSize tid env
       screma <- buildRedoMap [Reduce comm lambda ne]
       -- For each tile we can then get the corresponding chunk
-      chunks <- mapM (getChunk env tid sz) mapping
+      chunks <- mapM (getChunk env tid sz) arrs
+
 
       res <- letTupExp' "res" $ Op $ OtherOp $
                 Screma sz chunks screma
@@ -320,7 +316,8 @@ mkSegMapRed env mapping kbody retTs binop = do
       let ts = concatMap (lambdaReturnType . redLambda) reds
       params <- mapM (newParam "par" ) ts
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      let mapping' = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) mapping mapExps
+      -- let mapping' = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) mapping mapExps
+      let mapping' = M.fromList $ zip arrs mapExps
       kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
       let body = kbodyToBody kbody'
       lamb <- renameLambda $
@@ -335,10 +332,11 @@ getChunk ::
   Env ->
   VName ->              -- thread Id
   SubExp ->             -- size of chunk
-  (VName, VName) ->     -- array to tile mapping
+  -- (VName, VName) ->     -- array to tile mapping
+  VName ->              -- Array to get chunk from
   Builder GPU VName
-getChunk _ tid sz (_, tile) = do
-  letExp "chunk" $ BasicOp $ Index tile
+getChunk _ tid sz arr = do
+  letExp "chunk" $ BasicOp $ Index arr
     (Slice [DimFix $ Var tid,
             DimSlice (intConst Int64 0) sz (intConst Int64 1)])
 
@@ -448,7 +446,7 @@ mkTiles env = do
   scratchSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
                                                (eSubExp $ seqFactor env)
                                                (eSubExp $ grpSize env)
-                                              
+
   tiles <- forM arraysInScope $ \ (arrName, arrInfo) -> do
     let tp = elemType $ typeOf arrInfo
     -- tile <- letExp "tile" $ BasicOp $ Scratch tp [scratchSize]
@@ -471,7 +469,7 @@ mkTiles env = do
       -- Update the chunk
       chunk' <- letSubExp "chunk" $ BasicOp $ Update Unsafe chunk
                                     (Slice [DimSlice (intConst Int64 0) sliceSize (intConst Int64 1)]) slice
-      
+
       -- let shape = Shape [grpSize env]
 
       let lvl = SegThread SegNoVirt Nothing
@@ -496,7 +494,7 @@ mkTiles env = do
       -- NOTE: Can jsut use seqFactor here as we read from the padded tile craeted above
       let dimSlice = DimSlice start (seqFactor env) (intConst Int64 1)
 
-      chunk <- letSubExp "chunk" $ BasicOp $ Index tileFlat 
+      chunk <- letSubExp "chunk" $ BasicOp $ Index tileFlat
                                     (Slice [dimSlice])
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
@@ -507,9 +505,88 @@ mkTiles env = do
 
   pure $ (\(Env gid gSize gSizeOld tid _ factor) ->
             Env gid gSize gSizeOld tid (M.fromList tiles) factor) env
-  where
-    isArray :: NameInfo GPU -> Bool
-    isArray info = arrayRank (typeOf info) > 0
+
+
+  -- tiles <- forM arraysInScope $ \ (arrName, arrInfo) -> do
+
+  --   let tp = elemType $ typeOf arrInfo
+  --   -- Read coalesced
+  --   tile <- buildSegMap_ "tile" $ do
+  --     tid <- newVName "tid"
+  --     phys <- newVName "phys_tid"
+  --     let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
+  --     es <- letSubExp "elems" $ BasicOp $ Index arrName
+  --                 (Slice $ outerDim ++
+  --                           [DimSlice (Var tid) (seqFactor env) (grpSize env)])
+  --     let lvl = SegThread SegNoVirt Nothing
+  --     let space = SegSpace phys [(tid, grpSize env)]
+  --     let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
+  --     pure ([Returns ResultMaySimplify mempty es], lvl, space, types)
+
+  --   -- transpose and flatten
+  --   tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
+  --   tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
+  --               ReshapeArbitrary (Shape [grpsizeOld env]) tileT
+
+  --   -- Read the pr. thread chunk into registers
+  --   tile' <- buildSegMap_ "tile" $ do
+  --     tid <- newVName "tid"
+  --     phys <- newVName "phys_tid"
+  --     start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
+  --                                           (eSubExp $ Var tid)
+  --                                           (eSubExp $ seqFactor env)
+  --     es <- letSubExp "chunk" $ BasicOp $ Index tileFlat
+  --           (Slice [DimSlice start (seqFactor env) (intConst Int64 1)])
+  --     let lvl = SegThread SegNoVirt Nothing
+  --     let space = SegSpace phys [(tid, grpSize env)]
+  --     let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
+  --     pure ([Returns ResultPrivate mempty es], lvl, space, types)
+
+  --   -- return the original arr name with the name of its local tile
+  --   pure (arrName, tile')
+
+  -- pure $ (\(Env gid gSize gSizeOld _ factor) ->
+  --           Env gid gSize gSizeOld (M.fromList tiles) factor) env
+
+isArray :: NameInfo GPU -> Bool
+isArray info = arrayRank (typeOf info) > 0
+
+-- | Returns the VName of all arrays in scope that are also free variable in
+-- the kernel body
+arraysInScope ::
+  Env ->
+  KernelBody GPU ->
+  Builder GPU [VName]
+arraysInScope env kbody = do
+  scope <- askScope
+  let (arrays, _) = unzip $ M.toList $  M.filter isArray scope
+
+  let free = IM.elems $ namesIntMap $ freeIn kbody
+
+  let freeArrays = arrays `intersect` free
+
+  -- For each array in arrays see if it has been tiled 
+  let arrays' =
+        L.map ( \ arr ->
+          if M.member arr (tileMap env) then
+            let (Just tile) = M.lookup arr (tileMap env)
+            in tile
+          else
+            arr
+        ) freeArrays
+
+  pure arrays'
+
+  -- let free = IM.elems $ namesIntMap $ freeIn kbody
+  -- let tiles = M.toList $ tileMap env
+  -- let (used, tiles') = unzip $ intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
+  -- let free' = free L.\\ used
+
+  -- -- Only need the arrays from free'
+  -- infos <- mapM lookupInfo free'
+  -- let (free'', _) = unzip $ L.filter (\(_, i) -> isArray i) $ zip free' infos
+
+  -- pure $ free'' <> tiles'
 
 
 -- Builds a SegMap at thread level containing all bindings created in m
