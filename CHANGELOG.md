@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Very large `iota`s now work.
 
+* Lambda lifting in `while` conditions (#2038).
+
 ## [0.25.6]
 
 ### Added
