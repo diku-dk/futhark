@@ -310,7 +310,7 @@ library
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants
       Futhark.IR.Prop.Names
-      Futhark.IR.Prop.Patterns
+      Futhark.IR.Prop.Pat
       Futhark.IR.Prop.Rearrange
       Futhark.IR.Prop.Reshape
       Futhark.IR.Prop.Scope

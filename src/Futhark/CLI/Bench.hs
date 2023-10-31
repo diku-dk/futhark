@@ -643,4 +643,8 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runBenchmarks (excludeBackend config) progs
+    _
+      | optProfile config && isNothing (optJSON config) ->
+          Just $ optionsError "--profile cannot be used without --json."
+      | otherwise ->
+          Just $ runBenchmarks (excludeBackend config) progs

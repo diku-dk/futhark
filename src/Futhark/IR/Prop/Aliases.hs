@@ -33,7 +33,7 @@ import Data.List (find, transpose)
 import Data.Map qualified as M
 import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Prop.Types
 import Futhark.IR.Syntax
 

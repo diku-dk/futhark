@@ -472,7 +472,7 @@ runAutotuner opts prog = do
   T.putStrLn $ "Result of autotuning:\n" <> tuning
 
 supportedBackends :: [String]
-supportedBackends = ["opencl", "cuda"]
+supportedBackends = ["opencl", "cuda", "hip"]
 
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =
