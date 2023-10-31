@@ -138,9 +138,7 @@ transformSegOpGPU permTable expmap (Let pat aux _) op = do
   let mapper =
         identitySegOpMapper
           { mapOnSegOpBody = case segLevel op of
-              -- We don't want to coalesce anything defined inside a SegGroup
-              SegGroup {} -> pure
-              -- In any other case, we want to coalesce and recurse
+              SegGroup {} -> transformSegGroupKernelBody permTable expmap
               _ -> transformSegThreadKernelBody permTable patternName
           }
   op' <- mapSegOpM mapper op
@@ -183,6 +181,12 @@ transformBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap re
 transformBody permTable expmap (Body b stms res) = do
   stms' <- transformStms permTable expmap stms
   pure $ Body b stms' res
+
+-- | Recursively transform the statements in the body of a SegGroup kernel.
+transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegGroupKernelBody permTable expmap (KernelBody b stms res) = do
+  stms' <- transformStms permTable expmap stms
+  pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
 transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
