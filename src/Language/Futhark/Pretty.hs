@@ -232,8 +232,8 @@ prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
       ( hsep (map (brackets . prettyName) sizeparams ++ [pretty pat])
           <+> equals
           <+> pretty initexp
-          <+> pretty form
-          <+> "do"
+          </> pretty form
+          </> "do"
       )
     </> indent 2 (pretty loopbody)
 prettyAppExp _ (Index e idxs _) =
