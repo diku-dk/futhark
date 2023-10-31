@@ -44,21 +44,21 @@ type IndexTable rep =
 
 -- | SegOpName stores the nested "level" at which it is declared in the AST.
 data SegOpName
-  = SegmentedMap VName
-  | SegmentedRed VName
-  | SegmentedScan VName
-  | SegmentedHist VName
+  = SegmentedMap {vnameFromSegOp :: VName}
+  | SegmentedRed {vnameFromSegOp :: VName}
+  | SegmentedScan {vnameFromSegOp :: VName}
+  | SegmentedHist {vnameFromSegOp :: VName}
   deriving (Eq, Ord, Show)
-
-type ArrayName = (VName, [BodyType])
 
 type IndexExprName = VName
 
-vnameFromSegOp :: SegOpName -> VName
-vnameFromSegOp (SegmentedMap name) = name
-vnameFromSegOp (SegmentedRed name) = name
-vnameFromSegOp (SegmentedScan name) = name
-vnameFromSegOp (SegmentedHist name) = name
+type ArrayName = (VName, [BodyType])
+
+data BodyType
+  = SegOpName SegOpName
+  | LoopBodyName VName
+  | CondBodyName VName
+  deriving (Show, Ord, Eq)
 
 -- | Each element in `dimensions` corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
@@ -92,16 +92,6 @@ instance Monoid (DimIdxPat rep) where
 -- parallel construct, like foldl or map.
 data IterationType rep = Sequential | Parallel
   deriving (Eq, Show)
-
-data BodyType
-  = SegOpName SegOpName
-  | LoopBodyName LoopBodyName
-  | CondBodyName CondBodyName
-  deriving (Show, Ord, Eq)
-
-type LoopBodyName = VName
-
-type CondBodyName = VName
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables lhs rhs = do
