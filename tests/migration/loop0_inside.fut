@@ -3,7 +3,7 @@
 -- structure gpu {
 --   /Loop/GPUBody 1
 --   /Loop/GPUBody/Apply 1
---   /Loop/Index 1
+--   /Loop/GPUBody/Index 1
 -- }
 
 def main [n] [m] (A: *[n][m]f32) : *[n][m]f32 =
