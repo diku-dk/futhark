@@ -1,13 +1,9 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Pass.OptimizeMemLayout.Transform (coalesceAccess, printAST) where
+module Futhark.Pass.OptimizeMemLayout.Transform (Transform, transformStms) where
 
 import Control.Monad
 import Control.Monad.State.Strict
-import Data.IntMap.Strict qualified as S
-import Data.List qualified as L
 import Data.Map.Strict qualified as M
-import Data.Maybe
-import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.Builder
 import Futhark.Construct
@@ -16,59 +12,24 @@ import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.MC
 import Futhark.IR.MCMem
--- import Futhark.IR.Prop.Rearrange
 import Futhark.IR.SOACS
 import Futhark.IR.Seq
 import Futhark.IR.SeqMem
-import Futhark.Pass
+import Futhark.Pass.OptimizeMemLayout.Layout
 
-printAST :: (RepTypes rep) => Pass rep rep
-printAST =
-  Pass
-    "pretty print ast"
-    "Pretty-print the ast at current stage in pipeline"
-    $ pure . pTraceShowId
-
--- | The pass definition.
-coalesceAccess :: (Coalesce rep, BuilderOps rep) => Pass rep rep
-coalesceAccess =
-  Pass
-    "coalesce access"
-    "Transform kernel input arrays for better performance."
-    -- return
-    $ \prog -> do
-      -- Analyse the program
-      let analysisRes = analysisPropagateByTransitivity $ analyzeDimIdxPats prog
-      -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable analysisRes
-      -- Insert permutations in the AST
-      intraproceduralTransformation (onStms permutationTable) prog
-  where
-    onStms permutationTable scope stms = do
-      let m = localScope scope $ transformStms permutationTable mempty stms
-      fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
-
-class (Analyze rep) => Coalesce rep where
+class (Layout rep) => Transform rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)
-  transformOp :: PermutationTable -> ExpMap rep -> Stm rep -> Op rep -> CoalesceM rep (PermutationTable, ExpMap rep)
+  transformOp :: PermutationTable -> ExpMap rep -> Stm rep -> Op rep -> TransformM rep (PermutationTable, ExpMap rep)
 
-  -- | Return a coalescing permutation that will be used to create a manifest of the array.
-  -- Returns Nothing if the array is already in the optimal layout
-  permutationFromMemoryEntry :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
-
-type CoalesceM rep = Builder rep
-
-type Permutation = [Int]
-
-type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
+type TransformM rep = Builder rep
 
 -- | A map from the name of an expression to the expression that defines it.
 type ExpMap rep = M.Map VName (Stm rep)
 
-transformStms :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stms rep -> CoalesceM rep (Stms rep)
+transformStms :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stms rep -> TransformM rep (Stms rep)
 transformStms permTable expmap stms = collectStms_ $ foldM_ transformStm (permTable, expmap) stms
 
-transformStm :: (Coalesce rep, BuilderOps rep) => (PermutationTable, ExpMap rep) -> Stm rep -> CoalesceM rep (PermutationTable, ExpMap rep)
+transformStm :: (Transform rep, BuilderOps rep) => (PermutationTable, ExpMap rep) -> Stm rep -> TransformM rep (PermutationTable, ExpMap rep)
 transformStm (permTable, expmap) (Let pat aux (Op op)) = transformOp permTable expmap (Let pat aux (Op op)) op
 transformStm (permTable, expmap) (Let pat aux e) = do
   e' <- mapExpM (transform permTable expmap) e
@@ -76,63 +37,21 @@ transformStm (permTable, expmap) (Let pat aux e) = do
   addStm stm'
   pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
-instance Coalesce GPU where
+instance Transform GPU where
   onOp soacMapper (Futhark.IR.GPU.OtherOp soac) = Futhark.IR.GPU.OtherOp <$> mapSOACM soacMapper soac
   onOp _ op = pure op
   transformOp permTable expmap stm gpuOp
     | (SegOp op) <- gpuOp = transformSegOpGPU permTable expmap stm op
     | _ <- gpuOp = transformRestOp permTable expmap stm
 
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortGPU . dimensions)) memEntry
-
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-
-    if isInsideUndesired || isIdentity || isNotTranspose
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
-
-instance Coalesce MC where
+instance Transform MC where
   onOp soacMapper (Futhark.IR.MC.OtherOp soac) = Futhark.IR.MC.OtherOp <$> mapSOACM soacMapper soac
   onOp _ op = pure op
   transformOp permTable expmap stm mcOp
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC permTable expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp permTable expmap stm
 
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortMC . dimensions)) memEntry
-
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-
-    if isInsideUndesired || isIdentity || isNotTranspose
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
-
-transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> CoalesceM GPU (PermutationTable, ExpMap GPU)
+transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (PermutationTable, ExpMap GPU)
 transformSegOpGPU permTable expmap (Let pat aux _) op = do
   let mapper =
         identitySegOpMapper
@@ -147,7 +66,7 @@ transformSegOpGPU permTable expmap (Let pat aux _) op = do
   where
     patternName = patElemName . head $ patElems pat
 
-transformSegOpMC :: PermutationTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> CoalesceM MC (PermutationTable, ExpMap MC)
+transformSegOpMC :: PermutationTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> TransformM MC (PermutationTable, ExpMap MC)
 transformSegOpMC permTable expmap (Let pat aux _) maybeParSegOp seqSegOp
   | Nothing <- maybeParSegOp = add Nothing
   | Just parSegOp <- maybeParSegOp = do
@@ -164,55 +83,55 @@ transformSegOpMC permTable expmap (Let pat aux _) maybeParSegOp seqSegOp
     mapper = identitySegOpMapper {mapOnSegOpBody = transformKernelBody permTable expmap patternName}
     patternName = patElemName . head $ patElems pat
 
-transformRestOp :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stm rep -> CoalesceM rep (PermutationTable, ExpMap rep)
+transformRestOp :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Stm rep -> TransformM rep (PermutationTable, ExpMap rep)
 transformRestOp permTable expmap (Let pat aux e) = do
   e' <- mapExpM (transform permTable expmap) e
   let stm' = Let pat aux e'
   addStm stm'
   pure (permTable, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
 
-transform :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Mapper rep rep (CoalesceM rep)
+transform :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Mapper rep rep (TransformM rep)
 transform permTable expmap =
   identityMapper {mapOnBody = \scope -> localScope scope . transformBody permTable expmap}
 
 -- | Recursively transform the statements in a body.
-transformBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Body rep -> CoalesceM rep (Body rep)
+transformBody :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> Body rep -> TransformM rep (Body rep)
 transformBody permTable expmap (Body b stms res) = do
   stms' <- transformStms permTable expmap stms
   pure $ Body b stms' res
 
 -- | Recursively transform the statements in the body of a SegGroup kernel.
-transformSegGroupKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegGroupKernelBody :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> KernelBody rep -> TransformM rep (KernelBody rep)
 transformSegGroupKernelBody permTable expmap (KernelBody b stms res) = do
   stms' <- transformStms permTable expmap stms
   pure $ KernelBody b stms' res
 
 -- | Transform the statements in the body of a SegThread kernel.
-transformSegThreadKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformSegThreadKernelBody :: (Transform rep, BuilderOps rep) => PermutationTable -> VName -> KernelBody rep -> TransformM rep (KernelBody rep)
 transformSegThreadKernelBody permTable seg_name kbody = do
   evalStateT
     ( traverseKernelBodyArrayIndexes
         seg_name
-        (ensureCoalescedAccess permTable)
+        (ensureTransformdAccess permTable)
         kbody
     )
     mempty
 
-transformKernelBody :: (Coalesce rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> VName -> KernelBody rep -> CoalesceM rep (KernelBody rep)
+transformKernelBody :: (Transform rep, BuilderOps rep) => PermutationTable -> ExpMap rep -> VName -> KernelBody rep -> TransformM rep (KernelBody rep)
 transformKernelBody permTable expmap segName (KernelBody b stms res) = do
   stms' <- transformStms permTable expmap stms
   let kbody' = KernelBody b stms' res
   evalStateT
     ( traverseKernelBodyArrayIndexes
         segName
-        (ensureCoalescedAccess permTable)
+        (ensureTransformdAccess permTable)
         kbody'
     )
     mempty
 
 traverseKernelBodyArrayIndexes ::
   forall m rep.
-  (Monad m, Coalesce rep) =>
+  (Monad m, Transform rep) =>
   VName -> -- seg_name
   ArrayIndexTransform m ->
   KernelBody rep ->
@@ -263,11 +182,11 @@ type ArrayIndexTransform m =
   Slice SubExp -> -- slice
   m (Maybe (VName, Slice SubExp))
 
-ensureCoalescedAccess ::
+ensureTransformdAccess ::
   (MonadBuilder m) =>
   PermutationTable ->
   ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess
+ensureTransformdAccess
   permTable
   seg_name
   idx_name
@@ -299,35 +218,6 @@ ensureCoalescedAccess
           BasicOp $
             Manifest perm array
 
--- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
--- a PermutationTable.
-permutationTableFromIndexTable :: (Coalesce rep) => IndexTable rep -> PermutationTable
-permutationTableFromIndexTable indexTable =
-  -- Map each MemoryEntry in the IndexTable to a permutation in a generic way
-  -- that can be handled uniquely by each backend.
-  M.fromList
-    $ map
-      ( \(segOpName, arrayMap) ->
-          ( segOpName,
-            M.fromList
-              $ map
-                ( \(arrayName, idxMap) ->
-                    ( arrayName,
-                      M.fromList
-                        $ mapMaybe
-                          ( \(idxName, memEntry) -> do
-                              case permutationFromMemoryEntry segOpName idxName arrayName memEntry of
-                                Nothing -> Nothing
-                                Just perm -> Just (idxName, perm)
-                          )
-                        $ M.toList idxMap
-                    )
-                )
-              $ M.toList arrayMap
-          )
-      )
-    $ M.toList indexTable
-
 lookupPermutation :: PermutationTable -> VName -> IndexExprName -> VName -> Maybe Permutation
 lookupPermutation permTable segName idxName arrayName =
   case M.lookup segName (M.mapKeys vnameFromSegOp permTable) of
@@ -338,130 +228,23 @@ lookupPermutation permTable segName idxName arrayName =
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs
 
-sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
-sortGPU =
-  L.sortBy dimdexGPUcmp
-  where
-    dimdexGPUcmp a b = do
-      let depsA = dependencies a
-      let depsB = dependencies b
-      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
-      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
-      let aggr1 = foldl maxIdxPat Nothing deps1'
-      let aggr2 = foldl maxIdxPat Nothing deps2'
-      cmpIdxPat aggr1 aggr2
-      where
-        cmpIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Ordering
-        cmpIdxPat Nothing Nothing = EQ
-        cmpIdxPat (Just _) Nothing = GT
-        cmpIdxPat Nothing (Just _) = LT
-        cmpIdxPat
-          (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) =
-            case (iterL, iterR) of
-              (Parallel, Sequential) -> GT
-              (Sequential, Parallel) -> LT
-              _ ->
-                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
-
-        maxIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int)
-
-        maxIdxPat lhs rhs =
-          case cmpIdxPat lhs rhs of
-            LT -> rhs
-            _ -> lhs
-
-        f og (_, lvl, itertype) = Just (itertype, lvl, og)
-
-sortMC :: [DimIdxPat rep] -> [DimIdxPat rep]
-sortMC =
-  L.sortBy dimdexGPUcmp
-  where
-    dimdexGPUcmp a b = do
-      let depsA = dependencies a
-      let depsB = dependencies b
-      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
-      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
-      let aggr1 = foldl maxIdxPat Nothing deps1'
-      let aggr2 = foldl maxIdxPat Nothing deps2'
-      cmpIdxPat aggr1 aggr2
-      where
-        cmpIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Ordering
-        cmpIdxPat Nothing Nothing = EQ
-        cmpIdxPat (Just _) Nothing = GT
-        cmpIdxPat Nothing (Just _) = LT
-        cmpIdxPat
-          (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) =
-            case (iterL, iterR) of
-              (Parallel, Sequential) -> LT
-              (Sequential, Parallel) -> GT
-              _ ->
-                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
-
-        maxIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int)
-
-        maxIdxPat lhs rhs =
-          case cmpIdxPat lhs rhs of
-            LT -> rhs
-            _ -> lhs
-
-        f og (_, lvl, itertype) = Just (itertype, lvl, og)
-
-instance Coalesce GPUMem where
+instance Transform GPUMem where
   onOp _ _ = error $ notImplementedYet "GPUMem"
   transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
-  permutationFromMemoryEntry = error $ notImplementedYet "GPUMem"
 
-instance Coalesce MCMem where
+instance Transform MCMem where
   onOp _ op = pure op
   transformOp permTable expmap stm mcOp
     | _ <- mcOp = transformRestOp permTable expmap stm
 
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortMC . dimensions)) memEntry
-
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-
-    if isInsideUndesired || isIdentity || isNotTranspose
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
-
-instance Coalesce Seq where
+instance Transform Seq where
   onOp _ _ = error $ notImplementedYet "Seq"
   transformOp _ _ _ _ = error $ notImplementedYet "Seq"
-  permutationFromMemoryEntry = error $ notImplementedYet "Seq"
 
-instance Coalesce SeqMem where
+instance Transform SeqMem where
   onOp _ _ = error $ notImplementedYet "SeqMem"
   transformOp _ _ _ _ = error $ notImplementedYet "SeqMem"
-  permutationFromMemoryEntry = error $ notImplementedYet "SeqMem"
 
-instance Coalesce SOACS where
+instance Transform SOACS where
   onOp _ _ = error $ notImplementedYet "SOACS"
   transformOp _ _ _ _ = error $ notImplementedYet "SOACS"
-  permutationFromMemoryEntry = error $ notImplementedYet "SOACS"

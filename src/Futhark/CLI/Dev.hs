@@ -55,7 +55,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
-import Futhark.Pass.OptimizeMemLayout.Transform
+import Futhark.Pass.OptimizeMemLayout
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
@@ -391,15 +391,15 @@ coalesceOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (GPU prog) config =
-      GPU <$> runPipeline (onePass coalesceAccess) config prog
+      GPU <$> runPipeline (onePass optimizeMemLayout) config prog
     perform (MC prog) config =
-      MC <$> runPipeline (onePass coalesceAccess) config prog
+      MC <$> runPipeline (onePass optimizeMemLayout) config prog
     perform s _ =
       externalErrorS $
         "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
 
     long = [passLongOption pass]
-    pass = coalesceAccess :: Pass GPU.GPU GPU.GPU
+    pass = optimizeMemLayout :: Pass GPU.GPU GPU.GPU
 
 sinkOption :: String -> FutharkOption
 sinkOption short =

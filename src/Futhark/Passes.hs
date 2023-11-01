@@ -45,7 +45,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
-import Futhark.Pass.OptimizeMemLayout.Transform
+import Futhark.Pass.OptimizeMemLayout
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -106,7 +106,7 @@ gpuPipeline =
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU,
-        coalesceAccess,
+        optimizeMemLayout,
         simplifyGPU,
         performCSE True
       ]
@@ -215,7 +215,7 @@ mcmemPipeline =
         LowerAllocations.lowerAllocationsMCMem,
         performCSE False,
         simplifyMCMem,
-        coalesceAccess,
+        optimizeMemLayout,
         simplifyMCMem,
         performCSE True
       ]
