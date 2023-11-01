@@ -94,8 +94,7 @@ data IterationType rep = Sequential | Parallel
   deriving (Eq, Show)
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
-unionIndexTables lhs rhs = do
-  M.unionWith (M.unionWith M.union) lhs rhs
+unionIndexTables = M.unionWith (M.unionWith M.union)
 
 -- | Make segops on arrays transitive, ie. if
 -- > let A = segmap (..) xs -- A indexes into xs
@@ -247,7 +246,7 @@ analyzeStmsPrimitive ctx =
 analyzeStms :: (Analyze rep) => Context rep -> Context rep -> (VName -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
 analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
-  let (ctx'', aids) = analyzeStmsPrimitive recContext body
+  let (ctx'', indexTable) = analyzeStmsPrimitive recContext body
   -- 1. We do not want the returned context directly.
   --    however, we do want pat to map to the names what was hit in body.
   --    therefore we need to subtract the old context from the returned one,
@@ -261,7 +260,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
-  (ctx', aids)
+  (ctx', indexTable)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -356,14 +355,14 @@ getIndexDependencies ctx dims =
 
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
 analyzeIndex ctx pats arr_name dimIndexes = do
-  let dimindices = getIndexDependencies ctx dimIndexes
+  let dependencies = getIndexDependencies ctx dimIndexes
   -- If the array is not in the context, it is probably from somewhere we don't
   -- know wtf
   let array_name' = fromMaybe (arr_name, []) (L.find (\(n, _) -> n == arr_name) $ M.keys $ assignments ctx)
   maybe
     (ctx, mempty)
     (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pats) pats array_name')
-    dimindices
+    dependencies
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyzeIndexContextFromIndices ctx dimIndexes pats = do
