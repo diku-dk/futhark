@@ -427,9 +427,30 @@ instance Coalesce GPUMem where
   permutationFromMemoryEntry = error $ notImplementedYet "GPUMem"
 
 instance Coalesce MCMem where
-  onOp _ _ = error $ notImplementedYet "MCMem"
-  transformOp _ _ _ _ = error $ notImplementedYet "MCMem"
-  permutationFromMemoryEntry = error $ notImplementedYet "MCMem"
+  onOp _ op = pure op
+  transformOp permTable expmap stm mcOp
+    | _ <- mcOp = transformRestOp permTable expmap stm
+
+  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
+    let perm = (map originalDimension . (sortMC . dimensions)) memEntry
+
+    -- Don't manifest if the permutation is the identity permutation or is not
+    -- a transpose.
+    let isIdentity = perm `L.isPrefixOf` [0 ..]
+    let isNotTranspose = isNothing (isMapTranspose perm)
+
+    -- Don't manifest if the array is defined inside a segOp or loop body
+    let nestSegOps = filter isUndesired nest
+    let isInsideUndesired = not (null nestSegOps)
+
+    if isInsideUndesired || isIdentity || isNotTranspose
+      then Nothing
+      else Just perm
+    where
+      isUndesired bodyType = case bodyType of
+        SegOpName _ -> True
+        LoopBodyName _ -> True
+        _ -> False
 
 instance Coalesce Seq where
   onOp _ _ = error $ notImplementedYet "Seq"

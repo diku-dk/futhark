@@ -190,10 +190,7 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        inPlaceLoweringMC,
-        coalesceAccess,
-        simplifyMC,
-        performCSE True
+        inPlaceLoweringMC
       ]
 
 -- | Run 'mcPipeline' and then add memory information.
@@ -217,5 +214,8 @@ mcmemPipeline =
         simplifyMCMem,
         LowerAllocations.lowerAllocationsMCMem,
         performCSE False,
-        simplifyMCMem
+        simplifyMCMem,
+        coalesceAccess,
+        simplifyMCMem,
+        performCSE True
       ]
