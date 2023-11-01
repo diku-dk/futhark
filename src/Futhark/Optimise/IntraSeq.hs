@@ -45,7 +45,7 @@ data Env = Env {
   grpId      :: SubExp,             -- The group id
   grpSize    :: SubExp,             -- The group size after seq
   grpsizeOld :: SubExp,             -- The group size before seq
-  threadId   :: Maybe VName,       -- the thread id if available at given stage
+  threadId   :: Maybe VName,        -- the thread id if available at given stage
   tileMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
@@ -182,7 +182,7 @@ seqStm' env (Let pat aux
   -- let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) usedArrays redExps
 
   -- Modify the kernel body
-  -- TODO: Assumes single dimension
+  -- TODO: Assumes single dimensionfo
   kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
   let numResConsumed = numArgsConsumedBySegop binops
   let fusedReds = L.drop numResConsumed $ head reds
@@ -218,7 +218,7 @@ seqStm' env (Let pat aux (Op (SegOp
     let types' = scremaType (seqFactor env) screma
     let kres = L.map (Returns ResultPrivate mempty) res
     pure (kres, lvl', space', types')
-  
+
   -- let mapExps = L.map (\m -> BasicOp $ Index m $ Slice [DimFix $ Var tid]) maps
   -- let mapping = M.fromList $ zip orgArrays mapExps
   -- kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
@@ -228,10 +228,10 @@ seqStm' env (Let pat aux (Op (SegOp
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
   tps <- mapM lookupType maps
   let ts' = L.map (stripArray 1) tps
-  let pat' = Pat $ L.map(\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
+  let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
   addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
 
-  where 
+  where
     buildMapScrema :: [VName] -> Builder GPU (ScremaForm GPU)
     buildMapScrema orgArrs = do
       params <- mapM (newParam "par") ts
@@ -246,34 +246,38 @@ seqStm' env (Let pat aux (Op (SegOp
                   lambdaReturnType = ts
                 }
       pure $ mapSOAC lamb
-    
+
 
 seqStm' env (Let pat aux
-            (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
+            (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
 
-  usedArrays <- arraysInScope env kbody
+  (orgArrays, usedArrays) <- arraysInScope env kbody
 
-  reds <- mapM (mkSegMapRed env usedArrays kbody ts) binops
+  reds <- mapM (mkSegMapRed env (orgArrays, usedArrays) kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
-  scans <- forM redshead $ \red -> buildSegScan "scan_agg" $ do
+  scan <- buildSegScan "scan_agg" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
 
-    e' <- letSubExp "elem" =<< eIndex red (eSubExp $ Var tid)
+    e' <- forM redshead $ \ r -> do
+      letSubExp "elem" $ BasicOp $ Index r (Slice [DimFix $ Var tid])
+
+    -- map (\ x -> eIndex x (eSubExp $ Var tid)) redshead
 
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
-    pure ([Returns ResultMaySimplify mempty e'], lvl', space', binops', ts)
+    let results = L.map (Returns ResultMaySimplify mempty) e'
+    pure (results, lvl', space', binops', ts)
 
-  scans' <- forM scans $ \scan -> buildSegMapTup_ "scan_res" $ do
+  scans' <- buildSegMapTup_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
 
     -- TODO: Uses head
     let binop = head binops
-    let neutral = head $ segBinOpNeutral binop
+    let neutral = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
 
     let scanNames = L.map getVName scan
@@ -281,26 +285,40 @@ seqStm' env (Let pat aux
     idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
                                     (eSubExp $ Var tid)
                                     (eSubExp $ intConst Int64 1)
-    ne <- letSubExp "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
+    ne <- letTupExp' "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
                                   (eSubExp $ Var tid)
                                   (eSubExp $ intConst Int64 0)
                                )
-                               (eBody [toExp neutral])
-                               (eBody [eIndex (head scanNames) (eSubExp idx)])
-    scanSoac <- scanSOAC [Scan lambda [ne]]
-    es <- letChunkExp (seqFactor env) tid (snd $ head $ M.toList $ tileMap env)
-    res <- letSubExp "res" $ Op $ OtherOp $ Screma (seqFactor env) [es] scanSoac
+                               (eBody $ L.map toExp neutral)
+                               (eBody $ L.map (\s -> eIndex s (eSubExp idx)) scanNames)
+                              --  (eBody [toExp neutral])
+                              --  (eBody [eIndex (head scanNames) (eSubExp idx)])
+
+    scanSoac <- scanSOAC [Scan lambda ne]
+    -- es <- letChunkExp (seqFactor env) tid (snd $ head $ M.toList $ tileMap env)
+    -- sz <- mkChunkSize tid env
+    es <- mapM (getChunk env tid (seqFactor env)) usedArrays
+    res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
 
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
     let types' = scremaType (seqFactor env) scanSoac
-    pure ([Returns ResultMaySimplify mempty res], lvl', space', types')
+    let returns = L.map (Returns ResultMaySimplify mempty) res
+    pure (returns, lvl', space', types')
 
   -- TODO first head mult binops
-  let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head $ head scans')
-  addStm $ Let pat aux $ BasicOp exp'
+  -- let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
+  -- addStm $ Let pat aux $ BasicOp exp'
+  -- exps <- mapM (eSubExp . Var) scans'
 
-  pure ()
+  --scans'' <- mapM eSubExp scans'
+  forM_ (zip (patElems pat) scans') (\(p, s) ->
+            let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
+            in addStm $ Let (Pat [p]) aux $ BasicOp exp')
+
+
+  --exp <- letTupExp "tmp" $ 
+ -- addStm $ Let pat aux 
 
 
 
