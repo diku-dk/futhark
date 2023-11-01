@@ -35,7 +35,6 @@ import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
 import Futhark.Pass.AD
-import Futhark.Pass.CoalesceAccess
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
 import Futhark.Pass.ExplicitAllocations.MC qualified as MC
@@ -46,6 +45,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
+import Futhark.Pass.OptimizeMemLayout.Transform
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 

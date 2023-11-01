@@ -1,6 +1,5 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
--- module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
-module Futhark.Pass.CoalesceAccess (coalesceAccess, printAST) where
+module Futhark.Pass.OptimizeMemLayout.Transform (coalesceAccess, printAST) where
 
 import Control.Monad
 import Control.Monad.State.Strict
