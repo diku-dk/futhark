@@ -109,11 +109,7 @@ performCSEOnStms =
     f stms =
       fst $
         runReader
-          ( cseInStms
-              (consumedInStms stms)
-              (stmsToList stms)
-              (pure ())
-          )
+          (cseInStms (consumedInStms stms) (stmsToList stms) (pure ()))
           -- It is never safe to CSE arrays in stms in isolation,
           -- because we might introduce additional aliasing.
           (newCSEState False)

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `futhark autotune` how supports `hip` backend.
 
+* Better parallelisation of `scatter` when the target is
+  multidimensional (#2035).
+
 ### Removed
 
 ### Changed
@@ -18,6 +21,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 
 * Very large `iota`s now work.
+
+* Lambda lifting in `while` conditions (#2038).
 
 ## [0.25.6]
 
