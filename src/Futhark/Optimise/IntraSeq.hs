@@ -21,6 +21,7 @@ import Debug.Pretty.Simple
 import Data.List as L
 import Debug.Trace
 import Text.Pretty.Simple
+import qualified Control.Monad
 
 
 
@@ -183,7 +184,7 @@ seqStm' env (Let pat aux
 
   -- Modify the kernel body
   -- TODO: Assumes single dimensionfo
-  kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
+  kbody' <- runSeqM $ seqSegRedKernelBody env' mapping kbody
   let numResConsumed = numArgsConsumedBySegop binops
   let fusedReds = L.drop numResConsumed $ head reds
   kbody'' <- addMapResultsToKbody env' kbody' fusedReds numResConsumed
@@ -197,7 +198,6 @@ seqStm' env (Let pat aux
   let pat' = Pat $ patKeep ++ L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
 
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody'')))
-
 
 seqStm' env (Let pat aux (Op (SegOp
           (SegMap lvl@(SegThread {}) space ts kbody)))) = do
@@ -383,6 +383,41 @@ seqStm'' _ mapping stm@(Let pat aux (BasicOp (Index arr _))) =
     addStm stm
 seqStm'' _ _ stm = addStm stm
 
+seqSegRedKernelBody ::
+  Env ->
+  Map VName (Exp GPU) -> -- mapping from global array to intermediate results
+  KernelBody GPU ->
+  SeqM (KernelBody GPU)
+seqSegRedKernelBody env mapping (KernelBody dec stms results) = do
+  (nms, stms') <- seqSegRedStms env mapping stms
+  -- TODO: IS THIS CORRECT??
+  let results' = L.map (\(Returns m c _, n) -> Returns m c (Var n)) $ zip results nms
+  pure $ KernelBody dec stms' results'
+
+seqSegRedStms ::
+  Env ->
+  Map VName (Exp GPU) ->
+  Stms GPU ->
+  SeqM ([VName], Stms GPU)
+seqSegRedStms env mapping stms = do
+  foldM (\(nms, ss) s -> do
+      (nms', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqSegRedStm env mapping s
+      pure (nms ++ nms', ss <> ss')
+      ) ([], mempty) (stmsToList stms)
+
+seqSegRedStm ::
+  Env ->
+  Map VName (Exp GPU) ->
+  Stm GPU ->
+  Builder GPU [VName]
+seqSegRedStm _ mapping (Let pat aux (BasicOp (Index arr _))) =
+  if M.member arr mapping then do
+    let (Just op) = M.lookup arr mapping
+    addStm $ Let pat aux op
+    let pNames = L.map patElemName $ patElems pat
+    pure pNames
+  else pure []
+seqSegRedStm _ _ _ = pure []
 
 mkSegMapRed ::
   Env ->
@@ -425,8 +460,9 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
   where
     buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
     buildRedoMap reds = do
-      let ts = concatMap (lambdaReturnType . redLambda) reds
-      params <- mapM (newParam "par" ) ts
+      ts <- mapM lookupType usedArrs
+      let ts' = L.map (Prim . elemType) ts
+      params <- mapM (newParam "par" ) ts'
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
       let mapping' = M.fromList $ zip orgArrs mapExps
 
@@ -441,7 +477,7 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
                       lambdaBody = body,
                       lambdaReturnType = retTs
                     }
-        pure $ redomapSOAC reds lamb
+        pTrace (show (zip orgArrs usedArrs )) (pure $ redomapSOAC reds lamb)
 
 
 kernelNeeded ::
