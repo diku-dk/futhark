@@ -591,13 +591,12 @@ instance Analyze MC where
     | ParOp Nothing seqSegop <- mcOp = analyzeSegOp seqSegop
     | ParOp (Just segop) seqSegop <- mcOp = \ctx name -> do
         let (ctx', res') = analyzeSegOp segop ctx name
-        let (ctx'', res'') = pTrace ("\n\nHOLLA HOLLA GET DOLLA" ++ show name) $ analyzeSegOp seqSegop ctx name
-        (ctx' <> ctx'', unionIndexTables (pTraceShowId res') (pTraceShowId res''))
+        let (ctx'', res'') = analyzeSegOp seqSegop ctx name
+        (ctx' <> ctx'', unionIndexTables res' res'')
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
 instance Analyze MCMem where
   analyzeOp mcOp = error $ "Unexpected?"
-
 
 instance Analyze Seq where
   analyzeOp _ = error $ notImplementedYet "Seq"
