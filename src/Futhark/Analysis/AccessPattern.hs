@@ -358,9 +358,15 @@ analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context
 analyzeIndex ctx pats arr_name dimIndexes = do
   let dependencies = getIndexDependencies ctx dimIndexes
   let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
-  -- If the array is not in the context, it is probably from somewhere we don't
-  -- know wtf
-  let array_name' = fromMaybe (arr_name, []) (L.find (\(n, _) -> n == arr_name) $ M.keys $ assignments ctx)
+  -- FIXME: Some variables are not added properly to the scope, and will cause
+  -- this to return (arr_name, []), we should throw an error instead and fix the
+  -- context with the missing variable.
+  -- For now it works fine tho.
+  let array_name' =
+        fromMaybe (arr_name, []) $
+          L.find (\(n, _) -> n == arr_name) $
+            M.keys $
+              assignments ctx'
   maybe
     (ctx', mempty)
     (analyzeIndex' ctx' pats array_name')
