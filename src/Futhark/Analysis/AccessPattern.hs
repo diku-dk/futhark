@@ -243,8 +243,8 @@ analyzeStmsPrimitive ctx =
 
 -- | Same as analyzeStmsPrimitive, but change the resulting context into
 -- a ctxVal, mapped to pattern.
-analyzeStms :: (Analyze rep) => Context rep -> Context rep -> (VName -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
-analyzeStms ctx tmp_ctx bodyConstructor pats body = do
+analyzeStms :: (Analyze rep) => Context rep -> (VName -> BodyType) -> [VName] -> [Stm rep] -> (Context rep, IndexTable rep)
+analyzeStms ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
   let (ctx'', indexTable) = analyzeStmsPrimitive recContext body
   -- 1. We do not want the returned context directly.
@@ -260,7 +260,7 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
-  (ctx', indexTable)
+  (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -270,11 +270,10 @@ analyzeStms ctx tmp_ctx bodyConstructor pats body = do
 
     -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
-      extend ctx $
-        tmp_ctx
-          { parents = concatMap (\pat -> [bodyConstructor pat]) pats,
-            currentLevel = currentLevel ctx + 1
-          }
+      ctx
+        { parents = concatMap (\pat -> [bodyConstructor pat]) pats,
+          currentLevel = currentLevel ctx + 1
+        }
 
     -- Recursively looks up dependencies, until they're in scope or empty set.
     rmOutOfScopeDeps :: Context rep -> M.Map VName (CtxVal rep) -> Names
@@ -345,7 +344,9 @@ analyzeStm ctx (Let pats _ e) = do
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
 getIndexDependencies _ [] = Nothing
 getIndexDependencies ctx dims =
-  fst . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Just [], length dims - 1) $ reverse dims
+  fst
+    . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Just [], length dims - 1)
+    $ reverse dims
   where
     matchDimIndex idx i accumulator =
       case idx of
@@ -440,7 +441,7 @@ analyzeMatch ctx pats body bodies =
             -- This Little Maneuver's Gonna Cost Us 51 Years
             onFst constLevel
               . onSnd (unionIndexTables res)
-              . analyzeStms ctx' mempty CondBodyName pats
+              . analyzeStms ctx' CondBodyName pats
               . stmsToList
               $ bodyStms b
         )
@@ -460,7 +461,7 @@ analyzeLoop ctx bindings loop body pats = do
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
 
   -- Extend context with the loop expression
-  analyzeStms ctx' mempty LoopBodyName pats $ stmsToList $ bodyStms body
+  analyzeStms ctx' LoopBodyName pats $ stmsToList $ bodyStms body
 
 analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, IndexTable rep)
 analyzeApply ctx pats diets =
@@ -489,7 +490,7 @@ analyzeSegOp op ctx pats = do
           . unSegSpace
           $ segSpace op
   -- Analyze statements in the SegOp body
-  analyzeStms segSpaceContext mempty (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
+  analyzeStms segSpaceContext (SegOpName . segOpType op) pats . stmsToList . kernelBodyStms $ segBody op
 
 analyzeSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeSizeOp op ctx pats = do
@@ -597,7 +598,7 @@ instance Analyze MC where
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
 instance Analyze MCMem where
-  analyzeOp mcOp = error $ "Unexpected?"
+  analyzeOp mcOp = error "Unexpected?"
 
 instance Analyze Seq where
   analyzeOp _ = error $ notImplementedYet "Seq"
