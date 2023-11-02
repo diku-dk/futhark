@@ -618,6 +618,7 @@ commandLineOptions =
     iplOption [],
     allocateOption "a",
     kernelsMemPassOption doubleBufferGPU [],
+    mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],
