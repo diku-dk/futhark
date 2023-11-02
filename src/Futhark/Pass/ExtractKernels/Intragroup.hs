@@ -297,15 +297,14 @@ intraGroupStm stm@(Let pat aux e) = do
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToGPU lam
-          (dests_ws, _, _) = unzip3 dests
           krets = do
-            (a_w, a, is_vs) <-
+            (_a_w, a, is_vs) <-
               groupScatterResults dests $ bodyResult $ lambdaBody lam'
             let cs =
                   foldMap (foldMap resCerts . fst) is_vs
                     <> foldMap (resCerts . snd) is_vs
                 is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-            pure $ WriteReturns cs a_w a is_vs'
+            pure $ WriteReturns cs a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -316,9 +315,8 @@ intraGroupStm stm@(Let pat aux e) = do
           addStms $ bodyStms $ lambdaBody lam'
 
       certifying (stmAuxCerts aux) $ do
-        let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
-            body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl space ts body
+        let body = KernelBody () kstms krets
+        letBind pat $ Op $ SegOp $ SegMap lvl space (patTypes pat) body
 
       parallelMin [w]
     _ ->

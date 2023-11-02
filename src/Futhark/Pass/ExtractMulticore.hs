@@ -27,7 +27,6 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
 import Futhark.Transform.Rename (Rename, renameSomething)
-import Futhark.Util (takeLast)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -258,21 +257,15 @@ transformSOAC pat _ (Scatter w ivs lam dests) = do
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
-  let rets = takeLast (length dests) $ lambdaReturnType lam
-      kres = do
-        (a_w, a, is_vs) <- groupScatterResults dests res
-        let cs =
-              foldMap (foldMap resCerts . fst) is_vs
-                <> foldMap (resCerts . snd) is_vs
-            is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns cs a_w a is_vs'
-      kbody = KernelBody () kstms kres
-  pure $
-    oneStm $
-      Let pat (defAux ()) $
-        Op $
-          ParOp Nothing $
-            SegMap () space rets kbody
+  (rets, kres) <- fmap unzip $ forM (groupScatterResults dests res) $ \(_a_w, a, is_vs) -> do
+    a_t <- lookupType a
+    let cs =
+          foldMap (foldMap resCerts . fst) is_vs
+            <> foldMap (resCerts . snd) is_vs
+        is_vs' = [(fullSlice a_t $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+    pure (a_t, WriteReturns cs a is_vs')
+  pure . oneStm . Let pat (defAux ()) . Op . ParOp Nothing $
+    SegMap () space rets (KernelBody () kstms kres)
 transformSOAC pat _ (Hist w arrs hists map_lam) = do
   (seq_hist_stms, seq_op) <-
     transformHist DoNotRename sequentialiseBody w hists map_lam arrs
