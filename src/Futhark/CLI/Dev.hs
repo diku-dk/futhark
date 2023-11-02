@@ -391,15 +391,15 @@ coalesceOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (GPU prog) config =
-      GPU <$> runPipeline (onePass optimizeMemLayout) config prog
+      GPU <$> runPipeline (onePass optimizeArrayLayout) config prog
     perform (MC prog) config =
-      MC <$> runPipeline (onePass optimizeMemLayout) config prog
+      MC <$> runPipeline (onePass optimizeArrayLayout) config prog
     perform s _ =
       externalErrorS $
         "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
 
     long = [passLongOption pass]
-    pass = optimizeMemLayout :: Pass GPU.GPU GPU.GPU
+    pass = optimizeArrayLayout :: Pass GPU.GPU GPU.GPU
 
 sinkOption :: String -> FutharkOption
 sinkOption short =

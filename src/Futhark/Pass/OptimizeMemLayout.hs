@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimizeMemLayout (optimizeMemLayout, printAST) where
+module Futhark.Pass.OptimizeMemLayout (optimizeArrayLayout, printAST) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
@@ -18,8 +18,8 @@ printAST =
     $ pure . pTraceShowId
 
 -- | The pass definition.
-optimizeMemLayout :: (Transform rep, BuilderOps rep) => Pass rep rep
-optimizeMemLayout =
+optimizeArrayLayout :: (Transform rep, BuilderOps rep) => Pass rep rep
+optimizeArrayLayout =
   Pass
     "coalesce access"
     "Transform kernel input arrays for better performance."

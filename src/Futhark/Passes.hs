@@ -106,7 +106,7 @@ gpuPipeline =
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
         inPlaceLoweringGPU,
-        optimizeMemLayout,
+        optimizeArrayLayout,
         simplifyGPU,
         performCSE True
       ]
@@ -215,7 +215,7 @@ mcmemPipeline =
         LowerAllocations.lowerAllocationsMCMem,
         performCSE False,
         simplifyMCMem,
-        optimizeMemLayout,
+        optimizeArrayLayout,
         simplifyMCMem,
         performCSE True
       ]

@@ -22,7 +22,7 @@ configure-profile:
 	cabal configure --enable-profiling --profiling-detail=toplevel-functions
 
 build:
-	cabal build
+	cabal build -j32
 
 install: build
 	install -d $(PREFIX)/bin/
