@@ -356,12 +356,13 @@ getIndexDependencies ctx dims =
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
 analyzeIndex ctx pats arr_name dimIndexes = do
   let dependencies = getIndexDependencies ctx dimIndexes
+  let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
   -- If the array is not in the context, it is probably from somewhere we don't
   -- know wtf
   let array_name' = fromMaybe (arr_name, []) (L.find (\(n, _) -> n == arr_name) $ M.keys $ assignments ctx)
   maybe
-    (ctx, mempty)
-    (analyzeIndex' (analyzeIndexContextFromIndices ctx dimIndexes pats) pats array_name')
+    (ctx', mempty)
+    (analyzeIndex' ctx' pats array_name')
     dependencies
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
