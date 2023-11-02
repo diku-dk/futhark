@@ -267,6 +267,11 @@ intraGroupStm stm@(Let pat aux e) = do
           certifying (stmAuxCerts aux) $
             addStms =<< segRed lvl pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
           parallelMin [w]
+    Op (Screma w arrs form) ->
+      -- This screma is too complicated for us to immediately do
+      -- anything, so split it up and try again.
+      mapM_ intraGroupStm . fmap (certify (stmAuxCerts aux)) . snd
+        =<< runBuilderT (dissectScrema pat w form arrs) (scopeForSOACs scope)
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
