@@ -1392,8 +1392,9 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map pe64 rws
+compileThreadResult _ pe (WriteReturns _ arr dests) = do
+  arr_t <- lookupType arr
+  let rws' = map pe64 $ arrayDims arr_t
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap pe64 slice
         write = inBounds slice' rws'

@@ -11,7 +11,7 @@ where
 import Control.Monad
 import Control.Monad.Writer
 import Data.Either
-import Data.List (find, unzip4)
+import Data.List (find, unzip5)
 import Data.Maybe (isNothing, mapMaybe)
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Construct
@@ -84,12 +84,12 @@ lowerUpdateGPU
   updates
     | all ((`elem` patNames pat) . updateValue) updates,
       not source_used_in_kbody = do
-        mk <- lowerUpdatesIntoSegMap scope pat updates space kbody
+        mk <- lowerUpdatesIntoSegMap scope pat ts updates space kbody
         Just $ do
-          (pat', kbody', poststms) <- mk
+          (pat', ts', kbody', poststms) <- mk
           let cs = stmAuxCerts aux <> foldMap updateCerts updates
           pure $
-            certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts kbody')
+            certify cs (Let pat' aux $ Op $ SegOp $ SegMap lvl space ts' kbody')
               : stmsToList poststms
     where
       -- This check is a bit more conservative than ideal.  In a perfect
@@ -106,24 +106,27 @@ lowerUpdatesIntoSegMap ::
   (MonadFreshNames m) =>
   Scope (Aliases GPU) ->
   Pat (LetDec (Aliases GPU)) ->
+  [Type] ->
   [DesiredUpdate (LetDec (Aliases GPU))] ->
   SegSpace ->
   KernelBody (Aliases GPU) ->
   Maybe
     ( m
         ( Pat (LetDec (Aliases GPU)),
+          [Type],
           KernelBody (Aliases GPU),
           Stms (Aliases GPU)
         )
     )
-lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
+lowerUpdatesIntoSegMap scope pat ret_ts updates kspace kbody = do
   -- The updates are all-or-nothing.  Being more liberal would require
   -- changes to the in-place-lowering pass itself.
-  mk <- zipWithM onRet (patElems pat) (kernelBodyResult kbody)
+  mk <- mapM onRet (zip3 (patElems pat) ret_ts (kernelBodyResult kbody))
   pure $ do
-    (pes, bodystms, krets, poststms) <- unzip4 <$> sequence mk
+    (pes, ret_ts', bodystms, krets, poststms) <- unzip5 <$> sequence mk
     pure
       ( Pat pes,
+        ret_ts',
         kbody
           { kernelBodyStms = kernelBodyStms kbody <> mconcat bodystms,
             kernelBodyResult = krets
@@ -133,7 +136,7 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
   where
     (gtids, _dims) = unzip $ unSegSpace kspace
 
-    onRet (PatElem v v_dec) ret
+    onRet (PatElem v v_dec, _, ret)
       | Just (DesiredUpdate bindee_nm bindee_dec _cs src slice _val) <-
           find ((== v) . updateValue) updates = do
           Returns _ cs se <- Just ret
@@ -153,13 +156,13 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                   fixSlice (fmap pe64 slice) $
                     map (pe64 . Var) gtids
 
-            let res_dims = take (length slice') $ arrayDims $ snd bindee_dec
-                ret' = WriteReturns cs (Shape res_dims) src [(Slice $ map DimFix slice', se)]
+            let ret' = WriteReturns cs src [(fullSlice (typeOf bindee_dec) (map DimFix slice'), se)]
 
             v_aliased <- newName v
 
             pure
               ( PatElem bindee_nm bindee_dec,
+                typeOf bindee_dec,
                 bodystms,
                 ret',
                 stmsFromList
@@ -167,8 +170,8 @@ lowerUpdatesIntoSegMap scope pat updates kspace kbody = do
                     mkLet [Ident v $ typeOf v_dec] $ BasicOp $ Replicate mempty $ Var v_aliased
                   ]
               )
-    onRet pe ret =
-      Just $ pure (pe, mempty, ret, mempty)
+    onRet (pe, ret_t, ret) =
+      Just $ pure (pe, ret_t, mempty, ret, mempty)
 
 lowerUpdateIntoLoop ::
   ( Buildable rep,

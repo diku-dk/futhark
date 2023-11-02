@@ -477,6 +477,7 @@ transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
     -- Generate code for a scatter where each thread writes only a scalar.
     doScatter res_pe (scatter_space, arr, is_vs) = do
       kernel_i <- newVName "write_i"
+      arr_t <- lookupType arr
       val_t <- stripArray (shapeRank scatter_space) <$> lookupType arr
       val_is <- replicateM (arrayRank val_t) (newVName "val_i")
       (kret, kstms) <- collectStms $ do
@@ -485,13 +486,13 @@ transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
           is' <- forM is $ \i' ->
             letSubExp (baseString i' <> "_i") $ BasicOp $ Index i' $ Slice [DimFix $ Var kernel_i]
           pure (Slice $ map DimFix $ is' <> map Var val_is, v')
-        pure $ WriteReturns mempty (scatter_space <> arrayShape val_t) arr is_vs'
+        pure $ WriteReturns mempty arr is_vs'
       (kernel, stms) <-
         mapKernel
           segThreadCapped
           ((kernel_i, w) : zip val_is (arrayDims val_t))
           mempty
-          [Prim $ elemType val_t]
+          [arr_t]
           (KernelBody () kstms [kret])
       addStms stms
       letBind (Pat [res_pe]) $ Op $ SegOp kernel
@@ -499,16 +500,14 @@ transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
-  let (as_ws, _, _) = unzip3 as
-      kstms = bodyStms $ lambdaBody lam'
-      krets = do
-        (a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
+  let krets = do
+        (_a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
         let res_cs =
               foldMap (foldMap resCerts . fst) is_vs
                 <> foldMap (resCerts . snd) is_vs
             is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns res_cs a_w a is_vs'
-      body = KernelBody () kstms krets
+        pure $ WriteReturns res_cs a is_vs'
+      body = KernelBody () (bodyStms $ lambdaBody lam') krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
         pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -517,7 +516,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilde
       segThreadCapped
       [(write_i, w)]
       inputs
-      (zipWith (stripArray . length) as_ws $ patTypes pat)
+      (patTypes pat)
       body
   certifying cs $ do
     addStms stms

@@ -18,9 +18,10 @@ writeResult ::
   MulticoreGen ()
 writeResult is pe (Returns _ _ se) =
   copyDWIMFix (patElemName pe) (map Imp.le64 is) se []
-writeResult _ pe (WriteReturns _ (Shape rws) _ idx_vals) = do
+writeResult _ pe (WriteReturns _ arr idx_vals) = do
+  arr_t <- lookupType arr
   let (iss, vs) = unzip idx_vals
-      rws' = map pe64 rws
+      rws' = map pe64 $ arrayDims arr_t
   forM_ (zip iss vs) $ \(slice, v) -> do
     let slice' = fmap pe64 slice
     sWhen (inBounds slice' rws') $

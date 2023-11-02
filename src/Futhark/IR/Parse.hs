@@ -833,10 +833,8 @@ pKernelResult = do
         <*> pure cs
         <*> pSubExp,
       try $
-        flip (SegOp.WriteReturns cs)
+        SegOp.WriteReturns cs
           <$> pVName
-          <* pColon
-          <*> pShape
           <* keyword "with"
           <*> parens (pWrite `sepBy` pComma),
       try "tile"
