@@ -392,9 +392,9 @@ library
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.AD
-      Futhark.Pass.OptimizeMemLayout
-      Futhark.Pass.OptimizeMemLayout.Transform
-      Futhark.Pass.OptimizeMemLayout.Layout
+      Futhark.Pass.OptimizeArrayLayout
+      Futhark.Pass.OptimizeArrayLayout.Transform
+      Futhark.Pass.OptimizeArrayLayout.Layout
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU

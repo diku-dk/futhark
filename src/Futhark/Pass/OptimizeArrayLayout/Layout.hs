@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimizeMemLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, PermutationTable) where
+module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, PermutationTable) where
 
 import Data.IntMap.Strict qualified as S
 import Data.List qualified as L

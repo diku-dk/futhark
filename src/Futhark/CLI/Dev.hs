@@ -55,7 +55,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
-import Futhark.Pass.OptimizeMemLayout
+import Futhark.Pass.OptimizeArrayLayout
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log

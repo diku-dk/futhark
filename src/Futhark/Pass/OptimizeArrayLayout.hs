@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimizeMemLayout (optimizeArrayLayout, printAST) where
+module Futhark.Pass.OptimizeArrayLayout (optimizeArrayLayout, printAST) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
@@ -7,8 +7,8 @@ import Futhark.Analysis.AccessPattern
 import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.Pass
-import Futhark.Pass.OptimizeMemLayout.Layout
-import Futhark.Pass.OptimizeMemLayout.Transform
+import Futhark.Pass.OptimizeArrayLayout.Layout
+import Futhark.Pass.OptimizeArrayLayout.Transform
 
 printAST :: (RepTypes rep) => Pass rep rep
 printAST =
