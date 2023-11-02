@@ -74,27 +74,30 @@ instance Layout GPU where
         LoopBodyName _ -> True
         _ -> False
 
+multikernePermutering :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
+multikernePermutering _segOpName _idxName (_arrayName, nest) memEntry = do
+  let perm = (map originalDimension . (sortMC . dimensions)) memEntry
+
+  -- Don't manifest if the permutation is the identity permutation or is not
+  -- a transpose.
+  let isIdentity = perm `L.isPrefixOf` [0 ..]
+  let isNotTranspose = isNothing (isMapTranspose perm)
+
+  -- Don't manifest if the array is defined inside a segOp or loop body
+  let nestSegOps = filter isUndesired nest
+  let isInsideUndesired = not (null nestSegOps)
+
+  if isInsideUndesired || isIdentity || isNotTranspose
+    then Nothing
+    else Just perm
+  where
+    isUndesired bodyType = case bodyType of
+      SegOpName _ -> True
+      LoopBodyName _ -> True
+      _ -> False
+
 instance Layout MC where
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortMC . dimensions)) memEntry
-
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-
-    if isInsideUndesired || isIdentity || isNotTranspose
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
+  permutationFromMemoryEntry = multikernePermutering
 
 sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
 sortGPU =
@@ -179,26 +182,7 @@ sortMC =
         f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
 instance Layout MCMem where
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortMC . dimensions)) memEntry
-
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-
-    if isInsideUndesired || isIdentity || isNotTranspose
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
+  permutationFromMemoryEntry = multikernePermutering
 
 instance Layout GPUMem where
   permutationFromMemoryEntry = error $ notImplementedYet "GPUMem"
