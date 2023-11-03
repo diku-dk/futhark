@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Lambda lifting in `while` conditions (#2038).
 
+* Size expressions in local function parameters had an interesting
+  interaction with defunctionalisation (#2040).
+
 ## [0.25.6]
 
 ### Added
