@@ -60,13 +60,9 @@ data BodyType
   | CondBodyName VName
   deriving (Show, Ord, Eq)
 
--- | Each element in `dimensions` corresponds to an access to a given dimension
+-- | Each element corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
-data MemoryEntry rep = MemoryEntry
-  { dimensions :: [DimIdxPat rep],
-    nest :: [BodyType]
-  }
-  deriving (Show)
+type MemoryEntry rep = [DimIdxPat rep]
 
 -- | Collect all features of access to a specific dimension of an array.
 data DimIdxPat rep = DimIdxPat
@@ -396,7 +392,7 @@ analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimIdxPat rep
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pats arr_name dimIndexes = do
   let segmaps = allSegMap ctx
-  let memory_entries = MemoryEntry dimIndexes $ parents ctx
+  let memory_entries = dimIndexes
   let idx_expr_name = pats --                                                IndexExprName
   let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> MemoryEntry
   let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
@@ -646,8 +642,8 @@ instance Pretty (IndexTable rep) where
       printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntry mems)
 
       printMemoryEntry :: MemoryEntry rep -> Doc ann
-      printMemoryEntry (MemoryEntry dims _) =
-        stack $ map printDim dims
+      printMemoryEntry memEntry =
+        stack $ map printDim memEntry
 
       printDim m = pretty (originalDimension m) <+> ":" <+> indent 0 (pretty m)
 
