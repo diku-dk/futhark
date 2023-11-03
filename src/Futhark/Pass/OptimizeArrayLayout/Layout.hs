@@ -54,7 +54,7 @@ permutationTableFromIndexTable indexTable =
 
 instance Layout GPU where
   permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
-    let perm = (map originalDimension . (sortGPU . dimensions)) memEntry
+    let perm = (map originalDimension . sortGPU) memEntry
 
     -- Don't manifest if the permutation is the identity permutation or is not
     -- a transpose.
@@ -76,7 +76,7 @@ instance Layout GPU where
 
 multikernePermutering :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
 multikernePermutering _segOpName _idxName (_arrayName, nest) memEntry = do
-  let perm = (map originalDimension . (sortMC . dimensions)) memEntry
+  let perm = (map originalDimension . sortMC) memEntry
 
   -- Don't manifest if the permutation is the identity permutation or is not
   -- a transpose.

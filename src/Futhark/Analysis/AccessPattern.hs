@@ -122,7 +122,7 @@ analysisPropagateByTransitivity idxTable =
 data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
-    assignments :: M.Map (VName, [BodyType]) (CtxVal rep),
+    assignments :: M.Map VName (CtxVal rep),
     -- | A set of all DimIndexes of type `Constant`.
     constants :: Names,
     -- | A list of the segMaps encountered during the analysis in the order they
@@ -173,7 +173,8 @@ allSegMap (Context _ _ bodies _) =
 data CtxVal rep = CtxVal
   { deps :: Names,
     iterationType :: IterationType rep,
-    level :: Int
+    level :: Int,
+    parents_nest :: [BodyType]
   }
   deriving (Show, Eq)
 
@@ -183,12 +184,13 @@ ctxValFromNames ctx names =
     names
     (getIterationType ctx)
     (currentLevel ctx)
+    (parents ctx)
 
 -- | Wrapper around the constructur of Context.
-oneContext :: VName -> Context rep -> CtxVal rep -> Context rep
-oneContext name ctx ctxValue =
+oneContext :: VName -> CtxVal rep -> Context rep
+oneContext name ctxValue =
   Context
-    { assignments = M.singleton (name, parents ctx) ctxValue,
+    { assignments = M.singleton name ctxValue,
       constants = mempty,
       parents = [],
       currentLevel = 0
@@ -200,7 +202,8 @@ ctxValZeroDeps ctx iterType =
   CtxVal
     { deps = mempty,
       iterationType = iterType,
-      level = currentLevel ctx
+      level = currentLevel ctx,
+      parents_nest = parents ctx
     }
 
 -- | Create a singular context from a segspace
@@ -208,7 +211,7 @@ contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
 contextFromNames ctx itertype =
   -- Create context from names in segspace
   foldl' extend ctx
-    . map (\n -> oneContext n ctx (ctxValZeroDeps ctx itertype))
+    . map (\n -> oneContext n (ctxValZeroDeps ctx itertype))
 
 --  . zipWith
 --    ( \i n ->
@@ -251,7 +254,7 @@ analyzeStms ctx bodyConstructor pats body = do
   -- assignments :: M.Map VName (CtxVal rep),
   let inScopeDependenciesFromBody =
         rmOutOfScopeDeps ctx'' $
-          M.difference (M.mapKeys fst $ assignments ctx'') (M.mapKeys fst $ assignments recContext)
+          M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
@@ -262,7 +265,7 @@ analyzeStms ctx bodyConstructor pats body = do
     -- MAY throw away needed information, but it was my best guess at a solution
     -- at the time of writing.
     concatCtxVal dependencies =
-      map (\pat -> oneContext pat ctx (ctxValFromNames ctx dependencies)) pats
+      map (\pat -> oneContext pat (ctxValFromNames ctx dependencies)) pats
 
     -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
@@ -274,9 +277,8 @@ analyzeStms ctx bodyConstructor pats body = do
     -- Recursively looks up dependencies, until they're in scope or empty set.
     rmOutOfScopeDeps :: Context rep -> M.Map VName (CtxVal rep) -> Names
     rmOutOfScopeDeps ctx' newAssignments = do
-      let rmParents = M.mapKeys fst
-      let throwawayAssignments = rmParents $ assignments ctx'
-      let localAssignments = rmParents $ assignments ctx
+      let throwawayAssignments = assignments ctx'
+      let localAssignments = assignments ctx
       let localConstants = constants ctx
       M.foldlWithKey
         ( \result a ctxval ->
@@ -358,11 +360,12 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   -- this to return (arr_name, []), we should throw an error instead and fix the
   -- context with the missing variable.
   -- For now it works fine tho.
+
   let array_name' =
         fromMaybe (arr_name, []) $
           L.find (\(n, _) -> n == arr_name) $
-            M.keys $
-              assignments ctx'
+            map (\(k, a) -> (k, parents_nest a)) (M.toList $ assignments ctx')
+
   maybe
     (ctx', mempty)
     (analyzeIndex' ctx' pats array_name')
@@ -386,7 +389,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
-  foldl' extend ctx $ map (\pat -> (oneContext pat ctx ctxVal) {constants = namesFromList $ concat consts}) pats
+  foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal) {constants = namesFromList $ concat consts}) pats
 
 analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
@@ -427,7 +430,7 @@ analyzeBasicOp ctx expression pats = do
         (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
         (FlatIndex name _) -> ctxValFromNames ctx $ oneName name
         (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [name, source]
-  let ctx' = foldl' extend ctx $ map (\n -> oneContext n ctx ctx_val) pats
+  let ctx' = foldl' extend ctx $ map (\n -> oneContext n ctx_val) pats
   (ctx', mempty)
   where
     concatCtxVals ne nn =
@@ -469,7 +472,7 @@ analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, Inde
 analyzeApply ctx pats diets =
   onFst
     ( \ctx' ->
-        foldl' extend ctx' $ map (\pat -> oneContext pat ctx $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
+        foldl' extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
     )
     (ctx, mempty)
 
@@ -485,7 +488,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n ctx' $ CtxVal mempty Parallel (currentLevel ctx + i))
+          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx'))
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -504,7 +507,7 @@ analyzeSizeOp op ctx pats = do
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat ctx' $ ctxValZeroDeps ctx Sequential) pats
+  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ (ctxValZeroDeps ctx Sequential) {parents_nest = parents ctx'}) pats
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
@@ -538,7 +541,7 @@ getIterationType (Context _ _ bodies _) =
 analyzeSubExpr :: [VName] -> Context rep -> SubExp -> Names
 analyzeSubExpr _ _ (Constant _) = mempty
 analyzeSubExpr pp ctx (Var v) =
-  case M.lookup v (M.mapKeys fst $ assignments ctx) of
+  case M.lookup v (assignments ctx) of
     (Just _) -> oneName v
     Nothing ->
       error $
@@ -559,9 +562,9 @@ reduceDependencies :: Context rep -> VName -> DimIdxPat rep
 reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
-    else case M.lookup v (M.mapKeys fst $ assignments ctx) of
+    else case M.lookup v (assignments ctx) of
       Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
-      Just (CtxVal deps itertype lvl) ->
+      Just (CtxVal deps itertype lvl parents_nest) ->
         if null $ namesToList deps
           then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) $ currentLevel ctx
           else
