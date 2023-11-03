@@ -21,39 +21,25 @@ type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Pe
 class (Analyze rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
   -- Returns Nothing if the array is already in the optimal layout
-  permutationFromMemoryEntry :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
+  permutationFromMemoryEntry :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry rep -> Maybe Permutation
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
 permutationTableFromIndexTable :: (Layout rep) => IndexTable rep -> PermutationTable
-permutationTableFromIndexTable indexTable =
+permutationTableFromIndexTable =
   -- Map each MemoryEntry in the IndexTable to a permutation in a generic way
   -- that can be handled uniquely by each backend.
-  M.fromList
-    $ map
-      ( \(segOpName, arrayMap) ->
-          ( segOpName,
-            M.fromList
-              $ map
-                ( \(arrayName, idxMap) ->
-                    ( arrayName,
-                      M.fromList
-                        $ mapMaybe
-                          ( \(idxName, memEntry) -> do
-                              case permutationFromMemoryEntry segOpName idxName arrayName memEntry of
-                                Nothing -> Nothing
-                                Just perm -> Just (idxName, perm)
-                          )
-                        $ M.toList idxMap
-                    )
-                )
-              $ M.toList arrayMap
-          )
-      )
-    $ M.toList indexTable
+  -- We remove entries with no results after `permutationFromMemoryEntry`
+  M.mapMaybeWithKey $
+    \segOpName -> mapToMaybe $ mapToMaybe . permutationFromMemoryEntry segOpName
+  where
+    maybeMap :: M.Map k a -> Maybe (M.Map k a)
+    maybeMap val = if null val then Nothing else Just val
+
+    mapToMaybe f = maybeMap . M.mapMaybeWithKey f
 
 instance Layout GPU where
-  permutationFromMemoryEntry _segOpName _idxName (_arrayName, nest) memEntry = do
+  permutationFromMemoryEntry _segOpName (_arrayName, nest) _idxName memEntry = do
     let perm = (map originalDimension . sortGPU) memEntry
 
     -- Don't manifest if the permutation is the identity permutation or is not
@@ -74,8 +60,8 @@ instance Layout GPU where
         LoopBodyName _ -> True
         _ -> False
 
-multikernePermutering :: SegOpName -> IndexExprName -> ArrayName -> MemoryEntry rep -> Maybe Permutation
-multikernePermutering _segOpName _idxName (_arrayName, nest) memEntry = do
+multikernePermutering :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry rep -> Maybe Permutation
+multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
   let perm = (map originalDimension . sortMC) memEntry
 
   -- Don't manifest if the permutation is the identity permutation or is not
