@@ -23,6 +23,20 @@ class (Analyze rep) => Layout rep where
   -- Returns Nothing if the array is already in the optimal layout
   permutationFromMemoryEntry :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry rep -> Maybe Permutation
 
+commonPermutationEliminators :: [Int] -> Bool
+commonPermutationEliminators =
+  anyOf
+    [ -- Don't manifest if the permutation is the identity permutation
+      (`L.isPrefixOf` [0 ..]),
+      -- or is not a transpose.
+      isNothing . isMapTranspose
+    ]
+  where
+    -- Why is this not in the prelude, there's probably a monad for this.
+    anyOf :: forall a t. Foldable t => t (a -> Bool) -> a -> Bool
+    anyOf preds input =
+      any (\f -> f input) preds
+
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
 permutationTableFromIndexTable :: (Layout rep) => IndexTable rep -> PermutationTable
@@ -42,16 +56,11 @@ instance Layout GPU where
   permutationFromMemoryEntry _segOpName (_arrayName, nest) _idxName memEntry = do
     let perm = (map originalDimension . sortGPU) memEntry
 
-    -- Don't manifest if the permutation is the identity permutation or is not
-    -- a transpose.
-    let isIdentity = perm `L.isPrefixOf` [0 ..]
-    let isNotTranspose = isNothing (isMapTranspose perm)
-
     -- Don't manifest if the array is defined inside a segOp or loop body
     let nestSegOps = filter isUndesired nest
     let isInsideUndesired = not (null nestSegOps)
 
-    if isInsideUndesired || isIdentity || isNotTranspose
+    if isInsideUndesired || commonPermutationEliminators perm
       then Nothing
       else Just perm
     where
@@ -64,16 +73,11 @@ multikernePermutering :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry 
 multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
   let perm = (map originalDimension . sortMC) memEntry
 
-  -- Don't manifest if the permutation is the identity permutation or is not
-  -- a transpose.
-  let isIdentity = perm `L.isPrefixOf` [0 ..]
-  let isNotTranspose = isNothing (isMapTranspose perm)
-
   -- Don't manifest if the array is defined inside a segOp or loop body
   let nestSegOps = filter isUndesired nest
   let isInsideUndesired = not (null nestSegOps)
 
-  if isInsideUndesired || isIdentity || isNotTranspose
+  if isInsideUndesired || commonPermutationEliminators perm
     then Nothing
     else Just perm
   where
