@@ -270,7 +270,7 @@ analyzeStms ctx bodyConstructor pats body = do
     -- Context used for "recursion" into analyzeStmsPrimitive
     recContext =
       ctx
-        { parents = concatMap (\pat -> [bodyConstructor pat]) pats,
+        { parents = parents ctx <> concatMap (\pat -> [bodyConstructor pat]) pats,
           currentLevel = currentLevel ctx + 1
         }
 
