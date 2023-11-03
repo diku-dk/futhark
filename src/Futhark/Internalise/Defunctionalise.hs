@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifoldable (bifoldMap)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
@@ -783,6 +784,11 @@ defuncDimIndex (DimSlice me1 me2 me3) =
   where
     defunc' = mapM defuncExp'
 
+envFromDimNames :: [VName] -> Env
+envFromDimNames = M.fromList . flip zip (repeat d)
+  where
+    d = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
+
 -- | Defunctionalize a let-bound function, while preserving parameters
 -- that have order 0 types (i.e., non-functional).
 defuncLet ::
@@ -975,12 +981,14 @@ defuncApplyArg _ (f', DynamicFun _ sv) (((d, argext), arg), argtypes) = do
       apply_e = mkApply f' [(d, argext, arg')] callret
   pure (apply_e, sv)
 --
-defuncApplyArg fname_s (_, sv) _ =
+defuncApplyArg fname_s (_, sv) ((_, arg), _) =
   error $
     "defuncApplyArg: cannot apply StaticVal\n"
       <> show sv
       <> "\nFunction name: "
       <> prettyString fname_s
+      <> "\nArgument: "
+      <> prettyString arg
 
 updateReturn :: AppRes -> Exp -> Exp
 updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
@@ -1059,11 +1067,6 @@ envFromPat pat = case pat of
   PatLit {} -> mempty
   PatConstr _ _ ps _ -> foldMap envFromPat ps
 
-envFromDimNames :: [VName] -> Env
-envFromDimNames = M.fromList . flip zip (repeat d)
-  where
-    d = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
-
 -- | Given a closure environment, construct a record pattern that
 -- binds the closed over variables.  Insert wildcard for any patterns
 -- that would otherwise clash with size parameters.
@@ -1140,8 +1143,11 @@ matchPatSV (Id vn (Info t) _) sv =
       then dim_env <> M.singleton vn (Binding Nothing $ Dynamic t)
       else dim_env <> M.singleton vn (Binding Nothing sv)
   where
-    dim_env =
-      M.fromList $ map (,i64) $ S.toList $ fvVars $ freeInType t
+    -- Extract all sizes that are potentially bound here. This is
+    -- different from all free variables (see #2040).
+    dim_env = bifoldMap onDim (const mempty) t
+    onDim (Var v _ _) = M.singleton (qualLeaf v) i64
+    onDim _ = mempty
     i64 = Binding Nothing $ Dynamic $ Scalar $ Prim $ Signed Int64
 matchPatSV (Wildcard _ _) _ = pure mempty
 matchPatSV (PatAscription pat _ _) sv = matchPatSV pat sv
