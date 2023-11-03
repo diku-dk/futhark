@@ -425,8 +425,10 @@ transformFName loc fname t = do
 transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
 transformType typ =
   case typ of
-    Scalar scalar -> Scalar <$> transformScalarSizes scalar
-    Array u shape scalar -> Array u <$> mapM onDim shape <*> transformScalarSizes scalar
+    Scalar scalar ->
+      Scalar <$> transformScalarSizes scalar
+    Array u shape scalar ->
+      Array u <$> mapM onDim shape <*> transformScalarSizes scalar
   where
     transformScalarSizes :: ScalarTypeBase Size u -> MonoM (ScalarTypeBase Size u)
     transformScalarSizes (Record fs) =
