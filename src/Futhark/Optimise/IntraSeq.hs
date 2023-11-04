@@ -249,36 +249,40 @@ seqStm' env (Let pat aux (Op (SegOp
 
 
 seqStm' env (Let pat aux
-            (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
+            (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
 
   (orgArrays, usedArrays) <- arraysInScope env kbody
 
   reds <- mapM (mkSegMapRed env (orgArrays, usedArrays) kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
+  let numResConsumed = numArgsConsumedBySegop binops
+  let (scanReds, fusedReds) = L.splitAt numResConsumed redshead
+
   scan <- buildSegScan "scan_agg" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
 
-    e' <- forM redshead $ \ r -> do
+    -- update kernelbody according to the number of fused results
+    e' <- forM scanReds $ \ r -> do
       letSubExp "elem" $ BasicOp $ Index r (Slice [DimFix $ Var tid])
-
-    -- map (\ x -> eIndex x (eSubExp $ Var tid)) redshead
 
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
     let results = L.map (Returns ResultMaySimplify mempty) e'
-    pure (results, lvl', space', binops', ts)
+    let ts' = L.take numResConsumed ts
+    pure (results, lvl', space', binops', ts')
 
   scans' <- buildSegMapTup_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
+    let env' = updateEnvTid env tid
 
     -- TODO: Uses head
     let binop = head binops
     let neutral = segBinOpNeutral binop
-    lambda <- renameLambda $ segBinOpLambda binop
+    scanLambda <- renameLambda $ segBinOpLambda binop
 
     let scanNames = L.map getVName scan
 
@@ -294,16 +298,32 @@ seqStm' env (Let pat aux
                               --  (eBody [toExp neutral])
                               --  (eBody [eIndex (head scanNames) (eSubExp idx)])
 
-    scanSoac <- scanSOAC [Scan lambda ne]
-    -- es <- letChunkExp (seqFactor env) tid (snd $ head $ M.toList $ tileMap env)
-    -- sz <- mkChunkSize tid env
+    lambParamTs <- mapM lookupType usedArrays
+    let lambParamTs' = L.map (Prim . elemType) lambParamTs
+    params <- mapM (newParam "par") lambParamTs'
+    let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
+    let mapping = M.fromList $ zip orgArrays mapExps
+    kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
+    -- kbody'' <- addMapResultsToKbody env' kbody' fusedReds numResConsumed
+    let body = kbodyToBody kbody'
+    mapLambda <- renameLambda $
+                  Lambda
+                  { lambdaParams = params,
+                    lambdaBody = body,
+                    lambdaReturnType = ts
+                  }
+    let scanSoac = scanomapSOAC [Scan scanLambda ne] mapLambda
     es <- mapM (getChunk env tid (seqFactor env)) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
+    
+    -- return fused map results
+    fused <- buildMapResults env' fusedReds
 
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
     let types' = scremaType (seqFactor env) scanSoac
-    let returns = L.map (Returns ResultMaySimplify mempty) res
+    let returnExps = L.take numResConsumed res ++ fused
+    let returns = L.map (Returns ResultMaySimplify mempty) returnExps
     pure (returns, lvl', space', types')
 
   -- TODO first head mult binops
@@ -315,7 +335,6 @@ seqStm' env (Let pat aux
   forM_ (zip (patElems pat) scans') (\(p, s) ->
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
-
 
   --exp <- letTupExp "tmp" $ 
  -- addStm $ Let pat aux 
@@ -330,18 +349,23 @@ getVName :: SubExp -> VName
 getVName (Var name) = name
 getVName e = error $ "SubExp is not of type Var in getVName:\n" ++ show e
 
--- resConsumed: num of kernels results used in the segop
-addMapResultsToKbody :: Env -> KernelBody GPU -> [VName] -> Int -> Builder GPU (KernelBody GPU)
-addMapResultsToKbody env (KernelBody dec stms res) names resConsumed =
+buildMapResults :: Env -> [VName] -> Builder GPU [SubExp]
+buildMapResults env names =
   case threadId env of
     Just tid -> do
-      (resExp, stms') <- collectStms $ do
-        let slice = Slice [DimFix $ Var tid, DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+        let slice = Slice [DimFix $ Var tid, DimSlice (intConst Int64 0)
+                            (seqFactor env) (intConst Int64 1)]
         mapM (\n -> letSubExp "fused" $ BasicOp $ Index n slice) names
-      let res' = L.take resConsumed res ++
-                  L.map (Returns ResultMaySimplify mempty) resExp
-      pure $ KernelBody dec (stms <> stms') res'
     Nothing -> error "threadId required to add fused statements, but none given"
+
+-- resConsumed: num of kernels results used in the segop
+addMapResultsToKbody :: Env -> KernelBody GPU -> [VName] -> Int -> Builder GPU (KernelBody GPU)
+addMapResultsToKbody env (KernelBody dec stms res) names resConsumed = do
+  (resExp, stms') <- collectStms $ do buildMapResults env names
+  let res' = L.take resConsumed res ++
+              L.map (Returns ResultMaySimplify mempty) resExp
+  pure $ KernelBody dec (stms <> stms') res'
+
 
 numArgsConsumedBySegop :: [SegBinOp GPU] -> Int
 numArgsConsumedBySegop binops =
@@ -477,7 +501,7 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
                       lambdaBody = body,
                       lambdaReturnType = retTs
                     }
-        pTrace (show (zip orgArrs usedArrs )) (pure $ redomapSOAC reds lamb)
+        pure $ redomapSOAC reds lamb
 
 
 kernelNeeded ::
