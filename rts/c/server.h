@@ -969,6 +969,7 @@ void store_opaque(const struct opaque_aux *aux, FILE *f,
   size_t obj_size;
   void *data = NULL;
   (void)aux->store(ctx, obj, &data, &obj_size);
+  assert(futhark_context_sync(ctx) == 0);
   fwrite(data, sizeof(char), obj_size, f);
   free(data);
 }
