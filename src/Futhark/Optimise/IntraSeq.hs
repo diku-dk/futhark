@@ -51,6 +51,12 @@ data Env = Env {
   seqFactor  :: SubExp
 }
 
+data Mapping = Mapping {
+  m :: M.Map VName (VName -> Exp GPU)
+}
+
+
+
 
 
 -- NOTE uncomment this for pretty printing AST
@@ -176,11 +182,7 @@ seqStm' env (Let pat aux
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
   let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
-  -- let (arrs, tiles) = unzip $ M.toList $ tileMap env
-  -- let mapping = M.fromList $ zip arrs redExps <> zip tiles redExps
   let mapping = M.fromList $ zip orgArrays redExps
-  -- let mapping = M.fromList $ zip (trace (show usedArrays) orgArrays) redExps
-  -- let mapping = M.fromList $ zipWith (curry (\((a,_), r) -> (a,r))) usedArrays redExps
 
   -- Modify the kernel body
   -- TODO: Assumes single dimensionfo
@@ -463,7 +465,6 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
       -- For each tile we can then get the corresponding chunk
       chunks <- mapM (getChunk env tid sz) usedArrs
 
-
       -- expandArr is only because we might need scratch arrays that are not used for reductions
       -- const (0 :: Int64) is thus just a dummy
       let chunkElems = expandArr ne (constant (0 :: Int64)) (length usedArrs - length ne)
@@ -484,11 +485,12 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
   where
     buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
     buildRedoMap reds = do
-      ts <- mapM lookupType usedArrs
+      let arrs = usedArrs <> orgArrs
+      ts <- mapM lookupType arrs
       let ts' = L.map (Prim . elemType) ts
       params <- mapM (newParam "par" ) ts'
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      let mapping' = M.fromList $ zip orgArrs mapExps
+      let mapping' = M.fromList $ zip arrs mapExps
 
       -- if not $ kernelNeeded kbody mapping' then do
       --   reduceSOAC reds
