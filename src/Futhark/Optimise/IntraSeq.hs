@@ -216,7 +216,7 @@ seqStm' env (Let pat aux (Op (SegOp
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tidName, grpSize env)]
     let types' = scremaType (seqFactor env) screma
-    let kres = L.map (Returns ResultPrivate mempty) res
+    let kres = L.map (Returns ResultMaySimplify  mempty) res
     pure (kres, lvl', space', types')
 
   -- let mapExps = L.map (\m -> BasicOp $ Index m $ Slice [DimFix $ Var tid]) maps
@@ -479,7 +479,7 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
       let types' = scremaType (seqFactor env) screma
-      let kres = L.map (Returns ResultPrivate mempty) res
+      let kres = L.map (Returns ResultMaySimplify mempty) res
       pure (kres, lvl', space', types')
   where
     buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
@@ -490,18 +490,18 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
       let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
       let mapping' = M.fromList $ zip orgArrs mapExps
 
-      if not $ kernelNeeded kbody mapping' then do
-        reduceSOAC reds
-      else do
-        kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
-        let body = kbodyToBody kbody'
-        lamb <- renameLambda $
-                    Lambda
-                    { lambdaParams = params,
-                      lambdaBody = body,
-                      lambdaReturnType = retTs
-                    }
-        pure $ redomapSOAC reds lamb
+      -- if not $ kernelNeeded kbody mapping' then do
+      --   reduceSOAC reds
+      -- else do
+      kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+      let body = kbodyToBody kbody'
+      lamb <- renameLambda $
+                  Lambda
+                  { lambdaParams = params,
+                    lambdaBody = body,
+                    lambdaReturnType = retTs
+                  }
+      pure $ redomapSOAC reds lamb
 
 
 kernelNeeded ::
@@ -712,8 +712,8 @@ arraysInScope ::
   Builder GPU ([VName], [VName])
 arraysInScope env kbody = do
   scope <- askScope
-  let (arrays, _) = unzip $ M.toList $  M.filter isArray scope
-
+  let (arrays, _) = unzip $ M.toList $ M.filter isArray scope
+  let (orgArrays, _) = unzip $ M.toList $ M.filter isFParam $ M.filter isArray scope
   let free = IM.elems $ namesIntMap $ freeIn kbody
 
   let freeArrays = arrays `intersect` free
@@ -728,7 +728,11 @@ arraysInScope env kbody = do
             arr
         ) freeArrays
 
-  pure (arrays, arrays')
+  pure (orgArrays, arrays')
+  where
+    isFParam :: NameInfo GPU -> Bool
+    isFParam (FParamName {}) = True
+    isFParam _ = False
 
   -- let free = IM.elems $ namesIntMap $ freeIn kbody
   -- let tiles = M.toList $ tileMap env
