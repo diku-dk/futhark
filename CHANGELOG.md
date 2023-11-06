@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Size expressions in local function parameters had an interesting
   interaction with defunctionalisation (#2040).
 
+* The `store` command in server executables did not properly
+  synchronise when storing opaque values, which would lead to
+  use-after-free errors.
+
 ## [0.25.6]
 
 ### Added
