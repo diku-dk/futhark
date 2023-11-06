@@ -51,9 +51,30 @@ data Env = Env {
   seqFactor  :: SubExp
 }
 
-data Mapping = Mapping {
-  m :: M.Map VName (VName -> Exp GPU)
-}
+setMapping :: Env -> M.Map VName VName -> Env
+setMapping (Env gid gSize gSizeOld tid _ factor) mapping =
+            Env gid gSize gSizeOld tid mapping factor
+
+updateMapping :: Env -> M.Map VName VName -> Env
+updateMapping env mapping =
+  let mapping' = mapping `M.union` tileMap env
+  in setMapping env mapping'
+
+
+updateEnvTid :: Env -> VName -> Env
+updateEnvTid (Env gid sz szo _ tm sq) tid = Env gid sz szo (Just tid) tm sq
+
+getThreadId :: Env -> VName
+getThreadId env =
+  case threadId env of
+    (Just tid ) -> tid
+    _ -> error "No tid to get"
+
+-- getMappingKeys :: Env -> 
+
+-- data Mapping = Mapping {
+--   m :: M.Map VName (VName -> Exp GPU)
+-- }
 
 
 
@@ -155,10 +176,10 @@ seqStms' ::
   Stms GPU ->
   Builder GPU ()
 seqStms' env stms = do
-  stms' <- foldM (\ss s -> do
-      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env s
-      pure $ ss <> ss'
-      ) mempty (stmsToList stms)
+  (stms', _) <- foldM (\(ss, env') s -> do
+      (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env' s
+      pure (ss <> ss', env'')
+      ) (mempty, env) (stmsToList stms)
   addStms stms'
 
 
@@ -167,22 +188,26 @@ seqStms' env stms = do
 seqStm' ::
   Env ->
   Stm GPU ->
-  Builder GPU ()
+  Builder GPU Env
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
   let tid = fst $ head $ unSegSpace space
   let env' = updateEnvTid env tid
 
-  (orgArrays, usedArrays) <- arraysInScope env kbody
+  -- NOTE: Mapping is arrays to tiles
+
+  -- (orgArrays, usedArrays) <- arraysInScope env kbody
 
   -- For each SegBinOp we should create an intermediate reduction result
-  reds <- mapM (mkSegMapRed env' (orgArrays, usedArrays) kbody ts) binops
+  reds <- mapM (mkSegMapRed env' kbody ts) binops
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
   let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
   let mapping = M.fromList $ zip orgArrays redExps
+
+  let env'' = updateMapping env' $ zip  
 
   -- Modify the kernel body
   -- TODO: Assumes single dimensionfo
@@ -317,7 +342,7 @@ seqStm' env (Let pat aux
     let scanSoac = scanomapSOAC [Scan scanLambda ne] mapLambda
     es <- mapM (getChunk env tid (seqFactor env)) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
-    
+
     -- return fused map results
     fused <- buildMapResults env' fusedReds
 
@@ -378,36 +403,47 @@ numArgsConsumedBySegop binops =
 
 seqKernelBody' ::
   Env ->
-  Map VName (Exp GPU) -> -- mapping from global array to intermediate results
+  -- Map VName (Exp GPU) -> -- mapping from global array to intermediate results
   KernelBody GPU ->
   SeqM (KernelBody GPU)
-seqKernelBody' env mapping (KernelBody dec stms results) = do
-  stms' <- seqStms'' env mapping stms
+seqKernelBody' env (KernelBody dec stms results) = do
+  stms' <- seqStms'' env stms
   pure $ KernelBody dec stms' results
 
 seqStms'' ::
   Env ->
-  Map VName (Exp GPU) ->
+  -- Map VName (Exp GPU) ->
   Stms GPU ->
   SeqM (Stms GPU)
-seqStms'' env mapping stms = do
-  foldM (\ss s -> do
-      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env mapping s
-      pure $ ss <> ss'
-      ) mempty (stmsToList stms)
+seqStms'' env stms = do
+  (stms', _) <- foldM (\(ss, env') s -> do
+      (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env' s
+      pure (ss <> ss', env'')
+      ) (mempty, env) (stmsToList stms)
+  pure stms'
 
 seqStm'' ::
   Env ->
-  Map VName (Exp GPU) ->
+  -- Map VName (Exp GPU) ->
   Stm GPU ->
-  Builder GPU ()
-seqStm'' _ mapping stm@(Let pat aux (BasicOp (Index arr _))) =
-  if M.member arr mapping then do
-    let (Just op) = M.lookup arr mapping
-    addStm $ Let pat aux op
-  else
+  Builder GPU Env
+seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
+  if M.member arr (tileMap env) then do
+    let (Just name) = M.lookup arr (tileMap env)
+    tp <- lookupType name
+    slice <- 
+          case arrayRank tp of
+            0 -> pure $ BasicOp $ SubExp $ Var name
+            1 -> pure $ BasicOp $ Index name (Slice [DimFix $ Var (getThreadId env)])
+            _ -> error ":("
+    addStm $ Let pat aux slice
+    pure env
+  else do
     addStm stm
-seqStm'' _ _ stm = addStm stm
+    pure env
+seqStm'' env stm = do
+  addStm stm
+  pure env
 
 seqSegRedKernelBody ::
   Env ->
@@ -447,12 +483,11 @@ seqSegRedStm _ _ _ = pure []
 
 mkSegMapRed ::
   Env ->
-  ([VName],[VName]) ->
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
+mkSegMapRed env kbody retTs binop = do
     let comm = segBinOpComm binop
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
@@ -461,8 +496,9 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       sz <- mkChunkSize tid env
-      screma <- buildRedoMap [Reduce comm lambda ne]
-      -- For each tile we can then get the corresponding chunk
+      usedArrs <- getUsedArraysIn env kbody
+      screma <- buildRedoMap [Reduce comm lambda ne] usedArrs tid
+
       chunks <- mapM (getChunk env tid sz) usedArrs
 
       -- expandArr is only because we might need scratch arrays that are not used for reductions
@@ -474,6 +510,7 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
         letExp "chunk" $ BasicOp $ Update Unsafe scratch
           (Slice [DimSlice (intConst Int64 0) sz (intConst Int64 1)])
           $ Var chunk) $ L.zip chunksScratch chunks
+
       res <- letTupExp' "res" $ Op $ OtherOp $
                 Screma (seqFactor env) chunks' screma
 
@@ -483,19 +520,25 @@ mkSegMapRed env (orgArrs, usedArrs) kbody retTs binop = do
       let kres = L.map (Returns ResultMaySimplify mempty) res
       pure (kres, lvl', space', types')
   where
-    buildRedoMap :: [Reduce GPU] -> Builder GPU (ScremaForm GPU)
-    buildRedoMap reds = do
-      let arrs = usedArrs <> orgArrs
-      ts <- mapM lookupType arrs
+    buildRedoMap ::
+      [Reduce GPU] ->
+      [VName]      ->    -- Used arrays
+      VName      ->   -- tid
+      Builder GPU (ScremaForm GPU)
+    buildRedoMap reds usedArrs tid = do
+      ts <- mapM lookupType usedArrs
       let ts' = L.map (Prim . elemType) ts
       params <- mapM (newParam "par" ) ts'
-      let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      let mapping' = M.fromList $ zip arrs mapExps
 
+      let mapNames = L.map paramName params
+
+      -- let mapping' = M.fromList $ zip arrs mapExps
+      let env' = updateMapping env $ M.fromList $ zip usedArrs mapNames
+      let env'' = updateEnvTid env' tid
       -- if not $ kernelNeeded kbody mapping' then do
       --   reduceSOAC reds
       -- else do
-      kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+      kbody' <- runSeqM $ seqKernelBody' env'' kbody
       let body = kbodyToBody kbody'
       lamb <- renameLambda $
                   Lambda
@@ -517,6 +560,23 @@ kernelNeeded (KernelBody _ stms _) mapping = needed $ stmsToList stms
        not (M.member arr mapping) || needed t
     needed _ = True
 
+getUsedArraysIn ::
+  Env ->
+  KernelBody GPU ->
+  Builder GPU [VName]
+getUsedArraysIn env kbody = do
+  scope <- askScope
+  let (arrays, _) = unzip $ M.toList $ M.filter isArray scope
+  let free = IM.elems $ namesIntMap $ freeIn kbody
+  let freeArrays = arrays `intersect` free
+  let arrays' =
+        L.map ( \ arr ->
+          if M.member arr (tileMap env) then
+            let (Just tile) = M.lookup arr (tileMap env)
+            in tile
+          else arr
+          ) freeArrays
+  pure arrays'
 
 
 getChunk ::
@@ -638,13 +698,13 @@ mkTiles ::
   Builder GPU Env
 mkTiles env = do
   scope <- askScope
-  let arraysInScope = M.toList $  M.filter isArray scope
+  let arrsInScope = M.toList $  M.filter isArray scope
 
   scratchSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
                                                (eSubExp $ seqFactor env)
                                                (eSubExp $ grpSize env)
 
-  tiles <- forM arraysInScope $ \ (arrName, arrInfo) -> do
+  tiles <- forM arrsInScope $ \ (arrName, arrInfo) -> do
     let tp = elemType $ typeOf arrInfo
     -- tile <- letExp "tile" $ BasicOp $ Scratch tp [scratchSize]
 
@@ -700,8 +760,7 @@ mkTiles env = do
 
     pure (arrName, tile')
 
-  pure $ (\(Env gid gSize gSizeOld tid _ factor) ->
-            Env gid gSize gSizeOld tid (M.fromList tiles) factor) env
+  pure $ setMapping env (M.fromList tiles)
 
 isArray :: NameInfo GPU -> Bool
 isArray info = arrayRank (typeOf info) > 0
@@ -827,8 +886,6 @@ kbodyToBody (KernelBody dec stms res) =
       bodyResult = res'
     }
 
-updateEnvTid :: Env -> VName -> Env
-updateEnvTid (Env gid sz szo _ tm sq) tid = Env gid sz szo (Just tid) tm sq
 
 expandArr :: [a] -> a -> Int -> [a]
 expandArr arr ele num = arr ++ replicate num ele
