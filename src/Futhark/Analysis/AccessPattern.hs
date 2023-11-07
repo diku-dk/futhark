@@ -402,10 +402,12 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
 
   -- Add each non-constant DimIndex as a dependency to the index expression
   let ctxVal = ctxValFromNames ctx $ namesFromList subExprs
+  -- The pattern will have inextricable complexity.
+  let ctxVal' = ctxVal { boi = Idk }
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
-  foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal) {constants = namesFromList $ concat consts}) pats
+  foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal') {constants = namesFromList $ concat consts}) pats
 
 analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
