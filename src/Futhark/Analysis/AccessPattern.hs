@@ -480,9 +480,8 @@ analyzeBasicOp ctx expression pats = do
     reduceConstants (Var v) = Right v
 
     reduceNames :: [VName] -> [VName]
-    reduceNames names =
-      -- concatMap ((\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx) names
-      (\(a, _, _) -> a) $ (S.elems . dependencies . reduceDependencies ctx) (head names)
+    reduceNames =
+      map (\(a,_,_) -> a) . concatMap (S.elems . dependencies . reduceDependencies ctx)
 
     skrrt (Constant _) = Ez
     skrrt (Var v) = case M.lookup v (assignments ctx) of
