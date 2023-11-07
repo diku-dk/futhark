@@ -12,15 +12,15 @@
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     },
     "nixpkgs": {
-        "branch": "master",
+        "branch": "haskell-updates",
         "description": "Nix Packages collection",
         "homepage": "",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "6c5458cf32ba8aff7db0fc15379ba375f944067b",
-        "sha256": "1kljqi2zkbw2pqk2gins274f7k51by3firsicn61gnxxwd4nc4li",
+        "rev": "8541e5ab09d6d8928a362427e63aa41f2564b6d4",
+        "sha256": "17j45ds5hv3d2g467yrnpkcjba913zypjaijsmajc2a76px34ky6",
         "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/6c5458cf32ba8aff7db0fc15379ba375f944067b.tar.gz",
+        "url": "https://github.com/NixOS/nixpkgs/archive/8541e5ab09d6d8928a362427e63aa41f2564b6d4.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     }
 }
