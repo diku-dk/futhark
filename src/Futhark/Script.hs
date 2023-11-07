@@ -35,6 +35,7 @@ import Control.Monad
 import Control.Monad.Except (MonadError (..))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (bimap)
+import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
 import Data.Foldable (toList)
@@ -356,20 +357,33 @@ loadData datafile = do
     Just vs ->
       pure $ V.ValueTuple $ map V.ValueAtom vs
 
--- | Handles the following builtin functions: @loaddata@.  Fails for
--- everything else.  The 'FilePath' indicates the directory that files
--- should be read relative to.
-scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
-scriptBuiltin dir "loaddata" vs =
+pathArg ::
+  (MonadError T.Text f) =>
+  FilePath ->
+  T.Text ->
+  [V.Compound V.Value] ->
+  f FilePath
+pathArg dir cmd vs =
   case vs of
     [V.ValueAtom v]
-      | Just path <- V.getValue v -> do
-          let path' = map (chr . fromIntegral) (path :: [Word8])
-          loadData $ dir </> path'
+      | Just path <- V.getValue v ->
+          pure $ dir </> map (chr . fromIntegral) (path :: [Word8])
     _ ->
       throwError $
-        "$loaddata does not accept arguments of types: "
+        "$"
+          <> cmd
+          <> " does not accept arguments of types: "
           <> T.intercalate ", " (map (prettyText . fmap V.valueType) vs)
+
+-- | Handles the following builtin functions: @loaddata@, @loadbytes@.
+-- Fails for everything else. The 'FilePath' indicates the directory
+-- that files should be read relative to.
+scriptBuiltin :: (MonadIO m, MonadError T.Text m) => FilePath -> EvalBuiltin m
+scriptBuiltin dir "loaddata" vs = do
+  loadData =<< pathArg dir "loaddata" vs
+scriptBuiltin dir "loadbytes" vs = do
+  fmap (V.ValueAtom . V.putValue1) . liftIO . BS.readFile
+    =<< pathArg dir "loadbytes" vs
 scriptBuiltin _ f _ =
   throwError $ "Unknown builtin function $" <> prettyText f
 
