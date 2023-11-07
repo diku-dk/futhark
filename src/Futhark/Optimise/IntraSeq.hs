@@ -16,28 +16,30 @@ import Control.Monad.State
 
 import Data.Map as M
 import Data.IntMap.Strict as IM
+import Data.List as L
 
 import Debug.Pretty.Simple
-import Data.List as L
 import Debug.Trace
-import Text.Pretty.Simple
-import qualified Control.Monad
-
-
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
 
-
-
-runSeqM :: SeqM a -> Builder GPU a
-runSeqM m = do
-  scp <- askScope
-  let tmp = runReaderT m scp
+runSeqM' :: SeqM a -> Scope GPU -> Builder GPU a
+runSeqM' m sc = do
+  let tmp = runReaderT m sc
   st <- get
   let tmp' = runState tmp st
   pure $ fst tmp'
 
+runSeqM :: SeqM a -> Builder GPU a
+runSeqM m = do
+  scp <- askScope
+  runSeqM' m scp
+
+runSeqMExtendedScope :: SeqM a -> Scope GPU -> Builder GPU a
+runSeqMExtendedScope m sc = do
+  scp <- askScope
+  runSeqM' m (sc <> scp)
 
 
 -- | A structure for convenient passing of different information needed at 
@@ -47,7 +49,7 @@ data Env = Env {
   grpSize    :: SubExp,             -- The group size after seq
   grpsizeOld :: SubExp,             -- The group size before seq
   threadId   :: Maybe VName,        -- the thread id if available at given stage
-  tileMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
+  nameMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
 
@@ -57,9 +59,19 @@ setMapping (Env gid gSize gSizeOld tid _ factor) mapping =
 
 updateMapping :: Env -> M.Map VName VName -> Env
 updateMapping env mapping =
-  let mapping' = mapping `M.union` tileMap env
+  let mapping' = mapping `M.union` nameMap env
   in setMapping env mapping'
 
+lookupMapping :: Env -> VName -> Maybe VName
+lookupMapping env name 
+  | M.member name (nameMap env) = do
+    case M.lookup name (nameMap env) of
+      Just n -> 
+        case lookupMapping env n of
+          Nothing -> Just n
+          n' -> n'
+      Nothing -> Nothing
+lookupMapping _ _ = Nothing
 
 updateEnvTid :: Env -> VName -> Env
 updateEnvTid (Env gid sz szo _ tm sq) tid = Env gid sz szo (Just tid) tm sq
@@ -176,10 +188,11 @@ seqStms' ::
   Stms GPU ->
   Builder GPU ()
 seqStms' env stms = do
-  (stms', _) <- foldM (\(ss, env') s -> do
-      (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env' s
-      pure (ss <> ss', env'')
-      ) (mempty, env) (stmsToList stms)
+  (_, stms') <- collectStms $ mapM (seqStm' env) stms
+  -- (stms', _) <- foldM (\(ss, env') s -> do
+  --     (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env' s
+  --     pure (ss <> ss', env'')
+  --     ) (mempty, env) (stmsToList stms))
   addStms stms'
 
 
@@ -188,7 +201,7 @@ seqStms' env stms = do
 seqStm' ::
   Env ->
   Stm GPU ->
-  Builder GPU Env
+  Builder GPU ()
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
@@ -204,39 +217,43 @@ seqStm' env (Let pat aux
 
   -- Pair the original arrays with the intermediate results
   -- TODO head in reds until multiple binops are supported
-  let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
-  let mapping = M.fromList $ zip orgArrays redExps
+  -- let redExps = L.map (\r -> BasicOp $ Index r $ Slice [DimFix $ Var tid]) $ head reds
+  -- let mapping = M.fromList $ zip orgArrays redExps
 
-  let env'' = updateMapping env' $ zip  
+  -- let env'' = updateMapping env' $ zip  
 
   -- Modify the kernel body
   -- TODO: Assumes single dimensionfo
-  kbody' <- runSeqM $ seqSegRedKernelBody env' mapping kbody
-  let numResConsumed = numArgsConsumedBySegop binops
-  let fusedReds = L.drop numResConsumed $ head reds
-  kbody'' <- addMapResultsToKbody env' kbody' fusedReds numResConsumed
+  -- kbody' <- runSeqM $ seqSegRedKernelBody env' kbody
+  -- let fusedReds = L.drop numResConsumed $ head reds
+  -- kbody' <- addMapResultsToKbody env' kbody fusedReds numResConsumed
+  -- TODO: multiple binops
+  kbody' <- mkResultKBody env' kbody $ head reds
 
   -- Update remaining types
+  let numResConsumed = numArgsConsumedBySegop binops
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
   -- TODO: binop head
   tps <- mapM lookupType $ head reds
   let ts' = L.map (stripArray 1) tps
   let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
-  let pat' = Pat $ patKeep ++ L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
+  let pat' = Pat $ patKeep ++
+        L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
 
-  addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody'')))
+  addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
+
 
 seqStm' env (Let pat aux (Op (SegOp
           (SegMap lvl@(SegThread {}) space ts kbody)))) = do
   let tid = fst $ head $ unSegSpace space
   let env' = updateEnvTid env tid
 
-  (orgArrays, usedArrays) <- arraysInScope env kbody
+  usedArrays <- getUsedArraysIn env kbody
 
   maps <- buildSegMapTup_ "map_intermediate" $ do
     tidName <- newVName "tid"
     phys <- newVName "phys_tid"
-    screma <- buildMapScrema orgArrays
+    screma <- buildMapScrema usedArrays
     chunks <- mapM (letChunkExp (seqFactor env) tidName) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $
             Screma (seqFactor env) chunks screma
@@ -250,7 +267,7 @@ seqStm' env (Let pat aux (Op (SegOp
   -- let mapping = M.fromList $ zip orgArrays mapExps
   -- kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
   -- TODO: change name of addMapResultsToKbody here it is not because fused
-  kbody' <- addMapResultsToKbody env' kbody maps 0
+  kbody' <- mkResultKBody env' kbody maps
 
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
   tps <- mapM lookupType maps
@@ -260,11 +277,13 @@ seqStm' env (Let pat aux (Op (SegOp
 
   where
     buildMapScrema :: [VName] -> Builder GPU (ScremaForm GPU)
-    buildMapScrema orgArrs = do
+    buildMapScrema arrs = do
       params <- mapM (newParam "par") ts
-      let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-      let mapping' = M.fromList $ zip orgArrs mapExps
-      kbody' <- runSeqM $ seqKernelBody' env mapping' kbody
+      let mapNms = L.map paramName params
+      -- let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
+      -- let mapping' = M.fromList $ zip orgArrs mapExps
+      let env' = updateMapping env $ M.fromList $ zip arrs mapNms
+      kbody' <- runSeqMExtendedScope (seqKernelBody' env' kbody) (scopeOfLParams params)
       let body = kbodyToBody kbody'
       lamb <- renameLambda $
                 Lambda
@@ -276,42 +295,43 @@ seqStm' env (Let pat aux (Op (SegOp
 
 
 seqStm' env (Let pat aux
-            (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
-
-  (orgArrays, usedArrays) <- arraysInScope env kbody
-
-  reds <- mapM (mkSegMapRed env (orgArrays, usedArrays) kbody ts) binops
+            (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
+  usedArrays <- getUsedArraysIn env kbody
+  -- do local reduction
+  reds <- mapM (mkSegMapRed env kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
   let numResConsumed = numArgsConsumedBySegop binops
   let (scanReds, fusedReds) = L.splitAt numResConsumed redshead
 
-  scan <- buildSegScan "scan_agg" $ do
+  -- scan over reduction results
+  imScan <- buildSegScan "scan_agg" $ do
     tid <- newVName "tid"
+    let env' = updateEnvTid env tid
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
-
+    
     -- update kernelbody according to the number of fused results
-    e' <- forM scanReds $ \ r -> do
-      letSubExp "elem" $ BasicOp $ Index r (Slice [DimFix $ Var tid])
+    -- e' <- forM scanReds $ \ r -> do
+    --   letSubExp "elem" $ BasicOp $ Index r (Slice [DimFix $ Var tid])
 
     let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env)]
-    let results = L.map (Returns ResultMaySimplify mempty) e'
+    let space' = SegSpace phys [(tid, grpSize env')]
+    -- let results = L.map (Returns ResultMaySimplify mempty) e'
+    results <- mapM (buildKernelResult env') scanReds 
     let ts' = L.take numResConsumed ts
     pure (results, lvl', space', binops', ts')
 
   scans' <- buildSegMapTup_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
-    let env' = updateEnvTid env tid
 
     -- TODO: Uses head
     let binop = head binops
     let neutral = segBinOpNeutral binop
     scanLambda <- renameLambda $ segBinOpLambda binop
 
-    let scanNames = L.map getVName scan
+    let scanNames = L.map getVName imScan
 
     idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
                                     (eSubExp $ Var tid)
@@ -322,16 +342,16 @@ seqStm' env (Let pat aux
                                )
                                (eBody $ L.map toExp neutral)
                                (eBody $ L.map (\s -> eIndex s (eSubExp idx)) scanNames)
-                              --  (eBody [toExp neutral])
-                              --  (eBody [eIndex (head scanNames) (eSubExp idx)])
 
     lambParamTs <- mapM lookupType usedArrays
     let lambParamTs' = L.map (Prim . elemType) lambParamTs
     params <- mapM (newParam "par") lambParamTs'
-    let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
-    let mapping = M.fromList $ zip orgArrays mapExps
-    kbody' <- runSeqM $ seqKernelBody' env' mapping kbody
-    -- kbody'' <- addMapResultsToKbody env' kbody' fusedReds numResConsumed
+    let mapNms = L.map paramName params
+    -- let mapExps = L.map (BasicOp . SubExp . Var . paramName ) params
+    -- let mapping = M.fromList $ zip orgArrays mapExps
+    let env' = updateEnvTid env tid
+    let env'' = updateMapping env' $ M.fromList $ zip usedArrays mapNms
+    kbody' <- runSeqMExtendedScope (seqKernelBody' env'' kbody) (scopeOfLParams params)
     let body = kbodyToBody kbody'
     mapLambda <- renameLambda $
                   Lambda
@@ -342,31 +362,25 @@ seqStm' env (Let pat aux
     let scanSoac = scanomapSOAC [Scan scanLambda ne] mapLambda
     es <- mapM (getChunk env tid (seqFactor env)) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
-
+    let usedRes = L.map (Returns ResultMaySimplify mempty) $ L.take numResConsumed res
     -- return fused map results
-    fused <- buildMapResults env' fusedReds
+    fused <- mapM (buildKernelResult env'') fusedReds
 
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env)]
     let types' = scremaType (seqFactor env) scanSoac
-    let returnExps = L.take numResConsumed res ++ fused
-    let returns = L.map (Returns ResultMaySimplify mempty) returnExps
-    pure (returns, lvl', space', types')
+    pure (usedRes ++ fused, lvl', space', types')
 
-  -- TODO first head mult binops
-  -- let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
-  -- addStm $ Let pat aux $ BasicOp exp'
-  -- exps <- mapM (eSubExp . Var) scans'
-
-  --scans'' <- mapM eSubExp scans'
   forM_ (zip (patElems pat) scans') (\(p, s) ->
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
-  --exp <- letTupExp "tmp" $ 
- -- addStm $ Let pat aux 
+            -- TODO first head mult binops
+            -- let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) (head scans')
+            -- addStm $ Let pat aux $ BasicOp exp'
+            -- exps <- mapM (eSubExp . Var) scans'
 
-
+            --scans'' <- mapM eSubExp scans'
 
 -- Catch all
 seqStm' _ stm = error $
@@ -376,22 +390,30 @@ getVName :: SubExp -> VName
 getVName (Var name) = name
 getVName e = error $ "SubExp is not of type Var in getVName:\n" ++ show e
 
-buildMapResults :: Env -> [VName] -> Builder GPU [SubExp]
-buildMapResults env names =
-  case threadId env of
-    Just tid -> do
-        let slice = Slice [DimFix $ Var tid, DimSlice (intConst Int64 0)
-                            (seqFactor env) (intConst Int64 1)]
-        mapM (\n -> letSubExp "fused" $ BasicOp $ Index n slice) names
-    Nothing -> error "threadId required to add fused statements, but none given"
+getTidIndexExp :: Env -> VName -> Builder GPU (Exp GPU)
+getTidIndexExp env name = do
+  tp <- lookupType name
+  let outerDim = [DimFix $ Var $ getThreadId env]
+  let index =
+        case arrayRank tp of
+          0 -> SubExp $ Var name
+          1 -> Index name $ Slice outerDim
+          2 -> Index name $ Slice $ 
+                outerDim ++ [DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+          _ -> error "Arrays are not expected to have more than 2 dimensions \n"
+  pure $ BasicOp index
 
--- resConsumed: num of kernels results used in the segop
-addMapResultsToKbody :: Env -> KernelBody GPU -> [VName] -> Int -> Builder GPU (KernelBody GPU)
-addMapResultsToKbody env (KernelBody dec stms res) names resConsumed = do
-  (resExp, stms') <- collectStms $ do buildMapResults env names
-  let res' = L.take resConsumed res ++
-              L.map (Returns ResultMaySimplify mempty) resExp
-  pure $ KernelBody dec (stms <> stms') res'
+buildKernelResult :: Env -> VName -> Builder GPU KernelResult
+buildKernelResult env name = do
+  i <- getTidIndexExp env name
+  res <- letSubExp "res" i
+  pure $ Returns ResultMaySimplify mempty res
+
+mkResultKBody :: Env -> KernelBody GPU -> [VName] -> Builder GPU (KernelBody GPU)
+mkResultKBody env (KernelBody dec _ _) names = do
+  (res, stms) <- collectStms $ do mapM (buildKernelResult env) names
+  pure $ KernelBody dec stms res
+
 
 
 numArgsConsumedBySegop :: [SegBinOp GPU] -> Int
@@ -403,7 +425,6 @@ numArgsConsumedBySegop binops =
 
 seqKernelBody' ::
   Env ->
-  -- Map VName (Exp GPU) -> -- mapping from global array to intermediate results
   KernelBody GPU ->
   SeqM (KernelBody GPU)
 seqKernelBody' env (KernelBody dec stms results) = do
@@ -412,7 +433,6 @@ seqKernelBody' env (KernelBody dec stms results) = do
 
 seqStms'' ::
   Env ->
-  -- Map VName (Exp GPU) ->
   Stms GPU ->
   SeqM (Stms GPU)
 seqStms'' env stms = do
@@ -424,62 +444,20 @@ seqStms'' env stms = do
 
 seqStm'' ::
   Env ->
-  -- Map VName (Exp GPU) ->
   Stm GPU ->
   Builder GPU Env
 seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
-  if M.member arr (tileMap env) then do
-    let (Just name) = M.lookup arr (tileMap env)
-    tp <- lookupType name
-    slice <- 
-          case arrayRank tp of
-            0 -> pure $ BasicOp $ SubExp $ Var name
-            1 -> pure $ BasicOp $ Index name (Slice [DimFix $ Var (getThreadId env)])
-            _ -> error ":("
-    addStm $ Let pat aux slice
-    pure env
-  else do
-    addStm stm
-    pure env
+  case lookupMapping env arr of 
+    Just name -> do
+      i <- getTidIndexExp env name
+      addStm $ Let pat aux i
+      pure env
+    Nothing -> do 
+      addStm stm
+      pure env
 seqStm'' env stm = do
   addStm stm
   pure env
-
-seqSegRedKernelBody ::
-  Env ->
-  Map VName (Exp GPU) -> -- mapping from global array to intermediate results
-  KernelBody GPU ->
-  SeqM (KernelBody GPU)
-seqSegRedKernelBody env mapping (KernelBody dec stms results) = do
-  (nms, stms') <- seqSegRedStms env mapping stms
-  -- TODO: IS THIS CORRECT??
-  let results' = L.map (\(Returns m c _, n) -> Returns m c (Var n)) $ zip results nms
-  pure $ KernelBody dec stms' results'
-
-seqSegRedStms ::
-  Env ->
-  Map VName (Exp GPU) ->
-  Stms GPU ->
-  SeqM ([VName], Stms GPU)
-seqSegRedStms env mapping stms = do
-  foldM (\(nms, ss) s -> do
-      (nms', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqSegRedStm env mapping s
-      pure (nms ++ nms', ss <> ss')
-      ) ([], mempty) (stmsToList stms)
-
-seqSegRedStm ::
-  Env ->
-  Map VName (Exp GPU) ->
-  Stm GPU ->
-  Builder GPU [VName]
-seqSegRedStm _ mapping (Let pat aux (BasicOp (Index arr _))) =
-  if M.member arr mapping then do
-    let (Just op) = M.lookup arr mapping
-    addStm $ Let pat aux op
-    let pNames = L.map patElemName $ patElems pat
-    pure pNames
-  else pure []
-seqSegRedStm _ _ _ = pure []
 
 mkSegMapRed ::
   Env ->
@@ -519,6 +497,7 @@ mkSegMapRed env kbody retTs binop = do
       let types' = scremaType (seqFactor env) screma
       let kres = L.map (Returns ResultMaySimplify mempty) res
       pure (kres, lvl', space', types')
+
   where
     buildRedoMap ::
       [Reduce GPU] ->
@@ -529,16 +508,15 @@ mkSegMapRed env kbody retTs binop = do
       ts <- mapM lookupType usedArrs
       let ts' = L.map (Prim . elemType) ts
       params <- mapM (newParam "par" ) ts'
-
-      let mapNames = L.map paramName params
+      let mapNms = L.map paramName params
 
       -- let mapping' = M.fromList $ zip arrs mapExps
-      let env' = updateMapping env $ M.fromList $ zip usedArrs mapNames
+      let env' = updateMapping env $ M.fromList $ zip usedArrs mapNms
       let env'' = updateEnvTid env' tid
       -- if not $ kernelNeeded kbody mapping' then do
       --   reduceSOAC reds
       -- else do
-      kbody' <- runSeqM $ seqKernelBody' env'' kbody
+      kbody' <- runSeqMExtendedScope (seqKernelBody' env'' kbody) (scopeOfLParams params)
       let body = kbodyToBody kbody'
       lamb <- renameLambda $
                   Lambda
@@ -571,8 +549,8 @@ getUsedArraysIn env kbody = do
   let freeArrays = arrays `intersect` free
   let arrays' =
         L.map ( \ arr ->
-          if M.member arr (tileMap env) then
-            let (Just tile) = M.lookup arr (tileMap env)
+          if M.member arr (nameMap env) then
+            let (Just tile) = M.lookup arr (nameMap env)
             in tile
           else arr
           ) freeArrays
@@ -668,10 +646,10 @@ renameSegBinOp segbinops =
 
 
 letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
-letChunkExp size tid arrName = do
+letChunkExp sz tid arrName = do
   letExp "chunk" $ BasicOp $
     Index arrName (Slice [DimFix (Var tid),
-    DimSlice (intConst Int64 0) size (intConst Int64 1)])
+    DimSlice (intConst Int64 0) sz (intConst Int64 1)])
 
 
 -- Generates statements that compute the pr. thread chunk size. This is needed
@@ -782,8 +760,8 @@ arraysInScope env kbody = do
   -- For each array in arrays see if it has been tiled 
   let arrays' =
         L.map ( \ arr ->
-          if M.member arr (tileMap env) then
-            let (Just tile) = M.lookup arr (tileMap env)
+          if M.member arr (nameMap env) then
+            let (Just tile) = M.lookup arr (nameMap env)
             in tile
           else
             arr
@@ -796,7 +774,7 @@ arraysInScope env kbody = do
     isFParam _ = False
 
   -- let free = IM.elems $ namesIntMap $ freeIn kbody
-  -- let tiles = M.toList $ tileMap env
+  -- let tiles = M.toList $ nameMap env
   -- let (used, tiles') = unzip $ intersectBy (\(a,_)(b,_) -> a == b) tiles (zip free free)
   -- let free' = free L.\\ used
 
