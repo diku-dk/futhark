@@ -18,12 +18,13 @@ module Futhark.Analysis.AccessPattern
   )
 where
 
-import Data.Either (partitionEithers)
+import Data.Either
 import Data.Foldable
 import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Pretty.Simple
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.MC
@@ -70,24 +71,31 @@ data DimIdxPat rep = DimIdxPat
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it is created at.
     dependencies :: S.IntMap (VName, Int, IterationType rep),
-    originalDimension :: Int
+    originalDimension :: Int,
+    boiToisRUs :: Boi
   }
   deriving (Eq, Show)
 
 instance Semigroup (DimIdxPat rep) where
   (<>) :: DimIdxPat rep -> DimIdxPat rep -> DimIdxPat rep
   adeps <> bdeps =
-    DimIdxPat (dependencies adeps <> dependencies bdeps) $
-      max (originalDimension adeps) (originalDimension bdeps)
+    DimIdxPat
+      (dependencies adeps <> dependencies bdeps)
+      (max (originalDimension adeps) (originalDimension bdeps))
+      (max (boiToisRUs adeps) (boiToisRUs bdeps))
 
 instance Monoid (DimIdxPat rep) where
-  mempty = DimIdxPat {dependencies = mempty, originalDimension = 0}
+  mempty = DimIdxPat mempty 0 Ez
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
 -- parallel construct, like foldl or map.
 data IterationType rep = Sequential | Parallel
   deriving (Eq, Show)
+
+-- k | v | linear (add/sub) | mul | exp | indirect
+data Boi = Ez | StrideAndOffset [VName] Int Int | Idk
+  deriving (Eq, Show, Ord)
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables = M.unionWith (M.unionWith M.union)
@@ -174,17 +182,22 @@ data CtxVal rep = CtxVal
   { deps :: Names,
     iterationType :: IterationType rep,
     level :: Int,
-    parents_nest :: [BodyType]
+    parents_nest :: [BodyType],
+    boi :: Boi
   }
   deriving (Show, Eq)
 
 ctxValFromNames :: Context rep -> Names -> CtxVal rep
-ctxValFromNames ctx names =
+ctxValFromNames ctx names = do
+  let (keys, ctxvals) = unzip $ M.toList $ assignments ctx
+  let wew = mapMaybe (\n -> M.lookup n $ M.fromList (zip keys (map boi $ ctxvals))) (namesToList names)
+  let wow = foldl max Ez wew
   CtxVal
     names
     (getIterationType ctx)
     (currentLevel ctx)
     (parents ctx)
+    wow
 
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal rep -> Context rep
@@ -203,7 +216,8 @@ ctxValZeroDeps ctx iterType =
     { deps = mempty,
       iterationType = iterType,
       level = currentLevel ctx,
-      parents_nest = parents ctx
+      parents_nest = parents ctx,
+      boi = Ez
     }
 
 -- | Create a singular context from a segspace
@@ -230,7 +244,9 @@ analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
   let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
-  snd $ analyzeStmsPrimitive ctx stms
+  let (names, asses) = unzip $ M.toList $ assignments ctx
+  let names' = map (\n -> show (baseName n) ++ "_" ++ show (baseTag n)) names
+  pTraceShow (zip names' (map boi asses)) $ snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: (Analyze rep) => Context rep -> [Stm rep] -> (Context rep, IndexTable rep)
@@ -259,7 +275,7 @@ analyzeStms ctx bodyConstructor pats body = do
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
-  (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
+  pTraceShow (assignments ctx'') $ (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -407,36 +423,66 @@ analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyzeBasicOp ctx expression pats = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (Opaque _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (ArrayLit subexps _t) -> concatCtxVals mempty subexps
-        (UnOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (ConvOp _ subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
-        (Assert subexp _ _) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp
+        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (Opaque _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (ArrayLit subexps _t) -> (concatCtxVals mempty subexps) {boi = Idk}
+        (UnOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (BinOp t lsubexp rsubexp) -> analyzeBinOp t lsubexp rsubexp
+        (CmpOp _ lsubexp rsubexp) -> (concatCtxVals mempty [lsubexp, rsubexp]) {boi = Idk}
+        (ConvOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (Assert subexp _ _) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
         (Index name _) ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp
-        (Manifest _dim name) -> ctxValFromNames ctx $ oneName name
-        (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
-        (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
-        (Scratch _ subexprs) -> concatCtxVals mempty subexprs
-        (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
-        (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
-        (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
-        (FlatIndex name _) -> ctxValFromNames ctx $ oneName name
-        (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [name, source]
-  let ctx' = foldl' extend ctx $ map (\n -> oneContext n ctx_val) pats
+        (Concat _ _ length_subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp) {boi = Idk}
+        (Manifest _dim name) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
+        (Iota end start stride _) -> (concatCtxVals mempty [end, start, stride]) {boi = Idk}
+        (Replicate (Shape shape) value') -> (concatCtxVals mempty (value' : shape)) {boi = Idk}
+        (Scratch _ subexprs) -> (concatCtxVals mempty subexprs) {boi = Idk}
+        (Reshape _ (Shape shape_subexp) name) -> (concatCtxVals (oneName name) shape_subexp) {boi = Idk}
+        (Rearrange _ name) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
+        (UpdateAcc name lsubexprs rsubexprs) -> (concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)) {boi = Idk}
+        (FlatIndex name _) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
+        (FlatUpdate name _ source) -> (ctxValFromNames ctx $ namesFromList [name, source]) {boi = Idk}
+  let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
     concatCtxVals ne nn =
       ctxValFromNames
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
+
+    analyzeBinOp t lsubexp rsubexp = do
+      let lboi = skrrt lsubexp
+      let rboi = skrrt rsubexp
+      let reduced = [reduceConstants lsubexp, reduceConstants rsubexp]
+      let boi = case t of
+            (Add _ _) -> case (lboi, rboi) of
+              (StrideAndOffset names s o, Ez) -> StrideAndOffset (names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Ez, StrideAndOffset names s o) -> StrideAndOffset (names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Ez, Ez) -> case partitionEithers reduced of
+                (_, []) -> Idk -- TODO: Can we handle this case better?
+                (consts, vars) -> StrideAndOffset vars 0 (sum consts)
+              _ -> Idk -- TODO: Can we handle this case better?
+            (Mul _ _) -> case (lboi, rboi) of
+              (StrideAndOffset names s o, Ez) -> StrideAndOffset (names ++ rights reduced) (s * product (lefts reduced)) o
+              (Ez, StrideAndOffset names s o) -> StrideAndOffset (names ++ rights reduced) (s * product (lefts reduced)) o
+              (Ez, Ez) -> case partitionEithers reduced of
+                (_, []) -> Idk -- TODO: Can we handle this case better?
+                (consts, vars) -> StrideAndOffset vars (product consts) 0
+              _ -> Idk -- TODO: Can we handle this case better?
+            _ -> Idk
+      pTrace "\n" $ pTraceShow (t, lsubexp, rsubexp, boi) $ pTrace "\n" $ (concatCtxVals mempty [lsubexp, rsubexp]) {boi = boi}
+
+    reduceConstants (Constant (IntValue v)) = Left $ valueIntegral v
+    reduceConstants (Var v) = Right v
+
+    skrrt (Constant _) = Ez
+    skrrt (Var v) = case M.lookup v (assignments ctx) of
+      Nothing -> error "we are not happy :(((((("
+      Just ass -> boi ass
 
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pats body bodies =
@@ -488,7 +534,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx'))
+          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') Ez)
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -564,11 +610,12 @@ reduceDependencies ctx v =
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
       Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
-      Just (CtxVal deps itertype lvl parents_nest) ->
+      Just (CtxVal deps itertype lvl parents_nest boi) ->
+        -- pTraceShow ("I just fucked yo bitch in some gucci flip flops", boi) $
         if null $ namesToList deps
-          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) $ currentLevel ctx
+          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) boi
           else
-            foldl' (<>) mempty $
+            foldl' (<>) (mempty {boiToisRUs = boi}) $
               map (reduceDependencies ctx) $
                 namesToList deps
 
@@ -654,7 +701,7 @@ instance Pretty (DimIdxPat rep) where
   pretty dimidx =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx)
+    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) <+> (pretty $ boiToisRUs dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
@@ -676,3 +723,8 @@ instance Pretty BodyType where
 instance Pretty (IterationType rep) where
   pretty Sequential = "seq"
   pretty Parallel = "par"
+
+instance Pretty Boi where
+  pretty Ez = "ez"
+  pretty (StrideAndOffset names stride offset) = "stride" <+> pretty names <+> pretty stride <+> "offset" <+> pretty offset
+  pretty Idk = "idk"
