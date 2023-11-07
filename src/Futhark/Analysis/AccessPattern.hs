@@ -190,7 +190,7 @@ data CtxVal rep = CtxVal
 ctxValFromNames :: Context rep -> Names -> CtxVal rep
 ctxValFromNames ctx names = do
   let (keys, ctxvals) = unzip $ M.toList $ assignments ctx
-  let wew = mapMaybe (\n -> M.lookup n $ M.fromList (zip keys (map boi $ ctxvals))) (namesToList names)
+  let wew = mapMaybe (\n -> M.lookup n $ M.fromList (zip keys (map boi ctxvals))) (namesToList names)
   let wow = foldl max Ez wew
   CtxVal
     names
@@ -275,7 +275,7 @@ analyzeStms ctx bodyConstructor pats body = do
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
-  pTraceShow (assignments ctx'') $ (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
+  pTraceShow (assignments ctx'') (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -460,15 +460,15 @@ analyzeBasicOp ctx expression pats = do
       let reduced = [reduceConstants lsubexp, reduceConstants rsubexp]
       let boi = case t of
             (Add _ _) -> case (lboi, rboi) of
-              (StrideAndOffset names s o, Ez) -> StrideAndOffset (names ++ rights reduced) s $ o + sum (lefts reduced)
-              (Ez, StrideAndOffset names s o) -> StrideAndOffset (names ++ rights reduced) s $ o + sum (lefts reduced)
+              (StrideAndOffset names s o, Ez) -> StrideAndOffset (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Ez, StrideAndOffset names s o) -> StrideAndOffset (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
               (Ez, Ez) -> case partitionEithers reduced of
                 (_, []) -> Idk -- TODO: Can we handle this case better?
                 (consts, vars) -> StrideAndOffset vars 0 (sum consts)
               _ -> Idk -- TODO: Can we handle this case better?
             (Mul _ _) -> case (lboi, rboi) of
-              (StrideAndOffset names s o, Ez) -> StrideAndOffset (names ++ rights reduced) (s * product (lefts reduced)) o
-              (Ez, StrideAndOffset names s o) -> StrideAndOffset (names ++ rights reduced) (s * product (lefts reduced)) o
+              (StrideAndOffset names s o, Ez) -> StrideAndOffset (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
+              (Ez, StrideAndOffset names s o) -> StrideAndOffset (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
               (Ez, Ez) -> case partitionEithers reduced of
                 (_, []) -> Idk -- TODO: Can we handle this case better?
                 (consts, vars) -> StrideAndOffset vars (product consts) 0
@@ -478,6 +478,11 @@ analyzeBasicOp ctx expression pats = do
 
     reduceConstants (Constant (IntValue v)) = Left $ valueIntegral v
     reduceConstants (Var v) = Right v
+
+    reduceNames :: [VName] -> [VName]
+    reduceNames names =
+      -- concatMap ((\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx) names
+      (\(a, _, _) -> a) $ (S.elems . dependencies . reduceDependencies ctx) (head names)
 
     skrrt (Constant _) = Ez
     skrrt (Var v) = case M.lookup v (assignments ctx) of
@@ -701,7 +706,7 @@ instance Pretty (DimIdxPat rep) where
   pretty dimidx =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) <+> (pretty $ boiToisRUs dimidx)
+    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) <+> pretty (boiToisRUs dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
