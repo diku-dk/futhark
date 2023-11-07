@@ -38,10 +38,10 @@ commonPermutationEliminators =
     anyOf preds input =
       any (\f -> f input) preds
 
-inscrutable :: Boi -> Bool
+inscrutable :: Complexity -> Bool
 inscrutable boi = case boi of
-  Ez -> False
-  (StrideAndOffset names s o) -> length names > 1 || s > 0 || o > 1000
+  Simple -> False
+  (Linear names s o) -> length names > 1 || s > 0 || o > 1000
   _ -> True
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
@@ -67,7 +67,7 @@ instance Layout GPU where
     let nestSegOps = filter isUndesired nest
     let isInsideUndesired = not (null nestSegOps)
     -- Don't manifest if the array is indexed by something weird
-    let isInscrutable = any (inscrutable . boiToisRUs) memEntry
+    let isInscrutable = any (inscrutable . complexity) memEntry
 
     if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
       then Nothing
@@ -86,7 +86,7 @@ multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
   let nestSegOps = filter isUndesired nest
   let isInsideUndesired = not (null nestSegOps)
   -- Don't manifest if the array is indexed by something weird
-  let isInscrutable = any (inscrutable . boiToisRUs) memEntry
+  let isInscrutable = any (inscrutable . complexity) memEntry
 
   if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
     then Nothing

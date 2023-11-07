@@ -15,10 +15,11 @@ module Futhark.Analysis.AccessPattern
     BodyType (..),
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
     notImplementedYet,
-    Boi (..),
+    Complexity (..),
   )
 where
 
+import Data.Bifunctor
 import Data.Either
 import Data.Foldable
 import Data.IntMap.Strict qualified as S
@@ -64,7 +65,7 @@ data BodyType
 
 -- | Each element corresponds to an access to a given dimension
 -- in the given array, in the same order of dimensions.
-type MemoryEntry rep = [DimIdxPat rep]
+type MemoryEntry rep = [DimIdxInfo rep]
 
 -- | Collect all features of access to a specific dimension of an array.
 data DimIdxPat rep = DimIdxPat
@@ -73,7 +74,7 @@ data DimIdxPat rep = DimIdxPat
     -- Tuple of patternName and nested `level` it is created at.
     dependencies :: S.IntMap (VName, Int, IterationType rep),
     originalDimension :: Int,
-    boiToisRUs :: Boi
+    complexity :: Complexity
   }
   deriving (Eq, Show)
 
@@ -83,10 +84,10 @@ instance Semigroup (DimIdxPat rep) where
     DimIdxPat
       (dependencies adeps <> dependencies bdeps)
       (max (originalDimension adeps) (originalDimension bdeps))
-      (max (boiToisRUs adeps) (boiToisRUs bdeps))
+      (max (complexity adeps) (complexity bdeps))
 
 instance Monoid (DimIdxPat rep) where
-  mempty = DimIdxPat mempty 0 Ez
+  mempty = DimIdxPat mempty 0 Simple
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -95,7 +96,14 @@ data IterationType rep = Sequential | Parallel
   deriving (Eq, Show)
 
 -- k | v | linear (add/sub) | mul | exp | indirect
-data Boi = Ez | StrideAndOffset [VName] Int Int | Idk
+
+-- | The complexity of an expression. Used to determine whether to manifest
+-- an array based on its index expressions. If an array is indexed by a
+-- constant, a thread ID or a loop counter, then it is `Simple`. If it is
+-- indexed by a linear combination of constants, thread IDs or loop counters,
+-- then it is `Linear`. If it is indexed by anything else, then it is probably
+-- too complex to reason about (inscrutable), so we give up on manifesting it.
+data Complexity = Simple | Linear [VName] Int Int | Inscrutable
   deriving (Eq, Show, Ord)
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
@@ -184,21 +192,21 @@ data CtxVal rep = CtxVal
     iterationType :: IterationType rep,
     level :: Int,
     parents_nest :: [BodyType],
-    boi :: Boi
+    complexity_ctx :: Complexity
   }
   deriving (Show, Eq)
 
 ctxValFromNames :: Context rep -> Names -> CtxVal rep
 ctxValFromNames ctx names = do
   let (keys, ctxvals) = unzip $ M.toList $ assignments ctx
-  let wew = mapMaybe (\n -> M.lookup n $ M.fromList (zip keys (map boi ctxvals))) (namesToList names)
-  let wow = foldl max Ez wew
+  let complexities = mapMaybe (\n -> M.lookup n $ M.fromList (zip keys (map complexity_ctx ctxvals))) (namesToList names)
+  let complexity = foldl max Simple complexities
   CtxVal
     names
     (getIterationType ctx)
     (currentLevel ctx)
     (parents ctx)
-    wow
+    complexity
 
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal rep -> Context rep
@@ -214,12 +222,11 @@ oneContext name ctxValue =
 ctxValZeroDeps :: Context rep -> IterationType rep -> CtxVal rep
 ctxValZeroDeps ctx iterType =
   CtxVal
-    { deps = mempty,
-      iterationType = iterType,
-      level = currentLevel ctx,
-      parents_nest = parents ctx,
-      boi = Ez
-    }
+    mempty
+    iterType
+    (currentLevel ctx)
+    (parents ctx)
+    Simple
 
 -- | Create a singular context from a segspace
 contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
@@ -247,7 +254,7 @@ analyzeFunction func = do
   let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
   let (names, asses) = unzip $ M.toList $ assignments ctx
   let names' = map (\n -> show (baseName n) ++ "_" ++ show (baseTag n)) names
-  pTraceShow (zip names' (map boi asses)) $ snd $ analyzeStmsPrimitive ctx stms
+  snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
 analyzeStmsPrimitive :: (Analyze rep) => Context rep -> [Stm rep] -> (Context rep, IndexTable rep)
@@ -276,7 +283,7 @@ analyzeStms ctx bodyConstructor pats body = do
   --    dependencies of pat :) )
   let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
-  pTraceShow (assignments ctx'') (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
+  (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
   where
     -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -381,7 +388,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let array_name' =
         fromMaybe (arr_name, []) $
           L.find (\(n, _) -> n == arr_name) $
-            map (\(k, a) -> (k, parents_nest a)) (M.toList $ assignments ctx')
+            map (second parents_nest) (M.toList $ assignments ctx')
 
   maybe
     (ctx', mempty)
@@ -404,7 +411,7 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
   -- Add each non-constant DimIndex as a dependency to the index expression
   let ctxVal = ctxValFromNames ctx $ namesFromList subExprs
   -- The pattern will have inextricable complexity.
-  let ctxVal' = ctxVal { boi = Idk }
+  let ctxVal' = ctxVal {complexity_ctx = Inscrutable}
 
   -- Add each constant DimIndex to the context
   -- Extend context with the dependencies and constants index expression
@@ -426,29 +433,29 @@ analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyzeBasicOp ctx expression pats = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
-        (Opaque _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
-        (ArrayLit subexps _t) -> (concatCtxVals mempty subexps) {boi = Idk}
-        (UnOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (Opaque _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (ArrayLit subexps _t) -> (concatCtxVals mempty subexps) {complexity_ctx = Inscrutable}
+        (UnOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
         (BinOp t lsubexp rsubexp) -> analyzeBinOp t lsubexp rsubexp
-        (CmpOp _ lsubexp rsubexp) -> (concatCtxVals mempty [lsubexp, rsubexp]) {boi = Idk}
-        (ConvOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
-        (Assert subexp _ _) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {boi = Idk}
+        (CmpOp _ lsubexp rsubexp) -> (concatCtxVals mempty [lsubexp, rsubexp]) {complexity_ctx = Inscrutable}
+        (ConvOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (Assert subexp _ _) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
         (Index name _) ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp) {boi = Idk}
-        (Manifest _dim name) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
-        (Iota end start stride _) -> (concatCtxVals mempty [end, start, stride]) {boi = Idk}
-        (Replicate (Shape shape) value') -> (concatCtxVals mempty (value' : shape)) {boi = Idk}
-        (Scratch _ subexprs) -> (concatCtxVals mempty subexprs) {boi = Idk}
-        (Reshape _ (Shape shape_subexp) name) -> (concatCtxVals (oneName name) shape_subexp) {boi = Idk}
-        (Rearrange _ name) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
-        (UpdateAcc name lsubexprs rsubexprs) -> (concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)) {boi = Idk}
-        (FlatIndex name _) -> (ctxValFromNames ctx $ oneName name) {boi = Idk}
-        (FlatUpdate name _ source) -> (ctxValFromNames ctx $ namesFromList [name, source]) {boi = Idk}
+        (Concat _ _ length_subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp) {complexity_ctx = Inscrutable}
+        (Manifest _dim name) -> (ctxValFromNames ctx $ oneName name) {complexity_ctx = Inscrutable}
+        (Iota end start stride _) -> (concatCtxVals mempty [end, start, stride]) {complexity_ctx = Inscrutable}
+        (Replicate (Shape shape) value') -> (concatCtxVals mempty (value' : shape)) {complexity_ctx = Inscrutable}
+        (Scratch _ subexprs) -> (concatCtxVals mempty subexprs) {complexity_ctx = Inscrutable}
+        (Reshape _ (Shape shape_subexp) name) -> (concatCtxVals (oneName name) shape_subexp) {complexity_ctx = Inscrutable}
+        (Rearrange _ name) -> (ctxValFromNames ctx $ oneName name) {complexity_ctx = Inscrutable}
+        (UpdateAcc name lsubexprs rsubexprs) -> (concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)) {complexity_ctx = Inscrutable}
+        (FlatIndex name _) -> (ctxValFromNames ctx $ oneName name) {complexity_ctx = Inscrutable}
+        (FlatUpdate name _ source) -> (ctxValFromNames ctx $ namesFromList [name, source]) {complexity_ctx = Inscrutable}
   let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
@@ -458,26 +465,26 @@ analyzeBasicOp ctx expression pats = do
         (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
 
     analyzeBinOp t lsubexp rsubexp = do
-      let lboi = skrrt lsubexp
-      let rboi = skrrt rsubexp
+      let lcomplexity = skrrt lsubexp
+      let rcomplexity = skrrt rsubexp
       let reduced = [reduceConstants lsubexp, reduceConstants rsubexp]
-      let boi = case t of
-            (Add _ _) -> case (lboi, rboi) of
-              (StrideAndOffset names s o, Ez) -> StrideAndOffset (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
-              (Ez, StrideAndOffset names s o) -> StrideAndOffset (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
-              (Ez, Ez) -> case partitionEithers reduced of
-                (_, []) -> Idk -- TODO: Can we handle this case better?
-                (consts, vars) -> StrideAndOffset vars 0 (sum consts)
-              _ -> Idk -- TODO: Can we handle this case better?
-            (Mul _ _) -> case (lboi, rboi) of
-              (StrideAndOffset names s o, Ez) -> StrideAndOffset (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
-              (Ez, StrideAndOffset names s o) -> StrideAndOffset (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
-              (Ez, Ez) -> case partitionEithers reduced of
-                (_, []) -> Idk -- TODO: Can we handle this case better?
-                (consts, vars) -> StrideAndOffset vars (product consts) 0
-              _ -> Idk -- TODO: Can we handle this case better?
-            _ -> Idk
-      pTrace "\n" $ pTraceShow (t, lsubexp, rsubexp, boi) $ pTrace "\n" $ (concatCtxVals mempty [lsubexp, rsubexp]) {boi = boi}
+      let complexity = case t of
+            (Add _ _) -> case (lcomplexity, rcomplexity) of
+              (Linear names s o, Simple) -> Linear (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Simple, Linear names s o) -> Linear (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Simple, Simple) -> case partitionEithers reduced of
+                (_, []) -> Inscrutable -- TODO: Can we handle this case better?
+                (consts, vars) -> Linear vars 0 (sum consts)
+              _ -> Inscrutable -- TODO: Can we handle this case better?
+            (Mul _ _) -> case (lcomplexity, rcomplexity) of
+              (Linear names s o, Simple) -> Linear (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
+              (Simple, Linear names s o) -> Linear (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
+              (Simple, Simple) -> case partitionEithers reduced of
+                (_, []) -> Inscrutable -- TODO: Can we handle this case better?
+                (consts, vars) -> Linear vars (product consts) 0
+              _ -> Inscrutable -- TODO: Can we handle this case better?
+            _ -> Inscrutable
+      (concatCtxVals mempty [lsubexp, rsubexp]) {complexity_ctx = complexity}
 
     reduceConstants (Constant (IntValue v)) = Left $ valueIntegral v
     reduceConstants (Var v) = Right v
@@ -485,10 +492,10 @@ analyzeBasicOp ctx expression pats = do
     reduceNames :: [VName] -> [VName]
     reduceNames = L.nub . concatMap (map (\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
 
-    skrrt (Constant _) = Ez
+    skrrt (Constant _) = Simple
     skrrt (Var v) = case M.lookup v (assignments ctx) of
       Nothing -> error "we are not happy :(((((("
-      Just ass -> boi ass
+      Just ass -> complexity_ctx ass
 
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pats body bodies =
@@ -540,7 +547,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') Ez)
+          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') Simple)
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -616,12 +623,11 @@ reduceDependencies ctx v =
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
       Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
-      Just (CtxVal deps itertype lvl parents_nest boi) ->
-        -- pTraceShow ("I just fucked yo bitch in some gucci flip flops", boi) $
+      Just (CtxVal deps itertype lvl parents_nest complexity) ->
         if null $ namesToList deps
-          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) boi
+          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
           else
-            foldl' (<>) (mempty {boiToisRUs = boi}) $
+            foldl' (<>) (mempty {complexity = complexity}) $
               map (reduceDependencies ctx) $
                 namesToList deps
 
@@ -707,7 +713,7 @@ instance Pretty (DimIdxPat rep) where
   pretty dimidx =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) <+> pretty (boiToisRUs dimidx)
+    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) <+> pretty (complexity dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (name, lvl, itertype) = pretty name <+> pretty lvl <+> pretty itertype
@@ -730,7 +736,7 @@ instance Pretty (IterationType rep) where
   pretty Sequential = "seq"
   pretty Parallel = "par"
 
-instance Pretty Boi where
-  pretty Ez = "ez"
-  pretty (StrideAndOffset names stride offset) = "stride" <+> pretty names <+> pretty stride <+> "offset" <+> pretty offset
-  pretty Idk = "idk"
+instance Pretty Complexity where
+  pretty Simple = "ez"
+  pretty (Linear names stride offset) = "stride" <+> pretty names <+> pretty stride <+> "offset" <+> pretty offset
+  pretty Inscrutable = "idk"
