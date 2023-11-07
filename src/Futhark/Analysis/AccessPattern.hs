@@ -64,9 +64,15 @@ data BodyType
   | CondBodyName VName
   deriving (Show, Ord, Eq)
 
--- | Each element corresponds to an access to a given dimension
--- in the given array, in the same order of dimensions.
-type MemoryEntry rep = [DimIdxInfo rep]
+-- AccessPattern
+-- ArrayAccessPat
+-- ArrayAccessInfo
+-- ArrayAccessDescriptor
+-- ArrayIndexDescriptor
+-- DimIdxInfo
+-- DimAccessInfo
+-- IdxInfo
+-- ArrayAccessIndexDimensionInfo
 
 -- | Collect all features of access to a specific dimension of an array.
 data AccessInfo rep = AccessInfo
