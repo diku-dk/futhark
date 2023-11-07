@@ -1,17 +1,16 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Futhark.Analysis.AccessPattern
-  ( analyzeDimIdxPats,
+  ( analyzeAccessInfos,
     analyzeFunction,
     vnameFromSegOp,
     analysisPropagateByTransitivity,
     Analyze,
     IndexTable,
     ArrayName,
-    DimIdxPat (..),
+    AccessInfo (..),
     IndexExprName,
     IterationType (Sequential, Parallel),
-    MemoryEntry (..),
     BodyType (..),
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
     notImplementedYet,
@@ -41,9 +40,11 @@ class Analyze rep where
 
 -- | Map patterns of Segmented operations on arrays, to index expressions with
 -- their index descriptors.
--- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimIdxPat]
+-- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [AccessInfo]
+-- Each AccessInfo element corresponds to an access to a given dimension
+-- in the given array, in the same order of the dimensions.
 type IndexTable rep =
-  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName (MemoryEntry rep)))
+  M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [AccessInfo rep]))
 
 -- | SegOpName stores the nested "level" at which it is declared in the AST.
 data SegOpName
@@ -68,7 +69,7 @@ data BodyType
 type MemoryEntry rep = [DimIdxInfo rep]
 
 -- | Collect all features of access to a specific dimension of an array.
-data DimIdxPat rep = DimIdxPat
+data AccessInfo rep = AccessInfo
   { -- | Set of VNames of gtid's that some access is variant to.
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it is created at.
@@ -78,16 +79,16 @@ data DimIdxPat rep = DimIdxPat
   }
   deriving (Eq, Show)
 
-instance Semigroup (DimIdxPat rep) where
-  (<>) :: DimIdxPat rep -> DimIdxPat rep -> DimIdxPat rep
+instance Semigroup (AccessInfo rep) where
+  (<>) :: AccessInfo rep -> AccessInfo rep -> AccessInfo rep
   adeps <> bdeps =
-    DimIdxPat
+    AccessInfo
       (dependencies adeps <> dependencies bdeps)
       (max (originalDimension adeps) (originalDimension bdeps))
       (max (complexity adeps) (complexity bdeps))
 
-instance Monoid (DimIdxPat rep) where
-  mempty = DimIdxPat mempty 0 Simple
+instance Monoid (AccessInfo rep) where
+  mempty = AccessInfo mempty 0 Simple
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -120,7 +121,7 @@ analysisPropagateByTransitivity idxTable =
     foldlArrayNameMap
     idxTable
   where
-    -- VName -> M.Map ArrayName (M.Map IndexExprName (MemoryEntry rep))
+    -- VName -> M.Map ArrayName (M.Map IndexExprName ([AccessInfo rep]))
     aggregateResults arrayName =
       maybe
         mempty
@@ -243,8 +244,8 @@ contextFromNames ctx itertype =
 --    [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
-analyzeDimIdxPats :: (Analyze rep) => Prog rep -> IndexTable rep
-analyzeDimIdxPats = foldMap' analyzeFunction . progFuns
+analyzeAccessInfos :: (Analyze rep) => Prog rep -> IndexTable rep
+analyzeAccessInfos = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
 analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable rep
@@ -363,7 +364,7 @@ analyzeStm ctx (Let pats _ e) = do
     (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternNames
 
-getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimIdxPat rep]
+getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [AccessInfo rep]
 getIndexDependencies _ [] = Nothing
 getIndexDependencies ctx dims =
   fst
@@ -417,14 +418,14 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
   -- Extend context with the dependencies and constants index expression
   foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal') {constants = namesFromList $ concat consts}) pats
 
-analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimIdxPat rep] -> (Context rep, IndexTable rep)
+analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [AccessInfo rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pats arr_name dimIndexes = do
   let segmaps = allSegMap ctx
   let memory_entries = dimIndexes
   let idx_expr_name = pats --                                                IndexExprName
-  let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> MemoryEntry
-  let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> MemoryEntry
+  let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> [AccessInfo]
+  let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> [AccessInfo]
   let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
   let res = foldl' unionIndexTables mempty results
   (ctx, res)
@@ -612,12 +613,12 @@ analyzeSubExpr pp ctx (Var v) =
           ++ show ctx
 
 -- | Reduce a DimFix into its set of dependencies
-consolidate :: Context rep -> SubExp -> DimIdxPat rep
+consolidate :: Context rep -> SubExp -> AccessInfo rep
 consolidate _ (Constant _) = mempty
 consolidate ctx (Var v) = reduceDependencies ctx v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
-reduceDependencies :: Context rep -> VName -> DimIdxPat rep
+reduceDependencies :: Context rep -> VName -> AccessInfo rep
 reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
@@ -625,7 +626,7 @@ reduceDependencies ctx v =
       Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
       Just (CtxVal deps itertype lvl parents_nest complexity) ->
         if null $ namesToList deps
-          then DimIdxPat (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
+          then AccessInfo (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
           else
             foldl' (<>) (mempty {complexity = complexity}) $
               map (reduceDependencies ctx) $
@@ -683,7 +684,7 @@ instance Pretty (IndexTable rep) where
 
       g maps = lbrace </> indent 4 (mapprintArray $ M.toList maps) </> rbrace
 
-      mapprintArray :: [(ArrayName, M.Map IndexExprName (MemoryEntry rep))] -> Doc ann
+      mapprintArray :: [(ArrayName, M.Map IndexExprName [AccessInfo rep])] -> Doc ann
       mapprintArray [] = ""
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
@@ -696,20 +697,20 @@ instance Pretty (IndexTable rep) where
           </> indent 4 (mapprintIdxExpr (M.toList maps))
           </> rbrace
 
-      mapprintIdxExpr :: [(IndexExprName, MemoryEntry rep)] -> Doc ann
+      mapprintIdxExpr :: [(IndexExprName, [AccessInfo rep])] -> Doc ann
       mapprintIdxExpr [] = ""
       mapprintIdxExpr [m] = printIdxExpMap m
       mapprintIdxExpr (m : mm) = printIdxExpMap m </> mapprintIdxExpr mm
 
-      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printMemoryEntry mems)
+      printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printAccessInfo mems)
 
-      printMemoryEntry :: MemoryEntry rep -> Doc ann
-      printMemoryEntry memEntry =
+      printAccessInfo :: [AccessInfo rep] -> Doc ann
+      printAccessInfo memEntry =
         stack $ map printDim memEntry
 
       printDim m = pretty (originalDimension m) <+> ":" <+> indent 0 (pretty m)
 
-instance Pretty (DimIdxPat rep) where
+instance Pretty (AccessInfo rep) where
   pretty dimidx =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements

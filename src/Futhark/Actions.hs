@@ -141,7 +141,7 @@ printMemoryAccessAnalysis =
   Action
     { actionName = "call-graph",
       actionDescription = "Prettyprint the callgraph of the result to standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . analyzeDimIdxPats
+      actionProcedure = liftIO . putStrLn . prettyString . analyzeAccessInfos
     }
 
 -- | Print call graph to stdout.

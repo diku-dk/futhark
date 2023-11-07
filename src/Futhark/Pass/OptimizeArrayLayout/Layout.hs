@@ -22,7 +22,7 @@ type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Pe
 class (Analyze rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
   -- Returns Nothing if the array is already in the optimal layout
-  permutationFromMemoryEntry :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry rep -> Maybe Permutation
+  permutationFromAccessInfo :: SegOpName -> ArrayName -> IndexExprName -> [AccessInfo rep] -> Maybe Permutation
 
 commonPermutationEliminators :: [Int] -> Bool
 commonPermutationEliminators =
@@ -44,15 +44,15 @@ inscrutable boi = case boi of
   (Linear names s o) -> length names > 1 || s > 0 || o > 1000
   _ -> True
 
--- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
+-- | Given an ordering function for `AccessInfo`, and an IndexTable, return
 -- a PermutationTable.
 permutationTableFromIndexTable :: (Layout rep) => IndexTable rep -> PermutationTable
 permutationTableFromIndexTable =
-  -- Map each MemoryEntry in the IndexTable to a permutation in a generic way
+  -- Map each list of `AccessInfo` in the IndexTable to a permutation in a generic way
   -- that can be handled uniquely by each backend.
-  -- We remove entries with no results after `permutationFromMemoryEntry`
+  -- We remove entries with no results after `permutationFromAccessInfo`
   M.mapMaybeWithKey $
-    \segOpName -> mapToMaybe $ mapToMaybe . permutationFromMemoryEntry segOpName
+    \segOpName -> mapToMaybe $ mapToMaybe . permutationFromAccessInfo segOpName
   where
     maybeMap :: M.Map k a -> Maybe (M.Map k a)
     maybeMap val = if null val then Nothing else Just val
@@ -60,7 +60,7 @@ permutationTableFromIndexTable =
     mapToMaybe f = maybeMap . M.mapMaybeWithKey f
 
 instance Layout GPU where
-  permutationFromMemoryEntry _segOpName (_arrayName, nest) _idxName memEntry = do
+  permutationFromAccessInfo _segOpName (_arrayName, nest) _idxName memEntry = do
     let perm = (map originalDimension . sortGPU) memEntry
 
     -- Don't manifest if the array is defined inside a segOp or loop body
@@ -78,7 +78,7 @@ instance Layout GPU where
         LoopBodyName _ -> True
         _ -> False
 
-multikernePermutering :: SegOpName -> ArrayName -> IndexExprName -> MemoryEntry rep -> Maybe Permutation
+multikernePermutering :: SegOpName -> ArrayName -> IndexExprName -> [AccessInfo rep] -> Maybe Permutation
 multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
   let perm = (map originalDimension . sortMC) memEntry
 
@@ -98,9 +98,9 @@ multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
       _ -> False
 
 instance Layout MC where
-  permutationFromMemoryEntry = multikernePermutering
+  permutationFromAccessInfo = multikernePermutering
 
-sortGPU :: [DimIdxPat rep] -> [DimIdxPat rep]
+sortGPU :: [AccessInfo rep] -> [AccessInfo rep]
 sortGPU =
   L.sortBy dimdexGPUcmp
   where
@@ -141,7 +141,7 @@ sortGPU =
 
         f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
-sortMC :: [DimIdxPat rep] -> [DimIdxPat rep]
+sortMC :: [AccessInfo rep] -> [AccessInfo rep]
 sortMC =
   L.sortBy dimdexGPUcmp
   where
@@ -183,16 +183,16 @@ sortMC =
         f og (_, lvl, itertype) = Just (itertype, lvl, og)
 
 instance Layout MCMem where
-  permutationFromMemoryEntry = multikernePermutering
+  permutationFromAccessInfo = multikernePermutering
 
 instance Layout GPUMem where
-  permutationFromMemoryEntry = error $ notImplementedYet "GPUMem"
+  permutationFromAccessInfo = error $ notImplementedYet "GPUMem"
 
 instance Layout Seq where
-  permutationFromMemoryEntry = error $ notImplementedYet "Seq"
+  permutationFromAccessInfo = error $ notImplementedYet "Seq"
 
 instance Layout SeqMem where
-  permutationFromMemoryEntry = error $ notImplementedYet "SeqMem"
+  permutationFromAccessInfo = error $ notImplementedYet "SeqMem"
 
 instance Layout SOACS where
-  permutationFromMemoryEntry = error $ notImplementedYet "SOACS"
+  permutationFromAccessInfo = error $ notImplementedYet "SOACS"
