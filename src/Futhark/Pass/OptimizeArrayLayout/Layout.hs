@@ -41,7 +41,7 @@ commonPermutationEliminators =
 inscrutable :: Boi -> Bool
 inscrutable boi = case boi of
   Ez -> False
-  (StrideAndOffset names s o) -> length names > 1 || s > 10 || o > 1000
+  (StrideAndOffset names s o) -> length names > 1 || s > 0 || o > 1000
   _ -> True
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
