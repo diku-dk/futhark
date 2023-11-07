@@ -4,6 +4,7 @@ import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
@@ -33,9 +34,15 @@ commonPermutationEliminators =
     ]
   where
     -- Why is this not in the prelude, there's probably a monad for this.
-    anyOf :: forall a t. Foldable t => t (a -> Bool) -> a -> Bool
+    anyOf :: forall a t. (Foldable t) => t (a -> Bool) -> a -> Bool
     anyOf preds input =
       any (\f -> f input) preds
+
+inscrutable :: Boi -> Bool
+inscrutable boi = case boi of
+  Ez -> False
+  (StrideAndOffset names s o) -> length names > 1 || s > 10 || o > 1000
+  _ -> True
 
 -- | Given an ordering function for `DimIdxPat`, and an IndexTable, return
 -- a PermutationTable.
@@ -59,8 +66,10 @@ instance Layout GPU where
     -- Don't manifest if the array is defined inside a segOp or loop body
     let nestSegOps = filter isUndesired nest
     let isInsideUndesired = not (null nestSegOps)
+    -- Don't manifest if the array is indexed by something weird
+    let isInscrutable = any (inscrutable . boiToisRUs) memEntry
 
-    if isInsideUndesired || commonPermutationEliminators perm
+    if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
       then Nothing
       else Just perm
     where
@@ -76,8 +85,10 @@ multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
   -- Don't manifest if the array is defined inside a segOp or loop body
   let nestSegOps = filter isUndesired nest
   let isInsideUndesired = not (null nestSegOps)
+  -- Don't manifest if the array is indexed by something weird
+  let isInscrutable = any (inscrutable . boiToisRUs) memEntry
 
-  if isInsideUndesired || commonPermutationEliminators perm
+  if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
     then Nothing
     else Just perm
   where

@@ -15,6 +15,7 @@ module Futhark.Analysis.AccessPattern
     BodyType (..),
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
     notImplementedYet,
+    Boi (..),
   )
 where
 
