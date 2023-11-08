@@ -278,7 +278,7 @@ seqStm' env (Let pat aux
                                   (eSubExp $ intConst Int64 0)
                                )
                                (eBody $ L.map toExp neutral)
-                               (eBody $ L.map (\s -> eIndex s (eSubExp idx)) scanNames)
+                               (eBody $ L.map (\s -> eIndex s [eSubExp idx]) scanNames)
 
     let env' = updateEnvTid env tid
     lambSOAC <- buildSOACLambda env' usedArrays kbody ts
@@ -417,9 +417,9 @@ mkSegMapRed env kbody retTs binop = do
       let (redRes, mapRes) = L.splitAt numRedRes res
       -- since fused map results result in arrays of the chunksize (sz)
       -- these do not fit the required result size of seqFactor, sinze sz is local
-      mapRes' <- forM mapRes 
-          ((letSubExp "map_res" . BasicOp . Reshape ReshapeArbitrary (Shape [seqFactor env])) 
-            . getVName) 
+      mapRes' <- forM mapRes
+          ((letSubExp "map_res" . BasicOp . Reshape ReshapeArbitrary (Shape [seqFactor env]))
+            . getVName)
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
