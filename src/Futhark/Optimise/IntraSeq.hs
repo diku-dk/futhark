@@ -304,10 +304,40 @@ seqStm' _ stm = addStm stm
 --                 "Encountered unhandled statement at thread level: " ++ show stm
 
 seqScatter :: Env -> Stm GPU -> Builder GPU ()
-seqScatter env (Let pat aux (Op (SegOp 
-              (SegMap (SegThread {}) space ts kbody)))) = error "SCATTER ENCOUNTERED"
+seqScatter env (Let pat aux (Op (SegOp
+              (SegMap (SegThread {}) space ts kbody)))) = do
+  usedArrays <- getUsedArraysIn env kbody
+  let (const, vnames) = getScatterInfo kbody
+  scatter <- buildSegMapTup_ "scatter_intermediate" $ do
+    tid <- newVName "write_i"
+    phys <- newVName "phys_tid"
+    let env' = updateEnvTid env tid
+    idx <- letSubExp "idx" =<< eBinOp (Mul Int64 OverflowUndef) (eSubExp $ Var tid) (eSubExp $ seqFactor env)
+    let stms' = colelctStms_ $ updateIndices vnames idx $ kernelBodyStms stms
 
-seqScatter _ stm = error $ 
+    pure ()
+  pure ()
+  where
+    getScatterInfo (KernelBody _ _ res) =
+      let upd = concatMap (\(WriteReturns _ _ updates) -> updates) res
+          tmp = concat $ unzip $ L.map (\(Slice [DimFix i], v) -> (i,v)) upd
+          in L.partition isConst tmp
+
+    isConst (Constant _) = True
+    isConst _ = False
+
+    updateIndices :: [VName] -> SubExp -> Stms GPU -> Builder GPU ()
+    updateIndices names idx stms = do
+      addStms $ mapM (\ stm ->
+        case stm of
+          (Constant 
+        if stm `elem` names then
+          undefined
+          -- case arrayRank $ typeof stm
+        else stm
+        ) stms
+
+seqScatter _ stm = error $
                   "SeqScatter error. Should be a map at thread level but got"
                   ++ show stm
 
@@ -612,7 +642,7 @@ isArray info = arrayRank (typeOf info) > 0
 -- | Checks if a kernel body ends in only WriteReturns results as then it
 -- must be the body of a scatter
 isScatter :: KernelBody GPU -> Bool
-isScatter (KernelBody _ _ res) = 
+isScatter (KernelBody _ _ res) =
   L.all isWriteReturns res
   where
     isWriteReturns (WriteReturns {}) = True
