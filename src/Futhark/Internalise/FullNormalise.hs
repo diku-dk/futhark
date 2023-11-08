@@ -345,15 +345,7 @@ transformBody e = do
       _ -> Info $ AppRes (typeOf e) []
 
     f body (PatBind sizes p expr) =
-      AppExp
-        ( LetPat
-            sizes
-            p
-            expr
-            body
-            mempty
-        )
-        appRes
+      AppExp (LetPat sizes p expr body mempty) appRes
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
 

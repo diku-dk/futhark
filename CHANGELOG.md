@@ -9,10 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark autotune` how supports `hip` backend.
-
-* Better parallelisation of `scatter` when the target is
-  multidimensional (#2035).
+* FutharkScript now has a `$loadbytes` builtin function for reading
+  arbitrary bytes into Futhark programs.
 
 ### Removed
 
@@ -20,9 +18,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.7]
+
+### Added
+
+* `futhark autotune` how supports `hip` backend.
+
+* Better parallelisation of `scatter` when the target is
+  multidimensional (#2035).
+
+### Fixed
+
 * Very large `iota`s now work.
 
 * Lambda lifting in `while` conditions (#2038).
+
+* Size expressions in local function parameters had an interesting
+  interaction with defunctionalisation (#2040).
+
+* The `store` command in server executables did not properly
+  synchronise when storing opaque values, which would lead to
+  use-after-free errors.
 
 ## [0.25.6]
 

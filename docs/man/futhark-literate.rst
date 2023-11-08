@@ -270,6 +270,9 @@ Futhark.  The following builtins are supported:
   of values is returned, which should be destructured before use. For example:
   ``let (a, b) = $loaddata "foo.in" in bar a b``.
 
+* ``$loadbytes "file"`` reads the contents of the given file as an
+  array of type ``[]u8``.
+
 * ``$loadaudio "file"`` reads audio from the given file and returns it as a
   ``[][]f64``, where each row corresponds to a channel of the original
   soundfile. Most common audio-formats are supported, including mp3, ogg, wav,
