@@ -277,6 +277,8 @@ compileSegScan pat lvl space scan_op map_kbody = do
   debug_ "sumT'" $ fromIntegral sumT'
 
   statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virtgroups]) (Space "device")
+  sReplicate statusFlags $ intConst Int8 statusX
+
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $
       forM tys $ \ty ->
@@ -314,7 +316,11 @@ compileSegScan pat lvl space scan_op map_kbody = do
                 (untyped (1 :: Imp.TExp Int32))
           sComment "Set dynamic id and reset status flag for this block" $ do
             copyDWIMFix sharedId [0] (tvSize dyn_id) []
-            copyDWIMFix statusFlags [tvExp dyn_id] (intConst Int8 statusX) []
+            -- TODO: find out why this flag initialization (rather than
+            -- initializing using sReplicate outside the current kernel) is
+            -- causing problems. it was never a problem with any of our
+            -- prototypes.
+            -- copyDWIMFix statusFlags [tvExp dyn_id] (intConst Int8 statusX) []
 
           sComment "First thread in last (virtual) block resets global dynamic_id" $ do
             sWhen (tvExp dyn_id .==. num_virtgroups_e - 1) $
