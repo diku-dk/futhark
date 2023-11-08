@@ -64,10 +64,10 @@ updateMapping env mapping =
   in setMapping env mapping'
 
 lookupMapping :: Env -> VName -> Maybe VName
-lookupMapping env name 
+lookupMapping env name
   | M.member name (nameMap env) = do
     case M.lookup name (nameMap env) of
-      Just n -> 
+      Just n ->
         case lookupMapping env n of
           Nothing -> Just n
           n' -> n'
@@ -185,7 +185,7 @@ seqStm' env (Let pat aux
 
   let tid = fst $ head $ unSegSpace space
   let env' = updateEnvTid env tid
-  
+
   -- thread local reduction
   reds <- mapM (mkSegMapRed env' kbody ts) binops
 
@@ -238,7 +238,7 @@ seqStm' env (Let pat aux (Op (SegOp
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
   usedArrays <- getUsedArraysIn env kbody
-  
+
   -- do local reduction
   reds <- mapM (mkSegMapRed env kbody ts) binops
   -- TODO: head until multiple binops
@@ -252,10 +252,10 @@ seqStm' env (Let pat aux
     let env' = updateEnvTid env tid
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
-    
+
     let lvl' = SegThread SegNoVirt Nothing
     let space' = SegSpace phys [(tid, grpSize env')]
-    results <- mapM (buildKernelResult env') scanReds 
+    results <- mapM (buildKernelResult env') scanReds
     let ts' = L.take numResConsumed ts
     pure (results, lvl', space', binops', ts')
 
@@ -329,7 +329,7 @@ getTidIndexExp env name = do
         case arrayRank tp of
           0 -> SubExp $ Var name
           1 -> Index name $ Slice outerDim
-          2 -> Index name $ Slice $ 
+          2 -> Index name $ Slice $
                 outerDim ++ [DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
           _ -> error "Arrays are not expected to have more than 2 dimensions \n"
   pure $ BasicOp index
@@ -378,12 +378,12 @@ seqStm'' ::
   Stm GPU ->
   Builder GPU Env
 seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
-  case lookupMapping env arr of 
+  case lookupMapping env arr of
     Just name -> do
       i <- getTidIndexExp env name
       addStm $ Let pat aux i
       pure env
-    Nothing -> do 
+    Nothing -> do
       addStm stm
       pure env
 seqStm'' env stm = do
@@ -411,24 +411,20 @@ mkSegMapRed env kbody retTs binop = do
       let screma = redomapSOAC [Reduce comm lambda ne] lambSOAC
       chunks <- mapM (getChunk env tid sz) usedArrs
 
-      -- create a scratch array that of size seqFactor that each chunk can be written into
-      -- this is to ensure correct sizes in case the last thread does not handle seqFactor elements
-      -- scratch arrays holding a chunk used in a reduction will be padded with the neutral element
-      let scratchElems = ne ++ replicate (length usedArrs - length ne) (constant (0 :: Int64))
-      chunksScratch <- mapM (letExp "chunk_scratch" . BasicOp .
-                              Replicate (Shape [seqFactor env])) scratchElems
-      chunks' <- mapM (\(scratch, chunk) ->
-        letExp "chunk" $ BasicOp $ Update Unsafe scratch
-          (Slice [DimSlice (intConst Int64 0) sz (intConst Int64 1)])
-          $ Var chunk) $ L.zip chunksScratch chunks
-
       res <- letTupExp' "res" $ Op $ OtherOp $
-                Screma (seqFactor env) chunks' screma
+                Screma sz chunks screma
+      let numRedRes = numArgsConsumedBySegop [binop]
+      let (redRes, mapRes) = L.splitAt numRedRes res
+      -- since fused map results result in arrays of the chunksize (sz)
+      -- these do not fit the required result size of seqFactor, sinze sz is local
+      mapRes' <- forM mapRes 
+          ((letSubExp "map_res" . BasicOp . Reshape ReshapeArbitrary (Shape [seqFactor env])) 
+            . getVName) 
 
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
+      let kres = L.map (Returns ResultMaySimplify mempty) $ redRes ++ mapRes'
       let types' = scremaType (seqFactor env) screma
-      let kres = L.map (Returns ResultMaySimplify mempty) res
       pure (kres, lvl', space', types')
 
 getUsedArraysIn ::
