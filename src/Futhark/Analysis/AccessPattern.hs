@@ -34,6 +34,7 @@ import Futhark.IR.SOACS
 import Futhark.IR.Seq
 import Futhark.IR.SeqMem
 import Futhark.Util.Pretty
+import Futhark.Util
 
 class Analyze rep where
   analyzeOp :: Op rep -> (Context rep -> [VName] -> (Context rep, IndexTable rep))
@@ -479,15 +480,17 @@ analyzeBasicOp ctx expression pats = do
             (Add _ _) -> case (lcomplexity, rcomplexity) of
               (Linear names s o, Simple) -> Linear (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
               (Simple, Linear names s o) -> Linear (reduceNames $ names ++ rights reduced) s $ o + sum (lefts reduced)
+              (Linear names0 0 o0, Linear names1 _ o1) -> Linear (reduceNames $ names0 ++ names1 ++ rights reduced) 0 $ o0 + o1 + sum (lefts reduced)
+              (Linear names0 1 o0, Linear names1 s o1) -> Linear (reduceNames $ names0 ++ names1 ++ rights reduced) s $ o0 + o1 + sum (lefts reduced)
+              (Linear names0 _ o0, Linear names1 0 o1) -> Linear (reduceNames $ names0 ++ names1 ++ rights reduced) 0 $ o0 + o1 + sum (lefts reduced)
+              (Linear names0 s o0, Linear names1 1 o1) -> Linear (reduceNames $ names0 ++ names1 ++ rights reduced) s $ o0 + o1 + sum (lefts reduced)
               (Simple, Simple) -> case partitionEithers reduced of
-                (_, []) -> Inscrutable -- TODO: Can we handle this case better?
-                (consts, vars) -> Linear vars 0 (sum consts)
+                (consts, vars) -> Linear vars 1 (sum consts)
               _ -> Inscrutable -- TODO: Can we handle this case better?
             (Mul _ _) -> case (lcomplexity, rcomplexity) of
               (Linear names s o, Simple) -> Linear (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
               (Simple, Linear names s o) -> Linear (reduceNames $ names ++ rights reduced) (s * product (lefts reduced)) o
               (Simple, Simple) -> case partitionEithers reduced of
-                (_, []) -> Inscrutable -- TODO: Can we handle this case better?
                 (consts, vars) -> Linear vars (product consts) 0
               _ -> Inscrutable -- TODO: Can we handle this case better?
             _ -> Inscrutable
@@ -497,7 +500,7 @@ analyzeBasicOp ctx expression pats = do
     reduceConstants (Var v) = Right v
 
     reduceNames :: [VName] -> [VName]
-    reduceNames = L.nub . concatMap (map (\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
+    reduceNames = nubOrd . concatMap (map (\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
 
     skrrt (Constant _) = Simple
     skrrt (Var v) = case M.lookup v (assignments ctx) of
