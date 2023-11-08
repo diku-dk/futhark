@@ -38,7 +38,6 @@ entry("main",
 }
 
 
--- Should we manifest inside segmap?
 -- === Expected output after pass:
 -- types {
 --

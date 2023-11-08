@@ -174,7 +174,6 @@ entry("main",
 }
 
 
--- Should we manifest the result of the loop inside the loop?
 -- === Expected output after pass:
 -- types {
 --

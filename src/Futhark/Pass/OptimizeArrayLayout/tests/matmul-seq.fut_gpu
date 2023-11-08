@@ -53,8 +53,6 @@ entry("main",
 }
 
 
--- We don't know if it's correct to manifest the result of a segmap,
--- that is, should "defunc_0_map_res_r_r_coalesced_1" exist?
 -- === Expected output after pass:
 -- types {
 --
