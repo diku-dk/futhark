@@ -257,7 +257,7 @@ Use camel case (e.g. `functionName`) when naming functions and upper
 camel case (e.g. `DataType`) when naming data types.  Use underscores
 to separate words in variables and parameters.  For compound names
 consisting of just two words, it is acceptable to not separate them at
-all, e.g. `flatarrs` instead of `flat_arrs.  If a variable or
+all, e.g. `flatarrs` instead of `flat_arrs`.  If a variable or
 parameter is also a function, use your judgement as to whether it is
 most like a function or most like a value.
 
