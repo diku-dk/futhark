@@ -164,8 +164,6 @@ seqKernelBody env (KernelBody _ stms results) = do
   pure results
 
 
-
-
 -- | Much like seqStms but now carries an Env
 seqStms' ::
   Env ->
@@ -173,10 +171,6 @@ seqStms' ::
   Builder GPU ()
 seqStms' env stms = do
   (_, stms') <- collectStms $ mapM (seqStm' env) stms
-  -- (stms', _) <- foldM (\(ss, env') s -> do
-  --     (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm' env' s
-  --     pure (ss <> ss', env'')
-  --     ) (mempty, env) (stmsToList stms))
   addStms stms'
 
 
@@ -415,8 +409,6 @@ mkSegMapRed env kbody retTs binop = do
       usedArrs <- getUsedArraysIn env kbody
       lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
       let screma = redomapSOAC [Reduce comm lambda ne] lambSOAC
-      -- screma <- buildRedoMap [Reduce comm lambda ne] usedArrs tid
-
       chunks <- mapM (getChunk env tid sz) usedArrs
 
       -- create a scratch array that of size seqFactor that each chunk can be written into
@@ -478,6 +470,7 @@ getChunk env tid sz arr = do
           _ -> error "unhandled dims in getChunk"
 
   letExp "chunk" $ BasicOp $ Index arr (Slice dims)
+
 
 kbodyToBody :: KernelBody GPU -> Body GPU
 kbodyToBody (KernelBody dec stms res) =
