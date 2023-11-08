@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Bash script that reads the test files in the directory, runs them and compares their output to their expected output from comments in the test files.
 
-
 # Print help
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
-    printf "Usage: ./run_tests.sh [file ...] [OPTIONAL: specific test number]\n"
+    printf "Usage: ./test.sh [file ...] [OPTIONAL: specific test number]\n"
     exit 0
 fi
 
 
-# The directory where the test files are located.
-TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+# The directory where the test files are located. This is the parent directory of this script.
+TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && cd .. && pwd )"
+
 
 # Counter for the number of successful tests.
 successes=0
@@ -19,7 +19,7 @@ skipped=0
 # Index of the current test
 test_i=0
 # Number of tests
-test_n=$(find "$TEST_DIR" -name '*.fut' | wc -l)
+test_n=$(find "$TEST_DIR" -name '*.fut_gpu' | wc -l)
 
 # Get path of the latest build of the futhark executable
 futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
@@ -35,7 +35,7 @@ function skip_test() {
 # Read the test files in the directory and get the number of characters in the longest filename.
 # Needed for formatting the output.
 max_filename_length=0
-for file in "$TEST_DIR"/*.fut
+for file in "$TEST_DIR"/*.fut_gpu
 do
     # Get filename without path
     filename=$(basename -- "$file")
@@ -153,7 +153,7 @@ else
 fi
 
 # Read the test files in the directory.
-for file in "$TEST_DIR"/*.fut
+for file in "$TEST_DIR"/*.fut_gpu
 do
     # Run specific test if specified.
     if [ "$run_specific_test" = true ] ; then
@@ -188,14 +188,14 @@ do
     # Run the test file and compare the output to the expected output.
 
     # Run the test file.
-    output=$($futhark_dev dev -se --gpu -z "$file" 2>&1)
-    # Rempove trailing whitespace
+    output=$($futhark_dev dev --coalesce --simplify --cse "$file" 2>&1)
+    # Remove trailing whitespace
     output=$(echo "$output" | sed 's/[[:space:]]*$//')
 
     # Get the expected output starting after the string "=== Expected output of analysis:"
     # Find the line where the expected output starts + 1
-    expected_output_line=$(grep -n "=== Expected output of analysis:" "$file" | cut -d: -f1 | awk '{print $1+1}')
-    # Rempove trailing whitespace
+    expected_output_line=$(grep -n "=== Expected output after pass:" "$file" | cut -d: -f1 | awk '{print $1+1}')
+    # Remove trailing whitespace
     expected_output_line=$(echo "$expected_output_line" | sed 's/[[:space:]]*$//')
 
     # If expected output line is empty, skip the test.
@@ -207,8 +207,8 @@ do
 
     # Get the expected output.
     expected_output=$(sed -n "${expected_output_line},$ p" "$file")
-    # Remove the string "---" from the beginning of each line.
-    expected_output=$(echo "$expected_output" | sed 's/^-- //g')
+    # Remove the string "-- " from the beginning of each line.
+    expected_output=$(echo "$expected_output" | sed -Ee 's/^-- ?//g')
 
     # If expected output line is "TBD", skip the test.
     if [ "$expected_output" == "TBD" ]; then
