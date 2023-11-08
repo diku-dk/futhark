@@ -53,7 +53,6 @@ import Control.Monad.State.Strict
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Bitraversable
-import Data.Foldable (traverse_)
 import Data.List
   ( elemIndex,
     foldl',
@@ -194,8 +193,7 @@ data KernelResult
     Returns ResultManifest Certs SubExp
   | WriteReturns
       Certs
-      Shape -- Size of array.  Must match number of dims.
-      VName -- Which array
+      VName -- Destination array
       [(Slice SubExp, SubExp)]
   | TileReturns
       Certs
@@ -217,20 +215,20 @@ data KernelResult
 -- | Get the certs for this 'KernelResult'.
 kernelResultCerts :: KernelResult -> Certs
 kernelResultCerts (Returns _ cs _) = cs
-kernelResultCerts (WriteReturns cs _ _ _) = cs
+kernelResultCerts (WriteReturns cs _ _) = cs
 kernelResultCerts (TileReturns cs _ _) = cs
 kernelResultCerts (RegTileReturns cs _ _) = cs
 
 -- | Get the root t'SubExp' corresponding values for a 'KernelResult'.
 kernelResultSubExp :: KernelResult -> SubExp
 kernelResultSubExp (Returns _ _ se) = se
-kernelResultSubExp (WriteReturns _ _ arr _) = Var arr
+kernelResultSubExp (WriteReturns _ arr _) = Var arr
 kernelResultSubExp (TileReturns _ _ v) = Var v
 kernelResultSubExp (RegTileReturns _ _ v) = Var v
 
 instance FreeIn KernelResult where
   freeIn' (Returns _ cs what) = freeIn' cs <> freeIn' what
-  freeIn' (WriteReturns cs rws arr res) = freeIn' cs <> freeIn' rws <> freeIn' arr <> freeIn' res
+  freeIn' (WriteReturns cs arr res) = freeIn' cs <> freeIn' arr <> freeIn' res
   freeIn' (TileReturns cs dims v) =
     freeIn' cs <> freeIn' dims <> freeIn' v
   freeIn' (RegTileReturns cs dims_n_tiles v) =
@@ -252,10 +250,9 @@ instance (ASTRep rep) => Substitute (KernelBody rep) where
 instance Substitute KernelResult where
   substituteNames subst (Returns manifest cs se) =
     Returns manifest (substituteNames subst cs) (substituteNames subst se)
-  substituteNames subst (WriteReturns cs rws arr res) =
+  substituteNames subst (WriteReturns cs arr res) =
     WriteReturns
       (substituteNames subst cs)
-      (substituteNames subst rws)
       (substituteNames subst arr)
       (substituteNames subst res)
   substituteNames subst (TileReturns cs dims v) =
@@ -296,7 +293,7 @@ consumedInKernelBody ::
 consumedInKernelBody (KernelBody dec stms res) =
   consumedInBody (Body dec stms []) <> mconcat (map consumedByReturn res)
   where
-    consumedByReturn (WriteReturns _ _ a _) = oneName a
+    consumedByReturn (WriteReturns _ a _) = oneName a
     consumedByReturn _ = mempty
 
 checkKernelBody ::
@@ -320,7 +317,7 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
           <> " values."
     zipWithM_ checkKernelResult kres ts
   where
-    consumeKernelResult (WriteReturns _ _ arr _) =
+    consumeKernelResult (WriteReturns _ arr _) =
       TC.consume =<< TC.lookupAliases arr
     consumeKernelResult _ =
       pure ()
@@ -328,24 +325,20 @@ checkKernelBody ts (KernelBody (_, dec) stms kres) = do
     checkKernelResult (Returns _ cs what) t = do
       TC.checkCerts cs
       TC.require [t] what
-    checkKernelResult (WriteReturns cs shape arr res) t = do
+    checkKernelResult (WriteReturns cs arr res) t = do
       TC.checkCerts cs
-      mapM_ (TC.require [Prim int64]) $ shapeDims shape
       arr_t <- lookupType arr
+      unless (arr_t == t) $
+        TC.bad . TC.TypeError $
+          "WriteReturns result type annotation for "
+            <> prettyText arr
+            <> " is "
+            <> prettyText t
+            <> ", but inferred as"
+            <> prettyText arr_t
       forM_ res $ \(slice, e) -> do
-        traverse_ (TC.require [Prim int64]) slice
-        TC.require [t] e
-        unless (arr_t == t `arrayOfShape` shape) $
-          TC.bad $
-            TC.TypeError $
-              "WriteReturns returning "
-                <> prettyText e
-                <> " of type "
-                <> prettyText t
-                <> ", shape="
-                <> prettyText shape
-                <> ", but destination array has type "
-                <> prettyText arr_t
+        TC.checkSlice arr_t slice
+        TC.require [t `setArrayShape` sliceShape slice] e
     checkKernelResult (TileReturns cs dims v) t = do
       TC.checkCerts cs
       forM_ dims $ \(dim, tile) -> do
@@ -395,15 +388,10 @@ instance Pretty KernelResult where
     hsep $ certAnnots cs <> ["returns (private)" <+> pretty what]
   pretty (Returns ResultMaySimplify cs what) =
     hsep $ certAnnots cs <> ["returns" <+> pretty what]
-  pretty (WriteReturns cs shape arr res) =
+  pretty (WriteReturns cs arr res) =
     hsep $
       certAnnots cs
-        <> [ pretty arr
-               <+> PP.colon
-               <+> pretty shape
-               </> "with"
-               <+> PP.apply (map ppRes res)
-           ]
+        <> [pretty arr </> "with" <+> PP.apply (map ppRes res)]
     where
       ppRes (slice, e) = pretty slice <+> "=" <+> pretty e
   pretty (TileReturns cs dims v) =
@@ -450,6 +438,12 @@ checkSegSpace (SegSpace _ dims) =
 -- of information.  For example, in GPU backends, it is used to
 -- indicate whether the 'SegOp' is expected to run at the thread-level
 -- or the group-level.
+--
+-- The type list is usually the type of the element returned by a
+-- single thread. The result of the SegOp is then an array of that
+-- type, with the shape of the 'SegSpace' prepended. One exception is
+-- for 'WriteReturns', where the type annotation is the /full/ type of
+-- the result.
 data SegOp lvl rep
   = SegMap lvl SegSpace [Type] (KernelBody rep)
   | -- | The KernelSpace must always have at least two dimensions,
@@ -483,8 +477,8 @@ segBody segop =
     SegHist _ _ _ _ body -> body
 
 segResultShape :: SegSpace -> Type -> KernelResult -> Type
-segResultShape _ t (WriteReturns _ shape _ _) =
-  t `arrayOfShape` shape
+segResultShape _ t (WriteReturns {}) =
+  t
 segResultShape space t Returns {} =
   foldr (flip arrayOfRow) t $ segSpaceDims space
 segResultShape _ t (TileReturns _ dims _) =
@@ -874,9 +868,9 @@ instance (PrettyRep rep) => Pretty (SegBinOp rep) where
   pretty (SegBinOp comm lam nes shape) =
     PP.braces (PP.commasep $ map pretty nes)
       <> PP.comma
-      </> pretty shape
+        </> pretty shape
       <> PP.comma
-      </> comm'
+        </> comm'
       <> pretty lam
     where
       comm' = case comm of
@@ -887,47 +881,47 @@ instance (PrettyRep rep, PP.Pretty lvl) => PP.Pretty (SegOp lvl rep) where
   pretty (SegMap lvl space ts body) =
     "segmap"
       <> pretty lvl
-      </> PP.align (pretty space)
-      <+> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        <+> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegRed lvl space reds ts body) =
     "segred"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty reds)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegScan lvl space scans ts body) =
     "segscan"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map pretty scans)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
   pretty (SegHist lvl space ops ts body) =
     "seghist"
       <> pretty lvl
-      </> PP.align (pretty space)
-      </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
-      </> PP.colon
-      <+> ppTuple' (map pretty ts)
-      <+> PP.nestedBlock "{" "}" (pretty body)
+        </> PP.align (pretty space)
+        </> PP.parens (mconcat $ intersperse (PP.comma <> PP.line) $ map ppOp ops)
+        </> PP.colon
+        <+> ppTuple' (map pretty ts)
+        <+> PP.nestedBlock "{" "}" (pretty body)
     where
       ppOp (HistOp w rf dests nes shape op) =
         pretty w
           <> PP.comma
-          <+> pretty rf
+            <+> pretty rf
           <> PP.comma
-          </> PP.braces (PP.commasep $ map pretty dests)
+            </> PP.braces (PP.commasep $ map pretty dests)
           <> PP.comma
-          </> PP.braces (PP.commasep $ map pretty nes)
+            </> PP.braces (PP.commasep $ map pretty nes)
           <> PP.comma
-          </> pretty shape
+            </> pretty shape
           <> PP.comma
-          </> pretty op
+            </> pretty op
 
 instance CanBeAliased (SegOp lvl) where
   addOpAliases aliases = runIdentity . mapSegOpM alias
@@ -1005,6 +999,8 @@ instance
   where
   cheapOp _ = False
   safeOp _ = True
+  opDependencies op =
+    replicate (length . kernelBodyResult $ segBody op) (freeIn op)
 
 --- Simplification
 
@@ -1015,10 +1011,9 @@ instance Engine.Simplifiable SegSpace where
 instance Engine.Simplifiable KernelResult where
   simplify (Returns manifest cs what) =
     Returns manifest <$> Engine.simplify cs <*> Engine.simplify what
-  simplify (WriteReturns cs ws a res) =
+  simplify (WriteReturns cs a res) =
     WriteReturns
       <$> Engine.simplify cs
-      <*> Engine.simplify ws
       <*> Engine.simplify a
       <*> Engine.simplify res
   simplify (TileReturns cs dims what) =
@@ -1086,7 +1081,7 @@ simplifyKernelBody space (KernelBody _ stms res) = do
     scope_vtable = segSpaceSymbolTable space
     bound_here = namesFromList $ M.keys $ scopeOfSegSpace space
 
-    consumedInResult (WriteReturns _ _ arr _) =
+    consumedInResult (WriteReturns _ arr _) =
       [arr]
     consumedInResult _ =
       []
@@ -1342,7 +1337,7 @@ bottomUpSegOp ::
   Rule rep
 -- Some SegOp results can be moved outside the SegOp, which can
 -- simplify further analysis.
-bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
+bottomUpSegOp (vtable, _used) (Pat kpes) dec segop = Simplify $ do
   -- Iterate through the bindings.  For each, we check whether it is
   -- in kres and can be moved outside.  If so, we remove it from kres
   -- and kpes and make it a binding outside.  We have to be careful
@@ -1353,20 +1348,16 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
     localScope (scopeOfSegSpace space) $
       foldM distribute (kpes, kts, kres, mempty) kstms
 
-  when
-    (kpes' == kpes)
-    cannotSimplify
+  when (kpes' == kpes) cannotSimplify
 
   kbody' <-
-    localScope (scopeOfSegSpace space) $
-      mkKernelBodyM kstms' kres'
+    localScope (scopeOfSegSpace space) $ mkKernelBodyM kstms' kres'
 
   addStm $ Let (Pat kpes') dec $ Op $ segOp $ mk_segop kts' kbody'
   where
-    (kts, kbody@(KernelBody _ kstms kres), num_nonmap_results, mk_segop) =
+    (kts, KernelBody _ kstms kres, num_nonmap_results, mk_segop) =
       segOpGuts segop
     free_in_kstms = foldMap freeIn kstms
-    consumed_in_segop = consumedInKernelBody kbody
     space = segSpace segop
 
     sliceWithGtidsFixed stm
@@ -1395,13 +1386,9 @@ bottomUpSegOp (vtable, used) (Pat kpes) dec segop = Simplify $ do
                 letBindNames [patElemName kpe'] . BasicOp . Index arr $
                   Slice $
                     outer_slice <> remaining_slice
-          if (patElemName kpe `UT.isConsumed` used)
-            || (arr `nameIn` consumed_in_segop)
-            then do
-              precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
-              index kpe {patElemName = precopy}
-              letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
-            else index kpe
+          precopy <- newVName $ baseString (patElemName kpe) <> "_precopy"
+          index kpe {patElemName = precopy}
+          letBindNames [patElemName kpe] $ BasicOp $ Replicate mempty $ Var precopy
           pure
             ( kpes'',
               kts'',
@@ -1434,7 +1421,7 @@ kernelBodyReturns ::
   m [ExpReturns]
 kernelBodyReturns = zipWithM correct . kernelBodyResult
   where
-    correct (WriteReturns _ _ arr _) _ = varReturns arr
+    correct (WriteReturns _ arr _) _ = varReturns arr
     correct _ ret = pure ret
 
 -- | Like 'segOpType', but for memory representations.

@@ -160,8 +160,8 @@ dupDefinitionError space name loc1 loc2 =
       <+> pretty space
       <+> prettyName name
       <> "."
-      </> "Previously defined at"
-      <+> pretty (locStr loc2)
+        </> "Previously defined at"
+        <+> pretty (locStr loc2)
       <> "."
 
 checkForDuplicateDecs :: [DecBase NoInfo Name] -> TypeM ()

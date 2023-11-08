@@ -518,9 +518,9 @@ instance Pretty ValueDesc where
         Unsigned -> " (unsigned)"
         Signed -> mempty
   pretty (ArrayValue mem space et ept shape) =
-    foldr f (pretty et) shape <+> "at" <+> pretty mem <> pretty space <+> ept'
+    foldMap (brackets . pretty) shape
+      <> (pretty et <+> "at" <+> pretty mem <> pretty space <+> ept')
     where
-      f e s = brackets $ s <> comma <> pretty e
       ept' = case ept of
         Unsigned -> " (unsigned)"
         Signed -> mempty
@@ -574,9 +574,15 @@ instance (Pretty op) => Pretty (Code op) where
   pretty (Free name space) =
     "free" <> parens (pretty name) <> pretty space
   pretty (Write name i bt space vol val) =
-    pretty name <> langle <> vol' <> pretty bt <> pretty space <> rangle <> brackets (pretty i)
-      <+> "<-"
-      <+> pretty val
+    pretty name
+      <> langle
+      <> vol'
+      <> pretty bt
+      <> pretty space
+      <> rangle
+      <> brackets (pretty i)
+        <+> "<-"
+        <+> pretty val
     where
       vol' = case vol of
         Volatile -> "volatile "
@@ -584,7 +590,13 @@ instance (Pretty op) => Pretty (Code op) where
   pretty (Read name v is bt space vol) =
     pretty name
       <+> "<-"
-      <+> pretty v <> langle <> vol' <> pretty bt <> pretty space <> rangle <> brackets (pretty is)
+      <+> pretty v
+      <> langle
+      <> vol'
+      <> pretty bt
+      <> pretty space
+      <> rangle
+      <> brackets (pretty is)
     where
       vol' = case vol of
         Volatile -> "volatile "
@@ -602,14 +614,17 @@ instance (Pretty op) => Pretty (Code op) where
       <> (parens . align)
         ( foldMap (brackets . pretty) shape
             <> ","
-            </> p dst dstspace dstoffset dststrides
+              </> p dst dstspace dstoffset dststrides
             <> ","
-            </> p src srcspace srcoffset srcstrides
+              </> p src srcspace srcoffset srcstrides
         )
     where
       p mem space offset strides =
-        pretty mem <> pretty space <> "+" <> pretty offset
-          <+> foldMap (brackets . pretty) strides
+        pretty mem
+          <> pretty space
+          <> "+"
+          <> pretty offset
+            <+> foldMap (brackets . pretty) strides
   pretty (If cond tbranch fbranch) =
     "if"
       <+> pretty cond
@@ -626,7 +641,8 @@ instance (Pretty op) => Pretty (Code op) where
     "call"
       <+> commasep (map pretty dests)
       <+> "<-"
-      <+> pretty fname <> parens (commasep $ map pretty args)
+      <+> pretty fname
+      <> parens (commasep $ map pretty args)
   pretty (Comment s code) =
     "--" <+> pretty s </> pretty code
   pretty (DebugPrint desc (Just e)) =

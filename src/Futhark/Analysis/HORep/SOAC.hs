@@ -76,7 +76,8 @@ import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.Construct hiding (toExp)
 import Futhark.IR hiding
-  ( Iota,
+  ( Index,
+    Iota,
     Rearrange,
     Replicate,
     Reshape,
@@ -107,6 +108,8 @@ data ArrayTransform
     ReshapeInner Certs ReshapeKind Shape
   | -- | Replicate the rows of the array a number of times.
     Replicate Certs Shape
+  | -- | An array indexing operation.
+    Index Certs (Slice SubExp)
   deriving (Show, Eq, Ord)
 
 instance Substitute ArrayTransform where
@@ -120,6 +123,8 @@ instance Substitute ArrayTransform where
     ReshapeInner (substituteNames substs cs) k (substituteNames substs ses)
   substituteNames substs (Replicate cs se) =
     Replicate (substituteNames substs cs) (substituteNames substs se)
+  substituteNames substs (Index cs slice) =
+    Index (substituteNames substs cs) (substituteNames substs slice)
 
 -- | A sequence of array transformations, heavily inspired by
 -- "Data.Seq".  You can decompose it using 'viewf' and 'viewl', and
@@ -232,6 +237,8 @@ transformFromExp cs (BasicOp (Futhark.Reshape k shape v)) =
   Just (v, Reshape cs k shape)
 transformFromExp cs (BasicOp (Futhark.Replicate shape (Var v))) =
   Just (v, Replicate cs shape)
+transformFromExp cs (BasicOp (Futhark.Index v slice)) =
+  Just (v, Index cs slice)
 transformFromExp _ _ = Nothing
 
 -- | Turn an array transform on an array back into an expression.
@@ -249,6 +256,8 @@ transformToExp (ReshapeOuter cs k shape) ia = do
 transformToExp (ReshapeInner cs k shape) ia = do
   shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
   pure (cs, BasicOp $ Futhark.Reshape k shape' ia)
+transformToExp (Index cs slice) ia = do
+  pure (cs, BasicOp $ Futhark.Index ia slice)
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
@@ -312,6 +321,7 @@ applyTransform tr ia = do
       Reshape {} -> "reshape"
       ReshapeOuter {} -> "reshape_outer"
       ReshapeInner {} -> "reshape_inner"
+      Index {} -> "index"
 
 applyTransforms :: (MonadBuilder m) => ArrayTransforms -> VName -> m VName
 applyTransforms (ArrayTransforms ts) a = foldlM (flip applyTransform) a ts
@@ -350,6 +360,8 @@ inputType (Input (ArrayTransforms ts) _ at) =
     transformType t (ReshapeInner _ _ shape) =
       let Shape oldshape = arrayShape t
        in t `setArrayShape` Shape (take 1 oldshape ++ shapeDims shape)
+    transformType t (Index _ slice) =
+      t `setArrayShape` sliceShape slice
 
 -- | Return the row type of an input.  Just a convenient alias.
 inputRowType :: Input -> Type
@@ -395,32 +407,6 @@ data SOAC rep
   | Screma SubExp (ScremaForm rep) [Input]
   | Hist SubExp [HistOp rep] (Lambda rep) [Input]
   deriving (Eq, Show)
-
-instance PP.Pretty Input where
-  pretty (Input (ArrayTransforms ts) arr _) = foldl f (pretty arr) ts
-    where
-      f e (Rearrange cs perm) =
-        "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
-      f e (Reshape cs ReshapeArbitrary shape) =
-        "reshape" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (ReshapeOuter cs ReshapeArbitrary shape) =
-        "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (ReshapeInner cs ReshapeArbitrary shape) =
-        "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (Reshape cs ReshapeCoerce shape) =
-        "coerce" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (ReshapeOuter cs ReshapeCoerce shape) =
-        "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (ReshapeInner cs ReshapeCoerce shape) =
-        "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
-      f e (Replicate cs ne) =
-        "replicate" <> pretty cs <> PP.apply [pretty ne, e]
-
-instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
-  pretty (Screma w form arrs) = Futhark.ppScrema w arrs form
-  pretty (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
-  pretty (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
-  pretty (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC rep -> [Input]
@@ -572,7 +558,7 @@ soacToStream soac = do
               insstm = mkLet strm_resids $ Op insoac
               strmbdy = mkBody (oneStm insstm) $ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : strm_inpids
-              strmlam = Lambda strmpar strmbdy loutps
+              strmlam = Lambda strmpar loutps strmbdy
           -- map(f,a) creates a stream with NO accumulators
           pure (Stream w strmlam [] inps, [])
       | Just (scans, _) <- Futhark.isScanomapSOAC form,
@@ -614,9 +600,7 @@ soacToStream soac = do
                   outszm1id
                   (constant (0 :: Int64))
             -- 3. let lasteel_ids = ...
-            let indexLast arr = do
-                  arr_t <- lookupType arr
-                  pure $ BasicOp . Index arr $ fullSlice arr_t [DimFix outszm1id]
+            let indexLast arr = eIndex arr [eSubExp outszm1id]
             lastel_ids <-
               letTupExp "lastel"
                 =<< eIf
@@ -671,7 +655,7 @@ soacToStream soac = do
                 mkBody (oneStm insstm <> addaccstm) $
                   addaccres ++ map (subExpRes . Var . identName) strm_resids
               strmpar = chunk_param : inpacc_ids ++ strm_inpids
-              strmlam = Lambda strmpar strmbdy (accrtps ++ loutps')
+              strmlam = Lambda strmpar (accrtps ++ loutps') strmbdy
           pure (Stream w strmlam nes inps, [])
 
     -- Otherwise it cannot become a stream.
@@ -695,7 +679,7 @@ soacToStream soac = do
               (bodyDec plus_bdy)
               (stmsFromList parstms <> bodyStms plus_bdy)
               (bodyResult plus_bdy)
-      renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
+      renameLambda $ Lambda rempars (lambdaReturnType plus) newlambdy
 
     mkPlusBnds ::
       (MonadFreshNames m, Buildable rep) =>
@@ -711,3 +695,35 @@ soacToStream soac = do
               accels
           body = lambdaBody plus'
       pure $ body {bodyStms = stmsFromList parstms <> bodyStms body}
+
+ppArrayTransform :: PP.Doc a -> ArrayTransform -> PP.Doc a
+ppArrayTransform e (Rearrange cs perm) =
+  "rearrange" <> pretty cs <> PP.apply [PP.apply (map pretty perm), e]
+ppArrayTransform e (Reshape cs ReshapeArbitrary shape) =
+  "reshape" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (ReshapeOuter cs ReshapeArbitrary shape) =
+  "reshape_outer" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (ReshapeInner cs ReshapeArbitrary shape) =
+  "reshape_inner" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (Reshape cs ReshapeCoerce shape) =
+  "coerce" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (ReshapeOuter cs ReshapeCoerce shape) =
+  "coerce_outer" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (ReshapeInner cs ReshapeCoerce shape) =
+  "coerce_inner" <> pretty cs <> PP.apply [pretty shape, e]
+ppArrayTransform e (Replicate cs ne) =
+  "replicate" <> pretty cs <> PP.apply [pretty ne, e]
+ppArrayTransform e (Index cs slice) =
+  e <> pretty cs <> pretty slice
+
+instance PP.Pretty Input where
+  pretty (Input (ArrayTransforms ts) arr _) = foldl ppArrayTransform (pretty arr) ts
+
+instance PP.Pretty ArrayTransform where
+  pretty = ppArrayTransform "INPUT"
+
+instance (PrettyRep rep) => PP.Pretty (SOAC rep) where
+  pretty (Screma w form arrs) = Futhark.ppScrema w arrs form
+  pretty (Hist len ops bucket_fun imgs) = Futhark.ppHist len imgs ops bucket_fun
+  pretty (Stream w lam nes arrs) = Futhark.ppStream w arrs nes lam
+  pretty (Scatter w lam arrs dests) = Futhark.ppScatter w arrs lam dests

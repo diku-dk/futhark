@@ -33,7 +33,6 @@ import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
 import Control.Monad.Writer.Strict
-import Data.Function ((&))
 import Data.List (find, partition, tails)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map qualified as M
@@ -54,7 +53,6 @@ import Futhark.Tools
 import Futhark.Transform.CopyPropagate
 import Futhark.Transform.FirstOrderTransform qualified as FOT
 import Futhark.Transform.Rename
-import Futhark.Util
 import Futhark.Util.Log
 
 scopeForSOACs :: (SameScope rep SOACS) => Scope rep -> Scope SOACS
@@ -566,23 +564,39 @@ maybeDistributeStm (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) acc = do
   scope <- asksScope scopeForSOACs
   distributeMapBodyStms acc . fmap (certify cs) . snd
     =<< runBuilderT (dissectScrema pat w form arrs) scope
-maybeDistributeStm (Let pat aux (BasicOp (Replicate (Shape (d : ds)) v))) acc
-  | [t] <- patTypes pat = do
-      tmp <- newVName "tmp"
-      let rowt = rowType t
-          newstm = Let pat aux $ Op $ Screma d [] $ mapSOAC lam
-          tmpstm =
-            Let (Pat [PatElem tmp rowt]) aux $ BasicOp $ Replicate (Shape ds) v
-          lam =
-            Lambda
-              { lambdaReturnType = [rowt],
-                lambdaParams = [],
-                lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
-              }
-      maybeDistributeStm newstm acc
-maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate (Shape []) (Var stm_arr)))) acc =
-  distributeSingleUnaryStm acc stm stm_arr $ \_ outerpat arr ->
-    pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
+maybeDistributeStm stm@(Let _ aux (BasicOp (Replicate shape (Var stm_arr)))) acc = do
+  distributeSingleUnaryStm acc stm stm_arr $ \nest outerpat arr ->
+    if shape == mempty
+      then pure $ oneStm $ Let outerpat aux $ BasicOp $ Replicate mempty $ Var arr
+      else runBuilder_ $ auxing aux $ do
+        arr_t <- lookupType arr
+        let arr_r = arrayRank arr_t
+            nest_r = length (snd nest) + 1
+            res_r = arr_r + shapeRank shape
+        -- Move the to-be-replicated dimensions outermost.
+        arr_tr <-
+          letExp (baseString arr <> "_tr") . BasicOp $
+            Rearrange ([nest_r .. arr_r - 1] ++ [0 .. nest_r - 1]) arr
+        -- Replicate the now-outermost dimensions appropriately.
+        arr_tr_rep <-
+          letExp (baseString arr <> "_tr_rep") . BasicOp $
+            Replicate shape (Var arr_tr)
+        -- Move the replicated dimensions back where they belong.
+        letBind outerpat . BasicOp $
+          Rearrange ([res_r - nest_r .. res_r - 1] ++ [0 .. res_r - nest_r - 1]) arr_tr_rep
+maybeDistributeStm (Let (Pat [pe]) aux (BasicOp (Replicate (Shape (d : ds)) v))) acc = do
+  tmp <- newVName "tmp"
+  let rowt = rowType $ patElemType pe
+      newstm = Let (Pat [pe]) aux $ Op $ Screma d [] $ mapSOAC lam
+      tmpstm =
+        Let (Pat [PatElem tmp rowt]) aux $ BasicOp $ Replicate (Shape ds) v
+      lam =
+        Lambda
+          { lambdaReturnType = [rowt],
+            lambdaParams = [],
+            lambdaBody = mkBody (oneStm tmpstm) [varRes tmp]
+          }
+  maybeDistributeStm newstm acc
 -- Opaques are applied to the full array, because otherwise they can
 -- drastically inhibit parallelisation in some cases.
 maybeDistributeStm stm@(Let (Pat [pe]) aux (BasicOp (Opaque _ (Var stm_arr)))) acc
@@ -648,10 +662,9 @@ distributeSingleUnaryStm acc stm stm_arr f =
     Just (kernels, res, nest, acc')
       | map resSubExp res == map Var (patNames $ stmPat stm),
         (outer, _) <- nest,
-        [(arr_p, arr)] <- loopNestingParamsAndArrs outer,
-        boundInKernelNest nest
-          `namesIntersection` freeIn stm
-          == oneName (paramName arr_p),
+        [(_, arr)] <- loopNestingParamsAndArrs outer,
+        boundInKernelNest nest `namesIntersection` freeIn stm
+          == oneName stm_arr,
         perfectlyMapped arr nest -> do
           addPostStms kernels
           let outerpat = loopNestingPat $ fst nest
@@ -773,27 +786,21 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   mk_lvl <- mkSegLevel
 
-  let rts =
-        concatMap (take 1) $
-          chunks as_ns $
-            drop (sum indexes) $
-              lambdaReturnType lam
-      (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
-
+  let (is, vs) = splitAt (sum indexes) $ bodyResult $ lambdaBody lam
   (is', k_body_stms) <- runBuilder $ do
     addStms $ bodyStms $ lambdaBody lam
     pure is
 
-  let k_body =
-        groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
-          & map (inPlaceReturn ispace)
-          & KernelBody () k_body_stms
+  let grouped = groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
+      (_, dest_arrs, _) = unzip3 grouped
+      k_body = KernelBody () k_body_stms (map (inPlaceReturn ispace) grouped)
       -- Remove unused kernel inputs, since some of these might
       -- reference the array we are scattering into.
       kernel_inps' =
         filter ((`nameIn` freeIn k_body) . kernelInputName) kernel_inps
 
-  (k, k_stms) <- mapKernel mk_lvl ispace kernel_inps' rts k_body
+  dest_arrs_ts <- mapM (lookupType . kernelInputArray) dest_arrs
+  (k, k_stms) <- mapKernel mk_lvl ispace kernel_inps' dest_arrs_ts k_body
 
   traverse renameStm <=< runBuilder_ $ do
     addStms k_stms
@@ -810,18 +817,17 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
       maybe bad pure $ find ((== a) . kernelInputName) kernel_inps
     bad = error "Ill-typed nested scatter encountered."
 
-    inPlaceReturn ispace (aw, inp, is_vs) =
+    inPlaceReturn ispace (_aw, inp, is_vs) =
       WriteReturns
         ( foldMap (foldMap resCerts . fst) is_vs
             <> foldMap (resCerts . snd) is_vs
         )
-        (Shape (init ws ++ shapeDims aw))
         (kernelInputArray inp)
         [ (Slice $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
           | (is, v) <- is_vs
         ]
       where
-        (gtids, ws) = unzip ispace
+        (gtids, _ws) = unzip ispace
 
 segmentedUpdateKernel ::
   (MonadFreshNames m, LocalScope rep m, DistRep rep) =>
@@ -839,15 +845,11 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
   let ispace = base_ispace ++ zip slice_gtids slice_dims
 
-  ((res_t, res), kstms) <- runBuilder $ do
+  ((dest_t, res), kstms) <- runBuilder $ do
     -- Compute indexes into full array.
     v' <-
-      certifying cs $
-        letSubExp "v" $
-          BasicOp $
-            Index v $
-              Slice $
-                map (DimFix . Var) slice_gtids
+      certifying cs . letSubExp "v" . BasicOp . Index v $
+        Slice (map (DimFix . Var) slice_gtids)
     slice_is <-
       traverse (toSubExp "index") $
         fixSlice (fmap pe64 slice) $
@@ -858,10 +860,9 @@ segmentedUpdateKernel nest perm cs arr slice v = do
           maybe (error "incorrectly typed Update") kernelInputArray $
             find ((== arr) . kernelInputName) kernel_inps
     arr_t <- lookupType arr'
-    v_t <- subExpType v'
     pure
-      ( v_t,
-        WriteReturns mempty (arrayShape arr_t) arr' [(Slice $ map DimFix write_is, v')]
+      ( arr_t,
+        WriteReturns mempty arr' [(Slice $ map DimFix write_is, v')]
       )
 
   -- Remove unused kernel inputs, since some of these might
@@ -871,18 +872,12 @@ segmentedUpdateKernel nest perm cs arr slice v = do
 
   mk_lvl <- mkSegLevel
   (k, prestms) <-
-    mapKernel mk_lvl ispace kernel_inps' [res_t] $
+    mapKernel mk_lvl ispace kernel_inps' [dest_t] $
       KernelBody () kstms [res]
 
   traverse renameStm <=< runBuilder_ $ do
     addStms prestms
-
-    let pat =
-          Pat . rearrangeShape perm $
-            patElems $
-              loopNestingPat $
-                fst nest
-
+    let pat = Pat . rearrangeShape perm $ patElems $ loopNestingPat $ fst nest
     letBind pat $ Op $ segOp k
 
 segmentedGatherKernel ::

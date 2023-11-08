@@ -70,7 +70,8 @@ runOptions timeout_s opts =
       runVerbose = optVerbose opts,
       runConvergencePhase = True,
       runConvergenceMaxTime = fromIntegral timeout_s,
-      runResultAction = const $ pure ()
+      runResultAction = const $ pure (),
+      runProfile = False
     }
 
 type Path = [(T.Text, Int)]
@@ -167,8 +168,7 @@ prepare opts futhark prog = do
       pure (dataset, do_run, iosEntryPoint ios)
   where
     run server entry_point trun expected timeout path = do
-      let bestRuntime :: ([RunResult], T.Text) -> ([(T.Text, Int)], Int)
-          bestRuntime (runres, errout) =
+      let bestRuntime (runres, errout, _) =
             ( comparisons errout,
               minimum $ map runMicroseconds runres
             )
@@ -472,7 +472,7 @@ runAutotuner opts prog = do
   T.putStrLn $ "Result of autotuning:\n" <> tuning
 
 supportedBackends :: [String]
-supportedBackends = ["opencl", "cuda"]
+supportedBackends = ["opencl", "cuda", "hip"]
 
 commandLineOptions :: [FunOptDescr AutotuneOptions]
 commandLineOptions =

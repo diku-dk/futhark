@@ -223,17 +223,14 @@ reshape (LMAD off dims) newshape
 
 -- Then the general case.
 reshape lmad@(LMAD off dims) newshape = do
-  let mid_dims = take (length dims) dims
+  let base_stride = ldStride (last dims)
+      no_zero_stride = all (\ld -> ldStride ld /= 0) dims
+      strides_as_expected = lmad == iotaStrided off base_stride (shape lmad)
 
-  guard $
-    -- checking conditions (2)
-    all (\(LMADDim s _) -> s /= 0) mid_dims
-      && all
-        (\(ld, se) -> ldStride ld == se)
-        (zip dims (reverse $ scanl (*) 1 (reverse (tail (shape lmad)))))
+  guard $ no_zero_stride && strides_as_expected
 
-  let LMAD off' dims_sup = iota off newshape
-  Just $ LMAD off' dims_sup
+  Just $ iotaStrided off base_stride newshape
+{-# NOINLINE reshape #-}
 
 -- | Substitute a name with a PrimExp in an LMAD.
 substituteInLMAD ::
@@ -255,6 +252,19 @@ shape = map ldShape . dims
 rank :: LMAD num -> Int
 rank = length . shape
 
+iotaStrided ::
+  (IntegralExp num) =>
+  -- | Offset
+  num ->
+  -- | Base Stride
+  num ->
+  -- | Shape
+  [num] ->
+  LMAD num
+iotaStrided off s ns =
+  let ss = tail $ reverse $ scanl (*) s $ reverse ns
+   in LMAD off $ zipWith LMADDim ss ns
+
 -- | Generalised iota with user-specified offset.
 iota ::
   (IntegralExp num) =>
@@ -263,10 +273,8 @@ iota ::
   -- | Shape
   [num] ->
   LMAD num
-iota off ns =
-  let rk = length ns
-      ss = reverse $ take rk $ scanl (*) 1 $ reverse ns
-   in LMAD off $ zipWith LMADDim ss ns
+iota off = iotaStrided off 1
+{-# NOINLINE iota #-}
 
 -- | Create an LMAD that is existential in everything.
 mkExistential :: Int -> Int -> LMAD (Ext a)
@@ -517,6 +525,7 @@ dynamicEqualsLMAD lmad1 lmad2 =
       ((.&&.) . uncurry dynamicEqualsLMADDim)
       true
       (zip (dims lmad1) (dims lmad2))
+{-# NOINLINE dynamicEqualsLMAD #-}
 
 -- | Returns true if two 'LMAD's are equivalent.
 --
@@ -526,10 +535,9 @@ equivalent lmad1 lmad2 =
   length (dims lmad1) == length (dims lmad2)
     && offset lmad1 == offset lmad2
     && map ldStride (dims lmad1) == map ldStride (dims lmad2)
+{-# NOINLINE equivalent #-}
 
--- | Is this is a row-major array?
+-- | Is this is a row-major array with zero offset?
 isDirect :: (Eq num, IntegralExp num) => LMAD num -> Bool
-isDirect (LMAD offset dims) =
-  let strides_expected = reverse $ scanl (*) 1 $ reverse $ tail $ map ldShape dims
-   in offset == 0
-        && and (zipWith (==) (map ldStride dims) strides_expected)
+isDirect lmad = lmad == iota 0 (map ldShape $ dims lmad)
+{-# NOINLINE isDirect #-}

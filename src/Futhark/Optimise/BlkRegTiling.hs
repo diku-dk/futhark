@@ -57,7 +57,6 @@ kkLoopBody ::
     SegLevel,
     [Int],
     (VName, SubExp, VName, SubExp, SubExp),
-    (SubExp, SubExp),
     (VName, VName),
     (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
     (Lambda GPU, Lambda GPU)
@@ -72,7 +71,6 @@ kkLoopBody
     segthd_lvl,
     var_dims,
     (gtid_x, width_B, gtid_y, height_A, common_dim),
-    (a_loc_sz, b_loc_sz),
     (iii, jjj),
     (load_A, inp_A, pt_A, load_B, inp_B, pt_B),
     (map_lam, red_lam)
@@ -84,11 +82,11 @@ kkLoopBody
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
     -- copy A to local memory
     (a_loc, aCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_sz, a_loc_init')
+      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
     -- copy B from global to shared memory
     (b_loc, bCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_sz, b_loc_init')
+      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
@@ -173,10 +171,16 @@ kkLoopBody
                           -- is garbage anyways and should not be written.
                           -- so fits_ij should be always true!!!
 
-                            le64 iii + le64 i + pe64 ry * le64 ltid_y
-                              .<. pe64 height_A
-                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                .<. pe64 width_B
+                            le64 iii
+                              + le64 i
+                              + pe64 ry
+                                * le64 ltid_y
+                                  .<. pe64 height_A
+                                  .&&. le64 jjj
+                              + le64 j
+                              + pe64 rx
+                                * le64 ltid_x
+                                  .<. pe64 width_B
                     )
                     ( do
                         a <- index "a" as [i]
@@ -204,14 +208,14 @@ kkLoopBody
       --
       copyGlb2ShMem ::
         VName ->
-        (VName, VName, PrimType, SubExp, VName, Stm GPU, SubExp, VName) ->
+        (VName, VName, PrimType, SubExp, VName, Stm GPU, VName) ->
         Builder GPU (VName, VName -> VName -> Builder GPU VName)
-      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, loc_sz_X, x_loc_init') = do
+      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseString inp_X
         x_loc <-
-          segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
+          segScatter2D (str_A ++ "_glb2loc") x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
             scatterFun is_inner_coal
 
         pure (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
@@ -255,7 +259,8 @@ kkLoopBody
               letSubExp (str_A ++ "_elem")
                 =<< eIf
                   ( toExp $
-                      le64 gtid .<. pe64 parlen_X
+                      le64 gtid
+                        .<. pe64 parlen_X
                         .&&. if epilogue
                           then le64 a_seqdim_idx .<. pe64 common_dim
                           else true
@@ -355,7 +360,6 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   segthd_lvl,
                   var_dims,
                   (gtid_x, width_B, gtid_y, height_A, common_dim),
-                  (a_loc_sz, b_loc_sz),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -376,8 +380,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             letTupExp "redomap_res_if"
               =<< eIf
                 ( toExp $
-                    le64 full_tiles .==. pe64 rk
-                      .||. pe64 common_dim .==. (pe64 tk * le64 full_tiles + le64 ttt)
+                    le64 full_tiles
+                      .==. pe64 rk
+                      .||. pe64 common_dim
+                      .==. (pe64 tk * le64 full_tiles + le64 ttt)
                 )
                 (resultBodyM $ map Var prologue_res_list)
                 ( do
@@ -460,8 +466,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 letSubExp "res_elem"
                   =<< eIf
                     ( toExp $
-                        le64 gtid_y .<. pe64 height_A
-                          .&&. le64 gtid_x .<. pe64 width_B
+                        le64 gtid_y
+                          .<. pe64 height_A
+                          .&&. le64 gtid_x
+                          .<. pe64 width_B
                     )
                     ( do
                         addStms code2_subs
@@ -539,7 +547,6 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   segthd_lvl,
                   var_dims,
                   (gtid_x, width_B, gtid_y, height_A, common_dim),
-                  (a_loc_sz, b_loc_sz),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -608,8 +615,10 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                       letSubExp "res_elem"
                         =<< eIf
                           ( toExp $
-                              le64 gtid_y .<. pe64 height_A
-                                .&&. le64 gtid_x .<. pe64 width_B
+                              le64 gtid_y
+                                .<. pe64 height_A
+                                .&&. le64 gtid_x
+                                .<. pe64 width_B
                           )
                           ( do
                               addStms code2'
@@ -1153,14 +1162,14 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           -- y_tp  <- subExpType y_elm
                           pure (y_elm, y_ind)
 
-                        let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [(Slice [DimFix res_i], res_v)]
+                        let ret = WriteReturns mempty loc_Y_nm [(Slice [DimFix res_i], res_v)]
                         let body = KernelBody () stms [ret]
+                        loc_Y_nm_t <- lookupType loc_Y_nm
 
                         res_nms <-
                           letTupExp "Y_glb2loc" <=< renameExp $
-                            Op $
-                              SegOp $
-                                SegMap segthd_lvl segspace [Prim ptp_Y] body
+                            Op . SegOp $
+                              SegMap segthd_lvl segspace [loc_Y_nm_t] body
                         let res_nm : _ = res_nms
                         pure res_nm
                     resultBodyM $ map Var loc_arr_merge2_nms'
@@ -1251,9 +1260,12 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     letTupExp' "res_elem"
                       =<< eIf
                         ( toExp $
-                            le64 gtid_y .<. pe64 d_Ky
-                              .&&. le64 gtid_x .<. pe64 d_Kx
-                              .&&. le64 gtid_z .<. pe64 d_M
+                            le64 gtid_y
+                              .<. pe64 d_Ky
+                              .&&. le64 gtid_x
+                              .<. pe64 d_Kx
+                              .&&. le64 gtid_z
+                              .<. pe64 d_M
                         )
                         ( do
                             addStms code2'

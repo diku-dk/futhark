@@ -1345,7 +1345,7 @@ iotaForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam n int32,
+            Imp.ScalarParam n int64,
             Imp.ScalarParam x $ IntType bt,
             Imp.ScalarParam s $ IntType bt
           ]
@@ -1358,7 +1358,7 @@ iotaForType bt = do
       arr <-
         sArray "arr" (IntType bt) shape mem $
           LMAD.iota 0 (map pe64 (shapeDims shape))
-      sIotaKernel arr (sExt64 n') x' s' bt
+      sIotaKernel arr n' x' s' bt
 
   pure fname
 
@@ -1392,8 +1392,9 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map pe64 rws
+compileThreadResult _ pe (WriteReturns _ arr dests) = do
+  arr_t <- lookupType arr
+  let rws' = map pe64 $ arrayDims arr_t
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap pe64 slice
         write = inBounds slice' rws'

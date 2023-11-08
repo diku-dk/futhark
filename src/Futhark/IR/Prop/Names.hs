@@ -48,8 +48,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import Futhark.IR.Prop.Patterns
-import Futhark.IR.Prop.Scope
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.Util.Pretty
@@ -287,7 +286,9 @@ instance
   freeIn' (Loop merge form loopbody) =
     let (params, args) = unzip merge
         bound_here =
-          namesFromList $ M.keys $ scopeOf form <> scopeOfFParams params
+          case form of
+            WhileLoop {} -> namesFromList $ map paramName params
+            ForLoop i _ _ -> namesFromList $ i : map paramName params
      in fvBind bound_here $
           freeIn' args <> freeIn' form <> freeIn' params <> freeIn' loopbody
   freeIn' (WithAcc inputs lam) =
@@ -363,8 +364,8 @@ instance (FreeIn dec) => FreeIn (Param dec) where
 instance (FreeIn dec) => FreeIn (PatElem dec) where
   freeIn' (PatElem _ dec) = freeIn' dec
 
-instance (FreeIn (LParamInfo rep)) => FreeIn (LoopForm rep) where
-  freeIn' (ForLoop _ _ bound loop_vars) = freeIn' bound <> freeIn' loop_vars
+instance FreeIn LoopForm where
+  freeIn' (ForLoop _ _ bound) = freeIn' bound
   freeIn' (WhileLoop cond) = freeIn' cond
 
 instance (FreeIn d) => FreeIn (DimIndex d) where

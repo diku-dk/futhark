@@ -136,76 +136,43 @@ static void str_builder(struct str_builder *b, const char *s, ...) {
   b->used += needed;
 }
 
-struct cost_centre {
-  const char *name;
-  int64_t runs;
-  int64_t runtime;
-};
-
-// Dynamic dictionary for tallying cost centres when aggregating
-// profiling information.  Not performance-critical.
-struct cost_centres {
-  size_t capacity;
-  size_t used;
-  struct cost_centre* centres;
-};
-
-static struct cost_centres *cost_centres_new() {
-  struct cost_centres *ccs = malloc(sizeof(struct cost_centres));
-  ccs->capacity = 100;
-  ccs->used = 0;
-  ccs->centres = calloc(ccs->capacity, sizeof(struct cost_centre));
-  return ccs;
-}
-
-static void cost_centres_free(struct cost_centres* ccs) {
-  free(ccs->centres);
-  free(ccs);
-}
-
-static void cost_centres_init(struct cost_centres* ccs, const char *name) {
-  if (ccs->used == ccs->capacity) {
-    ccs->capacity *= 2;
-    ccs->centres = realloc(ccs->centres, ccs->capacity*sizeof(struct cost_centre));
+static void str_builder_str(struct str_builder *b, const char *s) {
+  size_t needed = strlen(s);
+  if (b->capacity < b->used + needed + 1) {
+    b->capacity *= 2;
+    b->str = realloc(b->str, b->capacity);
   }
-  ccs->centres[ccs->used].name = name;
-  ccs->centres[ccs->used].runs = 0;
-  ccs->centres[ccs->used].runtime = 0;
-  ccs->used++;
+  strcpy(b->str+b->used, s);
+  b->used += needed;
 }
 
-static void cost_centres_add(struct cost_centres* ccs, struct cost_centre c) {
-  size_t i = 0;
-  for (i = 0; i < ccs->used; i++) {
-    if (strcmp(c.name, ccs->centres[i].name) == 0) {
-      ccs->centres[i].runs += c.runs;
-      ccs->centres[i].runtime += c.runtime;
-      return;
+static void str_builder_char(struct str_builder *b, char c) {
+  size_t needed = 1;
+  if (b->capacity < b->used + needed + 1) {
+    b->capacity *= 2;
+    b->str = realloc(b->str, b->capacity);
+  }
+  b->str[b->used] = c;
+  b->str[b->used+1] = 0;
+  b->used += needed;
+}
+
+static void str_builder_json_str(struct str_builder* sb, const char* s) {
+  str_builder_char(sb, '"');
+  for (int j = 0; s[j]; j++) {
+    char c = s[j];
+    switch (c) {
+    case '\n':
+      str_builder_str(sb, "\\n");
+      break;
+    case '"':
+      str_builder_str(sb, "\\\"");
+      break;
+    default:
+      str_builder_char(sb, c);
     }
   }
-  if (i == ccs->capacity) {
-    ccs->capacity *= 2;
-    ccs->centres = realloc(ccs->centres, ccs->capacity*sizeof(struct cost_centre));
-  }
-  ccs->centres[i] = c;
-  ccs->used++;
-}
-
-static void cost_centre_report(struct cost_centres* ccs, struct str_builder *b) {
-  int64_t total_runs = 0;
-  int64_t total_runtime = 0;
-  for (size_t i = 0; i < ccs->used; i++) {
-    struct cost_centre c = ccs->centres[i];
-    str_builder(b,
-                "%-40s ran %5d times; avg %8ldus; total: %8ldus\n",
-                c.name,
-                c.runs, c.runs == 0 ? 0 : c.runtime/c.runs, c.runtime);
-    total_runs += c.runs;
-    total_runtime += c.runtime;
-  }
-  str_builder(b,
-              "%d operations with cumulative runtime: %6ldus\n",
-              total_runs, total_runtime);
+  str_builder_char(sb, '"');
 }
 
 static char *strclone(const char *str) {

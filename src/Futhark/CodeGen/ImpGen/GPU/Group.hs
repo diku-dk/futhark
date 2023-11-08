@@ -201,10 +201,11 @@ compileFlatId space = do
 
 -- Construct the necessary lock arrays for an intra-group histogram.
 prepareIntraGroupSegHist ::
+  Shape ->
   Count GroupSize SubExp ->
   [HistOp GPUMem] ->
   InKernelGen [[Imp.TExp Int64] -> InKernelGen ()]
-prepareIntraGroupSegHist group_size =
+prepareIntraGroupSegHist segments group_size =
   fmap snd . mapAccumLM onOp Nothing
   where
     onOp l op = do
@@ -221,7 +222,7 @@ prepareIntraGroupSegHist group_size =
           locks <- newVName "locks"
 
           let num_locks = pe64 $ unCount group_size
-              dims = map pe64 $ shapeDims (histOpShape op <> histShape op)
+              dims = map pe64 $ shapeDims (segments <> histOpShape op <> histShape op)
               l' = Locking locks 0 1 0 (pure . (`rem` num_locks) . flattenIndex dims)
               locks_t = Array int32 (Shape [unCount group_size]) NoUniqueness
 
@@ -517,7 +518,7 @@ compileGroupOp pat (Inner (SegOp (SegRed lvl space ops _ body))) = do
       sOp $ Imp.Barrier Imp.FenceLocal
 compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
   compileFlatId space
-  let (ltids, _dims) = unzip $ unSegSpace space
+  let (ltids, dims) = unzip $ unSegSpace space
 
   -- We don't need the red_pes, because it is guaranteed by our type
   -- rules that they occupy the same memory as the destinations for
@@ -527,7 +528,7 @@ compileGroupOp pat (Inner (SegOp (SegHist lvl space ops _ kbody))) = do
         splitAt num_red_res $ patElems pat
 
   group_size <- kernelGroupSizeCount . kernelConstants <$> askEnv
-  ops' <- prepareIntraGroupSegHist group_size ops
+  ops' <- prepareIntraGroupSegHist (Shape $ init dims) group_size ops
 
   -- Ensure that all locks have been initialised.
   sOp $ Imp.Barrier Imp.FenceLocal

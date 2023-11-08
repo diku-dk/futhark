@@ -74,10 +74,9 @@ transformBody :: Body GPUMem -> ExpandM (Body GPUMem)
 transformBody (Body () stms res) = Body () <$> transformStms stms <*> pure res
 
 transformLambda :: Lambda GPUMem -> ExpandM (Lambda GPUMem)
-transformLambda (Lambda params body ret) =
-  Lambda params
+transformLambda (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody body)
-    <*> pure ret
 
 transformStms :: Stms GPUMem -> ExpandM (Stms GPUMem)
 transformStms stms =
@@ -733,7 +732,7 @@ offsetMemoryInExp (Loop merge form body) = do
   offsetMemoryInLoopParams merge $ \merge' -> do
     body' <-
       localScope
-        (scopeOfFParams (map fst merge') <> scopeOf form)
+        (scopeOfFParams (map fst merge') <> scopeOfLoopForm form)
         (offsetMemoryInBody body)
     pure $ Loop merge' form body'
 offsetMemoryInExp e = mapExpM recurse e
@@ -779,8 +778,8 @@ unAllocGPUStms = unAllocStms False
     unAllocStm _ (Let pat dec e) =
       Let <$> unAllocPat pat <*> pure dec <*> mapExpM unAlloc' e
 
-    unAllocLambda (Lambda params body ret) =
-      Lambda (map unParam params) <$> unAllocBody body <*> pure ret
+    unAllocLambda (Lambda params ret body) =
+      Lambda (map unParam params) ret <$> unAllocBody body
 
     unAllocPat (Pat pes) =
       Pat <$> mapM (rephrasePatElem (Right . unMem)) pes
@@ -865,7 +864,7 @@ sliceKernelSizes num_threads sizes space kstms = do
         forM (zip xs ys) $ \(x, y) ->
           fmap subExpRes . letSubExp "z" . BasicOp $
             BinOp (SMax Int64) (Var $ paramName x) (Var $ paramName y)
-    pure $ Lambda (xs ++ ys) (mkBody stms zs) i64s
+    pure $ Lambda (xs ++ ys) i64s (mkBody stms zs)
 
   flat_gtid_lparam <- newParam "flat_gtid" (Prim (IntType Int64))
 

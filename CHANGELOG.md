@@ -9,9 +9,70 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* FutharkScript now has a `$loadbytes` builtin function for reading
+  arbitrary bytes into Futhark programs.
+
 ### Removed
 
 ### Changed
+
+### Fixed
+
+## [0.25.7]
+
+### Added
+
+* `futhark autotune` how supports `hip` backend.
+
+* Better parallelisation of `scatter` when the target is
+  multidimensional (#2035).
+
+### Fixed
+
+* Very large `iota`s now work.
+
+* Lambda lifting in `while` conditions (#2038).
+
+* Size expressions in local function parameters had an interesting
+  interaction with defunctionalisation (#2040).
+
+* The `store` command in server executables did not properly
+  synchronise when storing opaque values, which would lead to
+  use-after-free errors.
+
+## [0.25.6]
+
+### Added
+
+* The various C API functions that accept strings now perform a copy,
+  meaning the caller does not have to keep the strings alive.
+
+* Slightly better lexer error messages.
+
+* Fusion across slicing is now possible in some cases.
+
+* New tool: `futhark profile`.
+
+### Fixed
+
+* Inefficient locking for certain segmented histograms (#2024).
+
+## [0.25.5]
+
+### Added
+
+* `futhark repl` now has a `:format` command.  Work by Dominic
+  Kennedy.
+
+### Fixed
+
+* Textual floating-point numbers printed by executables now always
+  print enough digits to not hide information.  Binary output is
+  unchanged.
+
+* Invalid CSE on constants could crash the compiler (#2021).
+
+## [0.25.4]
 
 ### Fixed
 
@@ -19,6 +80,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Rarely occurring deadlock for fused map-scan compositions in CUDA
   backend, when a bounds check failed in the map function.
+
+* Compiler and interpreter crash for tricky interactions of abstract
+  types and sizes (#2016).  Solved by banning such uses - in principle
+  this could break code.
+
+* Incomplete alias tracking could cause removal of necessary copies,
+  leading to compiler crash (#2018).
 
 ## [0.25.3]
 

@@ -234,7 +234,7 @@ rank (IxFun (LMAD _ sss) _) = length sss
 expand ::
   (Eq num, IntegralExp num) => num -> num -> IxFun num -> Maybe (IxFun num)
 expand o p (IxFun lmad base) =
-  let onDim ld = ld {LMAD.ldStride = LMAD.ldStride ld * p}
+  let onDim ld = ld {LMAD.ldStride = p * LMAD.ldStride ld}
       lmad' =
         LMAD
           (o + p * LMAD.offset lmad)

@@ -300,11 +300,11 @@ testRunReferenceOutput :: FilePath -> T.Text -> TestRun -> FilePath
 testRunReferenceOutput prog entry tr =
   "data"
     </> takeBaseName prog
-    <> ":"
-    <> T.unpack entry
-    <> "-"
-    <> map clean (T.unpack (runDescription tr))
-    <.> "out"
+      <> ":"
+      <> T.unpack entry
+      <> "-"
+      <> map clean (T.unpack (runDescription tr))
+        <.> "out"
   where
     clean '/' = '_' -- Would this ever happen?
     clean ' ' = '_'

@@ -581,7 +581,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
         & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
         & Slice
     resultSlice ixf = IxFun.slice ixf $ fullSlice (IxFun.shape ixf) thread_slice
-makeSegMapCoals _ _ td_env _ _ x (_, _, WriteReturns _ _ return_name _) =
+makeSegMapCoals _ _ td_env _ _ x (_, _, WriteReturns _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
     Nothing -> error "Should not happen?"
@@ -1072,10 +1072,10 @@ mkCoalsTabStm lutab (Let pat _ (Loop arginis lform body)) td_env bu_env = do
     translateIxFnInScope _ = Nothing
     se0 = intConst Int64 0
     mbLoopIndexRange ::
-      LoopForm (Aliases rep) ->
+      LoopForm ->
       Maybe (VName, (TPrimExp Int64 VName, TPrimExp Int64 VName))
     mbLoopIndexRange (WhileLoop _) = Nothing
-    mbLoopIndexRange (ForLoop inm _inttp seN _) = Just (inm, (pe64 se0, pe64 seN))
+    mbLoopIndexRange (ForLoop inm _inttp seN) = Just (inm, (pe64 se0, pe64 seN))
     addBeforeLoop actv_bef m_b etry =
       case M.lookup m_b actv_bef of
         Nothing -> etry
@@ -1704,7 +1704,7 @@ computeScalarTable scope_table (Let _ _ (Loop loop_inits loop_form body)) =
     ( computeScalarTable $
         scope_table
           <> scopeOfFParams (map fst loop_inits)
-          <> scopeOf loop_form
+          <> scopeOfLoopForm loop_form
           <> scopeOf (bodyStms body)
     )
     (stmsToList $ bodyStms body)

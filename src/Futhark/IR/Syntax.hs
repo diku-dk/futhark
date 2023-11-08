@@ -283,8 +283,8 @@ subExpResVName _ = Nothing
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExpRes]
 
--- | A body consists of a number of bindings, terminating in a result
--- (essentially a tuple literal).
+-- | A body consists of a sequence of statements, terminating in a
+-- list of result values.
 data Body rep = Body
   { bodyDec :: BodyDec rep,
     bodyStms :: Stms rep,
@@ -435,7 +435,7 @@ data Exp rep
     -- body/ is picked.
     Match [SubExp] [Case (Body rep)] (Body rep) (MatchDec (BranchType rep))
   | -- | @loop {a} = {v} (for i < n|while b) do b@.
-    Loop [(FParam rep, SubExp)] (LoopForm rep) (Body rep)
+    Loop [(FParam rep, SubExp)] LoopForm (Body rep)
   | -- | Create accumulators backed by the given arrays (which are
     -- consumed) and pass them to the lambda, which must return the
     -- updated accumulators and possibly some extra values.  The
@@ -453,22 +453,16 @@ deriving instance (RepTypes rep) => Show (Exp rep)
 deriving instance (RepTypes rep) => Ord (Exp rep)
 
 -- | For-loop or while-loop?
-data LoopForm rep
+data LoopForm
   = ForLoop
+      -- | The loop iterator var
       VName
-      -- ^ The loop iterator var
+      -- | The type of the loop iterator var
       IntType
-      -- ^ The type of the loop iterator var
+      -- | The number of iterations.
       SubExp
-      -- ^ The number of iterations.
-      [(LParam rep, VName)]
   | WhileLoop VName
-
-deriving instance (RepTypes rep) => Eq (LoopForm rep)
-
-deriving instance (RepTypes rep) => Show (LoopForm rep)
-
-deriving instance (RepTypes rep) => Ord (LoopForm rep)
+  deriving (Eq, Ord, Show)
 
 -- | Data associated with a branch.
 data MatchDec rt = MatchDec
@@ -499,8 +493,8 @@ data MatchSort
 -- | Anonymous function for use in a SOAC.
 data Lambda rep = Lambda
   { lambdaParams :: [LParam rep],
-    lambdaBody :: Body rep,
-    lambdaReturnType :: [Type]
+    lambdaReturnType :: [Type],
+    lambdaBody :: Body rep
   }
 
 deriving instance (RepTypes rep) => Eq (Lambda rep)
@@ -515,7 +509,7 @@ type FParam rep = Param (FParamInfo rep)
 -- | A lambda parameter.
 type LParam rep = Param (LParamInfo rep)
 
--- | Function Declarations
+-- | Function definitions.
 data FunDef rep = FunDef
   { -- | Contains a value if this function is
     -- an entry point.

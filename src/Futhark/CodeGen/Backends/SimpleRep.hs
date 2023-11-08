@@ -36,15 +36,13 @@ module Futhark.CodeGen.Backends.SimpleRep
   )
 where
 
-import Data.Bits (shiftR, xor)
-import Data.Char (isAlpha, isAlphaNum, isDigit, ord)
+import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
-import Futhark.Util (zEncodeText)
+import Futhark.Util (hashText, zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
-import Text.Printf
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -137,22 +135,7 @@ opaqueName s
         && not (isDigit $ T.head s')
         && T.all ok s'
     ok c = isAlphaNum c || c == '_'
-opaqueName s = "opaque_" <> hash (zipWith xor [0 ..] $ map ord (nameToString s))
-  where
-    -- FIXME: a stupid hash algorithm; may have collisions.
-    hash =
-      T.pack
-        . printf "%x"
-        . foldl xor 0
-        . map
-          ( iter
-              . (* 0x45d9f3b)
-              . iter
-              . (* 0x45d9f3b)
-              . iter
-              . fromIntegral
-          )
-    iter x = ((x :: Word32) `shiftR` 16) `xor` x
+opaqueName s = "opaque_" <> hashText (nameToText s)
 
 -- | The 'PrimType' (and sign) correspond to a human-readable scalar
 -- type name (e.g. @f64@).  Beware: partial!

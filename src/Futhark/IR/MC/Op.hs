@@ -78,6 +78,9 @@ instance (ASTRep rep, IsOp (op rep)) => IsOp (MCOp op rep) where
   cheapOp (ParOp _ op) = cheapOp op
   cheapOp (OtherOp op) = cheapOp op
 
+  opDependencies (ParOp _ op) = opDependencies op
+  opDependencies (OtherOp op) = opDependencies op
+
 instance (TypedOp (op rep)) => TypedOp (MCOp op rep) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op

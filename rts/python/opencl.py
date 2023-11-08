@@ -430,7 +430,7 @@ def copy_elements_gpu2gpu(
             "Futhark runtime limitation:\nCannot copy array of greater than rank 8.\n"
         )
 
-    n = np.product(shape)
+    n = np.prod(shape)
     zero = np.int64(0)
     layout_args = [None] * (8 * 3)
     for i in range(8):
@@ -464,7 +464,7 @@ def lmad_copy_gpu2gpu(
     self, pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
 ):
     elem_size = ct.sizeof(pt)
-    nbytes = np.product(shape) * elem_size
+    nbytes = np.prod(shape) * elem_size
     if nbytes == 0:
         return None
     if lmad_memcpyable(dst_strides, src_strides, shape):

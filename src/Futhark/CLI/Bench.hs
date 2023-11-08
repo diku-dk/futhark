@@ -1,10 +1,10 @@
 -- | @futhark bench@
 module Futhark.CLI.Bench (main) where
 
-import Control.Arrow (first)
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
+import Data.Bifunctor (first)
 import Data.ByteString.Char8 qualified as SBS
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Either
@@ -65,6 +65,7 @@ data BenchOptions = BenchOptions
     optConvergencePhase :: Bool,
     optConvergenceMaxTime :: NominalDiffTime,
     optConcurrency :: Maybe Int,
+    optProfile :: Bool,
     optVerbose :: Int,
     optTestSpec :: Maybe FilePath
   }
@@ -90,6 +91,7 @@ initialBenchOptions =
       optConvergencePhase = True,
       optConvergenceMaxTime = 5 * 60,
       optConcurrency = Nothing,
+      optProfile = False,
       optVerbose = 0,
       optTestSpec = Nothing
     }
@@ -226,7 +228,11 @@ maxDatasetNameLength = 40
 runBenchmark :: BenchOptions -> FutharkExe -> (FilePath, [InputOutputs]) -> IO (Maybe [BenchResult])
 runBenchmark opts futhark (program, cases) = do
   (tuning_opts, tuning_desc) <- determineTuning (optTuning opts) program
-  let runopts = optExtraOptions opts ++ tuning_opts ++ determineCache (optCacheExt opts) program
+  let runopts =
+        optExtraOptions opts
+          ++ tuning_opts
+          ++ determineCache (optCacheExt opts) program
+          ++ if optProfile opts then ["--profile", "--log"] else []
   withProgramServer program (optRunner opts) runopts $ \server ->
     mapM (forInputOutputs server tuning_desc) $ filter relevant cases
   where
@@ -254,7 +260,8 @@ runOptions f opts =
       runVerbose = optVerbose opts,
       runConvergencePhase = optConvergencePhase opts,
       runConvergenceMaxTime = optConvergenceMaxTime opts,
-      runResultAction = f
+      runResultAction = f,
+      runProfile = optProfile opts
     }
 
 descText :: T.Text -> Int -> T.Text
@@ -370,7 +377,8 @@ runBenchmarkCase _ _ _ _ _ _ (TestRun _ _ RunTimeFailure {} _ _) =
 runBenchmarkCase _ opts _ _ _ _ (TestRun tags _ _ _ _)
   | any (`elem` tags) $ optExcludeCase opts =
       pure Nothing
-runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = do
+runBenchmarkCase server opts futhark program entry pad_to tr = do
+  let (TestRun _ input_spec (Succeeds expected_spec) _ dataset_desc) = tr
   start_time <- liftIO getCurrentTime
   prompt <- mkProgressPrompt opts pad_to dataset_desc start_time
 
@@ -399,7 +407,7 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
       putStrLn ""
       putRedLn err
       pure $ Just $ DataResult dataset_desc $ Left err
-    Right (runtimes, errout) -> do
+    Right (runtimes, errout, report) -> do
       let vec_runtimes = U.fromList $ map (fromIntegral . runMicroseconds) runtimes
       g <- create
       resampled <- liftIO $ resample g [Mean] 70000 vec_runtimes
@@ -412,24 +420,20 @@ runBenchmarkCase server opts futhark program entry pad_to tr@(TestRun _ input_sp
               _ -> (0, 0)
 
       reportResult runtimes bootstrapCI
-      -- We throw away the 'errout' because it is almost always
-      -- useless and adds too much to the .json file size.  This
-      -- behaviour could be moved into a command line option if we
-      -- wish.
-      Result runtimes (getMemoryUsage errout) Nothing
+
+      -- We throw away the 'errout' unless profiling is enabled,
+      -- because it is otherwise useless and adds too much to the
+      -- .json file size.
+      let errout' = guard (optProfile opts) >> Just errout
+          report' = guard (optProfile opts) >> Just report
+      Result runtimes (getMemoryUsage report) errout' report'
         & Right
         & DataResult dataset_desc
         & Just
         & pure
 
-getMemoryUsage :: T.Text -> M.Map T.Text Int
-getMemoryUsage t =
-  foldMap matchMap $ T.lines t
-  where
-    mem_regex = "Peak memory usage for space '([^']+)': ([0-9]+) bytes." :: T.Text
-    matchMap l = case (l =~ mem_regex :: (T.Text, T.Text, T.Text, [T.Text])) of
-      (_, _, _, [device, bytes]) -> M.singleton device (read $ T.unpack bytes)
-      _ -> mempty
+getMemoryUsage :: ProfilingReport -> M.Map T.Text Int
+getMemoryUsage = fmap fromInteger . profilingMemory
 
 commandLineOptions :: [FunOptDescr BenchOptions]
 commandLineOptions =
@@ -619,7 +623,12 @@ commandLineOptions =
       "v"
       ["verbose"]
       (NoArg $ Right $ \config -> config {optVerbose = optVerbose config + 1})
-      "Enable logging.  Pass multiple times for more."
+      "Enable logging.  Pass multiple times for more.",
+    Option
+      "P"
+      ["profile"]
+      (NoArg $ Right $ \config -> config {optProfile = True})
+      "Collect profiling information."
   ]
   where
     max_timeout :: Int
@@ -634,4 +643,8 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions "options... programs..." $ \progs config ->
   case progs of
     [] -> Nothing
-    _ -> Just $ runBenchmarks (excludeBackend config) progs
+    _
+      | optProfile config && isNothing (optJSON config) ->
+          Just $ optionsError "--profile cannot be used without --json."
+      | otherwise ->
+          Just $ runBenchmarks (excludeBackend config) progs

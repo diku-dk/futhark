@@ -199,8 +199,7 @@ analyseHistOp ::
   InUse ->
   HistOp GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseHistOp lumap inuse histop =
-  analyseLambda lumap inuse (histOp histop)
+analyseHistOp lumap inuse = analyseLambda lumap inuse . histOp
 
 analyseLambda ::
   (LocalScope GPUMem m) =>
@@ -208,8 +207,7 @@ analyseLambda ::
   InUse ->
   Lambda GPUMem ->
   m (InUse, LastUsed, Graph VName)
-analyseLambda lumap inuse (Lambda _ body _) =
-  analyseBody lumap inuse body
+analyseLambda lumap inuse = analyseBody lumap inuse . lambdaBody
 
 analyseProgGPU :: Prog GPUMem -> Graph VName
 analyseProgGPU prog = onConsts (progConsts prog) <> foldMap onFun (progFuns prog)

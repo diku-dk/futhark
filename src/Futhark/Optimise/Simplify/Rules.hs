@@ -27,7 +27,6 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR
-import Futhark.IR.Prop.Aliases
 import Futhark.Optimise.Simplify.Rule
 import Futhark.Optimise.Simplify.Rules.BasicOp
 import Futhark.Optimise.Simplify.Rules.Index
@@ -51,7 +50,7 @@ bottomUpRules =
 -- | A set of standard simplification rules.  These assume pure
 -- functional semantics, and so probably should not be applied after
 -- memory block merging.
-standardRules :: (BuilderOps rep, TraverseOpStms rep, Aliased rep) => RuleBook rep
+standardRules :: (BuilderOps rep, TraverseOpStms rep) => RuleBook rep
 standardRules =
   ruleBook topDownRules bottomUpRules
     <> loopRules
@@ -126,7 +125,7 @@ emptyArrayToScratch _ _ = Skip
 
 simplifyIndex :: (BuilderOps rep) => BottomUpRuleBasicOp rep
 simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
-  | Just m <- simplifyIndexing vtable seType idd inds consumed =
+  | Just m <- simplifyIndexing vtable seType idd inds consumed consuming =
       Simplify $ certifying cs $ do
         res <- m
         attributing attrs $ case res of
@@ -135,7 +134,8 @@ simplifyIndex (vtable, used) pat@(Pat [pe]) (StmAux cs attrs _) (Index idd inds)
           IndexResult extra_cs idd' inds' ->
             certifying extra_cs $ letBindNames (patNames pat) $ BasicOp $ Index idd' inds'
   where
-    consumed = patElemName pe `UT.isConsumed` used
+    consuming = (`UT.isConsumed` used)
+    consumed = consuming $ patElemName pe
     seType (Var v) = ST.lookupType v vtable
     seType (Constant v) = Just $ Prim $ primValueType v
 simplifyIndex _ _ _ _ = Skip

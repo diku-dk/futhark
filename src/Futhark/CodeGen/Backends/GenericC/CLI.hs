@@ -46,9 +46,7 @@ genericOptions =
         optionArgument = NoArgument,
         optionDescription = "Perform possibly expensive internal correctness checks and verbose logging.",
         optionAction =
-          [C.cstm|{futhark_context_config_set_debugging(cfg, 1);
-                                print_report = 1;
-                               }|]
+          [C.cstm|{futhark_context_config_set_debugging(cfg, 1);}|]
       },
     Option
       { optionLongName = "log",
@@ -56,9 +54,14 @@ genericOptions =
         optionArgument = NoArgument,
         optionDescription = "Print various low-overhead logging information to stderr while running.",
         optionAction =
-          [C.cstm|{futhark_context_config_set_logging(cfg, 1);
-                   print_report = 1;
-                  }|]
+          [C.cstm|{futhark_context_config_set_logging(cfg, 1);}|]
+      },
+    Option
+      { optionLongName = "profile",
+        optionShortName = Just 'P',
+        optionArgument = NoArgument,
+        optionDescription = "Enable the collection of profiling information.",
+        optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
       },
     Option
       { optionLongName = "entry-point",
@@ -423,7 +426,6 @@ $esc:(T.unpack valuesH)
 
 static int binary_output = 0;
 static int print_result = 1;
-static int print_report = 0;
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
 static int num_runs = 1;
@@ -498,12 +500,6 @@ int main(int argc, char** argv) {
 
     if (runtime_file != NULL) {
       fclose(runtime_file);
-    }
-
-    if (print_report) {
-      char *report = futhark_context_report(ctx);
-      fputs(report, stderr);
-      free(report);
     }
   }
 

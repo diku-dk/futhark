@@ -71,16 +71,17 @@ performCSE cse_arrays =
       . aliasAnalysis
       $ prog
   where
-    onConsts free_in_funs stms =
-      pure $
-        fst $
-          runReader
-            ( cseInStms
-                (free_in_funs <> consumedInStms stms)
-                (stmsToList stms)
-                (pure ())
-            )
-            (newCSEState cse_arrays)
+    onConsts free_in_funs stms = do
+      let free_list = namesToList free_in_funs
+          (res_als, stms_cons) = mkStmsAliases stms $ varsRes free_list
+      pure . fst $
+        runReader
+          ( cseInStms
+              (mconcat res_als <> stms_cons)
+              (stmsToList stms)
+              (pure ())
+          )
+          (newCSEState cse_arrays)
     onFun _ = pure . cseInFunDef cse_arrays
 
 -- | Perform CSE on a single function.
@@ -98,28 +99,20 @@ performCSEOnFunDef cse_arrays =
   removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 -- | Perform CSE on some statements.
---
--- If the boolean argument is false, the pass will not perform CSE on
--- expressions producing arrays. This should be disabled when the rep has
--- memory information, since at that point arrays have identity beyond their
--- value.
 performCSEOnStms ::
   (AliasableRep rep, CSEInOp (Op (Aliases rep))) =>
-  Bool ->
   Stms rep ->
   Stms rep
-performCSEOnStms cse_arrays =
+performCSEOnStms =
   fmap removeStmAliases . f . fst . analyseStms mempty
   where
     f stms =
       fst $
         runReader
-          ( cseInStms
-              (consumedInStms stms)
-              (stmsToList stms)
-              (pure ())
-          )
-          (newCSEState cse_arrays)
+          (cseInStms (consumedInStms stms) (stmsToList stms) (pure ()))
+          -- It is never safe to CSE arrays in stms in isolation,
+          -- because we might introduce additional aliasing.
+          (newCSEState False)
 
 cseInFunDef ::
   (Aliased rep, CSEInOp (Op rep)) =>

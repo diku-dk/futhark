@@ -425,8 +425,10 @@ transformFName loc fname t = do
 transformType :: TypeBase Size u -> MonoM (TypeBase Size u)
 transformType typ =
   case typ of
-    Scalar scalar -> Scalar <$> transformScalarSizes scalar
-    Array u shape scalar -> Array u <$> mapM onDim shape <*> transformScalarSizes scalar
+    Scalar scalar ->
+      Scalar <$> transformScalarSizes scalar
+    Array u shape scalar ->
+      Array u <$> mapM onDim shape <*> transformScalarSizes scalar
   where
     transformScalarSizes :: ScalarTypeBase Size u -> MonoM (ScalarTypeBase Size u)
     transformScalarSizes (Record fs) =
@@ -511,10 +513,11 @@ transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) 
         let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
         pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
   | otherwise = do
-      body' <- scoping (S.fromList (foldMap patNames params)) $ transformExp body
-      ret' <- transformRetTypeSizes (S.fromList (foldMap patNames params)) ret
+      params' <- mapM transformPat params
+      body' <- scoping (S.fromList (foldMap patNames params')) $ transformExp body
+      ret' <- transformRetTypeSizes (S.fromList (foldMap patNames params')) ret
       AppExp
-        <$> ( LetFun fname (tparams, params, retdecl, Info ret', body')
+        <$> ( LetFun fname (tparams, params', retdecl, Info ret', body')
                 <$> scoping (S.singleton fname) (transformExp e)
                 <*> pure loc
             )
@@ -889,7 +892,8 @@ dimMapping t1 t2 r1 r2 = execState (matchDims onDims t1 t2) mempty
         Just rexp -> onExps bound (unReplaced rexp) e
         Nothing -> pure ()
     onExps bound e (Var v _ _)
-      | Just rexp <- lookup (qualLeaf v) named2 = onExps bound e (unReplaced rexp)
+      | Just rexp <- lookup (qualLeaf v) named2 =
+          onExps bound e (unReplaced rexp)
     onExps bound e1 e2
       | Just es <- similarExps e1 e2 =
           mapM_ (uncurry $ onExps bound) es

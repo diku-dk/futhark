@@ -417,12 +417,14 @@ eOutOfBounds arr is = do
             BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
--- | The array element at this index.
-eIndex :: (MonadBuilder m) => VName -> m (Exp (Rep m)) -> m (Exp (Rep m))
-eIndex arr i = do
-  i' <- letSubExp "i" =<< i
+-- | The array element at this index.  Returns array unmodified if
+-- indexes are null (does not even need to be an array in that case).
+eIndex :: (MonadBuilder m) => VName -> [m (Exp (Rep m))] -> m (Exp (Rep m))
+eIndex arr [] = eSubExp $ Var arr
+eIndex arr is = do
+  is' <- mapM (letSubExp "i" =<<) is
   arr_t <- lookupType arr
-  pure $ BasicOp $ Index arr $ fullSlice arr_t [DimFix i']
+  pure $ BasicOp $ Index arr $ fullSlice arr_t $ map DimFix is'
 
 -- | The last element of the given array.
 eLast :: (MonadBuilder m) => VName -> m (Exp (Rep m))
@@ -431,7 +433,7 @@ eLast arr = do
   nm1 <-
     letSubExp "nm1" . BasicOp $
       BinOp (Sub Int64 OverflowUndef) n (intConst Int64 1)
-  eIndex arr (eSubExp nm1)
+  eIndex arr [eSubExp nm1]
 
 -- | Construct an unspecified value of the given type.
 eBlank :: (MonadBuilder m) => Type -> m (Exp (Rep m))
@@ -544,7 +546,7 @@ mkLambda params m = do
     res <- m
     ret <- mapM subExpResType res
     pure (res, ret)
-  pure $ Lambda params body ret
+  pure $ Lambda params ret body
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp

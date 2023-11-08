@@ -179,6 +179,8 @@ tokens :-
 
   @binop                   { tokenS $ symbol [] . nameFromText }
   @qualbinop               { tokenS $ uncurry symbol . mkQualId }
+
+  .                        { tokenS ERROR }
 {
 
 nameFromBS :: BS.ByteString -> Name

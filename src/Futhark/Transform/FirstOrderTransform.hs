@@ -158,11 +158,11 @@ transformSOAC pat (Screma w arrs form@(ScremaForm scans reds map_lam)) = do
             zip mapout_params $ map Var map_arrs
           ]
   i <- newVName "i"
-  let loopform = ForLoop i Int64 w []
+  let loopform = ForLoop i Int64 w
       lam_cons = consumedByLambda $ Alias.analyseLambda mempty map_lam
 
   loop_body <- runBodyBuilder
-    . localScope (scopeOfFParams (map fst merge) <> scopeOf loopform)
+    . localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm loopform)
     $ do
       -- Bind the parameters to the lambda.
       forM_ (zip3 (lambdaParams map_lam) arrs arr_ts) $ \(p, arr, arr_t) ->
@@ -258,13 +258,13 @@ transformSOAC pat (Stream w arrs nes lam) = do
 
   i <- newVName "i"
 
-  let loop_form = ForLoop i Int64 w []
+  let loop_form = ForLoop i Int64 w
 
   letBindNames [paramName chunk_size_param] . BasicOp . SubExp $
     intConst Int64 1
 
   loop_body <- runBodyBuilder $
-    localScope (scopeOf loop_form <> scopeOfFParams merge_params) $ do
+    localScope (scopeOfLoopForm loop_form <> scopeOfFParams merge_params) $ do
       let slice = [DimSlice (Var i) (Var (paramName chunk_size_param)) (intConst Int64 1)]
       forM_ (zip chunk_params arrs) $ \(p, arr) ->
         letBindNames [paramName p] . BasicOp . Index arr $
@@ -308,7 +308,7 @@ transformSOAC pat (Scatter len ivs lam as) = do
 
         foldM saveInArray arr indexes'
       pure $ resultBody (map Var ress)
-  letBind pat $ Loop merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 transformSOAC pat (Hist len imgs ops bucket_fun) = do
   iter <- newVName "iter"
 
@@ -364,7 +364,7 @@ transformSOAC pat (Hist len imgs ops bucket_fun) = do
     pure $ resultBody $ map Var $ concat hists_out''
 
   -- Wrap up the above into a for-loop.
-  letBind pat $ Loop merge (ForLoop iter Int64 len []) loopBody
+  letBind pat $ Loop merge (ForLoop iter Int64 len) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda ::
@@ -378,12 +378,12 @@ transformLambda ::
   ) =>
   Lambda SOACS ->
   m (AST.Lambda rep)
-transformLambda (Lambda params body rettype) = do
+transformLambda (Lambda params rettype body) = do
   body' <-
     runBodyBuilder $
       localScope (scopeOfLParams params) $
         transformBody body
-  pure $ Lambda params body' rettype
+  pure $ Lambda params rettype body'
 
 letwith :: (Transformer m) => [VName] -> SubExp -> [SubExp] -> m [VName]
 letwith ks i vs = do
@@ -401,7 +401,7 @@ bindLambda ::
   AST.Lambda (Rep m) ->
   [AST.Exp (Rep m)] ->
   m Result
-bindLambda (Lambda params body _) args = do
+bindLambda (Lambda params _ body) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if primType $ paramType param
       then letBindNames [paramName param] arg

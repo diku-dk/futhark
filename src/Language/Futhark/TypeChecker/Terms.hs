@@ -388,7 +388,8 @@ checkExp (RecordLit fs loc) = do
             "Field"
               <+> dquotes (pretty f)
               <+> "previously defined at"
-              <+> pretty (locStrRel rloc sloc) <> "."
+              <+> pretty (locStrRel rloc sloc)
+              <> "."
         Nothing -> pure ()
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
@@ -986,10 +987,15 @@ boundInsideType (Scalar (Arrow _ pn _ t1 (RetType dims t2))) =
 dimUses :: TypeBase Size u -> (Names, Names)
 dimUses = flip execState mempty . traverseDims f
   where
-    f bound _ (Var v _ _) | qualLeaf v `S.member` bound = pure ()
-    f _ PosImmediate (Var v _ _) = modify ((S.singleton (qualLeaf v), mempty) <>)
-    f _ PosParam (Var v _ _) = modify ((mempty, S.singleton (qualLeaf v)) <>)
-    f _ _ _ = pure ()
+    f bound pos e =
+      case pos of
+        PosImmediate ->
+          modify ((fvVars fv, mempty) <>)
+        PosParam ->
+          modify ((mempty, fvVars fv) <>)
+        PosReturn -> pure ()
+      where
+        fv = freeInExp e `freeWithout` bound
 
 checkApply ::
   SrcLoc ->
@@ -1007,7 +1013,7 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
     argtype' <- normTypeFully argtype
 
     -- Check whether this would produce an impossible return type.
-    let (tp2_produced_dims, tp2_paramdims) = dimUses $ toStruct tp2'
+    let (tp2_produced_dims, tp2_paramdims) = dimUses tp2'
         problematic = S.fromList ext <> boundInsideType argtype'
         problem = any (`S.member` problematic) (tp2_paramdims `S.difference` tp2_produced_dims)
     when (not (S.null problematic) && problem) $ do
@@ -1062,13 +1068,13 @@ checkApply loc (fname, prev_applied) ftype argexp = do
           <+> fname'
           <+> "to argument #"
           <> pretty (prev_applied + 1)
-          <+> dquotes (shorten $ group $ pretty argexp)
+            <+> dquotes (shorten $ group $ pretty argexp)
           <> ","
-          </> "as"
-          <+> fname'
-          <+> "only takes"
-          <+> pretty prev_applied
-          <+> arguments
+            </> "as"
+            <+> fname'
+            <+> "only takes"
+            <+> pretty prev_applied
+            <+> arguments
           <> "."
   where
     arguments
@@ -1229,19 +1235,19 @@ causalityCheck binding_body = do
           <+> "needed for type of"
           <+> what
           <> colon
-          </> indent 2 (pretty t)
-          </> "But"
-          <+> dquotes (prettyName d)
-          <+> "is computed at"
-          <+> pretty (locStrRel loc dloc)
+            </> indent 2 (pretty t)
+            </> "But"
+            <+> dquotes (prettyName d)
+            <+> "is computed at"
+            <+> pretty (locStrRel loc dloc)
           <> "."
-          </> ""
-          </> "Hint:"
-          <+> align
-            ( textwrap "Bind the expression producing"
-                <+> dquotes (prettyName d)
-                <+> "with 'let' beforehand."
-            )
+            </> ""
+            </> "Hint:"
+            <+> align
+              ( textwrap "Bind the expression producing"
+                  <+> dquotes (prettyName d)
+                  <+> "with 'let' beforehand."
+              )
 
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
@@ -1388,7 +1394,7 @@ fixOverloadedTypes tyvars_at_toplevel =
             "Type is ambiguous (could be one of"
               <+> commasep (map pretty ots)
               <> ")."
-              </> "Add a type annotation to disambiguate the type."
+                </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
       unify usage (Scalar (TypeVar mempty (qualName v) [])) $
@@ -1411,7 +1417,7 @@ fixOverloadedTypes tyvars_at_toplevel =
         "Type is ambiguous (must be a sum type with constructors:"
           <+> pretty (Sum cs)
           <> ")."
-          </> "Add a type annotation to disambiguate the type."
+            </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
@@ -1535,10 +1541,10 @@ verifyFunctionParams fname params =
               </> "refers to size"
               <+> dquotes (prettyName d)
               <> comma
-              </> textwrap "which will not be accessible to the caller"
+                </> textwrap "which will not be accessible to the caller"
               <> comma
-              </> textwrap "possibly because it is nested in a tuple or record."
-              </> textwrap "Consider ascribing an explicit type that does not reference "
+                </> textwrap "possibly because it is nested in a tuple or record."
+                </> textwrap "Consider ascribing an explicit type that does not reference "
               <> dquotes (prettyName d)
               <> "."
       | otherwise = verifyParams forbidden' ps
@@ -1633,7 +1639,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
               <+> "in parameter of"
               <+> dquotes (prettyName defname)
               <> ", which is inferred as:"
-              </> indent 2 (pretty t)
+                </> indent 2 (pretty t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
     closeOver (_, _) =

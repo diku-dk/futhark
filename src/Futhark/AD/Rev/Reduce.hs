@@ -55,7 +55,7 @@ scanExc desc scan arrs = do
       =<< eIf
         first_elem
         (resultBodyM $ scanNeutral scan)
-        (eBody $ map (`eIndex` prev) res_incl)
+        (eBody $ map (`eIndex` [prev]) res_incl)
 
   letTupExp desc $ Op $ Screma w [iota] (mapSOAC lam)
 
