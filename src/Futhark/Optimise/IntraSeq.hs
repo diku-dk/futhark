@@ -205,34 +205,35 @@ seqStm' env (Let pat aux
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
 
-seqStm' env (Let pat aux (Op (SegOp
-          (SegMap lvl@(SegThread {}) space ts kbody)))) = do
+seqStm' env stm@(Let pat aux (Op (SegOp
+          (SegMap lvl@(SegThread {}) space ts kbody))))
+  | isScatter kbody = seqScatter env stm
+  | otherwise = do
+    usedArrays <- getUsedArraysIn env kbody
+    maps <- buildSegMapTup_ "map_intermediate" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      let env' = updateEnvTid env tid
+      lambSOAC <- buildSOACLambda env' usedArrays kbody ts
+      let screma = mapSOAC lambSOAC
+      chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
+      res <- letTupExp' "res" $ Op $ OtherOp $
+              Screma (seqFactor env) chunks screma
+      let lvl' = SegThread SegNoVirt Nothing
+      let space' = SegSpace phys [(tid, grpSize env)]
+      let types' = scremaType (seqFactor env) screma
+      let kres = L.map (Returns ResultMaySimplify  mempty) res
+      pure (kres, lvl', space', types')
 
-  usedArrays <- getUsedArraysIn env kbody
-  maps <- buildSegMapTup_ "map_intermediate" $ do
-    tid <- newVName "tid"
-    phys <- newVName "phys_tid"
+    let tid = fst $ head $ unSegSpace space
     let env' = updateEnvTid env tid
-    lambSOAC <- buildSOACLambda env' usedArrays kbody ts
-    let screma = mapSOAC lambSOAC
-    chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
-    res <- letTupExp' "res" $ Op $ OtherOp $
-            Screma (seqFactor env) chunks screma
-    let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env)]
-    let types' = scremaType (seqFactor env) screma
-    let kres = L.map (Returns ResultMaySimplify  mempty) res
-    pure (kres, lvl', space', types')
+    kbody' <- mkResultKBody env' kbody maps
 
-  let tid = fst $ head $ unSegSpace space
-  let env' = updateEnvTid env tid
-  kbody' <- mkResultKBody env' kbody maps
-
-  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
-  tps <- mapM lookupType maps
-  let ts' = L.map (stripArray 1) tps
-  let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
-  addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
+    let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
+    tps <- mapM lookupType maps
+    let ts' = L.map (stripArray 1) tps
+    let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
+    addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
 
 
 seqStm' env (Let pat aux
@@ -298,8 +299,17 @@ seqStm' env (Let pat aux
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
 -- Catch all
-seqStm' _ stm = error $
-                "Encountered unhandled statement at thread level: " ++ show stm
+seqStm' _ stm = addStm stm
+-- seqStm' _ stm = error $
+--                 "Encountered unhandled statement at thread level: " ++ show stm
+
+seqScatter :: Env -> Stm GPU -> Builder GPU ()
+seqScatter env (Let pat aux (Op (SegOp 
+              (SegMap (SegThread {}) space ts kbody)))) = error "SCATTER ENCOUNTERED"
+
+seqScatter _ stm = error $ 
+                  "SeqScatter error. Should be a map at thread level but got"
+                  ++ show stm
 
 buildSOACLambda :: Env -> [VName] -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
 buildSOACLambda env usedArrs kbody retTs = do
@@ -598,6 +608,15 @@ mkTiles env = do
 
 isArray :: NameInfo GPU -> Bool
 isArray info = arrayRank (typeOf info) > 0
+
+-- | Checks if a kernel body ends in only WriteReturns results as then it
+-- must be the body of a scatter
+isScatter :: KernelBody GPU -> Bool
+isScatter (KernelBody _ _ res) = 
+  L.all isWriteReturns res
+  where
+    isWriteReturns (WriteReturns {}) = True
+    isWriteReturns _ = False
 
 -- Builds a SegMap at thread level containing all bindings created in m
 -- and returns the subExp which is the variable containing the result
