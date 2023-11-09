@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, PermutationTable) where
+module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, PermutationTable) where
 
 import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
@@ -68,13 +68,12 @@ commonPermutationEliminators :: [Int] -> [BodyType] -> [DimAccess rep] -> Bool
 commonPermutationEliminators perm nest dimAccesses = do
   -- Don't manifest if the permutation is the permutation is invalid
   let isInvalidPerm =
-        anyOf
-          [ -- Don't manifest if the permutation is the identity permutation
-            (`L.isPrefixOf` [0 ..]),
-            -- or is not a transpose.
-            isNothing . isMapTranspose
-          ]
-          perm
+        -- Don't manifest if the permutation is the identity permutation
+        perm `L.isPrefixOf` [0 ..]
+          -- or is not a transpose.
+          || (isNothing . isMapTranspose) perm
+          -- or is not a permutation.
+          || not (L.sort perm `L.isPrefixOf` [0 ..])
 
   -- Don't manifest if the array is defined inside a segOp or loop body
   let isInsideUndesired = any isUndesired nest
@@ -94,7 +93,7 @@ commonPermutationEliminators perm nest dimAccesses = do
       _ -> False
 
     inscrutable :: Complexity -> Bool
-    inscrutable boi = case boi of
+    inscrutable complexity = case complexity of
       Simple -> False
       (Linear names s o) -> length names > 1 || s > 0 || o > 1000
       _ -> True
