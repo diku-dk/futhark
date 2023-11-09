@@ -688,6 +688,14 @@ instance Pretty (IndexTable rep) where
       mapprintArray [m] = printArrayMap m
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
 
+      printArrayMap :: (ArrayName, M.Map IndexExprName [DimAccess rep]) -> Doc ann
+      printArrayMap ((name, []), maps) =
+        "(arr)"
+          <+> pretty name
+          <+> colon
+          <+> lbrace
+          </> indent 4 (mapprintIdxExpr (M.toList maps))
+          </> rbrace
       printArrayMap (name, maps) =
         "(arr)"
           <+> pretty name
