@@ -329,7 +329,7 @@ atStartOfLine = do
   when (col /= pos1) empty
 
 afterExp :: Parser ()
-afterExp = choice [atStartOfLine, void eol]
+afterExp = choice [atStartOfLine, choice [void eol, eof]]
 
 withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
 withParsedSource p f = do
@@ -369,12 +369,12 @@ parseBlock =
             $> DirectiveImg
             <*> parseExp postlexeme
             <*> parseImgParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "plot2d"
             $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "gnuplot"
             $> DirectiveGnuplot
             <*> parseExp postlexeme
@@ -388,7 +388,7 @@ parseBlock =
             $> DirectiveAudio
             <*> parseExp postlexeme
             <*> parseAudioParams
-            <* eol
+            <* choice [void eol, eof]
         ]
     directiveName s = try $ token (":" <> s)
 
