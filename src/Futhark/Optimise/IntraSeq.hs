@@ -187,7 +187,7 @@ seqStm' env (Let pat aux
   let env' = updateEnvTid env tid
 
   -- thread local reduction
-  reds <- mapM (mkSegMapRed env' kbody ts) binops
+  reds <- mapM (mkIntmRed env' kbody ts) binops
 
   -- TODO: multiple binops
   kbody' <- mkResultKBody env' kbody $ head reds
@@ -240,7 +240,7 @@ seqStm' env (Let pat aux
   usedArrays <- getUsedArraysIn env kbody
 
   -- do local reduction
-  reds <- mapM (mkSegMapRed env kbody ts) binops
+  reds <- mapM (mkIntmRed env kbody ts) binops
   -- TODO: head until multiple binops
   let redshead = head reds
   let numResConsumed = numArgsConsumedBySegop binops
@@ -390,14 +390,14 @@ seqStm'' env stm = do
   addStm stm
   pure env
 
-mkSegMapRed ::
+-- create the intermediate reduction used in scan and reduce
+mkIntmRed ::
   Env ->
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
   SegBinOp GPU ->
   Builder GPU [VName]
-mkSegMapRed env kbody retTs binop = do
-    let comm = segBinOpComm binop
+mkIntmRed env kbody retTs binop = do
     let ne   = segBinOpNeutral binop
     lambda <- renameLambda $ segBinOpLambda binop
 
@@ -408,23 +408,27 @@ mkSegMapRed env kbody retTs binop = do
       sz <- mkChunkSize tid env
       usedArrs <- getUsedArraysIn env kbody
       lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
-      let screma = redomapSOAC [Reduce comm lambda ne] lambSOAC
-      chunks <- mapM (getChunk env tid sz) usedArrs
+      -- TODO analyze if any fused maps then produce reduce?
+      -- we build the reduce as a scan initially
+      let screma = scanomapSOAC [Scan lambda ne] lambSOAC
+      chunks <- mapM (getChunk env tid (seqFactor env)) usedArrs
 
       res <- letTupExp' "res" $ Op $ OtherOp $
-                Screma sz chunks screma
-      let numRedRes = numArgsConsumedBySegop [binop]
-      let (redRes, mapRes) = L.splitAt numRedRes res
-      -- since fused map results result in arrays of the chunksize (sz)
-      -- these do not fit the required result size of seqFactor, sinze sz is local
-      mapRes' <- forM mapRes
-          ((letSubExp "map_res" . BasicOp . Reshape ReshapeArbitrary (Shape [seqFactor env]))
-            . getVName)
+                Screma (seqFactor env) chunks screma
+      let numRes = numArgsConsumedBySegop [binop]
+      let (scanRes, mapRes) = L.splitAt numRes res
 
+      -- get the reduction result from the scan
+      redIndex <- letSubExp "red_index" =<< eBinOp (Sub Int64 OverflowUndef)
+                                                   (eSubExp sz)
+                                                   (eSubExp $ intConst Int64 1)
+      redRes <- forM scanRes
+            (\r -> letSubExp "red_res" $ BasicOp $ Index (getVName r) (Slice [DimFix redIndex]))
+      let res' = redRes ++ mapRes
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
-      let kres = L.map (Returns ResultMaySimplify mempty) $ redRes ++ mapRes'
-      let types' = scremaType (seqFactor env) screma
+      let kres = L.map (Returns ResultMaySimplify mempty) res'
+      types' <- mapM subExpType res'
       pure (kres, lvl', space', types')
 
 getUsedArraysIn ::
