@@ -712,8 +712,8 @@ instance Pretty (IndexTable rep) where
       printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printDimAccess mems)
 
       printDimAccess :: [DimAccess rep] -> Doc ann
-      printDimAccess memEntry =
-        stack $ map printDim memEntry
+      printDimAccess dimAccesses =
+        stack $ map printDim dimAccesses
 
       printDim m = pretty (originalDimension m) <+> ":" <+> indent 0 (pretty m)
 
