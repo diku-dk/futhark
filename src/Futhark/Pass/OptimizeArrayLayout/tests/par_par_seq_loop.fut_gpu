@@ -38,7 +38,7 @@ entry("main",
 }
 
 
--- === Expected output after pass:
+-- === Expected output after pass: CONFIRMED
 -- types {
 --
 -- }

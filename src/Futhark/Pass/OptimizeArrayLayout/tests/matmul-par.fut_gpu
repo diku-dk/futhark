@@ -148,7 +148,7 @@ entry("main",
                     mul_nw64(Tk_5728, i_5778)
                   let {as_transformed_row_glb2loc_5825 : [a_loc_sz_5737]i32} =
                     segmap(ingroup; full [0, 1])
-                    (ltid_seq_5806 < Rx_5727, ltid_seq_5807 < tk_div_tx_5729, ltid_y_5804 < Tx_5726, ltid_x_5805 < Tx_5726) (~ltid_flat_5803) : {i32} {
+                    (ltid_seq_5806 < Rx_5727, ltid_seq_5807 < tk_div_tx_5729, ltid_y_5804 < Tx_5726, ltid_x_5805 < Tx_5726) (~ltid_flat_5803) : {[a_loc_sz_5737]i32} {
                       let {binop_y_5808 : i64} =
                         mul_nw64(Tx_5726, ltid_seq_5807)
                       let {k_5809 : i64} =
@@ -185,12 +185,12 @@ entry("main",
                           in {x_5823}
                         } else {-1i64}
                         : {i64}
-                      return {merge_5780 : [a_loc_sz_5737]
+                      return {merge_5780
                               with ([as_transformed_row_loc_ind_5820] = as_transformed_row_elem_5815)}
                     }
                   let {as_transformed_row_glb2loc_5868 : [b_loc_sz_5742]i32} =
                     segmap(ingroup; full [0, 1])
-                    (ltid_seq_5849 < Rx_5727, ltid_seq_5850 < tk_div_tx_5729, ltid_y_5847 < Tx_5726, ltid_x_5848 < Tx_5726) (~ltid_flat_5846) : {i32} {
+                    (ltid_seq_5849 < Rx_5727, ltid_seq_5850 < tk_div_tx_5729, ltid_y_5847 < Tx_5726, ltid_x_5848 < Tx_5726) (~ltid_flat_5846) : {[b_loc_sz_5742]i32} {
                       let {binop_y_5851 : i64} =
                         mul_nw64(Tx_5726, ltid_seq_5850)
                       let {k_5852 : i64} =
@@ -227,7 +227,7 @@ entry("main",
                           in {x_5866}
                         } else {-1i64}
                         : {i64}
-                      return {merge_5781 : [b_loc_sz_5742]
+                      return {merge_5781
                               with ([as_transformed_row_loc_ind_5863] = as_transformed_row_elem_5858)}
                     }
                   let {loop_5971 : [Ty_5724][Tx_5726][Ry_5725][Rx_5727]i32} =
@@ -319,7 +319,7 @@ entry("main",
                 }
               let {as_transformed_row_glb2loc_6022 : [a_loc_sz_5737]i32} =
                 segmap(ingroup; full [0, 1])
-                (ltid_seq_6001 < Rx_5727, ltid_seq_6002 < tk_div_tx_5729, ltid_y_5999 < Tx_5726, ltid_x_6000 < Tx_5726) (~ltid_flat_5998) : {i32} {
+                (ltid_seq_6001 < Rx_5727, ltid_seq_6002 < tk_div_tx_5729, ltid_y_5999 < Tx_5726, ltid_x_6000 < Tx_5726) (~ltid_flat_5998) : {[a_loc_sz_5737]i32} {
                   let {binop_y_6003 : i64} =
                     mul_nw64(Tx_5726, ltid_seq_6002)
                   let {k_6004 : i64} =
@@ -360,12 +360,12 @@ entry("main",
                       in {x_6020}
                     } else {-1i64}
                     : {i64}
-                  return {loop_5973 : [a_loc_sz_5737]
+                  return {loop_5973
                           with ([as_transformed_row_loc_ind_6017] = as_transformed_row_elem_6012)}
                 }
               let {as_transformed_row_glb2loc_6069 : [b_loc_sz_5742]i32} =
                 segmap(ingroup; full [0, 1])
-                (ltid_seq_6048 < Rx_5727, ltid_seq_6049 < tk_div_tx_5729, ltid_y_6046 < Tx_5726, ltid_x_6047 < Tx_5726) (~ltid_flat_6045) : {i32} {
+                (ltid_seq_6048 < Rx_5727, ltid_seq_6049 < tk_div_tx_5729, ltid_y_6046 < Tx_5726, ltid_x_6047 < Tx_5726) (~ltid_flat_6045) : {[b_loc_sz_5742]i32} {
                   let {binop_y_6050 : i64} =
                     mul_nw64(Tx_5726, ltid_seq_6049)
                   let {k_6051 : i64} =
@@ -406,7 +406,7 @@ entry("main",
                       in {x_6067}
                     } else {-1i64}
                     : {i64}
-                  return {loop_5974 : [b_loc_sz_5742]
+                  return {loop_5974
                           with ([as_transformed_row_loc_ind_6064] = as_transformed_row_elem_6059)}
                 }
               let {loop_6174 : [Ty_5724][Tx_5726][Ry_5725][Rx_5727]i32} =
@@ -700,7 +700,7 @@ entry("main",
 --                     mul_nw64(Tk_5728, i_5778)
 --                   let {as_transformed_row_glb2loc_5825 : [a_loc_sz_5737]i32} =
 --                     segmap(ingroup; full [0, 1])
---                     (ltid_seq_5806 < Rx_5727, ltid_seq_5807 < tk_div_tx_5729, ltid_y_5804 < Tx_5726, ltid_x_5805 < Tx_5726) (~ltid_flat_5803) : {i32} {
+--                     (ltid_seq_5806 < Rx_5727, ltid_seq_5807 < tk_div_tx_5729, ltid_y_5804 < Tx_5726, ltid_x_5805 < Tx_5726) (~ltid_flat_5803) : {[a_loc_sz_5737]i32} {
 --                       let {binop_y_5808 : i64} =
 --                         mul_nw64(Tx_5726, ltid_seq_5807)
 --                       let {k_5809 : i64} =
@@ -737,12 +737,12 @@ entry("main",
 --                           in {x_5823}
 --                         } else {-1i64}
 --                         : {i64}
---                       return {merge_5780 : [a_loc_sz_5737]
+--                       return {merge_5780
 --                               with ([as_transformed_row_loc_ind_5820] = as_transformed_row_elem_5815)}
 --                     }
 --                   let {as_transformed_row_glb2loc_5868 : [b_loc_sz_5742]i32} =
 --                     segmap(ingroup; full [0, 1])
---                     (ltid_seq_5849 < Rx_5727, ltid_seq_5850 < tk_div_tx_5729, ltid_y_5847 < Tx_5726, ltid_x_5848 < Tx_5726) (~ltid_flat_5846) : {i32} {
+--                     (ltid_seq_5849 < Rx_5727, ltid_seq_5850 < tk_div_tx_5729, ltid_y_5847 < Tx_5726, ltid_x_5848 < Tx_5726) (~ltid_flat_5846) : {[b_loc_sz_5742]i32} {
 --                       let {binop_y_5851 : i64} =
 --                         mul_nw64(Tx_5726, ltid_seq_5850)
 --                       let {k_5852 : i64} =
@@ -779,7 +779,7 @@ entry("main",
 --                           in {x_5866}
 --                         } else {-1i64}
 --                         : {i64}
---                       return {merge_5781 : [b_loc_sz_5742]
+--                       return {merge_5781
 --                               with ([as_transformed_row_loc_ind_5863] = as_transformed_row_elem_5858)}
 --                     }
 --                   let {loop_5971 : [Ty_5724][Tx_5726][Ry_5725][Rx_5727]i32} =
@@ -871,7 +871,7 @@ entry("main",
 --                 }
 --               let {as_transformed_row_glb2loc_6022 : [a_loc_sz_5737]i32} =
 --                 segmap(ingroup; full [0, 1])
---                 (ltid_seq_6001 < Rx_5727, ltid_seq_6002 < tk_div_tx_5729, ltid_y_5999 < Tx_5726, ltid_x_6000 < Tx_5726) (~ltid_flat_5998) : {i32} {
+--                 (ltid_seq_6001 < Rx_5727, ltid_seq_6002 < tk_div_tx_5729, ltid_y_5999 < Tx_5726, ltid_x_6000 < Tx_5726) (~ltid_flat_5998) : {[a_loc_sz_5737]i32} {
 --                   let {binop_y_6003 : i64} =
 --                     mul_nw64(Tx_5726, ltid_seq_6002)
 --                   let {k_6004 : i64} =
@@ -912,12 +912,12 @@ entry("main",
 --                       in {x_6020}
 --                     } else {-1i64}
 --                     : {i64}
---                   return {loop_5973 : [a_loc_sz_5737]
+--                   return {loop_5973
 --                           with ([as_transformed_row_loc_ind_6017] = as_transformed_row_elem_6012)}
 --                 }
 --               let {as_transformed_row_glb2loc_6069 : [b_loc_sz_5742]i32} =
 --                 segmap(ingroup; full [0, 1])
---                 (ltid_seq_6048 < Rx_5727, ltid_seq_6049 < tk_div_tx_5729, ltid_y_6046 < Tx_5726, ltid_x_6047 < Tx_5726) (~ltid_flat_6045) : {i32} {
+--                 (ltid_seq_6048 < Rx_5727, ltid_seq_6049 < tk_div_tx_5729, ltid_y_6046 < Tx_5726, ltid_x_6047 < Tx_5726) (~ltid_flat_6045) : {[b_loc_sz_5742]i32} {
 --                   let {binop_y_6050 : i64} =
 --                     mul_nw64(Tx_5726, ltid_seq_6049)
 --                   let {k_6051 : i64} =
@@ -958,7 +958,7 @@ entry("main",
 --                       in {x_6067}
 --                     } else {-1i64}
 --                     : {i64}
---                   return {loop_5974 : [b_loc_sz_5742]
+--                   return {loop_5974
 --                           with ([as_transformed_row_loc_ind_6064] = as_transformed_row_elem_6059)}
 --                 }
 --               let {loop_6174 : [Ty_5724][Tx_5726][Ry_5725][Rx_5727]i32} =
