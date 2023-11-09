@@ -22,11 +22,11 @@ commonPermutationEliminatorsTests =
 
 permutationTests :: TestTree
 permutationTests =
-  testGroup "All permutations are transpose" $
+  testGroup "Permutations" $
     do
       let names = generateNames 2
       let dimAccesses = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
-      [ testCase (unwords ["commonPermutationEliminators", show perm, "...", "==", show res]) $
+      [ testCase (unwords [show perm, "->", show res]) $
           commonPermutationEliminators perm [] dimAccesses @?= res
         | (perm, res) <-
             [ ([0], True),
@@ -51,7 +51,7 @@ nestTests = testGroup "Nests" $
   do
     let names = generateNames 2
     let dimAccesses = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
-    [ testCase (unwords ["commonPermutationEliminators", "...", args, "==", show res]) $
+    [ testCase (unwords [args, "->", show res]) $
         commonPermutationEliminators [1, 0] nest dimAccesses @?= res
       | (args, nest, res) <-
           [ ("[]", [], False),
@@ -64,7 +64,7 @@ nestTests = testGroup "Nests" $
       ]
 
 dimAccessTests :: TestTree
-dimAccessTests = testGroup "Nests" [] -- TODO: Write tests for the part of commonPermutationEliminators that checks the complexity of the DimAccesses.
+dimAccessTests = testGroup "DimAccesses" [] -- TODO: Write tests for the part of commonPermutationEliminators that checks the complexity of the DimAccesses.
 
 singleParAccess :: Int -> Int -> VName -> DimAccess rep
 singleParAccess origDim level name =
