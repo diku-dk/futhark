@@ -21,28 +21,83 @@ type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Pe
 
 class (Analyze rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
-  -- Returns Nothing if the array is already in the optimal layout
+  -- Returns Nothing if the array is already in the optimal layout or if the array access
+  -- is too complex to confidently determine the optimal layout.
   permutationFromDimAccess :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
-commonPermutationEliminators :: [Int] -> Bool
-commonPermutationEliminators =
-  anyOf
-    [ -- Don't manifest if the permutation is the identity permutation
-      (`L.isPrefixOf` [0 ..]),
-      -- or is not a transpose.
-      isNothing . isMapTranspose
-    ]
+instance Layout GPU where
+  permutationFromDimAccess _segOpName (_arrayName, nest) _idxName dimAccesses = do
+    -- Create a candidate permutation
+    let perm = (map originalDimension . sortGPU) dimAccesses
+
+    -- Check if we want to manifest this array with the permutation
+    if commonPermutationEliminators perm nest dimAccesses
+      then Nothing
+      else Just perm
+
+multicorePermutation :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
+multicorePermutation _segOpName (_arrayName, nest) _idxName dimAccesses = do
+  -- Create a candidate permutation
+  let perm = (map originalDimension . sortMC) dimAccesses
+
+  -- Check if we want to manifest this array with the permutation
+  if commonPermutationEliminators perm nest dimAccesses
+    then Nothing
+    else Just perm
+
+instance Layout MC where
+  permutationFromDimAccess = multicorePermutation
+
+instance Layout MCMem where
+  permutationFromDimAccess = multicorePermutation
+
+instance Layout GPUMem where
+  permutationFromDimAccess = error $ notImplementedYet "GPUMem"
+
+instance Layout Seq where
+  permutationFromDimAccess = error $ notImplementedYet "Seq"
+
+instance Layout SeqMem where
+  permutationFromDimAccess = error $ notImplementedYet "SeqMem"
+
+instance Layout SOACS where
+  permutationFromDimAccess = error $ notImplementedYet "SOACS"
+
+-- | Reasons common to all backends to not manifest an array.
+commonPermutationEliminators :: [Int] -> [BodyType] -> [DimAccess rep] -> Bool
+commonPermutationEliminators perm nest dimAccesses = do
+  -- Don't manifest if the permutation is the permutation is invalid
+  let isInvalidPerm =
+        anyOf
+          [ -- Don't manifest if the permutation is the identity permutation
+            (`L.isPrefixOf` [0 ..]),
+            -- or is not a transpose.
+            isNothing . isMapTranspose
+          ]
+          perm
+
+  -- Don't manifest if the array is defined inside a segOp or loop body
+  let isInsideUndesired = any isUndesired nest
+  -- Don't manifest if the array is indexed by something weird
+  let isInscrutable = any (inscrutable . complexity) dimAccesses
+
+  isInvalidPerm || isInsideUndesired || isInscrutable
   where
     -- Why is this not in the prelude, there's probably a monad for this.
     anyOf :: forall a t. (Foldable t) => t (a -> Bool) -> a -> Bool
-    anyOf preds input =
-      any (\f -> f input) preds
+    anyOf preds input = any (\f -> f input) preds
 
-inscrutable :: Complexity -> Bool
-inscrutable boi = case boi of
-  Simple -> False
-  (Linear names s o) -> length names > 1 || s > 0 || o > 1000
-  _ -> True
+    isUndesired :: BodyType -> Bool
+    isUndesired bodyType = case bodyType of
+      SegOpName _ -> True
+      LoopBodyName _ -> True
+      _ -> False
+
+    inscrutable :: Complexity -> Bool
+    inscrutable boi = case boi of
+      Simple -> False
+      (Linear names s o) -> length names > 1 || s > 0 || o > 1000
+      _ -> True
 
 -- | Given an ordering function for `DimAccess`, and an IndexTable, return
 -- a PermutationTable.
@@ -58,47 +113,6 @@ permutationTableFromIndexTable =
     maybeMap val = if null val then Nothing else Just val
 
     mapToMaybe f = maybeMap . M.mapMaybeWithKey f
-
-instance Layout GPU where
-  permutationFromDimAccess _segOpName (_arrayName, nest) _idxName memEntry = do
-    let perm = (map originalDimension . sortGPU) memEntry
-
-    -- Don't manifest if the array is defined inside a segOp or loop body
-    let nestSegOps = filter isUndesired nest
-    let isInsideUndesired = not (null nestSegOps)
-    -- Don't manifest if the array is indexed by something weird
-    let isInscrutable = any (inscrutable . complexity) memEntry
-
-    if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
-      then Nothing
-      else Just perm
-    where
-      isUndesired bodyType = case bodyType of
-        SegOpName _ -> True
-        LoopBodyName _ -> True
-        _ -> False
-
-multikernePermutering :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
-multikernePermutering _segOpName (_arrayName, nest) _idxName memEntry = do
-  let perm = (map originalDimension . sortMC) memEntry
-
-  -- Don't manifest if the array is defined inside a segOp or loop body
-  let nestSegOps = filter isUndesired nest
-  let isInsideUndesired = not (null nestSegOps)
-  -- Don't manifest if the array is indexed by something weird
-  let isInscrutable = any (inscrutable . complexity) memEntry
-
-  if isInsideUndesired || commonPermutationEliminators perm || isInscrutable
-    then Nothing
-    else Just perm
-  where
-    isUndesired bodyType = case bodyType of
-      SegOpName _ -> True
-      LoopBodyName _ -> True
-      _ -> False
-
-instance Layout MC where
-  permutationFromDimAccess = multikernePermutering
 
 sortGPU :: [DimAccess rep] -> [DimAccess rep]
 sortGPU =
@@ -181,18 +195,3 @@ sortMC =
             _ -> lhs
 
         f og (_, lvl, itertype) = Just (itertype, lvl, og)
-
-instance Layout MCMem where
-  permutationFromDimAccess = multikernePermutering
-
-instance Layout GPUMem where
-  permutationFromDimAccess = error $ notImplementedYet "GPUMem"
-
-instance Layout Seq where
-  permutationFromDimAccess = error $ notImplementedYet "Seq"
-
-instance Layout SeqMem where
-  permutationFromDimAccess = error $ notImplementedYet "SeqMem"
-
-instance Layout SOACS where
-  permutationFromDimAccess = error $ notImplementedYet "SOACS"
