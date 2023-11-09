@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* `futhark literate` no longer fails if the final line is a directive
+  without a trailing newline.
+
 ## [0.25.7]
 
 ### Added
