@@ -306,17 +306,58 @@ seqStm' _ stm = addStm stm
 seqScatter :: Env -> Stm GPU -> Builder GPU ()
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) space ts kbody)))) = do
-  usedArrays <- getUsedArraysIn env kbody
-  let (const, vnames) = getScatterInfo kbody
-  scatter <- buildSegMapTup_ "scatter_intermediate" $ do
+
+  exp' <- buildSegMap' $ do
     tid <- newVName "write_i"
     phys <- newVName "phys_tid"
-    let env' = updateEnvTid env tid
-    idx <- letSubExp "idx" =<< eBinOp (Mul Int64 OverflowUndef) (eSubExp $ Var tid) (eSubExp $ seqFactor env)
-    let stms' = colelctStms_ $ updateIndices vnames idx $ kernelBodyStms stms
+    -- let env' = updateEnvTid env tid
 
-    pure ()
-  pure ()
+    let (const, _) = getScatterInfo kbody
+
+    const' <- mapM expandConst const
+    let constMap = M.fromList const'
+    start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                           (eSubExp $ seqFactor env)
+                                           (eSubExp $ Var tid)
+
+    -- Adjust all the Index Exps of the body to read slices instead
+    -- TODO: What if some of the arrays are tiled? Isn't this essentially
+    -- the same as in seqKernelBody?
+    forM_ (kernelBodyStms kbody) $ \ stm -> do
+      case stm of
+        (Let pat aux (BasicOp (Index arr _))) -> do
+          tp <- lookupType arr
+          let slice' = case arrayRank tp of
+                        1 -> Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
+                        2 -> Slice [DimFix $ grpId env
+                                   , DimSlice start (seqFactor env) (intConst Int64 1)]
+                        _ -> error "Error in scatter when adjusting dims"
+          -- TODO: Assumes one patElem
+          let patElem = head $ patElems pat
+          let patType = patElemType patElem
+          let patType' = arrayOf patType (Shape [seqFactor env]) NoUniqueness
+          let pat' = Pat [PatElem (patElemName patElem) patType']
+          addStm $ Let pat' aux (BasicOp (Index arr slice'))
+        stm' -> do addStm stm'
+
+    -- Modify all the WriteReturns kernel results to use the new "constant" arrays
+    res' <- forM (kernelBodyResult kbody) $ \ res -> do
+      case res of
+        (WriteReturns certs arr updates) ->
+          let updates' = L.map (\(Slice [DimFix i], v) -> 
+                                let i' = M.findWithDefault i i constMap
+                                    v' = M.findWithDefault v v constMap
+                                in (Slice [DimFix i'], v')
+                          ) updates
+          in pure $ WriteReturns certs arr updates'
+        _ -> error $ "Expected a WriteReturns Result but got: " ++ show res
+
+    let lvl' = SegThread SegNoVirt Nothing
+    let space' = SegSpace phys [(tid, grpSize env)]
+    pure (res', lvl', space', ts)
+        
+  addStm $ Let pat aux exp'
+  
   where
     getScatterInfo (KernelBody _ _ res) =
       let upd = concatMap (\(WriteReturns _ _ updates) -> updates) res
@@ -326,16 +367,38 @@ seqScatter env (Let pat aux (Op (SegOp
     isConst (Constant _) = True
     isConst _ = False
 
-    updateIndices :: [VName] -> SubExp -> Stms GPU -> Builder GPU ()
-    updateIndices names idx stms = do
-      addStms $ mapM (\ stm ->
-        case stm of
-          (Constant 
-        if stm `elem` names then
-          undefined
-          -- case arrayRank $ typeof stm
-        else stm
-        ) stms
+    -- | Returns a mapping from the original constant SubExps to the expanded
+    -- arrays
+    expandConst :: SubExp -> Builder GPU (SubExp, SubExp)
+    expandConst c = do
+      let shape = Shape [seqFactor env]
+      c' <- letSubExp "const" $ BasicOp $ Replicate shape c
+      pure (c, c')
+
+    -- | Returns a mapping from the original scalar SubExp to the expanded
+    -- array SubExp
+    -- expandVars :: SubExp -> SubExp -> Builder GPU (SubExp, SubExp)
+    -- expandVars tid var = do
+    --   let (Var varName) = var
+    --   let shape = Shape [seqFactor env]
+    --   start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+    --                                          (eSubExp $ seqFactor env)
+    --                                          (eSubExp $ Var tid)
+    --   var' <- letSubExp "var" $ BasicOp $ Index 
+    
+
+    
+
+    -- updateIndices :: [VName] -> SubExp -> Stms GPU -> Builder GPU ()
+    -- updateIndices names idx stms = do
+    --   addStms $ mapM (\ stm ->
+    --     case stm of
+    --       (Constant 
+    --     if stm `elem` names then
+    --       undefined
+    --       -- case arrayRank $ typeof stm
+    --     else stm
+    --     ) stms
 
 seqScatter _ stm = error $
                   "SeqScatter error. Should be a map at thread level but got"
@@ -696,6 +759,12 @@ buildSegMapTup_ name m = do
     varFromExp :: SubExp -> VName
     varFromExp (Var nm) = nm
     varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
+
+-- buildSegMapTup' ::
+--   String -> 
+--   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
+--   Builder GPU (Exp GPU)
+-- buildSegMapTup' name m = do undefined
 
 
 buildSegMap' ::
