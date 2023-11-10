@@ -63,6 +63,14 @@ runtime measurement reported by ``futhark bench``.  However, enabling
 profiling may still affect performance, as it changes the
 behaviour of the run time system.
 
+Raw reports
+-----------
+
+Alternatively, the JSON can also contain a raw profiling report as
+produced by the C API function ``futhark_context_report()``. A
+directory is still created, but it will only contain a single set of
+files, and it will not contain a log.
+
 EXAMPLES
 ========
 
