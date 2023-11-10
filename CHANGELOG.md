@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * FutharkScript now has a `$loadbytes` builtin function for reading
   arbitrary bytes into Futhark programs.
 
+* `futhark profile` can now process reports produced by the C API
+  function `futhark_context_report()`.
+
 ### Removed
 
 ### Changed

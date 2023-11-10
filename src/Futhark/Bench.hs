@@ -367,7 +367,7 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   report' <-
     maybe (throwError "Program produced invalid profiling report.") pure $
-      profilingInfoFromText (T.unlines report)
+      profilingReportFromText (T.unlines report)
 
   maybe_expected <-
     liftIO $ maybe (pure Nothing) (fmap Just . getExpectedValues) expected_spec

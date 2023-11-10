@@ -9,6 +9,7 @@ import Futhark.Bench
 import Futhark.Util (showText)
 import Futhark.Util.Options
 import System.Directory (createDirectoryIfMissing, removePathForcibly)
+import System.Exit
 import System.FilePath
 import System.IO
 import Text.Printf
@@ -48,7 +49,7 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           bottom =
             T.unwords
               [ showText (sum (map (fst . snd) rows)),
-                "events with a total runtime of ",
+                "events with a total runtime of",
                 T.pack $ printf "%.2fμs" $ sum $ map (snd . snd) rows
               ]
        in T.unlines $
@@ -71,12 +72,26 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           padLeft numpad $ T.pack $ printf "%.2fμs" $ dur / fromInteger n
         ]
 
-analyseProfileReport :: FilePath -> [BenchResult] -> IO ()
-analyseProfileReport json_path bench_results = do
+prepareDir :: FilePath -> IO FilePath
+prepareDir json_path = do
   let top_dir = takeFileName json_path -<.> "prof"
   T.hPutStrLn stderr $ "Writing results to " <> T.pack top_dir <> "/"
-  T.hPutStrLn stderr $ "Stripping '" <> T.pack prefix <> "' from program paths."
   removePathForcibly top_dir
+  pure top_dir
+
+analyseProfilingReport :: FilePath -> ProfilingReport -> IO ()
+analyseProfilingReport json_path r = do
+  top_dir <- prepareDir json_path
+  createDirectoryIfMissing True top_dir
+  T.writeFile (top_dir </> "summary") $
+    memoryReport (profilingMemory r)
+      <> "\n\n"
+      <> tabulateEvents (profilingEvents r)
+
+analyseBenchResults :: FilePath -> [BenchResult] -> IO ()
+analyseBenchResults json_path bench_results = do
+  top_dir <- prepareDir json_path
+  T.hPutStrLn stderr $ "Stripping '" <> T.pack prefix <> "' from program paths."
   mapM_ (onBenchResult top_dir) bench_results
   where
     prefix = longestCommonPrefix $ map benchResultProg bench_results
@@ -116,21 +131,24 @@ readFileSafely filepath =
   where
     couldNotRead e = pure $ Left $ show (e :: IOError)
 
-decodeFileBenchResults ::
-  FilePath ->
-  IO (Either String [BenchResult])
-decodeFileBenchResults path = do
-  file <- readFileSafely path
-  pure $ file >>= decodeBenchResults
-
 -- | Run @futhark profile@.
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "<file>" f
   where
     f [json_path] () = Just $ do
-      res_either <- decodeFileBenchResults json_path
-
-      case res_either of
-        Left a -> hPutStrLn stderr a
-        Right a -> analyseProfileReport json_path a
+      s <- readFileSafely json_path
+      case s of
+        Left a -> do
+          hPutStrLn stderr a
+          exitWith $ ExitFailure 2
+        Right s' ->
+          case decodeBenchResults s' of
+            Left _ ->
+              case decodeProfilingReport s' of
+                Nothing -> do
+                  hPutStrLn stderr $
+                    "Cannot recognise " <> json_path <> " as benchmark results or a profiling report."
+                Just pr ->
+                  analyseProfilingReport json_path pr
+            Right br -> analyseBenchResults json_path br
     f _ _ = Nothing
