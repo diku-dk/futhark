@@ -26,6 +26,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.List (find)
 import Data.Map.Strict qualified as M
 import Futhark.IR.SOACS
 import Futhark.MonadFreshNames
@@ -137,8 +138,14 @@ lookupSubst v = do
 -- | Add opaque types.  If the types are already known, they will not
 -- be added.
 addOpaques :: OpaqueTypes -> InternaliseM ()
-addOpaques ts = modify $ \s ->
-  s {stateTypes = stateTypes s <> ts}
+addOpaques ts@(OpaqueTypes ts') = modify $ \s ->
+  -- TODO: handle this better (#1960)
+  case find (knownButDifferent (stateTypes s)) ts' of
+    Just (x, _) -> error $ "addOpaques: multiple incompatible definitions of type " <> nameToString x
+    Nothing -> s {stateTypes = stateTypes s <> ts}
+  where
+    knownButDifferent (OpaqueTypes old_ts) (v, def) =
+      any (\(v_old, v_def) -> v == v_old && def /= v_def) old_ts
 
 -- | Add a function definition to the program being constructed.
 addFunDef :: FunDef SOACS -> InternaliseM ()
