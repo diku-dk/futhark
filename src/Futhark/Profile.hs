@@ -2,7 +2,8 @@
 module Futhark.Profile
   ( ProfilingEvent (..),
     ProfilingReport (..),
-    profilingInfoFromText,
+    profilingReportFromText,
+    decodeProfilingReport,
   )
 where
 
@@ -11,6 +12,7 @@ import Data.Aeson.Key qualified as JSON
 import Data.Aeson.KeyMap qualified as JSON
 import Data.Bifunctor
 import Data.ByteString.Builder (toLazyByteString)
+import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8Builder)
@@ -61,5 +63,8 @@ instance JSON.FromJSON ProfilingReport where
       <$> o JSON..: "events"
       <*> (JSON.toMapText <$> o JSON..: "memory")
 
-profilingInfoFromText :: T.Text -> Maybe ProfilingReport
-profilingInfoFromText = JSON.decode . toLazyByteString . encodeUtf8Builder
+decodeProfilingReport :: LBS.ByteString -> Maybe ProfilingReport
+decodeProfilingReport = JSON.decode
+
+profilingReportFromText :: T.Text -> Maybe ProfilingReport
+profilingReportFromText = JSON.decode . toLazyByteString . encodeUtf8Builder
