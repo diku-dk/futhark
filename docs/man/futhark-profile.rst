@@ -53,6 +53,10 @@ following files in the top level directory.
   the GPU backends, the cost centres are kernel executions and memory
   copies.
 
+* ``foo.timeline``: a list of all recorded profiling events, in the
+  order in which they occurred, along with their runtime and other
+  available information
+
 Technicalities
 --------------
 

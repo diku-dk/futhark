@@ -2,6 +2,7 @@ module Futhark.CLI.Profile (main) where
 
 import Control.Exception (catch)
 import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -72,6 +73,26 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           padLeft numpad $ T.pack $ printf "%.2fμs" $ dur / fromInteger n
         ]
 
+timeline :: [ProfilingEvent] -> T.Text
+timeline = T.unlines . L.intercalate [""] . map onEvent
+  where
+    onEvent (ProfilingEvent name duration description) =
+      [name, "Duration: " <> showText duration <> " μs"] <> T.lines description
+
+data TargetFiles = TargetFiles
+  { summaryFile :: FilePath,
+    timelineFile :: FilePath
+  }
+
+writeAnalysis :: TargetFiles -> ProfilingReport -> IO ()
+writeAnalysis tf r = do
+  T.writeFile (summaryFile tf) $
+    memoryReport (profilingMemory r)
+      <> "\n\n"
+      <> tabulateEvents (profilingEvents r)
+  T.writeFile (timelineFile tf) $
+    timeline (profilingEvents r)
+
 prepareDir :: FilePath -> IO FilePath
 prepareDir json_path = do
   let top_dir = takeFileName json_path -<.> "prof"
@@ -83,10 +104,12 @@ analyseProfilingReport :: FilePath -> ProfilingReport -> IO ()
 analyseProfilingReport json_path r = do
   top_dir <- prepareDir json_path
   createDirectoryIfMissing True top_dir
-  T.writeFile (top_dir </> "summary") $
-    memoryReport (profilingMemory r)
-      <> "\n\n"
-      <> tabulateEvents (profilingEvents r)
+  let tf =
+        TargetFiles
+          { summaryFile = top_dir </> "summary",
+            timelineFile = top_dir </> "timeline"
+          }
+  writeAnalysis tf r
 
 analyseBenchResults :: FilePath -> [BenchResult] -> IO ()
 analyseBenchResults json_path bench_results = do
@@ -120,10 +143,12 @@ analyseBenchResults json_path bench_results = do
       case report res of
         Nothing -> problem prog_name name "no profiling information"
         Just r ->
-          T.writeFile (name' <> ".summary") $
-            memoryReport (profilingMemory r)
-              <> "\n\n"
-              <> tabulateEvents (profilingEvents r)
+          let tf =
+                TargetFiles
+                  { summaryFile = name' <> ".summary",
+                    timelineFile = name' <> ".timeline"
+                  }
+           in writeAnalysis tf r
 
 readFileSafely :: FilePath -> IO (Either String BS.ByteString)
 readFileSafely filepath =
