@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* `futhark autotune` how supports `hip` backend.
+* `futhark autotune` now supports `hip` backend.
 
 * Better parallelisation of `scatter` when the target is
   multidimensional (#2035).
