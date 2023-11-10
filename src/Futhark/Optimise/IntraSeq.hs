@@ -307,6 +307,21 @@ seqScatter :: Env -> Stm GPU -> Builder GPU ()
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) space ts kbody)))) = do
 
+  -- exp' <- buildSegMap' $ do
+
+  --   -- Create the loop parts
+  --   let dests = L.map (\(WriteReturns _ dest _) -> dest) (kernelBodyResult kbody)
+  --   loopInit <- 
+  --         mapM (\d -> do
+  --           tp <- lookupType d
+  --           let decl = toDecl tp Unique -- No references outside current function
+  --           pure $ Param decl
+  --         ) dests 
+    
+  --   undefined
+
+  -- pure ()
+
   exp' <- buildSegMap' $ do
     tid <- newVName "write_i"
     phys <- newVName "phys_tid"
@@ -375,30 +390,6 @@ seqScatter env (Let pat aux (Op (SegOp
       c' <- letSubExp "const" $ BasicOp $ Replicate shape c
       pure (c, c')
 
-    -- | Returns a mapping from the original scalar SubExp to the expanded
-    -- array SubExp
-    -- expandVars :: SubExp -> SubExp -> Builder GPU (SubExp, SubExp)
-    -- expandVars tid var = do
-    --   let (Var varName) = var
-    --   let shape = Shape [seqFactor env]
-    --   start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
-    --                                          (eSubExp $ seqFactor env)
-    --                                          (eSubExp $ Var tid)
-    --   var' <- letSubExp "var" $ BasicOp $ Index 
-    
-
-    
-
-    -- updateIndices :: [VName] -> SubExp -> Stms GPU -> Builder GPU ()
-    -- updateIndices names idx stms = do
-    --   addStms $ mapM (\ stm ->
-    --     case stm of
-    --       (Constant 
-    --     if stm `elem` names then
-    --       undefined
-    --       -- case arrayRank $ typeof stm
-    --     else stm
-    --     ) stms
 
 seqScatter _ stm = error $
                   "SeqScatter error. Should be a map at thread level but got"
