@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark profile` can now process reports produced by the C API
   function `futhark_context_report()`.
 
+* `futhark profile` now also produces a timeline of events.
+
 ### Removed
 
 ### Changed
