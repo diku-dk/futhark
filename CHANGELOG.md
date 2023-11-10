@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark literate` no longer fails if the final line is a directive
   without a trailing newline.
 
+* Parser now allows arbitrary patterns in function parameters and
+  `let` bindings, although the type checker will reject any that are
+  refutable (#2017).
+
 ## [0.25.7]
 
 ### Added
