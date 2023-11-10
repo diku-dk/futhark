@@ -15,6 +15,9 @@ module Futhark.Analysis.AccessPattern
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
     notImplementedYet,
     Complexity (..),
+    Context (..),
+    analyzeIndex,
+    CtxVal (..),
   )
 where
 
@@ -383,6 +386,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   -- context with the missing variable.
   -- For now it works fine tho.
 
+  -- TODO: document this and the reason for [BodyType] in ArrayName
   let array_name' =
         fromMaybe (arr_name, []) $
           L.find (\(n, _) -> n == arr_name) $
@@ -622,7 +626,7 @@ reduceDependencies ctx v =
   if v `nameIn` constants ctx
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
-      Nothing -> mempty -- error $ "Unable to find " ++ prettyString v
+      Nothing -> error $ "Unable to find " ++ prettyString v
       Just (CtxVal deps itertype lvl parents_nest complexity) ->
         if null $ namesToList deps
           then DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity

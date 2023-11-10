@@ -9,7 +9,7 @@ tests :: TestTree
 tests =
   testGroup
     "OptimizeArrayLayoutTests"
-    [ -- Futhark.Pass.OptimizeArrayLayout.AnalyzeTests.tests
+    [ Futhark.Pass.OptimizeArrayLayout.AnalyzeTests.tests,
       Futhark.Pass.OptimizeArrayLayout.LayoutTests.tests
       --   , Futhark.Pass.OptimizeArrayLayout.TransformTests.tests
     ]
