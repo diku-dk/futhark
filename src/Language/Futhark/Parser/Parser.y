@@ -529,7 +529,7 @@ SizeExp :: { SizeExp NoInfo Name }
          | '...['     ']' { SizeExpAny (srcspan $1 $>) }
 
 FunParam :: { PatBase NoInfo Name ParamType }
-FunParam : InnerPat { fmap (toParam Observe) $1 }
+FunParam : ParamPat { fmap (toParam Observe) $1 }
 
 FunParams1 :: { (PatBase NoInfo Name ParamType, [PatBase NoInfo Name ParamType]) }
 FunParams1 : FunParam            { ($1, []) }
@@ -783,39 +783,52 @@ Cases :: { NE.NonEmpty (CaseBase NoInfo Name) }
        | Case Cases           { NE.cons $1 $2 }
 
 Case :: { CaseBase NoInfo Name }
-      : case CPat '->' Exp
+      : case Pat '->' Exp
         { let loc = srcspan $1 $> in CasePat $2 $> loc }
 
-CPat :: { PatBase NoInfo Name StructType }
-          : '#[' AttrInfo ']' CPat    { PatAttr $2 $4 (srcspan $1 $>) }
-          | CInnerPat ':' TypeExp     { PatAscription $1 $3 (srcspan $1 $>) }
-          | CInnerPat                 { $1 }
+Pat :: { PatBase NoInfo Name StructType }
+          : '#[' AttrInfo ']' Pat    { PatAttr $2 $4 (srcspan $1 $>) }
+          | InnerPat ':' TypeExp     { PatAscription $1 $3 (srcspan $1 $>) }
+          | InnerPat                 { $1 }
           | Constr ConstrFields       { let (n, loc) = $1;
                                             loc' = srcspan loc $>
                                         in PatConstr n NoInfo $2 loc'}
 
-CPats1 :: { [PatBase NoInfo Name StructType] }
-           : CPat               { [$1] }
-           | CPat ',' CPats1 { $1 : $3 }
+-- Parameter patterns are slightly restricted; see #2017.
+ParamPat :: { PatBase NoInfo Name StructType }
+               : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
+               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '_'                  { Wildcard NoInfo (srclocOf $1) }
+               | '(' ')'              { TuplePat [] (srcspan $1 $>) }
+               | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }
+               | '(' Pat ',' Pats1 ')'{ TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'   { RecordPat $2 (srcspan $1 $>) }
+               | PatLiteralNoNeg      { PatLit (fst $1) NoInfo (srclocOf (snd $1)) }
+               | Constr               { let (n, loc) = $1
+                                        in PatConstr n NoInfo [] (srclocOf loc) }
 
-CInnerPat :: { PatBase NoInfo Name StructType }
-               : id                                 { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-               | '(' BindingBinOp ')'               { Id $2 NoInfo (srcspan $1 $>) }
-               | '_'                                { Wildcard NoInfo (srclocOf $1) }
-               | '(' ')'                            { TuplePat [] (srcspan $1 $>) }
-               | '(' CPat ')'                       { PatParens $2 (srcspan $1 $>) }
-               | '(' CPat ',' CPats1 ')'            { TuplePat ($2:$4) (srcspan $1 $>) }
-               | '{' CFieldPats '}'                 { RecordPat $2 (srcspan $1 $>) }
-               | CaseLiteral                        { PatLit (fst $1) NoInfo (srclocOf (snd $1)) }
-               | Constr                             { let (n, loc) = $1
-                                                      in PatConstr n NoInfo [] (srclocOf loc) }
+Pats1 :: { [PatBase NoInfo Name StructType] }
+           : Pat               { [$1] }
+           | Pat ',' Pats1 { $1 : $3 }
+
+InnerPat :: { PatBase NoInfo Name StructType }
+               : id                   { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
+               | '(' BindingBinOp ')' { Id $2 NoInfo (srcspan $1 $>) }
+               | '_'                  { Wildcard NoInfo (srclocOf $1) }
+               | '(' ')'              { TuplePat [] (srcspan $1 $>) }
+               | '(' Pat ')'          { PatParens $2 (srcspan $1 $>) }
+               | '(' Pat ',' Pats1 ')'{ TuplePat ($2:$4) (srcspan $1 $>) }
+               | '{' CFieldPats '}'   { RecordPat $2 (srcspan $1 $>) }
+               | PatLiteral           { PatLit (fst $1) NoInfo (srclocOf (snd $1)) }
+               | Constr               { let (n, loc) = $1
+                                        in PatConstr n NoInfo [] (srclocOf loc) }
 
 ConstrFields :: { [PatBase NoInfo Name StructType] }
-              : CInnerPat                { [$1] }
-              | ConstrFields CInnerPat   { $1 ++ [$2] }
+              : InnerPat                { [$1] }
+              | ConstrFields InnerPat   { $1 ++ [$2] }
 
 CFieldPat :: { (Name, PatBase NoInfo Name StructType) }
-               : FieldId '=' CPat
+               : FieldId '=' Pat
                { (fst $1, $3) }
                | FieldId ':' TypeExp
                { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
@@ -830,17 +843,20 @@ CFieldPats1 :: { [(Name, PatBase NoInfo Name StructType)] }
                  : CFieldPat ',' CFieldPats1 { $1 : $3 }
                  | CFieldPat                    { [$1] }
 
-CaseLiteral :: { (PatLit, Loc) }
+PatLiteralNoNeg :: { (PatLit, Loc) }
              : charlit  { let L loc (CHARLIT x) = $1
                           in (PatLitInt (toInteger (ord x)), loc) }
              | PrimLit  { (PatLitPrim (fst $1), snd $1) }
              | intlit   { let L loc (INTLIT x) = $1 in (PatLitInt x, loc) }
              | natlit   { let L loc (NATLIT _ x) = $1 in (PatLitInt x, loc) }
              | floatlit { let L loc (FLOATLIT x) = $1 in (PatLitFloat x, loc) }
-             | '-' NumLit   { (PatLitPrim (primNegate (fst $2)), snd $2) }
-             | '-' intlit   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
-             | '-' natlit   { let L loc (NATLIT _ x) = $2 in (PatLitInt (negate x), loc) }
-             | '-' floatlit { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
+
+PatLiteral :: { (PatLit, Loc) }
+             : PatLiteralNoNeg           { $1 }
+             | '-' NumLit %prec bottom   { (PatLitPrim (primNegate (fst $2)), snd $2) }
+             | '-' intlit %prec bottom   { let L loc (INTLIT x) = $2 in (PatLitInt (negate x), loc) }
+             | '-' natlit %prec bottom   { let L loc (NATLIT _ x) = $2 in (PatLitInt (negate x), loc) }
+             | '-' floatlit              { let L loc (FLOATLIT x) = $2 in (PatLitFloat (negate x), loc) }
 
 LoopForm :: { LoopFormBase NoInfo Name }
 LoopForm : for VarId '<' Exp
@@ -875,41 +891,6 @@ VarId : id { let L loc (ID name) = $1 in Ident name NoInfo (srclocOf loc) }
 FieldId :: { (Name, Loc) }
          : id     { let L loc (ID name) = $1 in (name, loc) }
          | natlit { let L loc (NATLIT x _) = $1 in (x, loc) }
-
-Pat :: { PatBase NoInfo Name StructType }
-     : '#[' AttrInfo ']' Pat  { PatAttr $2 $4 (srcspan $1 $>) }
-     | InnerPat ':' TypeExp   { PatAscription $1 $3 (srcspan $1 $>) }
-     | InnerPat               { $1 }
-
-Pats1 :: { [PatBase NoInfo Name StructType] }
-       : Pat                    { [$1] }
-       | Pat ',' Pats1          { $1 : $3 }
-
-InnerPat :: { PatBase NoInfo Name StructType }
-InnerPat : id                               { let L loc (ID name) = $1 in Id name NoInfo (srclocOf loc) }
-             | '(' BindingBinOp ')'         { Id $2 NoInfo (srcspan $1 $>) }
-             | '_'                          { Wildcard NoInfo (srclocOf $1) }
-             | '(' ')'                      { TuplePat [] (srcspan $1 $>) }
-             | '(' Pat ')'                  { PatParens $2 (srcspan $1 $>) }
-             | '(' Pat ',' Pats1 ')'        { TuplePat ($2:$4) (srcspan $1 $>) }
-             | '{' FieldPats '}'            { RecordPat $2 (srcspan $1 $>) }
-
-FieldPat :: { (Name, PatBase NoInfo Name StructType) }
-              : FieldId '=' Pat
-                { (fst $1, $3) }
-              | FieldId ':' TypeExp
-                { (fst $1, PatAscription (Id (fst $1) NoInfo (srclocOf (snd $1))) $3 (srcspan (snd $1) $>)) }
-              | FieldId
-                { (fst $1, Id (fst $1) NoInfo (srclocOf (snd $1))) }
-
-FieldPats :: { [(Name, PatBase NoInfo Name StructType)] }
-               : FieldPats1 { $1 }
-               |            { [] }
-
-FieldPats1 :: { [(Name, PatBase NoInfo Name StructType)] }
-               : FieldPat ',' FieldPats1 { $1 : $3 }
-               | FieldPat                    { [$1] }
-
 
 maybeAscription(p) : ':' p { Just $2 }
                    |       { Nothing }
