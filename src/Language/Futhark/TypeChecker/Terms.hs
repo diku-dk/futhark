@@ -1249,6 +1249,15 @@ causalityCheck binding_body = do
                   <+> "with 'let' beforehand."
               )
 
+mustBeIrrefutable :: (MonadTypeChecker f) => Pat StructType -> f ()
+mustBeIrrefutable p = do
+  case unmatched [p] of
+    [] -> pure ()
+    ps' ->
+      typeError p mempty . withIndexLink "refutable-pattern" $
+        "Refutable pattern not allowed here.\nUnmatched cases:"
+          </> indent 2 (stack (map pretty ps'))
+
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
 --
@@ -1267,6 +1276,18 @@ localChecks = void . check
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
               </> indent 2 (stack (map pretty ps'))
+    check e@(AppExp (LetPat _ p _ _ _) _) =
+      mustBeIrrefutable p *> recurse e
+    check e@(Lambda ps _ _ _ _) =
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (LetFun _ (_, ps, _, _, _) _ _) _) =
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (Loop _ p _ form _ _) _) = do
+      mustBeIrrefutable (fmap toStruct p)
+      case form of
+        ForIn form_p _ -> mustBeIrrefutable form_p
+        _ -> pure ()
+      recurse e
     check e@(IntLit x ty loc) =
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
@@ -1350,6 +1371,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
     causalityCheck body''
 
     -- Check for various problems.
+    mapM_ (mustBeIrrefutable . fmap toStruct) params'
     localChecks body''
 
     bindSpaced [(Term, fname)] $ do

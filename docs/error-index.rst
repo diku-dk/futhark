@@ -841,6 +841,31 @@ that it should never happen:
 
 :ref:`See here <assert>` for details on how to use ``assert``.
 
+.. _refutable-pattern:
+
+"Refutable pattern not allowed here"
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This occurs when you try to use a :term:`refutable pattern` in a
+``let`` binding or function parameter. A refutable pattern is a
+pattern that is not guaranteed to match a well-typed value. For
+example, this expression tries to bind an arbitrary tuple value ``x``
+a pattern that requires the first element is ``2``:
+
+.. code-block:: futhark
+
+   let (2, y) = x in 0
+
+What should happen at run-time if ``x`` is not 2? Refutable patterns
+are only allowed in ``match`` expressions, where the failure to match
+can be handled.  For example:
+
+.. code-block:: futhark
+
+   match x
+   case (2, y) ->  0
+   case _ -> ... -- do something else
+
 .. _record-type-not-known:
 
 "Full type of *x* is not known at this point"
