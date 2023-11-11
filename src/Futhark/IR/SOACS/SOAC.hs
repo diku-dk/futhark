@@ -605,15 +605,15 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     let bucket_fun_deps' = lambdaDependencies mempty lam (depsOfArrays w arrs)
         -- Bucket function results are indices followed by values.
         -- Reshape this to align with list of histogram operations.
-        ranks = [length (histShape op) | op <- ops]
-        value_lengths = [length (histNeutral op) | op <- ops]
+        ranks = map (shapeRank . histShape) ops
+        value_lengths = map (length . histNeutral) ops
         (indices, values) = splitAt (sum ranks) bucket_fun_deps'
         bucket_fun_deps =
           zipWith
             concatIndicesToEachValue
             (chunks ranks indices)
             (chunks value_lengths values)
-     in mconcat $ zipWith (<>) bucket_fun_deps (map depsOfHistOp ops)
+     in mconcat $ zipWith (zipWith (<>)) bucket_fun_deps (map depsOfHistOp ops)
     where
       depsOfHistOp (HistOp dest_shape rf dests nes op) =
         let shape_deps = depsOfShape dest_shape
