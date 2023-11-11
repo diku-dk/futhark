@@ -56,7 +56,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
                 [ "dataDependencies':",
                   "Pattern size: " <> show (length pat_deps),
                   "Op deps size: " <> show (length op_deps),
-                  "Expression:\n",
+                  "Expression:",
                   prettyString op
                 ]
             else
