@@ -57,7 +57,7 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           splitter = T.map (const '-') header
           bottom =
             T.unwords
-              [ showText (sum (map (evSum . snd) rows)),
+              [ showText (sum (map (evCount . snd) rows)),
                 "events with a total runtime of",
                 T.pack $ printf "%.2fμs" $ sum $ map (evSum . snd) rows
               ]
