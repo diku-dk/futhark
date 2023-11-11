@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Avoid generating invalid code in cases where deduplicated sum types
   are exposed through entry points (#1960).
 
+* A bug in data dependency analysis for histogram operations would
+  mistakenly classify some loop parameters as redundant, leaving to
+  code being removed.
+
 ## [0.25.7]
 
 ### Added
