@@ -37,11 +37,19 @@ padRight k s = s <> T.replicate (k - T.length s) " "
 padLeft :: Int -> T.Text -> T.Text
 padLeft k s = T.replicate (k - T.length s) " " <> s
 
+data EvSummary = EvSummary
+  { evCount :: Integer,
+    evSum :: Double,
+    evMin :: Double,
+    evMax :: Double
+  }
+
 tabulateEvents :: [ProfilingEvent] -> T.Text
 tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
   where
-    pair (ProfilingEvent name dur _) = (name, (1, dur))
-    comb (xn, xdur) (yn, ydur) = (xn + yn, xdur + ydur)
+    pair (ProfilingEvent name dur _) = (name, EvSummary 1 dur dur dur)
+    comb (EvSummary xn xdur xmin xmax) (EvSummary yn ydur ymin ymax) =
+      EvSummary (xn + yn) (xdur + ydur) (min xmin ymin) (max xmax ymax)
     numpad = 15
     mkRows rows =
       let longest = foldl max numpad $ map (T.length . fst) rows
@@ -49,9 +57,9 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
           splitter = T.map (const '-') header
           bottom =
             T.unwords
-              [ showText (sum (map (fst . snd) rows)),
+              [ showText (sum (map (evSum . snd) rows)),
                 "events with a total runtime of",
-                T.pack $ printf "%.2fμs" $ sum $ map (snd . snd) rows
+                T.pack $ printf "%.2fμs" $ sum $ map (evSum . snd) rows
               ]
        in T.unlines $
             header
@@ -62,15 +70,19 @@ tabulateEvents = mkRows . M.toList . M.fromListWith comb . map pair
       T.unwords
         [ padLeft longest "Cost centre",
           padLeft numpad "count",
-          padLeft numpad "total",
-          padLeft numpad "mean"
+          padLeft numpad "sum",
+          padLeft numpad "avg",
+          padLeft numpad "min",
+          padLeft numpad "max"
         ]
-    mkRow longest (name, (n, dur)) =
+    mkRow longest (name, ev) =
       T.unwords
         [ padRight longest name,
-          padLeft numpad (showText n),
-          padLeft numpad $ T.pack $ printf "%.2fμs" dur,
-          padLeft numpad $ T.pack $ printf "%.2fμs" $ dur / fromInteger n
+          padLeft numpad (showText (evCount ev)),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evSum ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" $ evSum ev / fromInteger (evCount ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evMin ev),
+          padLeft numpad $ T.pack $ printf "%.2fμs" (evMax ev)
         ]
 
 timeline :: [ProfilingEvent] -> T.Text
