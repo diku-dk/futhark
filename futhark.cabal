@@ -92,6 +92,8 @@ extra-source-files:
     docs/requirements.txt
 extra-doc-files:
   assets/*.png
+  CHANGELOG.md
+  README.md
 
 source-repository head
   type: git
