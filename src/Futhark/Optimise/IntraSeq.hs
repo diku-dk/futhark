@@ -317,6 +317,8 @@ seqScatter env (Let pat aux (Op (SegOp
           p <- newParam "loop_param" decl
           pure (p, Var d)
 
+  let paramMap = M.fromList $ L.map invert loopInit
+
   i <- newVName "loop_i"
   let loopForm = ForLoop i Int64 (seqFactor env)
 
@@ -346,17 +348,20 @@ seqScatter env (Let pat aux (Op (SegOp
                     addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
                 stm -> addStm stm
 
-          -- Turn original WriteReturns into update statements
-          updates <- forM (kernelBodyResult kbody) $ \ res -> do
+
+          -- Update the original WriteReturns to target the loop params instead
+          res' <- forM (kernelBodyResult kbody) $ \ res -> do
               case res of
-                (WriteReturns _ dest [(Slice [DimFix i], v)]) ->
-                  letSubExp "update_returns" $ BasicOp $ Update Safe dest (Slice [DimFix i]) v 
-                _ -> error "Expected WriteReturns when seq scatter"
+                  (WriteReturns certs dest slice) -> do
+                      let (Just destParam) = M.lookup (Var dest) paramMap
+                      let dest' = paramName destParam
+                      pure $ WriteReturns certs dest' slice
+                  _ -> error "Expected WriteReturns in scatter"
 
           -- Return the results of the update statements form the segmap
           let lvl' = SegThread SegNoVirt Nothing
           let space' = SegSpace phys [(tid, grpSize env)]
-          let res' = L.map (Returns ResultMaySimplify mempty) updates
+          -- let res' = L.map (Returns ResultMaySimplify mempty) updates
           pure (res', lvl', space', ts)
 
       
@@ -371,6 +376,8 @@ seqScatter env (Let pat aux (Op (SegOp
   
   -- End
   pure ()
+  where
+    invert (a,b) = (b,a)
 
 
 
