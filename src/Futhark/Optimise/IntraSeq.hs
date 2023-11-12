@@ -3,6 +3,7 @@
 {-# HLINT ignore "Use uncurry" #-}
 {-# HLINT ignore "Use uncurry" #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# HLINT ignore "Use lambda-case" #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -305,90 +306,74 @@ seqStm' _ stm = addStm stm
 
 seqScatter :: Env -> Stm GPU -> Builder GPU ()
 seqScatter env (Let pat aux (Op (SegOp
-              (SegMap (SegThread {}) space ts kbody)))) = do
+              (SegMap (SegThread {}) _ ts kbody)))) = do
 
-  -- exp' <- buildSegMap' $ do
+  -- Create the Loop expression
+  let dests = L.map (\(WriteReturns _ dest _ ) -> dest) (kernelBodyResult kbody)
+  loopInit <- 
+      forM dests $ \d -> do
+          tp <- lookupType d
+          let decl = toDecl tp Unique
+          p <- newParam "loop_param" decl
+          pure (p, Var d)
 
-  --   -- Create the loop parts
-  --   let dests = L.map (\(WriteReturns _ dest _) -> dest) (kernelBodyResult kbody)
-  --   loopInit <- 
-  --         mapM (\d -> do
-  --           tp <- lookupType d
-  --           let decl = toDecl tp Unique -- No references outside current function
-  --           pure $ Param decl
-  --         ) dests 
-    
-  --   undefined
+  i <- newVName "loop_i"
+  let loopForm = ForLoop i Int64 (seqFactor env)
 
-  -- pure ()
+  body <- buildBody_ $ do
 
-  exp' <- buildSegMap' $ do
-    tid <- newVName "write_i"
-    phys <- newVName "phys_tid"
-    -- let env' = updateEnvTid env tid
+      mapRes <- buildSegMapTup "map_res" $ do
+          tid <- newVName "write_i"
+          phys <- newVName "phys_tid"
 
-    let (const, _) = getScatterInfo kbody
+          -- Modify original statements
+          forM_ (kernelBodyStms kbody) $ \ stm -> do
+              case stm of
+                (Let pat' aux' (BasicOp (Index arr _))) -> do
+                    let arr' = M.findWithDefault arr arr (nameMap env)
+                    start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                                           (eSubExp $ seqFactor env)
+                                                           (eSubExp $ Var tid)
+                    idx <- letSubExp "idx" =<< eBinOp (Add Int64 OverflowUndef)
+                                                      (eSubExp start)
+                                                      (eSubExp $ Var i)
+                    -- let slice' = Slice [DimFix idx]
+                    tp' <- lookupType arr'
+                    let slice' = case arrayRank tp' of
+                                    1 -> Slice [DimFix idx]
+                                    2 -> Slice [DimFix $ Var tid, DimFix idx]
+                                    _ -> error "Scatter more than two dimensions"
+                    addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
+                stm -> addStm stm
 
-    const' <- mapM expandConst const
-    let constMap = M.fromList const'
-    start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
-                                           (eSubExp $ seqFactor env)
-                                           (eSubExp $ Var tid)
+          -- Turn original WriteReturns into update statements
+          updates <- forM (kernelBodyResult kbody) $ \ res -> do
+              case res of
+                (WriteReturns _ dest [(Slice [DimFix i], v)]) ->
+                  letSubExp "update_returns" $ BasicOp $ Update Safe dest (Slice [DimFix i]) v 
+                _ -> error "Expected WriteReturns when seq scatter"
 
-    -- Adjust all the Index Exps of the body to read slices instead
-    -- TODO: What if some of the arrays are tiled? Isn't this essentially
-    -- the same as in seqKernelBody?
-    forM_ (kernelBodyStms kbody) $ \ stm -> do
-      case stm of
-        (Let pat aux (BasicOp (Index arr _))) -> do
-          tp <- lookupType arr
-          let slice' = case arrayRank tp of
-                        1 -> Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
-                        2 -> Slice [DimFix $ grpId env
-                                   , DimSlice start (seqFactor env) (intConst Int64 1)]
-                        _ -> error "Error in scatter when adjusting dims"
-          -- TODO: Assumes one patElem
-          let patElem = head $ patElems pat
-          let patType = patElemType patElem
-          let patType' = arrayOf patType (Shape [seqFactor env]) NoUniqueness
-          let pat' = Pat [PatElem (patElemName patElem) patType']
-          addStm $ Let pat' aux (BasicOp (Index arr slice'))
-        stm' -> do addStm stm'
+          -- Return the results of the update statements form the segmap
+          let lvl' = SegThread SegNoVirt Nothing
+          let space' = SegSpace phys [(tid, grpSize env)]
+          let res' = L.map (Returns ResultMaySimplify mempty) updates
+          pure (res', lvl', space', ts)
 
-    -- Modify all the WriteReturns kernel results to use the new "constant" arrays
-    res' <- forM (kernelBodyResult kbody) $ \ res -> do
-      case res of
-        (WriteReturns certs arr updates) ->
-          let updates' = L.map (\(Slice [DimFix i], v) -> 
-                                let i' = M.findWithDefault i i constMap
-                                    v' = M.findWithDefault v v constMap
-                                in (Slice [DimFix i'], v')
-                          ) updates
-          in pure $ WriteReturns certs arr updates'
-        _ -> error $ "Expected a WriteReturns Result but got: " ++ show res
+      
+      -- Return the results from the segmap from the loop
+      let res = L.map (SubExpRes mempty) mapRes
+      pure res
 
-    let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env)]
-    pure (res', lvl', space', ts)
-        
-  addStm $ Let pat aux exp'
+  -- Construct the final loop
+  let loopExp = Loop loopInit loopForm body
+
+  addStm $ Let pat aux loopExp
   
-  where
-    getScatterInfo (KernelBody _ _ res) =
-      let upd = concatMap (\(WriteReturns _ _ updates) -> updates) res
-          tmp = concat $ unzip $ L.map (\(Slice [DimFix i], v) -> (i,v)) upd
-          in L.partition isConst tmp
+  -- End
+  pure ()
 
-    isConst (Constant _) = True
-    isConst _ = False
 
-    -- | Returns a mapping from the original constant SubExps to the expanded
-    -- arrays
-    expandConst :: SubExp -> Builder GPU (SubExp, SubExp)
-    expandConst c = do
-      let shape = Shape [seqFactor env]
-      c' <- letSubExp "const" $ BasicOp $ Replicate shape c
-      pure (c, c')
+
 
 
 seqScatter _ stm = error $
