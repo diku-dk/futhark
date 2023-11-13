@@ -680,7 +680,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
                  && loopInvariantStm vtable stm
                  -- Avoid hoisting out something that might change the
                  -- asymptotics of the program.
-                 && all primType (patTypes (stmPat stm))
+                 && ( all primType (patTypes (stmPat stm))
+                        || (ifsort == MatchEquiv && isManifest (stmExp stm))
+                    )
              )
           || ( ifsort /= MatchFallback
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
@@ -703,6 +705,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= MatchEquiv
+
+      isManifest (BasicOp Manifest {}) = True
+      isManifest _ = False
 
       block =
         branch_blocker
