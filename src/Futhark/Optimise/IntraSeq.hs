@@ -588,7 +588,8 @@ mkTiles env = do
     --             ReshapeArbitrary (Shape [scratchSize]) tileT
 
     -- Now each thread will read their actual chunk to registers
-    tile' <- buildSegMap_ "tile" $ do
+    let (VName n _) = arrName
+    tile' <- buildSegMap_ ("tile_" ++ nameToString n) $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
 
