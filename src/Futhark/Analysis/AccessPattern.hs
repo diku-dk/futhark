@@ -253,8 +253,6 @@ analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
   let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
-  let (names, asses) = unzip $ M.toList $ assignments ctx
-  let names' = map (\n -> show (baseName n) ++ "_" ++ show (baseTag n)) names
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
@@ -467,8 +465,8 @@ analyzeBasicOp ctx expression pats = do
         (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
 
     analyzeBinOp t lsubexp rsubexp = do
-      let lcomplexity = skrrt lsubexp
-      let rcomplexity = skrrt rsubexp
+      let lcomplexity = getComplexity lsubexp
+      let rcomplexity = getComplexity rsubexp
       let reduced = [reduceConstants lsubexp, reduceConstants rsubexp]
       let complexity = case t of
             (Add _ _) -> case (lcomplexity, rcomplexity) of
@@ -496,10 +494,10 @@ analyzeBasicOp ctx expression pats = do
     reduceNames :: [VName] -> [VName]
     reduceNames = nubOrd . concatMap (map (\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
 
-    skrrt (Constant _) = Simple
-    skrrt (Var v) = case M.lookup v (assignments ctx) of
-      Nothing -> error "we are not happy :(((((("
-      Just ass -> complexity_ctx ass
+    getComplexity (Constant _) = Simple
+    getComplexity (Var v) = case M.lookup v (assignments ctx) of
+      Nothing -> error "getComplexity: variable not found in context"
+      Just assignment -> complexity_ctx assignment
 
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pats body bodies =
