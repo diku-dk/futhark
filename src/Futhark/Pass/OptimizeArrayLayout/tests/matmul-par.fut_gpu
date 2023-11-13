@@ -543,9 +543,7 @@ entry("main",
   in {defunc_0_map_res_5569}
 }
 
--- Should we manifest here? Do we care about the order of
--- loops on the gpu?
--- === Expected output after pass:
+-- === Expected output after pass: CONFIRMED
 -- types {
 --
 -- }
