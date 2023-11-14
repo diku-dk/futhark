@@ -12,7 +12,6 @@ module Futhark.IR.Prop.Names
     nameIn,
     notNameIn,
     oneName,
-    namesFromIntMap,
     namesFromList,
     namesToList,
     namesIntersection,
@@ -87,10 +86,6 @@ nameIn v (Names vs) = baseTag v `IM.member` vs
 -- | Does the set of names not contain this name?
 notNameIn :: VName -> Names -> Bool
 notNameIn v (Names vs) = baseTag v `IM.notMember` vs
-
--- | Construct a name set from an 'IntMap'.
-namesFromIntMap :: IM.IntMap VName -> Names
-namesFromIntMap = Names
 
 -- | Construct a name set from a list.  Slow.
 namesFromList :: [VName] -> Names
