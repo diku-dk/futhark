@@ -546,8 +546,12 @@ mkTiles env = do
                                                (eSubExp $ seqFactor env)
                                                (eSubExp $ grpSize env)
 
+ 
   tiles <- forM arrsInScope $ \ (arrName, arrInfo) -> do
     let tp = elemType $ typeOf arrInfo
+
+    -- The array to save the tile in
+    scratch <- letExp "tile_scratch" $ BasicOp $ Scratch tp [scratchSize]
 
     -- Build SegMap that will write to tile
     tile <- buildSegMap_ "tile_staging" $ do
@@ -561,25 +565,35 @@ mkTiles env = do
       sliceSize <- mkChunkSize tid env
       let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
-      slice <- letSubExp "slice" $ BasicOp $ Index arrName
+      vals <- letSubExp "slice" $ BasicOp $ Index arrName
                                   (Slice $ outerDim ++ [sliceIdx])
 
       -- Update the chunk
       chunk' <- letSubExp "chunk" $ BasicOp $ Update Unsafe chunk
-                                    (Slice [DimSlice (intConst Int64 0) sliceSize (intConst Int64 1)]) slice
+                                    (Slice [DimSlice (intConst Int64 0) sliceSize (intConst Int64 1)]) vals
 
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
-      let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
-      pure ([Returns ResultMaySimplify mempty chunk'], lvl, space, types)
+      -- let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
+      let types = [Array tp (Shape [scratchSize]) NoUniqueness]
+
+      -- 
+      -- start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
+      --                                       (eSubExp $ Var tid)
+      --                                       (eSubExp $ grpSize env)
+      let slice = Slice [DimSlice (Var tid) (seqFactor env) (grpSize env)]
+      let res = [WriteReturns mempty scratch [(slice, chunk')]]
+      
+      pure (res, lvl, space, types)
 
     -- transpose and flatten
-    tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
-    tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
-                ReshapeArbitrary (Shape [scratchSize]) tileT
+    -- tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
+    -- tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
+    --             ReshapeArbitrary (Shape [scratchSize]) tileT
 
-    -- Now each thread will read their actual chunk
-    tile' <- buildSegMap_ "tile" $ do
+    -- Now each thread will read their actual chunk to registers
+    let (VName n _) = arrName
+    tile' <- buildSegMap_ ("tile_" ++ nameToString n) $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
 
@@ -589,7 +603,7 @@ mkTiles env = do
       -- NOTE: Can just use seqFactor here as we read from the padded tile craeted above
       let dimSlice = DimSlice start (seqFactor env) (intConst Int64 1)
 
-      chunk <- letSubExp "chunk" $ BasicOp $ Index tileFlat
+      chunk <- letSubExp "chunk" $ BasicOp $ Index tile
                                     (Slice [dimSlice])
       let lvl = SegThread SegNoVirt Nothing
       let space = SegSpace phys [(tid, grpSize env)]
