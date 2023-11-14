@@ -1275,7 +1275,9 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
     (red_res, map_res) = splitAt (segBinOpResults ops) $ kernelBodyResult kbody
 
-    sameShape (op1, _) (op2, _) = segBinOpShape op1 == segBinOpShape op2
+    sameShape (op1, _) (op2, _) =
+      segBinOpShape op1 == segBinOpShape op2
+        && shapeRank (segBinOpShape op1) > 0
 
     combineOps [] = Nothing
     combineOps (x : xs) = Just $ foldl' combine x xs
