@@ -844,11 +844,11 @@ instance (OpMetrics (Op rep)) => OpMetrics (SegOp lvl rep) where
     inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ reds _ body) =
     inside "SegRed" $ do
-      mapM_ (lambdaMetrics . segBinOpLambda) reds
+      mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) reds
       kernelBodyMetrics body
   opMetrics (SegScan _ _ scans _ body) =
     inside "SegScan" $ do
-      mapM_ (lambdaMetrics . segBinOpLambda) scans
+      mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) scans
       kernelBodyMetrics body
   opMetrics (SegHist _ _ ops _ body) =
     inside "SegHist" $ do

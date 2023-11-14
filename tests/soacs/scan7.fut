@@ -3,7 +3,7 @@
 -- random input { [10][1][10]i32 } auto output
 -- random input { [10][10][1]i32 } auto output
 -- random input { [10][10][10]i32 } auto output
--- structure gpu { /SegScan 1 /SegScan/Loop 1 }
+-- structure gpu { /SegScan 1 /SegScan/SegBinOp/Loop 1 }
 
 def vecadd [m] (xs: [m]i32) (ys: [m]i32): [m]i32 =
   loop xs = copy xs for i < m do
