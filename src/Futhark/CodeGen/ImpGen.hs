@@ -315,8 +315,8 @@ instance MonadFreshNames (ImpM rep r op) where
 instance HasScope SOACS (ImpM rep r op) where
   askScope = gets $ M.map (LetName . entryType) . stateVTable
     where
-      entryType (MemVar _ dimAccesses) =
-        Mem (entryMemSpace dimAccesses)
+      entryType (MemVar _ memEntry) =
+        Mem (entryMemSpace memEntry)
       entryType (ArrayVar _ arrayEntry) =
         Array
           (entryArrayElemType arrayEntry)
