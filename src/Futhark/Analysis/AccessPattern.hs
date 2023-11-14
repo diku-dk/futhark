@@ -177,13 +177,13 @@ extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
 allSegMap :: Context rep -> [SegOpName]
-allSegMap (Context _ _ bodies _) =
+allSegMap (Context _ _ parents _) =
   mapMaybe
     ( \case
         (SegOpName o) -> Just o
         _ -> Nothing
     )
-    bodies
+    parents
 
 -- | Context Value (CtxVal) is the type used in the context to categorize
 -- assignments. For example, a pattern might depend on a function parameter, a
@@ -500,7 +500,7 @@ analyzeBasicOp ctx expression pats = do
       Just assignment -> complexity_ctx assignment
 
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
-analyzeMatch ctx pats body bodies =
+analyzeMatch ctx pats body parents =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
    in foldl
         ( \(ctx', res) b ->
@@ -512,7 +512,7 @@ analyzeMatch ctx pats body bodies =
               $ bodyStms b
         )
         (ctx'', mempty)
-        (body : bodies)
+        (body : parents)
   where
     constLevel context = context {currentLevel = currentLevel ctx - 1}
 
@@ -581,8 +581,8 @@ analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Get the iteration type of the last SegOp encountered in the context.
 getIterationType :: Context rep -> IterationType rep
-getIterationType (Context _ _ bodies _) =
-  getIteration_rec bodies
+getIterationType (Context _ _ parents _) =
+  getIteration_rec parents
   where
     getIteration_rec [] = Sequential
     getIteration_rec rec =
