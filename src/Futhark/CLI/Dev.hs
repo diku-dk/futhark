@@ -515,6 +515,7 @@ commandLineOptions =
                 "c" -> Right $ SeqMemAction compileCAction
                 "multicore" -> Right $ MCMemAction compileMulticoreAction
                 "opencl" -> Right $ GPUMemAction compileOpenCLAction
+                "hip" -> Right $ GPUMemAction compileHIPAction
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
@@ -525,7 +526,7 @@ commandLineOptions =
 
               Right $ \opts -> opts {futharkAction = action}
           )
-          "c|multicore|opencl|cuda|python|pyopencl"
+          "c|multicore|opencl|cuda|hip|python|pyopencl"
       )
       "Run this compiler backend on pipeline result.",
     Option
