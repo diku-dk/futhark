@@ -577,7 +577,7 @@ mkTiles env = do
       -- start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
       --                                       (eSubExp $ Var tid)
       --                                       (eSubExp $ grpSize env)
-      let slice = Slice [DimSlice (Var tid) (seqFactor env) (intConst Int64 1)]
+      let slice = Slice [DimSlice (Var tid) (seqFactor env) (grpSize env)]
       let res = [WriteReturns mempty scratch [(slice, chunk')]]
       
       pure (res, lvl, space, types)
