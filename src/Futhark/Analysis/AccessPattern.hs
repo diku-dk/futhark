@@ -433,7 +433,7 @@ analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyzeBasicOp ctx expression pats = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Simple}
         (Opaque _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
         (ArrayLit subexps _t) -> (concatCtxVals mempty subexps) {complexity_ctx = Inscrutable}
         (UnOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
