@@ -146,15 +146,11 @@ seqStm (Let pat aux (Op (SegOp (
     pure (kresults', lvl', space, ts)
 
   addStm $ Let pat aux exp'
-  pure ()
-
-
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
-seqStm stm = error $
-             "Encountered unhandled statement at group level: " ++ show stm
-
+seqStm stm = do addStm stm
+  
 
 seqKernelBody ::
   Env ->
@@ -301,8 +297,6 @@ seqStm' env (Let pat aux
 
 -- Catch all
 seqStm' _ stm = addStm stm
--- seqStm' _ stm = error $
---                 "Encountered unhandled statement at thread level: " ++ show stm
 
 seqScatter :: Env -> Stm GPU -> Builder GPU ()
 seqScatter env (Let pat aux (Op (SegOp
@@ -333,17 +327,10 @@ seqScatter env (Let pat aux (Op (SegOp
               case stm of
                 (Let pat' aux' (BasicOp (Index arr _))) -> do
                     let arr' = M.findWithDefault arr arr (nameMap env)
-                    start <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
-                                                           (eSubExp $ seqFactor env)
-                                                           (eSubExp $ Var tid)
-                    idx <- letSubExp "idx" =<< eBinOp (Add Int64 OverflowUndef)
-                                                      (eSubExp start)
-                                                      (eSubExp $ Var i)
-                    -- let slice' = Slice [DimFix idx]
                     tp' <- lookupType arr'
                     let slice' = case arrayRank tp' of
-                                    1 -> Slice [DimFix idx]
-                                    2 -> Slice [DimFix $ Var tid, DimFix idx]
+                                    1 -> Slice [DimFix $ Var i]
+                                    2 -> Slice [DimFix $ Var tid, DimFix $ Var i]
                                     _ -> error "Scatter more than two dimensions"
                     addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
                 stm -> addStm stm
@@ -352,10 +339,10 @@ seqScatter env (Let pat aux (Op (SegOp
           -- Update the original WriteReturns to target the loop params instead
           res' <- forM (kernelBodyResult kbody) $ \ res -> do
               case res of
-                  (WriteReturns certs dest slice) -> do
+                  (WriteReturns _ dest slice) -> do
                       let (Just destParam) = M.lookup (Var dest) paramMap
                       let dest' = paramName destParam
-                      pure $ WriteReturns certs dest' slice
+                      pure $ WriteReturns mempty dest' slice
                   _ -> error "Expected WriteReturns in scatter"
 
           -- Return the results of the update statements form the segmap
@@ -378,9 +365,6 @@ seqScatter env (Let pat aux (Op (SegOp
   pure ()
   where
     invert (a,b) = (b,a)
-
-
-
 
 
 seqScatter _ stm = error $
