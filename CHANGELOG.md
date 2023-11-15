@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Incorrect data dependency information for `scatter` could cause
+  invalid simplification.
+
 ## [0.25.8]
 
 ### Added

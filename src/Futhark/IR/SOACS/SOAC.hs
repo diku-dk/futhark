@@ -627,8 +627,8 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenGroups (groupScatterResults outputs deps)
     where
-      flattenGroups (_, _, ivs) =
-        mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
+      flattenGroups (_, arr, ivs) =
+        oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
   opDependencies (JVP lam args vec) =
     mconcat $
       replicate 2 $
