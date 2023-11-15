@@ -50,8 +50,18 @@ dataDependencies' startdeps = foldl grow startdeps . bodyStms
     grow deps (Let pat _ (Op op)) =
       let op_deps = map (depsOfNames deps) (opDependencies op)
           pat_deps = map (depsOfNames deps . freeIn) (patElems pat)
-       in M.fromList (zip (patNames pat) $ zipWith (<>) pat_deps op_deps)
-            `M.union` deps
+       in if length op_deps /= length pat_deps
+            then
+              error . unlines $
+                [ "dataDependencies':",
+                  "Pattern size: " <> show (length pat_deps),
+                  "Op deps size: " <> show (length op_deps),
+                  "Expression:",
+                  prettyString op
+                ]
+            else
+              M.fromList (zip (patNames pat) $ zipWith (<>) pat_deps op_deps)
+                `M.union` deps
     grow deps (Let pat _ (Match c cases defbody _)) =
       let cases_deps = map (dataDependencies' deps . caseBody) cases
           defbody_deps = dataDependencies' deps defbody

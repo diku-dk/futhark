@@ -9,20 +9,45 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* FutharkScript now has a `$loadbytes` builtin function for reading
-  arbitrary bytes into Futhark programs.
-
 ### Removed
 
 ### Changed
 
 ### Fixed
 
+## [0.25.8]
+
+### Added
+
+* FutharkScript now has a `$loadbytes` builtin function for reading
+  arbitrary bytes into Futhark programs.
+
+* `futhark profile` can now process reports produced by the C API
+  function `futhark_context_report()`.
+
+* `futhark profile` now also produces a timeline of events.
+
+### Fixed
+
+* `futhark literate` no longer fails if the final line is a directive
+  without a trailing newline.
+
+* Parser now allows arbitrary patterns in function parameters and
+  `let` bindings, although the type checker will reject any that are
+  refutable (#2017).
+
+* Avoid generating invalid code in cases where deduplicated sum types
+  are exposed through entry points (#1960).
+
+* A bug in data dependency analysis for histogram operations would
+  mistakenly classify some loop parameters as redundant, leaving to
+  code being removed.
+
 ## [0.25.7]
 
 ### Added
 
-* `futhark autotune` how supports `hip` backend.
+* `futhark autotune` now supports `hip` backend.
 
 * Better parallelisation of `scatter` when the target is
   multidimensional (#2035).

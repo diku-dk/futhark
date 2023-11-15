@@ -844,11 +844,11 @@ instance (OpMetrics (Op rep)) => OpMetrics (SegOp lvl rep) where
     inside "SegMap" $ kernelBodyMetrics body
   opMetrics (SegRed _ _ reds _ body) =
     inside "SegRed" $ do
-      mapM_ (lambdaMetrics . segBinOpLambda) reds
+      mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) reds
       kernelBodyMetrics body
   opMetrics (SegScan _ _ scans _ body) =
     inside "SegScan" $ do
-      mapM_ (lambdaMetrics . segBinOpLambda) scans
+      mapM_ (inside "SegBinOp" . lambdaMetrics . segBinOpLambda) scans
       kernelBodyMetrics body
   opMetrics (SegHist _ _ ops _ body) =
     inside "SegHist" $ do
@@ -999,8 +999,7 @@ instance
   where
   cheapOp _ = False
   safeOp _ = True
-  opDependencies op =
-    replicate (length . kernelBodyResult $ segBody op) (freeIn op)
+  opDependencies op = replicate (length (segOpType op)) (freeIn op)
 
 --- Simplification
 
@@ -1276,7 +1275,9 @@ topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
     (red_ts, map_ts) = splitAt (segBinOpResults ops) ts
     (red_res, map_res) = splitAt (segBinOpResults ops) $ kernelBodyResult kbody
 
-    sameShape (op1, _) (op2, _) = segBinOpShape op1 == segBinOpShape op2
+    sameShape (op1, _) (op2, _) =
+      segBinOpShape op1 == segBinOpShape op2
+        && shapeRank (segBinOpShape op1) > 0
 
     combineOps [] = Nothing
     combineOps (x : xs) = Just $ foldl' combine x xs

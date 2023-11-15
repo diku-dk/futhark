@@ -53,6 +53,10 @@ following files in the top level directory.
   the GPU backends, the cost centres are kernel executions and memory
   copies.
 
+* ``foo.timeline``: a list of all recorded profiling events, in the
+  order in which they occurred, along with their runtime and other
+  available information
+
 Technicalities
 --------------
 
@@ -62,6 +66,14 @@ information is not collected during the runs that contribute to the
 runtime measurement reported by ``futhark bench``.  However, enabling
 profiling may still affect performance, as it changes the
 behaviour of the run time system.
+
+Raw reports
+-----------
+
+Alternatively, the JSON can also contain a raw profiling report as
+produced by the C API function ``futhark_context_report()``. A
+directory is still created, but it will only contain a single set of
+files, and it will not contain a log.
 
 EXAMPLES
 ========

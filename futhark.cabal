@@ -14,7 +14,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 .
                 For introductionary information about hacking on the
                 Futhark compiler, see
-                <https://futhark.readthedocs.io/en/latest/hacking.html the hacking guide>.
+                <https://github.com/diku-dk/futhark/blob/master/HACKING.md the hacking guide>.
                 Regarding the internal design of the compiler, the following modules make
                 good starting points:
                 .
@@ -92,6 +92,8 @@ extra-source-files:
     docs/requirements.txt
 extra-doc-files:
   assets/*.png
+  CHANGELOG.md
+  README.md
 
 source-repository head
   type: git
