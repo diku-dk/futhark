@@ -28,11 +28,11 @@ optimizeArrayLayout =
     -- return
     $ \prog -> do
       -- Analyse the program
-      let analysisRes = analysisPropagateByTransitivity $ analyzeDimAccesss prog
+      let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
 
       -- let analysisRes2 =
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable analysisRes
+      let permutationTable = permutationTableFromIndexTable indexTable
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutationTable) prog
   where
