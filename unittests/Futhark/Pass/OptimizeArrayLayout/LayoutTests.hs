@@ -69,16 +69,14 @@ dimAccessTests = testGroup "DimAccesses" [] -- TODO: Write tests for the part of
 singleParAccess :: Int -> Int -> VName -> DimAccess rep
 singleParAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, level, Parallel))
+    (S.singleton 0 (name, level, Parallel, ThreadID))
     origDim
-    Simple
 
 singleSeqAccess :: Int -> Int -> VName -> DimAccess rep
 singleSeqAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, level, Sequential))
+    (S.singleton 0 (name, level, Sequential, LoopVar))
     origDim
-    Simple
 
 generateNames :: Int -> [VName]
 generateNames count = do

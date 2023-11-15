@@ -40,8 +40,8 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar)
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -56,8 +56,8 @@ analyzeIndexTests =
                           [ ( (arr_name, []),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel))]) 0 Simple,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential))]) 1 Simple
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
                                     ]
                                   )
                                 ]
@@ -112,9 +112,9 @@ analyzeIndexTests =
                     { parents = parents',
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar),
-                            (arr_name, CtxVal mempty Parallel 0 parents' Inscrutable Variable)
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar),
+                            (arr_name, CtxVal mempty Parallel 0 parents' Variable)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -129,8 +129,8 @@ analyzeIndexTests =
                           [ ( (arr_name, parents'),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel))]) 0 Simple,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential))]) 1 Simple
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
                                     ]
                                   )
                                 ]
@@ -153,11 +153,11 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar),
-                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Simple Variable),
-                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Simple Variable),
-                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty Simple ConstType)
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar),
+                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Variable),
+                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Variable),
+                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty ConstType)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -173,9 +173,9 @@ analyzeIndexTests =
                           [ ( (arr_name, []),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel))]) 0 Simple,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential))]) 1 Simple,
-                                      DimAccess mempty 2 Simple
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1,
+                                      DimAccess mempty 2
                                     ]
                                   )
                                 ]
@@ -200,8 +200,8 @@ analyzeDimAccesssTests = testGroup
                         [ ( (VName "xss" 5144, []),
                             M.fromList
                               [ ( VName "b" 5211,
-                                  [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel))]) 0 Simple,
-                                    DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential))]) 1 Simple
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
                                   ]
                                 )
                               ]
@@ -226,12 +226,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6292,
                                                 ( VName "gtid" 6292,
                                                   0,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -239,12 +239,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Inscrutable
+                                        originalDimension = 1
                                       },
                                     DimAccess
                                       { dependencies =
@@ -252,14 +252,14 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6304,
                                                 ( VName "gtid" 6304,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 3, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 3}
                                   ]
                                 ),
                                 ( VName "+_lhs" 6326,
@@ -269,12 +269,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6292,
                                                 ( VName "gtid" 6292,
                                                   0,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -282,12 +282,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Inscrutable
+                                        originalDimension = 1
                                       },
                                     DimAccess
                                       { dependencies =
@@ -295,12 +295,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6315,
                                                 ( VName "gtid" 6315,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
                                     DimAccess
                                       { dependencies =
@@ -308,24 +308,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6322,
                                                 ( VName "j" 6322,
                                                   3,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 3,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6299,
-                                              VName "j" 6322
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 3
                                       }
                                   ]
                                 )
@@ -351,14 +346,14 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6304,
                                                 ( VName "gtid" 6304,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 1, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 1}
                                   ]
                                 ),
                                 ( VName "+_rhs" 6328,
@@ -368,12 +363,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6315,
                                                 ( VName "gtid" 6315,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -381,24 +376,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6322,
                                                 ( VName "j" 6322,
                                                   3,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6299,
-                                              VName "j" 6322
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 1
                                       }
                                   ]
                                 )
@@ -419,12 +409,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6292,
                                                 ( VName "gtid" 6292,
                                                   0,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -432,12 +422,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Inscrutable
+                                        originalDimension = 1
                                       },
                                     DimAccess
                                       { dependencies =
@@ -445,14 +435,14 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6304,
                                                 ( VName "gtid" 6304,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 3, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 3}
                                   ]
                                 )
                               ]
@@ -477,14 +467,14 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6304,
                                                 ( VName "gtid" 6304,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 1, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 1}
                                   ]
                                 )
                               ]
@@ -507,12 +497,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6292,
                                                 ( VName "gtid" 6292,
                                                   0,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -520,12 +510,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Inscrutable
+                                        originalDimension = 1
                                       },
                                     DimAccess
                                       { dependencies =
@@ -533,12 +523,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6315,
                                                 ( VName "gtid" 6315,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
                                     DimAccess
                                       { dependencies =
@@ -546,24 +536,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6322,
                                                 ( VName "j" 6322,
                                                   3,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 3,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6299,
-                                              VName "j" 6322
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 3
                                       }
                                   ]
                                 )
@@ -589,12 +574,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6315,
                                                 ( VName "gtid" 6315,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -602,24 +587,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6299,
                                                 ( VName "i" 6299,
                                                   1,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6322,
                                                 ( VName "j" 6322,
                                                   3,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6299,
-                                              VName "j" 6322
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 1
                                       }
                                   ]
                                 )
@@ -643,28 +623,28 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6507,
                                                 ( VName "gtid" 6507,
                                                   1,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 1, complexity = Simple},
+                                    DimAccess {dependencies = mempty, originalDimension = 1},
                                     DimAccess
                                       { dependencies =
                                           IM.fromList
                                             [ ( 6508,
                                                 ( VName "gtid" 6508,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 3, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 3}
                                   ]
                                 )
                               ]
@@ -683,12 +663,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6507,
                                                 ( VName "gtid" 6507,
                                                   1,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -696,14 +676,14 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6508,
                                                 ( VName "gtid" 6508,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Simple
+                                        originalDimension = 1
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 2, complexity = Simple}
+                                    DimAccess {dependencies = mempty, originalDimension = 2}
                                   ]
                                 )
                               ]
@@ -726,26 +706,26 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6524,
                                                 ( VName "gtid" 6524,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
-                                    DimAccess {dependencies = mempty, originalDimension = 1, complexity = Simple},
+                                    DimAccess {dependencies = mempty, originalDimension = 1},
                                     DimAccess
                                       { dependencies =
                                           IM.fromList
                                             [ ( 6525,
                                                 ( VName "gtid" 6525,
                                                   3,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity = Simple
+                                        originalDimension = 2
                                       },
                                     DimAccess
                                       { dependencies =
@@ -753,24 +733,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6493,
                                                 ( VName "i" 6493,
                                                   0,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6532,
                                                 ( VName "j" 6532,
                                                   4,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 3,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6493,
-                                              VName "j" 6532
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 3
                                       }
                                   ]
                                 )
@@ -790,12 +765,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6524,
                                                 ( VName "gtid" 6524,
                                                   2,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 0,
-                                        complexity = Simple
+                                        originalDimension = 0
                                       },
                                     DimAccess
                                       { dependencies =
@@ -803,12 +778,12 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6525,
                                                 ( VName "gtid" 6525,
                                                   3,
-                                                  Parallel
+                                                  Parallel,
+                                                  ThreadID
                                                 )
                                               )
                                             ],
-                                        originalDimension = 1,
-                                        complexity = Simple
+                                        originalDimension = 1
                                       },
                                     DimAccess
                                       { dependencies =
@@ -816,24 +791,19 @@ analyzeDimAccesssTests = testGroup
                                             [ ( 6493,
                                                 ( VName "i" 6493,
                                                   0,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               ),
                                               ( 6532,
                                                 ( VName "j" 6532,
                                                   4,
-                                                  Sequential
+                                                  Sequential,
+                                                  LoopVar
                                                 )
                                               )
                                             ],
-                                        originalDimension = 2,
-                                        complexity =
-                                          Linear
-                                            [ VName "i" 6493,
-                                              VName "j" 6532
-                                            ]
-                                            1
-                                            0
+                                        originalDimension = 2
                                       }
                                   ]
                                 )
