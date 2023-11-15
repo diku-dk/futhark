@@ -556,7 +556,14 @@ mkTiles env = do
       chunk <- letExp "chunk_scratch" $ BasicOp $ Scratch tp [seqFactor env]
 
       -- Compute the chunk size of the current thread. Last thread might need to read less
-      sliceSize <- mkChunkSize tid env
+      -- sliceSize <- mkChunkSize tid env
+      tmp <- letSubExp "tmp" =<< eBinOp (Sub Int64 OverflowUndef)
+                                        (eSubExp $ grpsizeOld env)
+                                        (eSubExp $ Var tid)
+      sliceSize <- letSubExp "slice_size" =<< eBinOp (SDivUp Int64 Unsafe)
+                                                     (eSubExp tmp)
+                                                     (eSubExp $ grpSize env)
+      
       let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
       vals <- letSubExp "slice" $ BasicOp $ Index arrName
