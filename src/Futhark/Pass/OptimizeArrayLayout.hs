@@ -4,6 +4,8 @@ import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
+import Futhark.Analysis.PrimExp
+import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.Pass
@@ -27,6 +29,8 @@ optimizeArrayLayout =
     $ \prog -> do
       -- Analyse the program
       let analysisRes = analysisPropagateByTransitivity $ analyzeDimAccesss prog
+
+      -- let analysisRes2 =
       -- Compute permutations to acheive coalescence for all arrays
       let permutationTable = permutationTableFromIndexTable analysisRes
       -- Insert permutations in the AST
@@ -35,3 +39,32 @@ optimizeArrayLayout =
     onStms permutationTable scope stms = do
       let m = localScope scope $ transformStms permutationTable mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
+
+type PEMap = M.Map VName (PrimExp VName)
+
+funPrimExp :: (RepTypes rep) => Scope rep -> FunDef rep -> PEMap
+funPrimExp scope fundef = execState (bodyPrimExps scope (funDefBody fundef)) mempty
+
+bodyPrimExps :: (RepTypes rep) => Scope rep -> Body rep -> State PEMap ()
+bodyPrimExps scope body = mapM_ (stmPrimExps scope') (bodyStms body)
+  where
+    scope' = scope <> scopeOf (bodyStms body)
+
+stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PEMap ()
+stmPrimExps scope stm = do
+  m <- get
+  let toPrimExp v = case M.lookup v m of
+        Just pe -> Just pe
+        Nothing -> case fmap typeOf . M.lookup v $ scope of
+          (Just (Prim pt)) -> Just $ LeafExp v pt
+          _ -> Nothing
+  case stm of
+    (Let (Pat [PatElem v _]) aux e)
+      | Just pe <- primExpFromExp toPrimExp e -> modify $ M.insert v pe
+    _ -> walkExpM walker (stmExp stm)
+  where
+    walker =
+      identityWalker
+        { walkOnBody = \body_scope body -> bodyPrimExps (scope <> body_scope) body
+        -- , walkOnOp = undefined
+        }
