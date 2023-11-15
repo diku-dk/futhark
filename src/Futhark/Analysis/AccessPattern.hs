@@ -143,8 +143,6 @@ data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
     assignments :: M.Map VName (CtxVal rep),
-    -- | A set of all DimIndexes of type `Constant`.
-    constants :: Names,
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -157,18 +155,16 @@ instance Monoid (Context rep) where
   mempty =
     Context
       { assignments = mempty,
-        constants = mempty,
         parents = [],
         currentLevel = 0
       }
 
 instance Semigroup (Context rep) where
   (<>)
-    (Context ass0 consts0 lastBody0 lvl0)
-    (Context ass1 consts1 lastBody1 lvl1) =
+    (Context ass0 lastBody0 lvl0)
+    (Context ass1 lastBody1 lvl1) =
       Context
         ((<>) ass0 ass1)
-        ((<>) consts0 consts1)
         ((++) lastBody0 lastBody1)
         $ max lvl0 lvl1
 
@@ -179,7 +175,7 @@ extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
 allSegMap :: Context rep -> [SegOpName]
-allSegMap (Context _ _ parents _) =
+allSegMap (Context _ parents _) =
   mapMaybe
     ( \case
         (SegOpName o) -> Just o
@@ -225,7 +221,6 @@ oneContext :: VName -> CtxVal rep -> Context rep
 oneContext name ctxValue =
   Context
     { assignments = M.singleton name ctxValue,
-      constants = mempty,
       parents = [],
       currentLevel = 0
     }
@@ -239,7 +234,7 @@ ctxValZeroDeps ctx iterType =
     (currentLevel ctx)
     (parents ctx)
     Simple
-    Variable
+    Variable -- variable is a very common type
 
 -- | Create a singular context from a segspace
 contextFromNames :: Context rep -> CtxVal rep -> [VName] -> Context rep
@@ -314,12 +309,11 @@ analyzeStms ctx bodyConstructor pats body = do
     rmOutOfScopeDeps ctx' newAssignments = do
       let throwawayAssignments = assignments ctx'
       let localAssignments = assignments ctx
-      let localConstants = constants ctx
       M.foldlWithKey
         ( \result a ctxval ->
             let dependencies = deps ctxval
              in -- if the VName of the assignment exists in the context, we are good
-                if a `M.member` localAssignments || a `nameIn` localConstants
+                if a `M.member` localAssignments
                   then result <> oneName a
                   else -- Otherwise, recurse on its dependencies;
                   -- 0. Add dependencies in ctx to result
@@ -409,25 +403,24 @@ analyzeIndex ctx pats arr_name dimIndexes = do
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyzeIndexContextFromIndices ctx dimIndexes pats = do
-  let (subExprs, consts) =
-        partitionEithers $
-          mapMaybe
-            ( \case
-                (DimFix subExpression) -> case subExpression of
-                  (Var v) -> Just (Left v)
-                  (Constant _) -> Just (Right pats)
-                (DimSlice _offs _n _stride) -> Nothing
-            )
-            dimIndexes
+  let subExprs =
+        mapMaybe
+          ( \case
+              (DimFix subExpression) -> case subExpression of
+                (Var v) -> Just v
+                (Constant _) -> Nothing
+              (DimSlice _offs _n _stride) -> Nothing
+          )
+          dimIndexes
 
   -- Add each non-constant DimIndex as a dependency to the index expression
   let ctxVal = ctxValFromNames ctx $ namesFromList subExprs
+
   -- The pattern will have inextricable complexity.
   let ctxVal' = ctxVal {complexity_ctx = Inscrutable}
 
-  -- Add each constant DimIndex to the context
-  -- Extend context with the dependencies and constants index expression
-  foldl' extend ctx $ map (\pat -> (oneContext pat ctxVal') {constants = namesFromList $ concat consts}) pats
+  -- Extend context with the dependencies index expression
+  foldl' extend ctx $ map (`oneContext` ctxVal') pats
 
 analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimAccess rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
@@ -445,20 +438,20 @@ analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable 
 analyzeBasicOp ctx expression pats = do
   -- Construct a CtxVal from the subexpressions
   let ctx_val = case expression of
-        (SubExp subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Simple}
-        (Opaque _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (SubExp subexp) -> (ctxValFromSubExpr subexp) {complexity_ctx = Simple}
+        (Opaque _ subexp) -> (ctxValFromSubExpr subexp) {complexity_ctx = Inscrutable}
         (ArrayLit subexps _t) -> (concatCtxVals mempty subexps) {complexity_ctx = Inscrutable}
-        (UnOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (UnOp _ subexp) -> (ctxValFromSubExpr subexp) {complexity_ctx = Inscrutable}
         (BinOp t lsubexp rsubexp) -> analyzeBinOp t lsubexp rsubexp
         (CmpOp _ lsubexp rsubexp) -> (concatCtxVals mempty [lsubexp, rsubexp]) {complexity_ctx = Inscrutable}
-        (ConvOp _ subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
-        (Assert subexp _ _) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx subexp) {complexity_ctx = Inscrutable}
+        (ConvOp _ subexp) -> (ctxValFromSubExpr subexp) {complexity_ctx = Inscrutable}
+        (Assert subexp _ _) -> (ctxValFromSubExpr subexp) {complexity_ctx = Inscrutable}
         (Index name _) ->
           error $ "unhandled: Index (This should NEVER happen) into " ++ prettyString name
         (Update _ name _slice _subexp) ->
           error $ "unhandled: Update (This should NEVER happen) onto " ++ prettyString name
         -- Technically, do we need this case?
-        (Concat _ _ length_subexp) -> (ctxValFromNames ctx $ analyzeSubExpr pats ctx length_subexp) {complexity_ctx = Inscrutable}
+        (Concat _ _ length_subexp) -> (ctxValFromSubExpr length_subexp) {complexity_ctx = Inscrutable}
         (Manifest _dim name) -> (ctxValFromNames ctx $ oneName name) {complexity_ctx = Inscrutable}
         (Iota end start stride _) -> (concatCtxVals mempty [end, start, stride]) {complexity_ctx = Inscrutable}
         (Replicate (Shape shape) value') -> (concatCtxVals mempty (value' : shape)) {complexity_ctx = Inscrutable}
@@ -475,6 +468,19 @@ analyzeBasicOp ctx expression pats = do
       ctxValFromNames
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
+
+    ctxValFromSubExpr (Constant _) = (ctxValFromNames ctx mempty) {variableType = ConstType}
+    ctxValFromSubExpr (Var v) =
+      case M.lookup v (assignments ctx) of
+        (Just _) -> (ctxValFromNames ctx $ oneName v) {variableType = Variable}
+        Nothing ->
+          error $
+            "Failed to lookup variable \""
+              ++ prettyString v
+              ++ "\npat: "
+              ++ prettyString pats
+              ++ "\n\nContext\n"
+              ++ show ctx
 
     analyzeBinOp t lsubexp rsubexp = do
       let lcomplexity = getComplexity lsubexp
@@ -534,7 +540,7 @@ analyzeLoop ctx bindings loop body pats = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
   let ctx' =
-        contextFromNames ctx'' ((ctxValZeroDeps ctx Sequential) { variableType = LoopVar}) $
+        contextFromNames ctx'' ((ctxValZeroDeps ctx Sequential) {variableType = LoopVar}) $
           case loop of
             (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
@@ -594,8 +600,8 @@ analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Get the iteration type of the last SegOp encountered in the context.
 getIterationType :: Context rep -> IterationType rep
-getIterationType (Context _ _ parents _) =
-  getIteration_rec parents
+getIterationType (Context _ bodies _) =
+  getIteration_rec bodies
   where
     getIteration_rec [] = Sequential
     getIteration_rec rec =
@@ -634,19 +640,19 @@ consolidate ctx (Var v) = reduceDependencies ctx v
 -- | Recursively lookup vnames until vars with no deps are reached.
 reduceDependencies :: Context rep -> VName -> DimAccess rep
 reduceDependencies ctx v =
-  if v `nameIn` constants ctx
-    then mempty -- If v is a constant, then it is not a dependency
-    else case M.lookup v (assignments ctx) of
-      Nothing -> error $ "Unable to find " ++ prettyString v
-      Just (CtxVal deps itertype lvl _parents complexity t) ->
-        -- We detect whether it is a threadID or loop counter by checking
-        -- whether or not it has any dependencies
-        case t of
-          ThreadID -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
-          LoopVar -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
-          _ -> foldl' (<>) (mempty {complexity = complexity}) $
-                map (reduceDependencies ctx) $
-                  namesToList deps
+  case M.lookup v (assignments ctx) of
+    Nothing -> error $ "Unable to find " ++ prettyString v
+    Just (CtxVal deps itertype lvl _parents complexity t) ->
+      -- We detect whether it is a threadID or loop counter by checking
+      -- whether or not it has any dependencies
+      case t of
+        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
+        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
+        ConstType -> mempty
+        _ ->
+          foldl' (<>) (mempty {complexity = complexity}) $
+            map (reduceDependencies ctx) $
+              namesToList deps
 
 -- Misc functions
 
