@@ -69,9 +69,10 @@ stmPrimExps scope stm = do
   primExpTable <- get
   case stm of
     (Let (Pat [PatElem name _]) aux exp)
-      | Just patElm <- primExpFromExp (toPrimExp primExpTable) exp -> modify $ M.insert name patElm
+      | Just primExp <- primExpFromExp (toPrimExp primExpTable) exp -> modify $ M.insert name primExp
     _ -> walkExpM walker (stmExp stm)
   where
+    toPrimExp :: PrimExpTable -> VName -> Maybe (PrimExp VName)
     toPrimExp primExpTable name = case M.lookup name primExpTable of
       Just pe -> Just pe
       Nothing -> case fmap typeOf . M.lookup name $ scope of
