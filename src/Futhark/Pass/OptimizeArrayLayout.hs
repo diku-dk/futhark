@@ -61,17 +61,18 @@ bodyPrimExps scope body = mapM_ (stmPrimExps scope') (bodyStms body)
 
 stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PEMap ()
 stmPrimExps scope stm = do
-  m <- get
-  let toPrimExp v = case M.lookup v m of
-        Just pe -> Just pe
-        Nothing -> case fmap typeOf . M.lookup v $ scope of
-          (Just (Prim pt)) -> Just $ LeafExp v pt
-          _ -> Nothing
+  peMap <- get
   case stm of
-    (Let (Pat [PatElem v _]) aux e)
-      | Just pe <- primExpFromExp toPrimExp e -> modify $ M.insert v pe
+    (Let (Pat [PatElem name _]) aux exp)
+      | Just patElm <- primExpFromExp (toPrimExp peMap) exp -> modify $ M.insert name patElm
     _ -> walkExpM walker (stmExp stm)
   where
+    toPrimExp peMap name = case M.lookup name peMap of
+      Just pe -> Just pe
+      Nothing -> case fmap typeOf . M.lookup name $ scope of
+        (Just (Prim pt)) -> Just $ LeafExp name pt
+        _ -> Nothing
+
     walker =
       identityWalker
         { walkOnBody = \body_scope body -> bodyPrimExps (scope <> body_scope) body
