@@ -3,6 +3,7 @@
 {-# HLINT ignore "Use uncurry" #-}
 {-# HLINT ignore "Use uncurry" #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# HLINT ignore "Use lambda-case" #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -145,9 +146,6 @@ seqStm (Let pat aux (Op (SegOp (
     pure (kresults', lvl', space, ts)
 
   addStm $ Let pat aux exp'
-  pure ()
-
-
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
@@ -201,34 +199,35 @@ seqStm' env (Let pat aux
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
 
-seqStm' env (Let pat aux (Op (SegOp
-          (SegMap lvl@(SegThread {}) space ts kbody)))) = do
+seqStm' env stm@(Let pat aux (Op (SegOp
+          (SegMap lvl@(SegThread {}) space ts kbody))))
+  | isScatter kbody = seqScatter env stm
+  | otherwise = do
+    usedArrays <- getUsedArraysIn env kbody
+    maps <- buildSegMapTup_ "map_intermediate" $ do
+      tid <- newVName "tid"
+      phys <- newVName "phys_tid"
+      let env' = updateEnvTid env tid
+      lambSOAC <- buildSOACLambda env' usedArrays kbody ts
+      let screma = mapSOAC lambSOAC
+      chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
+      res <- letTupExp' "res" $ Op $ OtherOp $
+              Screma (seqFactor env) chunks screma
+      let lvl' = SegThread SegNoVirt Nothing
+      let space' = SegSpace phys [(tid, grpSize env)]
+      let types' = scremaType (seqFactor env) screma
+      let kres = L.map (Returns ResultMaySimplify  mempty) res
+      pure (kres, lvl', space', types')
 
-  usedArrays <- getUsedArraysIn env kbody
-  maps <- buildSegMapTup_ "map_intermediate" $ do
-    tid <- newVName "tid"
-    phys <- newVName "phys_tid"
+    let tid = fst $ head $ unSegSpace space
     let env' = updateEnvTid env tid
-    lambSOAC <- buildSOACLambda env' usedArrays kbody ts
-    let screma = mapSOAC lambSOAC
-    chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
-    res <- letTupExp' "res" $ Op $ OtherOp $
-            Screma (seqFactor env) chunks screma
-    let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env)]
-    let types' = scremaType (seqFactor env) screma
-    let kres = L.map (Returns ResultMaySimplify  mempty) res
-    pure (kres, lvl', space', types')
+    kbody' <- mkResultKBody env' kbody maps
 
-  let tid = fst $ head $ unSegSpace space
-  let env' = updateEnvTid env tid
-  kbody' <- mkResultKBody env' kbody maps
-
-  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
-  tps <- mapM lookupType maps
-  let ts' = L.map (stripArray 1) tps
-  let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
-  addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
+    let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
+    tps <- mapM lookupType maps
+    let ts' = L.map (stripArray 1) tps
+    let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
+    addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
 
 
 seqStm' env (Let pat aux
@@ -290,9 +289,104 @@ seqStm' env (Let pat aux
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
+
+-- Need to potentially fix index statements between segops
+seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
+  case M.lookup arr (nameMap env) of
+    Nothing -> addStm stm 
+    (Just arr') -> do
+      -- Start by flattening the tile for single use
+      size <- letSubExp "flat_size" =<< eBinOp (Mul Int64 OverflowUndef) 
+                                               (eSubExp $ seqFactor env)
+                                               (eSubExp $ grpSize env)
+      tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) arr'
+      let slice' = Slice $ tail $ unSlice slice
+      addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
+  
+
 -- Catch all
 seqStm' _ stm = addStm stm
                 
+
+seqScatter :: Env -> Stm GPU -> Builder GPU ()
+seqScatter env (Let pat aux (Op (SegOp
+              (SegMap (SegThread {}) _ ts kbody)))) = do
+
+  -- Create the Loop expression
+  let dests = L.map (\(WriteReturns _ dest _ ) -> dest) (kernelBodyResult kbody)
+  loopInit <- 
+      forM dests $ \d -> do
+          tp <- lookupType d
+          let decl = toDecl tp Unique
+          p <- newParam "loop_param" decl
+          pure (p, Var d)
+
+  let paramMap = M.fromList $ L.map invert loopInit
+
+  i <- newVName "loop_i"
+  let loopForm = ForLoop i Int64 (seqFactor env)
+
+  body <- buildBody_ $ do
+
+      mapRes <- buildSegMapTup "map_res" $ do
+          tid <- newVName "write_i"
+          phys <- newVName "phys_tid"
+
+          size <- mkChunkSize tid env
+          size' <- letSubExp "size'" =<< eBinOp (Sub Int64 OverflowUndef)
+                                                (eSubExp size)
+                                                (eSubExp $ intConst Int64 1)
+          i' <- letExp "loop_i'" $ BasicOp $ 
+                                 BinOp (SMin Int64) size' (Var i)
+
+          -- Modify original statements
+          forM_ (kernelBodyStms kbody) $ \ stm -> do
+              case stm of
+                (Let pat' aux' (BasicOp (Index arr _))) -> do
+                    let arr' = M.findWithDefault arr arr (nameMap env)
+                    tp' <- lookupType arr'
+                    let slice' = case arrayRank tp' of
+                                    1 -> Slice [DimFix $ Var i']
+                                    2 -> Slice [DimFix $ Var tid, DimFix $ Var i']
+                                    _ -> error "Scatter more than two dimensions"
+                    addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
+                stm -> addStm stm
+
+
+          -- Update the original WriteReturns to target the loop params instead
+          res' <- forM (kernelBodyResult kbody) $ \ res -> do
+              case res of
+                  (WriteReturns _ dest slice) -> do
+                      let (Just destParam) = M.lookup (Var dest) paramMap
+                      let dest' = paramName destParam
+                      pure $ WriteReturns mempty dest' slice
+                  _ -> error "Expected WriteReturns in scatter"
+
+          -- Return the results of the update statements form the segmap
+          let lvl' = SegThread SegNoVirt Nothing
+          let space' = SegSpace phys [(tid, grpSize env)]
+          -- let res' = L.map (Returns ResultMaySimplify mempty) updates
+          pure (res', lvl', space', ts)
+
+      
+      -- Return the results from the segmap from the loop
+      let res = L.map (SubExpRes mempty) mapRes
+      pure res
+
+  -- Construct the final loop
+  let loopExp = Loop loopInit loopForm body
+
+  addStm $ Let pat aux loopExp
+  
+  -- End
+  pure ()
+  where
+    invert (a,b) = (b,a)
+
+
+seqScatter _ stm = error $
+                  "SeqScatter error. Should be a map at thread level but got"
+                  ++ show stm
 
 buildSOACLambda :: Env -> [VName] -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
 buildSOACLambda env usedArrs kbody retTs = do
@@ -618,6 +712,15 @@ mkTiles env = do
 isArray :: NameInfo GPU -> Bool
 isArray info = arrayRank (typeOf info) > 0
 
+-- | Checks if a kernel body ends in only WriteReturns results as then it
+-- must be the body of a scatter
+isScatter :: KernelBody GPU -> Bool
+isScatter (KernelBody _ _ res) =
+  L.all isWriteReturns res
+  where
+    isWriteReturns (WriteReturns {}) = True
+    isWriteReturns _ = False
+
 -- Builds a SegMap at thread level containing all bindings created in m
 -- and returns the subExp which is the variable containing the result
 buildSegMap ::
@@ -666,6 +769,12 @@ buildSegMapTup_ name m = do
     varFromExp :: SubExp -> VName
     varFromExp (Var nm) = nm
     varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
+
+-- buildSegMapTup' ::
+--   String -> 
+--   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
+--   Builder GPU (Exp GPU)
+-- buildSegMapTup' name m = do undefined
 
 
 buildSegMap' ::
