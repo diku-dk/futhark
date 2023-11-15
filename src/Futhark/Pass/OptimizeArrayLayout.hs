@@ -31,7 +31,7 @@ optimizeArrayLayout =
       -- Analyse the program
       let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
       -- Compute primExps for all variables
-      let primExpMap = foldMap' (uncurry funPrimExp) $ scopesAndFuns prog
+      let primExpMap = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
       let permutationTable = permutationTableFromIndexTable indexTable
       -- Insert permutations in the AST
@@ -43,12 +43,14 @@ optimizeArrayLayout =
 
 -- TODO: move stuff below to a new file
 
-scopesAndFuns :: Prog rep -> [(Scope rep, FunDef rep)]
-scopesAndFuns prog = do
-  let funDefs = progFuns prog
-  let scopes = map getScope funDefs
-  zip scopes funDefs
+primExpAnalysis :: (RepTypes rep) => Prog rep -> PrimExpTable
+primExpAnalysis prog = foldMap' (uncurry funPrimExp) scopesAndFuns
   where
+    scopesAndFuns = do
+      let funDefs = progFuns prog
+      let scopes = map getScope funDefs
+      zip scopes funDefs
+
     getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
 -- TODO: document
