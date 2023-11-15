@@ -41,6 +41,8 @@ optimizeArrayLayout =
       let m = localScope scope $ transformStms permutationTable mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
 
+-- TODO: move stuff below to a new file
+
 scopesAndFuns :: Prog rep -> [(Scope rep, FunDef rep)]
 scopesAndFuns prog = do
   let funDefs = progFuns prog
@@ -49,25 +51,26 @@ scopesAndFuns prog = do
   where
     getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
-type PEMap = M.Map VName (PrimExp VName)
+-- TODO: document
+type PrimExpTable = M.Map VName (PrimExp VName)
 
-funPrimExp :: (RepTypes rep) => Scope rep -> FunDef rep -> PEMap
+funPrimExp :: (RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
 funPrimExp scope fundef = execState (bodyPrimExps scope (funDefBody fundef)) mempty
 
-bodyPrimExps :: (RepTypes rep) => Scope rep -> Body rep -> State PEMap ()
+bodyPrimExps :: (RepTypes rep) => Scope rep -> Body rep -> State PrimExpTable ()
 bodyPrimExps scope body = mapM_ (stmPrimExps scope') (bodyStms body)
   where
     scope' = scope <> scopeOf (bodyStms body)
 
-stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PEMap ()
+stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PrimExpTable ()
 stmPrimExps scope stm = do
-  peMap <- get
+  primExpTable <- get
   case stm of
     (Let (Pat [PatElem name _]) aux exp)
-      | Just patElm <- primExpFromExp (toPrimExp peMap) exp -> modify $ M.insert name patElm
+      | Just patElm <- primExpFromExp (toPrimExp primExpTable) exp -> modify $ M.insert name patElm
     _ -> walkExpM walker (stmExp stm)
   where
-    toPrimExp peMap name = case M.lookup name peMap of
+    toPrimExp primExpTable name = case M.lookup name primExpTable of
       Just pe -> Just pe
       Nothing -> case fmap typeOf . M.lookup name $ scope of
         (Just (Prim pt)) -> Just $ LeafExp name pt
