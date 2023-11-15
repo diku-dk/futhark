@@ -1,6 +1,7 @@
 module Futhark.Pass.OptimizeArrayLayout (optimizeArrayLayout, printAST) where
 
 import Control.Monad.State.Strict
+import Data.Foldable
 import Data.Map.Strict qualified as M
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
@@ -29,8 +30,8 @@ optimizeArrayLayout =
     $ \prog -> do
       -- Analyse the program
       let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
-
-      -- let analysisRes2 =
+      -- Compute primExps for all variables
+      let primExpMap = foldMap' (uncurry funPrimExp) $ scopesAndFuns prog
       -- Compute permutations to acheive coalescence for all arrays
       let permutationTable = permutationTableFromIndexTable indexTable
       -- Insert permutations in the AST
@@ -39,6 +40,14 @@ optimizeArrayLayout =
     onStms permutationTable scope stms = do
       let m = localScope scope $ transformStms permutationTable mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
+
+scopesAndFuns :: Prog rep -> [(Scope rep, FunDef rep)]
+scopesAndFuns prog = do
+  let funDefs = progFuns prog
+  let scopes = map getScope funDefs
+  zip scopes funDefs
+  where
+    getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
 type PEMap = M.Map VName (PrimExp VName)
 
