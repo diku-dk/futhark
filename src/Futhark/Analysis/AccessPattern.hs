@@ -18,6 +18,7 @@ module Futhark.Analysis.AccessPattern
     Context (..),
     analyzeIndex,
     CtxVal (..),
+    VarType (..),
   )
 where
 
@@ -28,14 +29,15 @@ import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Pretty.Simple
-import Futhark.IR.GPU
-import Futhark.IR.GPUMem
-import Futhark.IR.MC
-import Futhark.IR.MCMem
-import Futhark.IR.SOACS
-import Futhark.IR.Seq
-import Futhark.IR.SeqMem
+import Futhark.IR.GPU (GPU, HostOp (..), KernelBody (..), SegOp (..), SizeOp (..), segBody, segSpace, unSegSpace)
+import Futhark.IR.GPUMem (GPUMem)
+import Futhark.IR.MC (MC, MCOp (..))
+import Futhark.IR.MCMem (MCMem)
+import Futhark.IR.Prop.Names
+import Futhark.IR.SOACS (SOACS)
+import Futhark.IR.Seq (Seq)
+import Futhark.IR.SeqMem (SeqMem)
+import Futhark.IR.Syntax
 import Futhark.Util
 import Futhark.Util.Pretty
 
@@ -193,8 +195,16 @@ data CtxVal rep = CtxVal
     iterationType :: IterationType rep,
     level :: Int,
     parents_nest :: [BodyType],
-    complexity_ctx :: Complexity
+    complexity_ctx :: Complexity,
+    variableType :: VarType
   }
+  deriving (Show, Eq)
+
+data VarType
+  = Cumstant
+  | Variable
+  | ThreadID
+  | LoopVar
   deriving (Show, Eq)
 
 ctxValFromNames :: Context rep -> Names -> CtxVal rep
@@ -208,6 +218,7 @@ ctxValFromNames ctx names = do
     (currentLevel ctx)
     (parents ctx)
     complexity
+    Variable
 
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal rep -> Context rep
@@ -228,13 +239,14 @@ ctxValZeroDeps ctx iterType =
     (currentLevel ctx)
     (parents ctx)
     Simple
+    Variable
 
 -- | Create a singular context from a segspace
-contextFromNames :: Context rep -> IterationType rep -> [VName] -> Context rep
-contextFromNames ctx itertype =
+contextFromNames :: Context rep -> CtxVal rep -> [VName] -> Context rep
+contextFromNames ctx ctxval =
   -- Create context from names in segspace
   foldl' extend ctx
-    . map (\n -> oneContext n (ctxValZeroDeps ctx itertype))
+    . map (`oneContext` ctxval)
 
 --  . zipWith
 --    ( \i n ->
@@ -252,7 +264,7 @@ analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable rep
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
-  let ctx = contextFromNames mempty Sequential $ map paramName $ funDefParams func
+  let ctx = contextFromNames mempty (ctxValZeroDeps ctx Sequential) $ map paramName $ funDefParams func
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
@@ -356,7 +368,7 @@ analyzeStm ctx (Let pats _ e) = do
     (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternNames name ee
     (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternNames name subexp
     (BasicOp op) -> analyzeBasicOp ctx op patternNames
-    (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (getIterationType ctx) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
+    (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (ctxValZeroDeps ctx (getIterationType ctx)) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternNames
     (Apply _name diets _ _) -> analyzeApply ctx patternNames diets
     (WithAcc _ _) -> (ctx, mempty) -- ignored
@@ -490,6 +502,7 @@ analyzeBasicOp ctx expression pats = do
 
     reduceConstants (Constant (IntValue v)) = Left $ valueIntegral v
     reduceConstants (Var v) = Right v
+    reduceConstants _ = undefined
 
     reduceNames :: [VName] -> [VName]
     reduceNames = nubOrd . concatMap (map (\(a, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
@@ -521,7 +534,7 @@ analyzeLoop ctx bindings loop body pats = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
   let ctx' =
-        contextFromNames ctx'' Sequential $
+        contextFromNames ctx'' ((ctxValZeroDeps ctx Sequential) { variableType = LoopVar}) $
           case loop of
             (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
@@ -549,7 +562,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') Simple)
+          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') Simple ThreadID)
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -561,7 +574,7 @@ analyzeSegOp op ctx pats = do
 analyzeSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeSizeOp op ctx pats = do
   let subexprsToContext =
-        contextFromNames ctx Sequential
+        contextFromNames ctx (ctxValZeroDeps ctx Sequential)
           . concatMap (namesToList . analyzeSubExpr pats ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
@@ -625,13 +638,15 @@ reduceDependencies ctx v =
     then mempty -- If v is a constant, then it is not a dependency
     else case M.lookup v (assignments ctx) of
       Nothing -> error $ "Unable to find " ++ prettyString v
-      Just (CtxVal deps itertype lvl parents_nest complexity) ->
-        if null $ namesToList deps
-          then DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
-          else
-            foldl' (<>) (mempty {complexity = complexity}) $
-              map (reduceDependencies ctx) $
-                namesToList deps
+      Just (CtxVal deps itertype lvl _parents complexity t) ->
+        -- We detect whether it is a threadID or loop counter by checking
+        -- whether or not it has any dependencies
+        case t of
+          ThreadID -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
+          LoopVar -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype))]) (currentLevel ctx) complexity
+          _ -> foldl' (<>) (mempty {complexity = complexity}) $
+                map (reduceDependencies ctx) $
+                  namesToList deps
 
 -- Misc functions
 
@@ -664,7 +679,7 @@ instance Analyze MC where
     | Futhark.IR.MC.OtherOp _ <- mcOp = analyzeOtherOp
 
 instance Analyze MCMem where
-  analyzeOp mcOp = error "Unexpected?"
+  analyzeOp _mcOp = error "Unexpected?"
 
 instance Analyze Seq where
   analyzeOp _ = error $ notImplementedYet "Seq"

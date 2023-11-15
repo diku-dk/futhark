@@ -40,8 +40,8 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple)
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -112,9 +112,9 @@ analyzeIndexTests =
                     { parents = parents',
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple),
-                            (arr_name, CtxVal mempty Parallel 0 parents' Inscrutable)
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar),
+                            (arr_name, CtxVal mempty Parallel 0 parents' Inscrutable Variable)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -153,13 +153,12 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple),
-                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Simple),
-                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Simple),
-                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty Simple)
-                          ],
-                      constants = namesFromList [VName "k" 5212]
+                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty Simple ThreadID),
+                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar),
+                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Simple Variable),
+                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Simple Variable),
+                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty Simple Cumstant)
+                          ]
                     }
             let patternNames = [VName "b" 5211]
             let dimFixes =
