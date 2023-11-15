@@ -295,6 +295,22 @@ seqStm' env (Let pat aux
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
+
+-- Need to potentially fix index statements between segops
+-- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
+--   case M.lookup arr (nameMap env) of
+--     Nothing -> addStm stm 
+--     (Just arr') -> do
+--       -- Start by flattening the tile for single use
+--       tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) arr'
+--       let slice' = Slice $ tail $ unSlice slice
+--       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
+      -- let slice' = Slice $ tail $ unSlice slice
+      -- addStm $ Let pat aux (BasicOp (Index arr' slice'))
+  
+  -- let arr' = M.findWithDefault arr arr (nameMap env)
+  -- addStm $ Let pat aux (BasicOp (Index arr' slice))
+
 -- Catch all
 seqStm' _ stm = addStm stm
 
@@ -322,6 +338,13 @@ seqScatter env (Let pat aux (Op (SegOp
           tid <- newVName "write_i"
           phys <- newVName "phys_tid"
 
+          size <- mkChunkSize tid env
+          size' <- letSubExp "size'" =<< eBinOp (Sub Int64 OverflowUndef)
+                                                (eSubExp size)
+                                                (eSubExp $ intConst Int64 1)
+          i' <- letExp "loop_i'" $ BasicOp $ 
+                                 BinOp (SMin Int64) size' (Var i)
+
           -- Modify original statements
           forM_ (kernelBodyStms kbody) $ \ stm -> do
               case stm of
@@ -329,8 +352,8 @@ seqScatter env (Let pat aux (Op (SegOp
                     let arr' = M.findWithDefault arr arr (nameMap env)
                     tp' <- lookupType arr'
                     let slice' = case arrayRank tp' of
-                                    1 -> Slice [DimFix $ Var i]
-                                    2 -> Slice [DimFix $ Var tid, DimFix $ Var i]
+                                    1 -> Slice [DimFix $ Var i']
+                                    2 -> Slice [DimFix $ Var tid, DimFix $ Var i']
                                     _ -> error "Scatter more than two dimensions"
                     addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
                 stm -> addStm stm
