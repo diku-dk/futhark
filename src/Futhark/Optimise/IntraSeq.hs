@@ -151,8 +151,7 @@ seqStm (Let pat aux (Op (SegOp (
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
-seqStm stm = error $
-             "Encountered unhandled statement at group level: " ++ show stm
+seqStm stm = addStm stm
 
 
 seqKernelBody ::
@@ -187,16 +186,13 @@ seqStm' env (Let pat aux
   let env' = updateEnvTid env tid
 
   -- thread local reduction
-  reds <- mapM (mkIntmRed env' kbody ts) binops
-
-  -- TODO: multiple binops
-  kbody' <- mkResultKBody env' kbody $ head reds
+  reds <- mkIntmRed env' kbody ts binops
+  kbody' <- mkResultKBody env' kbody reds
 
   -- Update remaining types
   let numResConsumed = numArgsConsumedBySegop binops
   let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
-  -- TODO: binop head
-  tps <- mapM lookupType $ head reds
+  tps <- mapM lookupType reds
   let ts' = L.map (stripArray 1) tps
   let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
   let pat' = Pat $ patKeep ++
@@ -240,11 +236,9 @@ seqStm' env (Let pat aux
   usedArrays <- getUsedArraysIn env kbody
 
   -- do local reduction
-  reds <- mapM (mkIntmRed env kbody ts) binops
-  -- TODO: head until multiple binops
-  let redshead = head reds
+  reds <- mkIntmRed env kbody ts binops
   let numResConsumed = numArgsConsumedBySegop binops
-  let (scanReds, fusedReds) = L.splitAt numResConsumed redshead
+  let (scanReds, fusedReds) = L.splitAt numResConsumed reds
 
   -- scan over reduction results
   imScan <- buildSegScan "scan_agg" $ do
@@ -263,26 +257,25 @@ seqStm' env (Let pat aux
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
 
-    -- TODO: Uses head
-    let binop = head binops
-    let neutral = segBinOpNeutral binop
-    scanLambda <- renameLambda $ segBinOpLambda binop
+    let neutrals = L.map segBinOpNeutral binops
+    scanLambdas <- mapM (renameLambda . segBinOpLambda) binops
 
     let scanNames = L.map getVName imScan
 
     idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
                                     (eSubExp $ Var tid)
                                     (eSubExp $ intConst Int64 1)
-    ne <- letTupExp' "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
+    nes <- forM neutrals  (\n -> letTupExp' "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
                                   (eSubExp $ Var tid)
                                   (eSubExp $ intConst Int64 0)
                                )
-                               (eBody $ L.map toExp neutral)
-                               (eBody $ L.map (\s -> eIndex s [eSubExp idx]) scanNames)
+                               (eBody $ L.map toExp n)
+                               (eBody $ L.map (\s -> eIndex s [eSubExp idx]) scanNames))
 
     let env' = updateEnvTid env tid
     lambSOAC <- buildSOACLambda env' usedArrays kbody ts
-    let scanSoac = scanomapSOAC [Scan scanLambda ne] lambSOAC
+    let scans = L.map (\(l, n) -> Scan l n) $ zip scanLambdas nes
+    let scanSoac = scanomapSOAC scans lambSOAC
     es <- mapM (getChunk env tid (seqFactor env)) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
     let usedRes = L.map (Returns ResultMaySimplify mempty) $ L.take numResConsumed res
@@ -298,8 +291,8 @@ seqStm' env (Let pat aux
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
 -- Catch all
-seqStm' _ stm = error $
-                "Encountered unhandled statement at thread level: " ++ show stm
+seqStm' _ stm = addStm stm
+                
 
 buildSOACLambda :: Env -> [VName] -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
 buildSOACLambda env usedArrs kbody retTs = do
@@ -395,11 +388,11 @@ mkIntmRed ::
   Env ->
   KernelBody GPU ->
   [Type] ->                   -- segmap return types
-  SegBinOp GPU ->
+  [SegBinOp GPU] ->
   Builder GPU [VName]
-mkIntmRed env kbody retTs binop = do
-    let ne   = segBinOpNeutral binop
-    lambda <- renameLambda $ segBinOpLambda binop
+mkIntmRed env kbody retTs binops = do
+    let ne   = L.map segBinOpNeutral binops
+    lambda <- mapM (renameLambda . segBinOpLambda) binops
 
     buildSegMapTup_ "red_intermediate" $ do
       tid <- newVName "tid"
@@ -410,12 +403,13 @@ mkIntmRed env kbody retTs binop = do
       lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
       -- TODO analyze if any fused maps then produce reduce?
       -- we build the reduce as a scan initially
-      let screma = scanomapSOAC [Scan lambda ne] lambSOAC
+      let scans = L.map (\(l, n) -> Scan l n) $ zip lambda ne
+      let screma = scanomapSOAC scans lambSOAC
       chunks <- mapM (getChunk env tid (seqFactor env)) usedArrs
 
       res <- letTupExp' "res" $ Op $ OtherOp $
                 Screma (seqFactor env) chunks screma
-      let numRes = numArgsConsumedBySegop [binop]
+      let numRes = numArgsConsumedBySegop binops
       let (scanRes, mapRes) = L.splitAt numRes res
 
       -- get the reduction result from the scan
