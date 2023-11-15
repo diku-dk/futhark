@@ -78,9 +78,8 @@ commonPermutationEliminators perm nest dimAccesses = do
   -- Don't manifest if the array is defined inside a segOp or loop body
   let isInsideUndesired = any isUndesired nest
   -- Don't manifest if the array is indexed by something weird
-  let isInscrutable = any (inscrutable . complexity) dimAccesses
 
-  isInvalidPerm || isInsideUndesired || isInscrutable
+  isInvalidPerm || isInsideUndesired
   where
     -- Why is this not in the prelude, there's probably a monad for this.
     anyOf :: forall a t. (Foldable t) => t (a -> Bool) -> a -> Bool
@@ -91,12 +90,6 @@ commonPermutationEliminators perm nest dimAccesses = do
       SegOpName _ -> True
       LoopBodyName _ -> True
       _ -> False
-
-    inscrutable :: Complexity -> Bool
-    inscrutable complexity = case complexity of
-      Simple -> False
-      (Linear names s o) -> length names > 1 || s > 0 || o > 1000
-      _ -> True
 
 -- | Given an ordering function for `DimAccess`, and an IndexTable, return
 -- a PermutationTable.
@@ -152,7 +145,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype) = Just (itertype, lvl, og)
+        f og (_, lvl, itertype,_) = Just (itertype, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -193,4 +186,4 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype) = Just (itertype, lvl, og)
+        f og (_, lvl, itertype,_) = Just (itertype, lvl, og)
