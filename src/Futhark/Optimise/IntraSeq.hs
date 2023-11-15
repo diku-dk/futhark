@@ -302,6 +302,9 @@ seqStm' env (Let pat aux
 --     Nothing -> addStm stm 
 --     (Just arr') -> do
 --       -- Start by flattening the tile for single use
+--       size <- letSubExp "flat_size" =<< eBinOp (Mul Int64 OverflowUndef) 
+--                                                (eSubExp $ seqFactor env)
+--                                                (eSubExp $ grpSize env)
 --       tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) arr'
 --       let slice' = Slice $ tail $ unSlice slice
 --       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
