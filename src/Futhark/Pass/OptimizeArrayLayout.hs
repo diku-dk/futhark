@@ -68,8 +68,10 @@ stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PrimExpTable ()
 stmPrimExps scope stm = do
   primExpTable <- get
   case stm of
-    (Let (Pat [PatElem name _]) aux exp)
-      | Just primExp <- primExpFromExp (toPrimExp primExpTable) exp -> modify $ M.insert name primExp
+    (Let (Pat patElems) aux exp)
+      | Just primExp <- primExpFromExp (toPrimExp primExpTable) exp ->
+          -- For each pattern element, insert the primExp in the primExpTable
+          forM_ patElems $ \(PatElem name _) -> modify $ M.insert name primExp
     _ -> walkExpM walker (stmExp stm)
   where
     toPrimExp :: PrimExpTable -> VName -> Maybe (PrimExp VName)
