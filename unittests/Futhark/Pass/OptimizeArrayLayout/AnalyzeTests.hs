@@ -157,7 +157,7 @@ analyzeIndexTests =
                             (VName "i" 5209, CtxVal mempty Sequential 1 mempty Simple LoopVar),
                             (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Simple Variable),
                             (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Simple Variable),
-                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty Simple Cumstant)
+                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty Simple ConstType)
                           ]
                     }
             let patternNames = [VName "b" 5211]

@@ -201,7 +201,7 @@ data CtxVal rep = CtxVal
   deriving (Show, Eq)
 
 data VarType
-  = Cumstant
+  = ConstType
   | Variable
   | ThreadID
   | LoopVar
