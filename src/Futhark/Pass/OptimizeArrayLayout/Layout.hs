@@ -23,6 +23,8 @@ class (Analyze rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
   -- Returns Nothing if the array is already in the optimal layout or if the array access
   -- is too complex to confidently determine the optimal layout.
+  -- Map each list of `DimAccess` in the IndexTable to a permutation in a generic way
+  -- that can be handled uniquely by each backend.
   permutationFromDimAccess :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
@@ -93,18 +95,9 @@ commonPermutationEliminators perm nest dimAccesses = do
 
 -- | Given an ordering function for `DimAccess`, and an IndexTable, return
 -- a PermutationTable.
+-- We remove entries with no results after `permutationFromDimAccess`
 permutationTableFromIndexTable :: (Layout rep) => IndexTable rep -> PermutationTable
-permutationTableFromIndexTable =
-  -- Map each list of `DimAccess` in the IndexTable to a permutation in a generic way
-  -- that can be handled uniquely by each backend.
-  -- We remove entries with no results after `permutationFromDimAccess`
-  M.mapMaybeWithKey $
-    \segOpName -> mapToMaybe $ mapToMaybe . permutationFromDimAccess segOpName
-  where
-    maybeMap :: M.Map k a -> Maybe (M.Map k a)
-    maybeMap val = if null val then Nothing else Just val
-
-    mapToMaybe f = maybeMap . M.mapMaybeWithKey f
+permutationTableFromIndexTable = tableMapMaybe permutationFromDimAccess
 
 sortGPU :: [DimAccess rep] -> [DimAccess rep]
 sortGPU =
@@ -187,3 +180,15 @@ sortMC =
             _ -> lhs
 
         f og (_, lvl, itertype,_) = Just (itertype, lvl, og)
+
+-- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
+-- with missing (Nothing) values.
+tableMapMaybe :: (k0 -> k1 -> k2 -> a -> Maybe b) -> M.Map k0 (M.Map k1 (M.Map k2 a)) -> M.Map k0 (M.Map k1 (M.Map k2 b))
+tableMapMaybe f =
+  M.mapMaybeWithKey $
+    \key0 -> mapToMaybe $ mapToMaybe . f key0
+  where
+    maybeMap :: M.Map k a -> Maybe (M.Map k a)
+    maybeMap val = if null val then Nothing else Just val
+
+    mapToMaybe g = maybeMap . M.mapMaybeWithKey g
