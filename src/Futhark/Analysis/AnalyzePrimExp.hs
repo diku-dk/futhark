@@ -64,8 +64,8 @@ stmPrimExps scope stm = do
           primExpTable' <- get
           -- Add pattern elements that can't be resolved as `PrimExp` to the `PrimExpTable` as `Nothing`
           forM_ patElems $ \(PatElem name _) -> case M.lookup name primExpTable' of
-            Just pe -> modify $ M.insert name pe
             Nothing -> modify $ M.insert name Nothing
+            _ -> pure ()
   where
     toPrimExp :: PrimExpTable -> VName -> Maybe (PrimExp VName)
     toPrimExp primExpTable name = case M.lookup name primExpTable of
