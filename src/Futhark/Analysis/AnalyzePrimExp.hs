@@ -60,22 +60,18 @@ stmPrimExps scope stm = do
           -- For each pattern element, insert the PrimExp in the primExpTable
           forM_ patElems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
       | otherwise -> do
-          let state' = walkExpM (walker patElems) (stmExp stm)
-          let primExpTable' = execState state' primExpTable
-          let state'' = forM_ patElems $ \(PatElem name _) -> case M.lookup name primExpTable' of
-                Just pe -> pure ()
-                Nothing -> modify $ M.insert name Nothing
-          let primExpTable'' = execState state'' primExpTable'
-          put (primExpTable'' <> primExpTable')
+          walkExpM (walker patElems) (stmExp stm) -- Traverse the rest of the AST
+          primExpTable' <- get
+          -- Add pattern elements that can't be resolved as `PrimExp` to the `PrimExpTable` as `Nothing`
+          forM_ patElems $ \(PatElem name _) -> case M.lookup name primExpTable' of
+            Just pe -> modify $ M.insert name pe
+            Nothing -> modify $ M.insert name Nothing
   where
     toPrimExp :: PrimExpTable -> VName -> Maybe (PrimExp VName)
     toPrimExp primExpTable name = case M.lookup name primExpTable of
-      Just maybePrimExp -> case maybePrimExp of -- Already in the table
-        Just primExp -> Just primExp
-        Nothing -> case fmap typeOf . M.lookup name $ scope of
-          (Just (Prim pt)) -> Just $ LeafExp name pt
-          _ -> Nothing
-      Nothing -> case fmap typeOf . M.lookup name $ scope of
+      Just maybePrimExp
+        | Just primExp <- maybePrimExp -> Just primExp -- Already in the table
+      _ -> case fmap typeOf . M.lookup name $ scope of
         (Just (Prim pt)) -> Just $ LeafExp name pt
         _ -> Nothing
 
