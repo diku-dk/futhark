@@ -291,17 +291,17 @@ seqStm' env (Let pat aux
 
 
 -- Need to potentially fix index statements between segops
-seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
-  case M.lookup arr (nameMap env) of
-    Nothing -> addStm stm 
-    (Just arr') -> do
-      -- Start by flattening the tile for single use
-      size <- letSubExp "flat_size" =<< eBinOp (Mul Int64 OverflowUndef) 
-                                               (eSubExp $ seqFactor env)
-                                               (eSubExp $ grpSize env)
-      tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) arr'
-      let slice' = Slice $ tail $ unSlice slice
-      addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
+-- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
+--   case M.lookup arr (nameMap env) of
+--     Nothing -> addStm stm 
+--     (Just arr') -> do
+--       -- Start by flattening the tile for single use
+--       size <- letSubExp "flat_size" =<< eBinOp (Mul Int64 OverflowUndef) 
+--                                                (eSubExp $ seqFactor env)
+--                                                (eSubExp $ grpSize env)
+--       tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [size]) arr'
+--       let slice' = Slice $ tail $ unSlice slice
+--       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
   
 
 -- Catch all
