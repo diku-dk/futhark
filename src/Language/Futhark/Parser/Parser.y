@@ -168,7 +168,7 @@ import Language.Futhark.Parser.Monad
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
 %right '...' '..<' '..>' '..'
-%left '`' '!...'
+%left '`'
 %right '->'
 %left with
 %left '='
