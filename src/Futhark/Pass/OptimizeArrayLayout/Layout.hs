@@ -29,13 +29,16 @@ class (Analyze rep) => Layout rep where
 
 instance Layout GPU where
   permutationFromDimAccess _segOpName (_arrayName, nest) _idxName dimAccesses = do
-    -- Create a candidate permutation
-    let perm = (map originalDimension . sortGPU) dimAccesses
-
-    -- Check if we want to manifest this array with the permutation
-    if commonPermutationEliminators perm nest dimAccesses
+    -- Dont accept indices where the last index is constant
+    if null . dependencies $ last dimAccesses
       then Nothing
-      else Just perm
+      else -- Create a candidate permutation
+
+        let perm = (map originalDimension . sortGPU) dimAccesses
+         in -- Check if we want to manifest this array with the permutation
+            if commonPermutationEliminators perm nest dimAccesses
+              then Nothing
+              else Just perm
 
 multicorePermutation :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 multicorePermutation _segOpName (_arrayName, nest) _idxName dimAccesses = do
@@ -67,7 +70,7 @@ instance Layout SOACS where
 
 -- | Reasons common to all backends to not manifest an array.
 commonPermutationEliminators :: [Int] -> [BodyType] -> [DimAccess rep] -> Bool
-commonPermutationEliminators perm nest dimAccesses = do
+commonPermutationEliminators perm nest _dimAccesses = do
   -- Don't manifest if the permutation is the permutation is invalid
   let isInvalidPerm =
         -- Don't manifest if the permutation is the identity permutation
@@ -138,7 +141,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype,_) = Just (itertype, lvl, og)
+        f og (_, lvl, itertype, _) = Just (itertype, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -179,7 +182,7 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype,_) = Just (itertype, lvl, og)
+        f og (_, lvl, itertype, _) = Just (itertype, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.
