@@ -340,8 +340,8 @@ analyzeStm ctx (Let pats _ e) = do
   -- Construct the result and Context from the subexpression. If the subexpression
   -- is a body, we recurse into it.
   case e of
-    (BasicOp (Index name (Slice ee))) -> analyzeIndex ctx patternNames name ee
-    (BasicOp (Update _ name (Slice subexp) _subexp)) -> analyzeIndex ctx patternNames name subexp
+    (BasicOp (Index name (Slice dimSubexp))) -> analyzeIndex ctx patternNames name dimSubexp
+    (BasicOp (Update _ name (Slice dimSubexp) _subexp)) -> analyzeIndex ctx patternNames name dimSubexp
     (BasicOp op) -> analyzeBasicOp ctx op patternNames
     (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (ctxValZeroDeps ctx (getIterationType ctx)) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternNames
@@ -360,6 +360,8 @@ getIndexDependencies ctx dims =
       case idx of
         (DimFix subExpression) ->
           Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
+        -- (DimSlice _offset _num_elems _stride) ->
+        -- And then what?
         _ -> Nothing
 
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
