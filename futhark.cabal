@@ -171,6 +171,7 @@ library
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
       Futhark.Analysis.AccessPattern
+      Futhark.Analysis.AnalyzePrimExp
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
