@@ -5,6 +5,7 @@ import Data.Foldable
 import Data.Map.Strict qualified as M
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
+import Futhark.Analysis.AnalyzePrimExp
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
@@ -35,54 +36,8 @@ optimizeArrayLayout =
       -- Compute permutations to acheive coalescence for all arrays
       let permutationTable = permutationTableFromIndexTable indexTable
       -- Insert permutations in the AST
-      intraproceduralTransformation (onStms permutationTable) prog
+      pTraceShow primExpMap $ intraproceduralTransformation (onStms permutationTable) prog
   where
     onStms permutationTable scope stms = do
       let m = localScope scope $ transformStms permutationTable mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
-
--- TODO: move stuff below to a new file
-
-primExpAnalysis :: (RepTypes rep) => Prog rep -> PrimExpTable
-primExpAnalysis prog = foldMap' (uncurry funPrimExp) scopesAndFuns
-  where
-    scopesAndFuns = do
-      let funDefs = progFuns prog
-      let scopes = map getScope funDefs
-      zip scopes funDefs
-
-    getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
-
--- TODO: document
-type PrimExpTable = M.Map VName (PrimExp VName)
-
-funPrimExp :: (RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
-funPrimExp scope fundef = execState (bodyPrimExps scope (funDefBody fundef)) mempty
-
-bodyPrimExps :: (RepTypes rep) => Scope rep -> Body rep -> State PrimExpTable ()
-bodyPrimExps scope body = mapM_ (stmPrimExps scope') (bodyStms body)
-  where
-    scope' = scope <> scopeOf (bodyStms body)
-
-stmPrimExps :: (RepTypes rep) => Scope rep -> Stm rep -> State PrimExpTable ()
-stmPrimExps scope stm = do
-  primExpTable <- get
-  case stm of
-    (Let (Pat patElems) aux exp)
-      | Just primExp <- primExpFromExp (toPrimExp primExpTable) exp ->
-          -- For each pattern element, insert the primExp in the primExpTable
-          forM_ patElems $ \(PatElem name _) -> modify $ M.insert name primExp
-    _ -> walkExpM walker (stmExp stm)
-  where
-    toPrimExp :: PrimExpTable -> VName -> Maybe (PrimExp VName)
-    toPrimExp primExpTable name = case M.lookup name primExpTable of
-      Just pe -> Just pe
-      Nothing -> case fmap typeOf . M.lookup name $ scope of
-        (Just (Prim pt)) -> Just $ LeafExp name pt
-        _ -> Nothing
-
-    walker =
-      identityWalker
-        { walkOnBody = \body_scope body -> bodyPrimExps (scope <> body_scope) body
-        -- , walkOnOp = undefined
-        }

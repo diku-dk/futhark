@@ -6,6 +6,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
+import Futhark.Analysis.AnalyzePrimExp
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
@@ -19,7 +20,7 @@ type Permutation = [Int]
 
 type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
-class (Analyze rep) => Layout rep where
+class (PrimExpAnalysis rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
   -- Returns Nothing if the array is already in the optimal layout or if the array access
   -- is too complex to confidently determine the optimal layout.
