@@ -29,7 +29,7 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess _segOpName (_arrayName, nest) _idxName dimAccesses = do
+  permutationFromDimAccess _segOpName (_arrayName, nest) _idxName dimAccesses =
     -- Dont accept indices where the last index is constant
     if null . dependencies $ last dimAccesses
       then Nothing
@@ -71,7 +71,7 @@ instance Layout SOACS where
 
 -- | Reasons common to all backends to not manifest an array.
 commonPermutationEliminators :: [Int] -> [BodyType] -> [DimAccess rep] -> Bool
-commonPermutationEliminators perm nest _dimAccesses = do
+commonPermutationEliminators perm nest dimAccesses = do
   -- Don't manifest if the permutation is the permutation is invalid
   let isInvalidPerm =
         -- Don't manifest if the permutation is the identity permutation
@@ -80,6 +80,8 @@ commonPermutationEliminators perm nest _dimAccesses = do
           || (isNothing . isMapTranspose) perm
           -- or is not a permutation.
           || not (L.sort perm `L.isPrefixOf` [0 ..])
+          -- or if the last idx remains last
+          || (last perm == originalDimension (last dimAccesses))
 
   -- Don't manifest if the array is defined inside a segOp or loop body
   let isInsideUndesired = any isUndesired nest

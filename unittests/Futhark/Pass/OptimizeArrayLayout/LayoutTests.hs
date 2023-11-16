@@ -26,27 +26,33 @@ permutationTests :: TestTree
 permutationTests =
   testGroup "Permutations" $
     do
+      -- This isn't the way to test this, in reality we should provide realistic
+      -- access patterns that might result in the given permutations.
+      -- Luckily we only use the original access for one check atm.
       let names = generateNames 2
-      let dimAccesses = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
+      let dimAccesses1 = [singleParAccess 0 0] <*> names
+      let dimAccesses2 = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
+      let dimAccesses3 = [singleParAccess 0 0, singleParAccess 1 1, singleSeqAccess 2 2] <*> names
       [ testCase (unwords [show perm, "->", show res]) $
           commonPermutationEliminators perm [] dimAccesses @?= res
-        | (perm, res) <-
-            [ ([0], True),
-              ([1, 0], False),
-              ([0, 1], True),
-              ([0, 0], True),
-              ([1, 1], True),
-              ([1, 2, 0], False),
-              ([2, 0, 1], False),
-              ([0, 1, 2], True),
-              ([1, 0, 2], True),
-              ([2, 1, 0], True),
-              ([2, 2, 0], True),
-              ([2, 1, 1], True),
-              ([1, 0, 1], True),
-              ([0, 0, 0], True)
+        | (perm, dimAccesses, res) <-
+            [ ([0], dimAccesses1, True),
+              ([1, 0], dimAccesses2, False),
+              ([0, 1], dimAccesses2, True),
+              ([0, 0], dimAccesses2, True),
+              ([1, 1], dimAccesses2, True),
+              ([1, 2, 0], dimAccesses3, False),
+              ([2, 0, 1], dimAccesses3, False),
+              ([0, 1, 2], dimAccesses3, True),
+              ([1, 0, 2], dimAccesses3, True),
+              ([2, 1, 0], dimAccesses3, True),
+              ([2, 2, 0], dimAccesses3, True),
+              ([2, 1, 1], dimAccesses3, True),
+              ([1, 0, 1], dimAccesses3, True),
+              ([0, 0, 0], dimAccesses3, True)
             ]
         ]
+
 
 nestTests :: TestTree
 nestTests = testGroup "Nests" $
