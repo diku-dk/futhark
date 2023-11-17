@@ -39,6 +39,13 @@ class (Num e) => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
+  quotUp :: e -> e -> e
+  quotUp x y =
+   (x + y - 1) `Futhark.Util.IntegralExp.quot` y
+
+  nextMul :: e -> e -> e
+  nextMul x y = x `quotUp` y * y
+
 -- | This wrapper allows you to use a type that is an instance of the
 -- true class whenever the simile class is required.
 newtype Wrapped a = Wrapped {wrappedValue :: a}

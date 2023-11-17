@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (divUp, rem)
+import Futhark.Util.IntegralExp (divUp, rem, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
@@ -200,7 +200,7 @@ checkLocalMemoryReqs code = do
     -- These allocations will actually be padded to an 8-byte aligned
     -- size, so we should take that into account when checking whether
     -- they fit.
-    alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
+    alignedSize x = nextMul x 8
 
 withAcc ::
   Pat LetDecMem ->
