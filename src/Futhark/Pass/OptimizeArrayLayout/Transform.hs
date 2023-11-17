@@ -51,6 +51,27 @@ instance Transform MC where
     | ParOp maybeParSegOp seqSegOp <- mcOp = transformSegOpMC permTable expmap stm maybeParSegOp seqSegOp
     | _ <- mcOp = transformRestOp permTable expmap stm
 
+instance Transform GPUMem where
+  onOp _ _ = error $ notImplementedYet "GPUMem"
+  transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
+
+instance Transform MCMem where
+  onOp _ op = pure op
+  transformOp permTable expmap stm mcOp
+    | _ <- mcOp = transformRestOp permTable expmap stm
+
+instance Transform Seq where
+  onOp _ _ = error $ notImplementedYet "Seq"
+  transformOp _ _ _ _ = error $ notImplementedYet "Seq"
+
+instance Transform SeqMem where
+  onOp _ _ = error $ notImplementedYet "SeqMem"
+  transformOp _ _ _ _ = error $ notImplementedYet "SeqMem"
+
+instance Transform SOACS where
+  onOp _ _ = error $ notImplementedYet "SOACS"
+  transformOp _ _ _ _ = error $ notImplementedYet "SOACS"
+
 transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (PermutationTable, ExpMap GPU)
 transformSegOpGPU permTable expmap (Let pat aux _) op = do
   let mapper =
@@ -227,24 +248,3 @@ lookupPermutation permTable segName idxName arrayName =
       case M.lookup arrayName (M.mapKeys fst arrayNameMap) of
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs
-
-instance Transform GPUMem where
-  onOp _ _ = error $ notImplementedYet "GPUMem"
-  transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
-
-instance Transform MCMem where
-  onOp _ op = pure op
-  transformOp permTable expmap stm mcOp
-    | _ <- mcOp = transformRestOp permTable expmap stm
-
-instance Transform Seq where
-  onOp _ _ = error $ notImplementedYet "Seq"
-  transformOp _ _ _ _ = error $ notImplementedYet "Seq"
-
-instance Transform SeqMem where
-  onOp _ _ = error $ notImplementedYet "SeqMem"
-  transformOp _ _ _ _ = error $ notImplementedYet "SeqMem"
-
-instance Transform SOACS where
-  onOp _ _ = error $ notImplementedYet "SOACS"
-  transformOp _ _ _ _ = error $ notImplementedYet "SOACS"
