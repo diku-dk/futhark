@@ -59,8 +59,8 @@ import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (chunks)
-import Futhark.Util.IntegralExp (divUp, quot, rem)
+import Futhark.Util (chunks, forAccumLM)
+import Futhark.Util.IntegralExp (divUp, quot, rem, nextMul)
 import Prelude hiding (quot, rem)
 
 -- | The maximum number of operators we support in a single SegRed.
@@ -73,6 +73,7 @@ maxNumOps = 10
 -- represented as a pairing of a t'SubExp' along with a list of
 -- indexes into that t'SubExp' for reading the result.
 type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen ()
+
 
 -- | Compile 'SegRed' instance to host-level code with calls to
 -- various kernels.
@@ -87,6 +88,7 @@ compileSegRed pat lvl space reds body = do
   emit $ Imp.DebugPrint "\n# SegRed" Nothing
   KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
   let grid = KernelGrid num_groups group_size
+
   compileSegRed' pat grid space reds $ \red_cont ->
     compileStms mempty (kernelBodyStms body) $ do
       let (red_res, map_res) = splitAt (segBinOpResults reds) $ kernelBodyResult body
@@ -130,24 +132,152 @@ compileSegRed' pat grid space reds body
 -- global memory.  Allocations for the former have already been
 -- performed.  This policy is baked into how the allocations are done
 -- in ExplicitAllocations.
-intermediateArrays ::
+
+-- data ReduceType = NoncommPrimReduce | CommOrNonprimReduce
+data ReduceIntermediateArrays =
+    CommReduceInterms
+      { groupRedLMem :: [[VName]]
+      }
+  | NoncommPrimReduceInterms
+      { collCopyLMem :: [[VName]],
+        groupRedLMem :: [[VName]]
+      }
+
+
+makeLocalArrays ::
   Count GroupSize SubExp ->
-  SubExp ->
-  SegBinOp GPUMem ->
-  InKernelGen [VName]
-intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
-  let red_op_params = lambdaParams red_op
-      (red_acc_params, _) = splitAt (length nes) red_op_params
-  forM red_acc_params $ \p ->
-    case paramDec p of
-      MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [num_threads] <> shape
-        sArray "red_arr" pt shape' mem $
-          LMAD.iota 0 (map pe64 $ shapeDims shape')
-      _ -> do
-        let pt = elemType $ paramType p
-            shape = Shape [group_size]
-        sAllocArray "red_arr" pt shape $ Space "local"
+  TPrimExp Int64 VName ->
+  TV Int64 ->
+  [SegBinOp GPUMem] ->
+  InKernelGen ReduceIntermediateArrays
+makeLocalArrays (Count group_size) chunk num_threads segbinops
+  | is_noncommutative_prim_red =
+      localArraysNoncomm
+
+  | otherwise =
+    fmap CommReduceInterms $
+      forM segbinops $ \segbinop ->
+        forM (paramOf segbinop) $ \p ->
+          case paramDec p of
+            MemArray pt shape _ (ArrayIn mem _) -> do
+              let shape' = Shape [tvSize num_threads] <> shape
+              sArray "red_arr" pt shape' mem $
+                LMAD.iota 0 (map pe64 $ shapeDims shape')
+            _ -> do
+              let pt = elemType $ paramType p
+                  shape = Shape [group_size]
+              sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "local"
+
+  -- | otherwise =
+  --   error $ "Non-commutative reduction with non-primitive reduction param(s) "
+  --             <> "not yet handled! :')\nGot SegBinOp params: "
+  --             <> (prettyString $ map paramOf segbinops)
+  --             <> "\n\n"
+
+  where
+
+    -- TODO: this decision (of whether to declare interms for a commutative or a
+    -- noncommutative and prim-parameterized reduction) should not be made here,
+    -- but rather at the top level (compileSegRed or compileSegred').
+    is_noncommutative_prim_red =
+      binopsComm segbinops == Commutative
+        && all (all (isPrimParam . paramDec) . paramOf) segbinops
+
+
+    isPrimParam (MemArray _ _ _ _) = False
+    isPrimParam _ = True
+
+    paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
+
+    localArraysNoncomm = do
+      let group_size_E = pe64 group_size
+          group_worksize_E = group_size_E * chunk
+
+      group_worksize <- tvSize <$> (dPrimV "group_worksize" group_worksize_E)
+
+      -- regarding local memory layout for the non-commutative reduction kernel:
+      -- the kernel uses local memory for the initial collective copy, the
+      -- (virtualized) group reductions, and the final single-group collective
+      -- copy. there are no dependencies between these three stages, so we can
+      -- reuse the same pool of local mem for all three.
+      --
+      -- after the final single-group collective copy, a thread-sequential
+      -- reduction reduces the number of per-group partial results
+      -- from num_groups down to group_size (unless group_size >= num_groups, in
+      -- which case the loop runs for 0 iterations) for each reduction array,
+      -- such that they each fit in the final intra-group reduction.
+      --
+      -- if for each partial result we copy and immediately reduce, then we can
+      -- reuse the same lmem for all reduction arrays, rather than needing to
+      -- hold all partial results in lmem at once.
+      --
+      -- hence the total amount of local mem needed is the maximum between:
+      --   collective copy lmem       = group_size * chunk * max elem_sizes
+      --   final collective copy lmem = num_groups * max elem_sizes
+      --   group reduction lmem       = group_size * sum elem_sizes
+      --
+      -- as such, the amount of lmem will typically be dominated by the initial
+      -- collective copy *unless* the number of fused reductions is large *or*
+      -- we simultaneously have a large num_groups and small group_size and
+      -- chunk.
+
+
+      -- get param elem sizes of all the binops for which we need to store
+      -- intermediate arrays in local mem.
+      let paramSize = primByteSize . elemType . paramType
+          elem_sizes = concatMap (map paramSize . paramOf) segbinops
+
+
+          -- TODO: should we align to each elem_size or to 8?
+          --
+          -- TODO: additionally: should we align each array length individually
+          -- before summing, or should each prefix sum be aligned to the value
+          -- of the next element in a fold? because there is a difference when
+          -- there exists an elem_size which does not divide group_size (but
+          -- this may not be a problem, eg. if group_size is required to be a
+          -- mult of 32).
+
+          group_reds_lmem_req =
+            foldl (\x y -> nextMul x y + y * group_size_E) 0 elem_sizes
+
+          collcopy_lmem_req = group_worksize_E * maximum elem_sizes
+
+          lmem_total_size =
+            Imp.bytes $
+              collcopy_lmem_req `sMax64`
+              group_reds_lmem_req
+
+      -- allocate total pool of local mem.
+      lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
+
+      let arrInLMem p name len_se offset = do
+            let ptype = elemType $ paramType p
+            sArray
+              (name ++ "_" ++ prettyString ptype)
+              ptype
+              (Shape [len_se])
+              lmem
+              $ LMAD.iota offset [pe64 len_se]
+
+      (coll_copy_arrs, group_red_arrs) <-
+        fmap (unzip . map unzip . snd) $
+          forAccumLM 0 segbinops $ \offset_outer segbinop ->
+            forAccumLM offset_outer (paramOf segbinop) $ \offset p -> do
+              let elem_size = paramSize p
+                  -- TODO: again, should these be aligned to elem_size instead?
+                  offset_aligned = nextMul offset elem_size
+                  offset' = offset_aligned + group_size_E * elem_size
+
+              fmap (offset', ) $
+                (,) <$> arrInLMem p "coll_copy_arr" group_worksize 0
+                    <*> arrInLMem p "group_red_arr" group_size (offset `quot` elem_size)
+
+      pure $
+        NoncommPrimReduceInterms
+          { collCopyLMem = coll_copy_arrs,
+            groupRedLMem = group_red_arrs
+          }
+
 
 -- | Arrays for storing group results.
 --
@@ -201,7 +331,8 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    local_arrs <- makeLocalArrays group_size 1 num_threads reds
+    let reds_arrs = groupRedLMem local_arrs
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -288,7 +419,8 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (Var $ tvVar num_threads)) reds
+    tmp <- makeLocalArrays group_size 1 num_threads reds
+    let reds_arrs = groupRedLMem tmp
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -431,7 +563,8 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    tmp <- makeLocalArrays group_size 1 num_threads reds
+    let reds_arrs = groupRedLMem tmp
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
@@ -551,7 +684,11 @@ slugShape :: SegBinOpSlug -> Shape
 slugShape = segBinOpShape . slugOp
 
 slugsComm :: [SegBinOpSlug] -> Commutativity
-slugsComm = mconcat . map (segBinOpComm . slugOp)
+slugsComm = binopsComm . map slugOp
+
+binopsComm :: [SegBinOp GPUMem] -> Commutativity
+binopsComm = mconcat . map segBinOpComm
+
 
 accParams, nextParams :: SegBinOpSlug -> [LParam GPUMem]
 accParams slug = take (length (slugNeutral slug)) $ slugParams slug
