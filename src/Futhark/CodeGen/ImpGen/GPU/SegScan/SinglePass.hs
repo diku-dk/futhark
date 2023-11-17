@@ -105,7 +105,7 @@ createLocalArrays (Count groupSize) chunk types = do
 
   pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
-statusX, statusA, statusP :: Num a => a
+statusX, statusA, statusP :: (Num a) => a
 statusX = 0
 statusA = 1
 statusP = 2
@@ -237,7 +237,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       sumT, maxT :: Integer
       sumT = sum tys_sizes
-      sumT' = (sum $ map (max 4 . primByteSize) tys) `div` 4
+      sumT' = sum (map (max 4 . primByteSize) tys) `div` 4
       maxT = maximum tys_sizes
 
       -- TODO: Make these constants dynamic by querying device
