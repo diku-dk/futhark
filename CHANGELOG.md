@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The `cuda` and `hip` backends now generate faster code for `scan`s
+  that have been fused with `map`s that internally produce arrays.
+  Work by Anders Holst and Christian Påbøl Jacobsen.
+
 ### Removed
 
 ### Changed
