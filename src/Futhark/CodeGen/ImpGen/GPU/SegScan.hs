@@ -51,8 +51,8 @@ bodyHas f = any (f' . stmExp) . bodyStms
 canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
 canBeSinglePass scan_ops =
   if all ok scan_ops
-     then Just $ combineScanOps scan_ops
-     else Nothing
+    then Just $ combineScanOps scan_ops
+    else Nothing
   where
     ok op =
       segBinOpShape op == mempty
@@ -80,9 +80,9 @@ compileSegScan pat lvl space scan_ops map_kbody =
         SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
       _ ->
         TwoPass.compileSegScan pat lvl space scan_ops map_kbody
+    emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space
-    targetSupportsSinglePass HIP  = True
     targetSupportsSinglePass CUDA = True
-    targetSupportsSinglePass _    = False
-
+    targetSupportsSinglePass HIP = True
+    targetSupportsSinglePass _ = False
