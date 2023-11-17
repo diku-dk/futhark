@@ -26,23 +26,59 @@ class (PrimExpAnalysis rep) => Layout rep where
   -- is too complex to confidently determine the optimal layout.
   -- Map each list of `DimAccess` in the IndexTable to a permutation in a generic way
   -- that can be handled uniquely by each backend.
-  permutationFromDimAccess :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
+  permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess _segOpName (_arrayName, nest) _idxName dimAccesses =
+  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses = do
+    -- Create a candidate permutation
+    let perm = (map originalDimension . sortGPU) dimAccesses
+
     -- Dont accept indices where the last index is constant
-    if null . dependencies $ last dimAccesses
-      then Nothing
-      else -- Create a candidate permutation
+    let lastIdxIsConst = null . dependencies $ last dimAccesses
 
-        let perm = (map originalDimension . sortGPU) dimAccesses
-         in -- Check if we want to manifest this array with the permutation
-            if commonPermutationEliminators perm nest dimAccesses
-              then Nothing
-              else Just perm
+    -- Check if any of the dependencies are too complex to reason about
+    let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
+    let primExps = map (`M.lookup` primExpTable) deps
+    let inscrutables = map isInscrutable primExps
+    let isInscrutable = or inscrutables
 
-multicorePermutation :: SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
-multicorePermutation _segOpName (_arrayName, nest) _idxName dimAccesses = do
+    -- Check if we want to manifest this array with the permutation
+    pTraceShow deps $
+      pTraceShow primExps $
+        pTraceShow isInscrutable $
+          pTraceShow inscrutables $
+            pTraceShow primExpTable $
+              if lastIdxIsConst || isInscrutable || commonPermutationEliminators perm nest dimAccesses
+                then Nothing
+                else Just perm
+
+isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool
+isInscrutable Nothing = True
+isInscrutable (Just Nothing) = True
+isInscrutable (Just (Just (LeafExp _ _))) = False
+isInscrutable (Just (Just (ValueExp _))) = False
+isInscrutable (Just (Just op@(BinOpExp _ a b))) = do
+  pTraceShow (op, reduceStrideAndOffset op) $ case reduceStrideAndOffset op of
+    Just (s, o) -> s > 1 || o > 0
+    Nothing -> True
+isInscrutable _ = True
+
+reduceStrideAndOffset :: PrimExp VName -> Maybe (Int, Int)
+reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
+  | LeafExp _ _ <- op = case oper of
+      Add _ _ -> Just (1, valueIntegral v)
+      Sub _ _ -> Just (1, -valueIntegral v)
+      Mul _ _ -> Just (valueIntegral v, 0)
+  | BinOpExp {} <- op = case reduceStrideAndOffset op of
+      Nothing -> Nothing
+      Just (s, o) -> case oper of
+        Add _ _ -> Just (s, o + valueIntegral v)
+        Sub _ _ -> Just (s, o - valueIntegral v)
+        Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
+reduceStrideAndOffset _ = Nothing
+
+multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
+multicorePermutation primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses = do
   -- Create a candidate permutation
   let perm = (map originalDimension . sortMC) dimAccesses
 
@@ -102,8 +138,8 @@ commonPermutationEliminators perm nest dimAccesses = do
 -- | Given an ordering function for `DimAccess`, and an IndexTable, return
 -- a PermutationTable.
 -- We remove entries with no results after `permutationFromDimAccess`
-permutationTableFromIndexTable :: (Layout rep) => IndexTable rep -> PermutationTable
-permutationTableFromIndexTable = tableMapMaybe permutationFromDimAccess
+permutationTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> PermutationTable
+permutationTableFromIndexTable primExpTable = tableMapMaybe (permutationFromDimAccess primExpTable)
 
 sortGPU :: [DimAccess rep] -> [DimAccess rep]
 sortGPU =
@@ -144,7 +180,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype, _) = Just (itertype, lvl, og)
+        f og (_, _, lvl, itertype, _) = Just (itertype, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -185,7 +221,7 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (_, lvl, itertype, _) = Just (itertype, lvl, og)
+        f og (_, _, lvl, itertype, _) = Just (itertype, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.

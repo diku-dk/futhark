@@ -1,6 +1,7 @@
 module Futhark.Analysis.AnalyzePrimExp
   ( primExpAnalysis,
     PrimExpAnalysis (..),
+    PrimExpTable,
   )
 where
 

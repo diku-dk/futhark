@@ -32,11 +32,11 @@ optimizeArrayLayout =
       -- Analyse the program
       let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
       -- Compute primExps for all variables
-      let primExpMap = primExpAnalysis prog
+      let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable indexTable
+      let permutationTable = permutationTableFromIndexTable primExpTable indexTable
       -- Insert permutations in the AST
-      pTraceShow primExpMap $ intraproceduralTransformation (onStms permutationTable) prog
+      intraproceduralTransformation (onStms permutationTable) prog
   where
     onStms permutationTable scope stms = do
       let m = localScope scope $ transformStms permutationTable mempty stms

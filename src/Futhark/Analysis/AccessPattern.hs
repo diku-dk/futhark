@@ -75,7 +75,7 @@ data DimAccess rep = DimAccess
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
-    dependencies :: S.IntMap (VName, Int, IterationType rep, VarType),
+    dependencies :: S.IntMap (VName, VName, Int, IterationType rep, VarType),
     originalDimension :: Int
   }
   deriving (Eq, Show)
@@ -462,9 +462,6 @@ analyzeBasicOp ctx expression pats = do
               ++ "\n\nContext\n"
               ++ show ctx
 
-    reduceNames :: [VName] -> [VName]
-    reduceNames = nubOrd . concatMap (map (\(a, _, _, _) -> a) . S.elems . dependencies . reduceDependencies ctx)
-
 analyzeMatch :: (Analyze rep) => Context rep -> [VName] -> Body rep -> [Body rep] -> (Context rep, IndexTable rep)
 analyzeMatch ctx pats body parents =
   let ctx'' = ctx {currentLevel = currentLevel ctx - 1}
@@ -582,23 +579,24 @@ analyzeSubExpr pp ctx (Var v) =
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
 consolidate _ (Constant _) = mempty
-consolidate ctx (Var v) = reduceDependencies ctx v
+consolidate ctx (Var v) = reduceDependencies ctx v v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
-reduceDependencies :: Context rep -> VName -> DimAccess rep
-reduceDependencies ctx v =
+reduceDependencies :: Context rep -> VName -> VName -> DimAccess rep
+reduceDependencies ctx v_src v =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Unable to find " ++ prettyString v
     Just (CtxVal deps itertype lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype, t))]) (currentLevel ctx)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, lvl, itertype, t))]) (currentLevel ctx)
+        -- TODO: is basetag v good enough as a key?
+        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
+        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
         ConstType -> mempty
         _ ->
           foldl' (<>) mempty $
-            map (reduceDependencies ctx) $
+            map (reduceDependencies ctx v_src) $
               namesToList deps
 
 -- Misc functions
@@ -694,7 +692,7 @@ instance Pretty (DimAccess rep) where
     "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) -- <+> (show $ variableType dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
-      printPair (name, lvl, itertype, vtype) = pretty name <+> pretty lvl <+> pretty itertype <+> pretty vtype
+      printPair (name, name_orig, lvl, itertype, vtype) = pretty name_orig <+> pretty name <+> pretty lvl <+> pretty itertype <+> pretty vtype
 
 instance Pretty SegOpName where
   pretty (SegmentedMap name) = "(segmap)" <+> pretty name
