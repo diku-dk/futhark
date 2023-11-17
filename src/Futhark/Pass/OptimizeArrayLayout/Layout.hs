@@ -40,17 +40,18 @@ instance Layout GPU where
     let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
     let primExps = map (`M.lookup` primExpTable) deps
     let inscrutables = map isInscrutable primExps
-    let isInscrutable = or inscrutables
-
+    let isInscrutable =
+          or
+            inscrutables
     -- Check if we want to manifest this array with the permutation
-    pTraceShow deps $
-      pTraceShow primExps $
-        pTraceShow isInscrutable $
-          pTraceShow inscrutables $
-            pTraceShow primExpTable $
-              if lastIdxIsConst || isInscrutable || commonPermutationEliminators perm nest dimAccesses
-                then Nothing
-                else Just perm
+    -- pTraceShow deps $
+    --   pTraceShow primExps $
+    --     pTraceShow isInscrutable $
+    --       pTraceShow inscrutables $
+    --         pTraceShow primExpTable $
+    if lastIdxIsConst || isInscrutable || commonPermutationEliminators perm nest dimAccesses
+      then Nothing
+      else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool
 isInscrutable Nothing = True
@@ -58,7 +59,8 @@ isInscrutable (Just Nothing) = True
 isInscrutable (Just (Just (LeafExp _ _))) = False
 isInscrutable (Just (Just (ValueExp _))) = False
 isInscrutable (Just (Just op@(BinOpExp _ a b))) = do
-  pTraceShow (op, reduceStrideAndOffset op) $ case reduceStrideAndOffset op of
+  -- pTraceShow (op, reduceStrideAndOffset op) $
+  case reduceStrideAndOffset op of
     Just (s, o) -> s > 1 || o > 0
     Nothing -> True
 isInscrutable _ = True
