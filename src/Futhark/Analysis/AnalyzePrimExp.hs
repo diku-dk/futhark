@@ -76,8 +76,20 @@ stmToPrimExps scope stm = do
     walker =
       (identityWalker @rep)
         { walkOnBody = \body_scope -> bodyToPrimExps (scope <> body_scope),
-          walkOnOp = opPrimExp scope
+          walkOnOp = opPrimExp scope,
+          walkOnFParam = paramToPrimExp -- Loop parameters
         }
+
+    -- Adds a loop parameter to the PrimExpTable
+    paramToPrimExp :: FParam rep -> State PrimExpTable ()
+    paramToPrimExp param = do
+      let name = paramName param
+      -- Construct a `PrimExp` from the type of the parameter
+      -- and add it to the `PrimExpTable`
+      case typeOf $ paramDec param of
+        Prim pt ->
+          modify $ M.insert name (Just $ LeafExp name pt)
+        _ -> pure ()
 
 -- | Checks if a name is in the PrimExpTable and construct a `PrimExp` if it is not
 toPrimExp :: (RepTypes rep) => Scope rep -> PrimExpTable -> VName -> Maybe (PrimExp VName)
