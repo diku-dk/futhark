@@ -14,8 +14,8 @@ import Futhark.IR.GPUMem
 
 -- The single-pass scan does not support multiple operators, so jam
 -- them together here.
-combineScans :: [SegBinOp GPUMem] -> SegBinOp GPUMem
-combineScans ops =
+combineScanOps :: [SegBinOp GPUMem] -> SegBinOp GPUMem
+combineScanOps ops =
   SegBinOp
     { segBinOpComm = mconcat (map segBinOpComm ops),
       segBinOpLambda = lam',
@@ -48,13 +48,11 @@ bodyHas f = any (f' . stmExp) . bodyStms
         { walkOnBody = const $ guard . not . bodyHas f
         }
 
-canBeSinglePass :: [SegBinOp GPUMem] -> KernelBody GPUMem -> Maybe (SegBinOp GPUMem)
-canBeSinglePass ops kbody
-  | all ok ops,
-    not $ bodyHas freshArray (Body () (kernelBodyStms kbody) []) =
-      Just $ combineScans ops
-  | otherwise =
-      Nothing
+canBeSinglePass :: [SegBinOp GPUMem] -> Maybe (SegBinOp GPUMem)
+canBeSinglePass scan_ops =
+  if all ok scan_ops
+    then Just $ combineScanOps scan_ops
+    else Nothing
   where
     ok op =
       segBinOpShape op == mempty
@@ -62,16 +60,6 @@ canBeSinglePass ops kbody
         && not (bodyHas isAssert (lambdaBody (segBinOpLambda op)))
     isAssert (BasicOp Assert {}) = True
     isAssert _ = False
-    -- XXX: Currently single pass scans cannot handle construction of
-    -- arrays in the kernel body (#2013), because of insufficient
-    -- memory expansion.  This can in principle be fixed.
-    freshArray (BasicOp Manifest {}) = True
-    freshArray (BasicOp Iota {}) = True
-    freshArray (BasicOp Replicate {}) = True
-    freshArray (BasicOp Scratch {}) = True
-    freshArray (BasicOp Concat {}) = True
-    freshArray (BasicOp ArrayLit {}) = True
-    freshArray _ = False
 
 -- | Compile 'SegScan' instance to host-level code with calls to
 -- various kernels.
@@ -82,17 +70,19 @@ compileSegScan ::
   [SegBinOp GPUMem] ->
   KernelBody GPUMem ->
   CallKernelGen ()
-compileSegScan pat lvl space scans kbody = sWhen (0 .<. n) $ do
-  emit $ Imp.DebugPrint "\n# SegScan" Nothing
-  target <- hostTarget <$> askEnv
-  case target of
-    CUDA
-      | Just scan' <- canBeSinglePass scans kbody ->
-          SinglePass.compileSegScan pat lvl space scan' kbody
-    HIP
-      | Just scan' <- canBeSinglePass scans kbody ->
-          SinglePass.compileSegScan pat lvl space scan' kbody
-    _ -> TwoPass.compileSegScan pat lvl space scans kbody
-  emit $ Imp.DebugPrint "" Nothing
+compileSegScan pat lvl space scan_ops map_kbody =
+  sWhen (0 .<. n) $ do
+    emit $ Imp.DebugPrint "\n# SegScan" Nothing
+    target <- hostTarget <$> askEnv
+
+    case (targetSupportsSinglePass target, canBeSinglePass scan_ops) of
+      (True, Just scan_ops') ->
+        SinglePass.compileSegScan pat lvl space scan_ops' map_kbody
+      _ ->
+        TwoPass.compileSegScan pat lvl space scan_ops map_kbody
+    emit $ Imp.DebugPrint "" Nothing
   where
     n = product $ map pe64 $ segSpaceDims space
+    targetSupportsSinglePass CUDA = True
+    targetSupportsSinglePass HIP = True
+    targetSupportsSinglePass _ = False
