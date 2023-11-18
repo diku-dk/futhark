@@ -199,12 +199,12 @@ seqStm' env (Let pat aux
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
 
-seqStm' env stm@(Let pat aux (Op (SegOp
-          (SegMap lvl@(SegThread {}) space ts kbody))))
+seqStm' env stm@(Let pat _ (Op (SegOp
+          (SegMap (SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
   | isScatter kbody = seqScatter env stm
   | otherwise = do
     usedArrays <- getUsedArraysIn env kbody
-    maps <- buildSegMapTup_ "map_intermediate" $ do
+    ((kres, lvl', space', types'), stms) <- collectStms $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       let env' = updateEnvTid env tid
@@ -219,15 +219,9 @@ seqStm' env stm@(Let pat aux (Op (SegOp
       let kres = L.map (Returns ResultMaySimplify  mempty) res
       pure (kres, lvl', space', types')
 
-    let tid = fst $ head $ unSegSpace space
-    let env' = updateEnvTid env tid
-    kbody' <- mkResultKBody env' kbody maps
-
-    let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
-    tps <- mapM lookupType maps
-    let ts' = L.map (stripArray 1) tps
-    let pat' = Pat $ L.map (\(p, t) -> setPatElemDec p t) (zip (patElems pat) tps)
-    addStm $ Let pat' aux (Op (SegOp (SegMap lvl space' ts' kbody')))
+    let kbody' = KernelBody dec stms kres
+    let names = patNames pat
+    letBindNames names $ Op $ SegOp $ SegMap lvl' space' types' kbody'
 
 
 seqStm' env (Let pat aux
