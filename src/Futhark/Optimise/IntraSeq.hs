@@ -19,6 +19,7 @@ import Control.Monad.State
 import Data.Map as M
 import Data.IntMap.Strict as IM
 import Data.List as L
+import Data.Set as S
 
 import Debug.Pretty.Simple
 import Debug.Trace
@@ -296,24 +297,47 @@ seqStm' env (Let pat aux
 --       tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [size]) arr'
 --       let slice' = Slice $ tail $ unSlice slice
 --       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
-  
+
 
 -- Catch all
 seqStm' _ stm = addStm stm
-                
+
 
 seqScatter :: Env -> Stm GPU -> Builder GPU ()
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) _ ts kbody)))) = do
 
   -- Create the Loop expression
-  let dests = L.map (\(WriteReturns _ dest _ ) -> dest) (kernelBodyResult kbody)
-  loopInit <- 
+  let (dests, upds) = L.unzip $ L.map (\(WriteReturns _ dest upds ) -> (dest, upds)) (kernelBodyResult kbody)
+  loopInit <-
       forM dests $ \d -> do
           tp <- lookupType d
           let decl = toDecl tp Unique
           p <- newParam "loop_param" decl
           pure (p, Var d)
+
+
+  -- Collect a set of all is and vs used in returns (only the Vars)
+  let upds' = L.concatMap (\ (slice, vs) -> do
+            let is = L.map (\ dim ->
+                              case dim of
+                                DimFix d -> d
+                                _ -> error "please no"
+                  ) (unSlice slice)
+            vs : is
+          ) $ concat upds
+  let upd'' = L.filter (\u ->
+            case u of
+              Var _ -> True
+              _ -> False
+        ) upds'
+  let updNames = S.fromList $ L.map (\(Var n) -> n) upd''
+  -- Intersect it with all pattern names from the kbody
+  let names = S.fromList $ L.concatMap (\ (Let pat _ _) ->
+            patNames pat
+          ) $ kernelBodyStms kbody
+  -- The names that should have "producing statements"
+  let pStms = S.toList $ S.difference updNames names
 
   let paramMap = M.fromList $ L.map invert loopInit
 
@@ -330,7 +354,7 @@ seqScatter env (Let pat aux (Op (SegOp
           size' <- letSubExp "size'" =<< eBinOp (Sub Int64 OverflowUndef)
                                                 (eSubExp size)
                                                 (eSubExp $ intConst Int64 1)
-          i' <- letExp "loop_i'" $ BasicOp $ 
+          i' <- letExp "loop_i'" $ BasicOp $
                                  BinOp (SMin Int64) size' (Var i)
 
           -- Modify original statements
@@ -346,14 +370,27 @@ seqScatter env (Let pat aux (Op (SegOp
                     addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
                 stm -> addStm stm
 
+          -- Potentially create more statements and create a mapping from the
+          -- original name to the new subExp
+          mapping <- forM pStms $ \ nm -> do
+              offset <- letSubExp "iota_offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                                           (eSubExp $ Var tid)
+                                                           (eSubExp $ seqFactor env)
+              val <- letSubExp "iota_val" =<< eBinOp (Add Int64 OverflowUndef)
+                                                         (eSubExp offset)
+                                                         (eSubExp $ Var i')
+              pure (Var nm, val)
+          let valMap = M.fromList mapping
+
 
           -- Update the original WriteReturns to target the loop params instead
           res' <- forM (kernelBodyResult kbody) $ \ res -> do
               case res of
-                  (WriteReturns _ dest slice) -> do
+                  (WriteReturns _ dest upd) -> do
                       let (Just destParam) = M.lookup (Var dest) paramMap
                       let dest' = paramName destParam
-                      pure $ WriteReturns mempty dest' slice
+                      let upd' = L.map (mapUpdates valMap) upd
+                      pure $ WriteReturns mempty dest' upd'
                   _ -> error "Expected WriteReturns in scatter"
 
           -- Return the results of the update statements form the segmap
@@ -362,7 +399,7 @@ seqScatter env (Let pat aux (Op (SegOp
           -- let res' = L.map (Returns ResultMaySimplify mempty) updates
           pure (res', lvl', space', ts)
 
-      
+
       -- Return the results from the segmap from the loop
       let res = L.map (SubExpRes mempty) mapRes
       pure res
@@ -371,11 +408,21 @@ seqScatter env (Let pat aux (Op (SegOp
   let loopExp = Loop loopInit loopForm body
 
   addStm $ Let pat aux loopExp
-  
+
   -- End
   pure ()
   where
     invert (a,b) = (b,a)
+
+    mapUpdates :: M.Map SubExp SubExp -> (Slice SubExp, SubExp) -> (Slice SubExp, SubExp)
+    mapUpdates mapping (Slice dims, vs) = do
+      let vs' = M.findWithDefault vs vs mapping
+      let dims' = L.map (\d ->
+            case d of 
+              DimFix d' -> DimFix $ M.findWithDefault d' d' mapping  
+              d' -> d' -- should never happen
+            ) dims
+      (Slice dims', vs')
 
 
 seqScatter _ stm = error $
@@ -623,7 +670,7 @@ mkTiles ::
 mkTiles env = do
   scope <- askScope
   let arrsInScope = M.toList $ M.filter isArray scope
-  
+
   tileSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
                                                (eSubExp $ seqFactor env)
                                                (eSubExp $ grpSize env)
@@ -641,11 +688,11 @@ mkTiles env = do
                       Index arrName (Slice $ outerDim ++ [sliceIdx])
 
     tileStaging <- letExp "tile_staging" $ BasicOp $
-                      Update Unsafe tileScratch 
-                        (Slice [DimSlice (intConst Int64 0) 
-                                         (grpsizeOld env) 
+                      Update Unsafe tileScratch
+                        (Slice [DimSlice (intConst Int64 0)
+                                         (grpsizeOld env)
                                          (intConst Int64 1)]
-                        ) tileSlice 
+                        ) tileSlice
 
     -- Now read the chunks using a segmap
     let (VName n _) = arrName
@@ -664,12 +711,12 @@ mkTiles env = do
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
       let res = [Returns ResultPrivate mempty chunk]
       pure (res, lvl, space, types)
-    
+
 
     pure (arrName, tile)
 
   pure $ setMapping env (M.fromList tiles)
-  
+
 -- mkTiles ::
 --   Env ->
 --   Builder GPU Env
@@ -681,7 +728,7 @@ mkTiles env = do
 --                                                (eSubExp $ seqFactor env)
 --                                                (eSubExp $ grpSize env)
 
- 
+
 --   tiles <- forM arrsInScope $ \ (arrName, arrInfo) -> do
 --     let tp = elemType $ typeOf arrInfo
 
@@ -704,7 +751,7 @@ mkTiles env = do
 --       sliceSize <- letSubExp "slice_size" =<< eBinOp (SDivUp Int64 Unsafe)
 --                                                      (eSubExp tmp)
 --                                                      (eSubExp $ grpSize env)
-      
+
 --       let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
 --       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
 --       vals <- letSubExp "slice" $ BasicOp $ Index arrName
@@ -725,7 +772,7 @@ mkTiles env = do
 --       --                                       (eSubExp $ grpSize env)
 --       let slice = Slice [DimSlice (Var tid) (seqFactor env) (grpSize env)]
 --       let res = [WriteReturns mempty scratch [(slice, chunk')]]
-      
+
 --       pure (res, lvl, space, types)
 
 --     -- transpose and flatten
