@@ -59,7 +59,7 @@ import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
-import Futhark.Util (chunks, forAccumLM)
+import Futhark.Util (chunks, mapAccumLM)
 import Futhark.Util.IntegralExp (divUp, quot, rem, nextMul)
 import Prelude hiding (quot, rem)
 
@@ -155,7 +155,7 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
   | is_noncommutative_prim_red = do
     localArraysNoncomm
 
-  | otherwise = do
+  | otherwise =
     forM segbinops $ \segbinop ->
       fmap CommInterms $
         forM (paramOf segbinop) $ \p ->
@@ -176,12 +176,9 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
 
     is_noncommutative_prim_red =
       binopsComm segbinops == Noncommutative
-        && all (all (isPrimParam . paramDec) . paramOf) segbinops
+        && all (primType . paramType) (concat params)
 
-
-    isPrimParam (MemArray _ _ _ _) = False
-    isPrimParam _ = True
-
+    params = map paramOf segbinops
     paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
 
     localArraysNoncomm = do
@@ -220,22 +217,15 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
       -- get param elem sizes of all the binops for which we need to store
       -- intermediate arrays in local mem.
       let paramSize = primByteSize . elemType . paramType
-          elem_sizes = concatMap (map paramSize . paramOf) segbinops
-
-          -- TODO: additionally: should we align each array length individually
-          -- before summing, or should each prefix sum be aligned to the value
-          -- of the next element in a fold? because there is a difference when
-          -- there exists an elem_size which does not divide group_size (but
-          -- this may not be a problem, eg. if group_size is required to be a
-          -- mult of 32).
+          elem_sizes = map paramSize $ concat params
           collcopy_lmem_req = group_worksize_E * maximum elem_sizes
 
+      let forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
       (group_reds_lmem_req, params_and_offsets) <-
-        forAccumLM 0 segbinops $ \offset_outer segbinop ->
-          forAccumLM offset_outer (paramOf segbinop) $ \offset p -> do
-            let elem_size = paramSize p
-                offset' = nextMul offset elem_size + group_size_E * elem_size
-            pure (offset', (offset, p))
+        forAccumLM2D 0 params $ \offset p -> do
+          let elem_size = paramSize p
+              offset' = nextMul offset elem_size + group_size_E * elem_size
+          pure (offset', (offset, p))
 
       -- allocate total pool of local mem.
       let lmem_total_size =

@@ -10,7 +10,6 @@ module Futhark.Util
   ( nubOrd,
     nubByOrd,
     mapAccumLM,
-    forAccumLM,
     maxinum,
     chunk,
     chunks,
@@ -116,14 +115,6 @@ mapAccumLM op initial l = do
       (acc', y) <- lift $ op acc x
       put acc'
       pure y
-
-forAccumLM ::
-  (Monad m, Traversable t) =>
-  acc ->
-  t x ->
-  (acc -> x -> m (acc, y)) ->
-  m (acc, t y)
-forAccumLM initial l op = mapAccumLM op initial l
 
 -- | @chunk n a@ splits @a@ into @n@-size-chunks.  If the length of
 -- @a@ is not divisible by @n@, the last chunk will have fewer than
