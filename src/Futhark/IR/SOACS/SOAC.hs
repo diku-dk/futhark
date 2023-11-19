@@ -635,10 +635,11 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
   opDependencies (VJP lam args vec) =
-    mconcat $
-      replicate 2 $
-        lambdaDependencies mempty lam $
-          zipWith (<>) (map depsOf' args) (map depsOf' vec)
+    lambdaDependencies
+      mempty
+      lam
+      (zipWith (<>) (map depsOf' args) (map depsOf' vec))
+      <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
