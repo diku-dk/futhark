@@ -40,8 +40,8 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar)
+                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -56,8 +56,8 @@ analyzeIndexTests =
                           [ ( (arr_name, []),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, VName "gtid" 5205, 0, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, VName "i" 5209, 1, LoopVar))]) 1
                                     ]
                                   )
                                 ]
@@ -112,9 +112,9 @@ analyzeIndexTests =
                     { parents = parents',
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar),
-                            (arr_name, CtxVal mempty Parallel 0 parents' Variable)
+                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar),
+                            (arr_name, CtxVal mempty 0 parents' Variable)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -129,8 +129,8 @@ analyzeIndexTests =
                           [ ( (arr_name, parents'),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, VName "gtid" 5205, 0, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, VName "i" 5209, 1, LoopVar))]) 1
                                     ]
                                   )
                                 ]
@@ -153,11 +153,11 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty Parallel 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty Sequential 1 mempty LoopVar),
-                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) Sequential 2 mempty Variable),
-                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) Sequential 3 mempty Variable),
-                            (VName "k" 5212, CtxVal mempty Sequential 1 mempty ConstType)
+                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
+                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar),
+                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) 2 mempty Variable),
+                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) 3 mempty Variable),
+                            (VName "k" 5212, CtxVal mempty 1 mempty ConstType)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -173,8 +173,8 @@ analyzeIndexTests =
                           [ ( (arr_name, []),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1,
+                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, VName "tmp0" 5210, 0, ThreadID))]) 0,
+                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, VName "tmp1" 5211, 1, LoopVar))]) 1,
                                       DimAccess mempty 2
                                     ]
                                   )
@@ -200,8 +200,8 @@ analyzeDimAccesssTests = testGroup
                         [ ( (VName "xss" 5144, []),
                             M.fromList
                               [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, 0, Parallel, ThreadID))]) 0,
-                                      DimAccess (IM.fromList [(5209, (VName "i" 5209, 1, Sequential, LoopVar))]) 1
+                                  [ DimAccess (IM.fromList [(5205, (VName "gtid" 5205, VName "gtid" 5205, 0, ThreadID))]) 0,
+                                    DimAccess (IM.fromList [(5209, (VName "i" 5209, VName "i" 5209, 1, LoopVar))]) 1
                                   ]
                                 )
                               ]
@@ -220,176 +220,31 @@ analyzeDimAccesssTests = testGroup
                         [ ( (VName "xsss" 5720, []),
                             M.fromList
                               [ ( VName "+_lhs" 6308,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6292,
-                                                ( VName "gtid" 6292,
-                                                  0,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6304,
-                                                ( VName "gtid" 6304,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 3}
+                                  [ DimAccess {dependencies = IM.fromList [(6292, (VName "gtid" 6292, VName "gtid" 6292, 0, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "map2_arg2" 6301, 1, LoopVar))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6304, (VName "gtid" 6304, VName "gtid" 6304, 2, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 3}
                                   ]
                                 ),
                                 ( VName "+_lhs" 6326,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6292,
-                                                ( VName "gtid" 6292,
-                                                  0,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6315,
-                                                ( VName "gtid" 6315,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6322,
-                                                ( VName "j" 6322,
-                                                  3,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 3
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6292, (VName "gtid" 6292, VName "gtid" 6292, 0, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "map2_arg2" 6301, 1, LoopVar))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6315, (VName "gtid" 6315, VName "gtid" 6315, 2, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "+_lhs" 6325, 1, LoopVar)), (6322, (VName "j" 6322, VName "+_lhs" 6325, 3, LoopVar))], originalDimension = 3}
                                   ]
                                 )
                               ]
                           ),
-                          ( ( VName "res" 6300,
-                              [ CondBodyName
-                                  ( VName "defunc_0_map_res" 6243
-                                  ),
-                                SegOpName
-                                  ( SegmentedMap
-                                      { vnameFromSegOp =
-                                          VName "defunc_0_map_res" 6291
-                                      }
-                                  )
-                              ]
-                            ),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
                             M.fromList
                               [ ( VName "+_rhs" 6309,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6304,
-                                                ( VName "gtid" 6304,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 1}
+                                  [ DimAccess {dependencies = IM.fromList [(6304, (VName "gtid" 6304, VName "gtid" 6304, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 1}
                                   ]
                                 ),
                                 ( VName "+_rhs" 6328,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6315,
-                                                ( VName "gtid" 6315,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6322,
-                                                ( VName "j" 6322,
-                                                  3,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6315, (VName "gtid" 6315, VName "gtid" 6315, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "+_rhs" 6327, 1, LoopVar)), (6322, (VName "j" 6322, VName "+_rhs" 6327, 3, LoopVar))], originalDimension = 1}
                                   ]
                                 )
                               ]
@@ -398,413 +253,96 @@ analyzeDimAccesssTests = testGroup
                     ),
                     ( SegmentedMap {vnameFromSegOp = VName "wew_r" 6303},
                       M.fromList
-                        [ ( ( VName "xsss" 5720,
-                              []
-                            ),
+                        [ ( (VName "xsss" 5720, []),
                             M.fromList
                               [ ( VName "+_lhs" 6308,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6292,
-                                                ( VName "gtid" 6292,
-                                                  0,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6304,
-                                                ( VName "gtid" 6304,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 3}
+                                  [ DimAccess {dependencies = IM.fromList [(6292, (VName "gtid" 6292, VName "gtid" 6292, 0, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "map2_arg2" 6301, 1, LoopVar))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6304, (VName "gtid" 6304, VName "gtid" 6304, 2, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 3}
                                   ]
                                 )
                               ]
                           ),
-                          ( ( VName "res" 6300,
-                              [ CondBodyName
-                                  ( VName "defunc_0_map_res" 6243
-                                  ),
-                                SegOpName
-                                  ( SegmentedMap
-                                      { vnameFromSegOp =
-                                          VName "defunc_0_map_res" 6291
-                                      }
-                                  )
-                              ]
-                            ),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
                             M.fromList
                               [ ( VName "+_rhs" 6309,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6304,
-                                                ( VName "gtid" 6304,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 1}
+                                  [ DimAccess {dependencies = IM.fromList [(6304, (VName "gtid" 6304, VName "gtid" 6304, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 1}
                                   ]
                                 )
                               ]
                           )
                         ]
                     ),
-                    ( SegmentedMap
-                        { vnameFromSegOp =
-                            VName "defunc_0_map_res" 6314
-                        },
+                    ( SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6314},
                       M.fromList
-                        [ ( ( VName "xsss" 5720,
-                              []
-                            ),
+                        [ ( (VName "xsss" 5720, []),
                             M.fromList
                               [ ( VName "+_lhs" 6326,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6292,
-                                                ( VName "gtid" 6292,
-                                                  0,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6315,
-                                                ( VName "gtid" 6315,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6322,
-                                                ( VName "j" 6322,
-                                                  3,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 3
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6292, (VName "gtid" 6292, VName "gtid" 6292, 0, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "map2_arg2" 6301, 1, LoopVar))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6315, (VName "gtid" 6315, VName "gtid" 6315, 2, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "+_lhs" 6325, 1, LoopVar)), (6322, (VName "j" 6322, VName "+_lhs" 6325, 3, LoopVar))], originalDimension = 3}
                                   ]
                                 )
                               ]
                           ),
-                          ( ( VName "res" 6300,
-                              [ CondBodyName
-                                  ( VName "defunc_0_map_res" 6243
-                                  ),
-                                SegOpName
-                                  ( SegmentedMap
-                                      { vnameFromSegOp =
-                                          VName "defunc_0_map_res" 6291
-                                      }
-                                  )
-                              ]
-                            ),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
                             M.fromList
                               [ ( VName "+_rhs" 6328,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6315,
-                                                ( VName "gtid" 6315,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6299,
-                                                ( VName "i" 6299,
-                                                  1,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6322,
-                                                ( VName "j" 6322,
-                                                  3,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6315, (VName "gtid" 6315, VName "gtid" 6315, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6299, (VName "i" 6299, VName "+_rhs" 6327, 1, LoopVar)), (6322, (VName "j" 6322, VName "+_rhs" 6327, 3, LoopVar))], originalDimension = 1}
                                   ]
                                 )
                               ]
                           )
                         ]
                     ),
-                    ( SegmentedMap
-                        { vnameFromSegOp =
-                            VName "wew_r_r" 6506
-                        },
+                    ( SegmentedMap {vnameFromSegOp = VName "wew_r_r" 6506},
                       M.fromList
-                        [ ( ( VName "xsss" 5720,
-                              []
-                            ),
+                        [ ( (VName "xsss" 5720, []),
                             M.fromList
                               [ ( VName "+_lhs" 6512,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6507,
-                                                ( VName "gtid" 6507,
-                                                  1,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 1},
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6508,
-                                                ( VName "gtid" 6508,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 3}
+                                  [ DimAccess {dependencies = IM.fromList [(6507, (VName "gtid" 6507, VName "gtid" 6507, 1, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6508, (VName "gtid" 6508, VName "gtid" 6508, 2, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 3}
                                   ]
                                 )
                               ]
                           ),
-                          ( ( VName "res_expanded" 6494,
-                              [ CondBodyName
-                                  ( VName "defunc_0_map_res" 6243
-                                  )
-                              ]
-                            ),
+                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)]),
                             M.fromList
                               [ ( VName "+_rhs" 6513,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6507,
-                                                ( VName "gtid" 6507,
-                                                  1,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6508,
-                                                ( VName "gtid" 6508,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 2}
+                                  [ DimAccess {dependencies = IM.fromList [(6507, (VName "gtid" 6507, VName "gtid" 6507, 1, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6508, (VName "gtid" 6508, VName "gtid" 6508, 2, ThreadID))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 2}
                                   ]
                                 )
                               ]
                           )
                         ]
                     ),
-                    ( SegmentedMap
-                        { vnameFromSegOp =
-                            VName "lifted_lambda_res" 6523
-                        },
+                    ( SegmentedMap {vnameFromSegOp = VName "lifted_lambda_res" 6523},
                       M.fromList
-                        [ ( ( VName "xsss" 5720,
-                              []
-                            ),
+                        [ ( (VName "xsss" 5720, []),
                             M.fromList
                               [ ( VName "+_lhs" 6536,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6524,
-                                                ( VName "gtid" 6524,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess {dependencies = mempty, originalDimension = 1},
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6525,
-                                                ( VName "gtid" 6525,
-                                                  3,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6493,
-                                                ( VName "i" 6493,
-                                                  0,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6532,
-                                                ( VName "j" 6532,
-                                                  4,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 3
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6524, (VName "gtid" 6524, VName "gtid" 6524, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6525, (VName "gtid" 6525, VName "gtid" 6525, 3, ThreadID))], originalDimension = 2},
+                                    DimAccess {dependencies = IM.fromList [(6493, (VName "i" 6493, VName "+_lhs" 6535, 0, LoopVar)), (6532, (VName "j" 6532, VName "+_lhs" 6535, 4, LoopVar))], originalDimension = 3}
                                   ]
                                 )
                               ]
                           ),
-                          ( ( VName "res_expanded" 6494,
-                              [ CondBodyName
-                                  ( VName "defunc_0_map_res" 6243
-                                  )
-                              ]
-                            ),
+                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)]),
                             M.fromList
                               [ ( VName "+_rhs" 6538,
-                                  [ DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6524,
-                                                ( VName "gtid" 6524,
-                                                  2,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 0
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6525,
-                                                ( VName "gtid" 6525,
-                                                  3,
-                                                  Parallel,
-                                                  ThreadID
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 1
-                                      },
-                                    DimAccess
-                                      { dependencies =
-                                          IM.fromList
-                                            [ ( 6493,
-                                                ( VName "i" 6493,
-                                                  0,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              ),
-                                              ( 6532,
-                                                ( VName "j" 6532,
-                                                  4,
-                                                  Sequential,
-                                                  LoopVar
-                                                )
-                                              )
-                                            ],
-                                        originalDimension = 2
-                                      }
+                                  [ DimAccess {dependencies = IM.fromList [(6524, (VName "gtid" 6524, VName "gtid" 6524, 2, ThreadID))], originalDimension = 0},
+                                    DimAccess {dependencies = IM.fromList [(6525, (VName "gtid" 6525, VName "gtid" 6525, 3, ThreadID))], originalDimension = 1},
+                                    DimAccess {dependencies = IM.fromList [(6493, (VName "i" 6493, VName "+_rhs" 6537, 0, LoopVar)), (6532, (VName "j" 6532, VName "+_rhs" 6537, 4, LoopVar))], originalDimension = 2}
                                   ]
                                 )
                               ]

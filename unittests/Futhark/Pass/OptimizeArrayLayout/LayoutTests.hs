@@ -3,6 +3,7 @@ module Futhark.Pass.OptimizeArrayLayout.LayoutTests (tests) where
 import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
+import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.IR.GPU (GPU)
 import Futhark.Pass.OptimizeArrayLayout.Layout
@@ -53,7 +54,6 @@ permutationTests =
             ]
         ]
 
-
 nestTests :: TestTree
 nestTests = testGroup "Nests" $
   do
@@ -78,13 +78,30 @@ constInLastIndexElimTests :: TestTree
 constInLastIndexElimTests =
   testGroup
     "constantInLastIndexElimination"
-    [ testCase "gpu eliminates indexes with constant in last dim" $
-        permutationTableFromIndexTable accessTableGPU @?= mempty,
-      testCase "gpu ignores when not last" $
-        let res = permutationTableFromIndexTable accessTableGPUrev
-         in assertBool ("Expected not mempty, got " ++ show (M.toList res)) $
-              not $
-                null res
+    [ testCase "gpu eliminates indexes with constant in last dim" $ do
+        let primExpTable =
+              M.fromList
+                [ (VName "gtid" 4, Just (LeafExp (VName "n" 4) (IntType Int64))),
+                  (VName "i" 5, Just (LeafExp (VName "n" 4) (IntType Int64)))
+                ]
+        permutationTableFromIndexTable primExpTable accessTableGPU @?= mempty,
+      testCase "gpu ignores when not last" $ do
+        let primExpTable =
+              M.fromList
+                [ (VName "gtid" 4, Just (LeafExp (VName "n" 4) (IntType Int64))),
+                  (VName "gtid" 5, Just (LeafExp (VName "n" 4) (IntType Int64))),
+                  (VName "i" 6, Just (LeafExp (VName "n" 4) (IntType Int64)))
+                ]
+        permutationTableFromIndexTable primExpTable accessTableGPUrev
+          @?= M.fromList
+            [ ( SegmentedMap $ VName "mapres" 1,
+                M.fromList
+                  [ ( (VName "a" 2, []),
+                      M.fromList [(VName "A" 3, [2, 3, 0, 1])]
+                    )
+                  ]
+              )
+            ]
     ]
   where
     accessTableGPU :: IndexTable GPU
@@ -125,13 +142,13 @@ singleAccess dims =
 singleParAccess :: Int -> Int -> VName -> DimAccess rep
 singleParAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, level, Parallel, ThreadID))
+    (S.singleton 0 (name, name, level, ThreadID))
     origDim
 
 singleSeqAccess :: Int -> Int -> VName -> DimAccess rep
 singleSeqAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, level, Sequential, LoopVar))
+    (S.singleton 0 (name, name, level, LoopVar))
     origDim
 
 generateNames :: Int -> [VName]
