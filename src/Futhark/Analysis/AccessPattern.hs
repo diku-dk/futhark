@@ -398,10 +398,25 @@ analyzeIndex ctx pats arr_name dimIndexes = do
             -- 0. Get the "stack" of bodytypes for each assignment
             map (second parents_nest) (M.toList $ assignments ctx')
 
-  maybe
-    (ctx', mempty)
-    (analyzeIndex' ctx' pats array_name')
+  -- TODO:
+  -- Lookup `arr_name` in `slices ctx'`,
+  -- if not Nothing,
+  -- union deps with deps from (last index of) the slice,
+  -- replace deps in last index of slice with the union,
+  -- `analyzeIndex' ctx' pats array_name' newDeps`
+  either
+    (index ctx' array_name')
+    (slice ctx')
     dependencies
+  where
+    index context arrayName dimAccess =
+      case M.lookup (fst arrayName) $ slices context of
+        Nothing -> analyzeIndex' context pats arrayName dimAccess
+        Just sliceAccess -> do
+          analyzeIndex' context pats arrayName (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
+
+    slice context dims =
+      (context {slices = M.insert (head pats) dims $ slices context}, mempty)
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyzeIndexContextFromIndices ctx dimIndexes pats = do
