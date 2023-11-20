@@ -201,11 +201,11 @@ seqStm' env (Let pat aux
 
 
 seqStm' env stm@(Let pat _ (Op (SegOp
-          (SegMap (SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
+          (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
   | isScatter kbody = seqScatter env stm
   | otherwise = do
     usedArrays <- getUsedArraysIn env kbody
-    ((kres, lvl', space', types'), stms) <- collectStms $ do
+    ((kres, space', types'), stms) <- collectStms $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       let env' = updateEnvTid env tid
@@ -214,15 +214,14 @@ seqStm' env stm@(Let pat _ (Op (SegOp
       chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
       res <- letTupExp' "res" $ Op $ OtherOp $
               Screma (seqFactor env) chunks screma
-      let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
       let types' = scremaType (seqFactor env) screma
       let kres = L.map (Returns ResultMaySimplify  mempty) res
-      pure (kres, lvl', space', types')
+      pure (kres, space', types')
 
     let kbody' = KernelBody dec stms kres
     let names = patNames pat
-    letBindNames names $ Op $ SegOp $ SegMap lvl' space' types' kbody'
+    letBindNames names $ Op $ SegOp $ SegMap lvl space' types' kbody'
 
 
 seqStm' env (Let pat aux
