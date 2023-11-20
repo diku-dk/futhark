@@ -142,13 +142,13 @@ singleAccess dims =
 singleParAccess :: Int -> Int -> VName -> DimAccess rep
 singleParAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, name, level, ThreadID))
+    (S.singleton 0 $ Dependency name name level ThreadID)
     origDim
 
 singleSeqAccess :: Int -> Int -> VName -> DimAccess rep
 singleSeqAccess origDim level name =
   DimAccess
-    (S.singleton 0 (name, name, level, LoopVar))
+    (S.singleton 0 $ Dependency name name level LoopVar)
     origDim
 
 generateNames :: Int -> [VName]

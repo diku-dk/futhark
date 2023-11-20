@@ -38,8 +38,8 @@ instance Layout GPU where
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
       -- Check if any of the dependencies are too complex to reason about
-      let deps = concatMap (map ((\(_, n, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
-      let counters = concatMap (map ((\(_, _, _, t) -> isCounter t) . snd) . S.toList . dependencies) dimAccesses
+      let deps = concatMap (map (originalVar . snd) . S.toList . dependencies) dimAccesses
+      let counters = concatMap (map (isCounter . varType . snd) . S.toList . dependencies) dimAccesses
       let primExps = map (`M.lookup` primExpTable) deps
       let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
@@ -182,7 +182,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (_, _, lvl, varType) = Just (varType, lvl, og)
+        f og (Dependency _ _ lvl varType) = Just (varType, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -223,7 +223,7 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (_, _, lvl, varType) = Just (varType, lvl, og)
+        f og (Dependency _ _ lvl varType) = Just (varType, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.
