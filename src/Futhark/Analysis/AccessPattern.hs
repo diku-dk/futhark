@@ -137,6 +137,8 @@ data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
     assignments :: M.Map VName (VariableInfo rep),
+    -- | Maps from sliced arrays to their respective access patterns.
+    slices :: M.Map VName [DimAccess rep],
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -149,16 +151,18 @@ instance Monoid (Context rep) where
   mempty =
     Context
       { assignments = mempty,
+        slices = mempty,
         parents = [],
         currentLevel = 0
       }
 
 instance Semigroup (Context rep) where
   (<>)
-    (Context ass0 lastBody0 lvl0)
-    (Context ass1 lastBody1 lvl1) =
+    (Context ass0 slices0 lastBody0 lvl0)
+    (Context ass1 slices1 lastBody1 lvl1) =
       Context
         ((<>) ass0 ass1)
+        ((<>) slices0 slices1)
         ((++) lastBody0 lastBody1)
         $ max lvl0 lvl1
 
@@ -169,7 +173,7 @@ extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
 allSegMap :: Context rep -> [SegOpName]
-allSegMap (Context _ parents _) =
+allSegMap (Context _ _ parents _) =
   mapMaybe
     ( \case
         (SegOpName o) -> Just o
@@ -213,6 +217,7 @@ oneContext :: VName -> VariableInfo rep -> Context rep
 oneContext name ctxValue =
   Context
     { assignments = M.singleton name ctxValue,
+      slices = mempty,
       parents = [],
       currentLevel = 0
     }
@@ -232,13 +237,6 @@ contextFromNames ctx ctxval =
   -- Create context from names in segspace
   foldl' extend ctx
     . map (`oneContext` ctxval)
-
---  . zipWith
---    ( \i n ->
---        n
---          `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype
---    )
---    [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimAccesss :: (Analyze rep) => Prog rep -> IndexTable rep
@@ -361,8 +359,8 @@ analyzeStm ctx (Let pats _ e) = do
 -- If left, this is just a regular index. If right, a slice happened.
 getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Either [DimAccess rep] [DimAccess rep]
 getIndexDependencies ctx dims =
-    fst
-    $ foldr
+  fst $
+    foldr
       ( \idx (a, i) -> do
           let acc =
                 either
@@ -377,15 +375,12 @@ getIndexDependencies ctx dims =
     matchDimIndex idx i accumulator =
       case idx of
         (DimFix subExpression) ->
-          Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
+          Left $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
         -- \| If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
-        -- (DimSlice _offset _num_elems _stride) ->
-        -- And then what?
-        _ -> Nothing
-
-    forceRight (Left a) = Right a
-    forceRight (Right a) = Right a
+        (DimSlice offset num_elems stride) ->
+          let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
+           in Right $ dimAccess {originalDimension = i} : accumulator
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
@@ -422,6 +417,7 @@ analyzeIndex ctx pats arr_name dimIndexes = do
     dependencies
   where
     index context arrayName dimAccess =
+      -- If the arrayname is a `DimSlice` we want to fixup the access
       case M.lookup (fst arrayName) $ slices context of
         Nothing -> analyzeIndex' context pats arrayName dimAccess
         Just sliceAccess -> do
