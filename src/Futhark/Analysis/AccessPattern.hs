@@ -375,6 +375,9 @@ getIndexDependencies ctx dims =
         -- And then what?
         _ -> Nothing
 
+    forceRight (Left a) = Right a
+    forceRight (Right a) = Right a
+
 -- | Gets the dependencies of each dimension and either returns a result, or
 -- adds a slice to the context.
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
