@@ -10,7 +10,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -65,19 +65,14 @@ entry("main",
 -- (segmap) defunc_0_map_res_r_5726 : {
 --     (arr) xss_5513 : {
 --         (idx) eta_p_5730 :
---             0 : dependencies = {gtid_5727 0 par}
---             1 : dependencies = {gtid_5728 1 par}
+--             0 : dependencies = {gtid_5727 0 tid}
+--             1 : dependencies = {gtid_5728 1 tid}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5737 : {
---     (arr) xss_5513 : {
---         (idx) eta_p_5730 :
---             0 : dependencies = {gtid_5727 0 par}
---             1 : dependencies = {gtid_5728 1 par}
---     }
 --     (arr) defunc_0_map_res_r_5726 : {
 --         (idx) b_5744 :
---             0 : dependencies = {gtid_5738 1 par}
---             1 : dependencies = {i_5742 2 seq}
+--             0 : dependencies = {gtid_5738 1 tid}
+--             1 : dependencies = {i_5742 2 iter}
 --     }
 -- }

@@ -12,7 +12,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -93,24 +93,24 @@ entry("main",
 -- (segmap) defunc_0_map_res_5337 : {
 --     (arr) xsss_5223 : {
 --         (idx) eta_p_5351 :
---             0 : dependencies = {gtid_5338 0 par}
---             1 : dependencies = {i_5345 1 seq}
---             2 : dependencies = {gtid_5349 2 par}
+--             0 : dependencies = {gtid_5338 0 tid}
+--             1 : dependencies = {i_5345 1 iter}
+--             2 : dependencies = {gtid_5349 2 tid}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5348 : {
 --     (arr) xsss_5223 : {
 --         (idx) eta_p_5351 :
---             0 : dependencies = {gtid_5338 0 par}
---             1 : dependencies = {i_5345 1 seq}
---             2 : dependencies = {gtid_5349 2 par}
+--             0 : dependencies = {gtid_5338 0 tid}
+--             1 : dependencies = {i_5345 1 iter}
+--             2 : dependencies = {gtid_5349 2 tid}
 --     }
 -- }
 -- (segmap) lifted_lambda_res_5416 : {
 --     (arr) xsss_5223 : {
 --         (idx) eta_p_5420 :
---             0 : dependencies = {gtid_5417 1 par}
---             1 : dependencies = {i_5405 0 seq}
---             2 : dependencies = {gtid_5418 2 par}
+--             0 : dependencies = {gtid_5417 1 tid}
+--             1 : dependencies = {i_5405 0 iter}
+--             2 : dependencies = {gtid_5418 2 tid}
 --     }
 -- }

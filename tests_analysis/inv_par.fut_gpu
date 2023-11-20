@@ -7,7 +7,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -40,6 +40,6 @@ entry("main",
 --     (arr) xss_5111 : {
 --         (idx) eta_p_5151 :
 --             0 : dependencies = {}
---             1 : dependencies = {gtid_5149 0 par}
+--             1 : dependencies = {gtid_5149 0 tid}
 --     }
 -- }

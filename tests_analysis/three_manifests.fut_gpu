@@ -9,7 +9,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -65,4 +65,16 @@ entry("main",
 }
 
 -- === Expected output of analysis:
-
+-- (segmap) defunc_0_map_res_5419 : {
+--     (arr) xss_5263 : {
+--         (idx) b_5426 :
+--             0 : dependencies = {gtid_5420 0 tid}
+--             1 : dependencies = {i_5424 1 iter}
+--         (idx) b_5431 :
+--             0 : dependencies = {gtid_5420 0 tid}
+--             1 : dependencies = {i_5429 1 iter}
+--         (idx) b_5437 :
+--             0 : dependencies = {gtid_5420 0 tid}
+--             1 : dependencies = {i_5435 1 iter}
+--     }
+-- }

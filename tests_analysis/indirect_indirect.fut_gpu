@@ -10,7 +10,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -65,7 +65,7 @@ entry("main",
 -- (segmap) defunc_0_map_res_5649 : {
 --     (arr) xs_5437 : {
 --         (idx) lifted_lambda_res_5656 :
---             0 : dependencies = {gtid_5650 0 par}
---             1 : dependencies = {gtid_5651 1 par}
+--             0 : dependencies = {tmp_5653 gtid_5650 0 tid}
+--             1 : dependencies = {tmp_5655 gtid_5651 1 tid}
 --     }
 -- }

@@ -291,8 +291,6 @@ entry("main",
 --                 is2_5722[i_6493]
 --               in {map2_arg2_6548}
 --             }
---           let {res_expanded_coalesced_0 : [l_5716][n_5718][o_5719]i64} =
---             manifest((2, 0, 1), res_expanded_6494)
 --           let {wew_r_r_6506 : [l_5716][n_5718]i64} =
 --             segmap(thread; ; groups=segmap_usable_groups_6505; groupsize=segmap_group_size_6504)
 --             (gtid_6507 < l_5716, gtid_6508 < n_5718) (~phys_tid_6509) : {i64} {
@@ -301,7 +299,7 @@ entry("main",
 --               let {+_lhs_6512 : i64} =
 --                 xsss_5720[gtid_6507, map2_arg2_6550, gtid_6508, 0i64]
 --               let {+_rhs_6513 : i64} =
---                 res_expanded_coalesced_0[gtid_6507, gtid_6508, 0i64]
+--                 res_expanded_6494[gtid_6507, gtid_6508, 0i64]
 --               let {wew_6514 : i64} =
 --                 add64(+_lhs_6512, +_rhs_6513)
 --               return {returns wew_6514}

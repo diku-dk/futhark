@@ -38,6 +38,7 @@ entry("main",
 }
 
 
+-- NOTE: The validity of this test depends on the maximum allowable stride and offset
 -- === Expected output after pass: CONFIRMED
 -- types {
 --
@@ -65,7 +66,7 @@ entry("main",
 --     segmap(thread; ; groups=segmap_usable_groups_5389; groupsize=segmap_group_size_5388)
 --     (gtid_5391 < l_5238, gtid_5392 < n_5239) (~phys_tid_5393) : {i64} {
 --       let {tmp_5395 : i64} =
---         xsss_coalesced_0[gtid_5391, gtid_5392, 0i64]
+--         xsss_5241[gtid_5391, gtid_5392, 0i64]
 --       let {lifted_lambda_res_5396 : i64} =
 --         loop {res_5398 : i64} = {tmp_5395}
 --         for i_5397:i64 < n_5239 do {

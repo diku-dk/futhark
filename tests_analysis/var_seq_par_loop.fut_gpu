@@ -9,7 +9,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -50,7 +50,7 @@ entry("main",
 -- (segmap) defunc_0_map_res_5350 : {
 --     (arr) xss_5280 : {
 --         (idx) eta_p_5353 :
---             0 : dependencies = {i_5325 0 seq}
---             1 : dependencies = {gtid_5351 1 par}
+--             0 : dependencies = {i_5325 0 iter}
+--             1 : dependencies = {gtid_5351 1 tid}
 --     }
 -- }

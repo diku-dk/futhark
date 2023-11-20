@@ -12,7 +12,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -54,12 +54,12 @@ entry("main",
 -- (segmap) defunc_0_map_res_5390 : {
 --     (arr) xsss_5241 : {
 --         (idx) tmp_5395 :
---             0 : dependencies = {gtid_5391 0 par}
---             1 : dependencies = {gtid_5392 1 par}
+--             0 : dependencies = {gtid_5391 0 tid}
+--             1 : dependencies = {gtid_5392 1 tid}
 --             2 : dependencies = {}
 --         (idx) +_rhs_5399 :
---             0 : dependencies = {gtid_5391 0 par}
---             1 : dependencies = {gtid_5392 1 par}
---             2 : dependencies = {i_5397 2 seq}
+--             0 : dependencies = {gtid_5391 0 tid}
+--             1 : dependencies = {gtid_5392 1 tid}
+--             2 : dependencies = {i_5397 2 iter}
 --     }
 -- }

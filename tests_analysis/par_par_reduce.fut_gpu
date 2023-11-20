@@ -8,7 +8,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -117,24 +117,24 @@ entry("main",
 -- (segmap) defunc_0_map_res_5361 : {
 --     (arr) xsss_5239 : {
 --         (idx) x_5371 :
---             0 : dependencies = {gtid_5362 0 par}
---             1 : dependencies = {i_5472 1 seq}
---             2 : dependencies = {i_5475 2 seq}
+--             0 : dependencies = {gtid_5362 0 tid}
+--             1 : dependencies = {i_5472 1 iter}
+--             2 : dependencies = {i_5475 2 iter}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5441 : {
 --     (arr) xsss_5239 : {
 --         (idx) x_5450 :
---             0 : dependencies = {gtid_5442 0 par}
---             1 : dependencies = {gtid_5443 1 par}
---             2 : dependencies = {i_5477 2 seq}
+--             0 : dependencies = {gtid_5442 0 tid}
+--             1 : dependencies = {gtid_5443 1 tid}
+--             2 : dependencies = {i_5477 2 iter}
 --     }
 -- }
 -- (segred) defunc_0_map_res_5457 : {
 --     (arr) xsss_5239 : {
 --         (idx) x_5467 :
---             0 : dependencies = {gtid_5458 0 par}
---             1 : dependencies = {gtid_5459 1 par}
---             2 : dependencies = {gtid_5460 2 par}
+--             0 : dependencies = {gtid_5458 0 tid}
+--             1 : dependencies = {gtid_5459 1 tid}
+--             2 : dependencies = {gtid_5460 2 tid}
 --     }
 -- }

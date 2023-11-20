@@ -11,7 +11,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -54,7 +54,7 @@ entry("main",
 -- (segmap) defunc_0_map_res_5216 : {
 --     (arr) xss_5148 : {
 --         (idx) +_rhs_5224 :
---             0 : dependencies = {gtid_5217 0 par}
---             1 : dependencies = {k_5147 0 seq, i_5221 1 seq}
+--             0 : dependencies = {gtid_5217 0 tid}
+--             1 : dependencies = {+_rhs_5223 i_5221 1 iter}
 --     }
 -- }
