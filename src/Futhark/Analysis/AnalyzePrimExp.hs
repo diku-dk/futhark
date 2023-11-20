@@ -60,20 +60,30 @@ stmToPrimExps :: forall rep. (PrimExpAnalysis rep, RepTypes rep) => Scope rep ->
 stmToPrimExps scope stm = do
   primExpTable <- get
   case stm of
-    (Let (Pat patElems) aux exp)
+    (Let (Pat patElems) _ exp)
       | Just primExp <- primExpFromExp (toPrimExp scope primExpTable) exp ->
           -- The statement can be resolved as a `PrimExp`.
           -- For each pattern element, insert the PrimExp in the primExpTable
           forM_ patElems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
       | otherwise -> do
           -- The statement can't be resolved as a `PrimExp`.
-          walkExpM walker (stmExp stm) -- Traverse the rest of the AST
+          walk (stmExp stm) -- Traverse the rest of the AST
           primExpTable' <- get -- Get the updated PrimExpTable after traversing the AST
           -- Add pattern elements that can't be resolved as `PrimExp` to the `PrimExpTable` as `Nothing`
           forM_ patElems $ \(PatElem name _) -> case M.lookup name primExpTable' of
             Nothing -> modify $ M.insert name Nothing
             _ -> pure ()
   where
+    walk exp = do
+      -- Handle most cases using the walker
+      walkExpM walker exp
+      -- Additionally, handle loop parameters
+      case exp of
+        (Loop merge form@(ForLoop iter t subExp) loopbody) -> do
+          let primExp = primExpFromSubExp (IntType t) subExp
+          modify $ M.insert iter (Just primExp)
+        _ -> pure ()
+
     walker =
       (identityWalker @rep)
         { walkOnBody = \body_scope -> bodyToPrimExps (scope <> body_scope),
