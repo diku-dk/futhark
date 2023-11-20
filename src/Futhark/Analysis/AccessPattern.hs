@@ -590,7 +590,6 @@ reduceDependencies ctx v_src v =
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        -- TODO: is basetag v good enough as a key?
         ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
         LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
         ConstType -> mempty
