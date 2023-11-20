@@ -135,6 +135,8 @@ data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
     assignments :: M.Map VName (CtxVal rep),
+    -- | A mapping of array names to slices.
+    slices :: M.Map VName [DimAccess rep],
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -147,16 +149,18 @@ instance Monoid (Context rep) where
   mempty =
     Context
       { assignments = mempty,
+        slices = mempty,
         parents = [],
         currentLevel = 0
       }
 
 instance Semigroup (Context rep) where
   (<>)
-    (Context ass0 lastBody0 lvl0)
-    (Context ass1 lastBody1 lvl1) =
+    (Context ass0 slices0 lastBody0 lvl0)
+    (Context ass1 slices1 lastBody1 lvl1) =
       Context
         ((<>) ass0 ass1)
+        ((<>) slices0 slices1)
         ((++) lastBody0 lastBody1)
         $ max lvl0 lvl1
 
@@ -167,7 +171,7 @@ extend :: Context rep -> Context rep -> Context rep
 extend = (<>)
 
 allSegMap :: Context rep -> [SegOpName]
-allSegMap (Context _ parents _) =
+allSegMap (Context _ _ parents _) =
   mapMaybe
     ( \case
         (SegOpName o) -> Just o
@@ -210,12 +214,7 @@ ctxValFromNames ctx names = do
 
 -- | Wrapper around the constructur of Context.
 oneContext :: VName -> CtxVal rep -> Context rep
-oneContext name ctxValue =
-  Context
-    { assignments = M.singleton name ctxValue,
-      parents = [],
-      currentLevel = 0
-    }
+oneContext name ctxValue = mempty {assignments = M.singleton name ctxValue}
 
 -- | Create a singular ctxVal with no dependencies.
 ctxValZeroDeps :: Context rep -> IterationType rep -> CtxVal rep
@@ -233,13 +232,6 @@ contextFromNames ctx ctxval =
   -- Create context from names in segspace
   foldl' extend ctx
     . map (`oneContext` ctxval)
-
---  . zipWith
---    ( \i n ->
---        n
---          `oneContext` ctxValZeroDeps (ctx {currentLevel = currentLevel ctx + i}) itertype
---    )
---    [0 ..]
 
 -- | Analyze each `entry` and accumulate the results.
 analyzeDimAccesss :: (Analyze rep) => Prog rep -> IndexTable rep
@@ -359,24 +351,27 @@ analyzeStm ctx (Let pats _ e) = do
     (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternNames
 
-getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimAccess rep]
-getIndexDependencies _ [] = Nothing
+-- If left, this is just a regular index. If right, a slice happened.
+getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Either [DimAccess rep] [DimAccess rep]
+getIndexDependencies _ [] = Left []
 getIndexDependencies ctx dims =
   fst
-    . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Just [], length dims - 1)
+    . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Left [], length dims - 1)
     $ reverse dims
   where
     matchDimIndex idx i accumulator =
       case idx of
         (DimFix subExpression) ->
-          Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
+          Left $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
         -- \| If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
-        -- (DimSlice _offset _num_elems _stride) ->
-        -- And then what?
-        _ -> Nothing
+        (DimSlice offset num_elems stride) ->
+          -- And then what?
+          let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
+           in Right $ dimAccess {originalDimension = i} : accumulator
 
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
+analyzeIndex ctx _ _ [] = (ctx, mempty)
 analyzeIndex ctx pats arr_name dimIndexes = do
   let dependencies = getIndexDependencies ctx dimIndexes
   let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
@@ -391,9 +386,9 @@ analyzeIndex ctx pats arr_name dimIndexes = do
           L.find (\(n, _) -> n == arr_name) $
             map (second parents_nest) (M.toList $ assignments ctx')
 
-  maybe
-    (ctx', mempty)
+  either
     (analyzeIndex' ctx' pats array_name')
+    (\d -> (ctx' {slices = M.insert arr_name d $ slices ctx'}, mempty))
     dependencies
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
@@ -556,7 +551,7 @@ analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Get the iteration type of the last SegOp encountered in the context.
 getIterationType :: Context rep -> IterationType rep
-getIterationType (Context _ bodies _) =
+getIterationType (Context _ _ bodies _) =
   getIteration_rec bodies
   where
     getIteration_rec [] = Sequential
