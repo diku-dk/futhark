@@ -163,12 +163,11 @@ import Language.Futhark.Parser.Monad
       hole            { L $$ HOLE }
 
 %left bottom
-%left typeprec
 %left ifprec letprec caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
 %right '...' '..<' '..>' '..'
-%left '`' '!...'
+%left '`'
 %right '->'
 %left with
 %left '='

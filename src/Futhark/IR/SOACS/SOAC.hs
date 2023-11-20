@@ -627,18 +627,19 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
      in map flattenGroups (groupScatterResults outputs deps)
     where
-      flattenGroups (_, _, ivs) =
-        mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
+      flattenGroups (_, arr, ivs) =
+        oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
   opDependencies (JVP lam args vec) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
   opDependencies (VJP lam args vec) =
-    mconcat $
-      replicate 2 $
-        lambdaDependencies mempty lam $
-          zipWith (<>) (map depsOf' args) (map depsOf' vec)
+    lambdaDependencies
+      mempty
+      lam
+      (zipWith (<>) (map depsOf' args) (map depsOf' vec))
+      <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $
