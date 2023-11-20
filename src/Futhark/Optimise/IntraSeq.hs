@@ -349,12 +349,21 @@ seqScatter env (Let pat aux (Op (SegOp
           tid <- newVName "write_i"
           phys <- newVName "phys_tid"
 
-          size <- mkChunkSize tid env
+          -- size <- mkChunkSize tid env
+          offset <- letSubExp "offset" $ BasicOp $
+                      BinOp (Mul Int64 OverflowUndef) (Var tid) (seqFactor env)
+          tmp <- letSubExp "tmp" $ BasicOp $
+                      BinOp (Sub Int64 OverflowUndef) (grpsizeOld env) offset
+          size <- letSubExp "size" $ BasicOp $
+                      BinOp (SMin Int64) tmp (seqFactor env)
           size' <- letSubExp "size'" =<< eBinOp (Sub Int64 OverflowUndef)
                                                 (eSubExp size)
                                                 (eSubExp $ intConst Int64 1)
-          i' <- letExp "loop_i'" $ BasicOp $
+          i' <- letSubExp "loop_i'" $ BasicOp $
                                  BinOp (SMin Int64) size' (Var i)
+          idx <- letSubExp "idx" =<< eBinOp (Add Int64 OverflowUndef)
+                                            (eSubExp i')
+                                            (eSubExp offset)
 
           -- Modify original statements
           forM_ (kernelBodyStms kbody) $ \ stm -> do
@@ -363,8 +372,8 @@ seqScatter env (Let pat aux (Op (SegOp
                     let arr' = M.findWithDefault arr arr (nameMap env)
                     tp' <- lookupType arr'
                     let slice' = case arrayRank tp' of
-                                    1 -> Slice [DimFix $ Var i']
-                                    2 -> Slice [DimFix $ Var tid, DimFix $ Var i']
+                                    1 -> Slice [DimFix idx]
+                                    2 -> Slice [DimFix $ Var tid, DimFix i']
                                     _ -> error "Scatter more than two dimensions"
                     addStm $ Let pat' aux' (BasicOp (Index arr' slice'))
                 stm -> addStm stm
@@ -377,7 +386,7 @@ seqScatter env (Let pat aux (Op (SegOp
                                                            (eSubExp $ seqFactor env)
               val <- letSubExp "iota_val" =<< eBinOp (Add Int64 OverflowUndef)
                                                          (eSubExp offset)
-                                                         (eSubExp $ Var i')
+                                                         (eSubExp i')
               pure (Var nm, val)
           let valMap = M.fromList mapping
 
