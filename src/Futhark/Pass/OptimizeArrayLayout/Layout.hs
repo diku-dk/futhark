@@ -38,8 +38,8 @@ instance Layout GPU where
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
       -- Check if any of the dependencies are too complex to reason about
-      let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
-      let counters = concatMap (map ((\(_, _, _, _, t) -> isCounter t) . snd) . S.toList . dependencies) dimAccesses
+      let deps = concatMap (map ((\(_, n, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
+      let counters = concatMap (map ((\(_, _, _, t) -> isCounter t) . snd) . S.toList . dependencies) dimAccesses
       let primExps = map (`M.lookup` primExpTable) deps
       let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
@@ -158,32 +158,31 @@ sortGPU =
       cmpIdxPat aggr1 aggr2
       where
         cmpIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
           Ordering
         cmpIdxPat Nothing Nothing = EQ
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
         cmpIdxPat
           (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) =
-            case (iterL, iterR) of
-              (Parallel, Sequential) -> GT
-              (Sequential, Parallel) -> LT
-              _ ->
-                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+          (Just (iterR, lvlR, originalLevelR)) = case (iterL, iterR) of
+            (ThreadID, ThreadID) -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+            (ThreadID, _) -> GT
+            (_, ThreadID) -> LT
+            _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
 
         maxIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int)
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int)
 
         maxIdxPat lhs rhs =
           case cmpIdxPat lhs rhs of
             LT -> rhs
             _ -> lhs
 
-        f og (_, _, lvl, itertype, _) = Just (itertype, lvl, og)
+        f og (_, _, lvl, varType) = Just (varType, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -199,8 +198,8 @@ sortMC =
       cmpIdxPat aggr1 aggr2
       where
         cmpIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
           Ordering
         cmpIdxPat Nothing Nothing = EQ
         cmpIdxPat (Just _) Nothing = GT
@@ -209,22 +208,22 @@ sortMC =
           (Just (iterL, lvlL, originalLevelL))
           (Just (iterR, lvlR, originalLevelR)) =
             case (iterL, iterR) of
-              (Parallel, Sequential) -> LT
-              (Sequential, Parallel) -> GT
-              _ ->
-                (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+              (ThreadID, ThreadID) -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+              (ThreadID, _) -> LT
+              (_, ThreadID) -> GT
+              _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
 
         maxIdxPat ::
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int) ->
-          Maybe (IterationType rep, Int, Int)
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int) ->
+          Maybe (VarType, Int, Int)
 
         maxIdxPat lhs rhs =
           case cmpIdxPat lhs rhs of
             LT -> rhs
             _ -> lhs
 
-        f og (_, _, lvl, itertype, _) = Just (itertype, lvl, og)
+        f og (_, _, lvl, varType) = Just (varType, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.

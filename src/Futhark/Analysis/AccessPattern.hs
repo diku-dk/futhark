@@ -11,7 +11,6 @@ module Futhark.Analysis.AccessPattern
     ArrayName,
     DimAccess (..),
     IndexExprName,
-    IterationType (Sequential, Parallel),
     BodyType (..),
     SegOpName (SegmentedMap, SegmentedRed, SegmentedScan, SegmentedHist),
     notImplementedYet,
@@ -77,7 +76,7 @@ data DimAccess rep = DimAccess
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
-    dependencies :: S.IntMap (VName, VName, Int, IterationType rep, VarType),
+    dependencies :: S.IntMap (VName, VName, Int, VarType),
     originalDimension :: Int
   }
   deriving (Eq, Show)
@@ -94,12 +93,6 @@ instance Monoid (DimAccess rep) where
 
 isInvariant :: DimAccess rep -> Bool
 isInvariant = null . dependencies
-
--- | Iteration type describes whether the index is iterated in a parallel or
--- sequential way, ie. if the index expression comes from a sequential or
--- parallel construct, like foldl or map.
-data IterationType rep = Sequential | Parallel
-  deriving (Eq, Show)
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
 unionIndexTables = M.unionWith (M.unionWith M.union)
@@ -184,7 +177,6 @@ allSegMap (Context _ _ parents _) =
 -- gtid, or some other pattern.
 data CtxVal rep = CtxVal
   { deps :: Names,
-    iterationType :: IterationType rep,
     level :: Int,
     parents_nest :: [BodyType],
     variableType :: VarType
@@ -207,7 +199,6 @@ ctxValFromNames :: Context rep -> Names -> CtxVal rep
 ctxValFromNames ctx names = do
   CtxVal
     names
-    (getIterationType ctx)
     (currentLevel ctx)
     (parents ctx)
     Variable
@@ -217,11 +208,10 @@ oneContext :: VName -> CtxVal rep -> Context rep
 oneContext name ctxValue = mempty {assignments = M.singleton name ctxValue}
 
 -- | Create a singular ctxVal with no dependencies.
-ctxValZeroDeps :: Context rep -> IterationType rep -> CtxVal rep
-ctxValZeroDeps ctx iterType =
+ctxValZeroDeps :: Context rep -> CtxVal rep
+ctxValZeroDeps ctx =
   CtxVal
     mempty
-    iterType
     (currentLevel ctx)
     (parents ctx)
     Variable -- variable is a very common type
@@ -242,7 +232,7 @@ analyzeFunction :: (Analyze rep) => FunDef rep -> IndexTable rep
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- \| Create a context from a list of parameters
-  let ctx = contextFromNames mempty (ctxValZeroDeps ctx Sequential) $ map paramName $ funDefParams func
+  let ctx = contextFromNames mempty (ctxValZeroDeps ctx) $ map paramName $ funDefParams func
   snd $ analyzeStmsPrimitive ctx stms
 
 -- | Analyze each statement in a list of statements.
@@ -345,7 +335,7 @@ analyzeStm ctx (Let pats _ e) = do
     (BasicOp (Index name (Slice dimSubexp))) -> analyzeIndex ctx patternNames name dimSubexp
     (BasicOp (Update _ name (Slice dimSubexp) _subexp)) -> analyzeIndex ctx patternNames name dimSubexp
     (BasicOp op) -> analyzeBasicOp ctx op patternNames
-    (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (ctxValZeroDeps ctx (getIterationType ctx)) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
+    (Match conds cases defaultBody _) -> analyzeMatch (contextFromNames ctx (ctxValZeroDeps ctx) $ concatMap (namesToList . getDeps) conds) patternNames defaultBody $ map caseBody cases
     (Loop bindings loop body) -> analyzeLoop ctx bindings loop body patternNames
     (Apply _name diets _ _) -> analyzeApply ctx patternNames diets
     (WithAcc _ _) -> (ctx, mempty) -- ignored
@@ -509,7 +499,7 @@ analyzeLoop ctx bindings loop body pats = do
   let nextLevel = currentLevel ctx
   let ctx'' = ctx {currentLevel = nextLevel}
   let ctx' =
-        contextFromNames ctx'' ((ctxValZeroDeps ctx Sequential) {variableType = LoopVar}) $
+        contextFromNames ctx'' ((ctxValZeroDeps ctx) {variableType = LoopVar}) $
           case loop of
             (WhileLoop iterVar) -> iterVar : map (paramName . fst) bindings
             (ForLoop iterVar _ _) -> iterVar : map (paramName . fst) bindings
@@ -537,7 +527,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n $ CtxVal mempty Parallel (currentLevel ctx + i) (parents ctx') ThreadID)
+          . map (\(n, i) -> oneContext n $ CtxVal mempty (currentLevel ctx + i) (parents ctx') ThreadID)
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -549,14 +539,14 @@ analyzeSegOp op ctx pats = do
 analyzeSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeSizeOp op ctx pats = do
   let subexprsToContext =
-        contextFromNames ctx (ctxValZeroDeps ctx Sequential)
+        contextFromNames ctx (ctxValZeroDeps ctx)
           . concatMap (namesToList . analyzeSubExpr pats ctx)
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
         (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
-  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ (ctxValZeroDeps ctx Sequential) {parents_nest = parents ctx'}) pats
+  let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ (ctxValZeroDeps ctx) {parents_nest = parents ctx'}) pats
   (ctx'', mempty)
 
 -- | Analyze statements in a rep body.
@@ -566,20 +556,6 @@ analyzeGPUBody body ctx =
 
 analyzeOtherOp :: Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeOtherOp ctx _ = (ctx, mempty)
-
--- | Get the iteration type of the last SegOp encountered in the context.
-getIterationType :: Context rep -> IterationType rep
-getIterationType (Context _ _ bodies _) =
-  getIteration_rec bodies
-  where
-    getIteration_rec [] = Sequential
-    getIteration_rec rec =
-      case last rec of
-        SegOpName _ -> Parallel
-        LoopBodyName _ -> Sequential
-        -- We can't really trust cond/match to be sequential/parallel, so
-        -- recurse a bit
-        CondBodyName _ -> getIteration_rec $ init rec
 
 -- | Returns an intmap of names, to be used as dependencies in construction of
 -- CtxVals.
@@ -611,13 +587,13 @@ reduceDependencies :: Context rep -> VName -> VName -> DimAccess rep
 reduceDependencies ctx v_src v =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Unable to find " ++ prettyString v
-    Just (CtxVal deps itertype lvl _parents t) ->
+    Just (CtxVal deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
         -- TODO: is basetag v good enough as a key?
-        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
+        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
+        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
         ConstType -> mempty
         Variable ->
           mconcat $
@@ -717,7 +693,10 @@ instance Pretty (DimAccess rep) where
     "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) -- <+> (show $ variableType dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
-      printPair (name, name_orig, lvl, itertype, vtype) = pretty name_orig <+> pretty name <+> pretty lvl <+> pretty itertype <+> pretty vtype
+      printPair (name, name_orig, lvl, vtype) =
+        if name_orig == name
+          then pretty name <+> pretty lvl <+> pretty vtype
+          else pretty name_orig <+> pretty name <+> pretty lvl <+> pretty vtype
 
 instance Pretty SegOpName where
   pretty (SegmentedMap name) = "(segmap)" <+> pretty name
@@ -732,10 +711,6 @@ instance Pretty BodyType where
   pretty (SegOpName (SegmentedHist name)) = pretty name <+> colon <+> "seghist"
   pretty (LoopBodyName name) = pretty name <+> colon <+> "loop"
   pretty (CondBodyName name) = pretty name <+> colon <+> "cond"
-
-instance Pretty (IterationType rep) where
-  pretty Sequential = "seq"
-  pretty Parallel = "par"
 
 instance Pretty VarType where
   pretty ConstType = "const"
