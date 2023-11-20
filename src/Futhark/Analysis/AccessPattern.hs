@@ -19,6 +19,7 @@ module Futhark.Analysis.AccessPattern
     VariableInfo (..),
     VarType (..),
     isCounter,
+    Dependency (..),
   )
 where
 
@@ -76,8 +77,16 @@ data DimAccess rep = DimAccess
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
-    dependencies :: S.IntMap (VName, VName, Int, VarType),
+    dependencies :: S.IntMap Dependency,
     originalDimension :: Int
+  }
+  deriving (Eq, Show)
+
+data Dependency = Dependency
+  { reducedVar :: VName,
+    originalVar :: VName,
+    lvl :: Int,
+    varType :: VarType
   }
   deriving (Eq, Show)
 
@@ -590,8 +599,8 @@ reduceDependencies ctx v_src v =
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, t))]) (currentLevel ctx)
+        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v v_src lvl t)]) (currentLevel ctx)
+        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v v_src lvl t)]) (currentLevel ctx)
         ConstType -> mempty
         Variable ->
           mconcat $
@@ -691,7 +700,7 @@ instance Pretty (DimAccess rep) where
     "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) -- <+> (show $ variableType dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
-      printPair (name, name_orig, lvl, vtype) =
+      printPair (Dependency name name_orig lvl vtype) =
         if name_orig == name
           then pretty name <+> pretty lvl <+> pretty vtype
           else pretty name_orig <+> pretty name <+> pretty lvl <+> pretty vtype
