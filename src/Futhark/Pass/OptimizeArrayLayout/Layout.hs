@@ -41,12 +41,11 @@ instance Layout GPU where
       let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
       let primExps = map (`M.lookup` primExpTable) deps
       let inscrutable = any isInscrutable primExps
+
       -- Check if we want to manifest this array with the permutation
-      pTraceShow inscrutable $
-        pTraceShow primExps $
-          if lastIdxIsConst || inscrutable || commonPermutationEliminators perm nest dimAccesses
-            then Nothing
-            else Just perm
+      if lastIdxIsConst || inscrutable || commonPermutationEliminators perm nest dimAccesses
+        then Nothing
+        else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool
 isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) =
