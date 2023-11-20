@@ -16,7 +16,7 @@ module Futhark.Analysis.AccessPattern
     notImplementedYet,
     Context (..),
     analyzeIndex,
-    CtxVal (..),
+    VariableInfo (..),
     VarType (..),
     isCounter,
   )
@@ -127,7 +127,7 @@ analysisPropagateByTransitivity idxTable =
 data Context rep = Context
   { -- | A mapping from patterns occuring in Let expressions to their dependencies
     --  and iteration types.
-    assignments :: M.Map VName (CtxVal rep),
+    assignments :: M.Map VName (VariableInfo rep),
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -168,10 +168,10 @@ allSegMap (Context _ parents _) =
     )
     parents
 
--- | Context Value (CtxVal) is the type used in the context to categorize
+-- | Context Value (VariableInfo) is the type used in the context to categorize
 -- assignments. For example, a pattern might depend on a function parameter, a
 -- gtid, or some other pattern.
-data CtxVal rep = CtxVal
+data VariableInfo rep = VariableInfo
   { deps :: Names,
     level :: Int,
     parents_nest :: [BodyType],
@@ -191,16 +191,16 @@ isCounter LoopVar = True
 isCounter ThreadID = True
 isCounter _ = False
 
-ctxValFromNames :: Context rep -> Names -> CtxVal rep
+ctxValFromNames :: Context rep -> Names -> VariableInfo rep
 ctxValFromNames ctx names = do
-  CtxVal
+  VariableInfo
     names
     (currentLevel ctx)
     (parents ctx)
     Variable
 
 -- | Wrapper around the constructur of Context.
-oneContext :: VName -> CtxVal rep -> Context rep
+oneContext :: VName -> VariableInfo rep -> Context rep
 oneContext name ctxValue =
   Context
     { assignments = M.singleton name ctxValue,
@@ -209,16 +209,16 @@ oneContext name ctxValue =
     }
 
 -- | Create a singular ctxVal with no dependencies.
-ctxValZeroDeps :: Context rep -> CtxVal rep
+ctxValZeroDeps :: Context rep -> VariableInfo rep
 ctxValZeroDeps ctx =
-  CtxVal
+  VariableInfo
     mempty
     (currentLevel ctx)
     (parents ctx)
     Variable -- variable is a very common type
 
 -- | Create a singular context from a segspace
-contextFromNames :: Context rep -> CtxVal rep -> [VName] -> Context rep
+contextFromNames :: Context rep -> VariableInfo rep -> [VName] -> Context rep
 contextFromNames ctx ctxval =
   -- Create context from names in segspace
   foldl' extend ctx
@@ -262,20 +262,20 @@ analyzeStms ctx bodyConstructor pats body = do
   --    therefore we need to subtract the old context from the returned one,
   --    and discard all the keys within it.
 
-  -- assignments :: M.Map VName (CtxVal rep),
+  -- assignments :: M.Map VName (VariableInfo rep),
   let inScopeDependenciesFromBody =
         rmOutOfScopeDeps ctx'' $
           M.difference (assignments ctx'') (assignments recContext)
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = foldl extend ctx $ concatCtxVal inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
+  let ctx' = foldl extend ctx $ concatVariableInfo inScopeDependenciesFromBody -- . map snd $ M.toList ctxVals
   -- 3. Now we have the correct context and result
   (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
   where
-    -- Extracts and merges `Names` in `CtxVal`s, and makes a new CtxVal. This
+    -- Extracts and merges `Names` in `VariableInfo`s, and makes a new VariableInfo. This
     -- MAY throw away needed information, but it was my best guess at a solution
     -- at the time of writing.
-    concatCtxVal dependencies =
+    concatVariableInfo dependencies =
       map (\pat -> oneContext pat (ctxValFromNames ctx dependencies)) pats
 
     -- Context used for "recursion" into analyzeStmsPrimitive
@@ -286,7 +286,7 @@ analyzeStms ctx bodyConstructor pats body = do
         }
 
     -- Recursively looks up dependencies, until they're in scope or empty set.
-    rmOutOfScopeDeps :: Context rep -> M.Map VName (CtxVal rep) -> Names
+    rmOutOfScopeDeps :: Context rep -> M.Map VName (VariableInfo rep) -> Names
     rmOutOfScopeDeps ctx' newAssignments = do
       let throwawayAssignments = assignments ctx'
       let localAssignments = assignments ctx
@@ -430,14 +430,14 @@ analyzeIndex' ctx pats arr_name dimIndexes = do
 
 analyzeBasicOp :: Context rep -> BasicOp -> [VName] -> (Context rep, IndexTable rep)
 analyzeBasicOp ctx expression pats = do
-  -- Construct a CtxVal from the subexpressions
+  -- Construct a VariableInfo from the subexpressions
   let ctx_val = case expression of
         (SubExp subexp) -> ctxValFromSubExpr subexp
         (Opaque _ subexp) -> ctxValFromSubExpr subexp
-        (ArrayLit subexps _t) -> concatCtxVals mempty subexps
+        (ArrayLit subexps _t) -> concatVariableInfos mempty subexps
         (UnOp _ subexp) -> ctxValFromSubExpr subexp
-        (BinOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
-        (CmpOp _ lsubexp rsubexp) -> concatCtxVals mempty [lsubexp, rsubexp]
+        (BinOp _ lsubexp rsubexp) -> concatVariableInfos mempty [lsubexp, rsubexp]
+        (CmpOp _ lsubexp rsubexp) -> concatVariableInfos mempty [lsubexp, rsubexp]
         (ConvOp _ subexp) -> ctxValFromSubExpr subexp
         (Assert subexp _ _) -> ctxValFromSubExpr subexp
         (Index name _) ->
@@ -447,18 +447,18 @@ analyzeBasicOp ctx expression pats = do
         -- Technically, do we need this case?
         (Concat _ _ length_subexp) -> ctxValFromSubExpr length_subexp
         (Manifest _dim name) -> ctxValFromNames ctx $ oneName name
-        (Iota end start stride _) -> concatCtxVals mempty [end, start, stride]
-        (Replicate (Shape shape) value') -> concatCtxVals mempty (value' : shape)
-        (Scratch _ subexprs) -> concatCtxVals mempty subexprs
-        (Reshape _ (Shape shape_subexp) name) -> concatCtxVals (oneName name) shape_subexp
+        (Iota end start stride _) -> concatVariableInfos mempty [end, start, stride]
+        (Replicate (Shape shape) value') -> concatVariableInfos mempty (value' : shape)
+        (Scratch _ subexprs) -> concatVariableInfos mempty subexprs
+        (Reshape _ (Shape shape_subexp) name) -> concatVariableInfos (oneName name) shape_subexp
         (Rearrange _ name) -> ctxValFromNames ctx $ oneName name
-        (UpdateAcc name lsubexprs rsubexprs) -> concatCtxVals (oneName name) (lsubexprs ++ rsubexprs)
+        (UpdateAcc name lsubexprs rsubexprs) -> concatVariableInfos (oneName name) (lsubexprs ++ rsubexprs)
         (FlatIndex name _) -> ctxValFromNames ctx $ oneName name
         (FlatUpdate name _ source) -> ctxValFromNames ctx $ namesFromList [name, source]
   let ctx' = foldl' extend ctx $ map (`oneContext` ctx_val) pats
   (ctx', mempty)
   where
-    concatCtxVals ne nn =
+    concatVariableInfos ne nn =
       ctxValFromNames
         ctx
         (foldl' (\a -> (<>) a . analyzeSubExpr pats ctx) ne nn)
@@ -526,7 +526,7 @@ analyzeSegOp op ctx pats = do
   let ctx' = ctx {currentLevel = nextLevel}
   let segSpaceContext =
         foldl' extend ctx'
-          . map (\(n, i) -> oneContext n $ CtxVal mempty (currentLevel ctx + i) (parents ctx') ThreadID)
+          . map (\(n, i) -> oneContext n $ VariableInfo mempty (currentLevel ctx + i) (parents ctx') ThreadID)
           . (\segspaceParams -> zip segspaceParams [0 ..])
           -- contextFromNames ctx' Parallel
           . map fst
@@ -557,7 +557,7 @@ analyzeOtherOp :: Context rep -> [VName] -> (Context rep, IndexTable rep)
 analyzeOtherOp ctx _ = (ctx, mempty)
 
 -- | Returns an intmap of names, to be used as dependencies in construction of
--- CtxVals.
+-- VariableInfos.
 -- Throws an error if SubExp contains a name not in context. This behaviour
 -- might be thrown out in the future, as it is mostly just a very verbose way to
 -- ensure that we capture all necessary variables in the context at the moment
@@ -586,7 +586,7 @@ reduceDependencies :: Context rep -> VName -> VName -> DimAccess rep
 reduceDependencies ctx v_src v =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Unable to find " ++ prettyString v
-    Just (CtxVal deps lvl _parents t) ->
+    Just (VariableInfo deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of

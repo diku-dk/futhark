@@ -40,8 +40,8 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar)
+                          [ (VName "gtid" 5205, VariableInfo mempty 0 mempty ThreadID),
+                            (VName "i" 5209, VariableInfo mempty 1 mempty LoopVar)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -112,9 +112,9 @@ analyzeIndexTests =
                     { parents = parents',
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar),
-                            (arr_name, CtxVal mempty 0 parents' Variable)
+                          [ (VName "gtid" 5205, VariableInfo mempty 0 mempty ThreadID),
+                            (VName "i" 5209, VariableInfo mempty 1 mempty LoopVar),
+                            (arr_name, VariableInfo mempty 0 parents' Variable)
                           ]
                     }
             let patternNames = [VName "b" 5211]
@@ -153,11 +153,11 @@ analyzeIndexTests =
                         ],
                       assignments =
                         M.fromList
-                          [ (VName "gtid" 5205, CtxVal mempty 0 mempty ThreadID),
-                            (VName "i" 5209, CtxVal mempty 1 mempty LoopVar),
-                            (VName "tmp0" 5210, CtxVal (namesFromList [VName "gtid" 5205]) 2 mempty Variable),
-                            (VName "tmp1" 5211, CtxVal (namesFromList [VName "i" 5209]) 3 mempty Variable),
-                            (VName "k" 5212, CtxVal mempty 1 mempty ConstType)
+                          [ (VName "gtid" 5205, VariableInfo mempty 0 mempty ThreadID),
+                            (VName "i" 5209, VariableInfo mempty 1 mempty LoopVar),
+                            (VName "tmp0" 5210, VariableInfo (namesFromList [VName "gtid" 5205]) 2 mempty Variable),
+                            (VName "tmp1" 5211, VariableInfo (namesFromList [VName "i" 5209]) 3 mempty Variable),
+                            (VName "k" 5212, VariableInfo mempty 1 mempty ConstType)
                           ]
                     }
             let patternNames = [VName "b" 5211]
