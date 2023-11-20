@@ -29,41 +29,43 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses = do
-    -- Create a candidate permutation
-    let perm = (map originalDimension . sortGPU) dimAccesses
+  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses =
+    do
+      -- Create a candidate permutation
+      let perm = (map originalDimension . sortGPU) dimAccesses
 
-    -- Dont accept indices where the last index is constant
-    let lastIdxIsConst = null . dependencies $ last dimAccesses
+      -- Dont accept indices where the last index is constant
+      let lastIdxIsConst = null . dependencies $ last dimAccesses
 
-    -- Check if any of the dependencies are too complex to reason about
-    let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
-    let primExps = map (`M.lookup` primExpTable) deps
-    let inscrutables = map isInscrutable primExps
-    let isInscrutable =
-          or
-            inscrutables
-    -- Check if we want to manifest this array with the permutation
-    -- pTraceShow deps $
-    --   pTraceShow primExps $
-    --     pTraceShow isInscrutable $
-    --       pTraceShow inscrutables $
-    --         pTraceShow primExpTable $
-    if lastIdxIsConst || isInscrutable || commonPermutationEliminators perm nest dimAccesses
-      then Nothing
-      else Just perm
+      -- Check if any of the dependencies are too complex to reason about
+      let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
+      let primExps = map (`M.lookup` primExpTable) deps
+      let inscrutable = any isInscrutable primExps
+      -- Check if we want to manifest this array with the permutation
+      pTraceShow inscrutable $
+        pTraceShow primExps $
+          if lastIdxIsConst || inscrutable || commonPermutationEliminators perm nest dimAccesses
+            then Nothing
+            else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool
-isInscrutable Nothing = True
-isInscrutable (Just Nothing) = True
-isInscrutable (Just (Just (LeafExp _ _))) = False
-isInscrutable (Just (Just (ValueExp _))) = False
-isInscrutable (Just (Just op@(BinOpExp _ a b))) = do
-  -- pTraceShow (op, reduceStrideAndOffset op) $
-  case reduceStrideAndOffset op of
-    Just (s, o) -> s > 1 || o > 0
-    Nothing -> True
-isInscrutable _ = True
+isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) =
+  isInscrutableRec maybeOp
+    || case reduceStrideAndOffset op of
+      -- Maximum allowable stride and offset
+      Just (s, o) -> s > 8 || o > 128 -- TODO: Tune these values
+      Nothing -> True
+isInscrutable op = isInscrutableRec op
+
+isInscrutableRec :: Maybe (Maybe (PrimExp VName)) -> Bool
+isInscrutableRec Nothing = True
+isInscrutableRec (Just Nothing) = True
+isInscrutableRec (Just (Just (LeafExp _ _))) = False
+isInscrutableRec (Just (Just (ValueExp _))) = False
+isInscrutableRec (Just (Just op@(BinOpExp _ a b))) =
+  isInscrutableRec (Just $ Just a) || isInscrutableRec (Just $ Just b)
+-- TODO: Handle UnOpExp
+isInscrutableRec _ = True
 
 reduceStrideAndOffset :: PrimExp VName -> Maybe (Int, Int)
 reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
