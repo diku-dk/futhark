@@ -156,9 +156,9 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
     localArraysNoncomm
 
   | otherwise =
-    forM segbinops $ \segbinop ->
-      fmap CommInterms $
-        forM (paramOf segbinop) $ \p ->
+    fmap (map CommInterms) $
+      forM params $
+        mapM $ \p ->
           case paramDec p of
             MemArray pt shape _ (ArrayIn mem _) -> do
               let shape' = Shape [tvSize num_threads] <> shape
@@ -168,18 +168,20 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
               let pt = elemType $ paramType p
                   shape = Shape [group_size]
               sAllocArray ("red_arr_" ++ prettyString pt) pt shape $ Space "local"
+
   where
+    _forM2D ls f = mapM (mapM f) ls
+    forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
 
     -- TODO: this decision (of whether to declare interms for a commutative or a
     -- noncommutative and prim-parameterized reduction) should not be made here,
-    -- but rather at the top level (compileSegRed or compileSegred').
-
+    -- but rather at the top level (ie. compileSegRed or compileSegred').
     is_noncommutative_prim_red =
       binopsComm segbinops == Noncommutative
         && all (primType . paramType) (concat params)
 
-    params = map paramOf segbinops
     paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
+    params = map paramOf segbinops
 
     localArraysNoncomm = do
       let group_size_E = pe64 group_size
@@ -220,19 +222,20 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
           elem_sizes = map paramSize $ concat params
           collcopy_lmem_req = group_worksize_E * maximum elem_sizes
 
-      let forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
-      (group_reds_lmem_req, params_and_offsets) <-
+      -- compute total amount of lmem needed for the group reduction arrays as well
+      -- as the offset of each such array.
+      (group_reds_lmem_req, offsets) <-
         forAccumLM2D 0 params $ \offset p -> do
           let elem_size = paramSize p
               offset' = nextMul offset elem_size + group_size_E * elem_size
-          pure (offset', (offset, p))
+          pure (offset', offset `quot` elem_size)
 
       -- allocate total pool of local mem.
       let lmem_total_size =
             Imp.bytes $
               collcopy_lmem_req `sMax64` group_reds_lmem_req
-
       lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
+
 
       let arrInLMem p name len_se offset = do
             let ptype = elemType $ paramType p
@@ -243,13 +246,12 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
               lmem
               $ LMAD.iota offset [pe64 len_se]
 
-
       fmap (map (uncurry NoncommPrimInterms . unzip)) $
-        forM params_and_offsets $
-          mapM $ \(offset, p) ->
+        forM (zipWith zip params offsets) $
+          mapM $ \(p, offset) ->
             (,)
               <$> arrInLMem p "coll_copy_arr" group_worksize 0
-              <*> arrInLMem p "group_red_arr" group_size (offset `quot` paramSize p)
+              <*> arrInLMem p "group_red_arr" group_size offset
 
 
 -- | Arrays for storing group results.
@@ -260,11 +262,11 @@ makeIntermArrays (Count group_size) chunk num_threads segbinops
 -- group_size, and otherwise 1.  When actually storing group results,
 -- the first index is set to 0.
 groupResultArrays ::
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  SubExp ->
+  SubExp ->
   [SegBinOp GPUMem] ->
   CallKernelGen [[VName]]
-groupResultArrays (Count virt_num_groups) (Count group_size) reds =
+groupResultArrays virt_num_groups group_size reds =
   forM reds $ \(SegBinOp _ lam _ shape) ->
     forM (lambdaReturnType lam) $ \t -> do
       let pt = elemType t
@@ -288,19 +290,17 @@ nonsegmentedReduction ::
   CallKernelGen ()
 nonsegmentedReduction segred_pat num_groups group_size chunk space reds body = do
   let (gtids, dims) = unzip $ unSegSpace space
-      dims' = map pe64 dims
-      num_groups' = fmap pe64 num_groups
-      group_size' = fmap pe64 group_size
+      num_groups' = unCount num_groups
+      group_size' = unCount group_size
       global_tid = Imp.le64 $ segFlat space
-      w = last dims'
+      w = pe64 $ last dims
 
   counter <- genZeroes "counters" $ fromIntegral maxNumOps
 
-  reds_group_res_arrs <- groupResultArrays num_groups group_size reds
+  reds_group_res_arrs <- groupResultArrays num_groups' group_size' reds
 
   num_threads <-
-    dPrimV "num_threads" $
-      unCount num_groups' * unCount group_size'
+    dPrimV "num_threads" $ pe64 num_groups' * pe64 group_size'
 
   sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
@@ -492,8 +492,8 @@ largeSegmentsReduction segred_pat num_groups group_size chunk space reds body = 
       dims' = map pe64 dims
       num_segments = product $ init dims'
       segment_size = last dims'
-      num_groups' = fmap pe64 num_groups
-      group_size' = fmap pe64 group_size
+      num_groups' = pe64 $ unCount num_groups
+      group_size' = pe64 $ unCount group_size
 
   (groups_per_segment, q) <-
     groupsPerSegmentAndQ
@@ -509,22 +509,22 @@ largeSegmentsReduction segred_pat num_groups group_size chunk space reds body = 
 
   num_threads <-
     dPrimV "num_threads" $
-      unCount num_groups' * unCount group_size'
+      num_groups' * group_size'
 
   threads_per_segment <-
     dPrimV "threads_per_segment" $
-      groups_per_segment * unCount group_size'
+      groups_per_segment * group_size'
 
   emit $ Imp.DebugPrint "# SegRed-large" Nothing
   emit $ Imp.DebugPrint "num_segments" $ Just $ untyped num_segments
   emit $ Imp.DebugPrint "segment_size" $ Just $ untyped segment_size
   emit $ Imp.DebugPrint "virt_num_groups" $ Just $ untyped $ tvExp virt_num_groups
-  emit $ Imp.DebugPrint "num_groups" $ Just $ untyped $ Imp.unCount num_groups'
-  emit $ Imp.DebugPrint "group_size" $ Just $ untyped $ Imp.unCount group_size'
+  emit $ Imp.DebugPrint "num_groups" $ Just $ untyped num_groups'
+  emit $ Imp.DebugPrint "group_size" $ Just $ untyped group_size'
   emit $ Imp.DebugPrint "q" $ Just $ untyped q
   emit $ Imp.DebugPrint "groups_per_segment" $ Just $ untyped groups_per_segment
 
-  reds_group_res_arrs <- groupResultArrays (Count (tvSize virt_num_groups)) group_size reds
+  reds_group_res_arrs <- groupResultArrays (tvSize virt_num_groups) (unCount group_size) reds
 
   -- In principle we should have a counter for every segment.  Since
   -- the number of segments is a dynamic quantity, we would have to
@@ -560,8 +560,8 @@ largeSegmentsReduction segred_pat num_groups group_size chunk space reds body = 
 
       global_tid <-
         dPrimVE "global_tid" $
-          (sExt64 group_id * sExt64 (unCount group_size') + sExt64 local_tid)
-            `rem` (sExt64 (unCount group_size') * groups_per_segment)
+          (sExt64 group_id * sExt64 group_size' + sExt64 local_tid)
+            `rem` (sExt64 group_size' * groups_per_segment)
 
       let first_group_for_segment = sExt64 flat_segment_id * groups_per_segment
       dIndexSpace (zip segment_gtids (init dims')) $ sExt64 flat_segment_id
@@ -626,8 +626,8 @@ largeSegmentsReduction segred_pat num_groups group_size chunk space reds body = 
 groupsPerSegmentAndQ ::
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
-  Count NumGroups (Imp.TExp Int64) ->
-  Count GroupSize (Imp.TExp Int64) ->
+  Imp.TExp Int64 ->
+  Imp.TExp Int64 ->
   Imp.TExp Int64 ->
   CallKernelGen
     ( Imp.TExp Int64,
@@ -636,10 +636,10 @@ groupsPerSegmentAndQ ::
 groupsPerSegmentAndQ segment_size num_segments num_groups_hint group_size chunk = do
   groups_per_segment <-
     dPrimVE "groups_per_segment" $
-      unCount num_groups_hint `divUp` sMax64 1 num_segments
+      num_groups_hint `divUp` sMax64 1 num_segments
   q <-
     dPrimVE "q" $
-      segment_size `divUp` (unCount group_size * groups_per_segment * chunk)
+      segment_size `divUp` (group_size * groups_per_segment * chunk)
   pure (groups_per_segment, q)
 
 -- | A SegBinOp with auxiliary information.
