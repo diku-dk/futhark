@@ -358,12 +358,21 @@ analyzeStm ctx (Let pats _ e) = do
     (WithAcc _ _) -> (ctx, mempty) -- ignored
     (Op op) -> analyzeOp op ctx patternNames
 
-getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Maybe [DimAccess rep]
-getIndexDependencies _ [] = Nothing
+-- If left, this is just a regular index. If right, a slice happened.
+getIndexDependencies :: Context rep -> [DimIndex SubExp] -> Either [DimAccess rep] [DimAccess rep]
 getIndexDependencies ctx dims =
-  fst
-    . foldl' (\(a, i) idx -> (a >>= matchDimIndex idx i, i - 1)) (Just [], length dims - 1)
-    $ reverse dims
+    fst
+    $ foldr
+      ( \idx (a, i) -> do
+          let acc =
+                either
+                  (matchDimIndex idx i)
+                  (forceRight . matchDimIndex idx i)
+                  a
+          (acc, i - 1)
+      )
+      (Left [], length dims - 1)
+      dims
   where
     matchDimIndex idx i accumulator =
       case idx of
@@ -374,6 +383,9 @@ getIndexDependencies ctx dims =
         -- (DimSlice _offset _num_elems _stride) ->
         -- And then what?
         _ -> Nothing
+
+    forceRight (Left a) = Right a
+    forceRight (Right a) = Right a
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
