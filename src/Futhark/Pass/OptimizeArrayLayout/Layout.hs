@@ -72,12 +72,14 @@ reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
       Add _ _ -> Just (1, valueIntegral v)
       Sub _ _ -> Just (1, -valueIntegral v)
       Mul _ _ -> Just (valueIntegral v, 0)
+      _ -> Nothing
   | BinOpExp {} <- op = case reduceStrideAndOffset op of
       Nothing -> Nothing
       Just (s, o) -> case oper of
         Add _ _ -> Just (s, o + valueIntegral v)
         Sub _ _ -> Just (s, o - valueIntegral v)
         Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
+        _ -> Nothing
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
