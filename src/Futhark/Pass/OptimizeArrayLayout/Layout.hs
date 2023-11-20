@@ -126,14 +126,9 @@ commonPermutationEliminators perm nest dimAccesses = do
 
   -- Don't manifest if the array is defined inside a segOp or loop body
   let isInsideUndesired = any isUndesired nest
-  -- Don't manifest if the array is indexed by something weird
 
   isInvalidPerm || isInsideUndesired
   where
-    -- Why is this not in the prelude, there's probably a monad for this.
-    anyOf :: forall a t. (Foldable t) => t (a -> Bool) -> a -> Bool
-    anyOf preds input = any (\f -> f input) preds
-
     isUndesired :: BodyType -> Bool
     isUndesired bodyType = case bodyType of
       SegOpName _ -> True
