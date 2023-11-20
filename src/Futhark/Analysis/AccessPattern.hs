@@ -601,7 +601,7 @@ reduceDependencies ctx v_src v =
         ThreadID -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
         LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
         ConstType -> mempty
-        _ ->
+        Variable ->
           foldl' (<>) mempty $
             map (reduceDependencies ctx v_src) $
               namesToList deps
