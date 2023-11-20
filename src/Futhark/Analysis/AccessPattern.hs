@@ -370,22 +370,33 @@ getIndexDependencies ctx dims =
           let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
            in Right $ dimAccess {originalDimension = i} : accumulator
 
+-- | Gets the dependencies of each dimension and either returns a result, or
+-- adds a slice to the context.
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
 analyzeIndex ctx _ _ [] = (ctx, mempty)
 analyzeIndex ctx pats arr_name dimIndexes = do
+  -- Get the dependendencies of each dimension
   let dependencies = getIndexDependencies ctx dimIndexes
+  -- Extend the current context with current pattern(s) and its deps
   let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
-  -- FIXME: Some variables are not added properly to the scope, and will cause
-  -- this to return (arr_name, []), we should throw an error instead and fix the
-  -- context with the missing variable.
-  -- For now it works fine tho.
 
-  -- TODO: document this and the reason for [BodyType] in ArrayName
+  -- The bodytype(s) are used in the result construction
   let array_name' =
+        -- 2. If the arrayname was not in assignments, it was not an immediately
+        --    allocated array.
         fromMaybe (arr_name, []) $
+          -- 1. Maybe find the array name, and the "stack" of body types that the
+          -- array was allocated in.
           L.find (\(n, _) -> n == arr_name) $
+            -- 0. Get the "stack" of bodytypes for each assignment
             map (second parents_nest) (M.toList $ assignments ctx')
 
+  -- TODO:
+  -- Lookup `arr_name` in `slices ctx'`,
+  -- if not Nothing,
+  -- union deps with deps from (last index of) the slice,
+  -- replace deps in last index of slice with the union,
+  -- `analyzeIndex' ctx' pats array_name' newDeps`
   either
     (analyzeIndex' ctx' pats array_name')
     (\d -> (ctx' {slices = M.insert arr_name d $ slices ctx'}, mempty))
@@ -412,12 +423,19 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
 analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimAccess rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pats arr_name dimIndexes = do
+  -- Get the name of all segmaps in the current "callstack"
   let segmaps = allSegMap ctx
   let memory_entries = dimIndexes
   let idx_expr_name = pats --                                                IndexExprName
+  -- For each pattern, create a mapping to the dimensional indices
   let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> [DimAccess]
+  -- For each pattern -> [DimAccess] mapping, create a mapping from the array
+  -- name that was indexed.
   let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> [DimAccess]
+  -- ∀ (arrayName -> IdxExp -> [DimAccess]) mappings, create a mapping from all
+  -- segmaps in current callstack (segThread & segGroups alike).
   let results = concatMap (\ma -> map (`M.singleton` ma) segmaps) map_array
+
   let res = foldl' unionIndexTables mempty results
   (ctx, res)
 
@@ -503,7 +521,7 @@ analyzeApply :: Context rep -> [VName] -> [(SubExp, Diet)] -> (Context rep, Inde
 analyzeApply ctx pats diets =
   onFst
     ( \ctx' ->
-        foldl' extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ foldl' (<>) mempty $ map (getDeps . fst) diets) pats
+        foldl' extend ctx' $ map (\pat -> oneContext pat $ ctxValFromNames ctx' $ mconcat $ map (getDeps . fst) diets) pats
     )
     (ctx, mempty)
 
@@ -602,7 +620,7 @@ reduceDependencies ctx v_src v =
         LoopVar -> DimAccess (S.fromList [(baseTag v, (v, v_src, lvl, itertype, t))]) (currentLevel ctx)
         ConstType -> mempty
         Variable ->
-          foldl' (<>) mempty $
+          mconcat $
             map (reduceDependencies ctx v_src) $
               namesToList deps
 
