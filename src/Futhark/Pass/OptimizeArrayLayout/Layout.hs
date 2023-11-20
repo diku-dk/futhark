@@ -39,22 +39,25 @@ instance Layout GPU where
 
       -- Check if any of the dependencies are too complex to reason about
       let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
+      let counters = concatMap (map ((\(_, _, _, _, t) -> isCounter t) . snd) . S.toList . dependencies) dimAccesses
       let primExps = map (`M.lookup` primExpTable) deps
-      let inscrutable = any isInscrutable primExps
+      let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
       -- Check if we want to manifest this array with the permutation
       if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses
         then Nothing
         else Just perm
 
-isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool
-isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) =
-  isInscrutableRec maybeOp
-    || case reduceStrideAndOffset op of
+isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
+isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) counter =
+  if counter
+    then -- Calculate stride and offset for loop-counters and thread-IDs
+    case reduceStrideAndOffset op of
       -- Maximum allowable stride and offset
       Just (s, o) -> s > 8 || o > 128 -- TODO: Tune these values
       Nothing -> True
-isInscrutable op = isInscrutableRec op
+    else isInscrutableRec maybeOp
+isInscrutable maybeOp _ = isInscrutableRec maybeOp
 
 isInscrutableRec :: Maybe (Maybe (PrimExp VName)) -> Bool
 isInscrutableRec Nothing = True

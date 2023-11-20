@@ -19,6 +19,7 @@ module Futhark.Analysis.AccessPattern
     analyzeIndex,
     CtxVal (..),
     VarType (..),
+    isCounter,
   )
 where
 
@@ -193,6 +194,11 @@ data VarType
   | LoopVar
   deriving (Show, Eq)
 
+isCounter :: VarType -> Bool
+isCounter LoopVar = True
+isCounter ThreadID = True
+isCounter _ = False
+
 ctxValFromNames :: Context rep -> Names -> CtxVal rep
 ctxValFromNames ctx names = do
   CtxVal
@@ -364,7 +370,7 @@ getIndexDependencies ctx dims =
       case idx of
         (DimFix subExpression) ->
           Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
-        -- | If we encounter a DimSlice, add it to a map of `DimSlice`s and check
+        -- \| If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
         -- (DimSlice _offset _num_elems _stride) ->
         -- And then what?
