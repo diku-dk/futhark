@@ -55,6 +55,8 @@ entry("main",
 --     get_size(segmap_group_size_5191, group_size)
 --   let {segmap_usable_groups_5206 : i64} =
 --     sdiv_up64(n_5138, segmap_group_size_5205)
+--   let {xss_coalesced_0 : [n_5138][m_5139]i64} =
+--     manifest((1, 0), xss_5140)
 --   let {defunc_0_map_res_5207 : [n_5138]i64} =
 --     segmap(thread; ; groups=segmap_usable_groups_5206; groupsize=segmap_group_size_5205)
 --     (gtid_5208 < n_5138) (~phys_tid_5209) : {i64} {
@@ -66,7 +68,7 @@ entry("main",
 --           let {+_rhs_5215 : i64} =
 --             add64(3i64, +_lhs_5214)
 --           let {+_rhs_5216 : i64} =
---             xss_5140[gtid_5208, +_rhs_5215]
+--             xss_coalesced_0[gtid_5208, +_rhs_5215]
 --           let {loopres_5217 : i64} =
 --             add64(s_5213, +_rhs_5216)
 --           in {loopres_5217}
