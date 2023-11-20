@@ -34,8 +34,8 @@ instance Layout GPU where
       -- Create a candidate permutation
       let perm = (map originalDimension . sortGPU) dimAccesses
 
-      -- Dont accept indices where the last index is constant
-      let lastIdxIsConst = null . dependencies $ last dimAccesses
+      -- Dont accept indices where the last index is invariant
+      let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
       -- Check if any of the dependencies are too complex to reason about
       let deps = concatMap (map ((\(_, n, _, _, _) -> n) . snd) . S.toList . dependencies) dimAccesses
@@ -43,7 +43,7 @@ instance Layout GPU where
       let inscrutable = any isInscrutable primExps
 
       -- Check if we want to manifest this array with the permutation
-      if lastIdxIsConst || inscrutable || commonPermutationEliminators perm nest dimAccesses
+      if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses
         then Nothing
         else Just perm
 

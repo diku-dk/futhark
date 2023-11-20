@@ -5,6 +5,7 @@ module Futhark.Analysis.AccessPattern
     analyzeFunction,
     vnameFromSegOp,
     analysisPropagateByTransitivity,
+    isInvariant,
     Analyze,
     IndexTable,
     ArrayName,
@@ -89,6 +90,9 @@ instance Semigroup (DimAccess rep) where
 
 instance Monoid (DimAccess rep) where
   mempty = DimAccess mempty 0
+
+isInvariant :: DimAccess rep -> Bool
+isInvariant = null . dependencies
 
 -- | Iteration type describes whether the index is iterated in a parallel or
 -- sequential way, ie. if the index expression comes from a sequential or
@@ -360,6 +364,8 @@ getIndexDependencies ctx dims =
       case idx of
         (DimFix subExpression) ->
           Just $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
+        -- | If we encounter a DimSlice, add it to a map of `DimSlice`s and check
+        -- result later.
         -- (DimSlice _offset _num_elems _stride) ->
         -- And then what?
         _ -> Nothing
