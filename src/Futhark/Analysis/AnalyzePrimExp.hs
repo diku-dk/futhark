@@ -1,5 +1,6 @@
 module Futhark.Analysis.AnalyzePrimExp
   ( primExpAnalysis,
+    stmToPrimExps,
     PrimExpAnalysis (..),
     PrimExpTable,
   )
