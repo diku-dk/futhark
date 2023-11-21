@@ -10,6 +10,8 @@ import Futhark.Analysis.AnalyzePrimExp
 import Futhark.Analysis.PrimExp
 import Futhark.IR.GPU
 import Futhark.IR.GPU.Op
+import Futhark.IR.MC
+import Futhark.IR.MC.Op
 import Futhark.IR.Prop.Names
 import Futhark.IR.Syntax
 import Language.Futhark.Core
@@ -19,11 +21,16 @@ import Test.Tasty.HUnit
 tests :: TestTree
 tests = testGroup "AnalyzePrimExpTests" [stmToPrimExpsTests]
 
--- TODO: MC tests
 stmToPrimExpsTests :: TestTree
 stmToPrimExpsTests =
   testGroup
     "stmToPrimExps"
+    [stmToPrimExpsTestsGPU, stmToPrimExpsTestsMC]
+
+stmToPrimExpsTestsGPU :: TestTree
+stmToPrimExpsTestsGPU =
+  testGroup
+    "GPU"
     $ do
       let scope =
             M.fromList
@@ -457,511 +464,418 @@ stmToPrimExpsTests =
             res @?= expected
         ]
 
--- fromList
---     [
---         ( VName
---             ( Name "segmap_group_size" ) 5201
---         , Nothing
---         )
---     ,
---         ( VName
---             ( Name "segmap_usable_groups" ) 5202
---         , Just
---             ( BinOpExp ( SDivUp Int64 Unsafe )
---                 ( LeafExp
---                     ( VName
---                         ( Name "n" ) 5142
---                     ) ( IntType Int64 )
---                 )
---                 ( LeafExp
---                     ( VName
---                         ( Name "segmap_group_size" ) 5201
---                     ) ( IntType Int64 )
---                 )
---             )
---         )
---     ,
---         ( VName
---             ( Name "defunc_0_map_res" ) 5203
---         , Nothing
---         )
---     ,
---         ( VName
---             ( Name "gtid" ) 5204
---         , Just
---             ( LeafExp
---                 ( VName
---                     ( Name "n" ) 5142
---                 ) ( IntType Int64 )
---             )
---         )
---     ,
---         ( VName
---             ( Name "defunc_0_f_res" ) 5207
---         , Nothing
---         )
---     ,
---         ( VName
---             ( Name "i" ) 5208
---         , Just
---             ( LeafExp
---                 ( VName
---                     ( Name "m" ) 5143
---                 ) ( IntType Int64 )
---             )
---         )
---     ,
---         ( VName
---             ( Name "acc" ) 5209
---         , Just
---             ( LeafExp
---                 ( VName
---                     ( Name "acc" ) 5209
---                 ) ( IntType Int64 )
---             )
---         )
---     ,
---         ( VName
---             ( Name "b" ) 5210
---         , Nothing
---         )
---     ,
---         ( VName
---             ( Name "defunc_0_f_res" ) 5211
---         , Just
---             ( BinOpExp ( Add Int64 OverflowWrap )
---                 ( LeafExp
---                     ( VName
---                         ( Name "acc" ) 5209
---                     ) ( IntType Int64 )
---                 )
---                 ( LeafExp
---                     ( VName
---                         ( Name "b" ) 5210
---                     ) ( IntType Int64 )
---                 )
---             )
---         )
---     ]
-
--- Let
---     { stmPat = Pat
---         { patElems =
---             [ PatElem
---                 { patElemName = VName
---                     ( Name "defunc_0_map_res" ) 5203
---                 , patElemDec = Array ( IntType Int64 )
---                     ( Shape
---                         { shapeDims =
---                             [ Var
---                                 ( VName
---                                     ( Name "n" ) 5142
---                                 )
---                             ]
---                         }
---                     ) NoUniqueness
---                 }
---             ]
---         }
---     , stmAux = StmAux
---         { stmAuxCerts = Certs
---             { unCerts = [] }
---         , stmAuxAttrs = Attrs
---             { unAttrs = mempty }
---         , stmAuxDec = ()
---         }
---     , stmExp = Op
---         ( SegOp
---             ( SegMap
---                 ( SegThread SegNoVirt
---                     ( Just
---                         ( KernelGrid
---                             { gridNumGroups = Count
---                                 { unCount = Var
---                                     ( VName
---                                         ( Name "segmap_usable_groups" ) 5202
---                                     )
---                                 }
---                             , gridGroupSize = Count
---                                 { unCount = Var
---                                     ( VName
---                                         ( Name "segmap_group_size" ) 5201
---                                     )
---                                 }
---                             }
---                         )
---                     )
---                 )
---                 ( SegSpace
---                     { segFlat = VName
---                         ( Name "phys_tid" ) 5205
---                     , unSegSpace =
---                         [
---                             ( VName
---                                 ( Name "gtid" ) 5204
---                             , Var
---                                 ( VName
---                                     ( Name "n" ) 5142
---                                 )
---                             )
---                         ]
---                     }
---                 )
---                 [ Prim ( IntType Int64 ) ]
---                 ( KernelBody
---                     { kernelBodyDec = ()
---                     , kernelBodyStms = fromList
---                         [ Let
---                             { stmPat = Pat
---                                 { patElems =
---                                     [ PatElem
---                                         { patElemName = VName
---                                             ( Name "defunc_0_f_res" ) 5207
---                                         , patElemDec = Prim ( IntType Int64 )
---                                         }
---                                     ]
---                                 }
---                             , stmAux = StmAux
---                                 { stmAuxCerts = Certs
---                                     { unCerts = [] }
---                                 , stmAuxAttrs = Attrs
---                                     { unAttrs = mempty }
---                                 , stmAuxDec = ()
---                                 }
---                             , stmExp = Loop
---                                 [
---                                     ( Param
---                                         { paramAttrs = Attrs
---                                             { unAttrs = mempty }
---                                         , paramName = VName
---                                             ( Name "acc" ) 5209
---                                         , paramDec = Prim ( IntType Int64 )
---                                         }
---                                     , Constant
---                                         ( IntValue
---                                             ( Int64Value 0 )
---                                         )
---                                     )
---                                 ]
---                                 ( ForLoop
---                                     ( VName
---                                         ( Name "i" ) 5208
---                                     ) Int64
---                                     ( Var
---                                         ( VName
---                                             ( Name "m" ) 5143
---                                         )
---                                     )
---                                 )
---                                 ( Body
---                                     { bodyDec = ()
---                                     , bodyStms = fromList
---                                         [ Let
---                                             { stmPat = Pat
---                                                 { patElems =
---                                                     [ PatElem
---                                                         { patElemName = VName
---                                                             ( Name "b" ) 5210
---                                                         , patElemDec = Prim ( IntType Int64 )
---                                                         }
---                                                     ]
---                                                 }
---                                             , stmAux = StmAux
---                                                 { stmAuxCerts = Certs
---                                                     { unCerts = [] }
---                                                 , stmAuxAttrs = Attrs
---                                                     { unAttrs = mempty }
---                                                 , stmAuxDec = ()
---                                                 }
---                                             , stmExp = BasicOp
---                                                 ( Index
---                                                     ( VName
---                                                         ( Name "xss" ) 5144
---                                                     )
---                                                     ( Slice
---                                                         { unSlice =
---                                                             [ DimFix
---                                                                 ( Var
---                                                                     ( VName
---                                                                         ( Name "gtid" ) 5204
---                                                                     )
---                                                                 )
---                                                             , DimFix
---                                                                 ( Var
---                                                                     ( VName
---                                                                         ( Name "i" ) 5208
---                                                                     )
---                                                                 )
---                                                             ]
---                                                         }
---                                                     )
---                                                 )
---                                             }
---                                         , Let
---                                             { stmPat = Pat
---                                                 { patElems =
---                                                     [ PatElem
---                                                         { patElemName = VName
---                                                             ( Name "defunc_0_f_res" ) 5211
---                                                         , patElemDec = Prim ( IntType Int64 )
---                                                         }
---                                                     ]
---                                                 }
---                                             , stmAux = StmAux
---                                                 { stmAuxCerts = Certs
---                                                     { unCerts = [] }
---                                                 , stmAuxAttrs = Attrs
---                                                     { unAttrs = mempty }
---                                                 , stmAuxDec = ()
---                                                 }
---                                             , stmExp = BasicOp
---                                                 ( BinOp ( Add Int64 OverflowWrap )
---                                                     ( Var
---                                                         ( VName
---                                                             ( Name "acc" ) 5209
---                                                         )
---                                                     )
---                                                     ( Var
---                                                         ( VName
---                                                             ( Name "b" ) 5210
---                                                         )
---                                                     )
---                                                 )
---                                             }
---                                         ]
---                                     , bodyResult =
---                                         [ SubExpRes
---                                             { resCerts = Certs
---                                                 { unCerts = [] }
---                                             , resSubExp = Var
---                                                 ( VName
---                                                     ( Name "defunc_0_f_res" ) 5211
---                                                 )
---                                             }
---                                         ]
---                                     }
---                                 )
---                             }
---                         ]
---                     , kernelBodyResult =
---                         [ Returns ResultMaySimplify
---                             ( Certs
---                                 { unCerts = [] }
---                             )
---                             ( Var
---                                 ( VName
---                                     ( Name "defunc_0_f_res" ) 5207
---                                 )
---                             )
---                         ]
---                     }
---                 )
---             )
---         )
---     }
-
--- Let
---     { stmPat = Pat
---         { patElems =
---             [ PatElem
---                 { patElemName = VName
---                     ( Name "defunc_0_f_res" ) 5207
---                 , patElemDec = Prim ( IntType Int64 )
---                 }
---             ]
---         }
---     , stmAux = StmAux
---         { stmAuxCerts = Certs
---             { unCerts = [] }
---         , stmAuxAttrs = Attrs
---             { unAttrs = mempty }
---         , stmAuxDec = ()
---         }
---     , stmExp = Loop
---         [
---             ( Param
---                 { paramAttrs = Attrs
---                     { unAttrs = mempty }
---                 , paramName = VName
---                     ( Name "acc" ) 5209
---                 , paramDec = Prim ( IntType Int64 )
---                 }
---             , Constant
---                 ( IntValue
---                     ( Int64Value 0 )
---                 )
---             )
---         ]
---         ( ForLoop
---             ( VName
---                 ( Name "i" ) 5208
---             ) Int64
---             ( Var
---                 ( VName
---                     ( Name "m" ) 5143
---                 )
---             )
---         )
---         ( Body
---             { bodyDec = ()
---             , bodyStms = fromList
---                 [ Let
---                     { stmPat = Pat
---                         { patElems =
---                             [ PatElem
---                                 { patElemName = VName
---                                     ( Name "b" ) 5210
---                                 , patElemDec = Prim ( IntType Int64 )
---                                 }
---                             ]
---                         }
---                     , stmAux = StmAux
---                         { stmAuxCerts = Certs
---                             { unCerts = [] }
---                         , stmAuxAttrs = Attrs
---                             { unAttrs = mempty }
---                         , stmAuxDec = ()
---                         }
---                     , stmExp = BasicOp
---                         ( Index
---                             ( VName
---                                 ( Name "xss" ) 5144
---                             )
---                             ( Slice
---                                 { unSlice =
---                                     [ DimFix
---                                         ( Var
---                                             ( VName
---                                                 ( Name "gtid" ) 5204
---                                             )
---                                         )
---                                     , DimFix
---                                         ( Var
---                                             ( VName
---                                                 ( Name "i" ) 5208
---                                             )
---                                         )
---                                     ]
---                                 }
---                             )
---                         )
---                     }
---                 , Let
---                     { stmPat = Pat
---                         { patElems =
---                             [ PatElem
---                                 { patElemName = VName
---                                     ( Name "defunc_0_f_res" ) 5211
---                                 , patElemDec = Prim ( IntType Int64 )
---                                 }
---                             ]
---                         }
---                     , stmAux = StmAux
---                         { stmAuxCerts = Certs
---                             { unCerts = [] }
---                         , stmAuxAttrs = Attrs
---                             { unAttrs = mempty }
---                         , stmAuxDec = ()
---                         }
---                     , stmExp = BasicOp
---                         ( BinOp ( Add Int64 OverflowWrap )
---                             ( Var
---                                 ( VName
---                                     ( Name "acc" ) 5209
---                                 )
---                             )
---                             ( Var
---                                 ( VName
---                                     ( Name "b" ) 5210
---                                 )
---                             )
---                         )
---                     }
---                 ]
---             , bodyResult =
---                 [ SubExpRes
---                     { resCerts = Certs
---                         { unCerts = [] }
---                     , resSubExp = Var
---                         ( VName
---                             ( Name "defunc_0_f_res" ) 5211
---                         )
---                     }
---                 ]
---             }
---         )
---     }
-
--- Let
---     { stmPat = Pat
---         { patElems =
---             [ PatElem
---                 { patElemName = VName
---                     ( Name "b" ) 5210
---                 , patElemDec = Prim ( IntType Int64 )
---                 }
---             ]
---         }
---     , stmAux = StmAux
---         { stmAuxCerts = Certs
---             { unCerts = [] }
---         , stmAuxAttrs = Attrs
---             { unAttrs = mempty }
---         , stmAuxDec = ()
---         }
---     , stmExp = BasicOp
---         ( Index
---             ( VName
---                 ( Name "xss" ) 5144
---             )
---             ( Slice
---                 { unSlice =
---                     [ DimFix
---                         ( Var
---                             ( VName
---                                 ( Name "gtid" ) 5204
---                             )
---                         )
---                     , DimFix
---                         ( Var
---                             ( VName
---                                 ( Name "i" ) 5208
---                             )
---                         )
---                     ]
---                 }
---             )
---         )
---     }
-
--- Let
---     { stmPat = Pat
---         { patElems =
---             [ PatElem
---                 { patElemName = VName
---                     ( Name "defunc_0_f_res" ) 5211
---                 , patElemDec = Prim ( IntType Int64 )
---                 }
---             ]
---         }
---     , stmAux = StmAux
---         { stmAuxCerts = Certs
---             { unCerts = [] }
---         , stmAuxAttrs = Attrs
---             { unAttrs = mempty }
---         , stmAuxDec = ()
---         }
---     , stmExp = BasicOp
---         ( BinOp ( Add Int64 OverflowWrap )
---             ( Var
---                 ( VName
---                     ( Name "acc" ) 5209
---                 )
---             )
---             ( Var
---                 ( VName
---                     ( Name "b" ) 5210
---                 )
---             )
---         )
---     }
+stmToPrimExpsTestsMC :: TestTree
+stmToPrimExpsTestsMC =
+  testGroup
+    "MC"
+    $ do
+      let scope =
+            M.fromList
+              [ (VName "n" 5142, FParamName (Prim (IntType Int64))),
+                (VName "m" 5143, FParamName (Prim (IntType Int64))),
+                ( VName "xss" 5144,
+                  FParamName
+                    ( Array
+                        (IntType Int64)
+                        ( Shape
+                            { shapeDims =
+                                [ Var (VName "n" 5142),
+                                  Var (VName "m" 5143)
+                                ]
+                            }
+                        )
+                        Nonunique
+                    )
+                ),
+                (VName "segmap_group_size" 5201, LetName (Prim (IntType Int64))),
+                (VName "segmap_usable_groups" 5202, LetName (Prim (IntType Int64))),
+                ( VName "defunc_0_map_res" 5203,
+                  LetName
+                    ( Array
+                        (IntType Int64)
+                        (Shape {shapeDims = [Var (VName "n" 5142)]})
+                        NoUniqueness
+                    )
+                ),
+                (VName "defunc_0_f_res" 5207, LetName (Prim (IntType Int64))),
+                (VName "i" 5208, IndexName Int64),
+                (VName "acc" 5209, FParamName (Prim (IntType Int64))),
+                (VName "b" 5210, LetName (Prim (IntType Int64))),
+                (VName "defunc_0_f_res" 5211, LetName (Prim (IntType Int64)))
+              ]
+      let emptyStmAux =
+            StmAux
+              { stmAuxCerts = Certs {unCerts = mempty},
+                stmAuxAttrs = Attrs {unAttrs = mempty},
+                stmAuxDec = ()
+              }
+      [ testCase "BinOp" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "defunc_0_f_res" 5211,
+                                  patElemDec = Prim (IntType Int64)
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      BasicOp
+                        ( BinOp
+                            (Add Int64 OverflowWrap)
+                            (Var (VName "acc" 5209))
+                            (Var (VName "b" 5210))
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected =
+                M.fromList
+                  [ ( VName "defunc_0_f_res" 5211,
+                      Just
+                        ( BinOpExp
+                            (Add Int64 OverflowWrap)
+                            (LeafExp (VName "acc" 5209) (IntType Int64))
+                            (LeafExp (VName "b" 5210) (IntType Int64))
+                        )
+                    )
+                  ]
+          res @?= expected,
+        testCase "Index" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "b" 5210,
+                                  patElemDec = Prim (IntType Int64)
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      BasicOp
+                        ( Index
+                            (VName "xss" 5144)
+                            ( Slice
+                                { unSlice =
+                                    [ DimFix (Var (VName "gtid" 5204)),
+                                      DimFix (Var (VName "i" 5208))
+                                    ]
+                                }
+                            )
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected = M.fromList [(VName "b" 5210, Nothing)]
+          res @?= expected,
+        testCase "Loop" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "defunc_0_f_res" 5207,
+                                  patElemDec = Prim (IntType Int64)
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      Loop
+                        [ ( Param
+                              { paramAttrs = Attrs {unAttrs = mempty},
+                                paramName = VName "acc" 5209,
+                                paramDec = Prim (IntType Int64)
+                              },
+                            Constant (IntValue (Int64Value 0))
+                          )
+                        ]
+                        ( ForLoop
+                            (VName "i" 5208)
+                            Int64
+                            (Var (VName "m" 5143))
+                        )
+                        ( Body
+                            { bodyDec = (),
+                              bodyStms = mempty,
+                              bodyResult =
+                                [ SubExpRes
+                                    { resCerts = Certs {unCerts = []},
+                                      resSubExp = Var (VName "defunc_0_f_res" 5211)
+                                    }
+                                ]
+                            }
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected =
+                M.fromList
+                  [ (VName "defunc_0_f_res" 5207, Nothing),
+                    (VName "i" 5208, Just (LeafExp (VName "m" 5143) (IntType Int64))),
+                    (VName "acc" 5209, Just (LeafExp (VName "acc" 5209) (IntType Int64)))
+                  ]
+          res @?= expected,
+        testCase "Loop body" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "defunc_0_f_res" 5207,
+                                  patElemDec = Prim (IntType Int64)
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      Loop
+                        [ ( Param
+                              { paramAttrs = Attrs {unAttrs = mempty},
+                                paramName = VName "acc" 5209,
+                                paramDec = Prim (IntType Int64)
+                              },
+                            Constant (IntValue (Int64Value 0))
+                          )
+                        ]
+                        ( ForLoop
+                            (VName "i" 5208)
+                            Int64
+                            (Var (VName "m" 5143))
+                        )
+                        ( Body
+                            { bodyDec = (),
+                              bodyStms =
+                                S.fromList
+                                  [ Let
+                                      { stmPat =
+                                          Pat
+                                            { patElems =
+                                                [ PatElem
+                                                    { patElemName = VName "b" 5210,
+                                                      patElemDec = Prim (IntType Int64)
+                                                    }
+                                                ]
+                                            },
+                                        stmAux = emptyStmAux,
+                                        stmExp =
+                                          BasicOp
+                                            ( Index
+                                                (VName "xss" 5144)
+                                                ( Slice
+                                                    { unSlice =
+                                                        [ DimFix (Var (VName "gtid" 5204)),
+                                                          DimFix (Var (VName "i" 5208))
+                                                        ]
+                                                    }
+                                                )
+                                            )
+                                      },
+                                    Let
+                                      { stmPat =
+                                          Pat
+                                            { patElems =
+                                                [ PatElem
+                                                    { patElemName = VName "defunc_0_f_res" 5211,
+                                                      patElemDec = Prim (IntType Int64)
+                                                    }
+                                                ]
+                                            },
+                                        stmAux = emptyStmAux,
+                                        stmExp =
+                                          BasicOp
+                                            ( BinOp
+                                                (Add Int64 OverflowWrap)
+                                                (Var (VName "acc" 5209))
+                                                (Var (VName "b" 5210))
+                                            )
+                                      }
+                                  ],
+                              bodyResult =
+                                [ SubExpRes
+                                    { resCerts = Certs {unCerts = []},
+                                      resSubExp = Var (VName "defunc_0_f_res" 5211)
+                                    }
+                                ]
+                            }
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected =
+                M.fromList
+                  [ (VName "defunc_0_f_res" 5207, Nothing),
+                    (VName "i" 5208, Just (LeafExp (VName "m" 5143) (IntType Int64))),
+                    (VName "acc" 5209, Just (LeafExp (VName "acc" 5209) (IntType Int64))),
+                    (VName "b" 5210, Nothing),
+                    ( VName "defunc_0_f_res" 5211,
+                      Just
+                        ( BinOpExp
+                            (Add Int64 OverflowWrap)
+                            (LeafExp (VName "acc" 5209) (IntType Int64))
+                            (LeafExp (VName "b" 5210) (IntType Int64))
+                        )
+                    )
+                  ]
+          res @?= expected,
+        testCase "SegMap" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "defunc_0_map_res" 5125,
+                                  patElemDec =
+                                    Array
+                                      (IntType Int64)
+                                      (Shape {shapeDims = [Var (VName "n" 5142)]})
+                                      NoUniqueness
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      Op
+                        ( ParOp
+                            Nothing
+                            ( SegMap
+                                ()
+                                ( SegSpace
+                                    { segFlat = VName "flat_tid" 5112,
+                                      unSegSpace =
+                                        [ ( VName "gtid" 5126,
+                                            Var (VName "n" 5142)
+                                          )
+                                        ]
+                                    }
+                                )
+                                [Prim (IntType Int64)]
+                                ( KernelBody
+                                    { kernelBodyDec = (),
+                                      kernelBodyStms = mempty,
+                                      kernelBodyResult =
+                                        [ Returns
+                                            ResultMaySimplify
+                                            (Certs {unCerts = []})
+                                            (Var (VName "lifted_lambda_res" 5129))
+                                        ]
+                                    }
+                                )
+                            )
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected =
+                M.fromList
+                  [ (VName "defunc_0_map_res" 5125, Nothing),
+                    (VName "gtid" 5126, Just (LeafExp (VName "n" 5142) (IntType Int64)))
+                  ]
+          res @?= expected,
+        testCase "SegMap body" $ do
+          let stm =
+                Let
+                  { stmPat =
+                      Pat
+                        { patElems =
+                            [ PatElem
+                                { patElemName = VName "defunc_0_map_res" 5125,
+                                  patElemDec =
+                                    Array
+                                      (IntType Int64)
+                                      (Shape {shapeDims = [Var (VName "n" 5142)]})
+                                      NoUniqueness
+                                }
+                            ]
+                        },
+                    stmAux = emptyStmAux,
+                    stmExp =
+                      Op
+                        ( ParOp
+                            Nothing
+                            ( SegMap
+                                ()
+                                ( SegSpace
+                                    { segFlat = VName "flat_tid" 5112,
+                                      unSegSpace =
+                                        [ ( VName "gtid" 5126,
+                                            Var (VName "n" 5142)
+                                          )
+                                        ]
+                                    }
+                                )
+                                [Prim (IntType Int64)]
+                                ( KernelBody
+                                    { kernelBodyDec = (),
+                                      kernelBodyStms =
+                                        S.fromList
+                                          [ Let
+                                              { stmPat =
+                                                  Pat
+                                                    { patElems =
+                                                        [ PatElem
+                                                            { patElemName = VName "eta_p" 5128,
+                                                              patElemDec = Prim (IntType Int64)
+                                                            }
+                                                        ]
+                                                    },
+                                                stmAux = emptyStmAux,
+                                                stmExp =
+                                                  BasicOp
+                                                    ( Index
+                                                        (VName "xs" 5093)
+                                                        (Slice {unSlice = [DimFix (Var (VName "gtid" 5126))]})
+                                                    )
+                                              },
+                                            Let
+                                              { stmPat =
+                                                  Pat
+                                                    { patElems =
+                                                        [ PatElem
+                                                            { patElemName = VName "lifted_lambda_res" 5129,
+                                                              patElemDec = Prim (IntType Int64)
+                                                            }
+                                                        ]
+                                                    },
+                                                stmAux = emptyStmAux,
+                                                stmExp =
+                                                  BasicOp
+                                                    ( BinOp
+                                                        (Add Int64 OverflowWrap)
+                                                        (Constant (IntValue (Int64Value 2)))
+                                                        (Var (VName "eta_p" 5128))
+                                                    )
+                                              }
+                                          ],
+                                      kernelBodyResult =
+                                        [ Returns
+                                            ResultMaySimplify
+                                            (Certs {unCerts = []})
+                                            (Var (VName "lifted_lambda_res" 5129))
+                                        ]
+                                    }
+                                )
+                            )
+                        )
+                  }
+          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let expected =
+                M.fromList
+                  [ (VName "defunc_0_map_res" 5125, Nothing),
+                    (VName "gtid" 5126, Just (LeafExp (VName "n" 5142) (IntType Int64))),
+                    (VName "eta_p" 5128, Nothing),
+                    ( VName "lifted_lambda_res" 5129,
+                      Just
+                        ( BinOpExp
+                            (Add Int64 OverflowWrap)
+                            (ValueExp (IntValue (Int64Value 2)))
+                            (LeafExp (VName "eta_p" 5128) (IntType Int64))
+                        )
+                    )
+                  ]
+          res @?= expected
+        ]
