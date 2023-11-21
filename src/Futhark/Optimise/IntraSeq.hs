@@ -4,6 +4,7 @@
 {-# HLINT ignore "Use uncurry" #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# HLINT ignore "Use lambda-case" #-}
+{-# HLINT ignore "Replace case with maybe" #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -103,12 +104,11 @@ intraSeq =
 seqStms ::
   Stms GPU ->
   SeqM (Stms GPU)
-seqStms stms =
+seqStms stms = do
   foldM (\ss s -> do
       ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
       pure $ ss <> ss'
       ) mempty (stmsToList stms)
-
 
 -- | Matches against singular statements at the group level. That is statements
 -- that are either SegOps at group level or intermediate statements between
@@ -168,16 +168,30 @@ seqStms' ::
   Stms GPU ->
   Builder GPU ()
 seqStms' env stms = do
-  (_, stms') <- collectStms $ mapM (seqStm' env) stms
-  addStms stms'
+  seqStmsMaybe env (stmsToList stms) stms []
+  -- (_, stms') <- collectStms $ mapM (seqStm' env) stms
+  -- addStms stms'
 
+seqStmsMaybe ::
+  Env ->
+  [Stm GPU] ->
+  Stms GPU ->
+  [Stm GPU] ->
+  Builder GPU ()
+seqStmsMaybe _ [] orgStms [] = do addStms orgStms
+seqStmsMaybe _ [] _ finalStms = do addStms $ stmsFromList finalStms
+seqStmsMaybe env (stm:stms) orgStms finalStms = do
+  (res, stm') <- collectStms $ seqStm' env stm
+  case res of
+    Just _ -> seqStmsMaybe env stms orgStms $ finalStms ++ stmsToList stm'
+    Nothing -> addStms orgStms
 
 -- |Expects to only match on statements at thread level. That is SegOps at
 -- thread level or statements between such SegOps
 seqStm' ::
   Env ->
   Stm GPU ->
-  Builder GPU ()
+  Builder GPU (Maybe ())
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
@@ -198,7 +212,7 @@ seqStm' env (Let pat aux
         L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
 
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
-
+  pure Nothing
 
 seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
@@ -222,7 +236,7 @@ seqStm' env stm@(Let pat _ (Op (SegOp
     let kbody' = KernelBody dec stms kres
     let names = patNames pat
     letBindNames names $ Op $ SegOp $ SegMap lvl space' types' kbody'
-
+    pure $ Just ()
 
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
@@ -282,7 +296,7 @@ seqStm' env (Let pat aux
   forM_ (zip (patElems pat) scans') (\(p, s) ->
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
-
+  pure $ Just ()
 
 -- Need to potentially fix index statements between segops
 -- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
@@ -299,10 +313,12 @@ seqStm' env (Let pat aux
 
 
 -- Catch all
-seqStm' _ stm = addStm stm
+seqStm' _ stm = do
+  addStm stm
+  pure $ Just ()
 
 
-seqScatter :: Env -> Stm GPU -> Builder GPU ()
+seqScatter :: Env -> Stm GPU -> Builder GPU (Maybe())
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) _ ts kbody)))) = do
 
@@ -418,7 +434,7 @@ seqScatter env (Let pat aux (Op (SegOp
   addStm $ Let pat aux loopExp
 
   -- End
-  pure ()
+  pure $ Just ()
   where
     invert (a,b) = (b,a)
 
@@ -426,8 +442,8 @@ seqScatter env (Let pat aux (Op (SegOp
     mapUpdates mapping (Slice dims, vs) = do
       let vs' = M.findWithDefault vs vs mapping
       let dims' = L.map (\d ->
-            case d of 
-              DimFix d' -> DimFix $ M.findWithDefault d' d' mapping  
+            case d of
+              DimFix d' -> DimFix $ M.findWithDefault d' d' mapping
               d' -> d' -- should never happen
             ) dims
       (Slice dims', vs')
