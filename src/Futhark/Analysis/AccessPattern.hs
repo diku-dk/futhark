@@ -421,7 +421,11 @@ analyzeIndex ctx pats arr_name dimIndexes = do
       case M.lookup (fst arrayName) $ slices context of
         Nothing -> analyzeIndex' context pats arrayName dimAccess
         Just sliceAccess -> do
-          analyzeIndex' context pats arrayName (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
+          analyzeIndex'
+            context
+            pats
+            arrayName
+            (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
 
     slice context dims =
       (context {slices = M.insert (head pats) dims $ slices context}, mempty)
