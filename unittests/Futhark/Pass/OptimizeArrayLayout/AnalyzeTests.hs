@@ -14,7 +14,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 tests :: TestTree
-tests = testGroup "AnalyzeTests" [analyzeStmTests]
+tests = testGroup "Analyze" [analyzeStmTests]
 
 analyzeStmTests :: TestTree
 analyzeStmTests =

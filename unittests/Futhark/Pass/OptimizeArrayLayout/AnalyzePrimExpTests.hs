@@ -19,7 +19,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 tests :: TestTree
-tests = testGroup "AnalyzePrimExpTests" [stmToPrimExpsTests]
+tests = testGroup "AnalyzePrim" [stmToPrimExpsTests]
 
 stmToPrimExpsTests :: TestTree
 stmToPrimExpsTests =

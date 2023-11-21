@@ -14,7 +14,7 @@ import Test.Tasty.HUnit
 tests :: TestTree
 tests =
   testGroup
-    "LayoutTests"
+    "Layout"
     [commonPermutationEliminatorsTests]
 
 commonPermutationEliminatorsTests :: TestTree
