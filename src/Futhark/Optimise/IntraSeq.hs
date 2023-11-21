@@ -212,7 +212,7 @@ seqStm' env (Let pat aux
         L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
 
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
-  pure Nothing
+  pure $ Just ()
 
 seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
