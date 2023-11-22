@@ -168,33 +168,30 @@ seqStm stm = addStm stm
 
 
 -- | Much like seqStms but now carries an Env
--- TODO: RENAME THIS TO SEQKERNELBODY
 seqStms' ::
   Env ->
   Stms GPU ->
   Builder GPU SeqResult
 seqStms' env stms = do
-  (res, stms') <- collectStms $ seqStmsSeqResult env stms Empty
+  (res, stms') <- collectStms $ mapCondSeqStm' env stms Empty
   case res of
     Keep -> addStms stms'
     Discard -> addStms stms
   pure res
 
-
-seqStmsSeqResult ::
+mapCondSeqStm'::
   Env ->
   Stms GPU ->
   Stms GPU ->
   Builder GPU SeqResult
-seqStmsSeqResult _ Empty finalStms = do
+mapCondSeqStm' _ Empty finalStms = do
   addStms finalStms
   pure Keep
-seqStmsSeqResult env (stm :<| stms) finalStms = do
-  (res, stms') <- collectStms $ seqStm' env stm
+mapCondSeqStm' env (stm :<| stms) finalStms = do
+  (res, stms') <- runBuilder $ localScope (scopeOf finalStms) $ seqStm' env stm
   case res of
-    Keep -> seqStmsSeqResult env stms $ finalStms >< stms'
+    Keep -> mapCondSeqStm' env stms $ finalStms >< stms'
     Discard -> pure Discard
-
 
 -- |Expects to only match on statements at thread level. That is SegOps at
 -- thread level or statements between such SegOps
