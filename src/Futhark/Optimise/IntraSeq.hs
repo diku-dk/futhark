@@ -24,9 +24,11 @@ import Data.Set as S
 
 import Debug.Pretty.Simple
 import Debug.Trace
+import Data.Sequence
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
+data SeqResult = Keep | Discard
 
 runSeqM' :: SeqM a -> Scope GPU -> Builder GPU a
 runSeqM' m sc = do
@@ -116,8 +118,9 @@ seqStms stms = do
 seqStm ::
   Stm GPU ->
   Builder GPU ()
-seqStm (Let pat aux (Op (SegOp (
-            SegMap (SegGroup virt (Just grid)) space ts kbody)))) = do
+seqStm stm@(Let pat aux (Op (SegOp (
+              SegMap (SegGroup virt (Just grid)) space ts 
+                     (KernelBody dec stms kres))))) = do
   -- As we are at group level all arrays in scope must be global, i.e. not
   -- local to the current group. We simply create a tile for all such arrays
   -- and let a Simplify pass remove unused tiles.
@@ -132,66 +135,73 @@ seqStm (Let pat aux (Op (SegOp (
 
   let env = Env (Var grpId) sizeNew sizeOld Nothing mempty e
 
-  exp' <- buildSegMap' $ do
+  ((kres', lvl', seqRes), stms') <- collectStms $ do
     -- Update the env with mappings
     env' <- mkTiles env
 
     -- Create the new grid with the new group size
     let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
-    kresults <- seqKernelBody env' kbody
+    seqRes <- seqStms' env' stms
 
     let lvl' = SegGroup virt grid'
 
-    kresults' <- flattenResults pat kresults
+    kres' <- flattenResults pat kres
 
-    pure (kresults', lvl', space, ts)
-
-  addStm $ Let pat aux exp'
+    pure (kres', lvl', seqRes)
+  
+  case seqRes of
+    Discard -> addStm stm
+    Keep -> do
+      let kbody' = KernelBody dec stms' kres'
+      addStm $ Let pat aux $ Op $ SegOp $ SegMap lvl' space ts kbody'
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
 seqStm stm = addStm stm
 
 
-seqKernelBody ::
-  Env ->
-  KernelBody GPU ->
-  Builder GPU [KernelResult]
-seqKernelBody env (KernelBody _ stms results) = do
-  seqStms' env stms
-  pure results
+-- seqKernelBody ::
+--   Env ->
+--   KernelBody GPU ->
+--   Builder GPU SeqResult
+-- seqKernelBody env (KernelBody _ stms _) = do seqStms' env stms
 
 
 -- | Much like seqStms but now carries an Env
+-- TODO: RENAME THIS TO SEQKERNELBODY
 seqStms' ::
   Env ->
   Stms GPU ->
-  Builder GPU ()
+  Builder GPU SeqResult
 seqStms' env stms = do
-  seqStmsMaybe env (stmsToList stms) stms []
-  -- (_, stms') <- collectStms $ mapM (seqStm' env) stms
-  -- addStms stms'
-
-seqStmsMaybe ::
-  Env ->
-  [Stm GPU] ->
-  Stms GPU ->
-  [Stm GPU] ->
-  Builder GPU ()
-seqStmsMaybe _ [] orgStms [] = do addStms orgStms
-seqStmsMaybe _ [] _ finalStms = do addStms $ stmsFromList finalStms
-seqStmsMaybe env (stm:stms) orgStms finalStms = do
-  (res, stm') <- collectStms $ seqStm' env stm
+  (res, stms') <- collectStms $ seqStmsSeqResult env stms Empty
   case res of
-    Just _ -> seqStmsMaybe env stms orgStms $ finalStms ++ stmsToList stm'
-    Nothing -> addStms orgStms
+    Keep -> addStms stms'
+    Discard -> addStms stms
+  pure res
+
+
+seqStmsSeqResult ::
+  Env ->
+  Stms GPU ->
+  Stms GPU ->
+  Builder GPU SeqResult
+seqStmsSeqResult _ Empty finalStms = do
+  addStms finalStms
+  pure Keep
+seqStmsSeqResult env (stm :<| stms) finalStms = do
+  (res, stms') <- collectStms $ seqStm' env stm
+  case res of
+    Keep -> seqStmsSeqResult env stms $ finalStms >< stms'
+    Discard -> pure Discard
+
 
 -- |Expects to only match on statements at thread level. That is SegOps at
 -- thread level or statements between such SegOps
 seqStm' ::
   Env ->
   Stm GPU ->
-  Builder GPU (Maybe ())
+  Builder GPU SeqResult
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
@@ -209,10 +219,10 @@ seqStm' env (Let pat aux
   let ts' = L.map (stripArray 1) tps
   let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
   let pat' = Pat $ patKeep ++
-        L.map (\(p, t) -> setPatElemDec p t) (zip patUpdate (L.drop numResConsumed tps))
+        L.map (\(p, t) -> setPatElemDec p t) (L.zip patUpdate (L.drop numResConsumed tps))
 
   addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
-  pure $ Just ()
+  pure Keep
 
 seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
@@ -236,7 +246,7 @@ seqStm' env stm@(Let pat _ (Op (SegOp
     let kbody' = KernelBody dec stms kres
     let names = patNames pat
     letBindNames names $ Op $ SegOp $ SegMap lvl space' types' kbody'
-    pure $ Just ()
+    pure Keep
 
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
@@ -281,7 +291,7 @@ seqStm' env (Let pat aux
 
     let env' = updateEnvTid env tid
     lambSOAC <- buildSOACLambda env' usedArrays kbody ts
-    let scans = L.map (\(l, n) -> Scan l n) $ zip scanLambdas nes
+    let scans = L.map (\(l, n) -> Scan l n) $ L.zip scanLambdas nes
     let scanSoac = scanomapSOAC scans lambSOAC
     es <- mapM (getChunk env tid (seqFactor env)) usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
@@ -293,10 +303,10 @@ seqStm' env (Let pat aux
     let types' = scremaType (seqFactor env) scanSoac
     pure (usedRes ++ fused, lvl', space', types')
 
-  forM_ (zip (patElems pat) scans') (\(p, s) ->
+  forM_ (L.zip (patElems pat) scans') (\(p, s) ->
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
-  pure $ Just ()
+  pure Keep
 
 -- Need to potentially fix index statements between segops
 -- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
@@ -315,10 +325,10 @@ seqStm' env (Let pat aux
 -- Catch all
 seqStm' _ stm = do
   addStm stm
-  pure $ Just ()
+  pure Keep
 
 
-seqScatter :: Env -> Stm GPU -> Builder GPU (Maybe())
+seqScatter :: Env -> Stm GPU -> Builder GPU SeqResult
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) _ ts kbody)))) = do
 
@@ -434,7 +444,7 @@ seqScatter env (Let pat aux (Op (SegOp
   addStm $ Let pat aux loopExp
 
   -- End
-  pure $ Just ()
+  pure Keep
   where
     invert (a,b) = (b,a)
 
@@ -459,7 +469,7 @@ buildSOACLambda env usedArrs kbody retTs = do
   let ts' = L.map (Prim . elemType) ts
   params <- mapM (newParam "par" ) ts'
   let mapNms = L.map paramName params
-  let env' = updateMapping env $ M.fromList $ zip usedArrs mapNms
+  let env' = updateMapping env $ M.fromList $ L.zip usedArrs mapNms
   kbody' <- runSeqMExtendedScope (seqKernelBody' env' kbody) (scopeOfLParams params)
   let body = kbodyToBody kbody'
   renameLambda $
@@ -503,7 +513,7 @@ numArgsConsumedBySegop :: [SegBinOp GPU] -> Int
 numArgsConsumedBySegop binops =
   let numResUsed = L.foldl
                     (\acc (SegBinOp _ (Lambda pars _ _) neuts _)
-                      -> acc + length pars - length neuts) 0 binops
+                      -> acc + L.length pars - L.length neuts) 0 binops
   in numResUsed
 
 seqKernelBody' ::
@@ -562,7 +572,7 @@ mkIntmRed env kbody retTs binops = do
       lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
       -- TODO analyze if any fused maps then produce reduce?
       -- we build the reduce as a scan initially
-      let scans = L.map (\(l, n) -> Scan l n) $ zip lambda ne
+      let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
       let screma = scanomapSOAC scans lambSOAC
       chunks <- mapM (getChunk env tid (seqFactor env)) usedArrs
 
@@ -590,7 +600,7 @@ getUsedArraysIn ::
   Builder GPU [VName]
 getUsedArraysIn env kbody = do
   scope <- askScope
-  let (arrays, _) = unzip $ M.toList $ M.filter isArray scope
+  let (arrays, _) = L.unzip $ M.toList $ M.filter isArray scope
   let free = IM.elems $ namesIntMap $ freeIn kbody
   let freeArrays = arrays `intersect` free
   let arrays' =
@@ -640,7 +650,7 @@ flattenResults ::
   [KernelResult] ->
   Builder GPU [KernelResult]
 flattenResults pat kresults = do
-  subExps <- forM (zip kresults $ patTypes pat) $ \(res, tp)-> do
+  subExps <- forM (L.zip kresults $ patTypes pat) $ \(res, tp)-> do
     let resSubExp = kernelResultSubExp res
     case resSubExp of
       (Constant _) -> letSubExp "const_res" $ BasicOp $ SubExp resSubExp
@@ -888,20 +898,13 @@ buildSegMapTup_ name m = do
     varFromExp (Var nm) = nm
     varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
 
--- buildSegMapTup' ::
---   String -> 
+-- buildSegMap' ::
 --   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
 --   Builder GPU (Exp GPU)
--- buildSegMapTup' name m = do undefined
-
-
-buildSegMap' ::
-  Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
-  Builder GPU (Exp GPU)
-buildSegMap' m = do
-  ((res, lvl, space, ts), stms) <- collectStms m
-  let kbody' = KernelBody () stms res
-  pure $ Op $ SegOp $ SegMap lvl space ts kbody'
+-- buildSegMap' m = do
+--   ((res, lvl, space, ts), stms) <- collectStms m
+--   let kbody' = KernelBody () stms res
+--   pure $ Op $ SegOp $ SegMap lvl space ts kbody'
 
 -- | The [KernelResult] from the input monad is what is being passed to the 
 -- segmented binops
