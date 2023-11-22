@@ -77,28 +77,19 @@ data DimAccess rep = DimAccess
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
+    -- FIXME: Should not be intmap
     dependencies :: S.IntMap Dependency,
+    originalVar :: Maybe VName,
     originalDimension :: Int
   }
   deriving (Eq, Show)
 
 data Dependency = Dependency
   { reducedVar :: VName,
-    originalVar :: VName,
     lvl :: Int,
     varType :: VarType
   }
   deriving (Eq, Show)
-
-instance Semigroup (DimAccess rep) where
-  (<>) :: DimAccess rep -> DimAccess rep -> DimAccess rep
-  adeps <> bdeps =
-    DimAccess
-      (dependencies adeps <> dependencies bdeps)
-      (max (originalDimension adeps) (originalDimension bdeps))
-
-instance Monoid (DimAccess rep) where
-  mempty = DimAccess mempty 0
 
 isInvariant :: DimAccess rep -> Bool
 isInvariant = null . dependencies
@@ -379,8 +370,12 @@ getIndexDependencies ctx dims =
         -- \| If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
         (DimSlice offset num_elems stride) ->
-          let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
-           in Right $ dimAccess {originalDimension = i} : accumulator
+          -- We assume that a slice is iterated sequentially, so we have to
+          -- create a fake dependency for the slice.
+          -- TODO: propoerly construct a unique VName?
+          let dimAccess = DimAccess (S.singleton 0 $ Dependency (VName "slice" 0) (currentLevel ctx) LoopVar) (Just $ VName "slice" 0) (currentLevel ctx)
+           in -- let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
+              Right $ dimAccess {originalDimension = i} : accumulator
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
@@ -425,7 +420,9 @@ analyzeIndex ctx pats arr_name dimIndexes = do
             context
             pats
             arrayName
-            (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
+            -- TODO: Fix this
+            (init sliceAccess)
+    -- (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
 
     slice context dims =
       (context {slices = M.insert (head pats) dims $ slices context}, mempty)
@@ -617,7 +614,7 @@ analyzeSubExpr pp ctx (Var v) =
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
-consolidate _ (Constant _) = mempty
+consolidate _ (Constant _) = DimAccess mempty Nothing 0
 consolidate ctx (Var v) = reduceDependencies ctx v v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
@@ -629,13 +626,13 @@ reduceDependencies ctx v_src v =
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v v_src lvl t)]) (currentLevel ctx)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v v_src lvl t)]) (currentLevel ctx)
-        ConstType -> mempty
-        Variable ->
-          mconcat $
-            map (reduceDependencies ctx v_src) $
-              namesToList deps
+        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src) (currentLevel ctx)
+        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src) (currentLevel ctx)
+        ConstType -> DimAccess mempty (Just v_src) (currentLevel ctx)
+        Variable -> do
+          -- TODO: This might be wrong
+          let reducedDeps = mconcat $ map (dependencies . reduceDependencies ctx v_src) $ namesToList deps
+          DimAccess reducedDeps (Just v_src) (currentLevel ctx)
 
 -- Misc functions
 
@@ -730,10 +727,7 @@ instance Pretty (DimAccess rep) where
     "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) -- <+> (show $ variableType dimidx)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
-      printPair (Dependency name name_orig lvl vtype) =
-        if name_orig == name
-          then pretty name <+> pretty lvl <+> pretty vtype
-          else pretty name_orig <+> pretty name <+> pretty lvl <+> pretty vtype
+      printPair (Dependency name lvl vtype) = pretty name <+> pretty lvl <+> pretty vtype
 
 instance Pretty SegOpName where
   pretty (SegmentedMap name) = "(segmap)" <+> pretty name

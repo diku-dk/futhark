@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, PermutationTable) where
 
 import Data.IntMap.Strict qualified as S
@@ -38,15 +40,20 @@ instance Layout GPU where
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
       -- Check if any of the dependencies are too complex to reason about
-      let deps = concatMap (map (originalVar . snd) . S.toList . dependencies) dimAccesses
+      let deps = map originalVar dimAccesses
       let counters = concatMap (map (isCounter . varType . snd) . S.toList . dependencies) dimAccesses
-      let primExps = map (`M.lookup` primExpTable) deps
+      let primExps = map (applyIfJust (`M.lookup` primExpTable)) deps
       let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
       -- Check if we want to manifest this array with the permutation
       if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses
         then Nothing
         else Just perm
+
+-- TODO: Is there a builtin function for this?
+applyIfJust :: (a -> Maybe b) -> Maybe a -> Maybe b
+applyIfJust _ Nothing = Nothing
+applyIfJust f (Just a) = f a
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
 isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) counter =
@@ -182,7 +189,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (Dependency _ _ lvl varType) = Just (varType, lvl, og)
+        f og (Dependency _ lvl varType) = Just (varType, lvl, og)
 
 sortMC :: [DimAccess rep] -> [DimAccess rep]
 sortMC =
@@ -223,7 +230,7 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (Dependency _ _ lvl varType) = Just (varType, lvl, og)
+        f og (Dependency _ lvl varType) = Just (varType, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.
