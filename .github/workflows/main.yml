@@ -68,7 +68,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install cabal-install ghc@9 sphinx-doc
+        brew install cabal-install ghc@9.4 sphinx-doc
         echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
         echo "/usr/local/opt/ghc@9/bin" >> $GITHUB_PATH
 
