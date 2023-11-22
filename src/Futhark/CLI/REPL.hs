@@ -227,7 +227,7 @@ readEvalPrint = do
         Right (Right e) -> do
           valOrErr <- onExp e
           case valOrErr of
-            Left err -> liftIO $ putDoc err
+            Left err -> liftIO $ putDocLn err
             Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
