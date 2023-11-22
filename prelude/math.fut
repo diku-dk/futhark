@@ -87,8 +87,11 @@ module type integral = {
   -- one of the operands is negative.  May be more efficient.
   val %%: t -> t -> t
 
+  -- | Bitwise and.
   val &: t -> t -> t
+  -- | Bitwise or.
   val |: t -> t -> t
+  -- | Bitwise xor.
   val ^: t -> t -> t
 
   -- | Bitwise negation.
