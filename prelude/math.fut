@@ -248,6 +248,9 @@ module type float = {
   -- | Produces the next representable number from `x` in the
   -- direction of `y`.
   val nextafter : (x: t) -> (y: t) -> t
+
+  -- | Multiplies floating-point value by 2 raised to an integer power.
+  val ldexp : t -> i32 -> t
 }
 
 -- | Boolean numbers.  When converting from a number to `bool`, 0 is
@@ -961,6 +964,7 @@ module f64: (float with t = f64 with int_t = u64) = {
   def round = intrinsics.round64
 
   def nextafter x y = intrinsics.nextafter64 (x,y)
+  def ldexp x y = intrinsics.ldexp64 (x,y)
 
   def to_bits (x: f64): u64 = u64m.i64 (intrinsics.to_bits64 x)
   def from_bits (x: u64): f64 = intrinsics.from_bits64 (intrinsics.sign_i64 x)
@@ -1076,6 +1080,7 @@ module f32: (float with t = f32 with int_t = u32) = {
   def round = intrinsics.round32
 
   def nextafter x y = intrinsics.nextafter32 (x,y)
+  def ldexp x y = intrinsics.ldexp32 (x,y)
 
   def to_bits (x: f32): u32 = u32m.i32 (intrinsics.to_bits32 x)
   def from_bits (x: u32): f32 = intrinsics.from_bits32 (intrinsics.sign_i32 x)
@@ -1195,6 +1200,7 @@ module f16: (float with t = f16 with int_t = u16) = {
   def round = intrinsics.round16
 
   def nextafter x y = intrinsics.nextafter16 (x,y)
+  def ldexp x y = intrinsics.ldexp16 (x,y)
 
   def to_bits (x: f16): u16 = u16m.i16 (intrinsics.to_bits16 x)
   def from_bits (x: u16): f16 = intrinsics.from_bits16 (intrinsics.sign_i16 x)
