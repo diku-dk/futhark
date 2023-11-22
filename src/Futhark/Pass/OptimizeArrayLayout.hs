@@ -30,8 +30,7 @@ optimizeArrayLayout =
     -- return
     $ \prog -> do
       -- Analyse the program
-      -- let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
-      let indexTable = analyzeDimAccesss prog
+      let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
