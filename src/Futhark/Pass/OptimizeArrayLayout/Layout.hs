@@ -40,20 +40,16 @@ instance Layout GPU where
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
       -- Check if any of the dependencies are too complex to reason about
-      let deps = map originalVar dimAccesses
-      let counters = concatMap (map (isCounter . varType . snd) . S.toList . dependencies) dimAccesses
-      let primExps = map (applyIfJust (`M.lookup` primExpTable)) deps
+      let dimAccesses' = filter (isJust . originalVar) dimAccesses
+      let deps = mapMaybe originalVar dimAccesses'
+      let counters = concatMap (map (isCounter . varType . snd) . S.toList . dependencies) dimAccesses'
+      let primExps = map (`M.lookup` primExpTable) deps
       let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
       -- Check if we want to manifest this array with the permutation
-      if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses
+      if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses'
         then Nothing
         else Just perm
-
--- TODO: Is there a builtin function for this?
-applyIfJust :: (a -> Maybe b) -> Maybe a -> Maybe b
-applyIfJust _ Nothing = Nothing
-applyIfJust f (Just a) = f a
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
 isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) counter =
