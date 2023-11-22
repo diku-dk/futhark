@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-* Incorrect data dependency information for `scatter` could cause
-  invalid simplification.
+* Incorrect data dependency information for `scatter` and `vjp` could
+  cause invalid simplification.
 
 * Barrier divergence in certain complicated kernels that contain both
   bounds checks and intragroup scans.
