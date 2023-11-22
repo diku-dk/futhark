@@ -30,22 +30,16 @@ import Data.Sequence
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
 data SeqResult = Keep | Discard
 
-runSeqM' :: SeqM a -> Scope GPU -> Builder GPU a
-runSeqM' m sc = do
-  let tmp = runReaderT m sc
-  st <- get
-  let tmp' = runState tmp st
-  pure $ fst tmp'
-
-runSeqM :: SeqM a -> Builder GPU a
-runSeqM m = do
-  scp <- askScope
-  runSeqM' m scp
 
 runSeqMExtendedScope :: SeqM a -> Scope GPU -> Builder GPU a
 runSeqMExtendedScope m sc = do
   scp <- askScope
-  runSeqM' m (sc <> scp)
+  let sc' = sc <> scp
+  let tmp = runReaderT m sc'
+  st <- get
+  let tmp' = runState tmp st
+  pure $ fst tmp'
+
 
 
 -- | A structure for convenient passing of different information needed at 
@@ -158,13 +152,6 @@ seqStm stm@(Let pat aux (Op (SegOp (
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
 seqStm stm = addStm stm
-
-
--- seqKernelBody ::
---   Env ->
---   KernelBody GPU ->
---   Builder GPU SeqResult
--- seqKernelBody env (KernelBody _ stms _) = do seqStms' env stms
 
 
 -- | Much like seqStms but now carries an Env
@@ -305,6 +292,7 @@ seqStm' env (Let pat aux
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
   pure Keep
 
+-- TODO: what is this
 -- Need to potentially fix index statements between segops
 -- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
 --   case M.lookup arr (nameMap env) of
@@ -748,91 +736,6 @@ mkTiles env = do
 
   pure $ setMapping env (M.fromList tiles)
 
--- mkTiles ::
---   Env ->
---   Builder GPU Env
--- mkTiles env = do
---   scope <- askScope
---   let arrsInScope = M.toList $  M.filter isArray scope
-
---   scratchSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
---                                                (eSubExp $ seqFactor env)
---                                                (eSubExp $ grpSize env)
-
-
---   tiles <- forM arrsInScope $ \ (arrName, arrInfo) -> do
---     let tp = elemType $ typeOf arrInfo
-
---     -- The array to save the tile in
---     scratch <- letExp "tile_scratch" $ BasicOp $ Scratch tp [scratchSize]
-
---     -- Build SegMap that will write to tile
---     tile <- buildSegMap_ "tile_staging" $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
-
---       -- Allocate local scratch chunk
---       chunk <- letExp "chunk_scratch" $ BasicOp $ Scratch tp [seqFactor env]
-
---       -- Compute the chunk size of the current thread. Last thread might need to read less
---       -- sliceSize <- mkChunkSize tid env
---       tmp <- letSubExp "tmp" =<< eBinOp (Sub Int64 OverflowUndef)
---                                         (eSubExp $ grpsizeOld env)
---                                         (eSubExp $ Var tid)
---       sliceSize <- letSubExp "slice_size" =<< eBinOp (SDivUp Int64 Unsafe)
---                                                      (eSubExp tmp)
---                                                      (eSubExp $ grpSize env)
-
---       let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
---       let sliceIdx = DimSlice (Var tid) sliceSize (grpSize env)
---       vals <- letSubExp "slice" $ BasicOp $ Index arrName
---                                   (Slice $ outerDim ++ [sliceIdx])
-
---       -- Update the chunk
---       chunk' <- letSubExp "chunk" $ BasicOp $ Update Unsafe chunk
---                                     (Slice [DimSlice (intConst Int64 0) sliceSize (intConst Int64 1)]) vals
-
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, grpSize env)]
---       -- let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
---       let types = [Array tp (Shape [scratchSize]) NoUniqueness]
-
---       -- 
---       -- start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
---       --                                       (eSubExp $ Var tid)
---       --                                       (eSubExp $ grpSize env)
---       let slice = Slice [DimSlice (Var tid) (seqFactor env) (grpSize env)]
---       let res = [WriteReturns mempty scratch [(slice, chunk')]]
-
---       pure (res, lvl, space, types)
-
---     -- transpose and flatten
---     -- tileT <- letExp "tileT" $ BasicOp $ Rearrange [1,0] tile
---     -- tileFlat <- letExp "tile_flat" $ BasicOp $ Reshape
---     --             ReshapeArbitrary (Shape [scratchSize]) tileT
-
---     -- Now each thread will read their actual chunk to registers
---     let (VName n _) = arrName
---     tile' <- buildSegMap_ ("tile_" ++ nameToString n) $ do
---       tid <- newVName "tid"
---       phys <- newVName "phys_tid"
-
---       start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
---                                             (eSubExp $ Var tid)
---                                             (eSubExp $ seqFactor env)
---       -- NOTE: Can just use seqFactor here as we read from the padded tile craeted above
---       let dimSlice = DimSlice start (seqFactor env) (intConst Int64 1)
-
---       chunk <- letSubExp "chunk" $ BasicOp $ Index tile
---                                     (Slice [dimSlice])
---       let lvl = SegThread SegNoVirt Nothing
---       let space = SegSpace phys [(tid, grpSize env)]
---       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
---       pure ([Returns ResultPrivate mempty chunk], lvl, space, types)
-
---     pure (arrName, tile')
-
---   pure $ setMapping env (M.fromList tiles)
 
 isArray :: NameInfo GPU -> Bool
 isArray info = arrayRank (typeOf info) > 0
@@ -894,14 +797,6 @@ buildSegMapTup_ name m = do
     varFromExp :: SubExp -> VName
     varFromExp (Var nm) = nm
     varFromExp e = error $ "Expected SubExp of type Var, but got:\n" ++ show e
-
--- buildSegMap' ::
---   Builder GPU ([KernelResult], SegLevel, SegSpace, [Type]) ->
---   Builder GPU (Exp GPU)
--- buildSegMap' m = do
---   ((res, lvl, space, ts), stms) <- collectStms m
---   let kbody' = KernelBody () stms res
---   pure $ Op $ SegOp $ SegMap lvl space ts kbody'
 
 -- | The [KernelResult] from the input monad is what is being passed to the 
 -- segmented binops
