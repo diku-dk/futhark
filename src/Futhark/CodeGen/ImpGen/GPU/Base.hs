@@ -290,9 +290,10 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
   let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
-            sWhen in_block_thread_active $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
             inactive <-
               dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
@@ -302,9 +303,11 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
             -- The convoluted control flow is to ensure all threads
             -- hit this barrier (if applicable).
             when array_scan barrier
-            sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              . sUnless inactive
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -498,10 +501,11 @@ groupScan seg_flag arrs_full_size w lam arrs = do
           when (primType $ paramType p) $
             copyDWIM arr [DimFix ltid] (Var $ paramName p) []
 
-  sComment "carry-in for every block except the first" $ do
-    sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_x
-    sComment "write final result" $ sUnless no_carry_in write_final_result
+  sComment "carry-in for every block except the first" $
+    localOps threadOperations $ do
+      sComment "read operands" read_carry_in
+      sComment "perform operation" op_to_x
+      sComment "write final result" $ sUnless no_carry_in write_final_result
 
   barrier
 
