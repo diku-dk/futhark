@@ -41,7 +41,6 @@ runSeqMExtendedScope m sc = do
   pure $ fst tmp'
 
 
-
 -- | A structure for convenient passing of different information needed at 
 -- various stages during the pass.
 data Env = Env {
@@ -82,6 +81,20 @@ getThreadId env =
     (Just tid ) -> tid
     _ -> error "No tid to get"
 
+getSeqFactor :: Attrs -> SubExp
+getSeqFactor (Attrs attrs) = 
+  let attrs' = S.toList attrs
+      i = L.findIndex isSeqFactor attrs'
+  in case i of 
+    Just i' -> 
+      let (AttrComp _ [AttrInt x]) = attrs' !! i'
+      in intConst Int64 x
+    Nothing -> intConst Int64 4
+  where
+    isSeqFactor :: Attr -> Bool
+    isSeqFactor (AttrComp "seq_factor" [AttrInt _]) = True
+    isSeqFactor _ = False
+
 intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
@@ -119,15 +132,14 @@ seqStm stm@(Let pat aux (Op (SegOp (
   -- local to the current group. We simply create a tile for all such arrays
   -- and let a Simplify pass remove unused tiles.
 
-  -- TODO: Somehow select what the seqFactor should be
-  let e       = intConst Int64 4
-  let grpId   = fst $ head $ unSegSpace space
+  let seqFactor = getSeqFactor $ stmAuxAttrs aux
+  let grpId   = pTrace(show seqFactor) fst $ head $ unSegSpace space
   let sizeOld = unCount $ gridGroupSize grid
   sizeNew <- letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                             (eSubExp sizeOld)
-                                            (eSubExp e)
+                                            (eSubExp seqFactor)
 
-  let env = Env (Var grpId) sizeNew sizeOld Nothing mempty e
+  let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
 
   ((kres', lvl', seqRes), stms') <- collectStms $ do
     -- Update the env with mappings
