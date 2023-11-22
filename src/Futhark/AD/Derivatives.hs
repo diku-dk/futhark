@@ -339,6 +339,21 @@ pdBuiltin "lerp64" [v0, v1, t] =
       untyped $ fMax64 0 (fMin64 1 (isF64 t)),
       untyped $ isF64 v1 - isF64 v0
     ]
+pdBuiltin "ldexp16" [x, y] =
+  Just
+    [ untyped $ 2 ** isF16 x,
+      untyped $ log 2 * (2 ** isF16 y) * isF16 x
+    ]
+pdBuiltin "ldexp32" [x, y] =
+  Just
+    [ untyped $ 2 ** isF32 x,
+      untyped $ log 2 * (2 ** isF32 y) * isF32 x
+    ]
+pdBuiltin "ldexp64" [x, y] =
+  Just
+    [ untyped $ 2 ** isF64 x,
+      untyped $ log 2 * (2 ** isF64 y) * isF64 x
+    ]
 pdBuiltin "erf16" [z] =
   Just [untyped $ (2 / sqrt pi) * exp (negate (isF16 z * isF16 z))]
 pdBuiltin "erf32" [z] =
