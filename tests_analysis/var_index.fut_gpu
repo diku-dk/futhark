@@ -60,7 +60,7 @@ entry("main",
 -- (segmap) defunc_0_map_res_5681 : {
 --     (arr) A_5449 : {
 --         (idx) lifted_lambda_res_5688 :
---             0 : dependencies = {tmp_5687 gtid_5683 1 tid}
---             1 : dependencies = {index_primexp_5696 gtid_5682 0 tid}
+--             0 : dependencies = tmp_5687 -> {gtid_5683 1 tid}
+--             1 : dependencies = index_primexp_5696 -> {gtid_5682 0 tid}
 --     }
 -- }

@@ -78,9 +78,9 @@ entry("main",
 -- (segmap) defunc_0_map_res_5832 : {
 --     (arr) xsss_5483 : {
 --         (idx) b_5852 :
---             0 : dependencies = {foldl_arg2_5843 gtid_5833 0 tid, foldl_arg2_5843 gtid_5834 1 tid, foldl_arg2_5843 k_5841 2 iter}
+--             0 : dependencies = foldl_arg2_5843 -> {gtid_5833 0 tid, gtid_5834 1 tid, k_5841 2 iter}
 --             1 : dependencies = {h_5846 3 iter}
---             2 : dependencies = {foldl_arg2_5848 gtid_5833 0 tid, foldl_arg2_5848 gtid_5834 1 tid, foldl_arg2_5848 k_5841 2 iter, foldl_arg2_5848 h_5846 3 iter}
+--             2 : dependencies = foldl_arg2_5848 -> {gtid_5833 0 tid, gtid_5834 1 tid, k_5841 2 iter, h_5846 3 iter}
 --             3 : dependencies = {i_5850 4 iter}
 --     }
 -- }

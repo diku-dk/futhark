@@ -292,56 +292,56 @@ entry("main",
 -- (segmap) defunc_0_map_res_5484 : {
 --     (arr) yss_5309 : {
 --         (idx) x_5702 :
---             0 : dependencies = {gtid_5681 gid_5577 0 tid, gtid_5681 ltid_5678 2 tid}
---             1 : dependencies = {slice_5803 tile_id_5605 1 iter, slice_5803 i_5798 3 iter}
+--             0 : dependencies = gtid_5681 -> {gid_5577 0 tid, ltid_5678 2 tid}
+--             1 : dependencies = slice_5803 -> {tile_id_5605 1 iter, i_5798 3 iter}
 --         (idx) x_5772 :
---             0 : dependencies = {gtid_5751 gid_5577 0 tid, gtid_5751 ltid_5738 1 tid}
---             1 : dependencies = {slice_5802 i_5801 2 iter}
+--             0 : dependencies = gtid_5751 -> {gid_5577 0 tid, ltid_5738 1 tid}
+--             1 : dependencies = slice_5802 -> {i_5801 2 iter}
 --         (idx) +_rhs_5792 :
---             0 : dependencies = {gtid_5784 gid_5577 0 tid, gtid_5784 ltid_5777 0 tid}
---             1 : dependencies = {defunc_0_reduce_comm_res_5786 ltid_5777 0 tid}
+--             0 : dependencies = gtid_5784 -> {gid_5577 0 tid, ltid_5777 0 tid}
+--             1 : dependencies = defunc_0_reduce_comm_res_5786 -> {ltid_5777 0 tid}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5567 : {
 --     (arr) yss_5309 : {
 --         (idx) +_rhs_5574 :
 --             0 : dependencies = {gtid_5568 1 tid}
---             1 : dependencies = {defunc_0_reduce_comm_res_5572 gtid_5568 1 tid}
+--             1 : dependencies = defunc_0_reduce_comm_res_5572 -> {gtid_5568 1 tid}
 --     }
 -- }
 -- (segmap) acc_5676 : {
 --     (arr) yss_5309 : {
 --         (idx) x_5702 :
---             0 : dependencies = {gtid_5681 gid_5577 0 tid, gtid_5681 ltid_5678 2 tid}
---             1 : dependencies = {slice_5803 tile_id_5605 1 iter, slice_5803 i_5798 3 iter}
+--             0 : dependencies = gtid_5681 -> {gid_5577 0 tid, ltid_5678 2 tid}
+--             1 : dependencies = slice_5803 -> {tile_id_5605 1 iter, i_5798 3 iter}
 --     }
 -- }
 -- (segmap) acc_5677 : {
 --     (arr) yss_5309 : {
 --         (idx) x_5702 :
---             0 : dependencies = {gtid_5681 gid_5577 0 tid, gtid_5681 ltid_5678 2 tid}
---             1 : dependencies = {slice_5803 tile_id_5605 1 iter, slice_5803 i_5798 3 iter}
+--             0 : dependencies = gtid_5681 -> {gid_5577 0 tid, ltid_5678 2 tid}
+--             1 : dependencies = slice_5803 -> {tile_id_5605 1 iter, i_5798 3 iter}
 --     }
 -- }
 -- (segmap) acc_5773 : {
 --     (arr) yss_5309 : {
 --         (idx) x_5772 :
---             0 : dependencies = {gtid_5751 gid_5577 0 tid, gtid_5751 ltid_5738 1 tid}
---             1 : dependencies = {slice_5802 i_5801 2 iter}
+--             0 : dependencies = gtid_5751 -> {gid_5577 0 tid, ltid_5738 1 tid}
+--             1 : dependencies = slice_5802 -> {i_5801 2 iter}
 --     }
 -- }
 -- (segmap) acc_5774 : {
 --     (arr) yss_5309 : {
 --         (idx) x_5772 :
---             0 : dependencies = {gtid_5751 gid_5577 0 tid, gtid_5751 ltid_5738 1 tid}
---             1 : dependencies = {slice_5802 i_5801 2 iter}
+--             0 : dependencies = gtid_5751 -> {gid_5577 0 tid, ltid_5738 1 tid}
+--             1 : dependencies = slice_5802 -> {i_5801 2 iter}
 --     }
 -- }
 -- (segmap) thread_res_5795 : {
 --     (arr) yss_5309 : {
 --         (idx) +_rhs_5792 :
---             0 : dependencies = {gtid_5784 gid_5577 0 tid, gtid_5784 ltid_5777 0 tid}
---             1 : dependencies = {defunc_0_reduce_comm_res_5786 ltid_5777 0 tid}
+--             0 : dependencies = gtid_5784 -> {gid_5577 0 tid, ltid_5777 0 tid}
+--             1 : dependencies = defunc_0_reduce_comm_res_5786 -> {ltid_5777 0 tid}
 --     }
 -- }
 -- (segred) defunc_0_reduce_comm_res_r_5548 : {

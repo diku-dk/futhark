@@ -394,14 +394,8 @@ analyzeIndex ctx pats arr_name dimIndexes = do
         --    allocated array.
         fromMaybe (arr_name, []) $
           -- 1. Maybe find the array name, and the "stack" of body types that the
-          -- 1. Maybe find the array name, and the "stack" of body types that the
-          -- array was allocated in.
-          -- array was allocated in.
-
-          -- 1. Maybe find the array name, and the "stack" of body types that the
           -- array was allocated in.
           L.find (\(n, _) -> n == arr_name) $
-            -- 0. Get the "stack" of bodytypes for each assignment
             -- 0. Get the "stack" of bodytypes for each assignment
             map (second parents_nest) (M.toList $ assignments ctx')
 
@@ -720,16 +714,22 @@ instance Pretty (IndexTable rep) where
       printIdxExpMap (name, mems) = "(idx)" <+> pretty name <+> ":" </> indent 4 (printDimAccess mems)
 
       printDimAccess :: [DimAccess rep] -> Doc ann
-      printDimAccess dimAccesses =
-        stack $ map printDim dimAccesses
+      printDimAccess dimAccesses = stack $ zipWith (curry printDim) [0 ..] dimAccesses
 
-      printDim m = ":" <+> indent 0 (pretty m)
+      printDim :: (Int, DimAccess rep) -> Doc ann
+      printDim (i, m) = pretty i <+> ":" <+> indent 0 (pretty m)
 
 instance Pretty (DimAccess rep) where
-  pretty dimidx =
+  pretty dimAccess =
     -- Instead of using `brackets $` we manually enclose with `[`s, to add
     -- spacing between the enclosed elements
-    "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimidx) -- <+> (show $ variableType dimidx)
+    if case originalVar dimAccess of
+      Nothing -> True
+      Just n ->
+        length (dependencies dimAccess) == 1 && n == reducedVar (head $ map snd $ S.toList $ dependencies dimAccess)
+        -- Only print the original name if it is different from the first (and single) dependency
+      then "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimAccess)
+      else "dependencies" <+> equals <+> pretty (originalVar dimAccess) <+> "->" <+> align (prettyDeps $ dependencies dimAccess)
     where
       prettyDeps = braces . commasep . map (printPair . snd) . S.toList
       printPair (Dependency name lvl vtype) = pretty name <+> pretty lvl <+> pretty vtype
