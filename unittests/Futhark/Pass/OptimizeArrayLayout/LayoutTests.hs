@@ -109,7 +109,7 @@ constInLastIndexElimTests =
       singleAccess
         [ singleParAccess 0 0 $ VName "gtid" 4,
           singleSeqAccess 1 1 $ VName "i" 5,
-          DimAccess mempty 2
+          DimAccess mempty Nothing 2
         ]
 
     accessTableGPUrev :: IndexTable GPU
@@ -117,7 +117,7 @@ constInLastIndexElimTests =
       singleAccess
         [ singleParAccess 0 1 $ VName "gtid" 4,
           singleParAccess 1 2 $ VName "gtid" 5,
-          DimAccess mempty 2,
+          DimAccess mempty Nothing 2,
           singleSeqAccess 3 1 $ VName "i" 6
         ]
 
@@ -142,13 +142,15 @@ singleAccess dims =
 singleParAccess :: Int -> Int -> VName -> DimAccess rep
 singleParAccess origDim level name =
   DimAccess
-    (S.singleton 0 $ Dependency name name level ThreadID)
+    (S.singleton 0 $ Dependency name level ThreadID)
+    (Just name)
     origDim
 
 singleSeqAccess :: Int -> Int -> VName -> DimAccess rep
 singleSeqAccess origDim level name =
   DimAccess
-    (S.singleton 0 $ Dependency name name level LoopVar)
+    (S.singleton 0 $ Dependency name level LoopVar)
+    (Just name)
     origDim
 
 generateNames :: Int -> [VName]
