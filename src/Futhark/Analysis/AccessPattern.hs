@@ -119,21 +119,21 @@ unionIndexTables = M.unionWith (M.unionWith M.union)
 -- Runs in n²
 analysisPropagateByTransitivity :: IndexTable rep -> IndexTable rep
 analysisPropagateByTransitivity idxTable =
-  undefined
+  M.map
+    foldlArrayNameMap
+    idxTable
+  where
+    -- VName -> M.Map ArrayName (M.Map IndexExprName ([DimAccess rep]))
+    aggregateResults arrayName =
+      maybe
+        mempty
+        foldlArrayNameMap
+        ((M.!?) (M.mapKeys vnameFromSegOp idxTable) arrayName)
 
---  M.map
---    foldlArrayNameMap
---    idxTable
---  where
---    -- VName -> M.Map ArrayName (M.Map IndexExprName ([DimAccess rep]))
---    aggregateResults arrayName =
---      maybe
---        mempty
---        foldlArrayNameMap
---        ((M.!?) (M.mapKeys vnameFromSegOp idxTable) arrayName)
---
---    foldlArrayNameMap aMap =
---      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys fst aMap)
+    foldlArrayNameMap aMap =
+      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys (\(a,_,_) -> a) aMap)
+
+
 
 --
 -- Helper types and functions to perform the analysis.
