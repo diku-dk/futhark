@@ -133,7 +133,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
   -- and let a Simplify pass remove unused tiles.
 
   let seqFactor = getSeqFactor $ stmAuxAttrs aux
-  let grpId   = pTrace(show seqFactor) fst $ head $ unSegSpace space
+  let grpId   = fst $ head $ unSegSpace space
   let sizeOld = unCount $ gridGroupSize grid
   sizeNew <- letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                             (eSubExp sizeOld)
