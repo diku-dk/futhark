@@ -170,6 +170,7 @@ SCALAR_FUN_ATTR f16 fmin16(f16 x, f16 y) {
 SCALAR_FUN_ATTR f16 fpow16(f16 x, f16 y) {
   return pow(x, y);
 }
+
 #else // Assuming CUDA.
 
 SCALAR_FUN_ATTR f16 fabs16(f16 x) {
@@ -329,6 +330,10 @@ SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return mix(v0, v1, t);
 }
 
+SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
+  return ldexp(x, y);
+}
+
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
   return mad(a, b, c);
 }
@@ -486,6 +491,10 @@ SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return v0 + (v1 - v0) * t;
 }
 
+SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
+  return futrts_ldexp32((float)x, y);
+}
+
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
   return a * b + c;
 }
@@ -618,6 +627,10 @@ SCALAR_FUN_ATTR f16 futrts_nextafter16(f16 x, f16 y) {
 
 SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return v0 + (v1 - v0) * t;
+}
+
+SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
+  return futrts_ldexp32((float)x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
@@ -820,6 +833,10 @@ SCALAR_FUN_ATTR f16 futrts_nextafter16(f16 x, f16 y) {
 
 SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
   return futrts_lerp32(v0, v1, t);
+}
+
+SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
+  return futrts_ldexp32(x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {

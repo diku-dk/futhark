@@ -22,8 +22,12 @@ module Futhark.Util.CMath
     cbrtf,
     hypot,
     hypotf,
+    ldexp,
+    ldexpf,
   )
 where
+
+import Foreign.C.Types (CInt (..))
 
 foreign import ccall "nearbyint" c_nearbyint :: Double -> Double
 
@@ -146,3 +150,15 @@ cbrt = c_cbrt
 -- | The system-level @cbrtf@ function.
 cbrtf :: Float -> Float
 cbrtf = c_cbrtf
+
+foreign import ccall "ldexp" c_ldexp :: Double -> CInt -> Double
+
+foreign import ccall "ldexpf" c_ldexpf :: Float -> CInt -> Float
+
+-- | The system-level @ldexp@ function.
+ldexp :: Double -> CInt -> Double
+ldexp = c_ldexp
+
+-- | The system-level @ldexpf@ function.
+ldexpf :: Float -> CInt -> Float
+ldexpf = c_ldexpf

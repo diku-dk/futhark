@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   that have been fused with `map`s that internally produce arrays.
   Work by Anders Holst and Christian Påbøl Jacobsen.
 
+* `f16.ldexp`, `f32.ldexp`, `f64.ldexp`, corresponding to the
+  functions in the C math library.
+
 ### Removed
 
 ### Changed
