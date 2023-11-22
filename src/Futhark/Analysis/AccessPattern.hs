@@ -110,7 +110,7 @@ isInvariant :: DimAccess rep -> Bool
 isInvariant = null . dependencies
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
-unionIndexTables = undefined -- M.unionWith (M.unionWith M.union)
+unionIndexTables = M.unionWith (M.unionWith M.union)
 
 -- | Make segops on arrays transitive, ie. if
 -- > let A = segmap (..) xs -- A indexes into xs
