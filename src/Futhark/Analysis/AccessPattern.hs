@@ -410,12 +410,14 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let array_name' =
         -- 2. If the arrayname was not in assignments, it was not an immediately
         --    allocated array.
-        fromMaybe (arr_name, [], [0 .. length dimIndexes]) .
+        fromMaybe (arr_name, [], [0 .. length dimIndexes])
+          .
           -- 1. Maybe find the array name, and the "stack" of body types that the
           -- array was allocated in.
-          L.find (\(n, _, _) -> n == arr_name) $
-            -- 0. Get the "stack" of bodytypes for each assignment
-            map (\(n, vi) -> (n, parents_nest vi, [])) (M.toList $ assignments ctx')
+          L.find (\(n, _, _) -> n == arr_name)
+          $
+          -- 0. Get the "stack" of bodytypes for each assignment
+          map (\(n, vi) -> (n, parents_nest vi, [])) (M.toList $ assignments ctx')
 
   -- TODO:
   -- Lookup `arr_name` in `slices ctx'`,
@@ -430,17 +432,17 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   where
     index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
     index context arrayName dimAccess =
-      let (name,_,_) = arrayName in
-      -- If the arrayname is a `DimSlice` we want to fixup the access
-      case M.lookup name $ slices context of
-        Nothing -> analyzeIndex' context pats arrayName dimAccess
-        Just sliceAccess -> do
-          analyzeIndex'
-            context
-            pats
-            arrayName
-            -- TODO: Fix this
-            (init sliceAccess)
+      let (name, _, _) = arrayName
+       in -- If the arrayname is a `DimSlice` we want to fixup the access
+          case M.lookup name $ slices context of
+            Nothing -> analyzeIndex' context pats arrayName dimAccess
+            Just sliceAccess -> do
+              analyzeIndex'
+                context
+                pats
+                arrayName
+                -- TODO: Fix this
+                (init sliceAccess)
     -- (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
 
     slice context dims =
@@ -744,7 +746,7 @@ instance Pretty (DimAccess rep) where
     if case originalVar dimAccess of
       Nothing -> True
       Just n ->
-        length (dependencies dimAccess) == 1 && n == reducedVar (head $ map snd $ S.toList $ dependencies dimAccess)
+        length (dependencies dimAccess) == 1 && n == head (map fst $ M.toList $ dependencies dimAccess)
         -- Only print the original name if it is different from the first (and single) dependency
       then "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimAccess)
       else "dependencies" <+> equals <+> pretty (originalVar dimAccess) <+> "->" <+> align (prettyDeps $ dependencies dimAccess)
