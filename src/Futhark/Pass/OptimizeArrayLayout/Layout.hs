@@ -34,7 +34,7 @@ instance Layout GPU where
   permutationFromDimAccess primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses =
     do
       -- Create a candidate permutation
-      let perm = (map originalDimension . sortGPU) dimAccesses
+      let perm = map fst $ sortGPU (zip [0 ..] dimAccesses)
 
       -- Dont accept indices where the last index is invariant
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
@@ -91,7 +91,7 @@ reduceStrideAndOffset _ = Nothing
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 multicorePermutation primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses = do
   -- Create a candidate permutation
-  let perm = (map originalDimension . sortMC) dimAccesses
+  let perm = map fst $ sortMC (zip [0 ..] dimAccesses)
 
   -- Check if we want to manifest this array with the permutation
   if commonPermutationEliminators perm nest dimAccesses
@@ -128,7 +128,7 @@ commonPermutationEliminators perm nest dimAccesses = do
           -- or is not a permutation.
           || not (L.sort perm `L.isPrefixOf` [0 ..])
           -- or if the last idx remains last
-          || (last perm == originalDimension (last dimAccesses))
+          || (last perm == length perm - 1)
 
   -- Don't manifest if the array is defined inside a segOp or loop body
   let isInsideUndesired = any isUndesired nest
@@ -147,23 +147,20 @@ commonPermutationEliminators perm nest dimAccesses = do
 permutationTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> PermutationTable
 permutationTableFromIndexTable primExpTable = tableMapMaybe (permutationFromDimAccess primExpTable)
 
-sortGPU :: [DimAccess rep] -> [DimAccess rep]
+sortGPU :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortGPU =
   L.sortBy dimdexGPUcmp
   where
-    dimdexGPUcmp a b = do
+    dimdexGPUcmp (ia, a) (ib, b) = do
       let depsA = dependencies a
       let depsB = dependencies b
-      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
-      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
+      let deps1' = map (f ia . snd) $ S.toList depsA
+      let deps2' = map (f ib . snd) $ S.toList depsB
       let aggr1 = foldl maxIdxPat Nothing deps1'
       let aggr2 = foldl maxIdxPat Nothing deps2'
       cmpIdxPat aggr1 aggr2
       where
-        cmpIdxPat ::
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int) ->
-          Ordering
+        cmpIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Ordering
         cmpIdxPat Nothing Nothing = EQ
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
@@ -175,11 +172,7 @@ sortGPU =
             (_, ThreadID) -> LT
             _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
 
-        maxIdxPat ::
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int)
-
+        maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
         maxIdxPat lhs rhs =
           case cmpIdxPat lhs rhs of
             LT -> rhs
@@ -187,23 +180,20 @@ sortGPU =
 
         f og (Dependency _ lvl varType) = Just (varType, lvl, og)
 
-sortMC :: [DimAccess rep] -> [DimAccess rep]
+sortMC :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortMC =
-  L.sortBy dimdexGPUcmp
+  L.sortBy dimdexMCcmp
   where
-    dimdexGPUcmp a b = do
+    dimdexMCcmp (ia, a) (ib, b) = do
       let depsA = dependencies a
       let depsB = dependencies b
-      let deps1' = map (f (originalDimension a) . snd) $ S.toList depsA
-      let deps2' = map (f (originalDimension b) . snd) $ S.toList depsB
+      let deps1' = map (f ia . snd) $ S.toList depsA
+      let deps2' = map (f ib . snd) $ S.toList depsB
       let aggr1 = foldl maxIdxPat Nothing deps1'
       let aggr2 = foldl maxIdxPat Nothing deps2'
       cmpIdxPat aggr1 aggr2
       where
-        cmpIdxPat ::
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int) ->
-          Ordering
+        cmpIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Ordering
         cmpIdxPat Nothing Nothing = EQ
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
@@ -216,11 +206,7 @@ sortMC =
               (_, ThreadID) -> GT
               _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
 
-        maxIdxPat ::
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int) ->
-          Maybe (VarType, Int, Int)
-
+        maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
         maxIdxPat lhs rhs =
           case cmpIdxPat lhs rhs of
             LT -> rhs

@@ -79,8 +79,7 @@ data DimAccess rep = DimAccess
     -- what the actual iteration type is.
     -- FIXME: Should not be intmap
     dependencies :: S.IntMap Dependency,
-    originalVar :: Maybe VName,
-    originalDimension :: Int
+    originalVar :: Maybe VName
   }
   deriving (Eq, Show)
 
@@ -366,16 +365,16 @@ getIndexDependencies ctx dims =
     matchDimIndex idx i accumulator =
       case idx of
         (DimFix subExpression) ->
-          Left $ (consolidate ctx subExpression) {originalDimension = i} : accumulator
+          Left $ consolidate ctx subExpression : accumulator
         -- \| If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
         (DimSlice offset num_elems stride) ->
           -- We assume that a slice is iterated sequentially, so we have to
           -- create a fake dependency for the slice.
           -- TODO: propoerly construct a unique VName?
-          let dimAccess = DimAccess (S.singleton 0 $ Dependency (VName "slice" 0) (currentLevel ctx) LoopVar) (Just $ VName "slice" 0) (currentLevel ctx)
-           in -- let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride
-              Right $ dimAccess {originalDimension = i} : accumulator
+          Right $
+            DimAccess (S.singleton 0 $ Dependency (VName "slice" 0) (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
+              : accumulator
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
@@ -395,8 +394,14 @@ analyzeIndex ctx pats arr_name dimIndexes = do
         --    allocated array.
         fromMaybe (arr_name, []) $
           -- 1. Maybe find the array name, and the "stack" of body types that the
+          -- 1. Maybe find the array name, and the "stack" of body types that the
+          -- array was allocated in.
+          -- array was allocated in.
+
+          -- 1. Maybe find the array name, and the "stack" of body types that the
           -- array was allocated in.
           L.find (\(n, _) -> n == arr_name) $
+            -- 0. Get the "stack" of bodytypes for each assignment
             -- 0. Get the "stack" of bodytypes for each assignment
             map (second parents_nest) (M.toList $ assignments ctx')
 
@@ -614,7 +619,7 @@ analyzeSubExpr pp ctx (Var v) =
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
-consolidate _ (Constant _) = DimAccess mempty Nothing 0
+consolidate _ (Constant _) = DimAccess mempty Nothing
 consolidate ctx (Var v) = reduceDependencies ctx v v
 
 -- | Recursively lookup vnames until vars with no deps are reached.
@@ -626,13 +631,13 @@ reduceDependencies ctx v_src v =
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src) (currentLevel ctx)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src) (currentLevel ctx)
-        ConstType -> DimAccess mempty (Just v_src) (currentLevel ctx)
+        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src)
+        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src)
+        ConstType -> DimAccess mempty (Just v_src)
         Variable -> do
           -- TODO: This might be wrong
           let reducedDeps = mconcat $ map (dependencies . reduceDependencies ctx v_src) $ namesToList deps
-          DimAccess reducedDeps (Just v_src) (currentLevel ctx)
+          DimAccess reducedDeps (Just v_src)
 
 -- Misc functions
 
@@ -718,7 +723,7 @@ instance Pretty (IndexTable rep) where
       printDimAccess dimAccesses =
         stack $ map printDim dimAccesses
 
-      printDim m = pretty (originalDimension m) <+> ":" <+> indent 0 (pretty m)
+      printDim m = ":" <+> indent 0 (pretty m)
 
 instance Pretty (DimAccess rep) where
   pretty dimidx =

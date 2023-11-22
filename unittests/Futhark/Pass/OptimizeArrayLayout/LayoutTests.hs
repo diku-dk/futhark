@@ -31,9 +31,9 @@ permutationTests =
       -- access patterns that might result in the given permutations.
       -- Luckily we only use the original access for one check atm.
       let names = generateNames 2
-      let dimAccesses1 = [singleParAccess 0 0] <*> names
-      let dimAccesses2 = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
-      let dimAccesses3 = [singleParAccess 0 0, singleParAccess 1 1, singleSeqAccess 2 2] <*> names
+      let dimAccesses1 = [singleParAccess 0] <*> names
+      let dimAccesses2 = [singleParAccess 0, singleSeqAccess 1] <*> names
+      let dimAccesses3 = [singleParAccess 0, singleParAccess 1, singleSeqAccess 2] <*> names
       [ testCase (unwords [show perm, "->", show res]) $
           commonPermutationEliminators perm [] dimAccesses @?= res
         | (perm, dimAccesses, res) <-
@@ -58,7 +58,7 @@ nestTests :: TestTree
 nestTests = testGroup "Nests" $
   do
     let names = generateNames 2
-    let dimAccesses = [singleParAccess 0 0, singleSeqAccess 1 1] <*> names
+    let dimAccesses = [singleParAccess 0, singleSeqAccess 1] <*> names
     [ testCase (unwords [args, "->", show res]) $
         commonPermutationEliminators [1, 0] nest dimAccesses @?= res
       | (args, nest, res) <-
@@ -107,18 +107,18 @@ constInLastIndexElimTests =
     accessTableGPU :: IndexTable GPU
     accessTableGPU =
       singleAccess
-        [ singleParAccess 0 0 $ VName "gtid" 4,
-          singleSeqAccess 1 1 $ VName "i" 5,
-          DimAccess mempty Nothing 2
+        [ singleParAccess 0 $ VName "gtid" 4,
+          singleSeqAccess 1 $ VName "i" 5,
+          DimAccess mempty Nothing
         ]
 
     accessTableGPUrev :: IndexTable GPU
     accessTableGPUrev =
       singleAccess
-        [ singleParAccess 0 1 $ VName "gtid" 4,
-          singleParAccess 1 2 $ VName "gtid" 5,
-          DimAccess mempty Nothing 2,
-          singleSeqAccess 3 1 $ VName "i" 6
+        [ singleParAccess 1 $ VName "gtid" 4,
+          singleParAccess 2 $ VName "gtid" 5,
+          DimAccess mempty Nothing,
+          singleSeqAccess 1 $ VName "i" 6
         ]
 
 singleAccess :: [DimAccess rep] -> IndexTable rep
@@ -139,19 +139,17 @@ singleAccess dims =
   where
     sgOp = SegmentedMap {vnameFromSegOp = VName "mapres" 1}
 
-singleParAccess :: Int -> Int -> VName -> DimAccess rep
-singleParAccess origDim level name =
+singleParAccess :: Int -> VName -> DimAccess rep
+singleParAccess level name =
   DimAccess
     (S.singleton 0 $ Dependency name level ThreadID)
     (Just name)
-    origDim
 
-singleSeqAccess :: Int -> Int -> VName -> DimAccess rep
-singleSeqAccess origDim level name =
+singleSeqAccess :: Int -> VName -> DimAccess rep
+singleSeqAccess level name =
   DimAccess
     (S.singleton 0 $ Dependency name level LoopVar)
     (Just name)
-    origDim
 
 generateNames :: Int -> [VName]
 generateNames count = do
