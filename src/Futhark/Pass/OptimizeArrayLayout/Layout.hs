@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, PermutationTable) where
 
 import Data.IntMap.Strict qualified as S
@@ -31,25 +29,25 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses =
-    do
-      -- Create a candidate permutation
-      let perm = map fst $ sortGPU (zip [0 ..] dimAccesses)
+  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest, _original_layout) _idxName dimAccesses =
+      do
+        -- Create a candidate permutation
+        let perm = map fst $ sortGPU (zip [0 ..] dimAccesses)
 
-      -- Dont accept indices where the last index is invariant
-      let lastIdxIsInvariant = isInvariant $ last dimAccesses
+        -- Dont accept indices where the last index is invariant
+        let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
-      -- Check if any of the dependencies are too complex to reason about
-      let dimAccesses' = filter (isJust . originalVar) dimAccesses
-      let deps = mapMaybe originalVar dimAccesses'
-      let counters = concatMap (map (isCounter . varType . snd) . S.toList . dependencies) dimAccesses'
-      let primExps = map (`M.lookup` primExpTable) deps
-      let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
+        -- Check if any of the dependencies are too complex to reason about
+        let dimAccesses' = filter (isJust . originalVar) dimAccesses
+        let deps = mapMaybe originalVar dimAccesses'
+        let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+        let primExps = map (`M.lookup` primExpTable) deps
+        let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
-      -- Check if we want to manifest this array with the permutation
-      if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses'
-        then Nothing
-        else Just perm
+        -- Check if we want to manifest this array with the permutation
+        if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses'
+          then Nothing
+          else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
 isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) counter =
@@ -89,7 +87,7 @@ reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
-multicorePermutation primExpTable _segOpName (_arrayName, nest) _idxName dimAccesses = do
+multicorePermutation primExpTable _segOpName (_arrayName, nest, _original_layout) _idxName dimAccesses = do
   -- Create a candidate permutation
   let perm = map fst $ sortMC (zip [0 ..] dimAccesses)
 
@@ -154,8 +152,8 @@ sortGPU =
     dimdexGPUcmp (ia, a) (ib, b) = do
       let depsA = dependencies a
       let depsB = dependencies b
-      let deps1' = map (f ia . snd) $ S.toList depsA
-      let deps2' = map (f ib . snd) $ S.toList depsB
+      let deps1' = map (f ia . snd) $ M.toList depsA
+      let deps2' = map (f ib . snd) $ M.toList depsB
       let aggr1 = foldl maxIdxPat Nothing deps1'
       let aggr2 = foldl maxIdxPat Nothing deps2'
       cmpIdxPat aggr1 aggr2
@@ -178,7 +176,7 @@ sortGPU =
             LT -> rhs
             _ -> lhs
 
-        f og (Dependency _ lvl varType) = Just (varType, lvl, og)
+        f og (Dependency lvl varType) = Just (varType, lvl, og)
 
 sortMC :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortMC =
@@ -187,8 +185,8 @@ sortMC =
     dimdexMCcmp (ia, a) (ib, b) = do
       let depsA = dependencies a
       let depsB = dependencies b
-      let deps1' = map (f ia . snd) $ S.toList depsA
-      let deps2' = map (f ib . snd) $ S.toList depsB
+      let deps1' = map (f ia . snd) $ M.toList depsA
+      let deps2' = map (f ib . snd) $ M.toList depsB
       let aggr1 = foldl maxIdxPat Nothing deps1'
       let aggr2 = foldl maxIdxPat Nothing deps2'
       cmpIdxPat aggr1 aggr2
@@ -212,7 +210,7 @@ sortMC =
             LT -> rhs
             _ -> lhs
 
-        f og (Dependency _ lvl varType) = Just (varType, lvl, og)
+        f og (Dependency lvl varType) = Just (varType, lvl, og)
 
 -- | like mapMaybe, but works on nested maps. Eliminates "dangling" maps / rows
 -- with missing (Nothing) values.

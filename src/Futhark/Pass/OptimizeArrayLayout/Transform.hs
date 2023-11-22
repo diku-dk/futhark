@@ -245,6 +245,6 @@ lookupPermutation permTable segName idxName arrayName =
     Nothing -> Nothing
     Just arrayNameMap ->
       -- Look for the current array
-      case M.lookup arrayName (M.mapKeys fst arrayNameMap) of
+      case M.lookup arrayName (M.mapKeys (\(n,_,_) -> n) arrayNameMap) of
         Nothing -> Nothing
         Just idxs -> M.lookup idxName idxs

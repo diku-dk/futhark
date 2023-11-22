@@ -63,7 +63,12 @@ data SegOpName
 
 type IndexExprName = VName
 
-type ArrayName = (VName, [BodyType])
+-- Stores the name of the array,
+-- the "stack trace" where it was allocated at,
+-- and the original layout.
+-- The latter is currently unused, but can prove useful when throwing
+-- transpositions into the mix.
+type ArrayName = (VName, [BodyType], [Int])
 
 data BodyType
   = SegOpName SegOpName
@@ -77,24 +82,35 @@ data DimAccess rep = DimAccess
     -- An empty set indicates that the access is invariant.
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
-    -- FIXME: Should not be intmap
-    dependencies :: S.IntMap Dependency,
+    dependencies :: M.Map VName Dependency,
     originalVar :: Maybe VName
   }
   deriving (Eq, Show)
 
 data Dependency = Dependency
-  { reducedVar :: VName,
-    lvl :: Int,
+  { lvl :: Int,
     varType :: VarType
   }
   deriving (Eq, Show)
+
+instance Semigroup (DimAccess rep) where
+  (<>) :: DimAccess rep -> DimAccess rep -> DimAccess rep
+  adeps <> bdeps =
+    DimAccess
+      (dependencies adeps <> dependencies bdeps)
+      ( case originalVar adeps of
+          Nothing -> originalVar bdeps
+          _ -> originalVar adeps
+      )
+
+instance Monoid (DimAccess rep) where
+  mempty = DimAccess mempty Nothing
 
 isInvariant :: DimAccess rep -> Bool
 isInvariant = null . dependencies
 
 unionIndexTables :: IndexTable rep -> IndexTable rep -> IndexTable rep
-unionIndexTables = M.unionWith (M.unionWith M.union)
+unionIndexTables = undefined -- M.unionWith (M.unionWith M.union)
 
 -- | Make segops on arrays transitive, ie. if
 -- > let A = segmap (..) xs -- A indexes into xs
@@ -103,19 +119,21 @@ unionIndexTables = M.unionWith (M.unionWith M.union)
 -- Runs in n²
 analysisPropagateByTransitivity :: IndexTable rep -> IndexTable rep
 analysisPropagateByTransitivity idxTable =
-  M.map
-    foldlArrayNameMap
-    idxTable
-  where
-    -- VName -> M.Map ArrayName (M.Map IndexExprName ([DimAccess rep]))
-    aggregateResults arrayName =
-      maybe
-        mempty
-        foldlArrayNameMap
-        ((M.!?) (M.mapKeys vnameFromSegOp idxTable) arrayName)
+  undefined
 
-    foldlArrayNameMap aMap =
-      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys fst aMap)
+--  M.map
+--    foldlArrayNameMap
+--    idxTable
+--  where
+--    -- VName -> M.Map ArrayName (M.Map IndexExprName ([DimAccess rep]))
+--    aggregateResults arrayName =
+--      maybe
+--        mempty
+--        foldlArrayNameMap
+--        ((M.!?) (M.mapKeys vnameFromSegOp idxTable) arrayName)
+--
+--    foldlArrayNameMap aMap =
+--      foldl (M.unionWith M.union) aMap (map aggregateResults $ M.keys $ M.mapKeys fst aMap)
 
 --
 -- Helper types and functions to perform the analysis.
@@ -372,9 +390,9 @@ getIndexDependencies ctx dims =
           -- We assume that a slice is iterated sequentially, so we have to
           -- create a fake dependency for the slice.
           -- TODO: propoerly construct a unique VName?
-          Right $
-            DimAccess (S.singleton 0 $ Dependency (VName "slice" 0) (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
-              : accumulator
+          let dimAccess' = DimAccess (M.singleton (VName "slice" 0) $ Dependency (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
+           in let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride <> dimAccess'
+               in Right $ dimAccess : accumulator
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
@@ -392,12 +410,12 @@ analyzeIndex ctx pats arr_name dimIndexes = do
   let array_name' =
         -- 2. If the arrayname was not in assignments, it was not an immediately
         --    allocated array.
-        fromMaybe (arr_name, []) $
+        fromMaybe (arr_name, [], [0 .. length dimIndexes]) .
           -- 1. Maybe find the array name, and the "stack" of body types that the
           -- array was allocated in.
-          L.find (\(n, _) -> n == arr_name) $
+          L.find (\(n, _, _) -> n == arr_name) $
             -- 0. Get the "stack" of bodytypes for each assignment
-            map (second parents_nest) (M.toList $ assignments ctx')
+            map (\(n, vi) -> (n, parents_nest vi, [])) (M.toList $ assignments ctx')
 
   -- TODO:
   -- Lookup `arr_name` in `slices ctx'`,
@@ -410,9 +428,11 @@ analyzeIndex ctx pats arr_name dimIndexes = do
     (slice ctx')
     dependencies
   where
+    index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
     index context arrayName dimAccess =
+      let (name,_,_) = arrayName in
       -- If the arrayname is a `DimSlice` we want to fixup the access
-      case M.lookup (fst arrayName) $ slices context of
+      case M.lookup name $ slices context of
         Nothing -> analyzeIndex' context pats arrayName dimAccess
         Just sliceAccess -> do
           analyzeIndex'
@@ -444,12 +464,13 @@ analyzeIndexContextFromIndices ctx dimIndexes pats = do
   -- Extend context with the dependencies index expression
   foldl' extend ctx $ map (`oneContext` ctxVal) pats
 
-analyzeIndex' :: Context rep -> [VName] -> (VName, [BodyType]) -> [DimAccess rep] -> (Context rep, IndexTable rep)
+analyzeIndex' :: Context rep -> [VName] -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pats arr_name dimIndexes = do
   -- Get the name of all segmaps in the current "callstack"
   let segmaps = allSegMap ctx
   let memory_entries = dimIndexes
+  -- For now, just assume the identity permutation as the layout by default
   let idx_expr_name = pats --                                                IndexExprName
   -- For each pattern, create a mapping to the dimensional indices
   let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> [DimAccess]
@@ -613,25 +634,22 @@ analyzeSubExpr pp ctx (Var v) =
 
 -- | Reduce a DimFix into its set of dependencies
 consolidate :: Context rep -> SubExp -> DimAccess rep
-consolidate _ (Constant _) = DimAccess mempty Nothing
-consolidate ctx (Var v) = reduceDependencies ctx v v
+consolidate _ (Constant _) = mempty
+consolidate ctx (Var v) = DimAccess (reduceDependencies ctx v) (Just v)
 
 -- | Recursively lookup vnames until vars with no deps are reached.
-reduceDependencies :: Context rep -> VName -> VName -> DimAccess rep
-reduceDependencies ctx v_src v =
+reduceDependencies :: Context rep -> VName -> M.Map VName Dependency
+reduceDependencies ctx v =
   case M.lookup v (assignments ctx) of
     Nothing -> error $ "Unable to find " ++ prettyString v
     Just (VariableInfo deps lvl _parents t) ->
       -- We detect whether it is a threadID or loop counter by checking
       -- whether or not it has any dependencies
       case t of
-        ThreadID -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src)
-        LoopVar -> DimAccess (S.fromList [(baseTag v, Dependency v lvl t)]) (Just v_src)
-        ConstType -> DimAccess mempty (Just v_src)
-        Variable -> do
-          -- TODO: This might be wrong
-          let reducedDeps = mconcat $ map (dependencies . reduceDependencies ctx v_src) $ namesToList deps
-          DimAccess reducedDeps (Just v_src)
+        ThreadID -> M.fromList [(v, Dependency lvl t)]
+        LoopVar -> M.fromList [(v, Dependency lvl t)]
+        Variable -> mconcat $ map (reduceDependencies ctx) $ namesToList deps
+        ConstType -> mempty
 
 -- Misc functions
 
@@ -691,7 +709,7 @@ instance Pretty (IndexTable rep) where
       mapprintArray (m : mm) = printArrayMap m </> mapprintArray mm
 
       printArrayMap :: (ArrayName, M.Map IndexExprName [DimAccess rep]) -> Doc ann
-      printArrayMap ((name, []), maps) =
+      printArrayMap (name, maps) =
         "(arr)"
           <+> pretty name
           <+> colon
@@ -731,8 +749,8 @@ instance Pretty (DimAccess rep) where
       then "dependencies" <+> equals <+> align (prettyDeps $ dependencies dimAccess)
       else "dependencies" <+> equals <+> pretty (originalVar dimAccess) <+> "->" <+> align (prettyDeps $ dependencies dimAccess)
     where
-      prettyDeps = braces . commasep . map (printPair . snd) . S.toList
-      printPair (Dependency name lvl vtype) = pretty name <+> pretty lvl <+> pretty vtype
+      prettyDeps = braces . commasep . map printPair . M.toList
+      printPair (name, Dependency lvl vtype) = pretty name <+> pretty lvl <+> pretty vtype
 
 instance Pretty SegOpName where
   pretty (SegmentedMap name) = "(segmap)" <+> pretty name
