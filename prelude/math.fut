@@ -94,8 +94,11 @@ module type integral = {
   -- | Bitwise negation.
   val not: t -> t
 
+  -- | Left shift; inserting zeroes.
   val <<: t -> t -> t
+  -- | Arithmetic right shift, using sign extension for the leftmost bits.
   val >>: t -> t -> t
+  -- | Logical right shift, inserting zeroes for the leftmost bits.
   val >>>: t -> t -> t
 
   val num_bits: i32
