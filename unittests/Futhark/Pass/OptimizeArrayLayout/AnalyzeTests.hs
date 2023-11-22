@@ -1,6 +1,5 @@
 module Futhark.Pass.OptimizeArrayLayout.AnalyzeTests (tests) where
 
-import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty
 import Data.Map.Strict qualified as M
 import Data.Sequence.Internal qualified as S
@@ -53,11 +52,11 @@ analyzeIndexTests =
                   M.fromList
                     [ ( SegmentedMap (VName "defunc_0_map_res" 5204),
                         M.fromList
-                          [ ( (arr_name, []),
+                          [ ( (arr_name, [], [0 .. 1]),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, Dependency (VName "gtid" 5205) 0 ThreadID)]) (Just $ VName "gtid" 5205),
-                                      DimAccess (IM.fromList [(5209, Dependency (VName "i" 5209) 1 LoopVar)]) (Just $ VName "i" 5209)
+                                    [ DimAccess (M.fromList [(VName "gtid" 5205, Dependency 0 ThreadID)]) (Just $ VName "gtid" 5205),
+                                      DimAccess (M.fromList [(VName "i" 5209, Dependency 1 LoopVar)]) (Just $ VName "i" 5209)
                                     ]
                                   )
                                 ]
@@ -126,11 +125,11 @@ analyzeIndexTests =
                   M.fromList
                     [ ( SegmentedMap (VName "defunc_0_map_res" 5204),
                         M.fromList
-                          [ ( (arr_name, parents'),
+                          [ ( (arr_name, parents', [0 .. 1]),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, Dependency (VName "gtid" 5205) 0 ThreadID)]) (Just $ VName "gtid" 5205),
-                                      DimAccess (IM.fromList [(5209, Dependency (VName "i" 5209) 1 LoopVar)]) (Just $ VName "i" 5209)
+                                    [ DimAccess (M.fromList [(VName "gtid" 5205, Dependency 0 ThreadID)]) (Just $ VName "gtid" 5205),
+                                      DimAccess (M.fromList [(VName "i" 5209, Dependency 1 LoopVar)]) (Just $ VName "i" 5209)
                                     ]
                                   )
                                 ]
@@ -170,11 +169,11 @@ analyzeIndexTests =
                   M.fromList
                     [ ( SegmentedMap (VName "defunc_0_map_res" 5204),
                         M.fromList
-                          [ ( (arr_name, []),
+                          [ ( (arr_name, [], [0 .. 2]),
                               M.fromList
                                 [ ( VName "b" 5211,
-                                    [ DimAccess (IM.fromList [(5205, Dependency (VName "gtid" 5205) 0 ThreadID)]) (Just $ VName "tmp0" 5210),
-                                      DimAccess (IM.fromList [(5209, Dependency (VName "i" 5209) 1 LoopVar)]) (Just $ VName "tmp1" 5211),
+                                    [ DimAccess (M.fromList [(VName "gtid" 5205, Dependency 0 ThreadID)]) (Just $ VName "tmp0" 5210),
+                                      DimAccess (M.fromList [(VName "i" 5209, Dependency 1 LoopVar)]) (Just $ VName "tmp1" 5211),
                                       DimAccess mempty (Just $ VName "k" 5212)
                                     ]
                                   )
@@ -197,11 +196,11 @@ analyzeDimAccesssTests = testGroup
                 M.fromList
                   [ ( SegmentedMap (VName "defunc_0_map_res" 5204),
                       M.fromList
-                        [ ( (VName "xss" 5144, []),
+                        [ ( (VName "xss" 5144, [], []),
                             M.fromList
                               [ ( VName "b" 5211,
-                                  [ DimAccess (IM.fromList [(5205, Dependency (VName "gtid" 5205) 0 ThreadID)]) (Just $ VName "gtid" 5205),
-                                    DimAccess (IM.fromList [(5209, Dependency (VName "i" 5209) 1 LoopVar)]) (Just $ VName "i" 5209)
+                                  [ DimAccess (M.fromList [(VName "gtid" 5205, Dependency 0 ThreadID)]) (Just $ VName "gtid" 5205),
+                                    DimAccess (M.fromList [(VName "i" 5209, Dependency 1 LoopVar)]) (Just $ VName "i" 5209)
                                   ]
                                 )
                               ]
@@ -217,24 +216,24 @@ analyzeDimAccesssTests = testGroup
                 M.fromList
                   [ ( SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291},
                       M.fromList
-                        [ ( (VName "xsss" 5720, []),
+                        [ ( (VName "xsss" 5720, [], [0 .. 3]),
                             M.fromList
                               [ ( VName "+_lhs" 6308,
-                                  [ DimAccess (IM.fromList [(6292, Dependency (VName "gtid" 6292) 0 ThreadID)]) (Just $ VName "gtid" 6292),
-                                    DimAccess (IM.fromList [(6299, Dependency (VName "i" 6299) 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
-                                    DimAccess (IM.fromList [(6304, Dependency (VName "gtid" 6304) 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
+                                    DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
+                                    DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 ),
                                 ( VName "+_lhs" 6326,
-                                  [ DimAccess (IM.fromList [(6292, Dependency (VName "gtid" 6292) 0 ThreadID)]) (Just $ VName "gtid" 6292),
-                                    DimAccess (IM.fromList [(6299, Dependency (VName "i" 6299) 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
-                                    DimAccess (IM.fromList [(6315, Dependency (VName "gtid" 6315) 2 ThreadID)]) (Just $ VName "gtid" 6315),
+                                  [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
+                                    DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
+                                    DimAccess (M.fromList [(VName "gtid" 6315, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6315),
                                     DimAccess
                                       { dependencies =
-                                          IM.fromList
-                                            [ (6299, Dependency (VName "i" 6299) 1 LoopVar),
-                                              (6322, Dependency (VName "j" 6322) 3 LoopVar)
+                                          M.fromList
+                                            [ (VName "i" 6299, Dependency 1 LoopVar),
+                                              (VName "j" 6322, Dependency 3 LoopVar)
                                             ],
                                         originalVar = Just $ VName "+_lhs" 6325
                                       }
@@ -242,20 +241,20 @@ analyzeDimAccesssTests = testGroup
                                 )
                               ]
                           ),
-                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})], [0 .. 1]),
                             M.fromList
                               [ ( VName "+_rhs" 6309,
-                                  [ DimAccess (IM.fromList [(6304, Dependency (VName "gtid" 6304) 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 ),
                                 ( VName "+_rhs" 6328,
-                                  [ DimAccess (IM.fromList [(6315, Dependency (VName "gtid" 6315) 2 ThreadID)]) (Just $ VName "gtid" 6315),
+                                  [ DimAccess (M.fromList [(VName "gtid" 6315, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6315),
                                     DimAccess
                                       { dependencies =
-                                          IM.fromList
-                                            [ (6299, Dependency (VName "i" 6299) 1 LoopVar),
-                                              (6322, Dependency (VName "j" 6322) 3 LoopVar)
+                                          M.fromList
+                                            [ (VName "i" 6299, Dependency 1 LoopVar),
+                                              (VName "j" 6322, Dependency 3 LoopVar)
                                             ],
                                         originalVar = Just $ VName "+_rhs" 6327
                                       }
@@ -267,22 +266,22 @@ analyzeDimAccesssTests = testGroup
                     ),
                     ( SegmentedMap {vnameFromSegOp = VName "wew_r" 6303},
                       M.fromList
-                        [ ( (VName "xsss" 5720, []),
+                        [ ( (VName "xsss" 5720, [], [0 .. 3]),
                             M.fromList
                               [ ( VName "+_lhs" 6308,
-                                  [ DimAccess (IM.fromList [(6292, Dependency (VName "gtid" 6292) 0 ThreadID)]) (Just $ VName "gtid" 6292),
-                                    DimAccess (IM.fromList [(6299, Dependency (VName "i" 6299) 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
-                                    DimAccess (IM.fromList [(6304, Dependency (VName "gtid" 6304) 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
+                                    DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
+                                    DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 )
                               ]
                           ),
-                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})], [0 .. 1]),
                             M.fromList
                               [ ( VName "+_rhs" 6309,
-                                  [ DimAccess (IM.fromList [(6304, Dependency (VName "gtid" 6304) 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 )
                               ]
@@ -291,17 +290,17 @@ analyzeDimAccesssTests = testGroup
                     ),
                     ( SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6314},
                       M.fromList
-                        [ ( (VName "xsss" 5720, []),
+                        [ ( (VName "xsss" 5720, [], [0 .. 3]),
                             M.fromList
                               [ ( VName "+_lhs" 6326,
-                                  [ DimAccess (IM.fromList [(6292, Dependency (VName "gtid" 6292) 0 ThreadID)]) (Just $ VName "gtid" 6292),
-                                    DimAccess (IM.fromList [(6299, Dependency (VName "i" 6299) 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
-                                    DimAccess (IM.fromList [(6315, Dependency (VName "gtid" 6315) 2 ThreadID)]) (Just $ VName "gtid" 6315),
+                                  [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
+                                    DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
+                                    DimAccess (M.fromList [(VName "gtid" 6315, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6315),
                                     DimAccess
                                       { dependencies =
-                                          IM.fromList
-                                            [ (6299, Dependency (VName "i" 6299) 1 LoopVar),
-                                              (6322, Dependency (VName "j" 6322) 3 LoopVar)
+                                          M.fromList
+                                            [ (VName "i" 6299, Dependency 1 LoopVar),
+                                              (VName "j" 6322, Dependency 3 LoopVar)
                                             ],
                                         originalVar = Just $ VName "+_lhs" 6325
                                       }
@@ -309,11 +308,11 @@ analyzeDimAccesssTests = testGroup
                                 )
                               ]
                           ),
-                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})]),
+                          ( (VName "res" 6300, [CondBodyName (VName "defunc_0_map_res" 6243), SegOpName (SegmentedMap {vnameFromSegOp = VName "defunc_0_map_res" 6291})], [0 .. 1]),
                             M.fromList
                               [ ( VName "+_rhs" 6328,
-                                  [ DimAccess (IM.fromList [(6315, Dependency (VName "gtid" 6315) 2 ThreadID)]) (Just $ VName "gtid" 6315),
-                                    DimAccess (IM.fromList [(6299, Dependency (VName "i" 6299) 1 LoopVar), (6322, Dependency (VName "j" 6322) 3 LoopVar)]) (Just $ VName "+_rhs" 6327)
+                                  [ DimAccess (M.fromList [(VName "gtid" 6315, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6315),
+                                    DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar), (VName "j" 6322, Dependency 3 LoopVar)]) (Just $ VName "+_rhs" 6327)
                                   ]
                                 )
                               ]
@@ -322,23 +321,23 @@ analyzeDimAccesssTests = testGroup
                     ),
                     ( SegmentedMap {vnameFromSegOp = VName "wew_r_r" 6506},
                       M.fromList
-                        [ ( (VName "xsss" 5720, []),
+                        [ ( (VName "xsss" 5720, [], [0 .. 3]),
                             M.fromList
                               [ ( VName "+_lhs" 6512,
-                                  [ DimAccess (IM.fromList [(6507, Dependency (VName "gtid" 6507) 1 ThreadID)]) (Just $ VName "gtid" 6507),
-                                    DimAccess (IM.fromList []) (Just $ VName "map2_arg2" 6550),
-                                    DimAccess (IM.fromList [(6508, Dependency (VName "gtid" 6508) 2 ThreadID)]) (Just $ VName "gtid" 6508),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6507, Dependency 1 ThreadID)]) (Just $ VName "gtid" 6507),
+                                    DimAccess (M.empty) (Just $ VName "map2_arg2" 6550),
+                                    DimAccess (M.fromList [(VName "gtid" 6508, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6508),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 )
                               ]
                           ),
-                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)]),
+                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)], [0 .. 2]),
                             M.fromList
                               [ ( VName "+_rhs" 6513,
-                                  [ DimAccess (IM.fromList [(6507, Dependency (VName "gtid" 6507) 1 ThreadID)]) (Just $ VName "gtid" 6507),
-                                    DimAccess (IM.fromList [(6508, Dependency (VName "gtid" 6508) 2 ThreadID)]) (Just $ VName "gtid" 6508),
-                                    DimAccess (IM.fromList []) Nothing
+                                  [ DimAccess (M.fromList [(VName "gtid" 6507, Dependency 1 ThreadID)]) (Just $ VName "gtid" 6507),
+                                    DimAccess (M.fromList [(VName "gtid" 6508, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6508),
+                                    DimAccess (M.empty) Nothing
                                   ]
                                 )
                               ]
@@ -347,23 +346,23 @@ analyzeDimAccesssTests = testGroup
                     ),
                     ( SegmentedMap {vnameFromSegOp = VName "lifted_lambda_res" 6523},
                       M.fromList
-                        [ ( (VName "xsss" 5720, []),
+                        [ ( (VName "xsss" 5720, [], [0 .. 3]),
                             M.fromList
                               [ ( VName "+_lhs" 6536,
-                                  [ DimAccess (IM.fromList [(6524, Dependency (VName "gtid" 6524) 2 ThreadID)]) (Just $ VName "gtid" 6524),
-                                    DimAccess (IM.fromList []) (Just $ VName "map2_arg2" 6551),
-                                    DimAccess (IM.fromList [(6525, Dependency (VName "gtid" 6525) 3 ThreadID)]) (Just $ VName "gtid" 6525),
-                                    DimAccess (IM.fromList [(6493, Dependency (VName "i" 6493) 0 LoopVar), (6532, Dependency (VName "j" 6532) 4 LoopVar)]) (Just $ VName "+_lhs" 6535)
+                                  [ DimAccess (M.fromList [(VName "gtid" 6524, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6524),
+                                    DimAccess (M.empty) (Just $ VName "map2_arg2" 6551),
+                                    DimAccess (M.fromList [(VName "gtid" 6525, Dependency 3 ThreadID)]) (Just $ VName "gtid" 6525),
+                                    DimAccess (M.fromList [(VName "i" 6493, Dependency 0 LoopVar), (VName "j" 6532, Dependency 4 LoopVar)]) (Just $ VName "+_lhs" 6535)
                                   ]
                                 )
                               ]
                           ),
-                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)]),
+                          ( (VName "res_expanded" 6494, [CondBodyName (VName "defunc_0_map_res" 6243)], [0 .. 2]),
                             M.fromList
                               [ ( VName "+_rhs" 6538,
-                                  [ DimAccess (IM.fromList [(6524, Dependency (VName "gtid" 6524) 2 ThreadID)]) (Just $ VName "gtid" 6524),
-                                    DimAccess (IM.fromList [(6525, Dependency (VName "gtid" 6525) 3 ThreadID)]) (Just $ VName "gtid" 6525),
-                                    DimAccess (IM.fromList [(6493, Dependency (VName "i" 6493) 0 LoopVar), (6532, Dependency (VName "j" 6532) 4 LoopVar)]) (Just $ VName "+_rhs" 6537)
+                                  [ DimAccess (M.fromList [(VName "gtid" 6524, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6524),
+                                    DimAccess (M.fromList [(VName "gtid" 6525, Dependency 3 ThreadID)]) (Just $ VName "gtid" 6525),
+                                    DimAccess (M.fromList [(VName "i" 6493, Dependency 0 LoopVar), (VName "j" 6532, Dependency 4 LoopVar)]) (Just $ VName "+_rhs" 6537)
                                   ]
                                 )
                               ]
