@@ -1886,6 +1886,10 @@ SCALAR_FUN_ATTR float futrts_lerp32(float v0, float v1, float t) {
   return mix(v0, v1, t);
 }
 
+SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
+  return ldexp(x, y);
+}
+
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
   return mad(a, b, c);
 }
@@ -2095,6 +2099,10 @@ SCALAR_FUN_ATTR float futrts_lerp32(float v0, float v1, float t) {
   return v0 + (v1 - v0) * t;
 }
 
+SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
+  return x * pow((double)2.0, (double)y);
+}
+
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
   return a * b + c;
 }
@@ -2227,6 +2235,10 @@ SCALAR_FUN_ATTR float futrts_nextafter32(float x, float y) {
 
 SCALAR_FUN_ATTR float futrts_lerp32(float v0, float v1, float t) {
   return v0 + (v1 - v0) * t;
+}
+
+SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
+  return ldexpf(x, y);
 }
 
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
@@ -2640,6 +2652,10 @@ SCALAR_FUN_ATTR double futrts_lerp64(double v0, double v1, double t) {
   return v0 + (v1 - v0) * t;
 }
 
+SCALAR_FUN_ATTR float futrts_ldexp64(double x, int32_t y) {
+  return x * pow((double)2.0, (double)y);
+}
+
 SCALAR_FUN_ATTR double futrts_mad64(double a, double b, double c) {
   return a * b + c;
 }
@@ -2968,6 +2984,10 @@ SCALAR_FUN_ATTR double futrts_lerp64(double v0, double v1, double t) {
 #else
   return v0 + (v1 - v0) * t;
 #endif
+}
+
+SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
+  return ldexp(x, y);
 }
 
 SCALAR_FUN_ATTR double futrts_mad64(double a, double b, double c) {
