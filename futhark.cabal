@@ -100,7 +100,7 @@ source-repository head
   location: https://github.com/diku-dk/futhark
 
 common common
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
   default-language: Haskell2010
   default-extensions:
     OverloadedStrings
