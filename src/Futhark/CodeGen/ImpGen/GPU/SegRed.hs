@@ -63,6 +63,26 @@ import Futhark.Util (chunks, mapAccumLM)
 import Futhark.Util.IntegralExp (divUp, nextMul, quot, rem)
 import Prelude hiding (quot, rem)
 
+
+mapM2 :: (Monad m) => (a -> b -> m c) -> [a] -> [b] -> m [c]
+mapM2 f xs ys = mapM (uncurry f) (zip xs ys)
+
+mapM2_ :: (Monad m) => (a -> b -> m c) -> [a] -> [b] -> m ()
+mapM2_ f xs ys = mapM2 f xs ys >> pure ()
+
+mapM3 :: (Monad m) => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
+mapM3 f xs ys zs = mapM2 (\(a, b) c -> f a b c) (zip xs ys) zs
+
+forM2 :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m [c]
+forM2 xs ys f = mapM2 f xs ys
+
+forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
+forM2_ xs ys f = mapM2_ f xs ys
+
+forM3_ :: (Monad m) => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m ()
+forM3_ xs ys zs f = forM2_ (zip xs ys) zs (\(a, b) c -> f a b c)
+
+
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int32
@@ -130,7 +150,7 @@ compileSegRed' pat grid space segbinops body_cont
     group_size = gridGroupSize grid
     group_size' = unCount group_size
 
-    chunk = intConst Int64 4
+    chunk = intConst Int64 12
 
     paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
     params = map paramOf segbinops
@@ -138,7 +158,7 @@ compileSegRed' pat grid space segbinops body_cont
     interms_cont = do
       let is_noncommprim_reduce =
             binopsComm segbinops == Noncommutative
-              && all (all (primType . paramType)) params
+              && all (all isPrimParam) params
       num_threads <-
         dPrimV "num_threads" $ (pe64 $ unCount num_groups) * pe64 group_size'
       makeIntermArrays is_noncommprim_reduce group_size' chunk num_threads params
@@ -437,15 +457,15 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size _chunk space reds 
       dPrimV_ (last gtids) index_within_segment
 
       let out_of_bounds =
-            forM_ (zip reds reds_arrs) $ \(SegBinOp _ _ nes _, red_arrs) ->
-              forM_ (zip red_arrs nes) $ \(arr, ne) ->
+            forM2_ reds reds_arrs $ \(SegBinOp _ _ nes _) red_arrs ->
+              forM2_ red_arrs nes $ \arr ne ->
                 copyDWIMFix arr [ltid] ne []
 
           in_bounds =
             body $ \red_res ->
               sComment "save results to be reduced" $ do
                 let red_dests = map (,[ltid]) (concat reds_arrs)
-                forM_ (zip red_dests red_res) $ \((d, d_is), (res, res_is)) ->
+                forM2_ red_dests red_res $ \(d, d_is) (res, res_is) ->
                   copyDWIMFix d d_is res res_is
 
       sComment "apply map function if in bounds" $
@@ -465,7 +485,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size _chunk space reds 
             (sExt64 to - sExt64 from) .>. (sExt64 to `rem` segment_size)
       sWhen (segment_size .>. 0) $
         sComment "perform segmented scan to imitate reduction" $
-          forM_ (zip reds reds_arrs) $ \(SegBinOp _ red_op _ _, red_arrs) ->
+          forM2_ reds reds_arrs $ \(SegBinOp _ red_op _ _) red_arrs ->
             groupScan
               (Just crossesSegment)
               (sExt64 $ tvExp num_threads)
@@ -484,8 +504,8 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size _chunk space reds 
                 .&&. ltid
                 .<. segments_per_group
           )
-        $ forM_ (zip segred_pes (concat reds_arrs))
-        $ \(pe, arr) -> do
+        $ forM2_ segred_pes (concat reds_arrs)
+        $ \pe arr -> do
           -- Figure out which segment result this thread should write...
           let flat_segment_index =
                 sExt64 group_id' * segments_per_group + sExt64 ltid
@@ -633,9 +653,9 @@ largeSegmentsReduction segred_pat num_groups group_size chunk space reds body ma
 
           one_group_per_segment =
             sComment "first thread in group saves final result to memory" $
-              forM_ (zip slugs segred_pes) $ \(slug, pes) ->
+              forM2_ slugs segred_pes $ \slug pes ->
                 sWhen (local_tid .==. 0) $
-                  forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
+                  forM2_ pes (slugAccs slug) $ \v (acc, acc_is) ->
                     copyDWIMFix (patElemName v) (map Imp.le64 segment_gtids) (Var acc) acc_is
 
       sIf (groups_per_segment .==. 1) one_group_per_segment multiple_groups_per_segment
@@ -661,18 +681,16 @@ groupsPerSegmentAndQ segment_size num_segments num_groups_hint group_size chunk 
       segment_size `divUp` (group_size * groups_per_segment * chunk)
   pure (groups_per_segment, q)
 
+
 -- | A SegBinOp with auxiliary information.
 data SegBinOpSlug = SegBinOpSlug
   { slugOp :: SegBinOp GPUMem,
     -- | The arrays used for computing the intra-group reduction
     -- (either local or global memory).
-    -- slugInterms :: BinOpIntermediateArrays,
     slugInterms :: BinOpIntermediateArrays,
     -- | Places to store accumulator in stage 1 reduction.
     slugAccs :: [(VName, [Imp.TExp Int64])]
   }
-
-
 
 slugBody :: SegBinOpSlug -> Body GPUMem
 slugBody = lambdaBody . segBinOpLambda . slugOp
@@ -716,8 +734,8 @@ segBinOpSlug local_tid group_id (op, interms, param_arrs) =
     mkAcc p param_arr
       | Prim t <- paramType p,
         shapeRank (segBinOpShape op) == 0 = do
-          acc <- dPrim (baseString (paramName p) <> "_acc") t
-          pure (tvVar acc, [])
+          group_res_acc <- dPrim (baseString (paramName p) <> "_group_res_acc") t
+          pure (tvVar group_res_acc, [])
       | otherwise =
           pure (param_arr, [sExt64 local_tid, sExt64 group_id])
 
@@ -738,11 +756,15 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
 
   dScope Nothing $ scopeOfLParams $ concatMap slugParams slugs
 
-  sComment "ne-initialise accumulator(s)" $
+  -- TODO: this/these accumulator/s should be used for the per-group
+  -- accumulation in the prim-param case!
+  sComment "ne-initialise the outer (per-group) accumulator(s)" $ do
     forM_ slugs $ \slug ->
-      forM_ (zip (slugAccs slug) (slugNeutral slug)) $ \((acc, acc_is), ne) ->
+      forM2_ (slugAccs slug) (slugNeutral slug) $ \(acc, acc_is) ne ->
         sLoopNest (slugShape slug) $ \vec_is ->
           copyDWIMFix acc (acc_is ++ vec_is) ne []
+
+  let ness = map slugNeutral slugs
 
   slugs_op_renamed <- mapM (renameLambda . segBinOpLambda . slugOp) slugs
 
@@ -750,40 +772,67 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
       is_comm = comm == Commutative
       group_size = kernelGroupSize constants
 
-  let doLMemGroupRed = do
-        forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
+  let doLMemGroupRed =
+        forM2_ slugs_op_renamed slugs $ \slug_op_renamed slug -> do
+          let accs = slugAccs slug
           sLoopNest (slugShape slug) $ \vec_is -> do
             let group_red_arrs = slugGroupRedArrs slug
-            sComment "before intra-group reduction, store thread result(s) in lmem" $ do
-              forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
+            sComment "before intra-group reduction, store accs in lmem" $ do
+              forM2_ (slugParams slug) accs $ \p (acc, acc_is) ->
                 copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
 
-              forM_ (zip group_red_arrs (slugParams slug)) $ \(arr, p) ->
-                when (primType $ paramType p) $
+              -- TODO: what is this?
+              forM2_ group_red_arrs (slugParams slug) $ \arr p ->
+                when (isPrimParam p) $
                   copyDWIMFix arr [ltid] (Var $ paramName p) []
 
             sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
             groupReduce (sExt32 group_size) slug_op_renamed group_red_arrs
-            sOp $ Imp.Barrier Imp.FenceLocal
+            -- TODO: I don't think this barrier is necessary, considering the
+            -- below two loops only write private accumulator variables, and we
+            -- have an error sync following the group reduction.
+            -- sOp $ Imp.Barrier Imp.FenceLocal
 
-            sComment "first thread saves result(s) in acc(s)" $
-              -- TODO: is this guard necessary?
-              -- in stageTwo, only the first thread uses this value anyway.
-              -- the answer might be in more complex cases (eg. multiple
-              -- reduction arrays)
-              -- additionally: do we ever need to reset to NE? is the variable
-              -- read before it is written somewhere earlier in the loop body?
-              sIf (ltid .==. 0)
-                ( forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $
-                    \((acc, acc_is), p) ->
-                      copyDWIMFix acc (acc_is ++ vec_is) (Var $ paramName p) []
-                )
-                ( when (not is_comm) $
-                    sComment "others reset to ne(s) (in case of non-comm reduction)" $
-                      forM_ (zip (slugAccs slug) (slugNeutral slug)) $
-                        \((acc, acc_is), ne) ->
-                          copyDWIMFix acc (acc_is ++ vec_is) ne []
-                )
+            -- accumulate group results in per-group accumulators. these are
+            -- only meaningful for thread 0, but no guard is necessary because
+            -- only thread 0 will ever be reading this value later on.
+            --
+            -- TODO: for the non-primitive case, we actually *do* need to guard
+            -- the write, since we are going to be using the global mem group
+            -- result arrays as accumulators for the duration of stage one.
+            -- see below commented-out block of code.
+            sComment "accumulate in the per-group accumulator(s)" $ do
+              forM2_ accs (lambdaParams slug_op_renamed) $
+                \(acc, acc_is) p ->
+                  copyDWIMFix acc (acc_is ++ vec_is) (Var $ paramName p) []
+
+            sWhen (ltid .>. 0) $
+              sComment "all but thread 0 reset to ne(s)" $
+                forM2_ accs (slugNeutral slug) $
+                  \(acc, acc_is) ne ->
+                    copyDWIMFix acc (acc_is ++ vec_is) ne []
+
+
+
+            -- if non_prim
+            -- sComment "first thread saves result(s) in acc(s)" $
+            --   -- TODO: is this guard necessary?
+            --   -- in stageTwo, only the first thread uses this value anyway.
+            --   -- the answer might be in more complex cases (eg. multiple
+            --   -- reduction arrays)
+            --   -- additionally: do we ever need to reset to NE? is the variable
+            --   -- read before it is written somewhere earlier in the loop body?
+            --   sIf (ltid .==. 0)
+            --     ( forM_ (zip (slugAccs slug) (lambdaParams slug_op_renamed)) $
+            --         \((acc, acc_is), p) ->
+            --           copyDWIMFix acc (acc_is ++ vec_is) (Var $ paramName p) []
+            --     )
+            --     ( id $ -- when (not is_comm) $
+            --         sComment "others reset to ne(s) (in case of non-comm reduction)" $
+            --           forM_ (zip (slugAccs slug) (slugNeutral slug)) $
+            --             \((acc, acc_is), ne) ->
+            --               copyDWIMFix acc (acc_is ++ vec_is) ne []
+            --     )
 
 
   -- If this is a non-commutative reduction, each thread must run the
@@ -802,35 +851,16 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
   -- this group's initial global offset.
   group_offs <- dPrimVE "group_offset" $ group_offs_in_segment * q * group_stride
 
+
+    -- TODO: for now we ignore the case of non-prim-parameterized non-comm
+    -- operators. hopefully this case is as simple as setting chunk = 1, such
+    -- that we don't have to interleave the comm and non-comm code generation
+    -- too much, but we should probably consult Troels on this.
   sFor "i" q $ \i -> do
-    -- THIS TODO MOSTLY OUTDATED
-    -- TODO: insert the actual collective read from global. the `k < chunk`
-    -- shouldn't simply wrap the entire below block of code -- it needs to be
-    -- split up somehow, and something needs to be added. the current code is
-    -- correct only for chunk = 1.
-    --
-    -- as is now, the code reads elements from global mem and writes it to
-    -- the groupRedArrs arrays. instead, we need to read to the collCopyArrs
-    -- arrays.
-    --
-    -- also, find out how to do this with multiple reduce arrays and possible
-    -- map-outs.
-    --
-    -- should we read each array element straight from global to private mem,
-    -- perform the map, write-out to global mem (if any), then write to local
-    -- mem, as in SegScan.SinglePass?
-    --
     glb_offset <- dPrimVE "global_offset" $ group_offs + i * group_stride
-    -- TODO: for now we ignore the case of non-prim-parameterized
-    -- non-commutative operators. hopefully this case is as simple as setting
-    -- chunk = 1, such that we don't have to interleave the
-    -- commutative/non-commutative code generation too much, but we should
-    -- probably consult Troels on this.
-
     if not is_comm then do
-      let chunkLoop = sFor "k" chunk -- TODO: ?
+      let chunkLoop = sFor "k" chunk
 
-      -- global offset
       chunkLoop $ \k -> do
         loc_ind <- dPrimVE "loc_ind" $ k * group_size + sExt64 ltid
         glb_ind <-- glb_offset + loc_ind
@@ -839,23 +869,17 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
           (tvExp glb_ind .<. num_elements)
           ( body_cont $ \all_red_res -> do 
               let slugs_res = chunks (map (length . slugNeutral) slugs) all_red_res
-              forM_ (zip slugs slugs_res) $ \(slug, red_res) -> do
+              forM2_ slugs slugs_res $ \slug slug_res -> do
 
-                -- TODO: should this sLoopNest be moved outwards, such that it
-                -- also wraps the `when_out_of_bounds` block?  don't think so,
-                -- but best to ask Troels. can we even have a non-null slugShape
-                -- when all reduce ops are prim-parameterized?
-                -- sLoopNest (slugShape slug) $ \vec_is -> do
                 let priv_chunks = slugPrivChunks slug
                 sComment "write map result(s) to private chunk(s)" $
-                  forM_ (zip priv_chunks red_res) $ \(priv_chunk, (res, res_is)) ->
-                    -- copyDWIMFix priv_chunk [k] res res_is (res_is ++ vec_is)
+                  forM2_ priv_chunks slug_res $ \priv_chunk (res, res_is) ->
                     copyDWIMFix priv_chunk [k] res res_is
           )
           -- if out of bounds, fill chunk(s) with neutral element(s)
           ( forM_ slugs $ \slug ->
-              forM_ (zip (slugPrivChunks slug) (slugNeutral slug)) $
-                \(priv_chunk, ne) ->
+              forM2_ (slugPrivChunks slug) (slugNeutral slug) $
+                \priv_chunk ne ->
                   copyDWIMFix priv_chunk [k] ne []
           )
 
@@ -869,7 +893,8 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
         forM_ slugs $ \slug -> do
           let group_red_arrs = slugGroupRedArrs slug
           let priv_chunks = slugPrivChunks slug
-          forM_ (zip group_red_arrs priv_chunks) $ \(lmem_arr, priv_chunk) -> do
+          let do_second_barrier = length group_red_arrs > 1
+          forM2_ group_red_arrs priv_chunks $ \lmem_arr priv_chunk -> do
             chunkLoop $ \k -> do
               lmem_idx <- dPrimVE "lmem_idx" $ ltid + k * group_size
               copyDWIMFix lmem_arr [lmem_idx] (Var priv_chunk) [k]
@@ -880,43 +905,38 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
               lmem_idx <- dPrimVE "lmem_idx" $ ltid * chunk + k
               copyDWIMFix priv_chunk [k] (Var lmem_arr) [lmem_idx]
 
-            sOp $ Imp.Barrier Imp.FenceLocal
+            when do_second_barrier $ sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "per-thread sequential reduction of private chunk(s)" $ do
-        priv_accss <-
-          mapM 
-            (mapM (fmap tvVar . dPrimV "priv_acc" . pe64)) $
-              map slugNeutral slugs
-
         chunkLoop $ \k ->
-          forM_ (zip slugs priv_accss) $ \(slug, priv_accs) -> do
+          forM_ slugs $ \slug -> do
 
-            let (acc_params, next_params) = slugSplitParams slug
-            let foo = zip4 acc_params next_params priv_accs $ slugPrivChunks slug
+            let accs = map fst $ slugAccs slug
+            let (acc_ps, next_ps) = slugSplitParams slug
+            let ps_accs_chunks = zip4 acc_ps next_ps accs (slugPrivChunks slug)
 
             sComment "load params for all reductions" $ do
-              forM_ foo $ \(acc_param, next_param, priv_acc, priv_chunk) -> do
-                copyDWIMFix (paramName acc_param) [] (Var priv_acc) []
-                copyDWIMFix (paramName next_param) [] (Var priv_chunk) [k]
+              forM_ ps_accs_chunks $ \(acc_p, next_p, acc, priv_chunk) -> do
+                copyDWIMFix (paramName acc_p) [] (Var acc) []
+                copyDWIMFix (paramName next_p) [] (Var priv_chunk) [k]
 
             sComment "apply reduction operator(s)" $ do
               let binop_ress = map resSubExp $ bodyResult $ slugBody slug
               compileStms mempty (bodyStms $ slugBody slug) $
-                forM_ (zip priv_accs binop_ress) $ \(priv_acc, binop_res) ->
-                  copyDWIMFix priv_acc [] binop_res []
+                forM2_ accs binop_ress $ \acc binop_res ->
+                  copyDWIMFix acc [] binop_res []
 
-        sComment "write chunk reduction(s) to outer accumulator(s)" $ do
-          forM_ (zip slugs priv_accss) $ \(slug, priv_accs) -> do
-            let accs = slugAccs slug
-            forM_ (zip accs priv_accs) $ \((acc, acc_is), priv_acc) ->
-              -- TODO: slugShape??
-              copyDWIMFix acc acc_is (Var priv_acc) []
+        -- sComment "write chunk reduction(s) to outer accumulator(s)" $ do
+        --   forM2_ slugs priv_accss $ \slug priv_accs -> do
+        --     let accs = slugAccs slug
+        --     forM2_ accs priv_accs $ \(acc, acc_is) priv_acc ->
+        --       -- TODO: slugShape??
+        --       copyDWIMFix acc acc_is (Var priv_acc) []
 
       sComment_ "noncomm doLMemGroupRed BEGIN"
       doLMemGroupRed
       sComment_ "noncomm doLMemGroupRed END"
       sOp $ Imp.ErrorSync Imp.FenceLocal
-
 
     else do
       glb_ind <-- case comm of
@@ -947,11 +967,8 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
                     $ \((acc, acc_is), se) ->
                       copyDWIMFix acc (acc_is ++ vec_is) se []
 
-    -- in the non-commutative case, the intra-group reduction of local memory is
-    -- performed inside the `i < Q` loop, meaning we have
-
-  sOp $ Imp.ErrorSync Imp.FenceLocal
   when is_comm $ do
+    sOp $ Imp.ErrorSync Imp.FenceLocal
     sComment_ "comm doLMemGroupRed BEGIN"
     doLMemGroupRed
     sComment_ "comm doLMemGroupRed END"
@@ -997,7 +1014,8 @@ reductionStageTwo
   sync_arr
   group_res_arrs
   red_arrs = do
-    let local_tid = kernelLocalThreadId constants
+    let ltid32 = kernelLocalThreadId constants
+        ltid = sExt64 ltid32
         group_size = kernelGroupSize constants
     old_counter <- dPrim "old_counter" int32
     (counter_mem, _, counter_offset) <-
@@ -1008,7 +1026,7 @@ reductionStageTwo
               + flat_segment_id `rem` num_counters
         ]
     sComment "first thread in group saves group result to global memory" $
-      sWhen (local_tid .==. 0) $ do
+      sWhen (ltid32 .==. 0) $ do
         forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
           copyDWIMFix v [0, sExt64 group_id] (Var acc) acc_is
         sOp $ Imp.MemFence Imp.FenceGlobal
@@ -1037,7 +1055,7 @@ reductionStageTwo
       -- counter so it is ready for next time.  This is done
       -- with an atomic to avoid warnings about write/write
       -- races in oclgrind.
-      sWhen (local_tid .==. 0) $
+      sWhen (ltid32 .==. 0) $
         sOp $
           Imp.Atomic DefaultSpace $
             Imp.AtomicAdd Int32 (tvVar old_counter) counter_mem counter_offset $
@@ -1056,7 +1074,7 @@ reductionStageTwo
         sComment "read in the per-group-results" $ do
           read_per_thread <-
             dPrimVE "read_per_thread" $
-              groups_per_segment `divUp` sExt64 group_size
+              (groups_per_segment - ltid) `divUp` sExt64 group_size
 
           forM_ (zip red_x_params nes) $ \(p, ne) ->
             copyDWIMFix (paramName p) [] ne []
@@ -1064,7 +1082,7 @@ reductionStageTwo
           sFor "i" read_per_thread $ \i -> do
             group_res_id <-
               dPrimVE "group_res_id" $
-                sExt64 local_tid * read_per_thread + i
+                ltid * read_per_thread + i
             index_of_group_res <-
               dPrimVE "index_of_group_res" $
                 first_group_for_segment + group_res_id
@@ -1083,8 +1101,8 @@ reductionStageTwo
                   copyDWIMFix (paramName p) [] se []
 
         forM_ (zip red_x_params red_arrs) $ \(p, arr) ->
-          when (primType $ paramType p) $
-            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName p) []
+          when (isPrimParam p) $
+            copyDWIMFix arr [ltid] (Var $ paramName p) []
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
@@ -1092,7 +1110,7 @@ reductionStageTwo
           groupReduce (sExt32 group_size) red_op_renamed red_arrs
 
           sComment "and back to memory with the final result" $
-            sWhen (local_tid .==. 0) $
+            sWhen (ltid32 .==. 0) $
               forM_ (zip segred_pes $ lambdaParams red_op_renamed) $ \(pe, p) ->
                 copyDWIMFix
                   (patElemName pe)
