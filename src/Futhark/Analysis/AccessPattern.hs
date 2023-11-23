@@ -398,28 +398,20 @@ analyzeIndex ctx pats arr_name dimAccesses = do
   let ctx' = analyzeIndexContextFromIndices ctx dimAccesses pats
 
   -- The bodytype(s) are used in the result construction
-  let array_name' = do
+  let array_name' =
         -- For now, we assume the array is in row-major-order, hence the
         -- identity permutation. In the future, we might want to infer its
         -- layout, for example, if the array is the result of a transposition.
         let layout = [0 .. length dimAccesses - 1]
         -- 2. If the arrayname was not in assignments, it was not an immediately
         --    allocated array.
-        fromMaybe (arr_name, [], layout)
-          .
+        in fromMaybe (arr_name, [], layout)
           -- 1. Maybe find the array name, and the "stack" of body types that the
           -- array was allocated in.
-          L.find (\(n, _, _) -> n == arr_name)
-          $
+          . L.find (\(n, _, _) -> n == arr_name)
           -- 0. Get the "stack" of bodytypes for each assignment
-          map (\(n, vi) -> (n, parents_nest vi, layout)) (M.toList $ assignments ctx')
+          $ map (\(n, vi) -> (n, parents_nest vi, layout)) (M.toList $ assignments ctx')
 
-  -- TODO:
-  -- Lookup `arr_name` in `slices ctx'`,
-  -- if not Nothing,
-  -- union deps with deps from (last index of) the slice,
-  -- replace deps in last index of slice with the union,
-  -- `analyzeIndex' ctx' pats array_name' newDeps`
   either
     (index ctx' array_name')
     (slice ctx')
