@@ -493,19 +493,21 @@ getTidIndexExp env name = do
           _ -> error "Arrays are not expected to have more than 2 dimensions \n"
   pure $ BasicOp index
 
+-- build a kernelresult from a single vName
 buildKernelResult :: Env -> VName -> Builder GPU KernelResult
 buildKernelResult env name = do
   i <- getTidIndexExp env name
   res <- letSubExp "res" i
   pure $ Returns ResultMaySimplify mempty res
 
+-- Creates a new kernelbody with the provided names as its results
 mkResultKBody :: Env -> KernelBody GPU -> [VName] -> Builder GPU (KernelBody GPU)
 mkResultKBody env (KernelBody dec _ _) names = do
   (res, stms) <- collectStms $ do mapM (buildKernelResult env) names
   pure $ KernelBody dec stms res
 
-
-
+-- get the number of results consumed by a segop
+-- i.e. the number of non-map results fed into the binops of the segop
 numArgsConsumedBySegop :: [SegBinOp GPU] -> Int
 numArgsConsumedBySegop binops =
   let numResUsed = L.foldl
