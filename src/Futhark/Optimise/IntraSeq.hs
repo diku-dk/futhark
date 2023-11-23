@@ -1,7 +1,6 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use zipWith" #-}
 {-# HLINT ignore "Use uncurry" #-}
-{-# HLINT ignore "Use uncurry" #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# HLINT ignore "Use lambda-case" #-}
 {-# HLINT ignore "Replace case with maybe" #-}
