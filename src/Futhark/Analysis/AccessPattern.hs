@@ -452,6 +452,7 @@ analyzeIndexContextFromIndices ctx dimAccesses pats = do
   foldl' extend ctx $ map (`oneContext` varInfo) pats
 
 analyzeIndex' :: Context rep -> [VName] -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
+analyzeIndex' ctx _ _ [] = (ctx, mempty)
 analyzeIndex' ctx _ _ [_] = (ctx, mempty)
 analyzeIndex' ctx pats arr_name dimAccesses = do
   -- Get the name of all segmaps in the current "callstack"
