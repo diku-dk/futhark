@@ -188,7 +188,7 @@ do
     # Run the test file and compare the output to the expected output.
 
     # Run the test file.
-    output=$($futhark_dev dev --coalesce --simplify --cse "$file" 2>&1)
+    output=$($futhark_dev dev --coalesce "$file" 2>&1)
     # Remove trailing whitespace
     output=$(echo "$output" | sed 's/[[:space:]]*$//')
 

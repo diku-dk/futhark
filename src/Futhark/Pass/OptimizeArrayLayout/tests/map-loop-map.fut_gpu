@@ -224,14 +224,14 @@ entry("main",
 --       let {defunc_0_f_res_5918 : [m_5494]i64} =
 --         if <equiv> intra_suff_and_fits_5792
 --         then {
---           let {xsss_coalesced_0 : [m_5494][n_5495][o_5496]i64} =
---             manifest((2, 0, 1), xsss_5497)
 --           let {defunc_0_f_res_5793 : [m_5494]i64} =
 --             segmap(group; ; groups=m_5494; groupsize=n_5495)
 --             (gtid_5794 < m_5494) (~phys_group_id_5795) : {i64} {
 --               let {lifted_lambda_res_5797 : i64} =
 --                 loop {s_5799 : i64} = {0i64}
 --                 for i_5798:i64 < o_5496 do {
+--                   let {xsss_coalesced_0 : [m_5494][n_5495][o_5496]i64} =
+--                     manifest((2, 0, 1), xsss_5497)
 --                   let {defunc_0_f_res_5801 : i64} =
 --                     segred(thread; ; )
 --                     (gtid_5802 < n_5495) (~phys_tid_5803)
