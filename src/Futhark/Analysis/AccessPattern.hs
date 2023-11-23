@@ -428,9 +428,7 @@ analyzeIndex ctx pats arr_name dimAccesses = do
                 context
                 pats
                 arrayName
-                -- TODO: Fix this
-                (init sliceAccess)
-    -- (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
+                (init sliceAccess ++ [last sliceAccess <> head dimAccess] ++ drop 1 dimAccess)
 
     slice context dims =
       (context {slices = M.insert (head pats) dims $ slices context}, mempty)
