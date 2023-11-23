@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
-## [0.26.0]
+## [0.25.9]
 
 ### Added
 
@@ -15,10 +15,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `f16.ldexp`, `f32.ldexp`, `f64.ldexp`, corresponding to the
   functions in the C math library.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
