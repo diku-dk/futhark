@@ -92,7 +92,7 @@ constInLastIndexElimTests =
           @?= M.fromList
             [ ( SegmentedMap $ VName "mapres" 1,
                 M.fromList
-                  [ ( (VName "a" 2, [], []),
+                  [ ( (VName "a" 2, [], [0, 1, 2, 3]),
                       M.fromList [(VName "A" 3, [2, 3, 0, 1])]
                     )
                   ]
@@ -122,7 +122,7 @@ singleAccess dims =
   M.fromList
     [ ( sgOp,
         M.fromList
-          [ ( (VName "A" 2, [], []),
+          [ ( (VName "A" 2, [], [0, 1, 2, 3]),
               M.fromList
                 [ ( VName "a" 3,
                     dims

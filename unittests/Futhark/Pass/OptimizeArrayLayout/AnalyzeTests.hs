@@ -192,7 +192,7 @@ analyzeDimAccesssTests = testGroup
                 M.fromList
                   [ ( SegmentedMap (VName "defunc_0_map_res" 5204),
                       M.fromList
-                        [ ( (VName "xss" 5144, [], []),
+                        [ ( (VName "xss" 5144, [], [0, 1]),
                             M.fromList
                               [ ( VName "b" 5211,
                                   [ DimAccess (M.fromList [(VName "gtid" 5205, Dependency 0 ThreadID)]) (Just $ VName "gtid" 5205),
@@ -218,7 +218,7 @@ analyzeDimAccesssTests = testGroup
                                   [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
                                     DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
                                     DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess M.empty Nothing
                                   ]
                                 ),
                                 ( VName "+_lhs" 6326,
@@ -241,7 +241,7 @@ analyzeDimAccesssTests = testGroup
                             M.fromList
                               [ ( VName "+_rhs" 6309,
                                   [ DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess M.empty Nothing
                                   ]
                                 ),
                                 ( VName "+_rhs" 6328,
