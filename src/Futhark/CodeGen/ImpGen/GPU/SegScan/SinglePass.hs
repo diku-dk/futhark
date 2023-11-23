@@ -211,13 +211,10 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
       | otherwise =
           copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
 
-    writeResult x y arr
-      | primType $ paramType x = do
-          copyDWIMFix arr [ltid] (Var $ paramName x) []
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-      | otherwise =
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-
+    writeResult x y arr = do
+      when (isPrimParam x) $
+        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
@@ -236,23 +233,12 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       n = product $ map pe64 $ segSpaceDims space
 
-      tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scan_op
-      tys_sizes = map primByteSize tys
-
-      sumT, maxT :: Integer
-      sumT = sum tys_sizes
-      sumT' = (sum $ map (max 4 . primByteSize) tys) `div` 4
-      maxT = maximum tys_sizes
-
-      -- TODO: Make these constants dynamic by querying device
-      k_reg = 64
-      k_mem = 95
-
-      mem_constraint = max k_mem sumT `div` maxT
-      reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
+      tys' = lambdaReturnType $ segBinOpLambda scan_op
 
       chunk :: (Num a) => a
-      chunk = fromIntegral $ max 1 $ min mem_constraint reg_constraint
+      chunk = getChunkSize tys'
+
+      tys = map elemType tys'
 
       group_size_e     = pe64 $ unCount $ kAttrGroupSize attrs
       num_physgroups_e = pe64 $ unCount $ kAttrNumGroups attrs
@@ -271,11 +257,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
       not_segmented_e = fromBool $ not segmented
       segment_size = last dims'
 
-  let debug_ s v = emit $ Imp.DebugPrint s $ Just $ untyped (v :: Imp.TExp Int32)
-  debug_ "Sequential elements per thread (chunk) " chunk
-  debug_ "Memory constraint" $ fromIntegral mem_constraint
-  debug_ "Register constraint" $ fromIntegral reg_constraint
-  debug_ "sumT'" $ fromIntegral sumT'
+  emit $ Imp.DebugPrint "Sequential elements per thread (chunk)" $ Just $ untyped (chunk :: Imp.TExp Int32)
 
   statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virtgroups]) (Space "device")
   sReplicate statusFlags $ intConst Int8 statusX

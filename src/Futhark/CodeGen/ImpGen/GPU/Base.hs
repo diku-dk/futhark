@@ -30,6 +30,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     updateAcc,
     genZeroes,
     isPrimParam,
+    getChunkSize,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -260,6 +261,27 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
 
 isPrimParam :: (Typed p) => Param p -> Bool
 isPrimParam = primType . paramType
+
+-- | Given a list of parameter types, compute the largest available chunk size
+-- given the parameters for which we want chunking and the available resources.
+-- Used in SegScan.SinglePass.compileSegScan, and SegRed.compileSegRed (with
+-- primitive non-commutative operators only).
+getChunkSize :: (Num a) => [Type] -> a
+getChunkSize types = fromIntegral $ max 1 $ min mem_constraint reg_constraint
+  where
+    types' = map elemType $ filter primType types
+    sizes = map primByteSize types'
+
+    sum_sizes = sum sizes
+    sum_sizes' = (sum $ map (max 4 . primByteSize) types') `div` 4
+    max_size = maximum sizes
+
+    mem_constraint = max k_mem sum_sizes `div` max_size
+    reg_constraint = (k_reg - 1 - sum_sizes') `div` (2 * sum_sizes')
+
+    -- TODO: Make these constants dynamic by querying device
+    k_reg = 64
+    k_mem = 95
 
 inBlockScan ::
   KernelConstants ->
