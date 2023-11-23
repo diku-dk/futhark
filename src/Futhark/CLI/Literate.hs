@@ -10,7 +10,7 @@ import Data.Bits
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
-import Data.Functor
+import Data.Functor (($>))
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
 import Data.Map qualified as M
