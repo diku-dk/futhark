@@ -64,23 +64,8 @@ import Futhark.Util.IntegralExp (divUp, nextMul, quot, rem)
 import Prelude hiding (quot, rem)
 
 
-mapM2 :: (Monad m) => (a -> b -> m c) -> [a] -> [b] -> m [c]
-mapM2 f xs ys = mapM (uncurry f) (zip xs ys)
-
-mapM2_ :: (Monad m) => (a -> b -> m c) -> [a] -> [b] -> m ()
-mapM2_ f xs ys = mapM2 f xs ys >> pure ()
-
-mapM3 :: (Monad m) => (a -> b -> c -> m d) -> [a] -> [b] -> [c] -> m [d]
-mapM3 f xs ys zs = mapM2 (\(a, b) c -> f a b c) (zip xs ys) zs
-
-forM2 :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m [c]
-forM2 xs ys f = mapM2 f xs ys
-
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
-forM2_ xs ys f = mapM2_ f xs ys
-
-forM3_ :: (Monad m) => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m ()
-forM3_ xs ys zs f = forM2_ (zip xs ys) zs (\(a, b) c -> f a b c)
+forM2_ xs ys f = forM (zip xs ys) (uncurry f) >> pure ()
 
 
 -- | The maximum number of operators we support in a single SegRed.
@@ -149,8 +134,7 @@ compileSegRed' pat grid space segbinops body_cont
     num_groups = gridNumGroups grid
     group_size = gridGroupSize grid
     group_size' = unCount group_size
-
-    chunk = intConst Int64 12
+    chunk = intConst Int64 $ getChunkSize $ map paramType $ concat params
 
     paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
     params = map paramOf segbinops
@@ -163,12 +147,7 @@ compileSegRed' pat grid space segbinops body_cont
         dPrimV "num_threads" $ (pe64 $ unCount num_groups) * pe64 group_size'
       makeIntermArrays is_noncommprim_reduce group_size' chunk num_threads params
 
--- | Prepare intermediate arrays for the reduction.  Prim-typed
--- arguments go in local memory (so we need to do the allocation of
--- those arrays inside the kernel), while array-typed arguments go in
--- global memory.  Allocations for the former have already been
--- performed.  This policy is baked into how the allocations are done
--- in ExplicitAllocations.
+
 
 data BinOpIntermediateArrays
   = CommInterms
@@ -180,10 +159,12 @@ data BinOpIntermediateArrays
         privateChunks :: [VName]
       }
 
--- if ever we need to distinguish between more than two different sets of
--- intermediate arrays:
--- data ReduceKind = NoncommPrimReduce | CommOrNonprimReduce
-
+-- | Prepare intermediate arrays for the reduction.  Prim-typed
+-- arguments go in local memory (so we need to do the allocation of
+-- those arrays inside the kernel), while array-typed arguments go in
+-- global memory.  Allocations for the former have already been
+-- performed.  This policy is baked into how the allocations are done
+-- in ExplicitAllocations.
 makeIntermArrays ::
   Bool ->
   SubExp ->
@@ -235,7 +216,7 @@ makeIntermArrays True group_size chunk _ params = do
   let f x y = nextMul x y + group_size_E * y
       group_reds_lmem_requirement = foldl f 0 $ concat elem_sizes
 
-  (_group_reds_lmem_requirement, offsets) <-
+  (_, offsets) <-
     forAccumLM2D 0 elem_sizes $ \byte_offs elem_size -> do
       next_offs <- dPrimVE "offset" $ f byte_offs elem_size
       pure (next_offs, byte_offs `quot` elem_size)
@@ -764,8 +745,6 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
         sLoopNest (slugShape slug) $ \vec_is ->
           copyDWIMFix acc (acc_is ++ vec_is) ne []
 
-  let ness = map slugNeutral slugs
-
   slugs_op_renamed <- mapM (renameLambda . segBinOpLambda . slugOp) slugs
 
   let comm = slugsComm slugs
@@ -891,10 +870,10 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
         -- TODO: once again, do we need to take care about the slugShape here,
         -- in other words should we have a `sLoopNest (slugShape slug) ..`?
         forM_ slugs $ \slug -> do
-          let group_red_arrs = slugGroupRedArrs slug
+          let coll_copy_arrs = slugCollCopyArrs slug
           let priv_chunks = slugPrivChunks slug
-          let do_second_barrier = length group_red_arrs > 1
-          forM2_ group_red_arrs priv_chunks $ \lmem_arr priv_chunk -> do
+          let do_second_barrier = length coll_copy_arrs > 1
+          forM2_ coll_copy_arrs priv_chunks $ \lmem_arr priv_chunk -> do
             chunkLoop $ \k -> do
               lmem_idx <- dPrimVE "lmem_idx" $ ltid + k * group_size
               copyDWIMFix lmem_arr [lmem_idx] (Var priv_chunk) [k]
