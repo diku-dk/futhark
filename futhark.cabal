@@ -101,57 +101,9 @@ source-repository head
 
 common common
   ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
-  default-language: Haskell2010
+  default-language: GHC2021
   default-extensions:
     OverloadedStrings
-    -- The following extensions correspond to the GHC2021 language,
-    -- but we want to remain compatible with GHC 9.0, so we cannot use
-    -- it just yet.
-    BangPatterns
-    BinaryLiterals
-    ConstrainedClassMethods
-    ConstraintKinds
-    DeriveDataTypeable
-    DeriveFoldable
-    DeriveFunctor
-    DeriveGeneric
-    DeriveLift
-    DeriveTraversable
-    DoAndIfThenElse
-    EmptyCase
-    EmptyDataDecls
-    EmptyDataDeriving
-    ExistentialQuantification
-    ExplicitForAll
-    FlexibleContexts
-    FlexibleInstances
-    ForeignFunctionInterface
-    GADTSyntax
-    GeneralisedNewtypeDeriving
-    HexFloatLiterals
-    ImplicitPrelude
-    ImportQualifiedPost
-    InstanceSigs
-    KindSignatures
-    MonomorphismRestriction
-    MultiParamTypeClasses
-    NamedFieldPuns
-    NamedWildCards
-    NumericUnderscores
-    PatternGuards
-    PolyKinds
-    PostfixOperators
-    RankNTypes
-    RelaxedPolyRec
-    ScopedTypeVariables
-    StandaloneDeriving
-    StandaloneKindSignatures
-    StarIsType
-    TraditionalRecordSyntax
-    TupleSections
-    TypeApplications
-    TypeOperators
-    TypeSynonymInstances
 
 library
   import: common
