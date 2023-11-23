@@ -191,7 +191,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_6291 : {
---     (arr) xsss_5720 : {
+--     (arr) xsss_5720 : [0, 1, 2, 3] {
 --         (idx) +_lhs_6308 :
 --             0 : dependencies = {gtid_6292 0 tid}
 --             1 : dependencies = map2_arg2_6301 -> {i_6299 1 iter}
@@ -203,7 +203,7 @@ entry("main",
 --             2 : dependencies = {gtid_6315 2 tid}
 --             3 : dependencies = +_lhs_6325 -> {i_6299 1 iter, j_6322 3 iter}
 --     }
---     (arr) (res_6300, [defunc_0_map_res_6243 : cond, defunc_0_map_res_6291 : segmap]) : {
+--     (arr) res_6300 : [0, 1] {
 --         (idx) +_rhs_6309 :
 --             0 : dependencies = {gtid_6304 2 tid}
 --             1 : dependencies = {}
@@ -213,42 +213,42 @@ entry("main",
 --     }
 -- }
 -- (segmap) wew_r_6303 : {
---     (arr) xsss_5720 : {
+--     (arr) xsss_5720 : [0, 1, 2, 3] {
 --         (idx) +_lhs_6308 :
 --             0 : dependencies = {gtid_6292 0 tid}
 --             1 : dependencies = map2_arg2_6301 -> {i_6299 1 iter}
 --             2 : dependencies = {gtid_6304 2 tid}
 --             3 : dependencies = {}
 --     }
---     (arr) (res_6300, [defunc_0_map_res_6243 : cond, defunc_0_map_res_6291 : segmap]) : {
+--     (arr) res_6300 : [0, 1] {
 --         (idx) +_rhs_6309 :
 --             0 : dependencies = {gtid_6304 2 tid}
 --             1 : dependencies = {}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_6314 : {
---     (arr) xsss_5720 : {
+--     (arr) xsss_5720 : [0, 1, 2, 3] {
 --         (idx) +_lhs_6326 :
 --             0 : dependencies = {gtid_6292 0 tid}
 --             1 : dependencies = map2_arg2_6301 -> {i_6299 1 iter}
 --             2 : dependencies = {gtid_6315 2 tid}
 --             3 : dependencies = +_lhs_6325 -> {i_6299 1 iter, j_6322 3 iter}
 --     }
---     (arr) (res_6300, [defunc_0_map_res_6243 : cond, defunc_0_map_res_6291 : segmap]) : {
+--     (arr) res_6300 : [0, 1] {
 --         (idx) +_rhs_6328 :
 --             0 : dependencies = {gtid_6315 2 tid}
 --             1 : dependencies = +_rhs_6327 -> {i_6299 1 iter, j_6322 3 iter}
 --     }
 -- }
 -- (segmap) wew_r_r_6506 : {
---     (arr) xsss_5720 : {
+--     (arr) xsss_5720 : [0, 1, 2, 3] {
 --         (idx) +_lhs_6512 :
 --             0 : dependencies = {gtid_6507 1 tid}
 --             1 : dependencies = map2_arg2_6550 -> {}
 --             2 : dependencies = {gtid_6508 2 tid}
 --             3 : dependencies = {}
 --     }
---     (arr) (res_expanded_6494, [defunc_0_map_res_6243 : cond]) : {
+--     (arr) res_expanded_6494 : [0, 1, 2] {
 --         (idx) +_rhs_6513 :
 --             0 : dependencies = {gtid_6507 1 tid}
 --             1 : dependencies = {gtid_6508 2 tid}
@@ -256,14 +256,14 @@ entry("main",
 --     }
 -- }
 -- (segmap) lifted_lambda_res_6523 : {
---     (arr) xsss_5720 : {
+--     (arr) xsss_5720 : [0, 1, 2, 3] {
 --         (idx) +_lhs_6536 :
 --             0 : dependencies = {gtid_6524 2 tid}
 --             1 : dependencies = map2_arg2_6551 -> {}
 --             2 : dependencies = {gtid_6525 3 tid}
 --             3 : dependencies = +_lhs_6535 -> {i_6493 0 iter, j_6532 4 iter}
 --     }
---     (arr) (res_expanded_6494, [defunc_0_map_res_6243 : cond]) : {
+--     (arr) res_expanded_6494 : [0, 1, 2] {
 --         (idx) +_rhs_6538 :
 --             0 : dependencies = {gtid_6524 2 tid}
 --             1 : dependencies = {gtid_6525 3 tid}

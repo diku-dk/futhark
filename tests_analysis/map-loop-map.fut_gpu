@@ -171,7 +171,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_f_res_5774 : {
---     (arr) xsss_5497 : {
+--     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5786 :
 --             0 : dependencies = {gtid_5775 0 tid}
 --             1 : dependencies = {i_5933 2 iter}
@@ -179,7 +179,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) defunc_0_f_res_5793 : {
---     (arr) xsss_5497 : {
+--     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5807 :
 --             0 : dependencies = {gtid_5794 0 tid}
 --             1 : dependencies = {gtid_5802 2 tid}
@@ -187,7 +187,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) lifted_lambda_res_5890 : {
---     (arr) xsss_5497 : {
+--     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5900 :
 --             0 : dependencies = {gtid_5891 1 tid}
 --             1 : dependencies = {i_5935 2 iter}
@@ -195,7 +195,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) lifted_lambda_res_5905 : {
---     (arr) xsss_5497 : {
+--     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5915 :
 --             0 : dependencies = {gtid_5906 1 tid}
 --             1 : dependencies = {i_5937 2 iter}
@@ -203,7 +203,7 @@ entry("main",
 --     }
 -- }
 -- (segred) defunc_0_f_res_5801 : {
---     (arr) xsss_5497 : {
+--     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5807 :
 --             0 : dependencies = {gtid_5794 0 tid}
 --             1 : dependencies = {gtid_5802 2 tid}

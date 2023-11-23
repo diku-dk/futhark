@@ -48,7 +48,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5350 : {
---     (arr) xss_5280 : {
+--     (arr) xss_5280 : [0, 1] {
 --         (idx) eta_p_5353 :
 --             0 : dependencies = {i_5325 0 iter}
 --             1 : dependencies = {gtid_5351 1 tid}

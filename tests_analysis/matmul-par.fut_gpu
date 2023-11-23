@@ -558,19 +558,19 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5596 : {
---     (arr) xss_5385 : {
+--     (arr) xss_5385 : [0, 1] {
 --         (idx) eta_p_5606 :
 --             0 : dependencies = {gtid_5597 0 tid}
 --             1 : dependencies = {i_6190 2 iter}
 --     }
---     (arr) yss_5386 : {
+--     (arr) yss_5386 : [0, 1] {
 --         (idx) eta_p_5607 :
 --             0 : dependencies = {i_6190 2 iter}
 --             1 : dependencies = {i_6187 1 iter}
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5685 : {
---     (arr) xss_5385 : {
+--     (arr) xss_5385 : [0, 1] {
 --         (idx) A_elem_5817 :
 --             0 : dependencies = gtid_5812 -> {gid_y_5747 0 tid, ltid_y_5804 6 tid, ltid_seq_5806 4 tid}
 --             1 : dependencies = as_transformed_row_seqdim_idx_5813 -> {i_5778 3 iter, ltid_x_5805 7 tid, ltid_seq_5807 5 tid}
@@ -578,7 +578,7 @@ entry("main",
 --             0 : dependencies = gtid_6007 -> {gid_y_5747 0 tid, ltid_y_5999 5 tid, ltid_seq_6001 3 tid}
 --             1 : dependencies = as_transformed_row_seqdim_idx_6008 -> {ltid_x_6000 6 tid, ltid_seq_6002 4 tid}
 --     }
---     (arr) yss_5386 : {
+--     (arr) yss_5386 : [0, 1] {
 --         (idx) A_elem_5860 :
 --             0 : dependencies = as_transformed_row_seqdim_idx_5856 -> {i_5778 3 iter, ltid_y_5847 9 tid, ltid_seq_5850 8 tid}
 --             1 : dependencies = gtid_5855 -> {gid_x_5748 1 tid, ltid_x_5848 10 tid, ltid_seq_5849 7 tid}
@@ -586,24 +586,24 @@ entry("main",
 --             0 : dependencies = as_transformed_row_seqdim_idx_6055 -> {ltid_y_6046 8 tid, ltid_seq_6049 7 tid}
 --             1 : dependencies = gtid_6054 -> {gid_x_5748 1 tid, ltid_x_6047 9 tid, ltid_seq_6048 6 tid}
 --     }
---     (arr) (merge_5772, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, cssss_5774 : segmap, loop_5767 : loop]) : {
+--     (arr) merge_5772 : [0, 1] {
 --         (idx) css_5773 :
 --             0 : dependencies = {i_5768 4 iter}
 --             1 : dependencies = {i_5771 5 iter}
 --     }
---     (arr) (reg_mem_5921, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop]) : {
+--     (arr) reg_mem_5921 : [0, 1, 2] {
 --         (idx) x_6181 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
 --             1 : dependencies = {ltid_x_5946 13 tid}
 --             2 : dependencies = {i_5953 14 iter}
 --     }
---     (arr) (reg_mem_5922, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop]) : {
+--     (arr) reg_mem_5922 : [0, 1, 2] {
 --         (idx) b_5960 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
 --             1 : dependencies = {ltid_x_5946 13 tid}
 --             2 : dependencies = {i_5956 14 iter}
 --     }
---     (arr) (merge_5957, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop, redomap_res_5969 : segmap, loop_5952 : loop]) : {
+--     (arr) merge_5957 : [0, 1] {
 --         (idx) c_5961 :
 --             0 : dependencies = {i_5953 14 iter}
 --             1 : dependencies = {i_5956 14 iter}
@@ -611,19 +611,19 @@ entry("main",
 --             0 : dependencies = {i_5953 14 iter}
 --             1 : dependencies = {i_5956 14 iter}
 --     }
---     (arr) (reg_mem_6124, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond]) : {
+--     (arr) reg_mem_6124 : [0, 1, 2] {
 --         (idx) x_6176 :
 --             0 : dependencies = {ltid_y_6150 11 tid}
 --             1 : dependencies = {ltid_x_6149 12 tid}
 --             2 : dependencies = {i_6156 13 iter}
 --     }
---     (arr) (reg_mem_6125, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond]) : {
+--     (arr) reg_mem_6125 : [0, 1, 2] {
 --         (idx) b_6163 :
 --             0 : dependencies = {ltid_y_6150 11 tid}
 --             1 : dependencies = {ltid_x_6149 12 tid}
 --             2 : dependencies = {i_6159 13 iter}
 --     }
---     (arr) (merge_6160, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond, redomap_res_6172 : segmap, loop_6155 : loop]) : {
+--     (arr) merge_6160 : [0, 1] {
 --         (idx) c_6164 :
 --             0 : dependencies = {i_6156 13 iter}
 --             1 : dependencies = {i_6159 13 iter}
@@ -633,40 +633,40 @@ entry("main",
 --     }
 -- }
 -- (segmap) cssss_5774 : {
---     (arr) (merge_5772, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, cssss_5774 : segmap, loop_5767 : loop]) : {
+--     (arr) merge_5772 : [0, 1] {
 --         (idx) css_5773 :
 --             0 : dependencies = {i_5768 4 iter}
 --             1 : dependencies = {i_5771 5 iter}
 --     }
 -- }
 -- (segmap) as_transformed_row_glb2loc_5825 : {
---     (arr) xss_5385 : {
+--     (arr) xss_5385 : [0, 1] {
 --         (idx) A_elem_5817 :
 --             0 : dependencies = gtid_5812 -> {gid_y_5747 0 tid, ltid_y_5804 6 tid, ltid_seq_5806 4 tid}
 --             1 : dependencies = as_transformed_row_seqdim_idx_5813 -> {i_5778 3 iter, ltid_x_5805 7 tid, ltid_seq_5807 5 tid}
 --     }
 -- }
 -- (segmap) as_transformed_row_glb2loc_5868 : {
---     (arr) yss_5386 : {
+--     (arr) yss_5386 : [0, 1] {
 --         (idx) A_elem_5860 :
 --             0 : dependencies = as_transformed_row_seqdim_idx_5856 -> {i_5778 3 iter, ltid_y_5847 9 tid, ltid_seq_5850 8 tid}
 --             1 : dependencies = gtid_5855 -> {gid_x_5748 1 tid, ltid_x_5848 10 tid, ltid_seq_5849 7 tid}
 --     }
 -- }
 -- (segmap) redomap_res_5969 : {
---     (arr) (reg_mem_5921, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop]) : {
+--     (arr) reg_mem_5921 : [0, 1, 2] {
 --         (idx) x_6181 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
 --             1 : dependencies = {ltid_x_5946 13 tid}
 --             2 : dependencies = {i_5953 14 iter}
 --     }
---     (arr) (reg_mem_5922, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop]) : {
+--     (arr) reg_mem_5922 : [0, 1, 2] {
 --         (idx) b_5960 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
 --             1 : dependencies = {ltid_x_5946 13 tid}
 --             2 : dependencies = {i_5956 14 iter}
 --     }
---     (arr) (merge_5957, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_5972 : loop, loop_5973 : loop, loop_5974 : loop, loop_5971 : loop, redomap_res_5969 : segmap, loop_5952 : loop]) : {
+--     (arr) merge_5957 : [0, 1] {
 --         (idx) c_5961 :
 --             0 : dependencies = {i_5953 14 iter}
 --             1 : dependencies = {i_5956 14 iter}
@@ -676,33 +676,33 @@ entry("main",
 --     }
 -- }
 -- (segmap) as_transformed_row_glb2loc_6022 : {
---     (arr) xss_5385 : {
+--     (arr) xss_5385 : [0, 1] {
 --         (idx) A_elem_6014 :
 --             0 : dependencies = gtid_6007 -> {gid_y_5747 0 tid, ltid_y_5999 5 tid, ltid_seq_6001 3 tid}
 --             1 : dependencies = as_transformed_row_seqdim_idx_6008 -> {ltid_x_6000 6 tid, ltid_seq_6002 4 tid}
 --     }
 -- }
 -- (segmap) as_transformed_row_glb2loc_6069 : {
---     (arr) yss_5386 : {
+--     (arr) yss_5386 : [0, 1] {
 --         (idx) A_elem_6061 :
 --             0 : dependencies = as_transformed_row_seqdim_idx_6055 -> {ltid_y_6046 8 tid, ltid_seq_6049 7 tid}
 --             1 : dependencies = gtid_6054 -> {gid_x_5748 1 tid, ltid_x_6047 9 tid, ltid_seq_6048 6 tid}
 --     }
 -- }
 -- (segmap) redomap_res_6172 : {
---     (arr) (reg_mem_6124, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond]) : {
+--     (arr) reg_mem_6124 : [0, 1, 2] {
 --         (idx) x_6176 :
 --             0 : dependencies = {ltid_y_6150 11 tid}
 --             1 : dependencies = {ltid_x_6149 12 tid}
 --             2 : dependencies = {i_6156 13 iter}
 --     }
---     (arr) (reg_mem_6125, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond]) : {
+--     (arr) reg_mem_6125 : [0, 1, 2] {
 --         (idx) b_6163 :
 --             0 : dependencies = {ltid_y_6150 11 tid}
 --             1 : dependencies = {ltid_x_6149 12 tid}
 --             2 : dependencies = {i_6159 13 iter}
 --     }
---     (arr) (merge_6160, [defunc_0_map_res_5569 : cond, defunc_0_map_res_5684 : cond, defunc_0_map_res_5685 : segmap, loop_6174 : loop, foo_6173 : cond, redomap_res_6172 : segmap, loop_6155 : loop]) : {
+--     (arr) merge_6160 : [0, 1] {
 --         (idx) c_6164 :
 --             0 : dependencies = {i_6156 13 iter}
 --             1 : dependencies = {i_6159 13 iter}
@@ -712,12 +712,12 @@ entry("main",
 --     }
 -- }
 -- (segred) defunc_0_map_res_5704 : {
---     (arr) xss_5385 : {
+--     (arr) xss_5385 : [0, 1] {
 --         (idx) eta_p_5714 :
 --             0 : dependencies = {gtid_5705 0 tid}
 --             1 : dependencies = {gtid_5707 2 tid}
 --     }
---     (arr) yss_5386 : {
+--     (arr) yss_5386 : [0, 1] {
 --         (idx) eta_p_5715 :
 --             0 : dependencies = {gtid_5707 2 tid}
 --             1 : dependencies = {gtid_5706 1 tid}

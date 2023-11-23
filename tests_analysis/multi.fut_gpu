@@ -130,7 +130,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5588 : {
---     (arr) xsss_5393 : {
+--     (arr) xsss_5393 : [0, 1, 2] {
 --         (idx) x_5601 :
 --             0 : dependencies = reduce_arg2_5594 -> {gtid_5589 0 tid, i_5837 1 iter}
 --             1 : dependencies = reduce_arg2_5595 -> {gtid_5589 0 tid, i_5837 1 iter}
@@ -138,7 +138,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5744 : {
---     (arr) xsss_5393 : {
+--     (arr) xsss_5393 : [0, 1, 2] {
 --         (idx) x_5757 :
 --             0 : dependencies = reduce_arg2_5750 -> {gtid_5745 0 tid, gtid_5746 1 tid}
 --             1 : dependencies = reduce_arg2_5751 -> {gtid_5745 0 tid, gtid_5746 1 tid}
@@ -146,7 +146,7 @@ entry("main",
 --     }
 -- }
 -- (segred) defunc_0_map_res_5792 : {
---     (arr) xsss_5393 : {
+--     (arr) xsss_5393 : [0, 1, 2] {
 --         (idx) x_5802 :
 --             0 : dependencies = index_primexp_5829 -> {gtid_5793 0 tid, gtid_5794 1 tid}
 --             1 : dependencies = index_primexp_5834 -> {gtid_5793 0 tid, gtid_5794 1 tid}

@@ -76,7 +76,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5832 : {
---     (arr) xsss_5483 : {
+--     (arr) xsss_5483 : [0, 1, 2, 3] {
 --         (idx) b_5852 :
 --             0 : dependencies = foldl_arg2_5843 -> {gtid_5833 0 tid, gtid_5834 1 tid, k_5841 2 iter}
 --             1 : dependencies = {h_5846 3 iter}

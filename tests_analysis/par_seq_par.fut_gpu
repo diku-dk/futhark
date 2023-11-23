@@ -91,7 +91,7 @@ entry("main",
 
 -- === Expected output of analysis:
 -- (segmap) defunc_0_map_res_5337 : {
---     (arr) xsss_5223 : {
+--     (arr) xsss_5223 : [0, 1, 2] {
 --         (idx) eta_p_5351 :
 --             0 : dependencies = {gtid_5338 0 tid}
 --             1 : dependencies = {i_5345 1 iter}
@@ -99,7 +99,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) defunc_0_map_res_5348 : {
---     (arr) xsss_5223 : {
+--     (arr) xsss_5223 : [0, 1, 2] {
 --         (idx) eta_p_5351 :
 --             0 : dependencies = {gtid_5338 0 tid}
 --             1 : dependencies = {i_5345 1 iter}
@@ -107,7 +107,7 @@ entry("main",
 --     }
 -- }
 -- (segmap) lifted_lambda_res_5416 : {
---     (arr) xsss_5223 : {
+--     (arr) xsss_5223 : [0, 1, 2] {
 --         (idx) eta_p_5420 :
 --             0 : dependencies = {gtid_5417 1 tid}
 --             1 : dependencies = {i_5405 0 iter}
