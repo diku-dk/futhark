@@ -9,7 +9,6 @@ where
 import Control.Monad.State.Strict
 import Data.Foldable
 import Data.Map.Strict qualified as M
-import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.PrimExp
 import Futhark.Analysis.PrimExp.Convert
@@ -61,8 +60,8 @@ stmToPrimExps :: forall rep. (PrimExpAnalysis rep, RepTypes rep) => Scope rep ->
 stmToPrimExps scope stm = do
   primExpTable <- get
   case stm of
-    (Let (Pat patElems) _ exp)
-      | Just primExp <- primExpFromExp (toPrimExp scope primExpTable) exp ->
+    (Let (Pat patElems) _ e)
+      | Just primExp <- primExpFromExp (toPrimExp scope primExpTable) e ->
           -- The statement can be resolved as a `PrimExp`.
           -- For each pattern element, insert the PrimExp in the primExpTable
           forM_ patElems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
@@ -75,12 +74,12 @@ stmToPrimExps scope stm = do
             Nothing -> modify $ M.insert name Nothing
             _ -> pure ()
   where
-    walk exp = do
+    walk e = do
       -- Handle most cases using the walker
-      walkExpM walker exp
+      walkExpM walker e
       -- Additionally, handle loop parameters
-      case exp of
-        (Loop merge form@(ForLoop iter t subExp) loopbody) -> do
+      case e of
+        (Loop _ (ForLoop iter t subExp) _) -> do
           let primExp = primExpFromSubExp (IntType t) subExp
           modify $ M.insert iter (Just primExp)
         _ -> pure ()
@@ -133,20 +132,20 @@ segOpParamsToPrimExps scope op = do
 instance PrimExpAnalysis GPU where
   opPrimExp scope gpuOp
     | (SegOp op) <- gpuOp = segOpToPrimExps scope op
-    | (SizeOp op) <- gpuOp = pure ()
-    | (GPUBody ts body) <- gpuOp = bodyToPrimExps scope body
-    | (Futhark.IR.GPUMem.OtherOp op) <- gpuOp = pure ()
+    | (SizeOp _) <- gpuOp = pure ()
+    | (GPUBody _ body) <- gpuOp = bodyToPrimExps scope body
+    | (Futhark.IR.GPUMem.OtherOp _) <- gpuOp = pure ()
 
 instance PrimExpAnalysis MC where
   opPrimExp scope mcOp
     | (ParOp maybeParSegOp seqSegOp) <- mcOp = do
         -- Add the statements in the parallel part of the ParOp to the PrimExpTable
         case maybeParSegOp of
-          Just parSegOp -> forM_ maybeParSegOp $ segOpToPrimExps scope
           Nothing -> pure ()
+          Just _ -> forM_ maybeParSegOp $ segOpToPrimExps scope
         -- Add the statements in the sequential part of the ParOp to the PrimExpTable
         segOpToPrimExps scope seqSegOp
-    | (Futhark.IR.MCMem.OtherOp op) <- mcOp = pure ()
+    | (Futhark.IR.MCMem.OtherOp _) <- mcOp = pure ()
 
 instance PrimExpAnalysis GPUMem where
   opPrimExp = error $ notImplementedYet "GPUMem"

@@ -5,10 +5,6 @@ import Data.Map.Strict qualified as M
 import Data.Sequence.Internal qualified as S
 import Futhark.Analysis.AccessPattern
 import Futhark.IR.GPU
-import Futhark.IR.GPU.Op
-import Futhark.IR.Prop.Names
-import Futhark.IR.Syntax
-import Language.Futhark.Core
 import Test.Tasty
 import Test.Tasty.HUnit
 

@@ -1,6 +1,5 @@
 module Futhark.Pass.OptimizeArrayLayout.LayoutTests (tests) where
 
-import Data.IntMap.Strict qualified as S
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.PrimExp
@@ -31,26 +30,23 @@ permutationTests =
       -- access patterns that might result in the given permutations.
       -- Luckily we only use the original access for one check atm.
       let names = generateNames 2
-      let dimAccesses1 = [singleParAccess 0] <*> names
-      let dimAccesses2 = [singleParAccess 0, singleSeqAccess 1] <*> names
-      let dimAccesses3 = [singleParAccess 0, singleParAccess 1, singleSeqAccess 2] <*> names
       [ testCase (unwords [show perm, "->", show res]) $
-          commonPermutationEliminators perm [] dimAccesses @?= res
-        | (perm, dimAccesses, res) <-
-            [ ([0], dimAccesses1, True),
-              ([1, 0], dimAccesses2, False),
-              ([0, 1], dimAccesses2, True),
-              ([0, 0], dimAccesses2, True),
-              ([1, 1], dimAccesses2, True),
-              ([1, 2, 0], dimAccesses3, False),
-              ([2, 0, 1], dimAccesses3, False),
-              ([0, 1, 2], dimAccesses3, True),
-              ([1, 0, 2], dimAccesses3, True),
-              ([2, 1, 0], dimAccesses3, True),
-              ([2, 2, 0], dimAccesses3, True),
-              ([2, 1, 1], dimAccesses3, True),
-              ([1, 0, 1], dimAccesses3, True),
-              ([0, 0, 0], dimAccesses3, True)
+          commonPermutationEliminators perm [] @?= res
+        | (perm, res) <-
+            [ ([0], True),
+              ([1, 0], False),
+              ([0, 1], True),
+              ([0, 0], True),
+              ([1, 1], True),
+              ([1, 2, 0], False),
+              ([2, 0, 1], False),
+              ([0, 1, 2], True),
+              ([1, 0, 2], True),
+              ([2, 1, 0], True),
+              ([2, 2, 0], True),
+              ([2, 1, 1], True),
+              ([1, 0, 1], True),
+              ([0, 0, 0], True)
             ]
         ]
 
@@ -60,7 +56,7 @@ nestTests = testGroup "Nests" $
     let names = generateNames 2
     let dimAccesses = [singleParAccess 0, singleSeqAccess 1] <*> names
     [ testCase (unwords [args, "->", show res]) $
-        commonPermutationEliminators [1, 0] nest dimAccesses @?= res
+        commonPermutationEliminators [1, 0] nest @?= res
       | (args, nest, res) <-
           [ ("[]", [], False),
             ("[CondBodyName]", [CondBodyName] <*> names, False),

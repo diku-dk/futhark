@@ -1,10 +1,8 @@
 module Futhark.Pass.OptimizeArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, PermutationTable) where
 
-import Data.IntMap.Strict qualified as S
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
-import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.AnalyzePrimExp
 import Futhark.IR.Aliases
@@ -29,28 +27,28 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess primExpTable _segOpName (_arrayName, nest, _original_layout) _idxName dimAccesses =
-      do
-        -- Create a candidate permutation
-        let perm = map fst $ sortGPU (zip [0 ..] dimAccesses)
+  permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idxName dimAccesses =
+    do
+      -- Create a candidate permutation
+      let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
 
-        -- Dont accept indices where the last index is invariant
-        let lastIdxIsInvariant = isInvariant $ last dimAccesses
+      -- Dont accept indices where the last index is invariant
+      let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
-        -- Check if any of the dependencies are too complex to reason about
-        let dimAccesses' = filter (isJust . originalVar) dimAccesses
-        let deps = mapMaybe originalVar dimAccesses'
-        let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-        let primExps = map (`M.lookup` primExpTable) deps
-        let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
+      -- Check if any of the dependencies are too complex to reason about
+      let dimAccesses' = filter (isJust . originalVar) dimAccesses
+      let deps = mapMaybe originalVar dimAccesses'
+      let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+      let primExps = map (`M.lookup` primExpTable) deps
+      let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
-        -- Check if we want to manifest this array with the permutation
-        if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest dimAccesses'
-          then Nothing
-          else Just perm
+      -- Check if we want to manifest this array with the permutation
+      if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
+        then Nothing
+        else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
-isInscrutable maybeOp@(Just (Just op@(BinOpExp _ a b))) counter =
+isInscrutable maybeOp@(Just (Just op@(BinOpExp {}))) counter =
   if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
@@ -65,7 +63,7 @@ isInscrutableRec Nothing = True
 isInscrutableRec (Just Nothing) = True
 isInscrutableRec (Just (Just (LeafExp _ _))) = False
 isInscrutableRec (Just (Just (ValueExp _))) = False
-isInscrutableRec (Just (Just op@(BinOpExp _ a b))) =
+isInscrutableRec (Just (Just (BinOpExp _ a b))) =
   isInscrutableRec (Just $ Just a) || isInscrutableRec (Just $ Just b)
 -- TODO: Handle UnOpExp
 isInscrutableRec _ = True
@@ -87,12 +85,19 @@ reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
-multicorePermutation primExpTable _segOpName (_arrayName, nest, _original_layout) _idxName dimAccesses = do
+multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idxName dimAccesses = do
   -- Create a candidate permutation
-  let perm = map fst $ sortMC (zip [0 ..] dimAccesses)
+  let perm = map fst $ sortMC (zip arr_layout dimAccesses)
+
+  -- Check if any of the dependencies are too complex to reason about
+  let dimAccesses' = filter (isJust . originalVar) dimAccesses
+  let deps = mapMaybe originalVar dimAccesses'
+  let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
+  let primExps = map (`M.lookup` primExpTable) deps
+  let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
   -- Check if we want to manifest this array with the permutation
-  if commonPermutationEliminators perm nest dimAccesses
+  if inscrutable || commonPermutationEliminators perm nest
     then Nothing
     else Just perm
 
@@ -115,8 +120,8 @@ instance Layout SOACS where
   permutationFromDimAccess = error $ notImplementedYet "SOACS"
 
 -- | Reasons common to all backends to not manifest an array.
-commonPermutationEliminators :: [Int] -> [BodyType] -> [DimAccess rep] -> Bool
-commonPermutationEliminators perm nest dimAccesses = do
+commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
+commonPermutationEliminators perm nest = do
   -- Don't manifest if the permutation is the permutation is invalid
   let isInvalidPerm =
         -- Don't manifest if the permutation is the identity permutation

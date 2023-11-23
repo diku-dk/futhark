@@ -1,13 +1,10 @@
 module Futhark.Pass.OptimizeArrayLayout (optimizeArrayLayout, printAST) where
 
 import Control.Monad.State.Strict
-import Data.Foldable
 import Data.Map.Strict qualified as M
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.AnalyzePrimExp
-import Futhark.Analysis.PrimExp
-import Futhark.Analysis.PrimExp.Convert
 import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.Pass

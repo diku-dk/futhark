@@ -1,20 +1,12 @@
 module Futhark.Pass.OptimizeArrayLayout.AnalyzePrimExpTests (tests) where
 
 import Control.Monad.State.Strict
-import Data.IntMap.Strict qualified as IM
-import Data.List.NonEmpty
 import Data.Map.Strict qualified as M
 import Data.Sequence.Internal qualified as S
-import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.AnalyzePrimExp
 import Futhark.Analysis.PrimExp
 import Futhark.IR.GPU
-import Futhark.IR.GPU.Op
 import Futhark.IR.MC
-import Futhark.IR.MC.Op
-import Futhark.IR.Prop.Names
-import Futhark.IR.Syntax
-import Language.Futhark.Core
 import Test.Tasty
 import Test.Tasty.HUnit
 
