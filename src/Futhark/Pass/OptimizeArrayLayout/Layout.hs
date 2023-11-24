@@ -53,7 +53,7 @@ isInscrutable maybeOp@(Just (Just op@(BinOpExp {}))) counter =
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
       -- Maximum allowable stride and offset
-      Just (s, o) -> s > 8 || o > 128 -- TODO: Tune these values
+      Just (s, _) -> s > 8 -- TODO: Tune these values
       Nothing -> True
     else isInscrutableRec maybeOp
 isInscrutable maybeOp _ = isInscrutableRec maybeOp
@@ -75,6 +75,11 @@ reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
       Sub _ _ -> Just (1, -valueIntegral v)
       Mul _ _ -> Just (valueIntegral v, 0)
       _ -> Nothing
+  -- | UnOpExp Not _ <- op = Nothing
+  -- | UnOpExp (Complement _) _  <- op = Nothing
+  -- | UnOpExp (Abs _) _ <- op = Nothing
+  -- | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+
   | BinOpExp {} <- op = case reduceStrideAndOffset op of
       Nothing -> Nothing
       Just (s, o) -> case oper of
