@@ -140,7 +140,7 @@ data Context rep = Context
     --  and iteration types.
     assignments :: M.Map VName (VariableInfo rep),
     -- | Maps from sliced arrays to their respective access patterns.
-    slices :: M.Map VName [DimAccess rep],
+    slices :: M.Map VName (ArrayName, [DimAccess rep]),
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -414,7 +414,7 @@ analyzeIndex ctx pats arr_name dimAccesses = do
 
   either
     (index ctx' array_name')
-    (slice ctx')
+    (slice ctx' array_name')
     dependencies
   where
     index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
@@ -423,15 +423,15 @@ analyzeIndex ctx pats arr_name dimAccesses = do
        in -- If the arrayname is a `DimSlice` we want to fixup the access
           case M.lookup name $ slices context of
             Nothing -> analyzeIndex' context pats arrayName dimAccess
-            Just sliceAccess -> do
+            Just (arrayName', sliceAccess) -> do
               analyzeIndex'
                 context
                 pats
-                arrayName
+                arrayName'
                 (init sliceAccess ++ [head dimAccess <> last sliceAccess] ++ drop 1 dimAccess)
 
-    slice context dims =
-      (context {slices = M.insert (head pats) dims $ slices context}, mempty)
+    slice context array_name dims =
+      (context {slices = M.insert (head pats) (array_name, dims) $ slices context}, mempty)
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyzeIndexContextFromIndices ctx dimAccesses pats = do
