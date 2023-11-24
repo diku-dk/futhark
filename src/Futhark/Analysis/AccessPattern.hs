@@ -390,18 +390,18 @@ getIndexDependencies ctx dims =
 -- | Gets the dependencies of each dimension and either returns a result, or
 -- adds a slice to the context.
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
-analyzeIndex ctx pats arr_name dimIndexes = do
+analyzeIndex ctx pats arr_name dimIndices = do
   -- Get the dependendencies of each dimension
-  let dependencies = getIndexDependencies ctx dimIndexes
+  let dependencies = getIndexDependencies ctx dimIndices
   -- Extend the current context with current pattern(s) and its deps
-  let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
+  let ctx' = analyzeIndexContextFromIndices ctx dimIndices pats
 
   -- The bodytype(s) are used in the result construction
   let array_name' =
         -- For now, we assume the array is in row-major-order, hence the
         -- identity permutation. In the future, we might want to infer its
         -- layout, for example, if the array is the result of a transposition.
-        let layout = [0 .. length dimIndexes - 1]
+        let layout = [0 .. length dimIndices - 1]
          in -- 2. If the arrayname was not in assignments, it was not an immediately
             --    allocated array.
             fromMaybe (arr_name, [], layout)
