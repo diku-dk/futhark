@@ -49,7 +49,7 @@ instance Layout GPU where
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
 isInscrutable maybeOp@(Just (Just op@(BinOpExp {}))) counter =
-  if not counter
+  if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
       -- Maximum allowable stride and offset
