@@ -6,7 +6,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -33,5 +33,4 @@ entry("main",
   in {defunc_0_map_res_5119}
 }
 
--- === Expected output of analysis:
-
+-- === Expected output of analysis: CONFIRMED

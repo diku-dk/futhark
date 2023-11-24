@@ -56,7 +56,7 @@ entry("main",
   in {defunc_0_map_res_5681}
 }
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_map_res_5681 : {
 --     (arr) A_5449 : [0, 1] {
 --         (idx) lifted_lambda_res_5688 :

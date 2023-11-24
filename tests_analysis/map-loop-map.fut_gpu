@@ -169,7 +169,7 @@ entry("main",
   in {defunc_0_f_res_5743}
 }
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_f_res_5774 : {
 --     (arr) xsss_5497 : [0, 1, 2] {
 --         (idx) xsss_transformed_row_5786 :

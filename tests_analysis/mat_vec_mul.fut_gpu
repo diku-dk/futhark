@@ -61,7 +61,7 @@ entry("main",
   in {defunc_0_map_res_5737}
 }
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_map_res_r_5726 : {
 --     (arr) xss_5513 : [0, 1] {
 --         (idx) eta_p_5730 :

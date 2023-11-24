@@ -12,7 +12,7 @@
 -- IR:
 
 types {
-  
+
 }
 
 
@@ -61,5 +61,4 @@ entry("main",
   in {main_res_5104}
 }
 
--- === Expected output of analysis:
-
+-- === Expected output of analysis: CONFIRMED

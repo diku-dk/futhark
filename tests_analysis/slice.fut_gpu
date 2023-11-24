@@ -32,7 +32,7 @@ entry("main",
   in {defunc_0_reduce_res_5430}
 }
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_reduce_res_5430 : {
 --     (arr) xss_5331 : [0, 1] {
 --         (idx) eta_p_5433 :

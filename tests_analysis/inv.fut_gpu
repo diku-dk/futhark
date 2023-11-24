@@ -47,7 +47,7 @@ entry("main",
   in {defunc_0_map_res_5194}
 }
 
--- === Expected output of analysis:
+-- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_map_res_5194 : {
 --     (arr) xss_5134 : [0, 1] {
 --         (idx) x_5199 :
