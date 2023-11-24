@@ -769,7 +769,7 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
             groupReduce (sExt32 group_size) slug_op_renamed group_red_arrs
             -- TODO: I don't think this barrier is necessary, considering the
             -- below two loops only write private accumulator variables, and we
-            -- have an error sync following the group reduction.
+            -- have an error sync following the group reduction in all cases.
             -- sOp $ Imp.Barrier Imp.FenceLocal
 
             -- accumulate group results in per-group accumulators. these are
@@ -864,7 +864,7 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
 
       -- TODO: is this barrier necessary? the above block of code only reads
       -- elements from global, maps them, and writes them to private mem.
-      sOp $ Imp.ErrorSync Imp.FenceLocal 
+      sOp $ Imp.ErrorSync Imp.FenceLocal
 
       sComment "effectualize collective copies in local memory" $ do
         -- TODO: once again, do we need to take care about the slugShape here,
@@ -872,7 +872,7 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
         forM_ slugs $ \slug -> do
           let coll_copy_arrs = slugCollCopyArrs slug
           let priv_chunks = slugPrivChunks slug
-          let do_second_barrier = length coll_copy_arrs > 1
+
           forM2_ coll_copy_arrs priv_chunks $ \lmem_arr priv_chunk -> do
             chunkLoop $ \k -> do
               lmem_idx <- dPrimVE "lmem_idx" $ ltid + k * group_size
@@ -884,7 +884,7 @@ reductionStageOne gtids num_elements global_tid q chunk threads_per_segment slug
               lmem_idx <- dPrimVE "lmem_idx" $ ltid * chunk + k
               copyDWIMFix priv_chunk [k] (Var lmem_arr) [lmem_idx]
 
-            when do_second_barrier $ sOp $ Imp.Barrier Imp.FenceLocal
+            sOp $ Imp.Barrier Imp.FenceLocal
 
       sComment "per-thread sequential reduction of private chunk(s)" $ do
         chunkLoop $ \k ->
