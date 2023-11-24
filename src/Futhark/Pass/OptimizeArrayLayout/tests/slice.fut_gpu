@@ -32,7 +32,7 @@ entry("main",
   in {defunc_0_reduce_res_5430}
 }
 
--- === Expected output after pass:
+-- === Expected output after pass: CONFIRMED
 -- types {
 --
 -- }
