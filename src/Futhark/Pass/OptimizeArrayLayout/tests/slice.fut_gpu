@@ -33,6 +33,11 @@ entry("main",
 }
 
 -- === Expected output after pass:
+-- types {
+--
+-- }
+--
+--
 -- entry("main",
 --       {xss: [][]i32},
 --       {[]i32})

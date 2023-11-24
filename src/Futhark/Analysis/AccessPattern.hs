@@ -140,7 +140,7 @@ data Context rep = Context
     --  and iteration types.
     assignments :: M.Map VName (VariableInfo rep),
     -- | Maps from sliced arrays to their respective access patterns.
-    slices :: M.Map VName (ArrayName, [DimAccess rep]),
+    slices :: M.Map VName (ArrayName, [VName], [DimAccess rep]),
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
@@ -238,11 +238,11 @@ contextFromNames :: Context rep -> VariableInfo rep -> [VName] -> Context rep
 contextFromNames ctx varInfo = foldl' extend ctx . map (`oneContext` varInfo)
 
 -- | Analyze each `entry` and accumulate the results.
-analyzeDimAccesss :: (RepTypes rep, Analyze rep) => Prog rep -> IndexTable rep
+analyzeDimAccesss :: (Analyze rep) => Prog rep -> IndexTable rep
 analyzeDimAccesss = foldMap' analyzeFunction . progFuns
 
 -- | Analyze each statement in a function body.
-analyzeFunction :: forall rep. (RepTypes rep, Analyze rep) => FunDef rep -> IndexTable rep
+analyzeFunction :: forall rep. (Analyze rep) => FunDef rep -> IndexTable rep
 analyzeFunction func = do
   let stms = stmsToList . bodyStms $ funDefBody func
   -- Create a context containing the function parameters
@@ -363,27 +363,26 @@ getIndexDependencies ctx dims =
       ( \idx (a, i) -> do
           let acc =
                 either
-                  (matchDimIndex idx i)
-                  (forceRight . matchDimIndex idx i)
+                  (matchDimIndex idx)
+                  (forceRight . matchDimIndex idx)
                   a
           (acc, i - 1)
       )
       (Left [], length dims - 1)
       dims
   where
-    matchDimIndex idx i accumulator =
+    matchDimIndex idx accumulator =
       case idx of
         (DimFix subExpression) ->
           Left $ consolidate ctx subExpression : accumulator
         -- If we encounter a DimSlice, add it to a map of `DimSlice`s and check
         -- result later.
-        (DimSlice offset num_elems stride) ->
+        (DimSlice offset num_elems stride) -> do
           -- We assume that a slice is iterated sequentially, so we have to
           -- create a fake dependency for the slice.
-          -- TODO: propoerly construct a unique VName?
           let dimAccess' = DimAccess (M.singleton (VName "slice" 0) $ Dependency (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
-           in let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride <> dimAccess'
-               in Right $ dimAccess : accumulator
+          let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride <> dimAccess'
+          Right $ dimAccess : accumulator
 
     forceRight (Left a) = Right a
     forceRight (Right a) = Right a
@@ -391,47 +390,48 @@ getIndexDependencies ctx dims =
 -- | Gets the dependencies of each dimension and either returns a result, or
 -- adds a slice to the context.
 analyzeIndex :: Context rep -> [VName] -> VName -> [DimIndex SubExp] -> (Context rep, IndexTable rep)
-analyzeIndex ctx pats arr_name dimAccesses = do
+analyzeIndex ctx pats arr_name dimIndexes = do
   -- Get the dependendencies of each dimension
-  let dependencies = getIndexDependencies ctx dimAccesses
+  let dependencies = getIndexDependencies ctx dimIndexes
   -- Extend the current context with current pattern(s) and its deps
-  let ctx' = analyzeIndexContextFromIndices ctx dimAccesses pats
+  let ctx' = analyzeIndexContextFromIndices ctx dimIndexes pats
 
   -- The bodytype(s) are used in the result construction
   let array_name' =
         -- For now, we assume the array is in row-major-order, hence the
         -- identity permutation. In the future, we might want to infer its
         -- layout, for example, if the array is the result of a transposition.
-        let layout = [0 .. length dimAccesses - 1]
-        -- 2. If the arrayname was not in assignments, it was not an immediately
-        --    allocated array.
-        in fromMaybe (arr_name, [], layout)
-          -- 1. Maybe find the array name, and the "stack" of body types that the
-          -- array was allocated in.
-          . L.find (\(n, _, _) -> n == arr_name)
-          -- 0. Get the "stack" of bodytypes for each assignment
-          $ map (\(n, vi) -> (n, parents_nest vi, layout)) (M.toList $ assignments ctx')
+        let layout = [0 .. length dimIndexes - 1]
+         in -- 2. If the arrayname was not in assignments, it was not an immediately
+            --    allocated array.
+            fromMaybe (arr_name, [], layout)
+              -- 1. Maybe find the array name, and the "stack" of body types that the
+              -- array was allocated in.
+              . L.find (\(n, _, _) -> n == arr_name)
+              -- 0. Get the "stack" of bodytypes for each assignment
+              $ map (\(n, vi) -> (n, parents_nest vi, layout)) (M.toList $ assignments ctx')
 
   either
     (index ctx' array_name')
     (slice ctx' array_name')
     dependencies
   where
+    slice :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
+    slice context array_name dims =
+      (context {slices = M.insert (head pats) (array_name, pats, dims) $ slices context}, mempty)
+
     index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
     index context arrayName dimAccess =
       let (name, _, _) = arrayName
        in -- If the arrayname is a `DimSlice` we want to fixup the access
           case M.lookup name $ slices context of
             Nothing -> analyzeIndex' context pats arrayName dimAccess
-            Just (arrayName', sliceAccess) -> do
+            Just (arrayName', pats', sliceAccess) -> do
               analyzeIndex'
                 context
-                pats
+                pats'
                 arrayName'
                 (init sliceAccess ++ [head dimAccess <> last sliceAccess] ++ drop 1 dimAccess)
-
-    slice context array_name dims =
-      (context {slices = M.insert (head pats) (array_name, dims) $ slices context}, mempty)
 
 analyzeIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyzeIndexContextFromIndices ctx dimAccesses pats = do

@@ -136,7 +136,7 @@ printMemAliasGPU =
     }
 
 -- | Print result of memory access analysis on the IR
-printMemoryAccessAnalysis :: (RepTypes rep, Analyze rep) => Action rep
+printMemoryAccessAnalysis :: (Analyze rep) => Action rep
 printMemoryAccessAnalysis =
   Action
     { actionName = "call-graph",

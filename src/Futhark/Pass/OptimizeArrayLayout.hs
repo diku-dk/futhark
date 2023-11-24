@@ -24,7 +24,6 @@ optimizeArrayLayout =
   Pass
     "coalesce access"
     "Transform kernel input arrays for better performance."
-    -- return
     $ \prog -> do
       -- Analyse the program
       let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
