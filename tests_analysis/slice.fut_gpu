@@ -33,4 +33,10 @@ entry("main",
 }
 
 -- === Expected output of analysis:
--- TBD
+-- (segmap) defunc_0_reduce_res_5430 : {
+--     (arr) xss_5331 : [0, 1] {
+--         (idx) eta_p_5433 :
+--             0 : dependencies = {gtid_5431 0 tid}
+--             1 : dependencies = i_5362 -> {slice_0 1 iter, i_5362 1 iter}
+--     }
+-- }
