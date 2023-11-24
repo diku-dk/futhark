@@ -194,7 +194,7 @@ sortGPU =
         cmpIdxPat
           (Just (iterL, lvlL, originalLevelL))
           (Just (iterR, lvlR, originalLevelR)) = case (iterL, iterR) of
-            (ThreadID, ThreadID) -> EQ
+            (ThreadID, ThreadID) -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
             (ThreadID, _) -> GT
             (_, ThreadID) -> LT
             _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
