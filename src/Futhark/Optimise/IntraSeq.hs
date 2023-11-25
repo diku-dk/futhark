@@ -245,7 +245,7 @@ seqStm' env stm@(Let pat _ (Op (SegOp
       let env' = updateEnvTid env tid
       lambSOAC <- buildSOACLambda env' usedArrays kbody ts
       let screma = mapSOAC lambSOAC
-      chunks <- mapM (letChunkExp (seqFactor env') tid) usedArrays
+      chunks <- mapM (getChunk env') usedArrays
       res <- letTupExp' "res" $ Op $ OtherOp $
               Screma (seqFactor env) chunks screma
       let space' = SegSpace phys [(tid, grpSize env)]
@@ -303,7 +303,7 @@ seqStm' env (Let pat aux
     lambSOAC <- buildSOACLambda env' usedArrays kbody ts
     let scans = L.map (\(l, n) -> Scan l n) $ L.zip scanLambdas nes
     let scanSoac = scanomapSOAC scans lambSOAC
-    es <- mapM (getChunk env tid (seqFactor env)) usedArrays
+    es <- mapM (getChunk env') usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
     let usedRes = L.map (Returns ResultMaySimplify mempty) $ L.take numResConsumed res
     fused <- mapM (buildKernelResult env') fusedReds
@@ -317,20 +317,6 @@ seqStm' env (Let pat aux
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
   pure Keep
-
--- TODO: what is this
--- Need to potentially fix index statements between segops
--- seqStm' env stm@(Let pat aux (BasicOp (Index arr slice))) = do
---   case M.lookup arr (nameMap env) of
---     Nothing -> addStm stm 
---     (Just arr') -> do
---       -- Start by flattening the tile for single use
---       size <- letSubExp "flat_size" =<< eBinOp (Mul Int64 OverflowUndef) 
---                                                (eSubExp $ seqFactor env)
---                                                (eSubExp $ grpSize env)
---       tileFlat <- letExp "flat" $ BasicOp $ Reshape ReshapeArbitrary (Shape [size]) arr'
---       let slice' = Slice $ tail $ unSlice slice
---       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
 
 
 -- Catch all
@@ -587,7 +573,7 @@ mkIntmRed env kbody retTs binops = do
       -- we build the reduce as a scan initially
       let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
       let screma = scanomapSOAC scans lambSOAC
-      chunks <- mapM (getChunk env tid (seqFactor env)) usedArrs
+      chunks <- mapM (getChunk env') usedArrs
 
       res <- letTupExp' "res" $ Op $ OtherOp $
                 Screma (seqFactor env) chunks screma
@@ -628,18 +614,16 @@ getUsedArraysIn env kbody = do
 
 getChunk ::
   Env ->
-  VName ->              -- thread Id
-  SubExp ->             -- size of chunk
   VName ->              -- Array to get chunk from
   Builder GPU VName
-getChunk env tid sz arr = do
+getChunk env arr = do
+  let tid = getThreadId env
+  let sz = seqFactor env
   tp <- lookupType arr
-
   offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
                                           (eSubExp $ seqFactor env)
                                           (eSubExp $ Var tid)
-
-  let dims =
+  let dims = 
         case arrayRank tp of
           1 -> [DimSlice offset sz (intConst Int64 1)]
           2 -> [DimFix $ Var tid, DimSlice (intConst Int64 0) sz (intConst Int64 1)]
@@ -683,14 +667,6 @@ renameSegBinOp segbinops =
   forM segbinops $ \(SegBinOp comm lam ne shape) -> do
     lam' <- renameLambda lam
     pure $ SegBinOp comm lam' ne shape
-
-
-letChunkExp :: SubExp -> VName -> VName -> Builder GPU VName
-letChunkExp sz tid arrName = do
-  letExp "chunk" $ BasicOp $
-    Index arrName (Slice [DimFix (Var tid),
-    DimSlice (intConst Int64 0) sz (intConst Int64 1)])
-
 
 -- Generates statements that compute the pr. thread chunk size. This is needed
 -- as the last thread in a block might not have seqFactor amount of elements
