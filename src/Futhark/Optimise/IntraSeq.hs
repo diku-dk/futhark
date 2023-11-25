@@ -80,19 +80,31 @@ getThreadId env =
     (Just tid ) -> tid
     _ -> error "No tid to get"
 
-getSeqFactor :: Attrs -> SubExp
-getSeqFactor (Attrs attrs) = 
+findSeqAttr :: Attrs -> Maybe Attr
+findSeqAttr (Attrs attrs) = 
   let attrs' = S.toList attrs
-      i = L.findIndex isSeqFactor attrs'
-  in case i of 
-    Just i' -> 
-      let (AttrComp _ [AttrInt x]) = attrs' !! i'
-      in intConst Int64 x
-    Nothing -> intConst Int64 4
+  in case L.findIndex isSeqFactor attrs' of
+    Just i -> Just $ attrs' !! i
+    Nothing -> Nothing
   where
     isSeqFactor :: Attr -> Bool
     isSeqFactor (AttrComp "seq_factor" [AttrInt _]) = True
     isSeqFactor _ = False
+
+getSeqFactor :: Attrs -> SubExp
+getSeqFactor attrs = 
+  case findSeqAttr attrs of 
+    Just i' -> 
+      let (AttrComp _ [AttrInt x]) = i'
+      in intConst Int64 x
+    Nothing -> intConst Int64 4
+
+shouldSequentialize :: Attrs -> Bool
+shouldSequentialize attrs = 
+  case findSeqAttr attrs of 
+    Just _ -> True
+    Nothing -> False
+
 
 intraSeq :: Pass GPU GPU
 intraSeq =
@@ -114,8 +126,11 @@ seqStms ::
   SeqM (Stms GPU)
 seqStms stms = do
   foldM (\ss s -> do
-      ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
-      pure $ ss <> ss'
+      let Let _ aux _ = s
+      if shouldSequentialize $ stmAuxAttrs aux then do
+        ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
+        pure $ ss <> ss'
+      else do pure $ ss <> oneStm s
       ) mempty (stmsToList stms)
 
 -- | Matches against singular statements at the group level. That is statements
