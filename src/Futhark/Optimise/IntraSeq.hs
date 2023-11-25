@@ -50,6 +50,7 @@ data Env = Env {
   nameMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
+  deriving(Show)
 
 setMapping :: Env -> M.Map VName VName -> Env
 setMapping (Env gid gSize gSizeOld tid _ factor) mapping =
@@ -81,7 +82,7 @@ getThreadId env =
     _ -> error "No tid to get"
 
 findSeqAttr :: Attrs -> Maybe Attr
-findSeqAttr (Attrs attrs) = 
+findSeqAttr (Attrs attrs) =
   let attrs' = S.toList attrs
   in case L.findIndex isSeqFactor attrs' of
     Just i -> Just $ attrs' !! i
@@ -92,16 +93,16 @@ findSeqAttr (Attrs attrs) =
     isSeqFactor _ = False
 
 getSeqFactor :: Attrs -> SubExp
-getSeqFactor attrs = 
-  case findSeqAttr attrs of 
-    Just i' -> 
+getSeqFactor attrs =
+  case findSeqAttr attrs of
+    Just i' ->
       let (AttrComp _ [AttrInt x]) = i'
       in intConst Int64 x
     Nothing -> intConst Int64 4
 
 shouldSequentialize :: Attrs -> Bool
-shouldSequentialize attrs = 
-  case findSeqAttr attrs of 
+shouldSequentialize attrs =
+  case findSeqAttr attrs of
     Just _ -> True
     Nothing -> False
 
@@ -140,7 +141,7 @@ seqStm ::
   Stm GPU ->
   Builder GPU ()
 seqStm stm@(Let pat aux (Op (SegOp (
-              SegMap (SegGroup virt (Just grid)) space ts 
+              SegMap (SegGroup virt (Just grid)) space ts
                      (KernelBody dec stms kres))))) = do
   -- As we are at group level all arrays in scope must be global, i.e. not
   -- local to the current group. We simply create a tile for all such arrays
@@ -168,12 +169,21 @@ seqStm stm@(Let pat aux (Op (SegOp (
     kres' <- flattenResults pat kres
 
     pure (kres', lvl', seqRes)
-  
+
   case seqRes of
     Discard -> addStm stm
     Keep -> do
       let kbody' = KernelBody dec stms' kres'
       addStm $ Let pat aux $ Op $ SegOp $ SegMap lvl' space ts kbody'
+
+
+seqStm (Let pat aux (Match scrutinee cases def dec)) = undefined
+
+seqStm (Let pat aux (Loop header form body)) = do
+  let (Body dec stms res) = trace ("Loop pattern matched!") body
+  stms' <- runSeqMExtendedScope (seqStms stms) mempty
+  let body' = Body dec stms' res
+  addStm $ Let pat aux (Loop header form body')
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
@@ -332,6 +342,22 @@ seqStm' env (Let pat aux
 --       let slice' = Slice $ tail $ unSlice slice
 --       addStm $ Let pat aux (BasicOp (Index tileFlat slice'))
 
+
+seqStm' env (Let pat aux (Match scrutinee cases def dec)) = undefined
+
+seqStm' env stm@(Let pat aux (Loop header form body)) = do
+  let (Body dec stms res) = body
+  (seqres, stms') <- runBuilder $ seqStms' env stms
+  let body' = Body dec stms' res
+  case seqres of
+    Discard -> do
+      addStm stm
+      pure Discard
+    Keep -> do
+      addStm $ Let pat aux (Loop header form body')
+      pure Keep
+  -- addStm $ Let pat aux (Loop header form body')
+  -- pure seqres
 
 -- Catch all
 seqStm' _ stm = do
@@ -615,7 +641,7 @@ getUsedArraysIn env kbody = do
   scope <- askScope
   let (arrays, _) = L.unzip $ M.toList $ M.filter isArray scope
   let free = IM.elems $ namesIntMap $ freeIn kbody
-  let freeArrays = arrays `intersect` free
+  let freeArrays = (pTrace (show arrays) arrays) `intersect` (pTrace (show free) free)
   let arrays' =
         L.map ( \ arr ->
           if M.member arr (nameMap env) then
