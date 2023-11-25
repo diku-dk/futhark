@@ -329,7 +329,22 @@ seqStm' env (Let pat aux
   pure Keep
 
 
-seqStm' env (Let pat aux (Match scrutinee cases def dec)) = undefined
+seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
+  cases' <- forM cases seqCase
+
+  let (Body dDec dStms dRes) = def
+  (seqres, dStms') <- runBuilder $ seqStms' env dStms
+  let def' = Body dDec dStms' dRes
+  addStm $ Let pat aux (Match scrutinee cases' def' dec)
+  pure Keep
+  where
+    seqCase :: Case (Body GPU) -> Builder GPU (Case (Body GPU))
+    seqCase (Case pats cBody) = do
+      let (Body bDec bStms bRes) = cBody
+      (seqres, bStms') <- runBuilder $ seqStms' env bStms
+      let cBody' = Body bDec bStms' bRes  
+      pure $ Case pats cBody'
+
 
 seqStm' env stm@(Let pat aux (Loop header form body)) = do
   let (Body dec stms res) = body
@@ -342,8 +357,6 @@ seqStm' env stm@(Let pat aux (Loop header form body)) = do
     Keep -> do
       addStm $ Let pat aux (Loop header form body')
       pure Keep
-  -- addStm $ Let pat aux (Loop header form body')
-  -- pure seqres
 
 -- Catch all
 seqStm' _ stm = do
@@ -627,7 +640,7 @@ getUsedArraysIn env kbody = do
   scope <- askScope
   let (arrays, _) = L.unzip $ M.toList $ M.filter isArray scope
   let free = IM.elems $ namesIntMap $ freeIn kbody
-  let freeArrays = (pTrace (show arrays) arrays) `intersect` (pTrace (show free) free)
+  let freeArrays = arrays `intersect` free
   let arrays' =
         L.map ( \ arr ->
           if M.member arr (nameMap env) then
