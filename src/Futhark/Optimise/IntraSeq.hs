@@ -32,7 +32,6 @@ import Futhark.Transform.Substitute
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
-data SeqResult = Keep | Discard
 
 -- | A builder with additional fail functionality
 type SeqBuilder a = ExceptT () (Builder GPU) a
@@ -47,10 +46,20 @@ runSeqBuilder (ExceptT b) = do
     Left _ -> pure Nothing
     Right _-> pure . Just $ stms
 
-collectSeqBuilder :: 
+
+collectSeqBuilder ::
+  SeqBuilder a ->
+  SeqBuilder (a, Stms GPU)
+collectSeqBuilder (ExceptT b) = do
+  (tmp, stms) <- lift $ do collectStms b
+  case tmp of
+    Left _ -> throwError ()
+    Right x -> pure (x, stms)
+
+collectSeqBuilder' ::
   SeqBuilder a ->
   SeqBuilder (Stms GPU)
-collectSeqBuilder (ExceptT b) = do
+collectSeqBuilder' (ExceptT b) = do
   (tmp, stms) <- lift $ do collectStms b
   case tmp of
     Left _ -> throwError ()
@@ -222,9 +231,9 @@ seqStm stm@(Let pat aux (Op (SegOp (
 
         kres' <- lift $ do flattenResults pat kres
         pure (kres', lvl', space, ts)
-      
+
     lift $ do addStm $ Let pat aux exp'
-  
+
 
 
 seqStm (Let pat aux (Match scrutinee cases def dec)) = undefined
@@ -301,7 +310,7 @@ seqStm' env stm@(Let pat aux (Op (SegOp
 
       lift $ do letBindNames names exp
 
-  
+
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) space binops ts kbody))))
   | L.length (unSegSpace space) /= 1 = throwError ()
@@ -367,23 +376,26 @@ seqStm' env (Let pat aux
 seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
   cases' <- forM cases seqCase
   let (Body ddec dstms dres) = def
-  dstms' <- collectSeqBuilder $ forM (stmsToList dstms) (seqStm' env)
-  let def' = Body ddec dstms' dres
+  dstms' <- collectSeqBuilder' $ forM (stmsToList dstms) (seqStm' env)
+  (dres', stms') <- collectSeqBuilder $ localScope (scopeOf dstms') $ fixReturnTypes pat dres
+  let def' = Body ddec (dstms' <> stms') dres'
   lift $ do addStm $ Let pat aux (Match scrutinee cases' def' dec)
   where
     seqCase :: Case (Body GPU) -> SeqBuilder (Case (Body GPU))
-    seqCase (Case pat body) = do
+    seqCase (Case cpat body) = do
       let (Body bdec bstms bres) = body
-      bstms' <- collectSeqBuilder $
+      bstms' <- collectSeqBuilder' $
                   forM (stmsToList bstms) (seqStm' env)
-      let body' = Body bdec bstms' bres
-      pure $ Case pat body'
+      (bres', stms') <- collectSeqBuilder $ localScope (scopeOf bstms') $ fixReturnTypes pat bres
+      let body' = Body bdec (bstms' <> stms') bres'
+      -- let body' = Body bdec bstms' bres
+      pure $ Case cpat body'
 
 
 seqStm' env (Let pat aux (Loop header form body)) = do
   let fparams = L.map fst header
   let (Body bdec bstms bres) = body
-  bstms' <- collectSeqBuilder $ 
+  bstms' <- collectSeqBuilder' $
               localScope (scopeOfFParams fparams) $
                 forM_ (stmsToList bstms) (seqStm' env)
   let body' = Body bdec bstms' bres
@@ -393,7 +405,7 @@ seqStm' env (Let pat aux (Loop header form body)) = do
 
 -- Catch all
 seqStm' _ stm = lift $ do addStm stm
-  
+
 
 
 seqScatter :: Env -> Stm GPU -> SeqBuilder ()
@@ -530,6 +542,35 @@ seqScatter env (Let pat aux (Op (SegOp
 seqScatter _ stm = error $
                   "SeqScatter error. Should be a map at thread level but got"
                   ++ show stm
+
+
+-- | Fixes the type of results and returns new results
+fixReturnTypes :: Pat (LetDec GPU) -> Result -> SeqBuilder Result
+fixReturnTypes pat result = do
+  let pelems = patElems pat
+  let pairs = L.zip pelems result
+  mapM fix pairs
+  where
+    fix :: (PatElem Type, SubExpRes) -> SeqBuilder SubExpRes
+    fix (pelem, subres) = do
+      let pdec = patElemDec pelem
+      sdec <- subExpResType subres
+
+      -- If the types differ create some statements to fix it
+      if sdec == pdec then
+        pure subres
+      else
+        case subExpResVName subres of
+          Nothing -> pure subres -- constant just return original
+          Just name -> lift $ do
+            let newShape = arrayShape pdec
+            resSubExp <- letSubExp "res_falt" $ BasicOp $
+                          Reshape ReshapeArbitrary newShape name
+            pure $ subExpRes resSubExp
+
+
+
+
 
 buildSOACLambda :: Env -> [VName] -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
 buildSOACLambda env usedArrs kbody retTs = do
