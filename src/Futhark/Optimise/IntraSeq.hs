@@ -388,7 +388,6 @@ seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
                   forM (stmsToList bstms) (seqStm' env)
       (bres', stms') <- collectSeqBuilder $ localScope (scopeOf bstms') $ fixReturnTypes pat bres
       let body' = Body bdec (bstms' <> stms') bres'
-      -- let body' = Body bdec bstms' bres
       pure $ Case cpat body'
 
 
@@ -398,7 +397,10 @@ seqStm' env (Let pat aux (Loop header form body)) = do
   bstms' <- collectSeqBuilder' $
               localScope (scopeOfFParams fparams) $
                 forM_ (stmsToList bstms) (seqStm' env)
-  let body' = Body bdec bstms' bres
+  (bres', stms') <- collectSeqBuilder $
+                      localScope (scopeOf bstms') $
+                        fixReturnTypes pat bres
+  let body' = Body bdec (bstms' <> stms') bres'
   lift $ do addStm $ Let pat aux (Loop header form body')
 
 
