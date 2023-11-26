@@ -389,22 +389,6 @@ seqStm' env (Let pat aux (Loop header form body)) = do
   let body' = Body bdec bstms' bres
   lift $ do addStm $ Let pat aux (Loop header form body')
 
-  -- Add flattening code
-  
-
--- NOTE: Attempt at fixing the looper size
--- seqStm' env (Let pat aux (BasicOp (Index arr idxs))) = do
---   case M.lookup arr (nameMap env) of
---     Nothing -> lift $ do addStm $ Let pat aux (BasicOp (Index arr idxs))
---     Just tile -> do
---       let names = patNames pat
---       let exp = BasicOp $ SubExp $ Var tile
-      
---       lift $ do letBindNames names exp
-    
-      -- lift $ do addStm $ Let pat aux (BasicOp $ SubExp $ Var tile)
-
-    
 
 
 -- Catch all
