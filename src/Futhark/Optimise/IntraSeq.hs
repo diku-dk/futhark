@@ -4,6 +4,7 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# HLINT ignore "Use lambda-case" #-}
 {-# HLINT ignore "Replace case with maybe" #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -24,10 +25,26 @@ import Data.Set as S
 import Debug.Pretty.Simple
 import Debug.Trace
 import Data.Sequence
+import Control.Monad.Trans.Except
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
 data SeqResult = Keep | Discard
+
+-- | A builder with additional fail functionality
+type SeqBuilder a = ExceptT () (Builder GPU) a
+
+runSeqBuilder ::
+  (MonadFreshNames m, HasScope GPU m, SameScope GPU GPU) =>
+  SeqBuilder a ->
+  m (Maybe (Stms GPU))
+runSeqBuilder (ExceptT b) = do
+  (tmp, stms) <- runBuilder b
+  case tmp of
+    Left _ -> pure Nothing
+    Right _-> pure . Just $ stms
+
+
 
 
 runSeqMExtendedScope :: SeqM a -> Scope GPU -> Builder GPU a
@@ -81,7 +98,7 @@ getThreadId env =
     _ -> error "No tid to get"
 
 findSeqAttr :: Attrs -> Maybe Attr
-findSeqAttr (Attrs attrs) = 
+findSeqAttr (Attrs attrs) =
   let attrs' = S.toList attrs
   in case L.findIndex isSeqFactor attrs' of
     Just i -> Just $ attrs' !! i
@@ -92,16 +109,16 @@ findSeqAttr (Attrs attrs) =
     isSeqFactor _ = False
 
 getSeqFactor :: Attrs -> SubExp
-getSeqFactor attrs = 
-  case findSeqAttr attrs of 
-    Just i' -> 
+getSeqFactor attrs =
+  case findSeqAttr attrs of
+    Just i' ->
       let (AttrComp _ [AttrInt x]) = i'
       in intConst Int64 x
     Nothing -> intConst Int64 4
 
 shouldSequentialize :: Attrs -> Bool
-shouldSequentialize attrs = 
-  case findSeqAttr attrs of 
+shouldSequentialize attrs =
+  case findSeqAttr attrs of
     Just _ -> True
     Nothing -> False
 
@@ -125,22 +142,26 @@ seqStms ::
   Stms GPU ->
   SeqM (Stms GPU)
 seqStms stms = do
-  foldM (\ss s -> do
-      let Let _ aux _ = s
-      if shouldSequentialize $ stmAuxAttrs aux then do
-        ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
-        pure $ ss <> ss'
-      else do pure $ ss <> oneStm s
-      ) mempty (stmsToList stms)
+  tmp <- runSeqBuilder $ forM (stmsToList stms) seqStm
+  case tmp of
+    Nothing -> pure stms
+    Just stms' -> pure stms'
+  -- foldM (\ss s -> do
+  --     let Let _ aux _ = s
+  --     if shouldSequentialize $ stmAuxAttrs aux then do
+  --       ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
+  --       pure $ ss <> ss'
+  --     else do pure $ ss <> oneStm s
+  --     ) mempty (stmsToList stms)
 
 -- | Matches against singular statements at the group level. That is statements
 -- that are either SegOps at group level or intermediate statements between
 -- such statements
 seqStm ::
   Stm GPU ->
-  Builder GPU ()
+  SeqBuilder ()
 seqStm stm@(Let pat aux (Op (SegOp (
-              SegMap (SegGroup virt (Just grid)) space ts 
+              SegMap (SegGroup virt (Just grid)) space ts
                      (KernelBody dec stms kres))))) = do
   -- As we are at group level all arrays in scope must be global, i.e. not
   -- local to the current group. We simply create a tile for all such arrays
@@ -149,13 +170,13 @@ seqStm stm@(Let pat aux (Op (SegOp (
   let seqFactor = getSeqFactor $ stmAuxAttrs aux
   let grpId   = fst $ head $ unSegSpace space
   let sizeOld = unCount $ gridGroupSize grid
-  sizeNew <- letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
+  sizeNew <- lift . letSubExp =<< "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                             (eSubExp sizeOld)
                                             (eSubExp seqFactor)
 
   let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
 
-  ((kres', lvl', seqRes), stms') <- collectStms $ do
+  ((kres', lvl', seqRes), stms') <- lift . collectStms $ do
     -- Update the env with mappings
     env' <- mkTiles env
 
@@ -168,7 +189,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
     kres' <- flattenResults pat kres
 
     pure (kres', lvl', seqRes)
-  
+
   case seqRes of
     Discard -> addStm stm
     Keep -> do
@@ -623,7 +644,7 @@ getChunk env arr = do
   offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
                                           (eSubExp $ seqFactor env)
                                           (eSubExp $ Var tid)
-  let dims = 
+  let dims =
         case arrayRank tp of
           1 -> [DimSlice offset sz (intConst Int64 1)]
           2 -> [DimFix $ Var tid, DimSlice (intConst Int64 0) sz (intConst Int64 1)]
