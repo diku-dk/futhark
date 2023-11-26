@@ -5,6 +5,7 @@
 {-# HLINT ignore "Use lambda-case" #-}
 {-# HLINT ignore "Replace case with maybe" #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -26,6 +27,7 @@ import Debug.Pretty.Simple
 import Debug.Trace
 import Data.Sequence
 import Control.Monad.Trans.Except
+import Control.Monad.Except
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
@@ -43,6 +45,22 @@ runSeqBuilder (ExceptT b) = do
   case tmp of
     Left _ -> pure Nothing
     Right _-> pure . Just $ stms
+
+-- instance
+--   (MonadFreshNames m, MonadBuilder m, BuilderOps GPU) =>
+--   MonadBuilder (ExceptT () (BuilderT GPU m))
+--   where
+--   type Rep (ExceptT () (BuilderT GPU m)) = GPU
+--   mkExpDecM = mkExpDecB
+--   mkBodyM = mkBodyB
+--   mkLetNamesM = mkLetNamesB
+
+--   addStms stms =
+--     liftEither $ Right $
+--           modify $ \(cur_stms, scope) ->
+--           (cur_stms <> stms, scope `M.union` scopeOf stms)
+
+--   collectStms = collectStms
 
 
 
@@ -170,69 +188,65 @@ seqStm stm@(Let pat aux (Op (SegOp (
   let seqFactor = getSeqFactor $ stmAuxAttrs aux
   let grpId   = fst $ head $ unSegSpace space
   let sizeOld = unCount $ gridGroupSize grid
-  sizeNew <- lift . letSubExp =<< "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
+  sizeNew <-  lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                             (eSubExp sizeOld)
                                             (eSubExp seqFactor)
 
   let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
 
-  ((kres', lvl', seqRes), stms') <- lift . collectStms $ do
-    -- Update the env with mappings
-    env' <- mkTiles env
+  exp' <- buildSegMap' $ do
+      env' <- lift $ do mkTiles env
 
-    -- Create the new grid with the new group size
-    let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
-    seqRes <- seqStms' env' stms
+      let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
+      let lvl' = SegGroup virt grid'
 
-    let lvl' = SegGroup virt grid'
+      _ <- seqStms' env' stms
 
-    kres' <- flattenResults pat kres
-
-    pure (kres', lvl', seqRes)
-
-  case seqRes of
-    Discard -> addStm stm
-    Keep -> do
-      let kbody' = KernelBody dec stms' kres'
-      addStm $ Let pat aux $ Op $ SegOp $ SegMap lvl' space ts kbody'
+      kres' <- lift $ do flattenResults pat kres
+      pure (kres', lvl', space, ts)
+      
+  lift $ do addStm $ Let pat aux exp'
+  
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
-seqStm stm = addStm stm
+seqStm stm = lift $ do addStm stm
 
 
 -- | Much like seqStms but now carries an Env
 seqStms' ::
   Env ->
   Stms GPU ->
-  Builder GPU SeqResult
-seqStms' env stms = do
-  (res, stms') <- collectStms $ mapCondSeqStm' env stms Empty
-  case res of
-    Keep -> addStms stms'
-    Discard -> addStms stms
-  pure res
+  SeqBuilder ()
+seqStms' env stms = do forM_ (stmsToList stms) (seqStm' env)
 
-mapCondSeqStm'::
-  Env ->
-  Stms GPU ->
-  Stms GPU ->
-  Builder GPU SeqResult
-mapCondSeqStm' _ Empty finalStms = do
-  addStms finalStms
-  pure Keep
-mapCondSeqStm' env (stm :<| stms) finalStms = do
-  (res, stms') <- runBuilder $ localScope (scopeOf finalStms) $ seqStm' env stm
-  case res of
-    Keep -> mapCondSeqStm' env stms $ finalStms >< stms'
-    Discard -> pure Discard
+
+  -- (res, stms') <- collectStms $ mapCondSeqStm' env stms Empty
+  -- case res of
+  --   Keep -> addStms stms'
+  --   Discard -> addStms stms
+  -- pure res
+
+-- mapCondSeqStm'::
+--   Env ->
+--   Stms GPU ->
+--   Stms GPU ->
+--   Builder GPU SeqResult
+-- mapCondSeqStm' _ Empty finalStms = do
+--   addStms finalStms
+--   pure Keep
+-- mapCondSeqStm' env (stm :<| stms) finalStms = do
+--   (res, stms') <- runBuilder $ localScope (scopeOf finalStms) $ seqStm' env stm
+--   case res of
+--     Keep -> mapCondSeqStm' env stms $ finalStms >< stms'
+--     Discard -> pure Discard
 
 -- |Expects to only match on statements at thread level. That is SegOps at
 -- thread level or statements between such SegOps
 seqStm' ::
   Env ->
   Stm GPU ->
-  Builder GPU SeqResult
+  SeqBuilder ()
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))) = do
 
@@ -240,8 +254,8 @@ seqStm' env (Let pat aux
   let env' = updateEnvTid env tid
 
   -- thread local reduction
-  reds <- mkIntmRed env' kbody ts binops
-  kbody' <- mkResultKBody env' kbody reds
+  reds <- lift $ do mkIntmRed env' kbody ts binops
+  kbody' <- lift $ do mkResultKBody env' kbody reds
 
   -- Update remaining types
   let numResConsumed = numArgsConsumedBySegop binops
@@ -252,44 +266,46 @@ seqStm' env (Let pat aux
   let pat' = Pat $ patKeep ++
         L.map (\(p, t) -> setPatElemDec p t) (L.zip patUpdate (L.drop numResConsumed tps))
 
-  addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
-  pure Keep
+  lift $ do addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
 seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
   | isScatter kbody = seqScatter env stm
   | otherwise = do
-    usedArrays <- getUsedArraysIn env kbody
-    ((kres, space', types'), stms) <- collectStms $ do
+    usedArrays <- lift $ do getUsedArraysIn env kbody
+    exp <- buildSegMap' $ do
       tid <- newVName "tid"
       phys <- newVName "phys_tid"
       let env' = updateEnvTid env tid
-      lambSOAC <- buildSOACLambda env' usedArrays kbody ts
+      lambSOAC <- lift $ do buildSOACLambda env' usedArrays kbody ts
       let screma = mapSOAC lambSOAC
-      chunks <- mapM (getChunk env') usedArrays
-      res <- letTupExp' "res" $ Op $ OtherOp $
-              Screma (seqFactor env) chunks screma
+      chunks <- lift $ do mapM (getChunk env') usedArrays
+      res <- lift $ do letTupExp' "res" $ Op $ OtherOp $
+                        Screma (seqFactor env) chunks screma
       let space' = SegSpace phys [(tid, grpSize env)]
       let types' = scremaType (seqFactor env) screma
       let kres = L.map (Returns ResultMaySimplify  mempty) res
-      pure (kres, space', types')
+      pure (kres, lvl, space', types')
+      -- pure (kres, space', types')
 
-    let kbody' = KernelBody dec stms kres
+    -- let kbody' = KernelBody mempty stms kres
     let names = patNames pat
-    letBindNames names $ Op $ SegOp $ SegMap lvl space' types' kbody'
-    pure Keep
 
+    -- exp <- lift $ do pure $ Op $ SegOp $ SegMap lvl space' types' kbody'
+    lift $ do letBindNames names exp
+
+  
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
-  usedArrays <- getUsedArraysIn env kbody
+  usedArrays <- lift $ do getUsedArraysIn env kbody
 
   -- do local reduction
-  reds <- mkIntmRed env kbody ts binops
+  reds <- lift $ do mkIntmRed env kbody ts binops
   let numResConsumed = numArgsConsumedBySegop binops
   let (scanReds, fusedReds) = L.splitAt numResConsumed reds
 
   -- scan over reduction results
-  imScan <- buildSegScan "scan_agg" $ do
+  imScan <- lift . buildSegScan "scan_agg" $ do
     tid <- newVName "tid"
     let env' = updateEnvTid env tid
     phys <- newVName "phys_tid"
@@ -301,7 +317,7 @@ seqStm' env (Let pat aux
     let ts' = L.take numResConsumed ts
     pure (results, lvl', space', binops', ts')
 
-  scans' <- buildSegMapTup_ "scan_res" $ do
+  scans' <- lift . buildSegMapTup_ "scan_res" $ do
     tid <- newVName "tid"
     phys <- newVName "phys_tid"
 
@@ -334,19 +350,17 @@ seqStm' env (Let pat aux
     let types' = scremaType (seqFactor env) scanSoac
     pure (usedRes ++ fused, lvl', space', types')
 
-  forM_ (L.zip (patElems pat) scans') (\(p, s) ->
-            let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
-            in addStm $ Let (Pat [p]) aux $ BasicOp exp')
-  pure Keep
+  lift $ do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
+              let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
+              in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
 
 -- Catch all
-seqStm' _ stm = do
-  addStm stm
-  pure Keep
+seqStm' _ stm = lift $ do addStm stm
+  
 
 
-seqScatter :: Env -> Stm GPU -> Builder GPU SeqResult
+seqScatter :: Env -> Stm GPU -> SeqBuilder ()
 seqScatter env (Let pat aux (Op (SegOp
               (SegMap (SegThread {}) _ ts kbody)))) = do
 
@@ -387,7 +401,7 @@ seqScatter env (Let pat aux (Op (SegOp
   i <- newVName "loop_i"
   let loopForm = ForLoop i Int64 (seqFactor env)
 
-  body <- buildBody_ $ do
+  body <- lift . buildBody_ $ do
 
       mapRes <- buildSegMapTup "map_res" $ do
           tid <- newVName "write_i"
@@ -459,10 +473,8 @@ seqScatter env (Let pat aux (Op (SegOp
   -- Construct the final loop
   let loopExp = Loop loopInit loopForm body
 
-  addStm $ Let pat aux loopExp
+  lift $ do addStm $ Let pat aux loopExp
 
-  -- End
-  pure Keep
   where
     invert (a,b) = (b,a)
 
@@ -773,6 +785,17 @@ isScatter (KernelBody _ _ res) =
   where
     isWriteReturns (WriteReturns {}) = True
     isWriteReturns _ = False
+
+buildSegMap' ::
+  SeqBuilder ([KernelResult], SegLevel, SegSpace, [Type]) ->
+  SeqBuilder (Exp GPU)
+buildSegMap' (ExceptT m) = do
+  (tmp, stms) <- lift . collectStms $ m
+  case tmp of
+    Left _ -> throwError ()
+    Right (kres, lvl, space, ts) -> do
+      let kbody = KernelBody () stms kres
+      pure $ Op $ SegOp $ SegMap lvl space ts kbody
 
 -- Builds a SegMap at thread level containing all bindings created in m
 -- and returns the subExp which is the variable containing the result
