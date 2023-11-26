@@ -24,6 +24,7 @@ import Data.Set as S
 import Debug.Pretty.Simple
 import Debug.Trace
 import Data.Sequence
+import Futhark.Transform.Substitute
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
@@ -46,7 +47,7 @@ data Env = Env {
   grpId      :: SubExp,             -- The group id
   grpSize    :: SubExp,             -- The group size after seq
   grpsizeOld :: SubExp,             -- The group size before seq
-  threadId   :: Maybe VName,        -- the thread id if available at given stage
+  threadId   :: Maybe VName,        -- the thread id if available 
   nameMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
@@ -245,12 +246,13 @@ seqStm' env (Let pat aux
   pure Keep
 
 seqStm' env stm@(Let pat _ (Op (SegOp
-          (SegMap lvl@(SegThread {}) _ ts kbody@(KernelBody dec _ _)))))
+          (SegMap lvl@(SegThread {}) space ts kbody@(KernelBody dec _ _)))))
   | isScatter kbody = seqScatter env stm
   | otherwise = do
     usedArrays <- getUsedArraysIn env kbody
+    -- TODO: should wrap this in segResult
+    let tid = fst $ head $ unSegSpace space
     ((kres, space', types'), stms) <- collectStms $ do
-      tid <- newVName "tid"
       phys <- newVName "phys_tid"
       let env' = updateEnvTid env tid
       lambSOAC <- buildSOACLambda env' usedArrays kbody ts
@@ -269,29 +271,31 @@ seqStm' env stm@(Let pat _ (Op (SegOp
     pure Keep
 
 seqStm' env (Let pat aux
-            (Op (SegOp (SegScan (SegThread {}) _ binops ts kbody)))) = do
+            (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))) = do
   usedArrays <- getUsedArraysIn env kbody
 
   -- do local reduction
-  reds <- mkIntmRed env kbody ts binops
+  let tid = fst $ head $ unSegSpace space
+  let env' = updateEnvTid env tid
+  reds <- mkIntmRed env' kbody ts binops
   let numResConsumed = numArgsConsumedBySegop binops
   let (scanReds, fusedReds) = L.splitAt numResConsumed reds
 
   -- scan over reduction results
   imScan <- buildSegScan "scan_agg" $ do
-    tid <- newVName "tid"
-    let env' = updateEnvTid env tid
+    tid' <- newVName "tid"
+    let env'' = updateEnvTid env tid'
     phys <- newVName "phys_tid"
     binops' <- renameSegBinOp binops
 
     let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env')]
-    results <- mapM (buildKernelResult env') scanReds
+    let space' = SegSpace phys [(tid', grpSize env'')]
+    results <- mapM (buildKernelResult env'') scanReds
     let ts' = L.take numResConsumed ts
     pure (results, lvl', space', binops', ts')
 
   scans' <- buildSegMapTup_ "scan_res" $ do
-    tid <- newVName "tid"
+    tid' <- newVName "tid"
     phys <- newVName "phys_tid"
 
     let neutrals = L.map segBinOpNeutral binops
@@ -300,26 +304,28 @@ seqStm' env (Let pat aux
     let scanNames = L.map getVName imScan
 
     idx <- letSubExp "idx" =<< eBinOp (Sub Int64 OverflowUndef)
-                                    (eSubExp $ Var tid)
+                                    (eSubExp $ Var tid')
                                     (eSubExp $ intConst Int64 1)
     nes <- forM neutrals  (\n -> letTupExp' "ne" =<< eIf (eCmpOp (CmpEq $ IntType Int64)
-                                  (eSubExp $ Var tid)
+                                  (eSubExp $ Var tid')
                                   (eSubExp $ intConst Int64 0)
                                )
                                (eBody $ L.map toExp n)
                                (eBody $ L.map (\s -> eIndex s [eSubExp idx]) scanNames))
 
-    let env' = updateEnvTid env tid
-    lambSOAC <- buildSOACLambda env' usedArrays kbody ts
+    let tidMap = M.singleton tid tid'
+    let kbody' = substituteNames tidMap kbody
+    lambSOAC <- buildSOACLambda env' usedArrays kbody' ts
+    let env'' = updateEnvTid env tid'
     let scans = L.map (\(l, n) -> Scan l n) $ L.zip scanLambdas nes
     let scanSoac = scanomapSOAC scans lambSOAC
-    es <- mapM (getChunk env') usedArrays
+    es <- mapM (getChunk env'') usedArrays
     res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
     let usedRes = L.map (Returns ResultMaySimplify mempty) $ L.take numResConsumed res
-    fused <- mapM (buildKernelResult env') fusedReds
+    fused <- mapM (buildKernelResult env'') fusedReds
 
     let lvl' = SegThread SegNoVirt Nothing
-    let space' = SegSpace phys [(tid, grpSize env)]
+    let space' = SegSpace phys [(tid', grpSize env)]
     let types' = scremaType (seqFactor env) scanSoac
     pure (usedRes ++ fused, lvl', space', types')
 
@@ -529,6 +535,7 @@ getTidIndexExp env name = do
           1 -> Index name $ Slice outerDim
           2 -> Index name $ Slice $
                 outerDim ++ [DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+          -- TODO: should really return discard here right?
           _ -> error "Arrays are not expected to have more than 2 dimensions \n"
   pure $ BasicOp index
 
@@ -567,28 +574,22 @@ seqStms'' ::
   Stms GPU ->
   SeqM (Stms GPU)
 seqStms'' env stms = do
-  (stms', _) <- foldM (\(ss, env') s -> do
-      (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env' s
-      pure (ss <> ss', env'')
-      ) (mempty, env) (stmsToList stms)
-  pure stms'
+  foldM (\ss s -> do
+      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env s
+      pure $ ss <> ss'
+      ) mempty (stmsToList stms)
 
 seqStm'' ::
   Env ->
   Stm GPU ->
-  Builder GPU Env
+  Builder GPU ()
 seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
   case lookupMapping env arr of
     Just name -> do
       i <- getTidIndexExp env name
       addStm $ Let pat aux i
-      pure env
-    Nothing -> do
-      addStm stm
-      pure env
-seqStm'' env stm = do
-  addStm stm
-  pure env
+    Nothing -> do addStm stm
+seqStm'' _ stm = do addStm stm
 
 -- create the intermediate reduction used in scan and reduce
 mkIntmRed ::
@@ -607,7 +608,9 @@ mkIntmRed env kbody retTs binops = do
       phys <- newVName "phys_tid"
       sz <- mkChunkSize tid env
       usedArrs <- getUsedArraysIn env kbody
-      lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
+      let tidMap = M.singleton (getThreadId env) tid
+      let kbody' = substituteNames tidMap kbody
+      lambSOAC <- buildSOACLambda env' usedArrs kbody' retTs
       -- TODO analyze if any fused maps then produce reduce?
       -- we build the reduce as a scan initially
       let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
@@ -662,7 +665,7 @@ getChunk env arr = do
   offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
                                           (eSubExp $ seqFactor env)
                                           (eSubExp $ Var tid)
-  let dims = 
+  let dims =
         case arrayRank tp of
           1 -> [DimSlice offset sz (intConst Int64 1)]
           2 -> [DimFix $ Var tid, DimSlice (intConst Int64 0) sz (intConst Int64 1)]
