@@ -109,20 +109,20 @@ gpuPipeline =
       --   inPlaceLoweringGPU,
       --   intraSeq
       -- ]
-      [ simplifyGPU,
-        intraSeq,
-        unstreamGPU,
-        simplifyGPU
-      ]
+      -- [ simplifyGPU,
+      --   intraSeq,
+      --   unstreamGPU,
+      --   simplifyGPU
+      -- ]
       -- [
       --   simplifyGPU,
       --   intraSeq,
       --   simplifyGPU
       -- ]
-      -- [
-      --   simplifyGPU,
-      --   intraSeq
-      -- ]
+      [
+        simplifyGPU,
+        intraSeq
+      ]
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.

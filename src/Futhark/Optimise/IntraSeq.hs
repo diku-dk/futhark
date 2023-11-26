@@ -28,6 +28,7 @@ import Debug.Trace
 import Data.Sequence
 import Control.Monad.Trans.Except
 import Control.Monad.Except
+import Futhark.Transform.Substitute
 
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
@@ -45,6 +46,19 @@ runSeqBuilder (ExceptT b) = do
   case tmp of
     Left _ -> pure Nothing
     Right _-> pure . Just $ stms
+
+collectSeqBuilder :: 
+  SeqBuilder a ->
+  SeqBuilder (Stms GPU)
+collectSeqBuilder (ExceptT b) = do
+  (tmp, stms) <- lift $ do collectStms b
+  case tmp of
+    Left _ -> throwError ()
+    Right _ -> pure stms
+  -- (tmp, stms) <- runBuilder b
+  -- case tmp of 
+  --   Left _ -> pure $ throwError ()
+  --   Right _ -> pure stms
 
 -- instance
 --   (MonadFreshNames m, MonadBuilder m, BuilderOps GPU) =>
@@ -81,10 +95,11 @@ data Env = Env {
   grpId      :: SubExp,             -- The group id
   grpSize    :: SubExp,             -- The group size after seq
   grpsizeOld :: SubExp,             -- The group size before seq
-  threadId   :: Maybe VName,        -- the thread id if available at given stage
+  threadId   :: Maybe VName,        -- the thread id if available 
   nameMap    :: M.Map VName VName,  -- Mapping from arrays to tiles
   seqFactor  :: SubExp
 }
+  deriving(Show)
 
 setMapping :: Env -> M.Map VName VName -> Env
 setMapping (Env gid gSize gSizeOld tid _ factor) mapping =
@@ -211,6 +226,15 @@ seqStm stm@(Let pat aux (Op (SegOp (
     lift $ do addStm $ Let pat aux exp'
   
 
+
+seqStm (Let pat aux (Match scrutinee cases def dec)) = undefined
+
+seqStm (Let pat aux (Loop header form body)) = undefined
+  -- let (Body dec stms res) = trace ("Loop pattern matched!") body
+  -- stms' <- runSeqMExtendedScope (seqStms stms) mempty
+  -- let body' = Body dec stms' res
+  -- addStm $ Let pat aux (Loop header form body')
+
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
 seqStm stm = lift $ do addStm stm
@@ -253,7 +277,7 @@ seqStm' env (Let pat aux
 
       lift $ do addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
-seqStm' env stm@(Let pat _ (Op (SegOp
+seqStm' env stm@(Let pat aux (Op (SegOp
           (SegMap lvl@(SegThread {}) space ts kbody@(KernelBody dec _ _)))))
   | L.length (unSegSpace space) /= 1 = throwError ()
   | isScatter kbody = seqScatter env stm
@@ -272,12 +296,9 @@ seqStm' env stm@(Let pat _ (Op (SegOp
         let types' = scremaType (seqFactor env) screma
         let kres = L.map (Returns ResultMaySimplify  mempty) res
         pure (kres, lvl, space', types')
-        -- pure (kres, space', types')
 
-      -- let kbody' = KernelBody mempty stms kres
       let names = patNames pat
 
-      -- exp <- lift $ do pure $ Op $ SegOp $ SegMap lvl space' types' kbody'
       lift $ do letBindNames names exp
 
   
@@ -341,6 +362,49 @@ seqStm' env (Let pat aux
       lift $ do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
                   let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
                   in addStm $ Let (Pat [p]) aux $ BasicOp exp')
+
+
+seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
+  cases' <- forM cases seqCase
+  let (Body ddec dstms dres) = def
+  dstms' <- collectSeqBuilder $ forM (stmsToList dstms) (seqStm' env)
+  let def' = Body ddec dstms' dres
+  lift $ do addStm $ Let pat aux (Match scrutinee cases' def' dec)
+  where
+    seqCase :: Case (Body GPU) -> SeqBuilder (Case (Body GPU))
+    seqCase (Case pat body) = do
+      let (Body bdec bstms bres) = body
+      bstms' <- collectSeqBuilder $
+                  forM (stmsToList bstms) (seqStm' env)
+      let body' = Body bdec bstms' bres
+      pure $ Case pat body'
+
+
+seqStm' env (Let pat aux (Loop header form body)) = do
+  let fparams = L.map fst header
+  let (Body bdec bstms bres) = body
+  bstms' <- collectSeqBuilder $ 
+              localScope (scopeOfFParams fparams) $
+                forM_ (stmsToList bstms) (seqStm' env)
+  let body' = Body bdec bstms' bres
+  lift $ do addStm $ Let pat aux (Loop header form body')
+
+  -- Add flattening code
+  
+
+-- NOTE: Attempt at fixing the looper size
+-- seqStm' env (Let pat aux (BasicOp (Index arr idxs))) = do
+--   case M.lookup arr (nameMap env) of
+--     Nothing -> lift $ do addStm $ Let pat aux (BasicOp (Index arr idxs))
+--     Just tile -> do
+--       let names = patNames pat
+--       let exp = BasicOp $ SubExp $ Var tile
+      
+--       lift $ do letBindNames names exp
+    
+      -- lift $ do addStm $ Let pat aux (BasicOp $ SubExp $ Var tile)
+
+    
 
 
 -- Catch all
@@ -513,6 +577,7 @@ getTidIndexExp env name = do
           1 -> Index name $ Slice outerDim
           2 -> Index name $ Slice $
                 outerDim ++ [DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
+          -- TODO: should really return discard here right?
           _ -> error "Arrays are not expected to have more than 2 dimensions \n"
   pure $ BasicOp index
 
@@ -551,28 +616,22 @@ seqStms'' ::
   Stms GPU ->
   SeqM (Stms GPU)
 seqStms'' env stms = do
-  (stms', _) <- foldM (\(ss, env') s -> do
-      (env'', ss') <- runBuilder $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env' s
-      pure (ss <> ss', env'')
-      ) (mempty, env) (stmsToList stms)
-  pure stms'
+  foldM (\ss s -> do
+      ss' <- runBuilder_ $ localScope (scopeOf ss <> scopeOf s) $ seqStm'' env s
+      pure $ ss <> ss'
+      ) mempty (stmsToList stms)
 
 seqStm'' ::
   Env ->
   Stm GPU ->
-  Builder GPU Env
+  Builder GPU ()
 seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
   case lookupMapping env arr of
     Just name -> do
       i <- getTidIndexExp env name
       addStm $ Let pat aux i
-      pure env
-    Nothing -> do
-      addStm stm
-      pure env
-seqStm'' env stm = do
-  addStm stm
-  pure env
+    Nothing -> do addStm stm
+seqStm'' _ stm = do addStm stm
 
 -- create the intermediate reduction used in scan and reduce
 mkIntmRed ::
@@ -591,7 +650,9 @@ mkIntmRed env kbody retTs binops = do
       phys <- newVName "phys_tid"
       sz <- mkChunkSize tid env
       usedArrs <- getUsedArraysIn env kbody
-      lambSOAC <- buildSOACLambda env' usedArrs kbody retTs
+      let tidMap = M.singleton (getThreadId env) tid
+      let kbody' = substituteNames tidMap kbody
+      lambSOAC <- buildSOACLambda env' usedArrs kbody' retTs
       -- TODO analyze if any fused maps then produce reduce?
       -- we build the reduce as a scan initially
       let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
