@@ -61,6 +61,9 @@ updateMapping env mapping =
   let mapping' = mapping `M.union` nameMap env
   in setMapping env mapping'
 
+memberMapping :: Env -> VName -> Bool
+memberMapping env name = M.member name (nameMap env) 
+
 lookupMapping :: Env -> VName -> Maybe VName
 lookupMapping env name
   | M.member name (nameMap env) = do
@@ -223,9 +226,9 @@ seqStm' env (Let pat aux
   reds <- mkIntmRed env' kbody ts binops
   kbody' <- mkResultKBody env' kbody reds
 
-  -- Update remaining types
+  -- Update existing SegRed 
   let numResConsumed = numArgsConsumedBySegop binops
-  let space' = SegSpace (segFlat space) [(fst $ head $ unSegSpace space, grpSize env')]
+  let space' = SegSpace (segFlat space) [(tid, grpSize env')]
   tps <- mapM lookupType reds
   let ts' = L.map (stripArray 1) tps
   let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
@@ -239,17 +242,18 @@ seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) space ts kbody@(KernelBody dec _ _)))))
   | isScatter kbody = seqScatter env stm
   | otherwise = do
-    usedArrays <- getUsedArraysIn env kbody
-    -- TODO: should wrap this in segResult
+    -- map is simply updating the existing SegMap
     let tid = fst $ head $ unSegSpace space
     ((kres, space', types'), stms) <- collectStms $ do
       phys <- newVName "phys_tid"
       let env' = updateEnvTid env tid
-      lambSOAC <- buildSOACLambda env' usedArrays kbody ts
+      usedArrays <- getUsedArraysIn env kbody
+      iot <- buildSeqFactorIota env
+      lambSOAC <- buildSOACLambda env' usedArrays iot kbody ts
       let screma = mapSOAC lambSOAC
       chunks <- mapM (getChunk env') usedArrays
       res <- letTupExp' "res" $ Op $ OtherOp $
-              Screma (seqFactor env) chunks screma
+              Screma (seqFactor env) (chunks ++ [iot]) screma
       let space' = SegSpace phys [(tid, grpSize env)]
       let types' = scremaType (seqFactor env) screma
       let kres = L.map (Returns ResultMaySimplify  mempty) res
@@ -305,12 +309,13 @@ seqStm' env (Let pat aux
 
     let tidMap = M.singleton tid tid'
     let kbody' = substituteNames tidMap kbody
-    lambSOAC <- buildSOACLambda env' usedArrays kbody' ts
+    iot <- buildSeqFactorIota env
     let env'' = updateEnvTid env tid'
+    lambSOAC <- buildSOACLambda env'' usedArrays iot kbody' ts
     let scans = L.map (\(l, n) -> Scan l n) $ L.zip scanLambdas nes
     let scanSoac = scanomapSOAC scans lambSOAC
     es <- mapM (getChunk env'') usedArrays
-    res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) es scanSoac
+    res <- letTupExp' "res" $ Op $ OtherOp $ Screma (seqFactor env) (es ++ [iot]) scanSoac
     let usedRes = L.map (Returns ResultMaySimplify mempty) $ L.take numResConsumed res
     fused <- mapM (buildKernelResult env'') fusedReds
 
@@ -466,18 +471,33 @@ seqScatter _ stm = error $
                   "SeqScatter error. Should be a map at thread level but got"
                   ++ show stm
 
-buildSOACLambda :: Env -> [VName] -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
-buildSOACLambda env usedArrs kbody retTs = do
+buildSeqFactorIota :: Env -> Builder GPU VName
+buildSeqFactorIota env = do
+  letExp "seq_index_iota" $ BasicOp $ 
+    Iota (seqFactor env) (intConst Int64 0) (intConst Int64 1) Int64
+
+buildSOACLambda :: Env -> [VName] -> VName -> KernelBody GPU -> [Type] -> Builder GPU (Lambda GPU)
+buildSOACLambda env usedArrs indexName kbody retTs = do
+  let tid = getThreadId env
   ts <- mapM lookupType usedArrs
   let ts' = L.map (Prim . elemType) ts
   params <- mapM (newParam "par" ) ts'
-  let mapNms = L.map paramName params
-  let env' = updateMapping env $ M.fromList $ L.zip usedArrs mapNms
+  itp <- lookupType indexName
+  indexParam <- newParam "par_index" $ Prim $ elemType itp
+  offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                          (eSubExp $ seqFactor env)
+                                          (eSubExp $ Var tid)
+  (gTid, stms') <- collectStms $ letExp "gtid" =<< eBinOp (Add Int64 OverflowUndef)
+                                                          (eSubExp offset)
+                                                          (eSubExp $ Var $ paramName indexParam)
+  let mapping = M.fromList $ L.zip (usedArrs ++ [tid]) $ L.map paramName params ++ [gTid]
+  let env' = updateMapping env mapping
+
   kbody' <- runSeqMExtendedScope (seqKernelBody' env' kbody) (scopeOfLParams params)
-  let body = kbodyToBody kbody'
+  let body = kbodyToBodyWithStms kbody' stms'
   renameLambda $
     Lambda
-    { lambdaParams = params,
+    { lambdaParams = params ++ [indexParam],
       lambdaBody = body,
       lambdaReturnType = retTs
     }
@@ -544,13 +564,17 @@ seqStm'' ::
   Env ->
   Stm GPU ->
   Builder GPU ()
-seqStm'' env stm@(Let pat aux (BasicOp (Index arr _))) =
-  case lookupMapping env arr of
-    Just name -> do
-      i <- getTidIndexExp env name
-      addStm $ Let pat aux i
-    Nothing -> do addStm stm
-seqStm'' _ stm = do addStm stm
+seqStm'' env (Let pat aux (BasicOp (Index arr _)))
+  | memberMapping env arr = do
+  let (Just name) = lookupMapping env arr
+  i <- getTidIndexExp env name
+  addStm $ Let pat aux i
+
+seqStm'' env stm = do 
+  let tid = getThreadId env
+  case lookupMapping env tid of
+    Just gtid -> addStm $ substituteNames (M.singleton tid gtid) stm
+    Nothing -> addStm stm
 
 -- create the intermediate reduction used in scan and reduce
 mkIntmRed ::
@@ -571,7 +595,8 @@ mkIntmRed env kbody retTs binops = do
       usedArrs <- getUsedArraysIn env kbody
       let tidMap = M.singleton (getThreadId env) tid
       let kbody' = substituteNames tidMap kbody
-      lambSOAC <- buildSOACLambda env' usedArrs kbody' retTs
+      iot <- buildSeqFactorIota env
+      lambSOAC <- buildSOACLambda env' usedArrs iot kbody' retTs
       -- TODO analyze if any fused maps then produce reduce?
       -- we build the reduce as a scan initially
       let scans = L.map (\(l, n) -> Scan l n) $ L.zip lambda ne
@@ -579,7 +604,7 @@ mkIntmRed env kbody retTs binops = do
       chunks <- mapM (getChunk env') usedArrs
 
       res <- letTupExp' "res" $ Op $ OtherOp $
-                Screma (seqFactor env) chunks screma
+                Screma (seqFactor env) (chunks ++ [iot]) screma
       let numRes = numArgsConsumedBySegop binops
       let (scanRes, mapRes) = L.splitAt numRes res
 
@@ -634,13 +659,13 @@ getChunk env arr = do
 
   letExp "chunk" $ BasicOp $ Index arr (Slice dims)
 
-
-kbodyToBody :: KernelBody GPU -> Body GPU
-kbodyToBody (KernelBody dec stms res) =
+-- conver the kernelbody to a body prepended with the additional statements
+kbodyToBodyWithStms :: KernelBody GPU -> Stms GPU -> Body GPU
+kbodyToBodyWithStms (KernelBody dec stms res) stms' =
   let res' = L.map (subExpRes . kernelResultSubExp) res
   in Body
     { bodyDec = dec,
-      bodyStms = stms,
+      bodyStms = stms' >< stms,
       bodyResult = res'
     }
 
@@ -659,7 +684,8 @@ flattenResults pat kresults = do
           if arrayRank resType == 0 then
             letSubExp "scalar_res" $ BasicOp $ SubExp resSubExp
           else
-            letSubExp "reshaped_res" $ BasicOp $ Reshape ReshapeArbitrary (arrayShape $ stripArray 1 tp) name
+            letSubExp "reshaped_res" $ BasicOp $ 
+                        Reshape ReshapeArbitrary (arrayShape $ stripArray 1 tp) name
 
   let kresults' = L.map (Returns ResultMaySimplify mempty) subExps
 
