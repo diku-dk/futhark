@@ -168,13 +168,6 @@ seqStms stms = do
   case tmp of
     Nothing -> pure stms
     Just stms' -> pure stms'
-  -- foldM (\ss s -> do
-  --     let Let _ aux _ = s
-  --     if shouldSequentialize $ stmAuxAttrs aux then do
-  --       ss' <- runBuilder_ $ localScope (scopeOf ss) $ seqStm s
-  --       pure $ ss <> ss'
-  --     else do pure $ ss <> oneStm s
-  --     ) mempty (stmsToList stms)
 
 -- | Matches against singular statements at the group level. That is statements
 -- that are either SegOps at group level or intermediate statements between
@@ -216,13 +209,34 @@ seqStm stm@(Let pat aux (Op (SegOp (
 
 
 
-seqStm (Let pat aux (Match scrutinee cases def dec)) = undefined
+seqStm (Let pat aux (Match scrutinee cases def dec)) = do
+  cases' <- forM cases seqCase
+  let (Body ddec dstms dres) = def
+  dstms' <- collectSeqBuilder' $ forM (stmsToList dstms) seqStm
+  (dres', stms') <- collectSeqBuilder $ localScope (scopeOf dstms') $ fixReturnTypes pat dres
+  let def' = Body ddec (dstms' <> stms') dres'
+  lift $ do addStm $ Let pat aux (Match scrutinee cases' def' dec)
+  where
+    seqCase :: Case (Body GPU) -> SeqBuilder (Case (Body GPU))
+    seqCase (Case cpat body) = do
+      let (Body bdec bstms bres) = body
+      bstms' <- collectSeqBuilder' $
+                  forM (stmsToList bstms) seqStm
+      (bres', stms') <- collectSeqBuilder $ localScope (scopeOf bstms') $ fixReturnTypes pat bres
+      let body' = Body bdec (bstms' <> stms') bres'
+      pure $ Case cpat body'
 
-seqStm (Let pat aux (Loop header form body)) = undefined
-  -- let (Body dec stms res) = trace ("Loop pattern matched!") body
-  -- stms' <- runSeqMExtendedScope (seqStms stms) mempty
-  -- let body' = Body dec stms' res
-  -- addStm $ Let pat aux (Loop header form body')
+seqStm (Let pat aux (Loop header form body)) = do
+  let fparams = L.map fst header
+  let (Body bdec bstms bres) = body
+  bstms' <- collectSeqBuilder' $
+              localScope (scopeOfFParams fparams) $
+                forM_ (stmsToList bstms) seqStm
+  (bres', stms') <- collectSeqBuilder $
+                      localScope (scopeOf bstms') $
+                        fixReturnTypes pat bres
+  let body' = Body bdec (bstms' <> stms') bres'
+  lift $ do addStm $ Let pat aux (Loop header form body')
 
 -- Catch all pattern. This will mainly just tell us if we encounter some
 -- statement in a test program so that we know that we will have to handle it
