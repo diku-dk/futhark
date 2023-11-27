@@ -319,7 +319,7 @@ seqStm' env (Let pat aux
       -- scan over reduction results
       imScan <- lift . buildSegScan "scan_agg" $ do
         tid <- newVName "tid"
-        let !env' = updateEnvTid env tid
+        let env' = updateEnvTid env tid
         phys <- newVName "phys_tid"
         binops' <- renameSegBinOp binops
 
