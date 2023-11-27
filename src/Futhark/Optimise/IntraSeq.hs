@@ -178,8 +178,8 @@ seqStm ::
 seqStm stm@(Let pat aux (Op (SegOp (
               SegMap (SegGroup virt (Just grid)) space ts
                      (KernelBody dec stms kres)))))
-  | L.length (unSegSpace space) /= 1 = throwError ()
-  | not $ shouldSequentialize (stmAuxAttrs aux) = throwError ()
+  | L.length (unSegSpace space) /= 1 = lift $ do addStm stm
+  | not $ shouldSequentialize (stmAuxAttrs aux) = lift $ do addStm stm
   | otherwise = do
     -- As we are at group level all arrays in scope must be global, i.e. not
     -- local to the current group. We simply create a tile for all such arrays
@@ -319,7 +319,7 @@ seqStm' env (Let pat aux
       -- scan over reduction results
       imScan <- lift . buildSegScan "scan_agg" $ do
         tid <- newVName "tid"
-        let env' = updateEnvTid env tid
+        let !env' = updateEnvTid env tid
         phys <- newVName "phys_tid"
         binops' <- renameSegBinOp binops
 
@@ -362,9 +362,10 @@ seqStm' env (Let pat aux
         let types' = scremaType (seqFactor env) scanSoac
         pure (usedRes ++ fused, lvl', space', types')
 
-      lift $ do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
-                  let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
-                  in addStm $ Let (Pat [p]) aux $ BasicOp exp')
+      lift $
+        do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
+            let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
+            in addStm $ Let (Pat [p]) aux $ BasicOp exp')
 
 
 seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
@@ -671,7 +672,7 @@ mkIntmRed env kbody retTs binops = do
       phys <- newVName "phys_tid"
       sz <- mkChunkSize tid env
       usedArrs <- getUsedArraysIn env kbody
-      let tidMap = M.singleton (getThreadId env) tid
+      let tidMap = M.singleton (getThreadId env') tid
       let kbody' = substituteNames tidMap kbody
       lambSOAC <- buildSOACLambda env' usedArrs kbody' retTs
       -- TODO analyze if any fused maps then produce reduce?
