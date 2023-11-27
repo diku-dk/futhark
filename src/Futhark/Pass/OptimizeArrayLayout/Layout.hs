@@ -106,6 +106,7 @@ reduceStrideAndOffset (BinOpExp oper op (ValueExp (IntValue v)))
   | UnOpExp (Abs _) _ <- op = Nothing
   | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
   | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+reduceStrideAndOffset (LeafExp _ _) = Just (1, 0)
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
