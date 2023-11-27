@@ -64,26 +64,6 @@ collectSeqBuilder' (ExceptT b) = do
   case tmp of
     Left _ -> throwError ()
     Right _ -> pure stms
-  -- (tmp, stms) <- runBuilder b
-  -- case tmp of 
-  --   Left _ -> pure $ throwError ()
-  --   Right _ -> pure stms
-
--- instance
---   (MonadFreshNames m, MonadBuilder m, BuilderOps GPU) =>
---   MonadBuilder (ExceptT () (BuilderT GPU m))
---   where
---   type Rep (ExceptT () (BuilderT GPU m)) = GPU
---   mkExpDecM = mkExpDecB
---   mkBodyM = mkBodyB
---   mkLetNamesM = mkLetNamesB
-
---   addStms stms =
---     liftEither $ Right $
---           modify $ \(cur_stms, scope) ->
---           (cur_stms <> stms, scope `M.union` scopeOf stms)
-
---   collectStms = collectStms
 
 
 
