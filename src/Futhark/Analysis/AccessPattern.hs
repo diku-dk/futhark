@@ -140,7 +140,7 @@ data Context rep = Context
     --  and iteration types.
     assignments :: M.Map VName (VariableInfo rep),
     -- | Maps from sliced arrays to their respective access patterns.
-    slices :: M.Map VName (ArrayName, [VName], [DimAccess rep]),
+    slices :: M.Map IndexExprName (ArrayName, [VName], [DimAccess rep]),
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
