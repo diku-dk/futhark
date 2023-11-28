@@ -21,7 +21,8 @@ import Futhark.IR.SOACS
 import Futhark.IR.Seq
 import Futhark.IR.SeqMem
 
--- TODO: move stuff below to a new file
+-- TODO: document
+type PrimExpTable = M.Map VName (Maybe (PrimExp VName))
 
 class (Analyze rep) => PrimExpAnalysis rep where
   opPrimExp :: (RepTypes rep) => Scope rep -> Op rep -> State PrimExpTable ()
@@ -36,11 +37,11 @@ primExpAnalysis prog = foldMap' (uncurry funToPrimExp) scopesAndFuns
 
     getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
--- TODO: document
-type PrimExpTable = M.Map VName (Maybe (PrimExp VName))
-
 funToPrimExp :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
-funToPrimExp scope fundef = execState (bodyToPrimExps scope (funDefBody fundef)) mempty
+funToPrimExp scope fundef = execState (bodyToPrimExps scope (funDefBody fundef)) initialState
+  where
+    initialState =
+      M.singleton (VName "slice" 0) $ Just $ LeafExp (VName "slice" 0) $ IntType Int64
 
 -- | Adds the statements of a body to the PrimExpTable
 bodyToPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> Body rep -> State PrimExpTable ()
