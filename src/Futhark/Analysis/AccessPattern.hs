@@ -401,7 +401,8 @@ getIndexDependencies ctx dims =
           -- We assume that a slice is iterated sequentially, so we have to
           -- create a fake dependency for the slice.
           let dimAccess' = DimAccess (M.singleton (VName "slice" 0) $ Dependency (currentLevel ctx) LoopVar) (Just $ VName "slice" 0)
-          let dimAccess = consolidate ctx offset <> consolidate ctx num_elems <> consolidate ctx stride <> dimAccess'
+          let cons = consolidate ctx
+          let dimAccess = dimAccess' <> cons offset <> cons num_elems <> cons stride
           Right $ dimAccess : accumulator
 
     forceRight (Left a) = Right a
