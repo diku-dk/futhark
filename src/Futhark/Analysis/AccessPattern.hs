@@ -263,20 +263,39 @@ analyzeStms :: (Analyze rep) => Context rep -> (VName -> BodyType) -> [VName] ->
 analyzeStms ctx bodyConstructor pats body = do
   -- 0. Recurse into body with ctx
   let (ctx'', indexTable) = analyzeStmsPrimitive recContext body
+
+  -- 0.1 Get all new slices
+  let slices_new = M.difference (slices ctx'') (slices ctx)
+  -- 0.2 Make "IndexExpressions" of the slices
+  let slices_indices =
+        foldl unionIndexTables indexTable
+          $ mapMaybe
+            ( uncurry $ \_idx_expression (array_name, patterns, dim_indices) ->
+                -- This might crash some examples? (from undefined above)
+                Just $
+                  snd $
+                    analyzeIndex'
+                      -- Should we use recContex instead of ctx''?
+                      ctx''
+                      patterns
+                      array_name
+                      dim_indices
+            )
+          $ M.toList slices_new
+
   -- 1. We do not want the returned context directly.
   --    however, we do want pat to map to the names what was hit in body.
   --    therefore we need to subtract the old context from the returned one,
   --    and discard all the keys within it.
-
-  -- assignments :: M.Map VName (VariableInfo rep),
   let inScopeDependenciesFromBody =
         rmOutOfScopeDeps ctx'' $
           M.difference (assignments ctx'') (assignments recContext)
+
   -- 2. We are ONLY interested in the rhs of assignments (ie. the
   --    dependencies of pat :) )
-  let ctx' = foldl extend ctx $ concatVariableInfo inScopeDependenciesFromBody -- . map snd $ M.toList varInfos
+  let ctx' = foldl extend ctx $ concatVariableInfo inScopeDependenciesFromBody
   -- 3. Now we have the correct context and result
-  (ctx' {parents = parents ctx, currentLevel = currentLevel ctx}, indexTable)
+  (ctx' {parents = parents ctx, currentLevel = currentLevel ctx, slices = slices ctx}, slices_indices)
   where
     -- Extracts and merges `Names` in `VariableInfo`s, and makes a new VariableInfo. This
     -- MAY throw away needed information, but it was my best guess at a solution
@@ -343,6 +362,7 @@ analyzeStm :: (Analyze rep) => Context rep -> Stm rep -> (Context rep, IndexTabl
 analyzeStm ctx (Let pats _ e) = do
   -- Get the name of the first element in a pattern
   let patternNames = map patElemName $ patElems pats
+
   -- Construct the result and Context from the subexpression. If the subexpression
   -- is a body, we recurse into it.
   case e of
