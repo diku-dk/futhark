@@ -631,7 +631,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
                 let f x = if x == v then Just (ExpSubst e') else Nothing
                 pure (applySubst f body_t, [])
           _ ->
-            unscopeType loc (patNames pat') body_t
+            unscopeType loc (map sizeName sizes' <> patNames pat') body_t
 
       pure $
         AppExp
