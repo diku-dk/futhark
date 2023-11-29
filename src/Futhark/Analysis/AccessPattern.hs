@@ -283,7 +283,6 @@ analyzeStms ctx body_constructor pats body = do
             )
           $ M.toList slices_new
 
-  let (ctx'', index_table) = analyzeStmsPrimitive recContext body
   -- 1. We do not want the returned context directly.
   --    however, we do want pat to map to the names what was hit in body.
   --    therefore we need to subtract the old context from the returned one,
