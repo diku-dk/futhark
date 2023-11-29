@@ -9,12 +9,7 @@ import Futhark.Builder
 import Futhark.Construct
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
-import Futhark.IR.GPUMem
 import Futhark.IR.MC
-import Futhark.IR.MCMem
-import Futhark.IR.SOACS
-import Futhark.IR.Seq
-import Futhark.IR.SeqMem
 import Futhark.Pass.OptimizeArrayLayout.Layout
 
 class (Layout rep) => Transform rep where
@@ -50,27 +45,6 @@ instance Transform MC where
   transformOp perm_table expmap stm mcOp
     | ParOp maybe_par_segop seqSegOp <- mcOp = transformSegOpMC perm_table expmap stm maybe_par_segop seqSegOp
     | _ <- mcOp = transformRestOp perm_table expmap stm
-
-instance Transform GPUMem where
-  onOp _ _ = error $ notImplementedYet "GPUMem"
-  transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
-
-instance Transform MCMem where
-  onOp _ = pure
-  transformOp perm_table expmap stm mcOp
-    | _ <- mcOp = transformRestOp perm_table expmap stm
-
-instance Transform Seq where
-  onOp _ _ = error $ notImplementedYet "Seq"
-  transformOp _ _ _ _ = error $ notImplementedYet "Seq"
-
-instance Transform SeqMem where
-  onOp _ _ = error $ notImplementedYet "SeqMem"
-  transformOp _ _ _ _ = error $ notImplementedYet "SeqMem"
-
-instance Transform SOACS where
-  onOp _ _ = error $ notImplementedYet "SOACS"
-  transformOp _ _ _ _ = error $ notImplementedYet "SOACS"
 
 transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (PermutationTable, ExpMap GPU)
 transformSegOpGPU perm_table expmap (Let pat aux _) op = do

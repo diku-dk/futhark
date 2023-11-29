@@ -147,18 +147,3 @@ instance PrimExpAnalysis MC where
         -- Add the statements in the sequential part of the ParOp to the PrimExpTable
         segOpToPrimExps scope seq_segop
     | (Futhark.IR.MCMem.OtherOp _) <- mc_op = pure ()
-
-instance PrimExpAnalysis GPUMem where
-  opPrimExp = error $ notImplementedYet "GPUMem"
-
-instance PrimExpAnalysis MCMem where
-  opPrimExp = error $ notImplementedYet "MCMem"
-
-instance PrimExpAnalysis Seq where
-  opPrimExp = error $ notImplementedYet "Seq"
-
-instance PrimExpAnalysis SeqMem where
-  opPrimExp = error $ notImplementedYet "SeqMem"
-
-instance PrimExpAnalysis SOACS where
-  opPrimExp = error $ notImplementedYet "SOACS"

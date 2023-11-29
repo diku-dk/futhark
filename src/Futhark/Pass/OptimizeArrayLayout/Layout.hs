@@ -116,21 +116,6 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
 instance Layout MC where
   permutationFromDimAccess = multicorePermutation
 
-instance Layout MCMem where
-  permutationFromDimAccess = multicorePermutation
-
-instance Layout GPUMem where
-  permutationFromDimAccess = error $ notImplementedYet "GPUMem"
-
-instance Layout Seq where
-  permutationFromDimAccess = error $ notImplementedYet "Seq"
-
-instance Layout SeqMem where
-  permutationFromDimAccess = error $ notImplementedYet "SeqMem"
-
-instance Layout SOACS where
-  permutationFromDimAccess = error $ notImplementedYet "SOACS"
-
 -- | Reasons common to all backends to not manifest an array.
 commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
 commonPermutationEliminators perm nest = do
