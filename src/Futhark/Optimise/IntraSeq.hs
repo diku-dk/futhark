@@ -152,7 +152,7 @@ intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
       intraproceduralTransformation onStms
-        >=> simplifyGPU
+        -- >=> simplifyGPU
     where
       onStms scope stms =
         modifyNameSource $
@@ -271,13 +271,12 @@ seqStm' env (Let pat aux
       kbody' <- lift $ do mkResultKBody env' kbody reds
 
       -- Update existing SegRed 
+      -- we need numResConsumed because reduction result types are unchanged
       let numResConsumed = numArgsConsumedBySegop binops
       let space' = SegSpace (segFlat space) [(tid, grpSize env')]
       tps <- mapM lookupType reds
       let ts' = L.map (stripArray 1) tps
-      let (patKeep, patUpdate) = L.splitAt numResConsumed $ patElems pat
-      let pat' = Pat $ patKeep ++
-            L.map (\(p, t) -> setPatElemDec p t) (L.zip patUpdate (L.drop numResConsumed tps))
+      pat' <- updateSegOpPatTypes numResConsumed pat tps
       lift $ do addStm $ Let pat' aux (Op (SegOp (SegRed lvl space' binops ts' kbody')))
 
 seqStm' env stm@(Let pat _ (Op (SegOp
@@ -365,12 +364,13 @@ seqStm' env (Let pat aux
         let space' = SegSpace phys [(tid', grpSize env)]
         let types' = scremaType (seqFactor env) scanSoac
         pure (usedRes ++ fused, lvl', space', types')
-
+      
+      -- tps <- mapM lookupType scans'
+      -- pat' <- updateSegOpPatTypes 0 pat tps
       lift $
         do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
             let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
             in addStm $ Let (Pat [p]) aux $ BasicOp exp')
-
 
 seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
   cases' <- forM cases seqCase
@@ -406,6 +406,14 @@ seqStm' env (Let pat aux (Loop header form body)) = do
 
 -- Catch all
 seqStm' _ stm = lift $ do addStm stm
+
+-- Update types of pat to match the return types of an intermediate SegOp 
+-- first keep patterns will not be changed
+updateSegOpPatTypes :: Int -> Pat Type -> [Type] -> SeqBuilder(Pat Type)
+updateSegOpPatTypes keep pat tps = do
+  let (patKeep, patUpdate) = L.splitAt keep $ patElems pat
+  pure $ Pat $ patKeep ++
+        L.map (\(p, t) -> setPatElemDec p t) (L.zip patUpdate (L.drop keep tps))
 
 
 
