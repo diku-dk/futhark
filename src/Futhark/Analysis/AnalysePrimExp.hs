@@ -18,14 +18,16 @@ import Futhark.IR.GPUMem
 import Futhark.IR.MC
 import Futhark.IR.MCMem
 
--- TODO: document
+-- | Maps variables to maybe PrimExps. Will map to nothing if it cannot be
+-- resolved to a PrimExp. For all uses of this analysis atm. it can be
+-- considered inscrutible if it cannot be resolved to a primexp.
 type PrimExpTable = M.Map VName (Maybe (PrimExp VName))
 
 class (Analyse rep) => PrimExpAnalysis rep where
   opPrimExp :: (RepTypes rep) => Scope rep -> Op rep -> State PrimExpTable ()
 
 primExpAnalysis :: (PrimExpAnalysis rep, RepTypes rep) => Prog rep -> PrimExpTable
-primExpAnalysis prog = foldMap' (uncurry funToPrimExp) scopesAndFuns
+primExpAnalysis prog = initialState <> foldMap' (uncurry funToPrimExp) scopesAndFuns
   where
     scopesAndFuns = do
       let fun_defs = progFuns prog
@@ -34,11 +36,12 @@ primExpAnalysis prog = foldMap' (uncurry funToPrimExp) scopesAndFuns
 
     getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
-funToPrimExp :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
-funToPrimExp scope fundef = execState (bodyToPrimExps scope (funDefBody fundef)) initialState
-  where
+    -- We need to have the dummy "slice" in the analysis for our "slice hack".
     initialState =
       M.singleton (VName "slice" 0) $ Just $ LeafExp (VName "slice" 0) $ IntType Int64
+
+funToPrimExp :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> FunDef rep -> PrimExpTable
+funToPrimExp scope fundef = execState (bodyToPrimExps scope (funDefBody fundef)) mempty
 
 -- | Adds the statements of a body to the PrimExpTable
 bodyToPrimExps :: (PrimExpAnalysis rep, RepTypes rep) => Scope rep -> Body rep -> State PrimExpTable ()

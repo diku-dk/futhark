@@ -48,8 +48,8 @@ isInscrutable maybe_op@(Just (Just op@(BinOpExp {}))) counter =
   if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
-      -- Maximum allowable stride and offset
-      Just (s, _) -> s > 8 -- TODO: Tune these values
+      -- Maximum allowable stride, might need tuning.
+      Just (s, _) -> s > 8
       Nothing -> True
     else isInscrutableRec maybe_op
 isInscrutable maybe_op _ = isInscrutableRec maybe_op
