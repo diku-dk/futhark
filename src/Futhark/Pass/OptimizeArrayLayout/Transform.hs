@@ -56,7 +56,7 @@ instance Transform GPUMem where
   transformOp _ _ _ _ = error $ notImplementedYet "GPUMem"
 
 instance Transform MCMem where
-  onOp _ op = pure op
+  onOp _ = pure
   transformOp perm_table expmap stm mcOp
     | _ <- mcOp = transformRestOp perm_table expmap stm
 

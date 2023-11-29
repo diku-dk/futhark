@@ -218,7 +218,7 @@ analyzeDimAccesssTests = testGroup
                                   [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
                                     DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
                                     DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess M.empty Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 ),
                                 ( VName "+_lhs" 6326,
@@ -241,7 +241,7 @@ analyzeDimAccesssTests = testGroup
                             M.fromList
                               [ ( VName "+_rhs" 6309,
                                   [ DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess M.empty Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 ),
                                 ( VName "+_rhs" 6328,
@@ -268,7 +268,7 @@ analyzeDimAccesssTests = testGroup
                                   [ DimAccess (M.fromList [(VName "gtid" 6292, Dependency 0 ThreadID)]) (Just $ VName "gtid" 6292),
                                     DimAccess (M.fromList [(VName "i" 6299, Dependency 1 LoopVar)]) (Just $ VName "map2_arg2" 6301),
                                     DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 )
                               ]
@@ -277,7 +277,7 @@ analyzeDimAccesssTests = testGroup
                             M.fromList
                               [ ( VName "+_rhs" 6309,
                                   [ DimAccess (M.fromList [(VName "gtid" 6304, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6304),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 )
                               ]
@@ -321,9 +321,9 @@ analyzeDimAccesssTests = testGroup
                             M.fromList
                               [ ( VName "+_lhs" 6512,
                                   [ DimAccess (M.fromList [(VName "gtid" 6507, Dependency 1 ThreadID)]) (Just $ VName "gtid" 6507),
-                                    DimAccess (M.empty) (Just $ VName "map2_arg2" 6550),
+                                    DimAccess mempty (Just $ VName "map2_arg2" 6550),
                                     DimAccess (M.fromList [(VName "gtid" 6508, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6508),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 )
                               ]
@@ -333,7 +333,7 @@ analyzeDimAccesssTests = testGroup
                               [ ( VName "+_rhs" 6513,
                                   [ DimAccess (M.fromList [(VName "gtid" 6507, Dependency 1 ThreadID)]) (Just $ VName "gtid" 6507),
                                     DimAccess (M.fromList [(VName "gtid" 6508, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6508),
-                                    DimAccess (M.empty) Nothing
+                                    DimAccess mempty Nothing
                                   ]
                                 )
                               ]
@@ -346,7 +346,7 @@ analyzeDimAccesssTests = testGroup
                             M.fromList
                               [ ( VName "+_lhs" 6536,
                                   [ DimAccess (M.fromList [(VName "gtid" 6524, Dependency 2 ThreadID)]) (Just $ VName "gtid" 6524),
-                                    DimAccess (M.empty) (Just $ VName "map2_arg2" 6551),
+                                    DimAccess mempty (Just $ VName "map2_arg2" 6551),
                                     DimAccess (M.fromList [(VName "gtid" 6525, Dependency 3 ThreadID)]) (Just $ VName "gtid" 6525),
                                     DimAccess (M.fromList [(VName "i" 6493, Dependency 0 LoopVar), (VName "j" 6532, Dependency 4 LoopVar)]) (Just $ VName "+_lhs" 6535)
                                   ]

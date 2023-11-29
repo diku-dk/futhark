@@ -444,11 +444,11 @@ analyzeIndex ctx pats arr_name dim_indices = do
       (context {slices = M.insert (head pats) (array_name, pats, dims) $ slices context}, mempty)
 
     index :: Context rep -> ArrayName -> [DimAccess rep] -> (Context rep, IndexTable rep)
-    index context arr_name dim_access =
-      let (name, _, _) = arr_name
+    index context array_name dim_access =
+      let (name, _, _) = array_name
        in -- If the arrayname is a `DimSlice` we want to fixup the access
           case M.lookup name $ slices context of
-            Nothing -> analyzeIndex' context pats arr_name dim_access
+            Nothing -> analyzeIndex' context pats array_name dim_access
             Just (arr_name', pats', sliceAccess) -> do
               analyzeIndex'
                 context
