@@ -4,15 +4,11 @@ import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Analysis.AccessPattern
-import Futhark.Analysis.AnalyzePrimExp
+import Futhark.Analysis.AnalysePrimExp
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
-import Futhark.IR.GPUMem
 import Futhark.IR.MC
 import Futhark.IR.MCMem
-import Futhark.IR.SOACS
-import Futhark.IR.Seq
-import Futhark.IR.SeqMem
 
 type Permutation = [Int]
 

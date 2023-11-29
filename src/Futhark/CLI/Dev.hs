@@ -10,7 +10,7 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.Actions
-import Futhark.Analysis.AccessPattern (Analyze)
+import Futhark.Analysis.AccessPattern (Analyse)
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
@@ -162,7 +162,7 @@ data UntypedAction
       ( forall (rep :: Data.Kind.Type).
         ( AliasableRep rep,
           (OpMetrics (Op rep)),
-          Analyze rep
+          Analyse rep
         ) =>
         Action rep
       )

@@ -4,7 +4,7 @@ import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
 import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
-import Futhark.Analysis.AnalyzePrimExp
+import Futhark.Analysis.AnalysePrimExp
 import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.Pass
@@ -26,7 +26,7 @@ optimizeArrayLayout =
     "Transform kernel input arrays for better performance."
     $ \prog -> do
       -- Analyse the program
-      let index_table = analyzeDimAccesss prog
+      let index_table = analyseDimAccesss prog
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays

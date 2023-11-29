@@ -135,13 +135,13 @@ printMemAliasGPU =
       actionProcedure = liftIO . print . MemAlias.analyzeGPUMem
     }
 
--- | Print result of memory access analysis on the IR
-printMemoryAccessAnalysis :: (Analyze rep) => Action rep
+-- | Print result of array access analysis on the IR
+printMemoryAccessAnalysis :: (Analyse rep) => Action rep
 printMemoryAccessAnalysis =
   Action
-    { actionName = "call-graph",
-      actionDescription = "Prettyprint the callgraph of the result to standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . analyzeDimAccesss
+    { actionName = "array-access-analysis",
+      actionDescription = "Prettyprint the array access analysis to standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString . analyseDimAccesss
     }
 
 -- | Print call graph to stdout.

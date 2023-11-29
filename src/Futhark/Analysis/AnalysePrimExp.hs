@@ -1,4 +1,4 @@
-module Futhark.Analysis.AnalyzePrimExp
+module Futhark.Analysis.AnalysePrimExp
   ( primExpAnalysis,
     stmToPrimExps,
     PrimExpAnalysis (..),
@@ -17,14 +17,11 @@ import Futhark.IR.GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.MC
 import Futhark.IR.MCMem
-import Futhark.IR.SOACS
-import Futhark.IR.Seq
-import Futhark.IR.SeqMem
 
 -- TODO: document
 type PrimExpTable = M.Map VName (Maybe (PrimExp VName))
 
-class (Analyze rep) => PrimExpAnalysis rep where
+class (Analyse rep) => PrimExpAnalysis rep where
   opPrimExp :: (RepTypes rep) => Scope rep -> Op rep -> State PrimExpTable ()
 
 primExpAnalysis :: (PrimExpAnalysis rep, RepTypes rep) => Prog rep -> PrimExpTable
