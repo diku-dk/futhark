@@ -620,10 +620,11 @@ getTidIndexExp env name = do
         case arrayRank tp of
           0 -> SubExp $ Var name
           1 -> Index name $ Slice outerDim
-          2 -> Index name $ Slice $
-                outerDim ++ [DimSlice (intConst Int64 0) (seqFactor env) (intConst Int64 1)]
-          -- TODO: should really return discard here right?
-          _ -> error "Arrays are not expected to have more than 2 dimensions \n"
+          _ -> do
+            let dims = L.tail $ arrayDims tp 
+            let innerDims = L.map (\d -> DimSlice (intConst Int64 0) d (intConst Int64 1)) dims
+            let allDims = outerDim ++ innerDims
+            Index name $ Slice allDims
   pure $ BasicOp index
 
 -- build a kernelresult from a single vName
@@ -718,8 +719,14 @@ mkIntmRed env kbody retTs binops = do
       redIndex <- letSubExp "red_index" =<< eBinOp (Sub Int64 OverflowUndef)
                                                    (eSubExp sz)
                                                    (eSubExp $ intConst Int64 1)
-      redRes <- forM scanRes
-            (\r -> letSubExp "red_res" $ BasicOp $ Index (getVName r) (Slice [DimFix redIndex]))
+      redRes <- forM scanRes (\r -> do
+          let rName = getVName r
+          rType <- lookupType rName
+          let rDims = L.tail $ arrayDims rType
+          let innerDims = L.map (\d -> DimSlice (intConst Int64 0) d (intConst Int64 1)) rDims
+          let newDims = DimFix redIndex : innerDims
+          letSubExp "red_res" $ BasicOp $ Index (getVName r) (Slice newDims)
+          )
       let res' = redRes ++ mapRes
       let lvl' = SegThread SegNoVirt Nothing
       let space' = SegSpace phys [(tid, grpSize env)]
