@@ -76,13 +76,15 @@ entry("main",
 --     get_size(segmap_group_size_5605, group_size)
 --   let {segmap_usable_groups_5674 : i64} =
 --     sdiv_up64(nest_size_5672, segmap_group_size_5673)
+--   let {yss_coalesced_0 : [n_5383][n_5383]i32} =
+--     manifest((1, 0), yss_5385)
 --   let {defunc_0_map_res_r_r_5675 : [n_5383][n_5383][n_5383]i32} =
 --     segmap(thread; ; groups=segmap_usable_groups_5674; groupsize=segmap_group_size_5673)
 --     (gtid_5676 < n_5383, gtid_5677 < n_5383, gtid_5678 < n_5383) (~phys_tid_5679) : {i32} {
 --       let {eta_p_5680 : i32} =
 --         xss_5384[gtid_5676, gtid_5678]
 --       let {eta_p_5681 : i32} =
---         yss_5385[gtid_5678, gtid_5677]
+--         yss_coalesced_0[gtid_5678, gtid_5677]
 --       let {defunc_0_f_res_5682 : i32} =
 --         mul32(eta_p_5680, eta_p_5681)
 --       return {returns defunc_0_f_res_5682}
@@ -91,7 +93,7 @@ entry("main",
 --     get_size(segmap_group_size_5576, group_size)
 --   let {segmap_usable_groups_5687 : i64} =
 --     sdiv_up64(y_5671, segmap_group_size_5686)
---   let {defunc_0_map_res_r_r_coalesced_0 : [n_5383][n_5383][n_5383]i32} =
+--   let {defunc_0_map_res_r_r_coalesced_1 : [n_5383][n_5383][n_5383]i32} =
 --     manifest((2, 0, 1), defunc_0_map_res_r_r_5675)
 --   let {defunc_0_map_res_5688 : [n_5383][n_5383]i32} =
 --     segmap(thread; ; groups=segmap_usable_groups_5687; groupsize=segmap_group_size_5686)
@@ -100,7 +102,7 @@ entry("main",
 --         loop {acc_5695 : i32} = {0i32}
 --         for i_5694:i64 < n_5383 do {
 --           let {b_5696 : i32} =
---             defunc_0_map_res_r_r_coalesced_0[gtid_5689, gtid_5690, i_5694]
+--             defunc_0_map_res_r_r_coalesced_1[gtid_5689, gtid_5690, i_5694]
 --           let {defunc_0_f_res_5697 : i32} =
 --             add32(acc_5695, b_5696)
 --           in {defunc_0_f_res_5697}

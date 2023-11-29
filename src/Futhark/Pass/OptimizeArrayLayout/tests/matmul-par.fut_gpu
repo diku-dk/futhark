@@ -1064,6 +1064,8 @@ entry("main",
 --             }
 --           in {defunc_0_map_res_5685}
 --         } else {
+--           let {yss_coalesced_2 : [n_5384][n_5384]i32} =
+--             manifest((1, 0), yss_5386)
 --           let {defunc_0_map_res_5704 : [n_5384][n_5384]i32} =
 --             segred(thread; ; groups=num_groups_5702; groupsize=segred_group_size_5701)
 --             (gtid_5705 < n_5384, gtid_5706 < n_5384, gtid_5707 < n_5384) (~phys_tid_5708)
@@ -1079,7 +1081,7 @@ entry("main",
 --               let {eta_p_5714 : i32} =
 --                 xss_5385[gtid_5705, gtid_5707]
 --               let {eta_p_5715 : i32} =
---                 yss_5386[gtid_5707, gtid_5706]
+--                 yss_coalesced_2[gtid_5707, gtid_5706]
 --               let {defunc_0_f_res_5716 : i32} =
 --                 mul32(eta_p_5714, eta_p_5715)
 --               return {returns defunc_0_f_res_5716}

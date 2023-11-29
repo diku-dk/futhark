@@ -50,6 +50,9 @@ entry("main",
 }
 
 
+-- WARNING: The expected output of this test depends on the maximum allowed
+--          stride in Layout.hs
+
 -- === Expected output after pass: CONFIRMED
 -- types {
 --
@@ -86,6 +89,8 @@ entry("main",
 --     get_size(segmap_group_size_5633, group_size)
 --   let {segmap_usable_groups_5680 : i64} =
 --     sdiv_up64(nest_size_5678, segmap_group_size_5679)
+--   let {A_coalesced_0 : [d₁_5445][d₂_5446]i64} =
+--     manifest((1, 0), A_5449)
 --   let {defunc_0_map_res_5681 : [n_5447][m_5448]i64} =
 --     segmap(thread; ; groups=segmap_usable_groups_5680; groupsize=segmap_group_size_5679)
 --     (gtid_5682 < n_5447, gtid_5683 < m_5448) (~phys_tid_5684) : {i64} {
@@ -96,7 +101,7 @@ entry("main",
 --         add64(1i64, gtid_5683)
 --       let {lifted_lambda_res_5688 : i64} =
 --         #{range_valid_c_5608}
---         A_5449[tmp_5687, index_primexp_5696]
+--         A_coalesced_0[tmp_5687, index_primexp_5696]
 --       return {returns lifted_lambda_res_5688}
 --     }
 --   in {defunc_0_map_res_5681}
