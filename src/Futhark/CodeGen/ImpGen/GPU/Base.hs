@@ -537,6 +537,7 @@ groupReduceWithOffset offset w lam arrs = do
   constants <- kernelConstants <$> askEnv
 
   let local_tid = kernelLocalThreadId constants
+      global_tid = kernelGlobalThreadId constants
 
       barrier
         | all primType $ lambdaReturnType lam = sOp $ Imp.Barrier Imp.FenceLocal
@@ -546,9 +547,13 @@ groupReduceWithOffset offset w lam arrs = do
         | all primType $ lambdaReturnType lam = sOp $ Imp.ErrorSync Imp.FenceLocal
         | otherwise = sOp $ Imp.ErrorSync Imp.FenceGlobal
 
-      readReduceArgument param arr = do
-        let i = local_tid + tvExp offset
-        copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+      readReduceArgument param arr
+        | Prim _ <- paramType param = do
+            let i = local_tid + tvExp offset
+            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
+        | otherwise = do
+            let i = global_tid + tvExp offset
+            copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
       writeReduceOpResult param arr
         | Prim _ <- paramType param =
@@ -560,7 +565,7 @@ groupReduceWithOffset offset w lam arrs = do
         | Prim _ <- paramType param =
             pure ()
         | otherwise =
-            copyDWIMFix arr [0] (Var $ paramName param) []
+            copyDWIMFix arr [sExt64 global_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
