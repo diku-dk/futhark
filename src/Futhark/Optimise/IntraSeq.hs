@@ -29,7 +29,7 @@ import Data.Sequence
 import Control.Monad.Trans.Except
 import Control.Monad.Except
 import Futhark.Transform.Substitute
-
+import Futhark.IR.GPU.Simplify (simplifyGPU)
 
 type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
 
@@ -152,14 +152,12 @@ intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
       intraproceduralTransformation onStms
+        >=> simplifyGPU
     where
       onStms scope stms =
         modifyNameSource $
           runState $
             runReaderT (seqStms stms) scope
-
-
-
 
 -- SeqStms is only to be used for top level statements. To sequentialize
 -- statements within a body use seqStms'
