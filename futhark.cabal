@@ -123,7 +123,7 @@ library
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
       Futhark.Analysis.AccessPattern
-      Futhark.Analysis.AnalyzePrimExp
+      Futhark.Analysis.AnalysePrimExp
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
@@ -522,9 +522,9 @@ test-suite unit
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
       Futhark.Pass.OptimizeArrayLayoutTests
-      Futhark.Pass.OptimizeArrayLayout.AnalyzeTests
+      Futhark.Pass.OptimizeArrayLayout.AnalyseTests
       Futhark.Pass.OptimizeArrayLayout.LayoutTests
-      Futhark.Pass.OptimizeArrayLayout.AnalyzePrimExpTests
+      Futhark.Pass.OptimizeArrayLayout.AnalysePrimExpTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
