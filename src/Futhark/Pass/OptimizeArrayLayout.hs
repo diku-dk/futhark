@@ -26,7 +26,7 @@ optimizeArrayLayout =
     "Transform kernel input arrays for better performance."
     $ \prog -> do
       -- Analyse the program
-      let index_table = analysisPropagateByTransitivity $ analyzeDimAccesss prog
+      let index_table = analyzeDimAccesss prog
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
