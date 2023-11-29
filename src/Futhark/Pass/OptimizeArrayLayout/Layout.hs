@@ -27,7 +27,7 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
-  permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idxName dimAccesses =
+  permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses =
     do
       -- Create a candidate permutation
       let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
@@ -48,15 +48,15 @@ instance Layout GPU where
         else Just perm
 
 isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
-isInscrutable maybeOp@(Just (Just op@(BinOpExp {}))) counter =
+isInscrutable maybe_op@(Just (Just op@(BinOpExp {}))) counter =
   if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
       -- Maximum allowable stride and offset
       Just (s, _) -> s > 8 -- TODO: Tune these values
       Nothing -> True
-    else isInscrutableRec maybeOp
-isInscrutable maybeOp _ = isInscrutableRec maybeOp
+    else isInscrutableRec maybe_op
+isInscrutable maybe_op _ = isInscrutableRec maybe_op
 
 isInscrutableRec :: Maybe (Maybe (PrimExp VName)) -> Bool
 isInscrutableRec Nothing = True
@@ -73,31 +73,31 @@ reduceStrideAndOffset (LeafExp _ _) = Just (1, 0)
 reduceStrideAndOffset (BinOpExp oper a b) = case (a, b) of
   (ValueExp (IntValue v), _) -> reduce v b
   (_, ValueExp (IntValue v)) -> reduce v a
-      _ -> Nothing
+  _ -> Nothing
   where
     reduce v op
-  | LeafExp _ _ <- op = case oper of
-      Add _ _ -> Just (1, valueIntegral v)
-      Sub _ _ -> Just (1, -valueIntegral v)
-      Mul _ _ -> Just (valueIntegral v, 0)
-      _ -> Nothing
-  | BinOpExp {} <- op = case reduceStrideAndOffset op of
-      Nothing -> Nothing
-      Just (s, o) -> case oper of
-        Add _ _ -> Just (s, o + valueIntegral v)
-        Sub _ _ -> Just (s, o - valueIntegral v)
-        Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
-        _ -> Nothing
-  | UnOpExp Not _ <- op = Nothing
-  | UnOpExp (Complement _) _ <- op = Nothing
-  | UnOpExp (Abs _) _ <- op = Nothing
-  | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
-  | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+      | LeafExp _ _ <- op = case oper of
+          Add _ _ -> Just (1, valueIntegral v)
+          Sub _ _ -> Just (1, -valueIntegral v)
+          Mul _ _ -> Just (valueIntegral v, 0)
+          _ -> Nothing
+      | BinOpExp {} <- op = case reduceStrideAndOffset op of
+          Nothing -> Nothing
+          Just (s, o) -> case oper of
+            Add _ _ -> Just (s, o + valueIntegral v)
+            Sub _ _ -> Just (s, o - valueIntegral v)
+            Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
+            _ -> Nothing
+      | UnOpExp Not _ <- op = Nothing
+      | UnOpExp (Complement _) _ <- op = Nothing
+      | UnOpExp (Abs _) _ <- op = Nothing
+      | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+      | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
       | otherwise = Nothing
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
-multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idxName dimAccesses = do
+multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
   -- Create a candidate permutation
   let perm = map fst $ sortMC (zip arr_layout dimAccesses)
 
@@ -135,7 +135,7 @@ instance Layout SOACS where
 commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
 commonPermutationEliminators perm nest = do
   -- Don't manifest if the permutation is the permutation is invalid
-  let isInvalidPerm =
+  let is_invalid_perm =
         -- Don't manifest if the permutation is the identity permutation
         perm `L.isPrefixOf` [0 ..]
           -- or is not a transpose.
@@ -146,9 +146,9 @@ commonPermutationEliminators perm nest = do
           || (last perm == length perm - 1)
 
   -- Don't manifest if the array is defined inside a segOp or loop body
-  let insideUndesired = any undesired nest
+  let inside_undesired = any undesired nest
 
-  isInvalidPerm || insideUndesired
+  is_invalid_perm || inside_undesired
   where
     undesired :: BodyType -> Bool
     undesired bodyType = case bodyType of
@@ -180,12 +180,12 @@ sortGPU =
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
         cmpIdxPat
-          (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) = case (iterL, iterR) of
-            (ThreadID, ThreadID) -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+          (Just (iterL, lvlL, original_lvl_L))
+          (Just (iterR, lvlR, original_lvl_R)) = case (iterL, iterR) of
+            (ThreadID, ThreadID) -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
             (ThreadID, _) -> GT
             (_, ThreadID) -> LT
-            _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+            _ -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
 
         maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
         maxIdxPat lhs rhs =
@@ -213,13 +213,13 @@ sortMC =
         cmpIdxPat (Just _) Nothing = GT
         cmpIdxPat Nothing (Just _) = LT
         cmpIdxPat
-          (Just (iterL, lvlL, originalLevelL))
-          (Just (iterR, lvlR, originalLevelR)) =
+          (Just (iterL, lvlL, original_lvl_L))
+          (Just (iterR, lvlR, original_lvl_R)) =
             case (iterL, iterR) of
-              (ThreadID, ThreadID) -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+              (ThreadID, ThreadID) -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
               (ThreadID, _) -> LT
               (_, ThreadID) -> GT
-              _ -> (lvlL, originalLevelL) `compare` (lvlR, originalLevelR)
+              _ -> (lvlL, original_lvl_L) `compare` (lvlR, original_lvl_R)
 
         maxIdxPat :: Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int) -> Maybe (VarType, Int, Int)
         maxIdxPat lhs rhs =

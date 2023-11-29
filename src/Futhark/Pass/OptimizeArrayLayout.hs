@@ -26,13 +26,13 @@ optimizeArrayLayout =
     "Transform kernel input arrays for better performance."
     $ \prog -> do
       -- Analyse the program
-      let indexTable = analysisPropagateByTransitivity $ analyzeDimAccesss prog
+      let index_table = analysisPropagateByTransitivity $ analyzeDimAccesss prog
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutationTable = permutationTableFromIndexTable primExpTable indexTable
+      let permutation_table = permutationTableFromIndexTable primExpTable index_table
       -- Insert permutations in the AST
-      intraproceduralTransformation (onStms permutationTable) prog
+      intraproceduralTransformation (onStms permutation_table) prog
   where
     onStms permutationTable scope stms = do
       let m = localScope scope $ transformStms permutationTable mempty stms

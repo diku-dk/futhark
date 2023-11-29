@@ -31,9 +31,9 @@ primExpAnalysis :: (PrimExpAnalysis rep, RepTypes rep) => Prog rep -> PrimExpTab
 primExpAnalysis prog = foldMap' (uncurry funToPrimExp) scopesAndFuns
   where
     scopesAndFuns = do
-      let funDefs = progFuns prog
-      let scopes = map getScope funDefs
-      zip scopes funDefs
+      let fun_defs = progFuns prog
+      let scopes = map getScope fun_defs
+      zip scopes fun_defs
 
     getScope funDef = scopeOf (progConsts prog) <> scopeOfFParams (funDefParams funDef)
 
@@ -61,17 +61,17 @@ stmToPrimExps :: forall rep. (PrimExpAnalysis rep, RepTypes rep) => Scope rep ->
 stmToPrimExps scope stm = do
   primExpTable <- get
   case stm of
-    (Let (Pat patElems) _ e)
+    (Let (Pat pat_elems) _ e)
       | Just primExp <- primExpFromExp (toPrimExp scope primExpTable) e ->
           -- The statement can be resolved as a `PrimExp`.
           -- For each pattern element, insert the PrimExp in the primExpTable
-          forM_ patElems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
+          forM_ pat_elems $ \(PatElem name _) -> modify $ M.insert name (Just primExp)
       | otherwise -> do
           -- The statement can't be resolved as a `PrimExp`.
           walk (stmExp stm) -- Traverse the rest of the AST
           primExpTable' <- get -- Get the updated PrimExpTable after traversing the AST
           -- Add pattern elements that can't be resolved as `PrimExp` to the `PrimExpTable` as `Nothing`
-          forM_ patElems $ \(PatElem name _) -> case M.lookup name primExpTable' of
+          forM_ pat_elems $ \(PatElem name _) -> case M.lookup name primExpTable' of
             Nothing -> modify $ M.insert name Nothing
             _ -> pure ()
   where
@@ -131,22 +131,22 @@ segOpParamsToPrimExps scope op = do
       Nothing -> pure ()
 
 instance PrimExpAnalysis GPU where
-  opPrimExp scope gpuOp
-    | (SegOp op) <- gpuOp = segOpToPrimExps scope op
-    | (SizeOp _) <- gpuOp = pure ()
-    | (GPUBody _ body) <- gpuOp = bodyToPrimExps scope body
-    | (Futhark.IR.GPUMem.OtherOp _) <- gpuOp = pure ()
+  opPrimExp scope gpu_op
+    | (SegOp op) <- gpu_op = segOpToPrimExps scope op
+    | (SizeOp _) <- gpu_op = pure ()
+    | (GPUBody _ body) <- gpu_op = bodyToPrimExps scope body
+    | (Futhark.IR.GPUMem.OtherOp _) <- gpu_op = pure ()
 
 instance PrimExpAnalysis MC where
-  opPrimExp scope mcOp
-    | (ParOp maybeParSegOp seqSegOp) <- mcOp = do
+  opPrimExp scope mc_op
+    | (ParOp maybe_par_segop seq_segop) <- mc_op = do
         -- Add the statements in the parallel part of the ParOp to the PrimExpTable
-        case maybeParSegOp of
+        case maybe_par_segop of
           Nothing -> pure ()
-          Just _ -> forM_ maybeParSegOp $ segOpToPrimExps scope
+          Just _ -> forM_ maybe_par_segop $ segOpToPrimExps scope
         -- Add the statements in the sequential part of the ParOp to the PrimExpTable
-        segOpToPrimExps scope seqSegOp
-    | (Futhark.IR.MCMem.OtherOp _) <- mcOp = pure ()
+        segOpToPrimExps scope seq_segop
+    | (Futhark.IR.MCMem.OtherOp _) <- mc_op = pure ()
 
 instance PrimExpAnalysis GPUMem where
   opPrimExp = error $ notImplementedYet "GPUMem"
