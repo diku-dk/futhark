@@ -69,44 +69,31 @@ isInscrutableRec (Just (Just (BinOpExp _ a b))) =
 isInscrutableRec _ = True
 
 reduceStrideAndOffset :: PrimExp VName -> Maybe (Int, Int)
-reduceStrideAndOffset (BinOpExp oper (ValueExp (IntValue v)) op)
-  | LeafExp _ _ <- op = case oper of
-      Add _ _ -> Just (1, valueIntegral v)
-      Sub _ _ -> Just (1, -valueIntegral v)
-      Mul _ _ -> Just (valueIntegral v, 0)
-      _ -> Nothing
-  | BinOpExp {} <- op = case reduceStrideAndOffset op of
-      Nothing -> Nothing
-      Just (s, o) -> case oper of
-        Add _ _ -> Just (s, o + valueIntegral v)
-        Sub _ _ -> Just (s, o - valueIntegral v)
-        Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
-        _ -> Nothing
-  | UnOpExp Not _ <- op = Nothing
-  | UnOpExp (Complement _) _ <- op = Nothing
-  | UnOpExp (Abs _) _ <- op = Nothing
-  | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
-  | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
--- Same as above, idk why, im just testing stuff out at this point
-reduceStrideAndOffset (BinOpExp oper op (ValueExp (IntValue v)))
-  | LeafExp _ _ <- op = case oper of
-      Add _ _ -> Just (1, valueIntegral v)
-      Sub _ _ -> Just (1, -valueIntegral v)
-      Mul _ _ -> Just (valueIntegral v, 0)
-      _ -> Nothing
-  | BinOpExp {} <- op = case reduceStrideAndOffset op of
-      Nothing -> Nothing
-      Just (s, o) -> case oper of
-        Add _ _ -> Just (s, o + valueIntegral v)
-        Sub _ _ -> Just (s, o - valueIntegral v)
-        Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
-        _ -> Nothing
-  | UnOpExp Not _ <- op = Nothing
-  | UnOpExp (Complement _) _ <- op = Nothing
-  | UnOpExp (Abs _) _ <- op = Nothing
-  | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
-  | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
 reduceStrideAndOffset (LeafExp _ _) = Just (1, 0)
+reduceStrideAndOffset (BinOpExp oper a b) = case (a, b) of
+  (ValueExp (IntValue v), _) -> reduce v b
+  (_, ValueExp (IntValue v)) -> reduce v a
+      _ -> Nothing
+  where
+    reduce v op
+  | LeafExp _ _ <- op = case oper of
+      Add _ _ -> Just (1, valueIntegral v)
+      Sub _ _ -> Just (1, -valueIntegral v)
+      Mul _ _ -> Just (valueIntegral v, 0)
+      _ -> Nothing
+  | BinOpExp {} <- op = case reduceStrideAndOffset op of
+      Nothing -> Nothing
+      Just (s, o) -> case oper of
+        Add _ _ -> Just (s, o + valueIntegral v)
+        Sub _ _ -> Just (s, o - valueIntegral v)
+        Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
+        _ -> Nothing
+  | UnOpExp Not _ <- op = Nothing
+  | UnOpExp (Complement _) _ <- op = Nothing
+  | UnOpExp (Abs _) _ <- op = Nothing
+  | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+  | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
+      | otherwise = Nothing
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
