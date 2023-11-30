@@ -152,7 +152,7 @@ intraSeq :: Pass GPU GPU
 intraSeq =
     Pass "name" "description" $
       intraproceduralTransformation onStms
-        -- >=> simplifyGPU
+        >=> simplifyGPU
     where
       onStms scope stms =
         modifyNameSource $
@@ -365,12 +365,13 @@ seqStm' env (Let pat aux
         let types' = scremaType (seqFactor env) scanSoac
         pure (usedRes ++ fused, lvl', space', types')
       
-      -- tps <- mapM lookupType scans'
-      -- pat' <- updateSegOpPatTypes 0 pat tps
+      tps <- mapM lookupType scans'
+      let tps' = mapM setArrayShape tps (Shape [grpsizeOld env])
+      pat' <- updateSegOpPatTypes 0 pat tps'
       lift $
-        do forM_ (L.zip (patElems pat) scans') (\(p, s) ->
-            let exp' = Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
-            in addStm $ Let (Pat [p]) aux $ BasicOp exp')
+        do forM_ (L.zip (patElems pat') scans') (\(p, s) ->
+            let exp' = BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
+            in addStm $ Let (Pat [p]) aux exp')
 
 seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
   cases' <- forM cases seqCase
