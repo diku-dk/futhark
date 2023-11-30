@@ -390,7 +390,6 @@ collect' m = do
   modify $ \s -> s {stateCode = prev_code}
   pure (x, new_code)
 
-
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM rep r op ()
 emit code = modify $ \s -> s {stateCode = stateCode s <> code}

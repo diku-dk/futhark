@@ -70,7 +70,7 @@ import Futhark.Util.IntegralExp (divUp, nextMul, quot, rem)
 import Prelude hiding (quot, rem)
 
 forM2_ :: (Monad m) => [a] -> [b] -> (a -> b -> m c) -> m ()
-forM2_ xs ys f = forM (zip xs ys) (uncurry f) >> pure ()
+forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
@@ -125,7 +125,7 @@ compileSegRed pat lvl space segbinops map_kbody = do
         let (red_res, map_res) = splitAt (segBinOpResults segbinops) $ kernelBodyResult map_kbody
 
         let mapout_arrs = drop (segBinOpResults segbinops) $ patElems pat
-        when (not $ null mapout_arrs) $
+        unless (null mapout_arrs) $
           sComment "write map-out result(s)" $ do
             zipWithM_ (compileThreadResult space) mapout_arrs map_res
 
@@ -195,7 +195,7 @@ makeIntermArrays ::
   [[Param LParamMem]] ->
   InKernelGen [SegRedIntermediateArrays]
 makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
-  group_worksize <- tvSize <$> (dPrimV "group_worksize" group_worksize_E)
+  group_worksize <- tvSize <$> dPrimV "group_worksize" group_worksize_E
 
   -- compute total amount of lmem needed for the group reduction arrays as well
   -- as the offset into the total pool of lmem of each such array.
@@ -215,7 +215,7 @@ makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
   (_, offsets) <-
     forAccumLM2D 0 elem_sizes $ \byte_offs elem_size ->
       (,byte_offs `quot` elem_size)
-        <$> (dPrimVE "offset" $ sum_ byte_offs elem_size)
+        <$> dPrimVE "offset" (sum_ byte_offs elem_size)
 
   let collcopy_lmem_requirement = group_worksize_E * max_elem_size
       lmem_total_size =
@@ -250,7 +250,7 @@ makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
     group_size_E = pe64 group_size
     group_worksize_E = group_size_E * pe64 chunk
 
-    paramSize = (primByteSize . elemType . paramType)
+    paramSize = primByteSize . elemType . paramType
     elem_sizes = map (map paramSize) params
     max_elem_size = maximum $ concat elem_sizes
 
@@ -354,7 +354,7 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
         map_body_cont
 
     let segred_pess =
-          chunks (map (length . segBinOpNeutral) segbinops) $
+          chunks (map (length . segBinOpNeutral) segbinops)
             segred_pes
     forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
       \(pes, slug, new_lambda, i) ->
@@ -558,7 +558,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
             `rem` (sExt64 group_size' * groups_per_segment)
 
       let first_group_for_segment = flat_segment_id * groups_per_segment
-      dIndexSpace (zip segment_gtids (init dims')) $ flat_segment_id
+      dIndexSpace (zip segment_gtids (init dims')) flat_segment_id
       dPrim_ (last gtids) int64
       let n = pe64 $ last dims
 
@@ -578,7 +578,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
           map_body_cont
 
       let segred_pess =
-            chunks (map (length . segBinOpNeutral) segbinops) $
+            chunks (map (length . segBinOpNeutral) segbinops)
               segred_pes
 
           multiple_groups_per_segment =

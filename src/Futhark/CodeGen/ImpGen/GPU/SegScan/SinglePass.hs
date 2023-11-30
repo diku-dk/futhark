@@ -15,7 +15,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (mapAccumLM, takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot, nextMul)
+import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]

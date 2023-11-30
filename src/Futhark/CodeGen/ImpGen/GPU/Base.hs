@@ -273,7 +273,7 @@ getChunkSize types = fromInteger $ max 1 $ min mem_constraint reg_constraint
     sizes = map primByteSize types'
 
     sum_sizes = sum sizes
-    sum_sizes' = (sum $ map (max 4 . primByteSize) types') `div` 4
+    sum_sizes' = sum (map (max 4 . primByteSize) types') `div` 4
     max_size = maximum sizes
 
     mem_constraint = max k_mem sum_sizes `div` max_size
@@ -642,7 +642,7 @@ groupReduceWithOffset offset w lam arrs = do
   cross_wave_reductions
   errorsync
 
-  when (not $ all isPrimParam reduce_acc_params) $
+  unless (all isPrimParam reduce_acc_params) $
     sComment "Copy array-typed operands to result array" $
       sWhen (local_tid .==. 0) $
         localOps threadOperations $
