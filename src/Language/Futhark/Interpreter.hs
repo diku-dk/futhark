@@ -1402,7 +1402,7 @@ initialCtx =
               <+> dquotes (prettyValue x)
               <+> "and"
               <+> dquotes (prettyValue y)
-                <> "."
+              <> "."
       where
         bopDef' (valf, retf, op) (x, y) = do
           x' <- valf x
@@ -1419,7 +1419,7 @@ initialCtx =
           bad noLoc mempty . docText $
             "Cannot apply function to argument"
               <+> dquotes (prettyValue x)
-                <> "."
+              <> "."
       where
         unopDef' (valf, retf, op) x = do
           x' <- valf x
@@ -1436,7 +1436,8 @@ initialCtx =
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to argument"
-              <+> dquotes (prettyValue v) <> "."
+              <+> dquotes (prettyValue v)
+              <> "."
 
     def "!" =
       Just $
@@ -1995,7 +1996,7 @@ checkEntryArgs entry args entry_t
           "Entry point "
             <> dquotes (prettyName entry)
             <> " expects input of type(s)"
-            </> indent 2 (stack (map pretty param_ts))
+              </> indent 2 (stack (map pretty param_ts))
 
 -- | Execute the named function on the given arguments; may fail
 -- horribly if these are ill-typed.

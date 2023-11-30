@@ -169,13 +169,6 @@ cliOptions =
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            },
          Option
-           { optionLongName = "profile",
-             optionShortName = Just 'P',
-             optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
-             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           },
-         Option
            { optionLongName = "list-devices",
              optionShortName = Nothing,
              optionArgument = NoArgument,

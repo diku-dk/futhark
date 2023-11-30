@@ -334,7 +334,7 @@ def clz_T(x):
     for i in range(bits):
         if x < 0:
             break
-        n += 1
+        n += np.int32(1)
         x <<= np.int8(1)
     return n
 
@@ -345,7 +345,7 @@ def ctz_T(x):
     for i in range(bits):
         if (x & 1) == 1:
             break
-        n += 1
+        n += np.int32(1)
         x >>= np.int8(1)
     return n
 
@@ -354,7 +354,7 @@ def popc_T(x):
     c = np.int32(0)
     while x != 0:
         x &= x - np.int8(1)
-        c += np.int8(1)
+        c += np.int32(1)
     return c
 
 
@@ -988,6 +988,18 @@ def futhark_lerp32(v0, v1, t):
 
 def futhark_lerp64(v0, v1, t):
     return v0 + (v1 - v0) * t
+
+
+def futhark_ldexp16(x, y):
+    return np.ldexp(x, y)
+
+
+def futhark_ldexp32(x, y):
+    return np.ldexp(x, y)
+
+
+def futhark_ldexp64(x, y):
+    return np.ldexp(x, y)
 
 
 def futhark_mad16(a, b, c):

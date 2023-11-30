@@ -14,7 +14,7 @@ description:    Futhark is a small programming language designed to be compiled 
                 .
                 For introductionary information about hacking on the
                 Futhark compiler, see
-                <https://futhark.readthedocs.io/en/latest/hacking.html the hacking guide>.
+                <https://github.com/diku-dk/futhark/blob/master/HACKING.md the hacking guide>.
                 Regarding the internal design of the compiler, the following modules make
                 good starting points:
                 .
@@ -49,6 +49,7 @@ extra-source-files:
     rts/c/timing.h
     rts/c/errors.h
     rts/c/free_list.h
+    rts/c/event_list.h
     rts/c/gpu.h
     rts/c/gpu_prototypes.h
     rts/c/tuning.h
@@ -91,64 +92,18 @@ extra-source-files:
     docs/requirements.txt
 extra-doc-files:
   assets/*.png
+  CHANGELOG.md
+  README.md
 
 source-repository head
   type: git
   location: https://github.com/diku-dk/futhark
 
 common common
-  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
-  default-language: Haskell2010
+  ghc-options: -Wall -Wcompat -Wno-incomplete-uni-patterns -Wno-x-partial -Wno-unrecognised-warning-flags  -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists -Wunused-packages
+  default-language: GHC2021
   default-extensions:
     OverloadedStrings
-    -- The following extensions correspond to the GHC2021 language,
-    -- but we want to remain compatible with GHC 9.0, so we cannot use
-    -- it just yet.
-    BangPatterns
-    BinaryLiterals
-    ConstrainedClassMethods
-    ConstraintKinds
-    DeriveDataTypeable
-    DeriveFoldable
-    DeriveFunctor
-    DeriveGeneric
-    DeriveLift
-    DeriveTraversable
-    DoAndIfThenElse
-    EmptyCase
-    EmptyDataDecls
-    EmptyDataDeriving
-    ExistentialQuantification
-    ExplicitForAll
-    FlexibleContexts
-    FlexibleInstances
-    ForeignFunctionInterface
-    GADTSyntax
-    GeneralisedNewtypeDeriving
-    HexFloatLiterals
-    ImplicitPrelude
-    ImportQualifiedPost
-    InstanceSigs
-    KindSignatures
-    MonomorphismRestriction
-    MultiParamTypeClasses
-    NamedFieldPuns
-    NamedWildCards
-    NumericUnderscores
-    PatternGuards
-    PolyKinds
-    PostfixOperators
-    RankNTypes
-    RelaxedPolyRec
-    ScopedTypeVariables
-    StandaloneDeriving
-    StandaloneKindSignatures
-    StarIsType
-    TraditionalRecordSyntax
-    TupleSections
-    TypeApplications
-    TypeOperators
-    TypeSynonymInstances
 
 library
   import: common
@@ -209,6 +164,7 @@ library
       Futhark.CLI.MulticoreWASM
       Futhark.CLI.OpenCL
       Futhark.CLI.Pkg
+      Futhark.CLI.Profile
       Futhark.CLI.PyOpenCL
       Futhark.CLI.Python
       Futhark.CLI.Query
@@ -307,7 +263,7 @@ library
       Futhark.IR.Prop.Aliases
       Futhark.IR.Prop.Constants
       Futhark.IR.Prop.Names
-      Futhark.IR.Prop.Patterns
+      Futhark.IR.Prop.Pat
       Futhark.IR.Prop.Rearrange
       Futhark.IR.Prop.Reshape
       Futhark.IR.Prop.Scope
@@ -415,6 +371,7 @@ library
       Futhark.Pkg.Info
       Futhark.Pkg.Solve
       Futhark.Pkg.Types
+      Futhark.Profile
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
@@ -545,6 +502,7 @@ test-suite unit
   other-modules:
       Futhark.AD.DerivativesTests
       Futhark.BenchTests
+      Futhark.ProfileTests
       Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
       Futhark.Internalise.TypesValuesTests

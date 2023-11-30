@@ -73,6 +73,18 @@ Note that GHCs code generator is sometimes slightly buggy in its
 handling of profiled code.  If you encounter a compiler crash with an
 error message like "PAP object entered", then this is a GHC bug.
 
+### Debugging compiler crashes
+
+By default, Haskell does not produce very good stack traces.  If you
+compile with `make configure-profile` as mentioned above, you can pass
+`+RTS -xc` to the Futhark compiler in order to get better stack
+traces.  You will see that you actually get *multiple* stack traces,
+as the Haskell runtime system will print a stack trace for every
+signal it receives, and several of these occur early, when the program
+is read from disk.  Also, the *final* stack trace is often some
+diagnostic artifact.  Usually the second-to-last stack trace is what
+you are looking for.
+
 ## Testing
 
 ### Only internal compilation

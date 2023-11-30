@@ -22,6 +22,11 @@ non-zero value on error, as documented below.  Others return a
 ``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
 (possibly) more precise error message.
 
+Some functions take a C string (``const char*``) as argument.  Unless
+otherwise indicated, the string will be copied if necessary, meaning
+the argument string can always be modified (or freed) after the
+function returns.
+
 .. c:macro:: FUTHARK_BACKEND_foo
 
    A preprocessor macro identifying that the backend *foo* was used to
@@ -202,7 +207,7 @@ Context
 
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
-   Produce a human-readable C string with debug and profiling
+   Produce a C string encoding a JSON object with debug and profiling
    information collected during program runtime.  It is the caller's
    responsibility to free the returned string.  It is likely to only
    contain interesting information if

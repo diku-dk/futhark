@@ -38,7 +38,6 @@ module Futhark.CodeGen.Backends.GenericPython
     collect',
     collect,
     simpleCall,
-    copyMemoryDefaultSpace,
   )
 where
 
@@ -143,7 +142,6 @@ data Operations op s = Operations
   { opsWriteScalar :: WriteScalar op s,
     opsReadScalar :: ReadScalar op s,
     opsAllocate :: Allocate op s,
-    opsCopy :: Copy op s,
     -- | @(dst,src)@-space mapping to copy functions.
     opsCopies :: M.Map (Space, Space) (DoLMADCopy op s),
     opsCompiler :: OpCompiler op s,
@@ -160,7 +158,6 @@ defaultOperations =
     { opsWriteScalar = defWriteScalar,
       opsReadScalar = defReadScalar,
       opsAllocate = defAllocate,
-      opsCopy = defCopy,
       opsCopies = M.singleton (DefaultSpace, DefaultSpace) lmadcopyCPU,
       opsCompiler = defCompiler,
       opsEntryOutput = defEntryOutput,
@@ -173,8 +170,6 @@ defaultOperations =
       error "Cannot read from non-default memory space"
     defAllocate _ _ _ =
       error "Cannot allocate in non-default memory space"
-    defCopy _ _ _ _ _ _ _ _ =
-      error "Cannot copy to or from non-default memory space"
     defCompiler _ =
       error "The default compiler cannot compile extended operations"
     defEntryOutput _ _ _ _ =
@@ -582,9 +577,16 @@ entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem (Imp.Space sid) bt ep
   pack_output <- asks envEntryOutput
   pack_output mem sid bt ept dims
 entryPointOutput (Imp.TransparentValue (Imp.ArrayValue mem _ bt ept dims)) = do
-  mem' <- Cast <$> compileVar mem <*> pure (compilePrimTypeExt bt ept)
+  mem' <- compileVar mem
   dims' <- mapM compileDim dims
-  pure $ simpleCall "createArray" [mem', Tuple dims', Var $ compilePrimToExtNp bt ept]
+  pure $
+    simpleCall
+      "np.reshape"
+      [ Index
+          (Call (Field mem' "view") [Arg $ Var $ compilePrimToExtNp bt ept])
+          (IdxRange (Integer 0) (foldl1 (BinOp "*") dims')),
+        Tuple dims'
+      ]
 
 badInput :: Int -> PyExp -> T.Text -> PyStmt
 badInput i e t =
@@ -853,24 +855,6 @@ prepareEntry (Imp.EntryPoint _ results args) (fname, Imp.Function _ outputs inpu
       zip (map snd results) res
     )
 
-copyMemoryDefaultSpace ::
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  PyExp ->
-  CompilerM op s ()
-copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes = do
-  let offset_call1 =
-        simpleCall
-          "addressOffset"
-          [destmem, destidx, Var "ct.c_byte"]
-  let offset_call2 =
-        simpleCall
-          "addressOffset"
-          [srcmem, srcidx, Var "ct.c_byte"]
-  stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, nbytes]
-
 data ReturnTiming = ReturnTiming | DoNotReturnTiming
 
 compileEntryFun ::
@@ -1116,21 +1100,21 @@ compilePrimValue (IntValue (Int64Value v)) =
   simpleCall "np.int64" [Integer $ toInteger v]
 compilePrimValue (FloatValue (Float16Value v))
   | isInfinite v =
-      if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.float16(np.inf)" else Var "np.float16(-np.inf)"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float16(np.nan)"
   | otherwise = simpleCall "np.float16" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float32Value v))
   | isInfinite v =
-      if v > 0 then Var "np.inf" else Var "-np.inf"
+      if v > 0 then Var "np.float32(np.inf)" else Var "np.float32(-np.inf)"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float32(np.nan)"
   | otherwise = simpleCall "np.float32" [Float $ fromRational $ toRational v]
 compilePrimValue (FloatValue (Float64Value v))
   | isInfinite v =
       if v > 0 then Var "np.inf" else Var "-np.inf"
   | isNaN v =
-      Var "np.nan"
+      Var "np.float64(np.nan)"
   | otherwise = simpleCall "np.float64" [Float $ fromRational $ toRational v]
 compilePrimValue (BoolValue v) = Bool v
 compilePrimValue UnitValue = Var "np.byte(0)"
@@ -1222,8 +1206,8 @@ generateWrite _ _ _ ScalarSpace {} _ = do
 generateWrite dst iexp pt (Imp.Space space) elemexp = do
   writer <- asks envWriteScalar
   writer dst iexp pt space elemexp
-generateWrite dst iexp pt DefaultSpace elemexp =
-  stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, toStorage pt elemexp]
+generateWrite dst iexp _ DefaultSpace elemexp =
+  stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, elemexp]
 
 -- | Compile an 'LMADCopy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.

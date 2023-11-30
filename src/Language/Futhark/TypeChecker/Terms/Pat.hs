@@ -263,11 +263,13 @@ checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
       when (length ps /= length ts) $
         typeError loc mempty $
-          "Pattern #" <> pretty n <> " expects"
-            <+> pretty (length ps)
-            <+> "constructor arguments, but type provides"
-            <+> pretty (length ts)
-            <+> "arguments."
+          "Pattern #"
+            <> pretty n
+            <> " expects"
+              <+> pretty (length ps)
+              <+> "constructor arguments, but type provides"
+              <+> pretty (length ts)
+              <+> "arguments."
       ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
       pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do

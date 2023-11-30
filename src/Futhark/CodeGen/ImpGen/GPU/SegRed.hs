@@ -188,12 +188,12 @@ compileSegRed' pat grid space segbinops map_body_cont
 -- kernels, see note [IntermArrays].
 makeIntermArrays ::
   SegredKind ->
-  SubExp ->
+  Imp.TExp Int64 ->
   SubExp ->
   SubExp ->
   [[Param LParamMem]] ->
   InKernelGen [SegRedIntermediateArrays]
-makeIntermArrays NoncommPrimSegred group_size chunk _ params = do
+makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
   group_worksize <- tvSize <$> (dPrimV "group_worksize" group_worksize_E)
 
   -- compute total amount of lmem needed for the group reduction arrays as well
@@ -254,15 +254,16 @@ makeIntermArrays NoncommPrimSegred group_size chunk _ params = do
     max_elem_size = maximum $ concat elem_sizes
 
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
-makeIntermArrays _ group_size _ num_threads params =
+makeIntermArrays _ group_id group_size _ params =
   fmap (map GeneralSegRedInterms) $
     forM params $
       mapM $ \p ->
         case paramDec p of
           MemArray pt shape _ (ArrayIn mem _) -> do
-            let shape' = Shape [num_threads] <> shape
-            sArray "red_arr" pt shape' mem $
-              LMAD.iota 0 (map pe64 $ shapeDims shape')
+            let shape' = Shape [group_size] <> shape
+            let shape_E = map pe64 $ shapeDims shape'
+            sArray ("red_arr_" ++ prettyString pt) pt shape' mem $
+              LMAD.iota (group_id * product shape_E) shape_E
           _ -> do
             let pt = elemType $ paramType p
                 shape = Shape [group_size]
@@ -327,7 +328,7 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
     let ltid = kernelLocalThreadId constants
     let group_id = kernelGroupId constants
 
-    interms <- makeIntermArrays segred_kind group_size_se chunk_se num_threads params
+    interms <- makeIntermArrays segred_kind (sExt64 group_id) group_size_se chunk_se params
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- Since this is the nonsegmented case, all outer segment IDs must
@@ -397,8 +398,6 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
-    interms <- makeIntermArrays GeneralSegred group_size_se undefined num_threads params
-    let reds_arrs = map groupRedArrs interms
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -412,6 +411,10 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
             (ltid `quot` segment_size_nonzero)
               + (sExt64 virt_group_id * sExt64 segments_per_group)
           index_within_segment = ltid `rem` segment_size
+          group_id = kernelGroupSize constants
+
+      interms <- makeIntermArrays GeneralSegred group_id group_size_se undefined params
+      let reds_arrs = map groupRedArrs interms
 
       dIndexSpace (zip (init gtids) (init dims')) segment_index
       dPrimV_ (last gtids) index_within_segment
@@ -492,10 +495,6 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
       chunk = pe64 chunk_se
       params = map paramOf segbinops
 
-  num_threads <-
-    dPrimV "num_threads_total" $
-      group_size' * num_groups'
-
   groups_per_segment <-
     dPrimVE "groups_per_segment" $
       num_groups' `divUp` sMax64 1 num_segments
@@ -537,9 +536,9 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
 
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
+    let group_id = sExt64 $ kernelGroupId constants
 
-    interms <- makeIntermArrays segred_kind group_size_se chunk_se (tvSize num_threads) params
-
+    interms <- makeIntermArrays segred_kind group_id group_size_se chunk_se params
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
@@ -665,9 +664,6 @@ slugsComm = mconcat . map (segBinOpComm . slugOp)
 slugSplitParams :: SegBinOpSlug -> ([LParam GPUMem], [LParam GPUMem])
 slugSplitParams slug = splitAt (length (slugNeutral slug)) $ slugParams slug
 
-slugSplitParams :: SegBinOpSlug -> ([LParam GPUMem], [LParam GPUMem])
-slugSplitParams slug = splitAt (length (slugNeutral slug)) $ slugParams slug
-
 slugGroupRedArrs :: SegBinOpSlug -> [VName]
 slugGroupRedArrs = groupRedArrs . slugInterms
 
@@ -716,7 +712,6 @@ reductionStageOne segred_kind gtids n global_tid q chunk threads_per_segment slu
                     then copyDWIMFix arr [ltid] (Var acc) (acc_is ++ vec_is)
                     else copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
 
-            let new_lambda = segBinOpLambda $ slugOp slug
             sOp $ Imp.ErrorSync Imp.FenceLocal -- Also implicitly barrier.
             groupReduce group_size new_lambda group_red_arrs
             sOp $ Imp.Barrier Imp.FenceLocal

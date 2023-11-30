@@ -776,20 +776,15 @@ compileOp (SegOp name params seq_task par_task retvals (SchedulerInfo e sched)) 
       Static -> GC.stm [C.cstm|$id:ftask_name.sched = STATIC;|]
 
     -- Generate the nested segop function if available
-    fnpar_task <- case par_task of
+    case par_task of
       Just (ParallelTask nested_code) -> do
         let lexical_nested = lexicalMemoryUsageMC OpaqueKernels $ Function Nothing [] params nested_code
         fnpar_task <- MC.generateParLoopFn lexical_nested (name ++ "_nested_task") nested_code fstruct free retval
         GC.stm [C.cstm|$id:ftask_name.nested_fn = $id:fnpar_task;|]
-        pure $ zip [fnpar_task] [True]
-      Nothing -> do
+      Nothing ->
         GC.stm [C.cstm|$id:ftask_name.nested_fn=NULL;|]
-        pure mempty
 
     GC.stm [C.cstm|return scheduler_prepare_task(&ctx->scheduler, &$id:ftask_name);|]
-
-    -- Add profile fields for -P option
-    mapM_ GC.profileReport $ MC.multiCoreReport $ (fpar_task, True) : fnpar_task
 
   schedn <- MC.multicoreDef "schedule_shim" $ \s ->
     pure

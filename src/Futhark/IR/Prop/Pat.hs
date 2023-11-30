@@ -2,7 +2,7 @@
 
 -- | Inspecing and modifying t'Pat's, function parameters and
 -- pattern elements.
-module Futhark.IR.Prop.Patterns
+module Futhark.IR.Prop.Pat
   ( -- * Function parameters
     paramIdent,
     paramType,

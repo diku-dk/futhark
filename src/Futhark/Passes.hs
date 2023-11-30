@@ -93,8 +93,6 @@ gpuPipeline =
         tileLoops,
         simplifyGPU,
         histAccsGPU,
-        babysitKernels,
-        simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,
@@ -105,7 +103,12 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
+        inPlaceLoweringGPU,
+        babysitKernels,
+        -- Important to simplify after babysitting in order to fix up
+        -- redundant manifests.
+        simplifyGPU,
+        performCSE True
       ]
 
 -- | The pipeline used by the sequential backends.  Turns all

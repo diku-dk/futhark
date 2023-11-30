@@ -316,9 +316,10 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
   let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
-            sWhen in_block_thread_active $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
             inactive <-
               dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
@@ -328,9 +329,11 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
             -- The convoluted control flow is to ensure all threads
             -- hit this barrier (if applicable).
             when array_scan barrier
-            sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              . sUnless inactive
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -522,10 +525,11 @@ groupScan seg_flag arrs_full_size w lam arrs = do
           when (isPrimParam p) $
             copyDWIMFix arr [ltid] (Var $ paramName p) []
 
-  sComment "carry-in for every block except the first" $ do
-    sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_x
-    sComment "write final result" $ sUnless no_carry_in write_final_result
+  sComment "carry-in for every block except the first" $
+    localOps threadOperations $ do
+      sComment "read operands" read_carry_in
+      sComment "perform operation" op_to_x
+      sComment "write final result" $ sUnless no_carry_in write_final_result
 
   barrier
 
@@ -576,7 +580,7 @@ groupReduceWithOffset offset w lam arrs = do
 
       writeArrayOpResult param arr =
         unless (isPrimParam param) $
-          copyDWIMFix arr [0] (Var $ paramName param) []
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
@@ -1366,7 +1370,7 @@ iotaForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam n int32,
+            Imp.ScalarParam n int64,
             Imp.ScalarParam x $ IntType bt,
             Imp.ScalarParam s $ IntType bt
           ]
@@ -1379,7 +1383,7 @@ iotaForType bt = do
       arr <-
         sArray "arr" (IntType bt) shape mem $
           LMAD.iota 0 (map pe64 (shapeDims shape))
-      sIotaKernel arr (sExt64 n') x' s' bt
+      sIotaKernel arr n' x' s' bt
 
   pure fname
 
@@ -1413,8 +1417,9 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map pe64 rws
+compileThreadResult _ pe (WriteReturns _ arr dests) = do
+  arr_t <- lookupType arr
+  let rws' = map pe64 $ arrayDims arr_t
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap pe64 slice
         write = inBounds slice' rws'

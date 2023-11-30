@@ -26,6 +26,7 @@ module Futhark.IR.TypeCheck
     checkExp,
     checkStms,
     checkStm,
+    checkSlice,
     checkType,
     checkExtType,
     matchExtPat,
@@ -517,9 +518,7 @@ checkAnnotation desc t1 t2
 require :: (Checkable rep) => [Type] -> SubExp -> TypeM rep ()
 require ts se = do
   t <- checkSubExp se
-  unless (t `elem` ts) $
-    bad $
-      UnexpectedType (BasicOp $ SubExp se) t ts
+  unless (t `elem` ts) $ bad $ UnexpectedType (BasicOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
 requireI :: (Checkable rep) => [Type] -> VName -> TypeM rep ()
@@ -562,7 +561,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
-      when (s `notElem` known) $
+      unless (s `elem` known) $
         Left . Error [] . TypeError $
           "Opaque not defined before first use: " <> nameToText s
     checkEntryPointType _ (TypeTransparent _) = pure ()
@@ -824,6 +823,13 @@ checkBody (Body (_, rep) stms res) = do
   where
     bound_here = namesFromList $ M.keys $ scopeOf stms
 
+-- | Check a slicing operation of an array of the provided type.
+checkSlice :: (Checkable rep) => Type -> Slice SubExp -> TypeM rep ()
+checkSlice vt (Slice idxes) = do
+  when (arrayRank vt /= length idxes) . bad $
+    SlicingError (arrayRank vt) (length idxes)
+  mapM_ (traverse $ require [Prim int64]) idxes
+
 checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
@@ -849,26 +855,20 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident (Slice idxes)) = do
+checkBasicOp (Index ident slice) = do
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt /= length idxes) $
-    bad $
-      SlicingError (arrayRank vt) (length idxes)
-  mapM_ checkDimIndex idxes
-checkBasicOp (Update _ src (Slice idxes) se) = do
+  checkSlice vt slice
+checkBasicOp (Update _ src slice se) = do
   (src_shape, src_pt) <- checkArrIdent src
-  when (shapeRank src_shape /= length idxes) $
-    bad $
-      SlicingError (shapeRank src_shape) (length idxes)
 
   se_aliases <- subExpAliasesM se
   when (src `nameIn` se_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
-  mapM_ checkDimIndex idxes
-  require [arrayOf (Prim src_pt) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
+  checkSlice (arrayOf (Prim src_pt) src_shape NoUniqueness) slice
+  require [arrayOf (Prim src_pt) (sliceShape slice) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
@@ -1236,13 +1236,6 @@ checkFlatSlice ::
 checkFlatSlice (FlatSlice offset idxs) = do
   require [Prim int64] offset
   mapM_ checkFlatDimIndex idxs
-
-checkDimIndex ::
-  (Checkable rep) =>
-  DimIndex SubExp ->
-  TypeM rep ()
-checkDimIndex (DimFix i) = require [Prim int64] i
-checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int64]) [i, n, s]
 
 checkStm ::
   (Checkable rep) =>

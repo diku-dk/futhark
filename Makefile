@@ -5,6 +5,8 @@
 
 PREFIX?=$(HOME)/.local
 
+UNAME:=$(shell uname)
+
 # Disable all implicit rules.
 .SUFFIXES:
 
@@ -23,7 +25,8 @@ build:
 	cabal build
 
 install: build
-	install -D "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
+	install -d $(PREFIX)/bin/
+	install "$$(cabal -v0 list-bin exe:futhark)" $(PREFIX)/bin/futhark
 
 docs:
 	cabal haddock \

@@ -1,9 +1,5 @@
 // Start of context.h
 
-// Eventually it would be nice to move the context definition in here
-// instead of generating it in the compiler.  For now it defines
-// various helper functions that must be available.
-
 // Internal functions.
 
 static void set_error(struct futhark_context* ctx, char *error) {
@@ -72,6 +68,17 @@ static void host_free(struct futhark_context* ctx,
   }
 }
 
+static void add_event(struct futhark_context* ctx,
+                      const char* name,
+                      char* description,
+                      void* data,
+                      event_report_fn f) {
+  if (ctx->logging) {
+    fprintf(ctx->log, "Event: %s\n%s\n", name, description);
+  }
+  add_event_to_list(&ctx->event_list, name, description, data, f);
+}
+
 struct futhark_context_config* futhark_context_config_new(void) {
   struct futhark_context_config* cfg = malloc(sizeof(struct futhark_context_config));
   if (cfg == NULL) {
@@ -96,6 +103,7 @@ struct futhark_context_config* futhark_context_config_new(void) {
 void futhark_context_config_free(struct futhark_context_config* cfg) {
   assert(!cfg->in_use);
   backend_context_config_teardown(cfg);
+  free(cfg->cache_fname);
   free(cfg->tuning_params);
   free(cfg);
 }
@@ -111,6 +119,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
+  event_list_init(&ctx->event_list);
   ctx->peak_mem_usage_default = 0;
   ctx->cur_mem_usage_default = 0;
   ctx->constants = malloc(sizeof(struct constants));
@@ -137,7 +146,9 @@ void futhark_context_free(struct futhark_context* ctx) {
   backend_context_teardown(ctx);
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
+  event_list_free(&ctx->event_list);
   free(ctx->constants);
+  free(ctx->error);
   free_lock(&ctx->lock);
   free_lock(&ctx->error_lock);
   ctx->cfg->in_use = 0;

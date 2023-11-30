@@ -388,7 +388,8 @@ checkExp (RecordLit fs loc) = do
             "Field"
               <+> dquotes (pretty f)
               <+> "previously defined at"
-              <+> pretty (locStrRel rloc sloc) <> "."
+              <+> pretty (locStrRel rloc sloc)
+              <> "."
         Nothing -> pure ()
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
@@ -630,7 +631,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
                 let f x = if x == v then Just (ExpSubst e') else Nothing
                 pure (applySubst f body_t, [])
           _ ->
-            unscopeType loc (patNames pat') body_t
+            unscopeType loc (map sizeName sizes' <> patNames pat') body_t
 
       pure $
         AppExp
@@ -1067,13 +1068,13 @@ checkApply loc (fname, prev_applied) ftype argexp = do
           <+> fname'
           <+> "to argument #"
           <> pretty (prev_applied + 1)
-          <+> dquotes (shorten $ group $ pretty argexp)
+            <+> dquotes (shorten $ group $ pretty argexp)
           <> ","
-          </> "as"
-          <+> fname'
-          <+> "only takes"
-          <+> pretty prev_applied
-          <+> arguments
+            </> "as"
+            <+> fname'
+            <+> "only takes"
+            <+> pretty prev_applied
+            <+> arguments
           <> "."
   where
     arguments
@@ -1234,19 +1235,28 @@ causalityCheck binding_body = do
           <+> "needed for type of"
           <+> what
           <> colon
-          </> indent 2 (pretty t)
-          </> "But"
-          <+> dquotes (prettyName d)
-          <+> "is computed at"
-          <+> pretty (locStrRel loc dloc)
+            </> indent 2 (pretty t)
+            </> "But"
+            <+> dquotes (prettyName d)
+            <+> "is computed at"
+            <+> pretty (locStrRel loc dloc)
           <> "."
-          </> ""
-          </> "Hint:"
-          <+> align
-            ( textwrap "Bind the expression producing"
-                <+> dquotes (prettyName d)
-                <+> "with 'let' beforehand."
-            )
+            </> ""
+            </> "Hint:"
+            <+> align
+              ( textwrap "Bind the expression producing"
+                  <+> dquotes (prettyName d)
+                  <+> "with 'let' beforehand."
+              )
+
+mustBeIrrefutable :: (MonadTypeChecker f) => Pat StructType -> f ()
+mustBeIrrefutable p = do
+  case unmatched [p] of
+    [] -> pure ()
+    ps' ->
+      typeError p mempty . withIndexLink "refutable-pattern" $
+        "Refutable pattern not allowed here.\nUnmatched cases:"
+          </> indent 2 (stack (map pretty ps'))
 
 -- | Traverse the expression, emitting warnings and errors for various
 -- problems:
@@ -1266,6 +1276,18 @@ localChecks = void . check
           typeError loc mempty . withIndexLink "unmatched-cases" $
             "Unmatched cases in match expression:"
               </> indent 2 (stack (map pretty ps'))
+    check e@(AppExp (LetPat _ p _ _ _) _) =
+      mustBeIrrefutable p *> recurse e
+    check e@(Lambda ps _ _ _ _) =
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (LetFun _ (_, ps, _, _, _) _ _) _) =
+      mapM_ (mustBeIrrefutable . fmap toStruct) ps *> recurse e
+    check e@(AppExp (Loop _ p _ form _ _) _) = do
+      mustBeIrrefutable (fmap toStruct p)
+      case form of
+        ForIn form_p _ -> mustBeIrrefutable form_p
+        _ -> pure ()
+      recurse e
     check e@(IntLit x ty loc) =
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI x t) x t loc
@@ -1349,6 +1371,7 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
     causalityCheck body''
 
     -- Check for various problems.
+    mapM_ (mustBeIrrefutable . fmap toStruct) params'
     localChecks body''
 
     bindSpaced [(Term, fname)] $ do
@@ -1393,7 +1416,7 @@ fixOverloadedTypes tyvars_at_toplevel =
             "Type is ambiguous (could be one of"
               <+> commasep (map pretty ots)
               <> ")."
-              </> "Add a type annotation to disambiguate the type."
+                </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
       unify usage (Scalar (TypeVar mempty (qualName v) [])) $
@@ -1416,7 +1439,7 @@ fixOverloadedTypes tyvars_at_toplevel =
         "Type is ambiguous (must be a sum type with constructors:"
           <+> pretty (Sum cs)
           <> ")."
-          </> "Add a type annotation to disambiguate the type."
+            </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
@@ -1540,10 +1563,10 @@ verifyFunctionParams fname params =
               </> "refers to size"
               <+> dquotes (prettyName d)
               <> comma
-              </> textwrap "which will not be accessible to the caller"
+                </> textwrap "which will not be accessible to the caller"
               <> comma
-              </> textwrap "possibly because it is nested in a tuple or record."
-              </> textwrap "Consider ascribing an explicit type that does not reference "
+                </> textwrap "possibly because it is nested in a tuple or record."
+                </> textwrap "Consider ascribing an explicit type that does not reference "
               <> dquotes (prettyName d)
               <> "."
       | otherwise = verifyParams forbidden' ps
@@ -1638,7 +1661,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
               <+> "in parameter of"
               <+> dquotes (prettyName defname)
               <> ", which is inferred as:"
-              </> indent 2 (pretty t)
+                </> indent 2 (pretty t)
       | k `S.member` produced_sizes =
           pure $ Just $ Right k
     closeOver (_, _) =

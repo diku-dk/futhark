@@ -253,6 +253,8 @@ intraGroupStm stm@(Let pat aux e) = do
             =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
     Op (Screma w arrs form)
       | Just (scans, mapfun) <- isScanomapSOAC form,
+        -- FIXME: Futhark.CodeGen.ImpGen.GPU.Group.compileGroupOp
+        -- cannot handle multiple scan operators yet.
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun
               mapfun' = soacsLambdaToGPU mapfun
@@ -260,13 +262,19 @@ intraGroupStm stm@(Let pat aux e) = do
             addStms =<< segScan lvl pat mempty w [SegBinOp Noncommutative scanfun' nes mempty] mapfun' arrs [] []
           parallelMin [w]
     Op (Screma w arrs form)
-      | Just (reds, map_lam) <- isRedomapSOAC form,
-        Reduce comm red_lam nes <- singleReduce reds -> do
-          let red_lam' = soacsLambdaToGPU red_lam
+      | Just (reds, map_lam) <- isRedomapSOAC form -> do
+          let onReduce (Reduce comm red_lam nes) =
+                SegBinOp comm (soacsLambdaToGPU red_lam) nes mempty
+              reds' = map onReduce reds
               map_lam' = soacsLambdaToGPU map_lam
           certifying (stmAuxCerts aux) $
-            addStms =<< segRed lvl pat mempty w [SegBinOp comm red_lam' nes mempty] map_lam' arrs [] []
+            addStms =<< segRed lvl pat mempty w reds' map_lam' arrs [] []
           parallelMin [w]
+    Op (Screma w arrs form) ->
+      -- This screma is too complicated for us to immediately do
+      -- anything, so split it up and try again.
+      mapM_ intraGroupStm . fmap (certify (stmAuxCerts aux)) . snd
+        =<< runBuilderT (dissectScrema pat w form arrs) (scopeForSOACs scope)
     Op (Hist w arrs ops bucket_fun) -> do
       ops' <- forM ops $ \(HistOp num_bins rf dests nes op) -> do
         (op', nes', shape) <- determineReduceOp op nes
@@ -292,15 +300,14 @@ intraGroupStm stm@(Let pat aux e) = do
       space <- mkSegSpace [(write_i, w)]
 
       let lam' = soacsLambdaToGPU lam
-          (dests_ws, _, _) = unzip3 dests
           krets = do
-            (a_w, a, is_vs) <-
+            (_a_w, a, is_vs) <-
               groupScatterResults dests $ bodyResult $ lambdaBody lam'
             let cs =
                   foldMap (foldMap resCerts . fst) is_vs
                     <> foldMap (resCerts . snd) is_vs
                 is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-            pure $ WriteReturns cs a_w a is_vs'
+            pure $ WriteReturns cs a is_vs'
           inputs = do
             (p, p_a) <- zip (lambdaParams lam') ivs
             pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -311,9 +318,8 @@ intraGroupStm stm@(Let pat aux e) = do
           addStms $ bodyStms $ lambdaBody lam'
 
       certifying (stmAuxCerts aux) $ do
-        let ts = zipWith (stripArray . length) dests_ws $ patTypes pat
-            body = KernelBody () kstms krets
-        letBind pat $ Op $ SegOp $ SegMap lvl space ts body
+        let body = KernelBody () kstms krets
+        letBind pat $ Op $ SegOp $ SegMap lvl space (patTypes pat) body
 
       parallelMin [w]
     _ ->

@@ -259,7 +259,8 @@ evalTypeExp ote@TEApply {} = do
           <+> "requires"
           <+> pretty (length ps)
           <+> "arguments, but provided"
-          <+> pretty (length targs) <> "."
+          <+> pretty (length targs)
+          <> "."
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
       pure
@@ -314,7 +315,8 @@ evalTypeExp ote@TEApply {} = do
         "Type argument"
           <+> pretty a
           <+> "not valid for a type parameter"
-          <+> pretty p <> "."
+          <+> pretty p
+          <> "."
 
 -- | Check a type expression, producing:
 --
@@ -359,7 +361,8 @@ checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
               "Name"
                 <+> dquotes (pretty v)
                 <+> "also bound at"
-                <+> pretty (locStr prev_loc) <> "."
+                <+> pretty (locStr prev_loc)
+                <> "."
         Nothing ->
           modify $ M.insert (ns, v) loc
 
@@ -379,7 +382,8 @@ checkForDuplicateNamesInType = check mempty
         "Name"
           <+> dquotes (pretty v)
           <+> "also bound at"
-          <+> pretty (locStr prev_loc) <> "."
+          <+> pretty (locStr prev_loc)
+          <> "."
 
     check seen (TEArrow (Just v) t1 t2 loc)
       | Just prev_loc <- M.lookup v seen =
@@ -433,7 +437,8 @@ checkTypeParams ps m =
               "Type parameter"
                 <+> dquotes (pretty v)
                 <+> "previously defined at"
-                <+> pretty (locStr prev) <> "."
+                <+> pretty (locStr prev)
+                <> "."
         Nothing -> do
           modify $ M.insert (ns, v) loc
           lift $ checkName ns v loc

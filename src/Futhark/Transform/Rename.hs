@@ -35,7 +35,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.FreshNames hiding (newName)
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.MonadFreshNames (MonadFreshNames (..), modifyNameSource, newName)

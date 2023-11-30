@@ -381,26 +381,6 @@ failureMsgFunction failures =
                   return strdup("Unknown error.  This is a compiler bug.");
                 }|]
 
-genProfileReport :: [Name] -> GC.CompilerM op s ()
-genProfileReport cost_centres =
-  GC.profileReport
-    [C.citem|{struct cost_centres* ccs = cost_centres_new();
-              $stms:(map initCostCentre (def_cost_centres<>cost_centres))
-              tally_profiling_records(ctx, ccs);
-              cost_centre_report(ccs, &builder);
-              cost_centres_free(ccs);
-              }|]
-  where
-    def_cost_centres =
-      [ "copy_dev_to_dev",
-        "copy_dev_to_host",
-        "copy_host_to_dev",
-        "copy_scalar_to_dev",
-        "copy_scalar_from_dev"
-      ]
-    initCostCentre v =
-      [C.cstm|cost_centres_init(ccs, $string:(nameToString v));|]
-
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateGPUBoilerplate ::
@@ -436,5 +416,3 @@ generateGPUBoilerplate gpu_program backendH kernels types failures = do
   GC.generateProgramStruct
 
   GC.onClear [C.citem|if (ctx->error == NULL) { gpu_free_all(ctx); }|]
-
-  genProfileReport kernels

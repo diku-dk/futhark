@@ -12,6 +12,7 @@ module Futhark.Bench
     RunOptions (..),
     prepareBenchmarkProgram,
     CompileOptions (..),
+    module Futhark.Profile,
   )
 where
 
@@ -30,6 +31,7 @@ import Data.Maybe
 import Data.Text qualified as T
 import Data.Time.Clock
 import Data.Vector.Unboxed qualified as U
+import Futhark.Profile
 import Futhark.Server
 import Futhark.Test
 import Futhark.Util (showText)
@@ -47,20 +49,30 @@ newtype RunResult = RunResult {runMicroseconds :: Int}
 -- | The measurements resulting from various successful runs of a
 -- benchmark (same dataset).
 data Result = Result
-  { runResults :: [RunResult],
+  { -- | Runtime of every run.
+    runResults :: [RunResult],
+    -- | Memory usage.
     memoryMap :: M.Map T.Text Int,
-    stdErr :: Maybe T.Text
+    -- | The error output produced during execution.  Often 'Nothing'
+    -- for space reasons, and otherwise only the output from the last
+    -- run.
+    stdErr :: Maybe T.Text,
+    -- | Profiling report.  This will have been measured based on the
+    -- last run.
+    report :: Maybe ProfilingReport
   }
   deriving (Eq, Show)
 
 -- | The results for a single named dataset is either an error message, or
--- runtime measurements, the number of bytes used, and the stderr that was
--- produced.
+-- a result.
 data DataResult = DataResult T.Text (Either T.Text Result)
   deriving (Eq, Show)
 
 -- | The results for all datasets for some benchmark program.
-data BenchResult = BenchResult FilePath [DataResult]
+data BenchResult = BenchResult
+  { benchResultProg :: FilePath,
+    benchResultResults :: [DataResult]
+  }
   deriving (Eq, Show)
 
 newtype DataResults = DataResults {unDataResults :: [DataResult]}
@@ -68,10 +80,13 @@ newtype DataResults = DataResults {unDataResults :: [DataResult]}
 newtype BenchResults = BenchResults {unBenchResults :: [BenchResult]}
 
 instance JSON.ToJSON Result where
-  toJSON (Result runres memmap err) = JSON.toJSON (runres, memmap, err)
+  toJSON (Result runres memmap err profiling) =
+    JSON.toJSON (runres, memmap, err, profiling)
 
 instance JSON.FromJSON Result where
-  parseJSON = fmap (\(runres, memmap, err) -> Result runres memmap err) . JSON.parseJSON
+  parseJSON = fmap f . JSON.parseJSON
+    where
+      f (runres, memmap, err, profiling) = Result runres memmap err profiling
 
 instance JSON.ToJSON RunResult where
   toJSON = JSON.toJSON . runMicroseconds
@@ -93,20 +108,27 @@ instance JSON.FromJSON DataResults where
         DataResult (JSON.toText k)
           <$> ((Right <$> success v) <|> (Left <$> JSON.parseJSON v))
       success = JSON.withObject "result" $ \o ->
-        Result <$> o JSON..: "runtimes" <*> o JSON..: "bytes" <*> o JSON..:? "stderr"
+        Result
+          <$> o JSON..: "runtimes"
+          <*> o JSON..: "bytes"
+          <*> o JSON..:? "stderr"
+          <*> o JSON..:? "profiling"
 
 dataResultJSON :: DataResult -> (JSON.Key, JSON.Value)
 dataResultJSON (DataResult desc (Left err)) =
   (JSON.fromText desc, JSON.toJSON err)
-dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt))) =
+dataResultJSON (DataResult desc (Right (Result runtimes bytes progerr_opt profiling_opt))) =
   ( JSON.fromText desc,
     JSON.object $
       [ ("runtimes", JSON.toJSON $ map runMicroseconds runtimes),
         ("bytes", JSON.toJSON bytes)
       ]
-        ++ case progerr_opt of
+        <> case progerr_opt of
           Nothing -> []
           Just progerr -> [("stderr", JSON.toJSON progerr)]
+        <> case profiling_opt of
+          Nothing -> []
+          Just profiling -> [("profiling", JSON.toJSON profiling)]
   )
 
 benchResultJSON :: BenchResult -> (JSON.Key, JSON.Value)
@@ -152,7 +174,10 @@ data RunOptions = RunOptions
     runConvergenceMaxTime :: NominalDiffTime,
     -- | Invoked for every runtime measured during the run.  Can be
     -- used to provide a progress bar.
-    runResultAction :: (Int, Maybe Double) -> IO ()
+    runResultAction :: (Int, Maybe Double) -> IO (),
+    -- | Perform a final run at the end with profiling information
+    -- enabled.
+    runProfile :: Bool
   }
 
 -- | A list of @(autocorrelation,rse)@ pairs.  When the
@@ -275,7 +300,7 @@ benchmarkDataset ::
   Values ->
   Maybe Success ->
   FilePath ->
-  IO (Either T.Text ([RunResult], T.Text))
+  IO (Either T.Text ([RunResult], T.Text, ProfilingReport))
 benchmarkDataset server opts futhark program entry input_spec expected_spec ref_out = runExceptT $ do
   output_types <- cmdEither $ cmdOutputs server entry
   input_types <- cmdEither $ cmdInputs server entry
@@ -283,6 +308,8 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
       ins = ["in" <> showText i | i <- [0 .. length input_types - 1]]
 
   cmdMaybe . liftIO $ cmdClear server
+
+  cmdMaybe . liftIO $ cmdPauseProfiling server
 
   let freeOuts = cmdMaybe (cmdFree server outs)
       freeIns = cmdMaybe (cmdFree server ins)
@@ -314,11 +341,21 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
     xs <- runConvergence (freeOuts *> doRun) opts ys
 
+    -- Possibly a profiled run at the end.
+    profile_log <-
+      if not (runProfile opts)
+        then pure Nothing
+        else do
+          cmdMaybe . liftIO $ cmdUnpauseProfiling server
+          profile_log <- freeOuts *> doRun
+          cmdMaybe . liftIO $ cmdPauseProfiling server
+          pure $ Just profile_log
+
     vs <- readResults server outs <* freeOuts
 
-    pure (vs, DL.toList xs)
+    pure (vs, DL.toList xs, profile_log)
 
-  (vs, call_logs) <- case maybe_call_logs of
+  (vs, call_logs, profile_log) <- case maybe_call_logs of
     Nothing ->
       throwError . T.pack $
         "Execution exceeded " ++ show (runTimeout opts) ++ " seconds."
@@ -327,6 +364,10 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
   freeIns
 
   report <- cmdEither $ cmdReport server
+
+  report' <-
+    maybe (throwError "Program produced invalid profiling report.") pure $
+      profilingReportFromText (T.unlines report)
 
   maybe_expected <-
     liftIO $ maybe (pure Nothing) (fmap Just . getExpectedValues) expected_spec
@@ -337,7 +378,8 @@ benchmarkDataset server opts futhark program entry input_spec expected_spec ref_
 
   pure
     ( map fst call_logs,
-      T.unlines $ map (T.unlines . snd) call_logs <> report
+      T.unlines $ snd $ fromMaybe (last call_logs) profile_log,
+      report'
     )
   where
     getExpectedValues (SuccessValues vs) =

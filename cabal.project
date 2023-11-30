@@ -1,5 +1,7 @@
 packages: futhark.cabal
-index-state: 2023-09-21T04:48:56Z
+index-state: 2023-11-22T20:04:53Z
 
 package futhark
   ghc-options: -j -fwrite-ide-info -hiedir=.hie
+
+allow-newer: versions:base, versions:text, generic-lens:text, generic-lens-core:text

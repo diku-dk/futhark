@@ -15,6 +15,98 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Incorrect type checking of `let` binding with explicit size
+  quantification, where size appears in type of body (#2048).
+
+* GPU code generation for non-commutative non-segmented reductions
+  with array operands (#2051).
+
+## [0.25.9]
+
+### Added
+
+* The `cuda` and `hip` backends now generate faster code for `scan`s
+  that have been fused with `map`s that internally produce arrays.
+  Work by Anders Holst and Christian Påbøl Jacobsen.
+
+* `f16.ldexp`, `f32.ldexp`, `f64.ldexp`, corresponding to the
+  functions in the C math library.
+
+### Fixed
+
+* Incorrect data dependency information for `scatter` and `vjp` could
+  cause invalid simplification.
+
+* Barrier divergence in certain complicated kernels that contain both
+  bounds checks and intragroup scans.
+
+## [0.25.8]
+
+### Added
+
+* FutharkScript now has a `$loadbytes` builtin function for reading
+  arbitrary bytes into Futhark programs.
+
+* `futhark profile` can now process reports produced by the C API
+  function `futhark_context_report()`.
+
+* `futhark profile` now also produces a timeline of events.
+
+### Fixed
+
+* `futhark literate` no longer fails if the final line is a directive
+  without a trailing newline.
+
+* Parser now allows arbitrary patterns in function parameters and
+  `let` bindings, although the type checker will reject any that are
+  refutable (#2017).
+
+* Avoid generating invalid code in cases where deduplicated sum types
+  are exposed through entry points (#1960).
+
+* A bug in data dependency analysis for histogram operations would
+  mistakenly classify some loop parameters as redundant, leaving to
+  code being removed.
+
+## [0.25.7]
+
+### Added
+
+* `futhark autotune` now supports `hip` backend.
+
+* Better parallelisation of `scatter` when the target is
+  multidimensional (#2035).
+
+### Fixed
+
+* Very large `iota`s now work.
+
+* Lambda lifting in `while` conditions (#2038).
+
+* Size expressions in local function parameters had an interesting
+  interaction with defunctionalisation (#2040).
+
+* The `store` command in server executables did not properly
+  synchronise when storing opaque values, which would lead to
+  use-after-free errors.
+
+## [0.25.6]
+
+### Added
+
+* The various C API functions that accept strings now perform a copy,
+  meaning the caller does not have to keep the strings alive.
+
+* Slightly better lexer error messages.
+
+* Fusion across slicing is now possible in some cases.
+
+* New tool: `futhark profile`.
+
+### Fixed
+
+* Inefficient locking for certain segmented histograms (#2024).
+
 ## [0.25.5]
 
 ### Added
