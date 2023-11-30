@@ -25,9 +25,6 @@ class (PrimExpAnalysis rep) => Layout rep where
 instance Layout GPU where
   permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses =
     do
-      -- Create a candidate permutation
-      let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
-
       -- Dont accept indices where the last index is invariant
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
@@ -37,6 +34,9 @@ instance Layout GPU where
       let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
       let primExps = map (`M.lookup` primExpTable) deps
       let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
+
+      -- Create a candidate permutation
+      let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
 
       -- Check if we want to manifest this array with the permutation
       if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
@@ -94,8 +94,8 @@ reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses = do
-  -- Create a candidate permutation
-  let perm = map fst $ sortMC (zip arr_layout dimAccesses)
+  -- Dont accept indices where the last index is invariant
+  let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
   -- Check if any of the dependencies are too complex to reason about
   let dimAccesses' = filter (isJust . originalVar) dimAccesses
@@ -104,8 +104,11 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
   let primExps = map (`M.lookup` primExpTable) deps
   let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
 
+  -- Create a candidate permutation
+  let perm = map fst $ sortMC (zip arr_layout dimAccesses)
+
   -- Check if we want to manifest this array with the permutation
-  if inscrutable || commonPermutationEliminators perm nest
+  if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
     then Nothing
     else Just perm
 
@@ -116,20 +119,17 @@ instance Layout MC where
 commonPermutationEliminators :: [Int] -> [BodyType] -> Bool
 commonPermutationEliminators perm nest = do
   -- Don't manifest if the permutation is the permutation is invalid
-  let is_invalid_perm =
-        -- Don't manifest if the permutation is the identity permutation
-        perm `L.isPrefixOf` [0 ..]
-          -- or is not a transpose.
-          || (isNothing . isMapTranspose) perm
-          -- or is not a permutation.
-          || not (L.sort perm `L.isPrefixOf` [0 ..])
-          -- or if the last idx remains last
-          || (last perm == length perm - 1)
-
+  let is_invalid_perm = not (L.sort perm `L.isPrefixOf` [0 ..])
+  -- Don't manifest if the permutation is the identity permutation
+  let is_identity = perm `L.isPrefixOf` [0 ..]
+  -- or is not a transpose.
+  let inefficient_transpose = (isNothing . isMapTranspose) perm
+  -- or if the last idx remains last
+  let static_last_idx = last perm == length perm - 1
   -- Don't manifest if the array is defined inside a segOp or loop body
   let inside_undesired = any undesired nest
 
-  is_invalid_perm || inside_undesired
+  is_invalid_perm || is_identity || inefficient_transpose || static_last_idx || inside_undesired
   where
     undesired :: BodyType -> Bool
     undesired bodyType = case bodyType of
