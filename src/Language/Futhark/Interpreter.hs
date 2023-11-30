@@ -90,14 +90,14 @@ instance Functor ExtOp where
 
 type Stack = [StackFrame]
 
-type Sizes = M.Map VName Int64
+type Exts = M.Map VName Value
 
 -- | The monad in which evaluation takes place.
 newtype EvalM a
   = EvalM
       ( ReaderT
           (Stack, M.Map ImportName Env)
-          (StateT Sizes (F ExtOp))
+          (StateT Exts (F ExtOp))
           a
       )
   deriving
@@ -106,7 +106,7 @@ newtype EvalM a
       Functor,
       MonadFree ExtOp,
       MonadReader (Stack, M.Map ImportName Env),
-      MonadState Sizes
+      MonadState Exts
     )
 
 runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
@@ -129,11 +129,11 @@ stacktrace = asks $ map stackFrameLoc . fst
 lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
-putExtSize :: VName -> Int64 -> EvalM ()
+putExtSize :: VName -> Value -> EvalM ()
 putExtSize v x = modify $ M.insert v x
 
-getSizes :: EvalM Sizes
-getSizes = get
+getExts :: EvalM Exts
+getExts = get
 
 -- | Disregard any existential sizes computed during this action.
 -- This is used so that existentials computed during one iteration of
@@ -145,8 +145,13 @@ localExts m = do
   put s
   pure x
 
-extSizeEnv :: EvalM Env
-extSizeEnv = i64Env <$> getSizes
+extEnv :: EvalM Env
+extEnv = valEnv . M.map f <$> getExts
+  where
+    f v =
+      ( Nothing,
+        v
+      )
 
 valueStructType :: ValueType -> StructType
 valueStructType = first $ flip sizeFromInteger mempty . toInteger
@@ -296,7 +301,8 @@ lookupType = lookupInEnv envType
 -- | An expression evaluator that embeds an environment.
 type Eval = Exp -> EvalM Value
 
--- | A TermValue with a 'Nothing' type annotation is an intrinsic.
+-- | A TermValue with a 'Nothing' type annotation is an intrinsic or
+-- an existential.
 data TermBinding
   = TermValue (Maybe T.BoundV) Value
   | -- | A polymorphic value that must be instantiated.  The
@@ -636,7 +642,7 @@ expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env)
 
 evalWithExts :: Env -> EvalM Eval
 evalWithExts env = do
-  size_env <- extSizeEnv
+  size_env <- extEnv
   pure $ eval $ size_env <> env
 
 -- | Evaluate all possible sizes, except those that contain free
@@ -750,16 +756,17 @@ evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
   v <- eval env e
   case ext of
-    Just ext' -> putExtSize ext' $ asInt64 v
-    Nothing -> pure ()
+    Just ext' -> putExtSize ext' v
+    _ -> pure ()
   pure v
 
 returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
-  mapM_ (uncurry putExtSize) . M.toList $
-    resolveExistentials retext (expandType env $ toStruct ret) $
-      valueShape v
+  mapM_ (uncurry putExtSize . second (ValuePrim . SignedValue . Int64Value))
+    . M.toList
+    $ resolveExistentials retext (expandType env $ toStruct ret)
+    $ valueShape v
   pure v
 
 evalAppExp :: Env -> AppExp -> EvalM Value
@@ -1193,7 +1200,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
-  sizes <- extSizeEnv
+  sizes <- extEnv
   pure $
     env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
@@ -1941,7 +1948,7 @@ interpretDecs ctx decs =
     -- We need to extract any new existential sizes and add them as
     -- ordinary bindings to the context, or we will not be able to
     -- look up their values later.
-    sizes <- extSizeEnv
+    sizes <- extEnv
     pure $ env <> sizes
 
 interpretDec :: Ctx -> Dec -> F ExtOp Ctx
