@@ -274,6 +274,7 @@ seqStm' env (Let pat aux
       -- we need numResConsumed because reduction result types are unchanged
       let numResConsumed = numArgsConsumedBySegop binops
       let space' = SegSpace (segFlat space) [(tid, grpSize env')]
+
       tps <- mapM lookupType reds
       let ts' = L.map (stripArray 1) tps
       pat' <- updateSegOpPatTypes numResConsumed pat tps
@@ -366,12 +367,16 @@ seqStm' env (Let pat aux
         pure (usedRes ++ fused, lvl', space', types')
       
       tps <- mapM lookupType scans'
-      let tps' = mapM setArrayShape tps (Shape [grpsizeOld env])
+      let shapes = L.map arrayShape tps
+      let shapes' = L.map (\s -> setOuterDims s 2 (Shape [grpsizeOld env])) shapes
+      let tps' = L.map (\(t, s) -> setArrayShape t s) (L.zip tps shapes')
+      -- let tps' = mapM setArrayShape tps (Shape [grpsizeOld env])
       pat' <- updateSegOpPatTypes 0 pat tps'
       lift $
-        do forM_ (L.zip (patElems pat') scans') (\(p, s) ->
-            let exp' = BasicOp $ Reshape ReshapeArbitrary (Shape [grpsizeOld env]) s
-            in addStm $ Let (Pat [p]) aux exp')
+        do forM_ (L.zip (patElems pat') scans') (\(p, s) -> do
+            let shape = arrayShape $ patElemType p
+            let exp' = BasicOp $ Reshape ReshapeArbitrary shape s
+            addStm $ Let (Pat [p]) aux exp')
 
 seqStm' env (Let pat aux (Match scrutinee cases def dec)) = do
   cases' <- forM cases seqCase
