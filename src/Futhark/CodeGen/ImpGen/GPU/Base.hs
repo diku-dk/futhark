@@ -560,7 +560,7 @@ groupReduceWithOffset offset w lam arrs = do
         | Prim _ <- paramType param =
             pure ()
         | otherwise =
-            copyDWIMFix arr [0] (Var $ paramName param) []
+            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam

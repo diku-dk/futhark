@@ -130,19 +130,19 @@ compileSegRed' pat grid space reds body
 -- performed.  This policy is baked into how the allocations are done
 -- in ExplicitAllocations.
 intermediateArrays ::
+  Imp.TExp Int64 ->
   Count GroupSize SubExp ->
-  SubExp ->
   SegBinOp GPUMem ->
   InKernelGen [VName]
-intermediateArrays (Count group_size) num_threads (SegBinOp _ red_op nes _) = do
+intermediateArrays group_id (Count group_size) (SegBinOp _ red_op nes _) = do
   let red_op_params = lambdaParams red_op
       (red_acc_params, _) = splitAt (length nes) red_op_params
   forM red_acc_params $ \p ->
     case paramDec p of
       MemArray pt shape _ (ArrayIn mem _) -> do
-        let shape' = Shape [num_threads] <> shape
+        let shape' = Shape [group_size] <> shape
         sArray "red_arr" pt shape' mem $
-          LMAD.iota 0 (map pe64 $ shapeDims shape')
+          LMAD.iota (group_id * product (map pe64 (shapeDims shape'))) (map pe64 $ shapeDims shape')
       _ -> do
         let pt = elemType $ paramType p
             shape = Shape [group_size]
@@ -200,7 +200,8 @@ nonsegmentedReduction segred_pat num_groups group_size space reds body = do
   sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    reds_arrs <-
+      mapM (intermediateArrays (sExt64 $ kernelGroupId constants) group_size) reds
 
     -- Since this is the nonsegmented case, all outer segment IDs must
     -- necessarily be 0.
@@ -283,7 +284,8 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size space reds body = 
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (Var $ tvVar num_threads)) reds
+    reds_arrs <-
+      mapM (intermediateArrays (sExt64 $ kernelGroupId constants) group_size) reds
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -392,10 +394,6 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
     dPrimV "virt_num_groups" $
       groups_per_segment * num_segments
 
-  num_threads <-
-    dPrimV "num_threads" $
-      unCount num_groups' * unCount group_size'
-
   threads_per_segment <-
     dPrimV "threads_per_segment" $
       groups_per_segment * unCount group_size'
@@ -426,7 +424,8 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
 
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
-    reds_arrs <- mapM (intermediateArrays group_size (tvSize num_threads)) reds
+    reds_arrs <-
+      mapM (intermediateArrays (sExt64 $ kernelGroupId constants) group_size) reds
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
