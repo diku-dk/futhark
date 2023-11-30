@@ -5,9 +5,8 @@
 -- with some constraints on the operator.  We use this when we can.
 module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
-import Debug.Trace
 import Control.Monad
-import Data.List (zip4, zip5, zip7)
+import Data.List (zip4, zip7)
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -18,7 +17,6 @@ import Futhark.Transform.Rename
 import Futhark.Util (mapAccumLM, takeLast)
 import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
 import Prelude hiding (mod, quot, rem)
-
 
 xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
 xParams scan =
@@ -107,11 +105,10 @@ createLocalArrays (Count groupSize) chunk types = do
 
   pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
-statusX, statusA, statusP :: Num a => a
+statusX, statusA, statusP :: (Num a) => a
 statusX = 0
 statusA = 1
 statusP = 2
-
 
 inBlockScanLookback ::
   KernelConstants ->
@@ -240,7 +237,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       tys = map elemType tys'
 
-      group_size_e     = pe64 $ unCount $ kAttrGroupSize attrs
+      group_size_e = pe64 $ unCount $ kAttrGroupSize attrs
       num_physgroups_e = pe64 $ unCount $ kAttrNumGroups attrs
 
   num_virtgroups <-
@@ -266,21 +263,22 @@ compileSegScan pat lvl space scan_op map_kbody = do
     fmap unzip $
       forM tys $ \ty ->
         (,)
-          <$> sAllocArray "aggregates"  ty (Shape [num_virtgroups]) (Space "device")
+          <$> sAllocArray "aggregates" ty (Shape [num_virtgroups]) (Space "device")
           <*> sAllocArray "incprefixes" ty (Shape [num_virtgroups]) (Space "device")
 
   global_id <- genZeroes "global_dynid" 1
 
   sKernelThread "segscan" (segFlat space) attrs $ do
-
     constants <- kernelConstants <$> askEnv
 
     -- TODO: we would use virtualiseGroups instead of the below couple of lines,
     --       but it adds a redundant barrier. why?
     physgroup_id <- dPrim "physgroup_id" int32
     sOp $ Imp.GetGroupId (tvVar physgroup_id) 0
-    iters <- dPrimVE "virtloop_bound" $ (num_virtgroups_e - tvExp physgroup_id)
-                                        `divUp` num_physgroups_e
+    iters <-
+      dPrimVE "virtloop_bound" $
+        (num_virtgroups_e - tvExp physgroup_id)
+          `divUp` num_physgroups_e
 
     let ltid32 = kernelLocalThreadId constants
         ltid = sExt64 ltid32
@@ -288,12 +286,12 @@ compileSegScan pat lvl space scan_op map_kbody = do
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
       createLocalArrays (kAttrGroupSize attrs) (intConst Int64 chunk) tys
     sFor "virtloop_i" iters $ const $ do
-
       dyn_id <- dPrim "dynamic_id" int32
       sComment "First thread in block fetches this block's dynamic_id" $ do
         sWhen (ltid32 .==. 0) $ do
           (globalIdMem, _, globalIdOff) <- fullyIndexArray global_id [0]
-          sOp $ Imp.Atomic DefaultSpace $
+          sOp $
+            Imp.Atomic DefaultSpace $
               Imp.AtomicAdd
                 Int32
                 (tvVar dyn_id)
@@ -314,7 +312,6 @@ compileSegScan pat lvl space scan_op map_kbody = do
       sOp local_barrier
       copyDWIMFix (tvVar dyn_id) [] (Var sharedId) [0]
       sOp local_barrier -- TODO: necessary? don't think so, but ignore it for now.
-
       block_offset <-
         dPrimVE "block_offset" $
           sExt64 (tvExp dyn_id) * chunk * group_size_e
@@ -376,7 +373,6 @@ compileSegScan pat lvl space scan_op map_kbody = do
             copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp lmem_idx]
           sOp local_barrier
 
-
       sComment "Per thread scan" $ do
         -- We don't need to touch the first element, so only m-1
         -- iterations here.
@@ -401,7 +397,6 @@ compileSegScan pat lvl space scan_op map_kbody = do
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
               forM_ (zip private_chunks $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(dest, res) ->
                 copyDWIMFix dest [i + 1] res []
-
 
       sComment "Publish results in shared memory" $ do
         forM_ (zip prefixArrays private_chunks) $ \(dest, src) ->
@@ -649,5 +644,4 @@ compileSegScan pat lvl space scan_op map_kbody = do
                 (Var locmem)
                 [sExt64 $ flat_idx - block_offset]
           sOp local_barrier
-
 {-# NOINLINE compileSegScan #-}

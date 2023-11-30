@@ -267,7 +267,7 @@ isPrimParam = primType . paramType
 -- Used in SegScan.SinglePass.compileSegScan, and SegRed.compileSegRed (with
 -- primitive non-commutative operators only).
 getChunkSize :: (Num a) => [Type] -> a
-getChunkSize types = fromIntegral $ max 1 $ min mem_constraint reg_constraint
+getChunkSize types = fromInteger $ max 1 $ min mem_constraint reg_constraint
   where
     types' = map elemType $ filter primType types
     sizes = map primByteSize types'
@@ -637,7 +637,6 @@ groupReduceWithOffset offset w lam arrs = do
   in_wave_reductions
   cross_wave_reductions
   errorsync
-
 
   when (not $ all isPrimParam reduce_acc_params) $
     sComment "Copy array-typed operands to result array" $

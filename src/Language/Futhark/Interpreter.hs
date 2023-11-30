@@ -378,7 +378,7 @@ bad :: SrcLoc -> Env -> T.Text -> EvalM a
 bad loc env s = stacking loc env $ do
   ss <- map (locText . srclocOf) <$> stacktrace
   liftF . ExtOpError . InterpreterError $
-    "Error at\n" <> prettyStacktrace 0 ss <> s
+    "Error at\n" <> prettyStacktrace 0 ss <> s <> "\n"
 
 trace :: T.Text -> Value -> EvalM ()
 trace w v = do

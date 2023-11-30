@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (divUp, rem, nextMul)
+import Futhark.Util.IntegralExp (divUp, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
