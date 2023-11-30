@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Interpreter crash for certain complicated size expressions involving
+  internal bindings (#2053).
+
 * Incorrect type checking of `let` binding with explicit size
   quantification, where size appears in type of body (#2048).
 
