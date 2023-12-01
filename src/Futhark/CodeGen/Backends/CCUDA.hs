@@ -67,7 +67,7 @@ cliOptions =
                           fprintf(stderr, "%s: %s\n", optarg, strerror(errno));
                           exit(1);
                         }
-                        exit(1);}|]
+                        exit(0);}|]
            },
          Option
            { optionLongName = "load-cuda",
