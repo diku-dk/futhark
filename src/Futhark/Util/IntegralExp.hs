@@ -39,10 +39,6 @@ class (Num e) => IntegralExp e where
   divUp x y =
     (x + y - 1) `Futhark.Util.IntegralExp.div` y
 
-  quotUp :: e -> e -> e
-  quotUp x y =
-   (x + y - 1) `Futhark.Util.IntegralExp.quot` y
-
   nextMul :: e -> e -> e
   nextMul x y = x `divUp` y * y
 

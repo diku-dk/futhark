@@ -42,9 +42,12 @@
 --   large strategy, but at most 50% of the threads in the group would
 --   have any element to read, which becomes highly inefficient.
 --
--- TODO: add description of the sequentialization optimization for
--- non-commutative prim-parameterized nonsegmented and large segments
--- reductions.
+-- An optimization specfically targeted at non-segmented and large-segments
+-- segmented reductions with non-commutative is made: The stage one main loop is
+-- essentially stripmined by a factor `chunk`, inserting collective copies via
+-- local memory of each reduction parameter going into the intra-group (partial)
+-- reductions. This saves a factor `chunk` number of intra-group reductions at
+-- the cost of some overhead in collective copies.
 module Futhark.CodeGen.ImpGen.GPU.SegRed
   ( compileSegRed,
     compileSegRed',
@@ -55,7 +58,6 @@ where
 import Control.Monad
 import Data.List (genericLength, zip4)
 import Data.Maybe
-import Debug.Trace
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
@@ -145,10 +147,9 @@ compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
         "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
-  | (Constant (IntValue (Int64Value 1)) : _) <- segSpaceDims space =
+  | [(_, Constant (IntValue (Int64Value 1))), _] <- unSegSpace space =
       compileReduction nonsegmentedReduction
   | otherwise = do
-      traceM $ "segspacedims: " ++ prettyString (segSpaceDims space)
       let segment_size = pe64 $ last $ segSpaceDims space
           use_small_segments = segment_size * 2 .<. group_size_E * chunk_E
       sIf
@@ -207,7 +208,6 @@ makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
   -- Alternatively, we can compute it without the use of `dPrimVE` inside the
   -- below `forAccum`, but this means the individual offsets are not bound to
   -- names, which absolutely clutters the generated code.
-
   let sum_ x y = nextMul x y + group_size_E * y
       group_reds_lmem_requirement = foldl sum_ 0 $ concat elem_sizes
 
@@ -224,7 +224,7 @@ makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
   -- total pool of local mem.
   lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
 
-  let arrInLMem ptype name len_se offset = do
+  let arrInLMem ptype name len_se offset =
         sArray
           (name ++ "_" ++ prettyString ptype)
           ptype
@@ -398,18 +398,17 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
 
-
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups SegVirt required_groups $ \virt_group_id -> do
+    virtualiseGroups SegVirt required_groups $ \virtgroup_id -> do
       -- Compute the 'n' input indices.  The outer 'n-1' correspond to
       -- the segment ID, and are computed from the group id.  The inner
       -- is computed from the local thread id, and may be out-of-bounds.
       let ltid = sExt64 $ kernelLocalThreadId constants
           segment_index =
             (ltid `quot` segment_size_nonzero)
-              + (sExt64 virt_group_id * sExt64 segments_per_group)
+              + (sExt64 virtgroup_id * sExt64 segments_per_group)
           index_within_segment = ltid `rem` segment_size
           group_id = kernelGroupSize constants
 
@@ -459,7 +458,7 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
 
       sComment "save final values of segments"
         $ sWhen
-          ( sExt64 virt_group_id
+          ( sExt64 virtgroup_id
               * segments_per_group
               + sExt64 ltid
                 .<. num_segments
@@ -470,7 +469,7 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
         $ \pe arr -> do
           -- Figure out which segment result this thread should write...
           let flat_segment_index =
-                sExt64 virt_group_id * segments_per_group + sExt64 ltid
+                sExt64 virtgroup_id * segments_per_group + sExt64 ltid
               gtids' =
                 unflattenIndex (init dims') flat_segment_index
           copyDWIMFix
@@ -544,13 +543,13 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
     -- duty; we put an outer loop to accomplish this.
-    virtualiseGroups SegVirt (sExt32 (tvExp num_virtgroups)) $ \virt_group_id -> do
+    virtualiseGroups SegVirt (sExt32 (tvExp num_virtgroups)) $ \virtgroup_id -> do
       let segment_gtids = init gtids
           ltid = kernelLocalThreadId constants
 
       flat_segment_id <-
         dPrimVE "flat_segment_id" $
-          sExt64 virt_group_id `quot` groups_per_segment
+          sExt64 virtgroup_id `quot` groups_per_segment
 
       global_tid <-
         dPrimVE "global_tid" $
@@ -563,7 +562,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
       let n = pe64 $ last dims
 
       slugs <-
-        mapM (segBinOpSlug ltid virt_group_id) $
+        mapM (segBinOpSlug ltid virtgroup_id) $
           zip3 segbinops interms reds_group_res_arrs
       new_lambdas <-
         reductionStageOne
@@ -590,7 +589,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
                           `rem` fromIntegral num_counters
                 reductionStageTwo
                   pes
-                  virt_group_id
+                  virtgroup_id
                   (map Imp.le64 segment_gtids)
                   first_group_for_segment
                   groups_per_segment
@@ -769,8 +768,8 @@ generalStageOneBody slugs body_cont glb_ind_var global_tid q n threads_per_segme
   let group_size = kernelGroupSize constants
       ltid = sExt64 $ kernelLocalThreadId constants
 
-  -- this group's id within its designated segment; the stride made per group in
-  -- the outer `i < q` loop; and this group's initial global offset.
+  -- this group's id within its designated segment, and this group's initial
+  -- global offset.
   group_id_in_segment <- dPrimVE "group_id_in_segment" $ global_tid `quot` group_size
   group_base_offset <- dPrimVE "group_base_offset" $ group_id_in_segment * q * group_size
 
@@ -972,6 +971,14 @@ reductionStageTwo segred_pes group_id segment_gtids first_group_for_segment grou
       -- have to read multiple elements.  We do this in a sequential
       -- way that may induce non-coalesced accesses, but the total
       -- number of accesses should be tiny here.
+      --
+      -- TODO: here we *could* insert a collective copy of the num_groups
+      -- per-group results. However, it may not be beneficial, since num_groups
+      -- is not necessarily larger than group_size, meaning the number of
+      -- uncoalesced reads here may be insignificant. In fact, if we happen to
+      -- have a num_groups < group_size, then the collective copy would add
+      -- unnecessary overhead. Also, this code is only executed by a single
+      -- group.
       sComment "read in the per-group-results" $ do
         read_per_thread <-
           dPrimVE "read_per_thread" $
