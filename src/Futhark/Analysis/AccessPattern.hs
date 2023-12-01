@@ -78,6 +78,7 @@ data DimAccess rep = DimAccess
     -- Tuple of patternName and nested `level` it index occurred at, as well as
     -- what the actual iteration type is.
     dependencies :: M.Map VName Dependency,
+    -- | Nothing if it is a constant.
     originalVar :: Maybe VName
   }
   deriving (Eq, Show)
