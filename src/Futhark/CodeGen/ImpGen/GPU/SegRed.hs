@@ -494,7 +494,7 @@ largeSegmentsReduction segred_pat num_groups group_size space reds body = do
                   red_arrs
 
           one_group_per_segment =
-            comment "first thread in group saves final result to memory" $
+            sComment "first thread in group saves final result to memory" $
               forM_ (zip slugs segred_pes) $ \(slug, pes) ->
                 sWhen (local_tid .==. 0) $
                   forM_ (zip pes (slugAccs slug)) $ \(v, (acc, acc_is)) ->
@@ -642,7 +642,7 @@ reductionStageZero constants ispace num_elements global_tid elems_per_thread thr
   let doTheReduction =
         forM_ (zip slugs_op_renamed slugs) $ \(slug_op_renamed, slug) ->
           sLoopNest (slugShape slug) $ \vec_is -> do
-            comment "to reduce current chunk, first store our result in memory" $ do
+            sComment "to reduce current chunk, first store our result in memory" $ do
               forM_ (zip (slugParams slug) (slugAccs slug)) $ \(p, (acc, acc_is)) ->
                 copyDWIMFix (paramName p) [] (Var acc) (acc_is ++ vec_is)
 
@@ -790,7 +790,7 @@ reductionStageTwo
             counter_i * num_counters
               + flat_segment_id `rem` num_counters
         ]
-    comment "first thread in group saves group result to global memory" $
+    sComment "first thread in group saves group result to global memory" $
       sWhen (local_tid .==. 0) $ do
         forM_ (take (length nes) $ zip group_res_arrs (slugAccs slug)) $ \(v, (acc, acc_is)) ->
           copyDWIMFix v [0, sExt64 group_id] (Var acc) acc_is
@@ -836,7 +836,7 @@ reductionStageTwo
         -- have to read multiple elements.  We do this in a sequential
         -- way that may induce non-coalesced accesses, but the total
         -- number of accesses should be tiny here.
-        comment "read in the per-group-results" $ do
+        sComment "read in the per-group-results" $ do
           read_per_thread <-
             dPrimVE "read_per_thread" $
               groups_per_segment `divUp` sExt64 group_size

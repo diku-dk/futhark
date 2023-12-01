@@ -457,7 +457,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
-  comment
+  sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
@@ -570,17 +570,17 @@ groupReduceWithOffset offset w lam arrs = do
 
   offset <-- (0 :: Imp.TExp Int32)
 
-  comment "participating threads read initial accumulator" $
+  sComment "participating threads read initial accumulator" $
     localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
   let do_reduce = localOps threadOperations $ do
-        comment "read array element" $
+        sComment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
-        comment "apply reduction operation" $
+        sComment "apply reduction operation" $
           compileBody' reduce_acc_params $
             lambdaBody lam
-        comment "write result of operation" $
+        sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
       in_wave_reduce = everythingVolatile do_reduce
 
