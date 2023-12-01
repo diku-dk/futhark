@@ -929,7 +929,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
       dPrimV "x" . TPrimExp $
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
+    copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
@@ -959,7 +959,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
       copy t dest_mem static_src
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
-        copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+        copyDWIMFix (patElemName pe) [fromInteger i] e []
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
