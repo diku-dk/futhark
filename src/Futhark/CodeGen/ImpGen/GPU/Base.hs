@@ -468,11 +468,11 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (primType $ paramType x) $
-            copyDWIM
+            copyDWIMFix
               arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
+              [arrs_full_size + group_offset + ltid]
               (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+              [arrs_full_size + group_offset + sExt64 block_size + ltid]
 
     barrier
 
