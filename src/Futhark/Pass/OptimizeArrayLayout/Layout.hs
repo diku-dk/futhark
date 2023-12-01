@@ -23,20 +23,22 @@ class (PrimExpAnalysis rep) => Layout rep where
   permutationFromDimAccess :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
 
 instance Layout GPU where
+  permutationFromDimAccess _ _ _ _ [] = Nothing
+  permutationFromDimAccess _ _ _ _ [_] = Nothing
   permutationFromDimAccess primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_name dimAccesses =
     do
       -- Dont accept indices where the last index is invariant
       let lastIdxIsInvariant = isInvariant $ last dimAccesses
 
-      -- Check if any of the dependencies are too complex to reason about
-      let dimAccesses' = filter (isJust . originalVar) dimAccesses
-      let deps = mapMaybe originalVar dimAccesses'
-      let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-      let primExps = map (`M.lookup` primExpTable) deps
-      let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
-
       -- Create a candidate permutation
       let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
+
+      -- Check if any of the dependencies are too complex to reason about
+      let lastAccessVar = reverse $ mapMaybe (originalVar . snd) $ L.sortOn fst $ zip perm dimAccesses
+      let inscrutable =
+            case lastAccessVar of
+              var : _ -> isInscrutable (M.lookup var primExpTable) True || isInscrutable (M.lookup var primExpTable) False
+              [] -> True
 
       -- Check if we want to manifest this array with the permutation
       if lastIdxIsInvariant || inscrutable || commonPermutationEliminators perm nest
