@@ -155,7 +155,6 @@ readImportFile include loc vfs = do
   -- First we try to find a file of the given name in the search path,
   -- then we look at the builtin library if we have to.  For the
   -- builtins, we don't use the search path.
-  let filepath = includeToFilePath include
   r <- contentsAndModTime filepath vfs
   case (r, lookup prelude_str prelude) of
     (Just (Right (s, mod_time)), _) ->
@@ -167,6 +166,8 @@ readImportFile include loc vfs = do
     (Nothing, Nothing) ->
       pure $ Left $ ProgError loc $ pretty not_found
   where
+    filepath = includeToFilePath include
+
     prelude_str = "/" Posix.</> includeToString include Posix.<.> "fut"
 
     loaded path s mod_time =
@@ -178,7 +179,7 @@ readImportFile include loc vfs = do
         }
 
     not_found =
-      "Could not find import " <> E.quote (includeToText include) <> "."
+      "Could not read file " <> E.quote (T.pack filepath) <> "."
 
 handleFile :: ReaderState -> VFS -> LoadedFile T.Text -> IO UncheckedImport
 handleFile state_mvar vfs (LoadedFile file_name import_name file_contents mod_time) = do
