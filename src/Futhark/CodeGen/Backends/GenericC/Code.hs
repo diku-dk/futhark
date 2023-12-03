@@ -4,7 +4,6 @@
 module Futhark.CodeGen.Backends.GenericC.Code
   ( compilePrimExp,
     compileExp,
-    compileExpToName,
     compileCode,
     compileDest,
     compileArg,
@@ -44,15 +43,6 @@ errorMsgString (ErrorMsg parts) = do
       onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
   (formatstrs, formatargs) <- mapAndUnzipM onPart parts
   pure (mconcat formatstrs, formatargs)
-
-compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
-compileExpToName _ _ (LeafExp v _) =
-  pure v
-compileExpToName desc t e = do
-  desc' <- newVName desc
-  e' <- compileExp e
-  decl [C.cdecl|$ty:(primTypeToCType t) $id:desc' = $e';|]
-  pure desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
 compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
