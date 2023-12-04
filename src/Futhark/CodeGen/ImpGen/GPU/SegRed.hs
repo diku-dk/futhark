@@ -197,34 +197,22 @@ makeIntermArrays ::
 makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
   group_worksize <- tvSize <$> dPrimV "group_worksize" group_worksize_E
 
-  -- compute total amount of lmem needed for the group reduction arrays as well
-  -- as the offset into the total pool of lmem of each such array.
-
-  -- TODO: we essentially compute `group_reds_lmem_requirement` twice, since it
-  -- is also contained in the computation of `offsets`. However, trying to
-  -- extract it, we get an "unknown variable" error, since the variable holding
-  -- the lmem size exists only in kernel scope but needs to be accessed from
-  -- host scope.
-  -- Alternatively, we can compute it without the use of `dPrimVE` inside the
-  -- below `forAccum`, but this means the individual offsets are not bound to
-  -- names, which absolutely clutters the generated code.
-
+  -- compute total amount of lmem.
   let sum_ x y = nextMul x y + group_size_E * y
       group_reds_lmem_requirement = foldl sum_ 0 $ concat elem_sizes
+      collcopy_lmem_requirement = group_worksize_E * max_elem_size
+      lmem_total_size =
+        Imp.bytes $
+          collcopy_lmem_requirement `sMax64` group_reds_lmem_requirement
 
+  -- offsets into the total pool of lmem for each group reduction array.
   (_, offsets) <-
     forAccumLM2D 0 elem_sizes $ \byte_offs elem_size ->
       (,byte_offs `quot` elem_size)
         <$> dPrimVE "offset" (sum_ byte_offs elem_size)
 
-  let collcopy_lmem_requirement = group_worksize_E * max_elem_size
-      lmem_total_size =
-        Imp.bytes $
-          collcopy_lmem_requirement `sMax64` group_reds_lmem_requirement
-
   -- total pool of local mem.
   lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
-
   let arrInLMem ptype name len_se offset =
         sArray
           (name ++ "_" ++ prettyString ptype)
