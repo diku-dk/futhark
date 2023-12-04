@@ -141,9 +141,7 @@ Configuration objects are cheap to create and destroy.
    cache was hit succesfully, but you can enable logging to see what
    happens.
 
-   The lifespan of ``fname`` must exceed the lifespan of the
-   configuration object.  Pass ``NULL`` to disable caching (this is
-   the default).
+   Pass ``NULL`` to disable caching (this is the default).
 
 Context
 -------
