@@ -8,7 +8,7 @@
 -- compiled random input { [1024]i64 }
 -- auto output
 -- structure gpu-mem { Alloc 2 }
--- structure seq-mem { Alloc 2 }
+-- structure seq-mem { Alloc 1 }
 
 let main [n] (xs: [n]i64): [n][n]i64 =
   map (\j ->

@@ -343,19 +343,19 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
     readInitial p arr
       | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+          copyDWIMFix (paramName p) [] (Var arr) [ltid]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid]
 
     readParam behind p arr
       | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
 
     writeResult x y arr
       | primType $ paramType x = do
-          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
+          copyDWIMFix arr [ltid] (Var $ paramName x) []
           copyDWIM (paramName y) [] (Var $ paramName x) []
       | otherwise =
           copyDWIM (paramName y) [] (Var $ paramName x) []
@@ -422,15 +422,15 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
       writeBlockResult p arr
         | primType $ paramType p =
-            copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
+            copyDWIMFix arr [sExt64 block_id] (Var $ paramName p) []
         | otherwise =
-            copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
+            copyDWIMFix arr [group_offset + sExt64 block_id] (Var $ paramName p) []
 
       readPrevBlockResult p arr
         | primType $ paramType p =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
+            copyDWIMFix (paramName p) [] (Var arr) [sExt64 block_id - 1]
         | otherwise =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
+            copyDWIMFix (paramName p) [] (Var arr) [group_offset + sExt64 block_id - 1]
 
   doInBlockScan seg_flag ltid_in_bounds lam
   barrier
@@ -441,7 +441,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (primType $ paramType x) $
-            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
+            copyDWIMFix arr [arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
 
     barrier
 
@@ -457,7 +457,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
-  comment
+  sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
@@ -468,11 +468,11 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
           unless (primType $ paramType x) $
-            copyDWIM
+            copyDWIMFix
               arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
+              [arrs_full_size + group_offset + ltid]
               (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+              [arrs_full_size + group_offset + sExt64 block_size + ltid]
 
     barrier
 
@@ -499,7 +499,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
           when (primType $ paramType p) $
-            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
+            copyDWIMFix arr [ltid] (Var $ paramName p) []
 
   sComment "carry-in for every block except the first" $
     localOps threadOperations $ do
@@ -513,8 +513,8 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     sWhen (is_first_block .&&. ltid_in_bounds) $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
         if primType (paramType y)
-          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
-          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
+          then copyDWIMFix arr [ltid] (Var $ paramName y) []
+          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + group_offset + ltid]
 
   barrier
 
@@ -560,7 +560,7 @@ groupReduceWithOffset offset w lam arrs = do
         | Prim _ <- paramType param =
             pure ()
         | otherwise =
-            copyDWIMFix arr [0] (Var $ paramName param) []
+            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
@@ -570,17 +570,17 @@ groupReduceWithOffset offset w lam arrs = do
 
   offset <-- (0 :: Imp.TExp Int32)
 
-  comment "participating threads read initial accumulator" $
+  sComment "participating threads read initial accumulator" $
     localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
   let do_reduce = localOps threadOperations $ do
-        comment "read array element" $
+        sComment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
-        comment "apply reduction operation" $
+        sComment "apply reduction operation" $
           compileBody' reduce_acc_params $
             lambdaBody lam
-        comment "write result of operation" $
+        sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
       in_wave_reduce = everythingVolatile do_reduce
 

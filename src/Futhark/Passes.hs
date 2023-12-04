@@ -26,7 +26,6 @@ import Futhark.Optimise.EntryPointMem
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.GenRedOpt
 import Futhark.Optimise.HistAccs
-import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.MergeGPUBodies
@@ -104,8 +103,9 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU,
         optimizeArrayLayout,
+        -- Important to simplify after coalescing in order to fix up
+        -- redundant manifests.
         simplifyGPU,
         performCSE True
       ]
@@ -123,8 +123,7 @@ seqPipeline =
   standardPipeline
     >>> onePass firstOrderTransform
     >>> passes
-      [ simplifySeq,
-        inPlaceLoweringSeq
+      [ simplifySeq
       ]
 
 -- | Run 'seqPipeline', then add memory information (and
@@ -189,7 +188,6 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        inPlaceLoweringMC,
         optimizeArrayLayout,
         simplifyMC,
         performCSE True

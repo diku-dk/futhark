@@ -38,7 +38,6 @@ module Futhark.CodeGen.ImpGen
     hasFunction,
     collect,
     collect',
-    comment,
     VarEntry (..),
     ArrayEntry (..),
 
@@ -390,13 +389,6 @@ collect' m = do
   new_code <- gets stateCode
   modify $ \s -> s {stateCode = prev_code}
   pure (x, new_code)
-
--- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
-comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
-comment desc m = do
-  code <- collect m
-  emit $ Imp.Comment desc code
 
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM rep r op ()
@@ -870,7 +862,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
   copyDWIM (patElemName pe) [] se []
   case op of
     OpaqueNil -> pure ()
-    OpaqueTrace s -> comment ("Trace: " <> s) $ do
+    OpaqueTrace s -> sComment ("Trace: " <> s) $ do
       se_t <- subExpType se
       case se_t of
         Prim t -> tracePrim s t se
@@ -937,7 +929,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
       dPrimV "x" . TPrimExp $
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
+    copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
@@ -967,7 +959,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
       copy t dest_mem static_src
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
-        copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+        copyDWIMFix (patElemName pe) [fromInteger i] e []
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
@@ -1665,6 +1657,8 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
+-- | Execute a code generation action, wrapping the generated code
+-- within a 'Imp.Comment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code

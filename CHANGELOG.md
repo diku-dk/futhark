@@ -15,8 +15,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Interpreter crash for certain complicated size expressions involving
+  internal bindings (#2053).
+
 * Incorrect type checking of `let` binding with explicit size
   quantification, where size appears in type of body (#2048).
+
+* GPU code generation for non-commutative non-segmented reductions
+  with array operands (#2051).
+
+* Histogram with non-vectorised reduction operators (#2056). (But it
+  is probably not a good idea to write such programs.)
 
 ## [0.25.9]
 

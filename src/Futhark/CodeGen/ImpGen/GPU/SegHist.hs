@@ -50,6 +50,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
+import Futhark.Transform.Substitute
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
@@ -1180,8 +1181,11 @@ compileSegHist (Pat pes) lvl space ops kbody = do
                   ++ zip bucket_ids (shapeDims (histShape op))
                   ++ zip vector_ids (shapeDims $ histOpShape op)
                   ++ [(subhistogram_id, Var $ tvVar num_histos)]
+            -- The operator may have references to the old flat thread
+            -- ID, which we must update to point at the new one.
+            subst = M.singleton (segFlat space) flat_gtid
 
-        let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
+        let segred_op = SegBinOp Commutative (substituteNames subst $ histOp op) (histNeutral op) mempty
         compileSegRed' (Pat red_pes) grid segred_space [segred_op] $ \red_cont ->
           red_cont . flip map subhistos $ \subhisto ->
             ( Var subhisto,
