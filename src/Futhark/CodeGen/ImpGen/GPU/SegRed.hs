@@ -83,16 +83,6 @@ maxNumOps = 10
 -- indexes into that t'SubExp' for reading the result.
 type DoSegBody = ([(SubExp, [Imp.TExp Int64])] -> InKernelGen ()) -> InKernelGen ()
 
--- | Datatype used to distinguish between the different types of reductions we
--- generate code for. Actually, we only distinguish between non-commutative
--- reductions with all-Prim parameters, and all other reductions. The former
--- requires a different (and larger) set of intermediate arrays (in local mem)
--- and a more elaborate stage one loop body.
---
--- TODO (1): ideally this choice would be made implicitly throughout the module,
--- somehow. Perhaps Troels has a good idea on how to do this elegantly (?).
-data SegredKind = NoncommPrimSegred | GeneralSegred
-
 -- | Datatype used to distinguish between and work with the different sets of
 -- intermediate memory we need for the different ReduceKinds.
 data SegRedIntermediateArrays
@@ -135,6 +125,11 @@ compileSegRed pat lvl space segbinops map_kbody = do
 paramOf :: SegBinOp GPUMem -> [Param LParamMem]
 paramOf (SegBinOp _ op ne _) = take (length ne) $ lambdaParams op
 
+isPrimSegBinOp :: SegBinOp GPUMem -> Bool
+isPrimSegBinOp segbinop =
+  all primType (lambdaReturnType $ segBinOpLambda segbinop)
+    && shapeRank (segBinOpShape segbinop) == 0
+
 -- | Like 'compileSegRed', but where the body is a monadic action.
 compileSegRed' ::
   Pat LetDecMem ->
@@ -158,18 +153,13 @@ compileSegRed' pat grid space segbinops map_body_cont
         (compileReduction largeSegmentsReduction)
   where
     compileReduction f =
-      f segred_kind pat num_groups group_size chunk space segbinops map_body_cont
+      f pat num_groups group_size chunk space segbinops map_body_cont
 
     chunk
-      | NoncommPrimSegred <- segred_kind =
+      | Noncommutative <- mconcat (map segBinOpComm segbinops),
+        all isPrimSegBinOp segbinops =
           intConst Int64 $ getChunkSize param_types
       | otherwise = intConst Int64 1
-
-    segred_kind
-      | mconcat (map segBinOpComm segbinops) == Noncommutative,
-        all primType param_types =
-          NoncommPrimSegred
-      | otherwise = GeneralSegred
 
     param_types = map paramType $ concatMap paramOf segbinops
 
@@ -188,53 +178,60 @@ compileSegRed' pat grid space segbinops map_body_cont
 -- For more info about the intermediate arrays used for the different reduction
 -- kernels, see note [IntermArrays].
 makeIntermArrays ::
-  SegredKind ->
   Imp.TExp Int64 ->
   SubExp ->
   SubExp ->
-  [[Param LParamMem]] ->
+  [SegBinOp GPUMem] ->
   InKernelGen [SegRedIntermediateArrays]
-makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
-  group_worksize <- tvSize <$> dPrimV "group_worksize" group_worksize_E
-
-  -- compute total amount of lmem.
-  let sum_ x y = nextMul x y + group_size_E * y
-      group_reds_lmem_requirement = foldl sum_ 0 $ concat elem_sizes
-      collcopy_lmem_requirement = group_worksize_E * max_elem_size
-      lmem_total_size =
-        Imp.bytes $
-          collcopy_lmem_requirement `sMax64` group_reds_lmem_requirement
-
-  -- offsets into the total pool of lmem for each group reduction array.
-  (_, offsets) <-
-    forAccumLM2D 0 elem_sizes $ \byte_offs elem_size ->
-      (,byte_offs `quot` elem_size)
-        <$> dPrimVE "offset" (sum_ byte_offs elem_size)
-
-  -- total pool of local mem.
-  lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
-  let arrInLMem ptype name len_se offset =
-        sArray
-          (name ++ "_" ++ prettyString ptype)
-          ptype
-          (Shape [len_se])
-          lmem
-          $ LMAD.iota offset [pe64 len_se]
-
-  forM (zipWith zip params offsets) $ \ps_and_offsets -> do
-    (coll_copy_arrs, group_red_arrs, priv_chunks) <-
-      fmap unzip3 $ forM ps_and_offsets $ \(p, offset) -> do
-        let ptype = elemType $ paramType p
-        (,,)
-          <$> arrInLMem ptype "coll_copy_arr" group_worksize 0
-          <*> arrInLMem ptype "group_red_arr" group_size offset
-          <*> sAllocArray
-            ("chunk_" ++ prettyString ptype)
-            ptype
-            (Shape [chunk])
-            (ScalarSpace [chunk] ptype)
-    pure $ NoncommPrimSegRedInterms coll_copy_arrs group_red_arrs priv_chunks
+makeIntermArrays group_id group_size chunk segbinops
+  | Noncommutative <- mconcat (map segBinOpComm segbinops),
+    all isPrimSegBinOp segbinops =
+      noncommPrimSegRedInterms
+  | otherwise =
+      generalSegRedInterms group_id group_size segbinops
   where
+    params = map paramOf segbinops
+
+    noncommPrimSegRedInterms = do
+      group_worksize <- tvSize <$> dPrimV "group_worksize" group_worksize_E
+
+      -- compute total amount of lmem.
+      let sum_ x y = nextMul x y + group_size_E * y
+          group_reds_lmem_requirement = foldl sum_ 0 $ concat elem_sizes
+          collcopy_lmem_requirement = group_worksize_E * max_elem_size
+          lmem_total_size =
+            Imp.bytes $
+              collcopy_lmem_requirement `sMax64` group_reds_lmem_requirement
+
+      -- offsets into the total pool of lmem for each group reduction array.
+      (_, offsets) <-
+        forAccumLM2D 0 elem_sizes $ \byte_offs elem_size ->
+          (,byte_offs `quot` elem_size)
+            <$> dPrimVE "offset" (sum_ byte_offs elem_size)
+
+      -- total pool of local mem.
+      lmem <- sAlloc "local_mem" lmem_total_size (Space "local")
+      let arrInLMem ptype name len_se offset =
+            sArray
+              (name ++ "_" ++ prettyString ptype)
+              ptype
+              (Shape [len_se])
+              lmem
+              $ LMAD.iota offset [pe64 len_se]
+
+      forM (zipWith zip params offsets) $ \ps_and_offsets -> do
+        (coll_copy_arrs, group_red_arrs, priv_chunks) <-
+          fmap unzip3 $ forM ps_and_offsets $ \(p, offset) -> do
+            let ptype = elemType $ paramType p
+            (,,)
+              <$> arrInLMem ptype "coll_copy_arr" group_worksize 0
+              <*> arrInLMem ptype "group_red_arr" group_size offset
+              <*> sAllocArray
+                ("chunk_" ++ prettyString ptype)
+                ptype
+                (Shape [chunk])
+                (ScalarSpace [chunk] ptype)
+        pure $ NoncommPrimSegRedInterms coll_copy_arrs group_red_arrs priv_chunks
     group_size_E = pe64 group_size
     group_worksize_E = group_size_E * pe64 chunk
 
@@ -243,9 +240,15 @@ makeIntermArrays NoncommPrimSegred _ group_size chunk params = do
     max_elem_size = maximum $ concat elem_sizes
 
     forAccumLM2D acc ls f = mapAccumLM (mapAccumLM f) acc ls
-makeIntermArrays _ group_id group_size _ params =
+
+generalSegRedInterms ::
+  Imp.TExp Int64 ->
+  SubExp ->
+  [SegBinOp GPUMem] ->
+  InKernelGen [SegRedIntermediateArrays]
+generalSegRedInterms group_id group_size segbinops =
   fmap (map GeneralSegRedInterms) $
-    forM params $
+    forM (map paramOf segbinops) $
       mapM $ \p ->
         case paramDec p of
           MemArray pt shape _ (ArrayIn mem _) -> do
@@ -284,7 +287,6 @@ groupResultArrays num_virtgroups group_size segbinops =
       sAllocArrayPerm "segred_tmp" pt full_shape (Space "device") perm
 
 type DoCompileSegRed =
-  SegredKind ->
   Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
@@ -295,7 +297,7 @@ type DoCompileSegRed =
   CallKernelGen ()
 
 nonsegmentedReduction :: DoCompileSegRed
-nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
+nonsegmentedReduction (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       chunk = pe64 chunk_se
       num_groups_se = unCount num_groups
@@ -303,7 +305,6 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
       group_size' = pe64 group_size_se
       global_tid = Imp.le64 $ segFlat space
       n = pe64 $ last dims
-      params = map paramOf segbinops
 
   counters <- genZeroes "counters" maxNumOps
 
@@ -317,7 +318,7 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
     let ltid = kernelLocalThreadId constants
     let group_id = kernelGroupId constants
 
-    interms <- makeIntermArrays segred_kind (sExt64 group_id) group_size_se chunk_se params
+    interms <- makeIntermArrays (sExt64 group_id) group_size_se chunk_se segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- Since this is the nonsegmented case, all outer segment IDs must
@@ -331,7 +332,6 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
         zip3 segbinops interms reds_group_res_arrs
     new_lambdas <-
       reductionStageOne
-        segred_kind
         gtids
         n
         global_tid
@@ -361,11 +361,10 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
           (fromInteger i)
 
 smallSegmentsReduction :: DoCompileSegRed
-smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinops map_body_cont = do
+smallSegmentsReduction (Pat segred_pes) num_groups group_size _ space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       segment_size = last dims'
-      params = map paramOf segbinops
 
   -- Careful to avoid division by zero now.
   segment_size_nonzero <-
@@ -391,7 +390,7 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
     let group_id = kernelGroupSize constants
         ltid = sExt64 $ kernelLocalThreadId constants
 
-    interms <- makeIntermArrays GeneralSegred group_id group_size_se undefined params
+    interms <- generalSegRedInterms group_id group_size_se segbinops
     let reds_arrs = map groupRedArrs interms
 
     -- We probably do not have enough actual workgroups to cover the
@@ -474,7 +473,7 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
       sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: DoCompileSegRed
-largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
+largeSegmentsReduction (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       num_segments = product $ init dims'
@@ -483,7 +482,6 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
       group_size_se = unCount group_size
       group_size' = pe64 group_size_se
       chunk = pe64 chunk_se
-      params = map paramOf segbinops
 
   groups_per_segment <-
     dPrimVE "groups_per_segment" $
@@ -529,7 +527,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
     let group_id = sExt64 $ kernelGroupId constants
         ltid = kernelLocalThreadId constants
 
-    interms <- makeIntermArrays segred_kind group_id group_size_se chunk_se params
+    interms <- makeIntermArrays group_id group_size_se chunk_se segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
@@ -557,7 +555,6 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
           zip3 segbinops interms reds_group_res_arrs
       new_lambdas <-
         reductionStageOne
-          segred_kind
           gtids
           n
           global_tid
@@ -665,7 +662,6 @@ slugCollCopyArrs :: SegBinOpSlug -> [VName]
 slugCollCopyArrs = collCopyArrs . slugInterms
 
 reductionStageOne ::
-  SegredKind ->
   [VName] ->
   Imp.TExp Int64 ->
   Imp.TExp Int64 ->
@@ -675,7 +671,7 @@ reductionStageOne ::
   [SegBinOpSlug] ->
   DoSegBody ->
   InKernelGen [Lambda GPUMem]
-reductionStageOne segred_kind gtids n global_tid q chunk threads_per_segment slugs body_cont = do
+reductionStageOne gtids n global_tid q chunk threads_per_segment slugs body_cont = do
   constants <- kernelConstants <$> askEnv
   let glb_ind_var = mkTV (last gtids) int64
       ltid = sExt64 $ kernelLocalThreadId constants
@@ -719,8 +715,8 @@ reductionStageOne segred_kind gtids n global_tid q chunk threads_per_segment slu
                       copyDWIMFix acc (acc_is ++ vec_is) ne []
                 )
 
-  case segred_kind of
-    NoncommPrimSegred ->
+  case (slugsComm slugs, all (isPrimSegBinOp . slugOp) slugs) of
+    (Noncommutative, True) ->
       noncommPrimParamsStageOneBody
         slugs
         body_cont

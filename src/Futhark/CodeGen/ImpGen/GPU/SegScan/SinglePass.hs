@@ -107,7 +107,6 @@ statusX = 0
 statusA = 1
 statusP = 2
 
-
 inBlockScanLookback ::
   KernelConstants ->
   Imp.TExp Int64 ->
