@@ -313,9 +313,6 @@ library
       Futhark.Optimise.Fusion.TryFusion
       Futhark.Optimise.GenRedOpt
       Futhark.Optimise.HistAccs
-      Futhark.Optimise.InPlaceLowering
-      Futhark.Optimise.InPlaceLowering.LowerIntoStm
-      Futhark.Optimise.InPlaceLowering.SubstituteIndices
       Futhark.Optimise.InliningDeadFun
       Futhark.Optimise.MemoryBlockMerging
       Futhark.Optimise.MemoryBlockMerging.GreedyColoring
