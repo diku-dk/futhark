@@ -354,8 +354,10 @@ nonsegmentedReduction segred_kind (Pat segred_pes) num_groups group_size chunk_s
         map_body_cont
 
     let segred_pess =
-          chunks (map (length . segBinOpNeutral) segbinops)
+          chunks
+            (map (length . segBinOpNeutral) segbinops)
             segred_pes
+
     forM_ (zip4 segred_pess slugs new_lambdas [0 ..]) $
       \(pes, slug, new_lambda, i) ->
         reductionStageTwo
@@ -398,6 +400,11 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
 
   sKernelThread "segred_small" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
+    let group_id = kernelGroupSize constants
+        ltid = sExt64 $ kernelLocalThreadId constants
+
+    interms <- makeIntermArrays GeneralSegred group_id group_size_se undefined params
+    let reds_arrs = map groupRedArrs interms
 
     -- We probably do not have enough actual workgroups to cover the
     -- entire iteration space.  Some groups thus have to perform double
@@ -406,15 +413,10 @@ smallSegmentsReduction _ (Pat segred_pes) num_groups group_size _ space segbinop
       -- Compute the 'n' input indices.  The outer 'n-1' correspond to
       -- the segment ID, and are computed from the group id.  The inner
       -- is computed from the local thread id, and may be out-of-bounds.
-      let ltid = sExt64 $ kernelLocalThreadId constants
-          segment_index =
+      let segment_index =
             (ltid `quot` segment_size_nonzero)
               + (sExt64 virtgroup_id * sExt64 segments_per_group)
           index_within_segment = ltid `rem` segment_size
-          group_id = kernelGroupSize constants
-
-      interms <- makeIntermArrays GeneralSegred group_id group_size_se undefined params
-      let reds_arrs = map groupRedArrs interms
 
       dIndexSpace (zip (init gtids) (init dims')) segment_index
       dPrimV_ (last gtids) index_within_segment
@@ -537,6 +539,7 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
   sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
     constants <- kernelConstants <$> askEnv
     let group_id = sExt64 $ kernelGroupId constants
+        ltid = kernelLocalThreadId constants
 
     interms <- makeIntermArrays segred_kind group_id group_size_se chunk_se params
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
@@ -546,7 +549,6 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
     -- duty; we put an outer loop to accomplish this.
     virtualiseGroups SegVirt (sExt32 (tvExp num_virtgroups)) $ \virtgroup_id -> do
       let segment_gtids = init gtids
-          ltid = kernelLocalThreadId constants
 
       flat_segment_id <-
         dPrimVE "flat_segment_id" $
@@ -554,8 +556,8 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
 
       global_tid <-
         dPrimVE "global_tid" $
-          Imp.le64 (segFlat space)
-            `rem` (sExt64 group_size' * groups_per_segment)
+          (sExt64 virtgroup_id * sExt64 group_size' + sExt64 ltid)
+            `rem` threads_per_segment
 
       let first_group_for_segment = flat_segment_id * groups_per_segment
       dIndexSpace (zip segment_gtids (init dims')) flat_segment_id
@@ -578,7 +580,8 @@ largeSegmentsReduction segred_kind (Pat segred_pes) num_groups group_size chunk_
           map_body_cont
 
       let segred_pess =
-            chunks (map (length . segBinOpNeutral) segbinops)
+            chunks
+              (map (length . segBinOpNeutral) segbinops)
               segred_pes
 
           multiple_groups_per_segment =
