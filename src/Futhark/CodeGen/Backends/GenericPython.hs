@@ -14,7 +14,6 @@ module Futhark.CodeGen.Backends.GenericPython
     compileCode,
     compilePrimValue,
     compilePrimType,
-    compilePrimTypeExt,
     compilePrimToNp,
     compilePrimToExtNp,
     fromStorage,
@@ -1026,24 +1025,6 @@ compilePrimType t =
     FloatType Float64 -> "ct.c_double"
     Imp.Bool -> "ct.c_bool"
     Unit -> "ct.c_bool"
-
--- | The ctypes type corresponding to a 'PrimType', taking sign into account.
-compilePrimTypeExt :: PrimType -> Imp.Signedness -> String
-compilePrimTypeExt t ept =
-  case (t, ept) of
-    (IntType Int8, Imp.Unsigned) -> "ct.c_uint8"
-    (IntType Int16, Imp.Unsigned) -> "ct.c_uint16"
-    (IntType Int32, Imp.Unsigned) -> "ct.c_uint32"
-    (IntType Int64, Imp.Unsigned) -> "ct.c_uint64"
-    (IntType Int8, _) -> "ct.c_int8"
-    (IntType Int16, _) -> "ct.c_int16"
-    (IntType Int32, _) -> "ct.c_int32"
-    (IntType Int64, _) -> "ct.c_int64"
-    (FloatType Float16, _) -> "ct.c_uint16"
-    (FloatType Float32, _) -> "ct.c_float"
-    (FloatType Float64, _) -> "ct.c_double"
-    (Imp.Bool, _) -> "ct.c_bool"
-    (Unit, _) -> "ct.c_byte"
 
 -- | The Numpy type corresponding to a 'PrimType'.
 compilePrimToNp :: Imp.PrimType -> String

@@ -1285,7 +1285,7 @@ primFuns =
           FloatType Float32,
           \case
             [FloatValue (Float32Value x), IntValue (Int32Value y)] ->
-              Just $ FloatValue $ Float32Value $ x * (2 ** fromIntegral y)
+              Just $ FloatValue $ Float32Value $ ldexpf x $ fromIntegral y
             _ -> Nothing
         )
       ),
@@ -1294,7 +1294,7 @@ primFuns =
           FloatType Float64,
           \case
             [FloatValue (Float64Value x), IntValue (Int32Value y)] ->
-              Just $ FloatValue $ Float64Value $ x * (2 ** fromIntegral y)
+              Just $ FloatValue $ Float64Value $ ldexp x $ fromIntegral y
             _ -> Nothing
         )
       ),

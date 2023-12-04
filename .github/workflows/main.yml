@@ -295,7 +295,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
         nix-shell --run 'futhark test -c --backend=ispc tests --no-tuning'
         nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 

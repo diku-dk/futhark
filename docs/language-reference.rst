@@ -576,6 +576,9 @@ in natural text.
   ``t``.  To pass a single array-typed parameter, enclose it in
   parens.
 
+* The bodies of ``let``, ``if``, and ``loop`` extend as far to the
+  right as possible.
+
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
   operators in the same row have the same precedence.  The rows are
@@ -836,10 +839,10 @@ are:
 
     Company any two values of numeric type for equality.
 
-  ```symbol```
+  ```qualname```
 
-    Use ``symbol``, which may be any non-operator function name, as an
-    infix operator.
+    Use ``qualname``, which may be any non-operator function name, as
+    an infix operator.
 
 ``x && y``
 ..........

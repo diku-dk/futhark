@@ -134,7 +134,7 @@ opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
   sKernelThread "gpuseq" tid (defKernelAttrs one one) $
     compileStms (freeIn res) stms $
       forM_ (zip pes res) $ \(pe, SubExpRes _ se) ->
-        copyDWIM (patElemName pe) [DimFix 0] se []
+        copyDWIMFix (patElemName pe) [0] se []
 opCompiler pat e =
   compilerBugS $
     "opCompiler: Invalid pattern\n  "
