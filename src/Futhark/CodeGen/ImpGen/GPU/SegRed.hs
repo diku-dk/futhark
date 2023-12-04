@@ -858,9 +858,7 @@ noncommPrimParamsStageOneBody slugs body_cont glb_ind_var global_tid q n chunk d
                 copyDWIMFix priv_chunk [k] ne []
         )
 
-    -- TODO: is this (errorsync) barrier necessary? the above block of code only
-    -- reads elements from global, maps them, and writes them to private mem.
-    -- sOp $ Imp.ErrorSync Imp.FenceLocal
+    sOp $ Imp.ErrorSync Imp.FenceLocal
 
     sComment "effectualize collective copies in local memory" $ do
       forM_ slugs $ \slug -> do
