@@ -469,7 +469,7 @@ seqScatter env (Let pat aux (Op (SegOp
     body <- lift . buildBody_ $ do
 
         mapRes <- buildSegMapTup "map_res" $ do
-            tid <- newVName "write_i"
+            let tid = fst $ head $ unSegSpace space
             phys <- newVName "phys_tid"
 
             -- size <- mkChunkSize tid env
