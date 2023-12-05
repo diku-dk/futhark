@@ -547,11 +547,11 @@ instance Substitutable (Pat ParamType) where
           }
 
 applyType ::
-  (Monoid als) =>
+  (Monoid u) =>
   [TypeParam] ->
-  TypeBase Size als ->
+  TypeBase Size u ->
   [StructTypeArg] ->
-  TypeBase Size als
+  TypeBase Size u
 applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
@@ -564,10 +564,10 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
 substTypesRet ::
-  (Monoid as) =>
-  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
-  TypeBase Size as ->
-  RetTypeBase Size as
+  (Monoid u) =>
+  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
+  TypeBase Size u ->
+  RetTypeBase Size u
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
@@ -614,8 +614,8 @@ substTypesRet lookupSubst ot =
           pure $ Scalar $ TypeVar u v targs'
     onType (Scalar (Record ts)) =
       Scalar . Record <$> traverse onType ts
-    onType (Scalar (Arrow als v d t1 t2)) =
-      Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
+    onType (Scalar (Arrow u v d t1 t2)) =
+      Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
 
@@ -642,10 +642,10 @@ substTypesRet lookupSubst ot =
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
-  (Monoid as) =>
-  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
-  TypeBase Size as ->
-  TypeBase Size as
+  (Monoid u) =>
+  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
+  TypeBase Size u ->
+  TypeBase Size u
 substTypesAny lookupSubst ot =
   case substTypesRet lookupSubst ot of
     RetType [] ot' -> ot'
