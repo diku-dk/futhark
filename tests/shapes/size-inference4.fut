@@ -2,6 +2,6 @@
 -- parameter.  Written in a convoluted way to ensure this is checked
 -- even for lambdas that are never let-generalised.
 -- ==
--- error: refers to size "n"
+-- error: scope violation
 
 def f : i32 = const 2 ((\xs n -> (zip xs (iota n) : [](i64, i64))))

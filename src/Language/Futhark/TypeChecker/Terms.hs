@@ -1695,7 +1695,7 @@ letGeneralise defname defloc tparams params restype =
     let keep_type_vars = overloadedTypeVars now_substs
 
     cur_lvl <- curLevel
-    let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= cur_lvl
+    let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= (cur_lvl - length params)
         new_substs = M.filterWithKey candidate now_substs
 
     (tparams', RetType ret_dims restype') <-
