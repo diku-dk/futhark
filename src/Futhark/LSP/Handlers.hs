@@ -66,19 +66,6 @@ onDocumentChangeHandler state_mvar =
         file_path = uriToFilePath $ doc ^. uri
     tryReCompile state_mvar file_path
 
-onDocumentOpenHandler :: IORef State -> Handlers (LspM ())
-onDocumentOpenHandler state_mvar =
-  notificationHandler SMethod_TextDocumentDidOpen $ \msg -> do
-    let TNotificationMessage _ _ (DidOpenTextDocumentParams doc) = msg
-        file_path = uriToFilePath $ doc ^. uri
-    logStringStderr <& ("Opened document: " ++ show (doc ^. uri))
-    tryReCompile state_mvar file_path
-
-onDocumentCloseHandler :: Handlers (LspM ())
-onDocumentCloseHandler =
-  notificationHandler SMethod_TextDocumentDidClose $ \_msg ->
-    logStringStderr <& "Closed document"
-
 -- Sent by Eglot when first connecting - not sure when else it might
 -- be sent.
 onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
@@ -93,8 +80,6 @@ handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
-      onDocumentOpenHandler state_mvar,
-      onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
