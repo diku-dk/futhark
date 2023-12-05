@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Faster non-commutative reductions in the GPU backends. Work by
+  Anders Holst and Christian Påbøl Jacobsen.
+
 ### Removed
 
 ### Changed
