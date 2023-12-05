@@ -66,6 +66,14 @@ onDocumentChangeHandler state_mvar =
         file_path = uriToFilePath $ doc ^. uri
     tryReCompile state_mvar file_path
 
+-- Some clients (Eglot) sends open/close events whether we want them
+-- or not, so we better be prepared to ignore them.
+onDocumentOpenHandler :: Handlers (LspM ())
+onDocumentOpenHandler = notificationHandler SMethod_TextDocumentDidOpen $ \_ -> pure ()
+
+onDocumentCloseHandler :: Handlers (LspM ())
+onDocumentCloseHandler = notificationHandler SMethod_TextDocumentDidClose $ \_msg -> pure ()
+
 -- Sent by Eglot when first connecting - not sure when else it might
 -- be sent.
 onWorkspaceDidChangeConfiguration :: IORef State -> Handlers (LspM ())
@@ -80,6 +88,8 @@ handlers :: IORef State -> ClientCapabilities -> Handlers (LspM ())
 handlers state_mvar _ =
   mconcat
     [ onInitializeHandler,
+      onDocumentOpenHandler,
+      onDocumentCloseHandler,
       onDocumentSaveHandler state_mvar,
       onDocumentChangeHandler state_mvar,
       onDocumentFocusHandler state_mvar,
