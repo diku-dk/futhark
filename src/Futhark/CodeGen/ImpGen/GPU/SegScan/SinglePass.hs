@@ -15,7 +15,7 @@ import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Transform.Rename
 import Futhark.Util (mapAccumLM, takeLast)
-import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, quot)
+import Futhark.Util.IntegralExp (IntegralExp (mod, rem), divUp, nextMul, quot)
 import Prelude hiding (mod, quot, rem)
 
 xParams, yParams :: SegBinOp GPUMem -> [LParam GPUMem]
@@ -23,9 +23,6 @@ xParams scan =
   take (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 yParams scan =
   drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
-
-alignTo :: (IntegralExp a) => a -> a -> a
-alignTo x a = (x `divUp` a) * a
 
 createLocalArrays ::
   Count GroupSize SubExp ->
@@ -36,7 +33,7 @@ createLocalArrays (Count groupSize) chunk types = do
   let groupSizeE = pe64 groupSize
       workSize = pe64 chunk * groupSizeE
       prefixArraysSize =
-        foldl (\acc tySize -> alignTo acc tySize + tySize * groupSizeE) 0 $
+        foldl (\acc tySize -> nextMul acc tySize + tySize * groupSizeE) 0 $
           map primByteSize types
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
@@ -44,7 +41,7 @@ createLocalArrays (Count groupSize) chunk types = do
       warpSize :: (Num a) => a
       warpSize = 32
       maxWarpExchangeSize =
-        foldl (\acc tySize -> alignTo acc tySize + tySize * fromInteger warpSize) 0 $
+        foldl (\acc tySize -> nextMul acc tySize + tySize * fromInteger warpSize) 0 $
           map primByteSize types
       maxLookbackSize = maxWarpExchangeSize + warpSize
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
@@ -52,7 +49,7 @@ createLocalArrays (Count groupSize) chunk types = do
   (_, byteOffsets) <-
     mapAccumLM
       ( \off tySize -> do
-          off' <- dPrimVE "byte_offsets" $ alignTo off tySize + pe64 groupSize * tySize
+          off' <- dPrimVE "byte_offsets" $ nextMul off tySize + pe64 groupSize * tySize
           pure (off', off)
       )
       0
@@ -61,7 +58,7 @@ createLocalArrays (Count groupSize) chunk types = do
   (_, warpByteOffsets) <-
     mapAccumLM
       ( \off tySize -> do
-          off' <- dPrimVE "warp_byte_offset" $ alignTo off tySize + warpSize * tySize
+          off' <- dPrimVE "warp_byte_offset" $ nextMul off tySize + warpSize * tySize
           pure (off', off)
       )
       warpSize
@@ -208,12 +205,10 @@ inBlockScanLookback constants arrs_full_size flag_arr arrs scan_lam = everything
       | otherwise =
           copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
 
-    writeResult x y arr
-      | primType $ paramType x = do
-          copyDWIMFix arr [ltid] (Var $ paramName x) []
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-      | otherwise =
-          copyDWIM (paramName y) [] (Var $ paramName x) []
+    writeResult x y arr = do
+      when (isPrimParam x) $
+        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIM (paramName y) [] (Var $ paramName x) []
 
 -- | Compile 'SegScan' instance to host-level code with calls to a
 -- single-pass kernel.
@@ -232,23 +227,12 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       n = product $ map pe64 $ segSpaceDims space
 
-      tys = map (\(Prim pt) -> pt) $ lambdaReturnType $ segBinOpLambda scan_op
-      tys_sizes = map primByteSize tys
-
-      sumT, maxT :: Integer
-      sumT = sum tys_sizes
-      sumT' = sum (map (max 4 . primByteSize) tys) `div` 4
-      maxT = maximum tys_sizes
-
-      -- TODO: Make these constants dynamic by querying device
-      k_reg = 64
-      k_mem = 95
-
-      mem_constraint = max k_mem sumT `div` maxT
-      reg_constraint = (k_reg - 1 - sumT') `div` (2 * sumT')
+      tys' = lambdaReturnType $ segBinOpLambda scan_op
 
       chunk :: (Num a) => a
-      chunk = fromIntegral $ max 1 $ min mem_constraint reg_constraint
+      chunk = getChunkSize tys'
+
+      tys = map elemType tys'
 
       group_size_e = pe64 $ unCount $ kAttrGroupSize attrs
       num_physgroups_e = pe64 $ unCount $ kAttrNumGroups attrs
@@ -266,11 +250,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
       not_segmented_e = fromBool $ not segmented
       segment_size = last dims'
 
-  let debug_ s v = emit $ Imp.DebugPrint s $ Just $ untyped (v :: Imp.TExp Int32)
-  debug_ "Sequential elements per thread (chunk) " chunk
-  debug_ "Memory constraint" $ fromIntegral mem_constraint
-  debug_ "Register constraint" $ fromIntegral reg_constraint
-  debug_ "sumT'" $ fromIntegral sumT'
+  emit $ Imp.DebugPrint "Sequential elements per thread (chunk)" $ Just $ untyped (chunk :: Imp.TExp Int32)
 
   statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virtgroups]) (Space "device")
   sReplicate statusFlags $ intConst Int8 statusX
@@ -286,6 +266,9 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
   sKernelThread "segscan" (segFlat space) attrs $ do
     constants <- kernelConstants <$> askEnv
+
+    let ltid32 = kernelLocalThreadId constants
+        ltid = sExt64 ltid32
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
       createLocalArrays (kAttrGroupSize attrs) (intConst Int64 chunk) tys
@@ -308,7 +291,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
     sFor "virtloop_i" iters $ const $ do
       dyn_id <- dPrim "dynamic_id" int32
       sComment "First thread in block fetches this block's dynamic_id" $ do
-        sWhen (kernelLocalThreadId constants .==. 0) $ do
+        sWhen (ltid32 .==. 0) $ do
           (globalIdMem, _, globalIdOff) <- fullyIndexArray global_id [0]
           sOp $
             Imp.Atomic DefaultSpace $
@@ -333,19 +316,19 @@ compileSegScan pat lvl space scan_op map_kbody = do
       copyDWIMFix (tvVar dyn_id) [] (Var sharedId) [0]
       sOp local_barrier
 
-      blockOff <-
-        dPrimV "blockOff" $
-          sExt64 (tvExp dyn_id) * chunk * group_size_e -- kernelGroupSize constants
-      sgmIdx <- dPrimVE "sgm_idx" $ tvExp blockOff `mod` segment_size
+      block_offset <-
+        dPrimVE "block_offset" $
+          sExt64 (tvExp dyn_id) * chunk * group_size_e
+      sgm_idx <- dPrimVE "sgm_idx" $ block_offset `mod` segment_size
       boundary <-
         dPrimVE "boundary" $
           sExt32 $
-            sMin64 (chunk * group_size_e) (segment_size - sgmIdx)
+            sMin64 (chunk * group_size_e) (segment_size - sgm_idx)
       segsize_compact <-
         dPrimVE "segsize_compact" $
           sExt32 $
             sMin64 (chunk * group_size_e) segment_size
-      privateArrays <-
+      private_chunks <-
         forM tys $ \ty ->
           sAllocArray
             "private"
@@ -353,14 +336,12 @@ compileSegScan pat lvl space scan_op map_kbody = do
             (Shape [intConst Int64 chunk])
             (ScalarSpace [intConst Int64 chunk] ty)
 
+      thd_offset <- dPrimVE "thd_offset" $ block_offset + ltid
+
       sComment "Load and map" $
         sFor "i" chunk $ \i -> do
           -- The map's input index
-          virt_tid <-
-            dPrimVE "virt_tid" $
-              tvExp blockOff
-                + sExt64 (kernelLocalThreadId constants)
-                + i * kernelGroupSize constants
+          virt_tid <- dPrimVE "virt_tid" $ thd_offset + i * group_size_e
           dIndexSpace (zip gtids dims') virt_tid
           -- Perform the map
           let in_bounds =
@@ -373,59 +354,55 @@ compileSegScan pat lvl space scan_op map_kbody = do
                     copyDWIMFix (patElemName dest) (map Imp.le64 gtids) (kernelResultSubExp src) []
 
                   -- Write to-scan results to private memory.
-                  forM_ (zip privateArrays $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
+                  forM_ (zip private_chunks $ map kernelResultSubExp all_scan_res) $ \(dest, src) ->
                     copyDWIMFix dest [i] src []
 
               out_of_bounds =
-                forM_ (zip privateArrays scanop_nes) $ \(dest, ne) ->
+                forM_ (zip private_chunks scanop_nes) $ \(dest, ne) ->
                   copyDWIMFix dest [i] ne []
 
           sIf (virt_tid .<. n) in_bounds out_of_bounds
 
       sOp $ Imp.ErrorSync Imp.FenceLocal
       sComment "Transpose scan inputs" $ do
-        forM_ (zip transposedArrays privateArrays) $ \(trans, priv) -> do
+        forM_ (zip transposedArrays private_chunks) $ \(trans, priv) -> do
           sFor "i" chunk $ \i -> do
-            sharedIdx <-
-              dPrimVE "sharedIdx" $
-                sExt64 (kernelLocalThreadId constants)
-                  + i * kernelGroupSize constants
+            sharedIdx <- dPrimVE "sharedIdx" $ ltid + i * group_size_e
             copyDWIMFix trans [sharedIdx] (Var priv) [i]
           sOp local_barrier
           sFor "i" chunk $ \i -> do
-            sharedIdx <- dPrimV "sharedIdx" $ kernelLocalThreadId constants * chunk + i
+            sharedIdx <- dPrimV "sharedIdx" $ ltid * chunk + i
             copyDWIMFix priv [sExt64 i] (Var trans) [sExt64 $ tvExp sharedIdx]
           sOp local_barrier
 
       sComment "Per thread scan" $ do
         -- We don't need to touch the first element, so only m-1
         -- iterations here.
-        globalIdx <-
-          dPrimVE "gidx" $
-            (kernelLocalThreadId constants * chunk) + 1
         sFor "i" (chunk - 1) $ \i -> do
           let xs = map paramName $ xParams scan_op
               ys = map paramName $ yParams scan_op
           -- determine if start of segment
           new_sgm <-
             if segmented
-              then dPrimVE "new_sgm" $ (globalIdx + sExt32 i - boundary) `mod` segsize_compact .==. 0
+              then do
+                gidx <- dPrimVE "gidx" $ (ltid32 * chunk) + 1
+                dPrimVE "new_sgm" $ (gidx + sExt32 i - boundary) `mod` segsize_compact .==. 0
               else pure false
           -- skip scan of first element in segment
           sUnless new_sgm $ do
-            forM_ (zip4 privateArrays xs ys tys) $ \(src, x, y, ty) -> do
+            forM_ (zip4 private_chunks xs ys tys) $ \(src, x, y, ty) -> do
               dPrim_ x ty
               dPrim_ y ty
               copyDWIMFix x [] (Var src) [i]
               copyDWIMFix y [] (Var src) [i + 1]
 
             compileStms mempty (bodyStms $ lambdaBody $ segBinOpLambda scan_op) $
-              forM_ (zip privateArrays $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(dest, res) ->
+              forM_ (zip private_chunks $ map resSubExp $ bodyResult $ lambdaBody $ segBinOpLambda scan_op) $ \(dest, res) ->
                 copyDWIMFix dest [i + 1] res []
 
       sComment "Publish results in shared memory" $ do
-        forM_ (zip prefixArrays privateArrays) $ \(dest, src) ->
-          copyDWIMFix dest [sExt64 $ kernelLocalThreadId constants] (Var src) [chunk - 1]
+        forM_ (zip prefixArrays private_chunks) $ \(dest, src) ->
+          copyDWIMFix dest [ltid] (Var src) [chunk - 1]
         sOp local_barrier
 
       let crossesSegment = do
@@ -441,19 +418,19 @@ compileSegScan pat lvl space scan_op map_kbody = do
       sComment "Scan results (with warp scan)" $ do
         groupScan
           crossesSegment
+          group_size_e
           num_virt_threads
-          (kernelGroupSize constants)
           scan_op1
           prefixArrays
 
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
         let firstThread acc prefixes =
-              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelGroupSize constants) - 1]
+              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 group_size_e - 1]
             notFirstThread acc prefixes =
-              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 (kernelLocalThreadId constants) - 1]
+              copyDWIMFix (tvVar acc) [] (Var prefixes) [ltid - 1]
         sIf
-          (kernelLocalThreadId constants .==. 0)
+          (ltid32 .==. 0)
           (zipWithM_ firstThread accs prefixArrays)
           (zipWithM_ notFirstThread accs prefixArrays)
 
@@ -461,9 +438,9 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       prefixes <- forM (zip scanop_nes tys) $ \(ne, ty) ->
         dPrimV "prefix" $ TPrimExp $ toExp' ty ne
-      blockNewSgm <- dPrimVE "block_new_sgm" $ sgmIdx .==. 0
+      blockNewSgm <- dPrimVE "block_new_sgm" $ sgm_idx .==. 0
       sComment "Perform lookback" $ do
-        sWhen (blockNewSgm .&&. kernelLocalThreadId constants .==. 0) $ do
+        sWhen (blockNewSgm .&&. ltid32 .==. 0) $ do
           everythingVolatile $
             forM_ (zip accs incprefixArrays) $ \(acc, incprefixArray) ->
               copyDWIMFix incprefixArray [tvExp dyn_id] (tvSize acc) []
@@ -475,8 +452,8 @@ compileSegScan pat lvl space scan_op map_kbody = do
         -- end sWhen
 
         let warpSize = kernelWaveSize constants
-        sWhen (bNot blockNewSgm .&&. kernelLocalThreadId constants .<. warpSize) $ do
-          sWhen (kernelLocalThreadId constants .==. 0) $ do
+        sWhen (bNot blockNewSgm .&&. ltid32 .<. warpSize) $ do
+          sWhen (ltid32 .==. 0) $ do
             sIf
               (not_segmented_e .||. boundary .==. sExt32 (group_size_e * chunk))
               ( do
@@ -505,7 +482,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
           sIf
             (tvExp status .==. statusP)
-            ( sWhen (kernelLocalThreadId constants .==. 0) $
+            ( sWhen (ltid32 .==. 0) $
                 everythingVolatile $
                   forM_ (zip prefixes incprefixArrays) $ \(prefix, incprefixArray) ->
                     copyDWIMFix (tvVar prefix) [] (Var incprefixArray) [tvExp dyn_id - 1]
@@ -518,11 +495,11 @@ compileSegScan pat lvl space scan_op map_kbody = do
                 let loopStop = warpSize * (-1)
                     sameSegment readIdx
                       | segmented =
-                          let startIdx = sExt64 (tvExp readIdx + 1) * kernelGroupSize constants * chunk - 1
-                           in tvExp blockOff - startIdx .<=. sgmIdx
+                          let startIdx = sExt64 (tvExp readIdx + 1) * group_size_e * chunk - 1
+                           in block_offset - startIdx .<=. sgm_idx
                       | otherwise = true
                 sWhile (tvExp readOffset .>. loopStop) $ do
-                  readI <- dPrimV "read_i" $ tvExp readOffset + kernelLocalThreadId constants
+                  readI <- dPrimV "read_i" $ tvExp readOffset + ltid32
                   aggrs <- forM (zip scanop_nes tys) $ \(ne, ty) ->
                     dPrimV "aggr" $ TPrimExp $ toExp' ty ne
                   flag <- dPrimV "flag" (statusX :: Imp.TExp Int8)
@@ -546,12 +523,12 @@ compileSegScan pat lvl space scan_op map_kbody = do
                   -- end sWhen
 
                   forM_ (zip exchanges aggrs) $ \(exchange, aggr) ->
-                    copyDWIMFix exchange [sExt64 $ kernelLocalThreadId constants] (tvSize aggr) []
-                  copyDWIMFix warpscan [sExt64 $ kernelLocalThreadId constants] (tvSize flag) []
+                    copyDWIMFix exchange [ltid] (tvSize aggr) []
+                  copyDWIMFix warpscan [ltid] (tvSize flag) []
 
                   -- execute warp-parallel reduction but only if the last read flag in not STATUS_P
                   copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warpSize - 1]
-                  sWhen (tvExp flag .<. (2 :: Imp.TExp Int8)) $ do
+                  sWhen (tvExp flag .<. statusP) $ do
                     lam' <- renameLambda scan_op1
                     inBlockScanLookback
                       constants
@@ -573,7 +550,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
                     )
 
                   -- update prefix if flag different than STATUS_X:
-                  sWhen (tvExp flag .>. (statusX :: Imp.TExp Int8)) $ do
+                  sWhen (tvExp flag .>. statusX) $ do
                     lam <- renameLambda scan_op1
                     let (xs, ys) = splitAt (length tys) $ map paramName $ lambdaParams lam
                     forM_ (zip xs aggrs) $ \(x, aggr) -> dPrimV_ x (tvExp aggr)
@@ -586,7 +563,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
           -- end sWhile
           -- end sIf
-          sWhen (kernelLocalThreadId constants .==. 0) $ do
+          sWhen (ltid32 .==. 0) $ do
             scan_op2 <- renameLambda scan_op1
             let xs = map paramName $ take (length tys) $ lambdaParams scan_op2
                 ys = map paramName $ drop (length tys) $ lambdaParams scan_op2
@@ -629,7 +606,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
             dPrimV_ y' $ tvExp acc
 
         sIf
-          (kernelLocalThreadId constants * chunk .<. boundary .&&. bNot blockNewSgm)
+          (ltid32 * chunk .<. boundary .&&. bNot blockNewSgm)
           ( compileStms mempty (bodyStms $ lambdaBody scan_op4) $
               forM_ (zip3 xs tys $ map resSubExp $ bodyResult $ lambdaBody scan_op4) $
                 \(x, ty, res) -> x <~~ toExp' ty res
@@ -639,38 +616,34 @@ compileSegScan pat lvl space scan_op map_kbody = do
         -- elements left before new segment.
         stop <-
           dPrimVE "stopping_point" $
-            segsize_compact - (kernelLocalThreadId constants * chunk - 1 + segsize_compact - boundary) `rem` segsize_compact
+            segsize_compact - (ltid32 * chunk - 1 + segsize_compact - boundary) `rem` segsize_compact
         sFor "i" chunk $ \i -> do
           sWhen (sExt32 i .<. stop - 1) $ do
-            forM_ (zip privateArrays ys) $ \(src, y) ->
+            forM_ (zip private_chunks ys) $ \(src, y) ->
               -- only include prefix for the first segment part per thread
               copyDWIMFix y [] (Var src) [i]
             compileStms mempty (bodyStms $ lambdaBody scan_op3) $
-              forM_ (zip privateArrays $ map resSubExp $ bodyResult $ lambdaBody scan_op3) $
+              forM_ (zip private_chunks $ map resSubExp $ bodyResult $ lambdaBody scan_op3) $
                 \(dest, res) ->
                   copyDWIMFix dest [i] res []
 
       sComment "Transpose scan output and Write it to global memory in coalesced fashion" $ do
-        forM_ (zip3 transposedArrays privateArrays $ map patElemName all_pes) $ \(locmem, priv, dest) -> do
+        forM_ (zip3 transposedArrays private_chunks $ map patElemName all_pes) $ \(locmem, priv, dest) -> do
           -- sOp local_barrier
           sFor "i" chunk $ \i -> do
             sharedIdx <-
               dPrimV "sharedIdx" $
-                sExt64 (kernelLocalThreadId constants * chunk) + i
+                sExt64 (ltid * chunk) + i
             copyDWIMFix locmem [tvExp sharedIdx] (Var priv) [i]
           sOp local_barrier
           sFor "i" chunk $ \i -> do
-            flat_idx <-
-              dPrimVE "flat_idx" $
-                tvExp blockOff
-                  + kernelGroupSize constants * i
-                  + sExt64 (kernelLocalThreadId constants)
+            flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * group_size_e
             dIndexSpace (zip gtids dims') flat_idx
             sWhen (flat_idx .<. n) $ do
               copyDWIMFix
                 dest
                 (map Imp.le64 gtids)
                 (Var locmem)
-                [sExt64 $ flat_idx - tvExp blockOff]
+                [sExt64 $ flat_idx - block_offset]
           sOp local_barrier
 {-# NOINLINE compileSegScan #-}
