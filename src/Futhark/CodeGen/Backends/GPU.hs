@@ -66,9 +66,12 @@ genKernelFunction kernel_name safety arg_params arg_set = do
           ([C.cinit|&ctx->global_failure_args|], [C.cinit|sizeof(ctx->global_failure_args)|])
         ]
 
+getParamByKey :: Name -> C.Exp
+getParamByKey key = [C.cexp|*ctx->tuning_params.$id:key|]
+
 kernelConstToExp :: KernelConst -> C.Exp
 kernelConstToExp (SizeConst key) =
-  [C.cexp|*ctx->tuning_params.$id:key|]
+  getParamByKey key
 kernelConstToExp (SizeMaxConst size_class) =
   [C.cexp|ctx->$id:field|]
   where
@@ -133,13 +136,11 @@ genLaunchKernel safety kernel_name local_memory args num_groups group_size = do
         )
 
 callKernel :: GC.OpCompiler OpenCL ()
-callKernel (GetSize v key) = do
-  let e = kernelConstToExp $ SizeConst key
-  GC.stm [C.cstm|$id:v = $exp:e;|]
+callKernel (GetSize v key) =
+  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key);|]
 callKernel (CmpSizeLe v key x) = do
-  let e = kernelConstToExp $ SizeConst key
   x' <- GC.compileExp x
-  GC.stm [C.cstm|$id:v = $exp:e <= $exp:x';|]
+  GC.stm [C.cstm|$id:v = $exp:(getParamByKey key) <= $exp:x';|]
   -- Output size information if logging is enabled.  The autotuner
   -- depends on the format of this output, so use caution if changing
   -- it.

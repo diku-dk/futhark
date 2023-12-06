@@ -202,9 +202,12 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = simpleCall "np.int64" [x]
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 kernelConstToExp :: Imp.KernelConst -> PyExp
 kernelConstToExp (Imp.SizeConst key) =
-  Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+  getParamByKey key
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
@@ -215,13 +218,11 @@ compileGroupDim (Right kc) = pure $ kernelConstToExp kc
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
+  stm $ Assign v' $ getParamByKey key
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $
-    Assign v' $
-      BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
+  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
