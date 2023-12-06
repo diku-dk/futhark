@@ -528,6 +528,8 @@ struct futhark_context {
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_local_memory;
+  size_t max_registers;
+  size_t max_cache;
 
   size_t lockstep_width;
 
@@ -593,6 +595,16 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                 "-D%s=%d ",
                 "max_group_size",
                 (int)ctx->max_group_size);
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_local_memory",
+                (int)ctx->max_local_memory);
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_registers",
+                (int)ctx->max_registers);
 
   for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
@@ -784,6 +796,14 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
     ctx->cfg->default_tile_size = max_tile_size;
   }
+
+
+  cl_ulong cache_size;
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
+                                       sizeof(cache_size), &cache_size, NULL));
+  ctx->max_cache = cache_size;
+
+  ctx->max_registers = 1<<16; // I cannot find a way to query for this.
 
   ctx->max_group_size = max_group_size;
   ctx->max_tile_size = max_tile_size; // No limit.

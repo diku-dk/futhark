@@ -263,6 +263,8 @@ struct futhark_context {
   size_t max_threshold;
   size_t max_local_memory;
   size_t max_bespoke;
+  size_t max_registers;
+  size_t max_cache;
 
   size_t lockstep_width;
 
@@ -473,6 +475,12 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
                         (int)ctx->max_group_size);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_local_memory",
+                        (int)ctx->max_local_memory);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_registers",
+                        (int)ctx->max_registers);
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
@@ -659,6 +667,8 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
+  ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
+  ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
   // FIXME: in principle we should query hipDeviceAttributeWarpSize
   // from the device, which will provide 64 on AMD GPUs.
   // Unfortunately, we currently do nasty implicit intra-warp

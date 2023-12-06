@@ -243,17 +243,9 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  -- Querying L2 cache size is not reliable.  Instead we provide a
-  -- tunable knob with a hopefully sane default.
-  let hist_L2_def = 4 * 1024 * 1024
   hist_L2 <- dPrim "L2_size" int32
-  entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
-  sOp
-    $ Imp.GetSize
-      (tvVar hist_L2)
-      (keyWithEntryPoint entry $ nameFromString (prettyString (tvVar hist_L2)))
-    $ Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
+  sOp $ Imp.GetSizeMax (tvVar hist_L2) $ Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-

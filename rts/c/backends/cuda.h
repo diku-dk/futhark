@@ -289,6 +289,7 @@ struct futhark_context {
   size_t max_threshold;
   size_t max_local_memory;
   size_t max_bespoke;
+  size_t max_cache;
 
   size_t lockstep_width;
 
@@ -457,6 +458,12 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
                         (int)ctx->max_group_size);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_local_memory",
+                        (int)ctx->max_local_memory);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_registers",
+                        (int)ctx->max_registers);
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
@@ -804,6 +811,8 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
+  ctx->max_registers = device_query(ctx->dev, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK);
+  ctx->max_cache = device_query(ctx->dev, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE);
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
