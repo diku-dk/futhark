@@ -54,7 +54,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
