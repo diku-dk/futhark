@@ -271,6 +271,7 @@ seqStm' ::
 seqStm' env (Let pat aux
             (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody))))
   | L.length (unSegSpace space) /= 1 = throwError ()
+  | differentSize space env = throwError ()
   | otherwise = do
       let tid = fst $ head $ unSegSpace space
       let env' = updateEnvTid env tid
@@ -292,6 +293,7 @@ seqStm' env (Let pat aux
 seqStm' env stm@(Let pat _ (Op (SegOp
           (SegMap lvl@(SegThread {}) space ts kbody))))
   | L.length (unSegSpace space) /= 1 = throwError ()
+  | differentSize space env = throwError ()
   | isScatter kbody = seqScatter env stm
   | otherwise = do
       let tid = fst $ head $ unSegSpace space
@@ -316,6 +318,7 @@ seqStm' env stm@(Let pat _ (Op (SegOp
 seqStm' env (Let pat aux
             (Op (SegOp (SegScan (SegThread {}) space binops ts kbody))))
   | L.length (unSegSpace space) /= 1 = throwError ()
+  | differentSize space env = throwError ()
   | otherwise = do
       usedArrays <- lift $ do getUsedArraysIn env kbody
 
@@ -900,6 +903,12 @@ mkTiles env = do
 
 isArray :: NameInfo GPU -> Bool
 isArray info = arrayRank (typeOf info) > 0
+
+-- Assumes the SegSpace to only have a single dimension
+differentSize :: SegSpace -> Env -> Bool
+differentSize space env = 
+  let sz = snd $ head $ unSegSpace space
+  in sz /= grpsizeOld env
 
 -- | Checks if a kernel body ends in only WriteReturns results as then it
 -- must be the body of a scatter
