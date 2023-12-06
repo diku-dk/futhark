@@ -62,15 +62,14 @@ data Kernel = Kernel
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
-    -- | If true, this kernel does not need to check
-    -- whether we are in a failing state, as it can cope.
-    -- Intuitively, it means that the kernel does not
-    -- depend on any non-scalar parameters to make control
-    -- flow decisions.  Replication, transpose, and copy
+    -- | If true, this kernel does not need to check whether we are in
+    -- a failing state, as it can cope. Intuitively, it means that the
+    -- kernel does not depend on any non-scalar parameters to make
+    -- control flow decisions. Replication, transpose, and copy
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements.  Set this to
+    -- when considering the local memory requirements. Set this to
     -- false for kernels that do their own checking.
     kernelCheckLocalMemory :: Bool
   }
