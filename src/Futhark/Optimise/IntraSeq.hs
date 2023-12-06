@@ -182,31 +182,40 @@ seqStm stm@(Let pat aux (Op (SegOp (
   | L.length (unSegSpace space) /= 1 = lift $ do addStm stm
   | not $ shouldSequentialize (stmAuxAttrs aux) = lift $ do addStm stm
   | otherwise = do
-    -- As we are at group level all arrays in scope must be global, i.e. not
-    -- local to the current group. We simply create a tile for all such arrays
-    -- and let a Simplify pass remove unused tiles.
 
-    let seqFactor = getSeqFactor $ stmAuxAttrs aux
-    let grpId   = fst $ head $ unSegSpace space
-    let sizeOld = unCount $ gridGroupSize grid
-    sizeNew <- lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
-                                              (eSubExp sizeOld)
-                                              (eSubExp seqFactor)
+    -- As we need to catch 'internal' errors we use runSeqBuilder here
+    res <- runSeqBuilder $ do
+  
+          -- As we are at group level all arrays in scope must be global, i.e. not
+          -- local to the current group. We simply create a tile for all such arrays
+          -- and let a Simplify pass remove unused tiles.
 
-    let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
+          let seqFactor = getSeqFactor $ stmAuxAttrs aux
+          let grpId   = fst $ head $ unSegSpace space
+          let sizeOld = unCount $ gridGroupSize grid
+          sizeNew <- lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
+                                                    (eSubExp sizeOld)
+                                                    (eSubExp seqFactor)
 
-    exp' <- buildSegMap' $ do
-        env' <- lift $ do mkTiles env
+          let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
 
-        let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
-        let lvl' = SegGroup virt grid'
+          exp' <- buildSegMap' $ do
+              env' <- lift $ do mkTiles env
 
-        _ <- seqStms' env' stms
+              let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
+              let lvl' = SegGroup virt grid'
 
-        kres' <- lift $ do flattenResults pat kres
-        pure (kres', lvl', space, ts)
+              _ <- seqStms' env' stms
 
-    lift $ do addStm $ Let pat aux exp'
+              kres' <- lift $ do flattenResults pat kres
+              pure (kres', lvl', space, ts)
+
+          lift $ do addStm $ Let pat aux exp'
+
+    -- Based on error or not we now return the correct program
+    case res of
+      Nothing -> lift $ do addStm stm
+      Just stms' -> lift $ do addStms stms'
 
 
 
