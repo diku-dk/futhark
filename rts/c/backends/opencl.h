@@ -801,6 +801,12 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   cl_ulong cache_size;
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
                                        sizeof(cache_size), &cache_size, NULL));
+
+  if (cache_size == 0) {
+    // Some code assumes nonzero cache.
+    cache_size = 1024*1024;
+  }
+
   ctx->max_cache = cache_size;
 
   ctx->max_registers = 1<<16; // I cannot find a way to query for this.
