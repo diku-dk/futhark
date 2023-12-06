@@ -166,7 +166,7 @@ kernelImpCodeGenAction =
   Action
     { actionName = "Compile imperative kernels",
       actionDescription = "Translate program into imperative IL with kernels and write it on standard output.",
-      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgOpenCL
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenGPU.compileProgHIP
     }
 
 -- | Convert the program to CPU multicore ImpCode and print it to stdout.
