@@ -57,6 +57,7 @@ where
 
 import Control.Monad
 import Data.List (genericLength, zip4)
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -106,7 +107,8 @@ compileSegRed ::
   CallKernelGen ()
 compileSegRed pat lvl space segbinops map_kbody = do
   emit $ Imp.DebugPrint "\n# SegRed" Nothing
-  KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
+  KernelAttrs {kAttrNumGroups = num_groups, kAttrGroupSize = group_size} <-
+    lvlKernelAttrs lvl
   let grid = KernelGrid num_groups group_size
 
   compileSegRed' pat grid space segbinops $ \red_cont ->
@@ -142,31 +144,32 @@ compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
         "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
-  | [(_, Constant (IntValue (Int64Value 1))), _] <- unSegSpace space =
-      compileReduction nonsegmentedReduction
   | otherwise = do
-      let segment_size = pe64 $ last $ segSpaceDims space
-          use_small_segments = segment_size * 2 .<. group_size_E * chunk_E
-      sIf
-        use_small_segments
-        (compileReduction smallSegmentsReduction)
-        (compileReduction largeSegmentsReduction)
+      chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+      case unSegSpace space of
+        [(_, Constant (IntValue (Int64Value 1))), _] ->
+          compileReduction (chunk_v, chunk_const) nonsegmentedReduction
+        _ -> do
+          let segment_size = pe64 $ last $ segSpaceDims space
+              use_small_segments = segment_size * 2 .<. pe64 (unCount group_size) * tvExp chunk_v
+          sIf
+            use_small_segments
+            (compileReduction (chunk_v, chunk_const) smallSegmentsReduction)
+            (compileReduction (chunk_v, chunk_const) largeSegmentsReduction)
   where
-    compileReduction f =
+    compileReduction chunk f =
       f pat num_groups group_size chunk space segbinops map_body_cont
-
-    chunk
-      | Noncommutative <- mconcat (map segBinOpComm segbinops),
-        all isPrimSegBinOp segbinops =
-          intConst Int64 $ getChunkSize param_types
-      | otherwise = intConst Int64 1
 
     param_types = map paramType $ concatMap paramOf segbinops
 
     num_groups = gridNumGroups grid
     group_size = gridGroupSize grid
-    group_size_E = pe64 $ unCount group_size
-    chunk_E = pe64 chunk
+
+    chunk_const =
+      if Noncommutative `elem` map segBinOpComm segbinops
+        && all isPrimSegBinOp segbinops
+        then getChunkSize param_types
+        else Imp.ValueExp $ IntValue $ intValue Int64 (1 :: Int64)
 
 -- | Prepare intermediate arrays for the reduction.  Prim-typed
 -- arguments go in local memory (so we need to do the allocation of
@@ -290,16 +293,16 @@ type DoCompileSegRed =
   Pat LetDecMem ->
   Count NumGroups SubExp ->
   Count GroupSize SubExp ->
-  SubExp ->
+  (TV Int64, Imp.KernelConstExp) ->
   SegSpace ->
   [SegBinOp GPUMem] ->
   DoSegBody ->
   CallKernelGen ()
 
 nonsegmentedReduction :: DoCompileSegRed
-nonsegmentedReduction (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
+nonsegmentedReduction (Pat segred_pes) num_groups group_size (chunk_v, chunk_const) space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
-      chunk = pe64 chunk_se
+      chunk = tvExp chunk_v
       num_groups_se = unCount num_groups
       group_size_se = unCount group_size
       group_size' = pe64 group_size_se
@@ -313,12 +316,17 @@ nonsegmentedReduction (Pat segred_pes) num_groups group_size chunk_se space segb
   num_threads <-
     fmap tvSize $ dPrimV "num_threads" $ pe64 num_groups_se * group_size'
 
-  sKernelThread "segred_nonseg" (segFlat space) (defKernelAttrs num_groups group_size) $ do
+  let attrs =
+        (defKernelAttrs num_groups group_size)
+          { kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const
+          }
+
+  sKernelThread "segred_nonseg" (segFlat space) attrs $ do
     constants <- kernelConstants <$> askEnv
     let ltid = kernelLocalThreadId constants
     let group_id = kernelGroupId constants
 
-    interms <- makeIntermArrays (sExt64 group_id) group_size_se chunk_se segbinops
+    interms <- makeIntermArrays (sExt64 group_id) group_size_se (tvSize chunk_v) segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- Since this is the nonsegmented case, all outer segment IDs must
@@ -473,7 +481,7 @@ smallSegmentsReduction (Pat segred_pes) num_groups group_size _ space segbinops 
       sOp $ Imp.Barrier Imp.FenceLocal
 
 largeSegmentsReduction :: DoCompileSegRed
-largeSegmentsReduction (Pat segred_pes) num_groups group_size chunk_se space segbinops map_body_cont = do
+largeSegmentsReduction (Pat segred_pes) num_groups group_size (chunk_v, chunk_const) space segbinops map_body_cont = do
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
       num_segments = product $ init dims'
@@ -481,7 +489,7 @@ largeSegmentsReduction (Pat segred_pes) num_groups group_size chunk_se space seg
       num_groups' = pe64 $ unCount num_groups
       group_size_se = unCount group_size
       group_size' = pe64 group_size_se
-      chunk = pe64 chunk_se
+      chunk = tvExp chunk_v
 
   groups_per_segment <-
     dPrimVE "groups_per_segment" $
@@ -522,12 +530,17 @@ largeSegmentsReduction (Pat segred_pes) num_groups group_size chunk_se space seg
   let num_counters = maxNumOps * 1024
   counters <- genZeroes "counters" $ fromIntegral num_counters
 
-  sKernelThread "segred_large" (segFlat space) (defKernelAttrs num_groups group_size) $ do
+  let attrs =
+        (defKernelAttrs num_groups group_size)
+          { kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const
+          }
+
+  sKernelThread "segred_large" (segFlat space) attrs $ do
     constants <- kernelConstants <$> askEnv
     let group_id = sExt64 $ kernelGroupId constants
         ltid = kernelLocalThreadId constants
 
-    interms <- makeIntermArrays group_id group_size_se chunk_se segbinops
+    interms <- makeIntermArrays group_id group_size_se (tvSize chunk_v) segbinops
     sync_arr <- sAllocArray "sync_arr" Bool (Shape [intConst Int32 1]) $ Space "local"
 
     -- We probably do not have enough actual workgroups to cover the
