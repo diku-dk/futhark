@@ -811,8 +811,8 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
-  ctx->max_registers = device_query(ctx->dev, CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK);
-  ctx->max_cache = device_query(ctx->dev, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE);
+  ctx->max_registers = device_query(ctx->dev, MAX_REGISTERS_PER_BLOCK);
+  ctx->max_cache = device_query(ctx->dev, L2_CACHE_SIZE);
   ctx->lockstep_width = device_query(ctx->dev, WARP_SIZE);
   CUDA_SUCCEED_FATAL(cuStreamCreate(&ctx->stream, CU_STREAM_DEFAULT));
   cuda_size_setup(ctx);
