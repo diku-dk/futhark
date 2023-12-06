@@ -75,6 +75,7 @@ module Futhark.CodeGen.ImpGen
     caseMatch,
 
     -- * Constructing code.
+    newVName,
     dLParams,
     dFParams,
     addLoopVar,

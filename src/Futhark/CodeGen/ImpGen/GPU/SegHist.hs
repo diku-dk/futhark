@@ -48,7 +48,6 @@ import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
@@ -245,7 +244,7 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
 
   hist_L2 <- dPrim "L2_size" int32
   -- Equivalent to F_L2*L2 in paper.
-  sOp $ Imp.GetSizeMax (tvVar hist_L2) $ Imp.SizeCache
+  sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-

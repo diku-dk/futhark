@@ -11,7 +11,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.Multicore.Base
 import Futhark.CodeGen.ImpGen.Multicore.SegRed (compileSegRed')
 import Futhark.IR.MCMem
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Util (chunks, splitFromEnd, takeLast)
 import Futhark.Util.IntegralExp (rem)

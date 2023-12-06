@@ -27,7 +27,6 @@ import Futhark.Construct (fullSliceNum)
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (chunks, mapAccumLM, takeLast)
 import Futhark.Util.IntegralExp (divUp, rem)
