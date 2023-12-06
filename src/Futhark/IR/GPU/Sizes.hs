@@ -38,6 +38,12 @@ data SizeClass
     SizeLocalMemory
   | -- | A bespoke size with a default.
     SizeBespoke Name Int64
+  | -- | Amount of registers available per workgroup. Mostly
+    -- meaningful for querying the maximum.
+    SizeRegisters
+  | -- | Amount of L2 cache memory, in bytes. Mostly meaningful for
+    -- querying the maximum.
+    SizeCache
   deriving (Eq, Ord, Show)
 
 instance Pretty SizeClass where
@@ -54,6 +60,8 @@ instance Pretty SizeClass where
   pretty SizeLocalMemory = "local_memory"
   pretty (SizeBespoke k def) =
     "bespoke" <> parens (pretty k <> comma <+> pretty def)
+  pretty SizeRegisters = "registers"
+  pretty SizeCache = "cache"
 
 -- | The default value for the size.  If 'Nothing', that means the backend gets to decide.
 sizeDefault :: SizeClass -> Maybe Int64
