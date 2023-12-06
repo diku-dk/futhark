@@ -804,38 +804,6 @@ SCALAR_FUN_ATTR int64_t smod_safe64(int64_t x, int64_t y) {
   return y == 0 ? 0 : smod64(x, y);
 }
 
-SCALAR_FUN_ATTR int8_t squot8(int8_t x, int8_t y) {
-  return x / y;
-}
-
-SCALAR_FUN_ATTR int16_t squot16(int16_t x, int16_t y) {
-  return x / y;
-}
-
-SCALAR_FUN_ATTR int32_t squot32(int32_t x, int32_t y) {
-  return x / y;
-}
-
-SCALAR_FUN_ATTR int64_t squot64(int64_t x, int64_t y) {
-  return x / y;
-}
-
-SCALAR_FUN_ATTR int8_t srem8(int8_t x, int8_t y) {
-  return x % y;
-}
-
-SCALAR_FUN_ATTR int16_t srem16(int16_t x, int16_t y) {
-  return x % y;
-}
-
-SCALAR_FUN_ATTR int32_t srem32(int32_t x, int32_t y) {
-  return x % y;
-}
-
-SCALAR_FUN_ATTR int64_t srem64(int64_t x, int64_t y) {
-  return x % y;
-}
-
 SCALAR_FUN_ATTR int8_t squot_safe8(int8_t x, int8_t y) {
   return y == 0 ? 0 : x / y;
 }
@@ -870,21 +838,10 @@ SCALAR_FUN_ATTR int64_t srem_safe64(int64_t x, int64_t y) {
 
 #endif
 
-SCALAR_FUN_ATTR int8_t smin8(int8_t x, int8_t y) {
-  return x < y ? x : y;
-}
-
-SCALAR_FUN_ATTR int16_t smin16(int16_t x, int16_t y) {
-  return x < y ? x : y;
-}
-
-SCALAR_FUN_ATTR int32_t smin32(int32_t x, int32_t y) {
-  return x < y ? x : y;
-}
-
-SCALAR_FUN_ATTR int64_t smin64(int64_t x, int64_t y) {
-  return x < y ? x : y;
-}
+#define smin8(x, y)  ((x) < (y) ? (x) : (y))
+#define smin16(x, y) ((x) < (y) ? (x) : (y))
+#define smin32(x, y) ((x) < (y) ? (x) : (y))
+#define smin64(x, y) ((x) < (y) ? (x) : (y))
 
 SCALAR_FUN_ATTR uint8_t umin8(uint8_t x, uint8_t y) {
   return x < y ? x : y;
@@ -902,21 +859,10 @@ SCALAR_FUN_ATTR uint64_t umin64(uint64_t x, uint64_t y) {
   return x < y ? x : y;
 }
 
-SCALAR_FUN_ATTR int8_t smax8(int8_t x, int8_t y) {
-  return x < y ? y : x;
-}
-
-SCALAR_FUN_ATTR int16_t smax16(int16_t x, int16_t y) {
-  return x < y ? y : x;
-}
-
-SCALAR_FUN_ATTR int32_t smax32(int32_t x, int32_t y) {
-  return x < y ? y : x;
-}
-
-SCALAR_FUN_ATTR int64_t smax64(int64_t x, int64_t y) {
-  return x < y ? y : x;
-}
+#define smax8(x, y) (x < y ? y : x)
+#define smax16(x, y) (x < y ? y : x)
+#define smax32(x, y) (x < y ? y : x)
+#define smax64(x, y) (x < y ? y : x)
 
 SCALAR_FUN_ATTR uint8_t umax8(uint8_t x, uint8_t y) {
   return x < y ? y : x;
