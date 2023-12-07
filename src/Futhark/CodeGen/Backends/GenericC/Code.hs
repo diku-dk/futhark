@@ -99,8 +99,6 @@ compilePrimExp f (BinOpExp bop x y) = do
     Add _ OverflowUndef -> [C.cexp|$exp:x' + $exp:y'|]
     Sub _ OverflowUndef -> [C.cexp|$exp:x' - $exp:y'|]
     Mul _ OverflowUndef -> [C.cexp|$exp:x' * $exp:y'|]
-    SQuot _ Unsafe -> [C.cexp|$exp:x' / $exp:y'|]
-    SRem _ Unsafe -> [C.cexp|$exp:x' % $exp:y'|]
     FAdd {} -> [C.cexp|$exp:x' + $exp:y'|]
     FSub {} -> [C.cexp|$exp:x' - $exp:y'|]
     FMul {} -> [C.cexp|$exp:x' * $exp:y'|]
