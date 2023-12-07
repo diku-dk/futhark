@@ -289,6 +289,7 @@ struct futhark_context {
   size_t max_threshold;
   size_t max_local_memory;
   size_t max_bespoke;
+  size_t max_registers;
   size_t max_cache;
 
   size_t lockstep_width;
