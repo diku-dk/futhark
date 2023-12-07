@@ -183,22 +183,19 @@ seqStm stm@(Let pat aux (Op (SegOp (
   | not $ shouldSequentialize (stmAuxAttrs aux) = lift $ do addStm stm
   | otherwise = do
 
-    -- As we need to catch 'internal' errors we use runSeqBuilder here
-    res <- runSeqBuilder $ do
-  
-          -- As we are at group level all arrays in scope must be global, i.e. not
-          -- local to the current group. We simply create a tile for all such arrays
-          -- and let a Simplify pass remove unused tiles.
-
-          let seqFactor = getSeqFactor $ stmAuxAttrs aux
-          let grpId   = fst $ head $ unSegSpace space
-          let sizeOld = unCount $ gridGroupSize grid
-          sizeNew <- lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
+    let seqFactor = getSeqFactor $ stmAuxAttrs aux
+    let grpId   = fst $ head $ unSegSpace space
+    let sizeOld = unCount $ gridGroupSize grid
+    sizeNew <- lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                                     (eSubExp sizeOld)
                                                     (eSubExp seqFactor)
 
-          let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
+    let env = Env (Var grpId) sizeNew sizeOld Nothing mempty seqFactor
 
+    -- As we need to catch 'internal' errors we use runSeqBuilder here
+    res <- runSeqBuilder $ do
+  
+          
           exp' <- buildSegMap' $ do
               env' <- lift $ do mkTiles env
 
@@ -215,7 +212,38 @@ seqStm stm@(Let pat aux (Op (SegOp (
     -- Based on error or not we now return the correct program
     case res of
       Nothing -> lift $ do addStm stm
-      Just stms' -> lift $ do addStms stms'
+      Just stms'
+        | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
+        | otherwise -> do 
+            let [stm'] = stmsToList stms' 
+
+            -- Create the braches with each code version
+            body1 <- lift $ do mkMatchBody stm'
+            body2 <- lift $ do mkMatchBody stm
+            
+            -- Create the conditional statements
+            cond <- lift $ do eCmpOp (CmpSlt Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+
+            matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
+            
+            lift $ do addStm (Let pat aux matchExp)
+
+    where
+      isOneStm :: [Stm GPU] -> Bool
+      isOneStm [_] = True
+      isOneStm _   = False
+
+      mkMatchBody :: Stm GPU -> Builder GPU (Body GPU)
+      mkMatchBody stm = do
+          let (Let pat' aux' exp') = stm
+          newPat <- renamePat pat'
+          newExp <- renameExp exp'
+          let newStm = Let newPat aux' newExp
+          let (Let pat' _ _) = newStm
+          let pNames = L.map patElemName $ patElems pat'
+          let res = L.map (SubExpRes mempty . Var) pNames
+          pure $ Body mempty (stmsFromList [newStm]) res
+      
 
 
 
