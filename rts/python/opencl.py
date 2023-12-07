@@ -102,6 +102,16 @@ def apply_size_heuristics(self, size_heuristics, sizes):
     return sizes
 
 
+def to_c_str_rep(x):
+    if type(x) is bool or type(x) is np.bool_:
+        if x:
+            return "true"
+        else:
+            return "false"
+    else:
+        return str(x)
+
+
 def initialise_opencl_object(
     self,
     program_src="",
@@ -119,6 +129,7 @@ def initialise_opencl_object(
     required_types=[],
     all_sizes={},
     user_sizes={},
+    constants=[],
 ):
     if command_queue is None:
         self.ctx = get_prefered_context(
@@ -283,6 +294,10 @@ def initialise_opencl_object(
                 v,
             )
             for (s, v) in self.sizes.items()
+        ]
+
+        build_options += [
+            "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants
         ]
 
         if self.platform.name == "Oclgrind":

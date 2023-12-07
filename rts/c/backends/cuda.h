@@ -431,6 +431,10 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   int arch_set = 0, num_extra_opts;
   struct futhark_context_config *cfg = ctx->cfg;
 
+  char** macro_names;
+  int64_t* macro_vals;
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+
   // nvrtc cannot handle multiple -arch options.  Hence, if one of the
   // extra_opts is -arch, we have to be careful not to do our usual
   // automatic generation.
@@ -443,7 +447,7 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
     }
   }
 
-  size_t i = 0, n_opts_alloc = 20 + num_extra_opts + cfg->num_tuning_params;
+  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + cfg->num_tuning_params;
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     opts[i++] = strdup("-arch");
@@ -465,6 +469,11 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   opts[i++] = msgprintf("-D%s=%d",
                         "max_registers",
                         (int)ctx->max_registers);
+
+  for (int j = 0; j < num_macros; j++) {
+    opts[i++] = msgprintf("-D%s=%zu", macro_names[j], macro_vals[j]);
+  }
+
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
@@ -492,6 +501,9 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
   opts[i++] = msgprintf("-DTR_BLOCK_DIM=%d", TR_BLOCK_DIM);
   opts[i++] = msgprintf("-DTR_TILE_DIM=%d", TR_TILE_DIM);
   opts[i++] = msgprintf("-DTR_ELEMS_PER_THREAD=%d", TR_ELEMS_PER_THREAD);
+
+  free(macro_names);
+  free(macro_vals);
 
   *n_opts = i;
   *opts_out = opts;

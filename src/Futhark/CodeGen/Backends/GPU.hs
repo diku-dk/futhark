@@ -12,17 +12,18 @@ module Futhark.CodeGen.Backends.GPU
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Bifunctor (bimap)
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
+import Futhark.CodeGen.Backends.GenericC.Pretty (expText, idText)
 import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (gpuH, gpuPrototypesH)
 import Futhark.MonadFreshNames
-import Futhark.Util (chunk)
+import Futhark.Util (chunk, zEncodeText)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -382,16 +383,20 @@ failureMsgFunction failures =
                   return strdup("Unknown error.  This is a compiler bug.");
                 }|]
 
+compileConstExp :: KernelConstExp -> C.Exp
+compileConstExp e = runIdentity $ GC.compilePrimExp (pure . kernelConstToExp) e
+
 -- | Called after most code has been generated to generate the bulk of
 -- the boilerplate.
 generateGPUBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   T.Text ->
   [Name] ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-generateGPUBoilerplate gpu_program backendH kernels types failures = do
+generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   createKernels kernels
   let gpu_program_fragments =
         -- Some C compilers limit the size of literal strings, so
@@ -403,6 +408,13 @@ generateGPUBoilerplate gpu_program backendH kernels types failures = do
         | FloatType Float64 `elem` types = [C.cexp|1|]
         | otherwise = [C.cexp|0|]
       max_failure_args = foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+
+      setMacro i (name, e) =
+        [C.cstm|{names[$int:i] = $string:(nameToString name);
+                 values[$int:i] = $esc:e';}|]
+        where
+          e' = T.unpack $ expText $ compileConstExp e
+
   mapM_
     GC.earlyDecl
     [C.cunit|static const int max_failure_args = $int:max_failure_args;
@@ -411,6 +423,17 @@ generateGPUBoilerplate gpu_program backendH kernels types failures = do
              $esc:(T.unpack gpuPrototypesH)
              $esc:(T.unpack backendH)
              $esc:(T.unpack gpuH)
+             static int gpu_macros(struct futhark_context *ctx, char*** names_out, typename int64_t** values_out) {
+               int num_macros = $int:(length macros);
+               char** names = malloc(num_macros * sizeof(char*));
+               typename int64_t* values = malloc(num_macros * sizeof(int64_t));
+
+               $stms:(zipWith setMacro [(0::Int)..] macros)
+
+               *names_out = names;
+               *values_out = values;
+               return num_macros;
+             }
             |]
   GC.earlyDecl $ failureMsgFunction failures
 
