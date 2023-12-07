@@ -23,7 +23,7 @@ import Futhark.CodeGen.Backends.SimpleRep (primStorageType, toStorage)
 import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.RTS.C (gpuH, gpuPrototypesH)
 import Futhark.MonadFreshNames
-import Futhark.Util (chunk, zEncodeText)
+import Futhark.Util (chunk)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
