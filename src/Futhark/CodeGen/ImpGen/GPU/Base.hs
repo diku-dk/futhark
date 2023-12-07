@@ -274,9 +274,9 @@ kernelConstToExp = traverse f
       sOp $ Imp.GetSize (tvVar v) k c
       pure $ tvVar v
 
--- | Given available register and cacha list of parameter types,
--- compute the largest available chunk size given the parameters for
--- which we want chunking and the available resources. Used in
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources. Used in
 -- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
 -- (with primitive non-commutative operators only).
 getChunkSize :: [Type] -> Imp.KernelConstExp
