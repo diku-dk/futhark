@@ -212,21 +212,21 @@ seqStm stm@(Let pat aux (Op (SegOp (
     -- Based on error or not we now return the correct program
     case res of
       Nothing -> lift $ do addStm stm
-      Just stms'
-        | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
-        | otherwise -> do 
-            let [stm'] = stmsToList stms' 
+      Just stms' -> lift $ do addStms stms'
+        -- | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
+        -- | otherwise -> do 
+        --     let [stm'] = stmsToList stms' 
 
-            -- Create the braches with each code version
-            body1 <- lift $ do mkMatchBody stm'
-            body2 <- lift $ do mkMatchBody stm
+        --     -- Create the braches with each code version
+        --     body1 <- lift $ do mkMatchBody stm'
+        --     body2 <- lift $ do mkMatchBody stm
             
-            -- Create the conditional statements
-            cond <- lift $ do eCmpOp (CmpSlt Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+        --     -- Create the conditional statements
+        --     cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
 
-            matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
+        --     matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
             
-            lift $ do addStm (Let pat aux matchExp)
+        --     lift $ do addStm (Let pat aux matchExp)
 
     where
       isOneStm :: [Stm GPU] -> Bool
@@ -892,12 +892,32 @@ mkTiles env = do
     tileScratch <- letExp "tile_scratch" $ BasicOp $
                       Scratch tp [tileSize]
 
-    let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
-    let sliceIdx = DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)
+    -- Check the type of the array to see if has been transposed
+    arrType <- lookupType arrName
+    let arrShape = arrayShape arrType
+    (arrName', slice) <- do
+            case arrShape of
+              (Shape [x,y])
+                | grpsizeOld env /= x -> do
+                  let slice = [DimFix x, 
+                               DimSlice(intConst Int64 0) (grpsizeOld env) (intConst Int64 1)] 
+                  pure (arrName, slice)
+                | otherwise -> do 
+                  let slice = [DimFix y, 
+                               DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)]
+                  let shape' = Shape [y, x]
+                  newname <- letExp "reshaped" $ BasicOp $ Reshape ReshapeArbitrary shape' arrName
+                  pure (newname, slice)
+              _ -> error "Only handle two dimensions in mkTiles"
+                  
 
-    tileSlice <- letSubExp "tile_slice" $ BasicOp $
-                      Index arrName (Slice $ outerDim ++ [sliceIdx])
+    -- let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
+    -- let sliceIdx = DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)
 
+    let slice' = Slice [DimFix $ grpId env, DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)]
+
+    
+    tileSlice <- letSubExp "tile_slice" $ BasicOp $ Index arrName' slice'
     tileStaging <- letExp "tile_staging" $ BasicOp $
                       Update Unsafe tileScratch
                         (Slice [DimSlice (intConst Int64 0)
