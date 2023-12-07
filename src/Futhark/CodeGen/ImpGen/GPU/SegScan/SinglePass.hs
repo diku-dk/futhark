@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpGen.GPU.SegScan.SinglePass (compileSegScan) where
 
 import Control.Monad
 import Data.List (zip4, zip7)
+import Data.Map qualified as M
 import Data.Maybe
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
@@ -229,13 +230,14 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       tys' = lambdaReturnType $ segBinOpLambda scan_op
 
-      chunk :: (Num a) => a
-      chunk = getChunkSize tys'
-
       tys = map elemType tys'
 
       group_size_e = pe64 $ unCount $ kAttrGroupSize attrs
       num_physgroups_e = pe64 $ unCount $ kAttrNumGroups attrs
+
+  let chunk_const = getChunkSize tys'
+  chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
+  let chunk = tvExp chunk_v
 
   num_virtgroups <-
     tvSize <$> dPrimV "num_virtgroups" (n `divUp` (group_size_e * chunk))
@@ -250,7 +252,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
       not_segmented_e = fromBool $ not segmented
       segment_size = last dims'
 
-  emit $ Imp.DebugPrint "Sequential elements per thread (chunk)" $ Just $ untyped (chunk :: Imp.TExp Int32)
+  emit $ Imp.DebugPrint "Sequential elements per thread (chunk)" $ Just $ untyped chunk
 
   statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virtgroups]) (Space "device")
   sReplicate statusFlags $ intConst Int8 statusX
@@ -264,14 +266,18 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
   global_id <- genZeroes "global_dynid" 1
 
-  sKernelThread "segscan" (segFlat space) attrs $ do
+  let attrs' = attrs {kAttrConstExps = M.singleton (tvVar chunk_v) chunk_const}
+
+  sKernelThread "segscan" (segFlat space) attrs' $ do
+    chunk32 <- dPrimVE "chunk_size_32b" $ sExt32 $ tvExp chunk_v
+
     constants <- kernelConstants <$> askEnv
 
     let ltid32 = kernelLocalThreadId constants
         ltid = sExt64 ltid32
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
-      createLocalArrays (kAttrGroupSize attrs) (intConst Int64 chunk) tys
+      createLocalArrays (kAttrGroupSize attrs) (tvSize chunk_v) tys
 
     -- We wrap the entire kernel body in a virtualisation loop to handle the
     -- case where we do not have enough workgroups to cover the iteration space.
@@ -333,8 +339,8 @@ compileSegScan pat lvl space scan_op map_kbody = do
           sAllocArray
             "private"
             ty
-            (Shape [intConst Int64 chunk])
-            (ScalarSpace [intConst Int64 chunk] ty)
+            (Shape [tvSize chunk_v])
+            (ScalarSpace [tvSize chunk_v] ty)
 
       thd_offset <- dPrimVE "thd_offset" $ block_offset + ltid
 
@@ -385,7 +391,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
           new_sgm <-
             if segmented
               then do
-                gidx <- dPrimVE "gidx" $ (ltid32 * chunk) + 1
+                gidx <- dPrimVE "gidx" $ (ltid32 * chunk32) + 1
                 dPrimVE "new_sgm" $ (gidx + sExt32 i - boundary) `mod` segsize_compact .==. 0
               else pure false
           -- skip scan of first element in segment
@@ -408,8 +414,8 @@ compileSegScan pat lvl space scan_op map_kbody = do
       let crossesSegment = do
             guard segmented
             Just $ \from to ->
-              let from' = (from + 1) * chunk - 1
-                  to' = (to + 1) * chunk - 1
+              let from' = (from + 1) * chunk32 - 1
+                  to' = (to + 1) * chunk32 - 1
                in (to' - from') .>. (to' + segsize_compact - boundary) `mod` segsize_compact
 
       scan_op1 <- renameLambda $ segBinOpLambda scan_op
@@ -606,7 +612,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
             dPrimV_ y' $ tvExp acc
 
         sIf
-          (ltid32 * chunk .<. boundary .&&. bNot blockNewSgm)
+          (ltid32 * chunk32 .<. boundary .&&. bNot blockNewSgm)
           ( compileStms mempty (bodyStms $ lambdaBody scan_op4) $
               forM_ (zip3 xs tys $ map resSubExp $ bodyResult $ lambdaBody scan_op4) $
                 \(x, ty, res) -> x <~~ toExp' ty res
@@ -616,7 +622,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
         -- elements left before new segment.
         stop <-
           dPrimVE "stopping_point" $
-            segsize_compact - (ltid32 * chunk - 1 + segsize_compact - boundary) `rem` segsize_compact
+            segsize_compact - (ltid32 * chunk32 - 1 + segsize_compact - boundary) `rem` segsize_compact
         sFor "i" chunk $ \i -> do
           sWhen (sExt32 i .<. stop - 1) $ do
             forM_ (zip private_chunks ys) $ \(src, y) ->

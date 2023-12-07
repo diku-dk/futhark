@@ -34,7 +34,7 @@ getParamByKey :: Name -> PyExp
 getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
 
 kernelConstToExp :: KernelConst -> PyExp
-kernelConstToExp (SizeConst key) =
+kernelConstToExp (SizeConst key _) =
   getParamByKey key
 kernelConstToExp (SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class

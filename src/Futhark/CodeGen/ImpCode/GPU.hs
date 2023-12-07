@@ -34,7 +34,7 @@ type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
 data KernelConst
-  = SizeConst Name
+  = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
   deriving (Eq, Ord, Show)
 
@@ -85,11 +85,13 @@ data KernelUse
   deriving (Eq, Ord, Show)
 
 instance Pretty KernelConst where
-  pretty (SizeConst key) = "get_size" <> parens (pretty key)
-  pretty (SizeMaxConst size_class) = "get_max_size" <> parens (pretty size_class)
+  pretty (SizeConst key size_class) =
+    "get_size" <> parens (commasep [pretty key, pretty size_class])
+  pretty (SizeMaxConst size_class) =
+    "get_max_size" <> parens (pretty size_class)
 
 instance FreeIn KernelConst where
-  freeIn' (SizeConst _) = mempty
+  freeIn' SizeConst {} = mempty
   freeIn' (SizeMaxConst _) = mempty
 
 instance Pretty KernelUse where

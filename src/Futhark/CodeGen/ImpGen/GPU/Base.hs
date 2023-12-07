@@ -30,6 +30,7 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     updateAcc,
     genZeroes,
     isPrimParam,
+    kernelConstToExp,
     getChunkSize,
 
     -- * Host-level bulk operations
@@ -261,26 +262,40 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
 isPrimParam :: (Typed p) => Param p -> Bool
 isPrimParam = primType . paramType
 
--- | Given a list of parameter types, compute the largest available chunk size
--- given the parameters for which we want chunking and the available resources.
--- Used in SegScan.SinglePass.compileSegScan, and SegRed.compileSegRed (with
--- primitive non-commutative operators only).
-getChunkSize :: (Num a) => [Type] -> a
-getChunkSize types = fromInteger $ max 1 $ min mem_constraint reg_constraint
+kernelConstToExp :: Imp.KernelConstExp -> CallKernelGen Imp.Exp
+kernelConstToExp = traverse f
   where
-    types' = map elemType $ filter primType types
-    sizes = map primByteSize types'
+    f (Imp.SizeMaxConst c) = do
+      v <- dPrim (prettyString c) int64
+      sOp $ Imp.GetSizeMax (tvVar v) c
+      pure $ tvVar v
+    f (Imp.SizeConst k c) = do
+      v <- dPrim (nameToString k) int64
+      sOp $ Imp.GetSize (tvVar v) k c
+      pure $ tvVar v
 
-    sum_sizes = sum sizes
-    sum_sizes' = sum (map (max 4 . primByteSize) types') `div` 4
-    max_size = maximum sizes
+-- | Given available register and cacha list of parameter types,
+-- compute the largest available chunk size given the parameters for
+-- which we want chunking and the available resources. Used in
+-- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
+-- (with primitive non-commutative operators only).
+getChunkSize :: [Type] -> Imp.KernelConstExp
+getChunkSize types = do
+  let max_group_size = Imp.SizeMaxConst SizeGroup
+      max_group_mem = Imp.SizeMaxConst SizeLocalMemory
+      max_group_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_group_mem `quot` le64 max_group_size
+      k_reg = le64 max_group_reg `quot` le64 max_group_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
 
-    mem_constraint = max k_mem sum_sizes `div` max_size
-    reg_constraint = (k_reg - 1 - sum_sizes') `div` (2 * sum_sizes')
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
 
-    -- TODO: Make these constants dynamic by querying device
-    k_reg = 64
-    k_mem = 95
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
 
 inBlockScan ::
   KernelConstants ->
@@ -920,10 +935,10 @@ isConstExp vtable size = do
   let onLeaf name _ = lookupConstExp name
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
-      constExp (Op (Inner (SizeOp (GetSize key _)))) =
-        Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
-      constExp (Op (Inner (SizeOp (GetSizeMax size_class)))) =
-        Just $ LeafExp (Imp.SizeMaxConst size_class) int32
+      constExp (Op (Inner (SizeOp (GetSize key c)))) =
+        Just $ LeafExp (Imp.SizeConst (keyWithEntryPoint fname key) c) int32
+      constExp (Op (Inner (SizeOp (GetSizeMax c)))) =
+        Just $ LeafExp (Imp.SizeMaxConst c) int32
       constExp e = primExpFromExp lookupConstExp e
   pure $ replaceInPrimExpM onLeaf size
   where
@@ -1112,7 +1127,12 @@ data KernelAttrs = KernelAttrs
     -- | Number of groups.
     kAttrNumGroups :: Count NumGroups SubExp,
     -- | Group size.
-    kAttrGroupSize :: Count GroupSize SubExp
+    kAttrGroupSize :: Count GroupSize SubExp,
+    -- | Variables that are specially in scope inside the kernel.
+    -- Operationally, these will be available at kernel compile time
+    -- (which happens at run-time, with access to machine-specific
+    -- information).
+    kAttrConstExps :: M.Map VName Imp.KernelConstExp
   }
 
 -- | The default kernel attributes.
@@ -1125,7 +1145,8 @@ defKernelAttrs num_groups group_size =
     { kAttrFailureTolerant = False,
       kAttrCheckLocalMemory = True,
       kAttrNumGroups = num_groups,
-      kAttrGroupSize = group_size
+      kAttrGroupSize = group_size,
+      kAttrConstExps = mempty
     }
 
 getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
@@ -1190,12 +1211,12 @@ sKernelOp ::
 sKernelOp attrs constants ops name m = do
   HostEnv atomics _ locks <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
-  uses <- computeKernelUses body mempty
+  uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   group_size <- onGroupSize $ kernelGroupSize constants
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
-        Imp.kernelUses = uses,
+        Imp.kernelUses = uses <> map constToUse (M.toList (kAttrConstExps attrs)),
         Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
         Imp.kernelGroupSize = [group_size],
         Imp.kernelName = name,
@@ -1212,6 +1233,8 @@ sKernelOp attrs constants ops name m = do
         case x of
           Just (LeafExp kc _) -> Right kc
           _ -> Left $ untyped e
+
+    constToUse (v, e) = Imp.ConstUse v e
 
 sKernelFailureTolerant ::
   Bool ->

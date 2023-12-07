@@ -1065,7 +1065,8 @@ compileSegHist ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegHist (Pat pes) lvl space ops kbody = do
-  KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
+  KernelAttrs {kAttrNumGroups = num_groups, kAttrGroupSize = group_size} <-
+    lvlKernelAttrs lvl
   -- Most of this function is not the histogram part itself, but
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which

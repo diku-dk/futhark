@@ -333,7 +333,7 @@ ensureDeviceFuns code = do
 isConst :: GroupDim -> Maybe T.Text
 isConst (Left (ValueExp (IntValue x))) =
   Just $ prettyText $ intToInt64 x
-isConst (Right (SizeConst v)) =
+isConst (Right (SizeConst v _)) =
   Just $ zEncodeText $ nameToText v
 isConst (Right (SizeMaxConst size_class)) =
   Just $ "max_" <> prettyText size_class
