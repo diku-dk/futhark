@@ -581,8 +581,16 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     compile_opts_size += strlen(ctx->cfg->tuning_param_names[i]) + 20;
   }
 
+  char** macro_names;
+  int64_t* macro_vals;
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
     compile_opts_size += strlen(extra_build_opts[i] + 1);
+  }
+
+  for (int i = 0; i < num_macros; i++) {
+    compile_opts_size += strlen(macro_names[i]) + 1 + 20;
   }
 
   char *compile_opts = (char*) malloc(compile_opts_size);
@@ -618,6 +626,11 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                   "%s ", extra_build_opts[i]);
   }
 
+  for (int i = 0; i < num_macros; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%zu ", macro_names[i], macro_vals[i]);
+  }
+
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-DTR_BLOCK_DIM=%d -DTR_TILE_DIM=%d -DTR_ELEMS_PER_THREAD=%d ",
                 TR_BLOCK_DIM, TR_TILE_DIM, TR_ELEMS_PER_THREAD);
@@ -627,6 +640,9 @@ static char* mk_compile_opts(struct futhark_context *ctx,
   if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
     w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
   }
+
+  free(macro_names);
+  free(macro_vals);
 
   return compile_opts;
 }

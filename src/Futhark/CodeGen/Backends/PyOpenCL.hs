@@ -33,6 +33,7 @@ compileProg mode class_name prog = do
     Imp.Program
       opencl_code
       opencl_prelude
+      macros
       kernels
       types
       sizes
@@ -89,7 +90,7 @@ compileProg mode class_name prog = do
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
-          [Escape $ openClInit types assign sizes failures]
+          [Escape $ openClInit macros types assign sizes failures]
       options =
         [ Option
             { optionLongName = "platform",
