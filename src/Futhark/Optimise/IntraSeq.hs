@@ -194,8 +194,8 @@ seqStm stm@(Let pat aux (Op (SegOp (
 
     -- As we need to catch 'internal' errors we use runSeqBuilder here
     res <- runSeqBuilder $ do
-  
-          
+
+
           exp' <- buildSegMap' $ do
               env' <- lift $ do mkTiles env
 
@@ -212,21 +212,21 @@ seqStm stm@(Let pat aux (Op (SegOp (
     -- Based on error or not we now return the correct program
     case res of
       Nothing -> lift $ do addStm stm
-      Just stms' -> lift $ do addStms stms'
-        -- | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
-        -- | otherwise -> do 
-        --     let [stm'] = stmsToList stms' 
+      Just stms'
+        | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
+        | otherwise -> do 
+            let [stm'] = stmsToList stms' 
 
-        --     -- Create the braches with each code version
-        --     body1 <- lift $ do mkMatchBody stm'
-        --     body2 <- lift $ do mkMatchBody stm
-            
-        --     -- Create the conditional statements
-        --     cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+            -- Create the braches with each code version
+            body1 <- lift $ do mkMatchBody stm'
+            body2 <- lift $ do mkMatchBody stm
 
-        --     matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
-            
-        --     lift $ do addStm (Let pat aux matchExp)
+            -- Create the conditional statements
+            cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+
+            matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
+
+            lift $ do addStm (Let pat aux matchExp)
 
     where
       isOneStm :: [Stm GPU] -> Bool
@@ -243,7 +243,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
           let pNames = L.map patElemName $ patElems pat'
           let res = L.map (SubExpRes mempty . Var) pNames
           pure $ Body mempty (stmsFromList [newStm]) res
-      
+
 
 
 
@@ -405,7 +405,7 @@ seqStm' env (Let pat aux
         let space' = SegSpace phys [(tid', grpSize env)]
         let types' = scremaType (seqFactor env) scanSoac
         pure (usedRes ++ fused, lvl', space', types')
-      
+
       tps <- mapM lookupType scans'
       let shapes = L.map arrayShape tps
       let shapes' = L.map (\s -> setOuterDims s 2 (Shape [grpsizeOld env])) shapes
@@ -667,7 +667,7 @@ getTidIndexExp env name = do
           0 -> SubExp $ Var name
           1 -> Index name $ Slice outerDim
           _ -> do
-            let dims = L.tail $ arrayDims tp 
+            let dims = L.tail $ arrayDims tp
             let innerDims = L.map (\d -> DimSlice (intConst Int64 0) d (intConst Int64 1)) dims
             let allDims = outerDim ++ innerDims
             Index name $ Slice allDims
@@ -895,28 +895,17 @@ mkTiles env = do
     -- Check the type of the array to see if has been transposed
     arrType <- lookupType arrName
     let arrShape = arrayShape arrType
-    (arrName', slice) <- do
+    arrName' <- do
             case arrShape of
               (Shape [x,y])
-                | grpsizeOld env /= x -> do
-                  let slice = [DimFix x, 
-                               DimSlice(intConst Int64 0) (grpsizeOld env) (intConst Int64 1)] 
-                  pure (arrName, slice)
-                | otherwise -> do 
-                  let slice = [DimFix y, 
-                               DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)]
+                | grpsizeOld env /= x -> pure arrName
+                | otherwise -> do
                   let shape' = Shape [y, x]
-                  newname <- letExp "reshaped" $ BasicOp $ Reshape ReshapeArbitrary shape' arrName
-                  pure (newname, slice)
+                  letExp "reshaped" $ BasicOp $ Reshape ReshapeArbitrary shape' arrName
               _ -> error "Only handle two dimensions in mkTiles"
-                  
-
-    -- let outerDim = ([DimFix $ grpId env | arrayRank (typeOf arrInfo) > 1])
-    -- let sliceIdx = DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)
 
     let slice' = Slice [DimFix $ grpId env, DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)]
 
-    
     tileSlice <- letSubExp "tile_slice" $ BasicOp $ Index arrName' slice'
     tileStaging <- letExp "tile_staging" $ BasicOp $
                       Update Unsafe tileScratch
@@ -954,7 +943,7 @@ isArray info = arrayRank (typeOf info) > 0
 
 -- Assumes the SegSpace to only have a single dimension
 differentSize :: SegSpace -> Env -> Bool
-differentSize space env = 
+differentSize space env =
   let sz = snd $ head $ unSegSpace space
   in sz /= grpsizeOld env
 
