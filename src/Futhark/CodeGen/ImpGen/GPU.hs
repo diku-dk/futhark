@@ -170,14 +170,13 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
-checkLocalMemoryReqs code = do
-  scope <- askScope
+checkLocalMemoryReqs :: (VName -> Bool) -> Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkLocalMemoryReqs in_scope code = do
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
-  if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
+  if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
       local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
@@ -250,9 +249,10 @@ expCompiler pat (WithAcc inputs lam) =
 -- always be safe (and what would we do if none of the branches would
 -- work?).
 expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ MatchEquiv)) = do
+  scope <- askScope
   tcode <- collect $ compileBody dest $ caseBody first_case
   fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
-  check <- checkLocalMemoryReqs tcode
+  check <- checkLocalMemoryReqs (`M.member` scope) tcode
   let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode

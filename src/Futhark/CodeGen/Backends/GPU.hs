@@ -71,7 +71,7 @@ getParamByKey :: Name -> C.Exp
 getParamByKey key = [C.cexp|*ctx->tuning_params.$id:key|]
 
 kernelConstToExp :: KernelConst -> C.Exp
-kernelConstToExp (SizeConst key) =
+kernelConstToExp (SizeConst key _) =
   getParamByKey key
 kernelConstToExp (SizeMaxConst size_class) =
   [C.cexp|ctx->$id:field|]
