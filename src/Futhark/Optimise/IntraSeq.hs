@@ -212,21 +212,22 @@ seqStm stm@(Let pat aux (Op (SegOp (
     -- Based on error or not we now return the correct program
     case res of
       Nothing -> lift $ do addStm stm
-      Just stms'
-        | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
-        | otherwise -> do 
-            let [stm'] = stmsToList stms' 
+      Just stms' -> lift $ do addStms stms'
+      -- Just stms'
+      --   | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
+      --   | otherwise -> do 
+      --       let [stm'] = stmsToList stms' 
 
-            -- Create the braches with each code version
-            body1 <- lift $ do mkMatchBody stm'
-            body2 <- lift $ do mkMatchBody stm
+      --       -- Create the braches with each code version
+      --       body1 <- lift $ do mkMatchBody stm'
+      --       body2 <- lift $ do mkMatchBody stm
 
-            -- Create the conditional statements
-            cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+      --       -- Create the conditional statements
+      --       cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
 
-            matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
+      --       matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
 
-            lift $ do addStm (Let pat aux matchExp)
+      --       lift $ do addStm (Let pat aux matchExp)
 
     where
       isOneStm :: [Stm GPU] -> Bool
@@ -923,7 +924,25 @@ mkTiles env = do
       start <- letSubExp "start" =<< eBinOp (Mul Int64 OverflowUndef)
                                             (eSubExp $ Var tid)
                                             (eSubExp $ seqFactor env)
-      let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
+
+      -- tmp <- letSubExp "please" =<< eBinOp (Mul Int64 OverflowUndef)
+      --                                      (eSubExp $ Var tid)
+      --                                      (eSubExp $ seqFactor env)      
+
+      offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
+                                               (eSubExp $ seqFactor env)
+                                               (eSubExp $ Var tid)
+      offset' <- letSubExp "offset" =<< eBinOp (Add Int64 OverflowUndef)
+                                               (eSubExp $ offset)
+                                               (eSubExp $ grpId env)
+      
+      let slice = 
+            case arrShape of
+              (Shape [x,y])
+                | grpsizeOld env == x -> Slice [DimSlice offset' (seqFactor env) x]
+                | otherwise -> Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
+              _ -> error "Only able to ahndle to dims in mkTiles"
+      -- let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
       chunk <- letSubExp "chunk" $ BasicOp $ Index tileStaging slice
 
       let lvl = SegThread SegNoVirt Nothing
