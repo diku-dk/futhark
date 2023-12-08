@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Futhark's LSP server should work better with Eglot.
 
+* Incorrect copy removal inside histograms could cause compiler error
+  (#2058).
+
 ## [0.25.9]
 
 ### Added
