@@ -212,22 +212,22 @@ seqStm stm@(Let pat aux (Op (SegOp (
     -- Based on error or not we now return the correct program
     case res of
       Nothing -> lift $ do addStm stm
-      Just stms' -> lift $ do addStms stms'
-      -- Just stms'
-      --   | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
-      --   | otherwise -> do 
-      --       let [stm'] = stmsToList stms' 
+      -- Just stms' -> lift $ do addStms stms'
+      Just stms'
+        | not $ isOneStm (stmsToList stms') -> lift $ do addStm stm
+        | otherwise -> do 
+            let [stm'] = stmsToList stms' 
 
-      --       -- Create the braches with each code version
-      --       body1 <- lift $ do mkMatchBody stm'
-      --       body2 <- lift $ do mkMatchBody stm
+            -- Create the braches with each code version
+            body1 <- lift $ do mkMatchBody stm'
+            body2 <- lift $ do mkMatchBody stm
 
-      --       -- Create the conditional statements
-      --       cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+            -- Create the conditional statements
+            cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
 
-      --       matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
+            matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
 
-      --       lift $ do addStm (Let pat aux matchExp)
+            lift $ do addStm (Let pat aux matchExp)
 
     where
       isOneStm :: [Stm GPU] -> Bool
