@@ -896,18 +896,16 @@ mkTiles env = do
     -- Check the type of the array to see if has been transposed
     arrType <- lookupType arrName
     let arrShape = arrayShape arrType
-    arrName' <- do
-            case arrShape of
-              (Shape [x,y])
-                | grpsizeOld env /= x -> pure arrName
-                | otherwise -> do
-                  let shape' = Shape [y, x]
-                  letExp "reshaped" $ BasicOp $ Reshape ReshapeArbitrary shape' arrName
-              _ -> error "Only handle two dimensions in mkTiles"
+    let dim = DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)
+    let slice' = case arrShape of
+                    (Shape [_]) -> Slice [dim]
+                    (Shape [n, _])
+                      | grpsizeOld env /= n -> Slice [DimFix $ grpId env, dim]
+                      | otherwise -> Slice [dim, DimFix $ grpId env]
+                    _ -> error "Expected two dimensions in mkTiles"
+                    
 
-    let slice' = Slice [DimFix $ grpId env, DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)]
-
-    tileSlice <- letSubExp "tile_slice" $ BasicOp $ Index arrName' slice'
+    tileSlice <- letSubExp "tile_slice" $ BasicOp $ Index arrName slice'
     tileStaging <- letExp "tile_staging" $ BasicOp $
                       Update Unsafe tileScratch
                         (Slice [DimSlice (intConst Int64 0)
@@ -925,24 +923,7 @@ mkTiles env = do
                                             (eSubExp $ Var tid)
                                             (eSubExp $ seqFactor env)
 
-      -- tmp <- letSubExp "please" =<< eBinOp (Mul Int64 OverflowUndef)
-      --                                      (eSubExp $ Var tid)
-      --                                      (eSubExp $ seqFactor env)      
-
-      offset <- letSubExp "offset" =<< eBinOp (Mul Int64 OverflowUndef)
-                                               (eSubExp $ seqFactor env)
-                                               (eSubExp $ Var tid)
-      offset' <- letSubExp "offset" =<< eBinOp (Add Int64 OverflowUndef)
-                                               (eSubExp $ offset)
-                                               (eSubExp $ grpId env)
-      
-      let slice = 
-            case arrShape of
-              (Shape [x,y])
-                | grpsizeOld env == x -> Slice [DimSlice offset' (seqFactor env) x]
-                | otherwise -> Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
-              _ -> error "Only able to ahndle to dims in mkTiles"
-      -- let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
+      let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
       chunk <- letSubExp "chunk" $ BasicOp $ Index tileStaging slice
 
       let lvl = SegThread SegNoVirt Nothing
