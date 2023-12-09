@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect copy removal inside histograms could cause compiler error
   (#2058).
 
+* CUDA backend now correctly queries for available shared memory,
+  which affects performance (hopefully positively).
+
 ## [0.25.9]
 
 ### Added
