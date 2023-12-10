@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * CUDA backend now correctly queries for available shared memory,
   which affects performance (hopefully positively).
 
+* `futhark literate` now switches to the directory containing the
+  `.fut` file before executing its contents. This fixes accessing
+  files through relative paths.
+
 ## [0.25.9]
 
 ### Added
