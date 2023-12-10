@@ -57,7 +57,7 @@ import Prelude hiding (mod)
 addDoc :: DocComment -> UncheckedDec -> UncheckedDec
 addDoc doc (ValDec val) = ValDec (val {valBindDoc = Just doc})
 addDoc doc (TypeDec tp) = TypeDec (tp {typeDoc = Just doc})
-addDoc doc (SigDec sig) = SigDec (sig {sigDoc = Just doc})
+addDoc doc (ModTypeDec sig) = ModTypeDec (sig {modTypeDoc = Just doc})
 addDoc doc (ModDec mod) = ModDec (mod {modDoc = Just doc})
 addDoc _ dec = dec
 
