@@ -66,9 +66,9 @@ module Language.Futhark.Syntax
     -- * Module language
     ImportName (..),
     SpecBase (..),
-    SigExpBase (..),
+    ModTypeExpBase (..),
     TypeRefBase (..),
-    SigBindBase (..),
+    ModTypeBindBase (..),
     ModExpBase (..),
     ModBindBase (..),
     ModParamBase (..),
@@ -1123,8 +1123,8 @@ data SpecBase f vn
   | TypeAbbrSpec (TypeBindBase f vn)
   | -- | Abstract type.
     TypeSpec Liftedness vn [TypeParamBase vn] (Maybe DocComment) SrcLoc
-  | ModSpec vn (SigExpBase f vn) (Maybe DocComment) SrcLoc
-  | IncludeSpec (SigExpBase f vn) SrcLoc
+  | ModSpec vn (ModTypeExpBase f vn) (Maybe DocComment) SrcLoc
+  | IncludeSpec (ModTypeExpBase f vn) SrcLoc
 
 deriving instance Show (SpecBase Info VName)
 
@@ -1138,16 +1138,16 @@ instance Located (SpecBase f vn) where
   locOf (IncludeSpec _ loc) = locOf loc
 
 -- | A module type expression.
-data SigExpBase f vn
-  = SigVar (QualName vn) (f (M.Map VName VName)) SrcLoc
-  | SigParens (SigExpBase f vn) SrcLoc
-  | SigSpecs [SpecBase f vn] SrcLoc
-  | SigWith (SigExpBase f vn) (TypeRefBase f vn) SrcLoc
-  | SigArrow (Maybe vn) (SigExpBase f vn) (SigExpBase f vn) SrcLoc
+data ModTypeExpBase f vn
+  = ModTypeVar (QualName vn) (f (M.Map VName VName)) SrcLoc
+  | ModTypeParens (ModTypeExpBase f vn) SrcLoc
+  | ModTypeSpecs [SpecBase f vn] SrcLoc
+  | ModTypeWith (ModTypeExpBase f vn) (TypeRefBase f vn) SrcLoc
+  | ModTypeArrow (Maybe vn) (ModTypeExpBase f vn) (ModTypeExpBase f vn) SrcLoc
 
-deriving instance Show (SigExpBase Info VName)
+deriving instance Show (ModTypeExpBase Info VName)
 
-deriving instance Show (SigExpBase NoInfo Name)
+deriving instance Show (ModTypeExpBase NoInfo Name)
 
 -- | A type refinement.
 data TypeRefBase f vn = TypeRef (QualName vn) [TypeParamBase vn] (TypeExp f vn) SrcLoc
@@ -1159,27 +1159,27 @@ deriving instance Show (TypeRefBase NoInfo Name)
 instance Located (TypeRefBase f vn) where
   locOf (TypeRef _ _ _ loc) = locOf loc
 
-instance Located (SigExpBase f vn) where
-  locOf (SigVar _ _ loc) = locOf loc
-  locOf (SigParens _ loc) = locOf loc
-  locOf (SigSpecs _ loc) = locOf loc
-  locOf (SigWith _ _ loc) = locOf loc
-  locOf (SigArrow _ _ _ loc) = locOf loc
+instance Located (ModTypeExpBase f vn) where
+  locOf (ModTypeVar _ _ loc) = locOf loc
+  locOf (ModTypeParens _ loc) = locOf loc
+  locOf (ModTypeSpecs _ loc) = locOf loc
+  locOf (ModTypeWith _ _ loc) = locOf loc
+  locOf (ModTypeArrow _ _ _ loc) = locOf loc
 
 -- | Module type binding.
-data SigBindBase f vn = SigBind
-  { sigName :: vn,
-    sigExp :: SigExpBase f vn,
-    sigDoc :: Maybe DocComment,
-    sigLoc :: SrcLoc
+data ModTypeBindBase f vn = ModTypeBind
+  { modTypeName :: vn,
+    modTypeExp :: ModTypeExpBase f vn,
+    modTypeDoc :: Maybe DocComment,
+    modTypeLoc :: SrcLoc
   }
 
-deriving instance Show (SigBindBase Info VName)
+deriving instance Show (ModTypeBindBase Info VName)
 
-deriving instance Show (SigBindBase NoInfo Name)
+deriving instance Show (ModTypeBindBase NoInfo Name)
 
-instance Located (SigBindBase f vn) where
-  locOf = locOf . sigLoc
+instance Located (ModTypeBindBase f vn) where
+  locOf = locOf . modTypeLoc
 
 -- | Canonical reference to a Futhark code file.  Does not include the
 -- @.fut@ extension.  This is most often a path relative to the
@@ -1205,10 +1205,10 @@ data ModExpBase f vn
       (f (M.Map VName VName))
       (f (M.Map VName VName))
       SrcLoc
-  | ModAscript (ModExpBase f vn) (SigExpBase f vn) (f (M.Map VName VName)) SrcLoc
+  | ModAscript (ModExpBase f vn) (ModTypeExpBase f vn) (f (M.Map VName VName)) SrcLoc
   | ModLambda
       (ModParamBase f vn)
-      (Maybe (SigExpBase f vn, f (M.Map VName VName)))
+      (Maybe (ModTypeExpBase f vn, f (M.Map VName VName)))
       (ModExpBase f vn)
       SrcLoc
 
@@ -1229,7 +1229,7 @@ instance Located (ModExpBase f vn) where
 data ModBindBase f vn = ModBind
   { modName :: vn,
     modParams :: [ModParamBase f vn],
-    modSignature :: Maybe (SigExpBase f vn, f (M.Map VName VName)),
+    modType :: Maybe (ModTypeExpBase f vn, f (M.Map VName VName)),
     modExp :: ModExpBase f vn,
     modDoc :: Maybe DocComment,
     modLocation :: SrcLoc
@@ -1245,7 +1245,7 @@ instance Located (ModBindBase f vn) where
 -- | A module parameter.
 data ModParamBase f vn = ModParam
   { modParamName :: vn,
-    modParamType :: SigExpBase f vn,
+    modParamType :: ModTypeExpBase f vn,
     modParamAbs :: f [VName],
     modParamLocation :: SrcLoc
   }
@@ -1261,7 +1261,7 @@ instance Located (ModParamBase f vn) where
 data DecBase f vn
   = ValDec (ValBindBase f vn)
   | TypeDec (TypeBindBase f vn)
-  | SigDec (SigBindBase f vn)
+  | ModTypeDec (ModTypeBindBase f vn)
   | ModDec (ModBindBase f vn)
   | OpenDec (ModExpBase f vn) SrcLoc
   | LocalDec (DecBase f vn) SrcLoc
@@ -1274,7 +1274,7 @@ deriving instance Show (DecBase NoInfo Name)
 instance Located (DecBase f vn) where
   locOf (ValDec d) = locOf d
   locOf (TypeDec d) = locOf d
-  locOf (SigDec d) = locOf d
+  locOf (ModTypeDec d) = locOf d
   locOf (ModDec d) = locOf d
   locOf (OpenDec _ loc) = locOf loc
   locOf (LocalDec _ loc) = locOf loc

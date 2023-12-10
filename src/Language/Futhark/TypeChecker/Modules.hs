@@ -25,8 +25,8 @@ import Prelude hiding (abs, mod)
 substituteTypesInMod :: TypeSubs -> Mod -> Mod
 substituteTypesInMod substs (ModEnv e) =
   ModEnv $ substituteTypesInEnv substs e
-substituteTypesInMod substs (ModFun (FunSig abs mod mty)) =
-  ModFun $ FunSig abs (substituteTypesInMod substs mod) (substituteTypesInMTy substs mty)
+substituteTypesInMod substs (ModFun (FunModType abs mod mty)) =
+  ModFun $ FunModType abs (substituteTypesInMod substs mod) (substituteTypesInMTy substs mty)
 
 substituteTypesInMTy :: TypeSubs -> MTy -> MTy
 substituteTypesInMTy substs (MTy abs mod) = MTy abs $ substituteTypesInMod substs mod
@@ -97,7 +97,7 @@ newNamesForMTy orig_mty = do
            in Env
                 { envVtable = vtable',
                   envTypeTable = ttable',
-                  envSigTable = mempty,
+                  envModTypeTable = mempty,
                   envModTable = mtable',
                   envNameMap = M.map (fmap substitute) names
                 }
@@ -122,10 +122,10 @@ newNamesForMTy orig_mty = do
         substituteInMod (ModEnv env) =
           ModEnv $ substituteInEnv env
         substituteInMod (ModFun funsig) =
-          ModFun $ substituteInFunSig funsig
+          ModFun $ substituteInFunModType funsig
 
-        substituteInFunSig (FunSig abs mod mty) =
-          FunSig
+        substituteInFunModType (FunModType abs mod mty) =
+          FunModType
             (M.mapKeys (fmap substitute) abs)
             (substituteInMod mod)
             (substituteInMTy substs mty)
@@ -169,7 +169,7 @@ mtyTypeAbbrs (MTy _ mod) = modTypeAbbrs mod
 modTypeAbbrs :: Mod -> M.Map VName TypeBinding
 modTypeAbbrs (ModEnv env) =
   envTypeAbbrs env
-modTypeAbbrs (ModFun (FunSig _ mod mty)) =
+modTypeAbbrs (ModFun (FunModType _ mod mty)) =
   modTypeAbbrs mod <> mtyTypeAbbrs mty
 
 envTypeAbbrs :: Env -> M.Map VName TypeBinding
@@ -309,8 +309,8 @@ resolveMTyNames = resolveMTyNames'
     resolveModNames (ModEnv mod_env) (ModEnv sig_env) =
       resolveEnvNames mod_env sig_env
     resolveModNames (ModFun mod_fun) (ModFun sig_fun) =
-      resolveModNames (funSigMod mod_fun) (funSigMod sig_fun)
-        <> resolveMTyNames' (funSigMty mod_fun) (funSigMty sig_fun)
+      resolveModNames (funModTypeMod mod_fun) (funModTypeMod sig_fun)
+        <> resolveMTyNames' (funModTypeMty mod_fun) (funModTypeMty sig_fun)
     resolveModNames _ _ =
       mempty
 
@@ -453,8 +453,8 @@ matchMTys orig_mty orig_mty_sig =
     matchMods
       old_abs_subst_to_type
       quals
-      (ModFun (FunSig mod_abs mod_pmod mod_mod))
-      (ModFun (FunSig sig_abs sig_pmod sig_mod))
+      (ModFun (FunModType mod_abs mod_pmod mod_mod))
+      (ModFun (FunModType sig_abs sig_pmod sig_mod))
       loc = do
         -- We need to use different substitutions when matching
         -- parameter and body signatures - this is because the
@@ -602,14 +602,14 @@ matchMTys orig_mty orig_mty_sig =
 -- | Apply a parametric module to an argument.
 applyFunctor ::
   Loc ->
-  FunSig ->
+  FunModType ->
   MTy ->
   TypeM
     ( MTy,
       M.Map VName VName,
       M.Map VName VName
     )
-applyFunctor applyloc (FunSig p_abs p_mod body_mty) a_mty = do
+applyFunctor applyloc (FunModType p_abs p_mod body_mty) a_mty = do
   p_subst <- badOnLeft $ matchMTys a_mty (MTy p_abs p_mod) applyloc
 
   -- Apply type abbreviations from a_mty to body_mty.

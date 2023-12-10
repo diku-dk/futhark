@@ -33,7 +33,7 @@ defsInProg = foldMap defsInDec . progDecs
     defsInDec (LocalDec d _) = defsInDec d
     defsInDec (OpenDec me _) = defsInModExp me
     defsInDec (ModDec mb) = defsInModExp $ modExp mb
-    defsInDec SigDec {} = mempty
+    defsInDec ModTypeDec {} = mempty
     defsInDec ImportDec {} = mempty
 
     defsInModExp ModVar {} = mempty
