@@ -45,6 +45,7 @@ import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
     doesFileExist,
+    getCurrentDirectory,
     removePathForcibly,
     setCurrentDirectory,
   )
@@ -1160,7 +1161,7 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           system futhark ["hash", prog] mempty
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
-          dir = takeDirectory mdfile
+          prog_dir = takeDirectory prog
           imgdir = dropExtension (takeFileName mdfile) <> "-img"
           run_options = scriptExtraOptions opts
           onLine "call" l = T.putStrLn l
@@ -1173,6 +1174,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                     else const . const $ pure ()
               }
 
+      orig_dir <- getCurrentDirectory
+
       withScriptServer cfg $ \server -> do
         let env =
               Env
@@ -1183,10 +1186,10 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                 }
 
         when (scriptVerbose opts > 0) $ do
-          T.hPutStrLn stderr $ "Executing from " <> T.pack dir
-        setCurrentDirectory dir
+          T.hPutStrLn stderr $ "Executing from " <> T.pack prog_dir
+        setCurrentDirectory prog_dir
 
         (failure, md) <- processScript env script
-        T.writeFile mdfile md
+        T.writeFile (orig_dir </> mdfile) md
         when (failure == Failure) exitFailure
     _ -> Nothing
