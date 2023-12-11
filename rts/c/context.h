@@ -123,9 +123,9 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   ctx->peak_mem_usage_default = 0;
   ctx->cur_mem_usage_default = 0;
   ctx->constants = malloc(sizeof(struct constants));
-  ctx->detail_memory = cfg->debugging;
   ctx->debugging = cfg->debugging;
   ctx->logging = cfg->logging;
+  ctx->detail_memory = cfg->logging;
   ctx->profiling = cfg->profiling;
   ctx->profiling_paused = 0;
   ctx->error = NULL;
