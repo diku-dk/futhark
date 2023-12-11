@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   used in all public interfaces. The OpenCL names are still supported
   for backwards compatibility.
 
+* More fusion across array slicing.
+
 ### Removed
 
 ### Changed

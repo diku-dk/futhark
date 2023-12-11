@@ -31,7 +31,6 @@ module Futhark.IR.SOACS.SOAC
     isScanSOAC,
     isReduceSOAC,
     isMapSOAC,
-    scremaLambda,
     ppScrema,
     ppHist,
     ppStream,
@@ -143,11 +142,16 @@ data HistOp rep = HistOp
 
 -- | The essential parts of a 'Screma' factored out (everything
 -- except the input arrays).
-data ScremaForm rep
-  = ScremaForm
-      [Scan rep]
-      [Reduce rep]
-      (Lambda rep)
+data ScremaForm rep = ScremaForm
+  { scremaScans :: [Scan rep],
+    scremaReduces :: [Reduce rep],
+    -- | The "main" lambda of the Screma. For a map, this is
+    -- equivalent to 'isMapSOAC'. Note that the meaning of the return
+    -- value of this lambda depends crucially on exactly which Screma
+    -- this is. The parameters will correspond exactly to elements of
+    -- the input arrays, however.
+    scremaLambda :: Lambda rep
+  }
   deriving (Eq, Ord, Show)
 
 singleBinOp :: (Buildable rep) => [Lambda rep] -> Lambda rep
@@ -315,14 +319,6 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null scans
   guard $ null reds
   pure map_lam
-
--- | Return the "main" lambda of the Screma.  For a map, this is
--- equivalent to 'isMapSOAC'.  Note that the meaning of the return
--- value of this lambda depends crucially on exactly which Screma this
--- is.  The parameters will correspond exactly to elements of the
--- input arrays, however.
-scremaLambda :: ScremaForm rep -> Lambda rep
-scremaLambda (ScremaForm _ _ map_lam) = map_lam
 
 -- | @groupScatterResults <output specification> <results>@
 --
