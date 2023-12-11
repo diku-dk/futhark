@@ -39,7 +39,7 @@ main _prog _args = do
 syncOptions :: TextDocumentSyncOptions
 syncOptions =
   TextDocumentSyncOptions
-    { _openClose = Just True,
+    { _openClose = Just False,
       _change = Just TextDocumentSyncKind_Incremental,
       _willSave = Just False,
       _willSaveWaitUntil = Just False,

@@ -34,7 +34,7 @@ type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
 data KernelConst
-  = SizeConst Name
+  = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
   deriving (Eq, Ord, Show)
 
@@ -62,15 +62,14 @@ data Kernel = Kernel
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
-    -- | If true, this kernel does not need to check
-    -- whether we are in a failing state, as it can cope.
-    -- Intuitively, it means that the kernel does not
-    -- depend on any non-scalar parameters to make control
-    -- flow decisions.  Replication, transpose, and copy
+    -- | If true, this kernel does not need to check whether we are in
+    -- a failing state, as it can cope. Intuitively, it means that the
+    -- kernel does not depend on any non-scalar parameters to make
+    -- control flow decisions. Replication, transpose, and copy
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements.  Set this to
+    -- when considering the local memory requirements. Set this to
     -- false for kernels that do their own checking.
     kernelCheckLocalMemory :: Bool
   }
@@ -86,11 +85,13 @@ data KernelUse
   deriving (Eq, Ord, Show)
 
 instance Pretty KernelConst where
-  pretty (SizeConst key) = "get_size" <> parens (pretty key)
-  pretty (SizeMaxConst size_class) = "get_max_size" <> parens (pretty size_class)
+  pretty (SizeConst key size_class) =
+    "get_size" <> parens (commasep [pretty key, pretty size_class])
+  pretty (SizeMaxConst size_class) =
+    "get_max_size" <> parens (pretty size_class)
 
 instance FreeIn KernelConst where
-  freeIn' (SizeConst _) = mempty
+  freeIn' SizeConst {} = mempty
   freeIn' (SizeMaxConst _) = mempty
 
 instance Pretty KernelUse where

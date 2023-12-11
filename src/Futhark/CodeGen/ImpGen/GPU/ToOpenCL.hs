@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
 where
 
 import Control.Monad
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
@@ -58,7 +57,7 @@ translateGPU ::
 translateGPU target prog =
   let env = envFromProg prog
       ( prog',
-        ToOpenCL kernels device_funs used_types sizes failures
+        ToOpenCL kernels device_funs used_types sizes failures constants
         ) =
           (`runState` initialOpenCL) . (`runReaderT` env) $ do
             let ImpGPU.Definitions
@@ -86,13 +85,15 @@ translateGPU target prog =
             T.unlines device_defs
           ]
    in ImpOpenCL.Program
-        opencl_code
-        opencl_prelude
-        kernels'
-        (S.toList used_types)
-        (findParamUsers env prog' (cleanSizes sizes))
-        failures
-        prog'
+        { openClProgram = opencl_code,
+          openClPrelude = opencl_prelude,
+          openClMacroDefs = constants,
+          openClKernelNames = kernels',
+          openClUsedTypes = S.toList used_types,
+          openClParams = findParamUsers env prog' (cleanSizes sizes),
+          openClFailures = failures,
+          hostDefinitions = prog'
+        }
   where
     genPrelude TargetOpenCL = genOpenClPrelude
     genPrelude TargetCUDA = const genCUDAPrelude
@@ -172,11 +173,12 @@ data ToOpenCL = ToOpenCL
     clDevFuns :: M.Map Name (C.Definition, T.Text),
     clUsedTypes :: S.Set PrimType,
     clSizes :: M.Map Name SizeClass,
-    clFailures :: [FailureMsg]
+    clFailures :: [FailureMsg],
+    clConstants :: [(Name, KernelConstExp)]
   }
 
 initialOpenCL :: ToOpenCL
-initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty
+initialOpenCL = ToOpenCL mempty mempty mempty mempty mempty mempty
 
 data Env = Env
   { envFuns :: ImpGPU.Functions ImpGPU.HostOp,
@@ -331,7 +333,7 @@ ensureDeviceFuns code = do
 isConst :: GroupDim -> Maybe T.Text
 isConst (Left (ValueExp (IntValue x))) =
   Just $ prettyText $ intToInt64 x
-isConst (Right (SizeConst v)) =
+isConst (Right (SizeConst v _)) =
   Just $ zEncodeText $ nameToText v
 isConst (Right (SizeMaxConst size_class)) =
   Just $ "max_" <> prettyText size_class
@@ -354,7 +356,8 @@ onKernel target kernel = do
           mapM_ GC.item body
       kstate = GC.compUserState cstate
 
-      (const_defs, const_undefs) = unzip $ mapMaybe constDef $ kernelUses kernel
+      (kernel_consts, (const_defs, const_undefs)) =
+        second unzip $ unzip $ mapMaybe (constDef (kernelName kernel)) $ kernelUses kernel
 
   let (local_memory_bytes, (local_memory_params, local_memory_args, local_memory_init)) =
         second unzip3 $
@@ -458,7 +461,8 @@ onKernel target kernel = do
     s
       { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
         clUsedTypes = typesInKernel kernel <> clUsedTypes s,
-        clFailures = kernelFailures kstate
+        clFailures = kernelFailures kstate,
+        clConstants = kernel_consts <> clConstants s
       }
 
   -- The error handling stuff is automatically added later.
@@ -506,17 +510,19 @@ useAsParam ConstUse {} =
 -- Constants are #defined as macros.  Since a constant name in one
 -- kernel might potentially (although unlikely) also be used for
 -- something else in another kernel, we #undef them after the kernel.
-constDef :: KernelUse -> Maybe (C.BlockItem, C.BlockItem)
-constDef (ConstUse v e) =
+constDef :: Name -> KernelUse -> Maybe ((Name, KernelConstExp), (C.BlockItem, C.BlockItem))
+constDef kernel_name (ConstUse v e) =
   Just
-    ( [C.citem|$escstm:(T.unpack def)|],
-      [C.citem|$escstm:(T.unpack undef)|]
+    ( (nameFromText v', e),
+      ( [C.citem|$escstm:(T.unpack def)|],
+        [C.citem|$escstm:(T.unpack undef)|]
+      )
     )
   where
-    e' = compilePrimExp e
-    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> expText e' <> ")"
+    v' = zEncodeText $ nameToText kernel_name <> "." <> prettyText v
+    def = "#define " <> idText (C.toIdent v mempty) <> " (" <> v' <> ")"
     undef = "#undef " <> idText (C.toIdent v mempty)
-constDef _ = Nothing
+constDef _ _ = Nothing
 
 commonPrelude :: T.Text
 commonPrelude =
@@ -549,14 +555,6 @@ genHIPPrelude =
   "#define FUTHARK_HIP\n"
     <> preludeCU
     <> commonPrelude
-
-compilePrimExp :: PrimExp KernelConst -> C.Exp
-compilePrimExp e = runIdentity $ GC.compilePrimExp compileKernelConst e
-  where
-    compileKernelConst (SizeConst key) =
-      pure [C.cexp|$id:(zEncodeText (prettyText key))|]
-    compileKernelConst (SizeMaxConst size_class) =
-      pure [C.cexp|$id:("max_" <> prettyString size_class)|]
 
 kernelArgs :: Kernel -> [KernelArg]
 kernelArgs = mapMaybe useToArg . kernelUses

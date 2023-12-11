@@ -1502,14 +1502,14 @@ Modules
    mod_param: "(" `name` ":" `mod_type_exp` ")"
    mod_type_bind: "module" "type" `name` "=" `mod_type_exp`
 
-Futhark supports an ML-style higher-order module system.  *Modules*
-can contain types, functions, and other modules and module types.
-*Module types* are used to classify the contents of modules, and
-*parametric modules* are used to abstract over modules (essentially
-module-level functions).  In Standard ML, modules, module types and
-parametric modules are called structs, signatures, and functors,
-respectively.  Module names exist in the same name space as values,
-but module types are their own name space.
+Futhark supports an ML-style higher-order module system. *Modules* can
+contain types, functions, and other modules and module types. *Module
+types* are used to classify the contents of modules, and *parametric
+modules* are used to abstract over modules (essentially module-level
+functions). In Standard ML, modules, module types and parametric
+modules are called *structs*, *signatures*, and *functors*,
+respectively. Module names exist in the same name space as values, but
+module types are their own name space.
 
 Module bindings
 ~~~~~~~~~~~~~~~

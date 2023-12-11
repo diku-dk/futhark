@@ -48,7 +48,6 @@ import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
 import Futhark.Transform.Substitute
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
@@ -243,17 +242,9 @@ prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  -- Querying L2 cache size is not reliable.  Instead we provide a
-  -- tunable knob with a hopefully sane default.
-  let hist_L2_def = 4 * 1024 * 1024
   hist_L2 <- dPrim "L2_size" int32
-  entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
-  sOp
-    $ Imp.GetSize
-      (tvVar hist_L2)
-      (keyWithEntryPoint entry $ nameFromString (prettyString (tvVar hist_L2)))
-    $ Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
+  sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-
@@ -1074,7 +1065,8 @@ compileSegHist ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegHist (Pat pes) lvl space ops kbody = do
-  KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
+  KernelAttrs {kAttrNumGroups = num_groups, kAttrGroupSize = group_size} <-
+    lvlKernelAttrs lvl
   -- Most of this function is not the histogram part itself, but
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which

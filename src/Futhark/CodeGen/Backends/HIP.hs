@@ -29,13 +29,15 @@ import NeatInterpolation (untrimming)
 
 mkBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-mkBoilerplate hip_program kernels types failures = do
+mkBoilerplate hip_program macros kernels types failures = do
   generateGPUBoilerplate
     hip_program
+    macros
     backendsHipH
     (M.keys kernels)
     types
@@ -95,7 +97,7 @@ hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' me
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program hip_code hip_prelude kernels types params failures prog'
+    Program hip_code hip_prelude macros kernels types params failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
@@ -104,7 +106,7 @@ compileProg version prog = do
       version
       params
       operations
-      (mkBoilerplate (hip_prelude <> hip_code) kernels types failures)
+      (mkBoilerplate (hip_prelude <> hip_code) macros kernels types failures)
       hip_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

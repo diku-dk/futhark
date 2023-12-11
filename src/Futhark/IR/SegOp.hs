@@ -1157,8 +1157,8 @@ simplifySegOp (SegScan lvl space scans ts kbody) = do
 simplifySegOp (SegHist lvl space ops ts kbody) = do
   (lvl', space', ts') <- Engine.simplify (lvl, space, ts)
 
-  (ops', ops_hoisted) <- fmap unzip $
-    forM ops $
+  Engine.localVtable (flip (foldr ST.consume) $ concatMap histDest ops) $ do
+    (ops', ops_hoisted) <- fmap unzip . forM ops $
       \(HistOp w rf arrs nes dims lam) -> do
         w' <- Engine.simplify w
         rf' <- Engine.simplify rf
@@ -1174,12 +1174,12 @@ simplifySegOp (SegHist lvl space ops ts kbody) = do
             op_hoisted
           )
 
-  (kbody', body_hoisted) <- simplifyKernelBody space kbody
+    (kbody', body_hoisted) <- simplifyKernelBody space kbody
 
-  pure
-    ( SegHist lvl' space' ops' ts' kbody',
-      mconcat ops_hoisted <> body_hoisted
-    )
+    pure
+      ( SegHist lvl' space' ops' ts' kbody',
+        mconcat ops_hoisted <> body_hoisted
+      )
   where
     scope = scopeOfSegSpace space
     scope_vtable = ST.fromScope scope

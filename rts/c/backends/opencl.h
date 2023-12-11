@@ -528,6 +528,8 @@ struct futhark_context {
   size_t max_tile_size;
   size_t max_threshold;
   size_t max_local_memory;
+  size_t max_registers;
+  size_t max_cache;
 
   size_t lockstep_width;
 
@@ -579,8 +581,16 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     compile_opts_size += strlen(ctx->cfg->tuning_param_names[i]) + 20;
   }
 
+  char** macro_names;
+  int64_t* macro_vals;
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
     compile_opts_size += strlen(extra_build_opts[i] + 1);
+  }
+
+  for (int i = 0; i < num_macros; i++) {
+    compile_opts_size += strlen(macro_names[i]) + 1 + 20;
   }
 
   char *compile_opts = (char*) malloc(compile_opts_size);
@@ -594,6 +604,16 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                 "max_group_size",
                 (int)ctx->max_group_size);
 
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_local_memory",
+                (int)ctx->max_local_memory);
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_registers",
+                (int)ctx->max_registers);
+
   for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
                   "-D%s=%d ",
@@ -606,6 +626,11 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                   "%s ", extra_build_opts[i]);
   }
 
+  for (int i = 0; i < num_macros; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%zu ", macro_names[i], macro_vals[i]);
+  }
+
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-DTR_BLOCK_DIM=%d -DTR_TILE_DIM=%d -DTR_ELEMS_PER_THREAD=%d ",
                 TR_BLOCK_DIM, TR_TILE_DIM, TR_ELEMS_PER_THREAD);
@@ -615,6 +640,9 @@ static char* mk_compile_opts(struct futhark_context *ctx,
   if (strcmp(device_option.platform_name, "Oclgrind") == 0) {
     w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
   }
+
+  free(macro_names);
+  free(macro_vals);
 
   return compile_opts;
 }
@@ -784,6 +812,20 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
     ctx->cfg->default_tile_size = max_tile_size;
   }
+
+
+  cl_ulong cache_size;
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
+                                       sizeof(cache_size), &cache_size, NULL));
+
+  if (cache_size == 0) {
+    // Some code assumes nonzero cache.
+    cache_size = 1024*1024;
+  }
+
+  ctx->max_cache = cache_size;
+
+  ctx->max_registers = 1<<16; // I cannot find a way to query for this.
 
   ctx->max_group_size = max_group_size;
   ctx->max_tile_size = max_tile_size; // No limit.

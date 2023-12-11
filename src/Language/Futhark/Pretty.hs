@@ -460,7 +460,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
 instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
   pretty (ValDec dec) = pretty dec
   pretty (TypeDec dec) = pretty dec
-  pretty (SigDec sig) = pretty sig
+  pretty (ModTypeDec sig) = pretty sig
   pretty (ModDec sd) = pretty sd
   pretty (OpenDec x _) = "open" <+> pretty x
   pretty (LocalDec dec _) = "local" <+> pretty dec
@@ -544,19 +544,19 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   pretty (IncludeSpec e _) =
     "include" <+> pretty e
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SigExpBase f vn) where
-  pretty (SigVar v _ _) = pretty v
-  pretty (SigParens e _) = parens $ pretty e
-  pretty (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
-  pretty (SigWith s (TypeRef v ps td _) _) =
+instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
+  pretty (ModTypeVar v _ _) = pretty v
+  pretty (ModTypeParens e _) = parens $ pretty e
+  pretty (ModTypeSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (ModTypeWith s (TypeRef v ps td _) _) =
     pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
-  pretty (SigArrow (Just v) e1 e2 _) =
+  pretty (ModTypeArrow (Just v) e1 e2 _) =
     parens (prettyName v <> colon <+> pretty e1) <+> "->" <+> pretty e2
-  pretty (SigArrow Nothing e1 e2 _) =
+  pretty (ModTypeArrow Nothing e1 e2 _) =
     pretty e1 <+> "->" <+> pretty e2
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SigBindBase f vn) where
-  pretty (SigBind name e _ _) =
+instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeBindBase f vn) where
+  pretty (ModTypeBind name e _ _) =
     "module type" <+> prettyName name <+> equals <+> pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModParamBase f vn) where

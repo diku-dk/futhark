@@ -18,6 +18,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
     FailureMsg (..),
     GroupDim,
     KernelConst (..),
+    KernelConstExp,
     module Futhark.CodeGen.ImpCode,
     module Futhark.IR.GPU.Sizes,
   )
@@ -26,7 +27,7 @@ where
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.ImpCode.GPU (GroupDim, KernelConst (..))
+import Futhark.CodeGen.ImpCode.GPU (GroupDim, KernelConst (..), KernelConstExp)
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
@@ -35,6 +36,9 @@ data Program = Program
   { openClProgram :: T.Text,
     -- | Must be prepended to the program.
     openClPrelude :: T.Text,
+    -- | Definitions to be passed as macro definitions to the kernel
+    -- compiler.
+    openClMacroDefs :: [(Name, KernelConstExp)],
     openClKernelNames :: M.Map KernelName KernelSafety,
     -- | So we can detect whether the device is capable.
     openClUsedTypes :: [PrimType],

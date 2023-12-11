@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+## [0.25.10]
+
+### Added
+
+* Faster non-commutative reductions in the GPU backends. Work by
+  Anders Holst and Christian Påbøl Jacobsen.
+
+### Fixed
+
 * Interpreter crash for certain complicated size expressions involving
   internal bindings (#2053).
 
@@ -26,6 +35,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Histogram with non-vectorised reduction operators (#2056). (But it
   is probably not a good idea to write such programs.)
+
+* Futhark's LSP server should work better with Eglot.
+
+* Incorrect copy removal inside histograms could cause compiler error
+  (#2058).
+
+* CUDA backend now correctly queries for available shared memory,
+  which affects performance (hopefully positively).
+
+* `futhark literate` now switches to the directory containing the
+  `.fut` file before executing its contents. This fixes accessing
+  files through relative paths.
 
 ## [0.25.9]
 

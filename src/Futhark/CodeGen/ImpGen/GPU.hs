@@ -27,7 +27,7 @@ import Futhark.CodeGen.ImpGen.GPU.SegScan
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.MonadFreshNames
-import Futhark.Util.IntegralExp (divUp, rem)
+import Futhark.Util.IntegralExp (divUp, nextMul)
 import Prelude hiding (quot, rem)
 
 callKernelOperations :: Operations GPUMem HostEnv Imp.HostOp
@@ -170,14 +170,13 @@ segOpCompiler pat segop =
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
-checkLocalMemoryReqs code = do
-  scope <- askScope
+checkLocalMemoryReqs :: (VName -> Bool) -> Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkLocalMemoryReqs in_scope code = do
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
 
   -- If any of the sizes involve a variable that is not known at this
   -- point, then we cannot check the requirements.
-  if any (`M.notMember` scope) (namesToList $ freeIn alloc_sizes)
+  if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
       local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
@@ -200,7 +199,7 @@ checkLocalMemoryReqs code = do
     -- These allocations will actually be padded to an 8-byte aligned
     -- size, so we should take that into account when checking whether
     -- they fit.
-    alignedSize x = x + ((8 - (x `rem` 8)) `rem` 8)
+    alignedSize x = nextMul x 8
 
 withAcc ::
   Pat LetDecMem ->
@@ -250,9 +249,10 @@ expCompiler pat (WithAcc inputs lam) =
 -- always be safe (and what would we do if none of the branches would
 -- work?).
 expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ MatchEquiv)) = do
+  scope <- askScope
   tcode <- collect $ compileBody dest $ caseBody first_case
   fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
-  check <- checkLocalMemoryReqs tcode
+  check <- checkLocalMemoryReqs (`M.member` scope) tcode
   let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode
