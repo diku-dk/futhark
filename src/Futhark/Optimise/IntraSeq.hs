@@ -223,7 +223,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
             body2 <- lift $ do mkMatchBody stm
 
             -- Create the conditional statements
-            cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 64) (eSubExp $ grpSize env) 
+            cond <- lift $ do eCmpOp (CmpSle Int64) (eSubExp $ intConst Int64 32) (eSubExp $ grpSize env) 
 
             matchExp <- lift $ do eIf' (pure cond) (pure body1) (pure body2) MatchEquiv
 
