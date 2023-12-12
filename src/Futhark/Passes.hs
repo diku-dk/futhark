@@ -88,32 +88,32 @@ gpuPipeline =
   standardPipeline
     >>> onePass extractKernels
     >>> passes
-      -- [ simplifyGPU,
-      --   optimiseGenRed,
-      --   simplifyGPU,
-      --   tileLoops,
-      --   simplifyGPU,
-      --   histAccsGPU,
-      --   babysitKernels,
-      --   simplifyGPU,
-      --   unstreamGPU,
-      --   performCSE True,
-      --   simplifyGPU,
-      --   sinkGPU, -- Sink reads before migrating them.
-      --   reduceDeviceSyncs,
-      --   simplifyGPU, -- Simplify and hoist storages.
-      --   performCSE True, -- Eliminate duplicate storages.
-      --   mergeGPUBodies,
-      --   simplifyGPU, -- Cleanup merged GPUBody kernels.
-      --   sinkGPU, -- Sink reads within GPUBody kernels.
-      --   inPlaceLoweringGPU,
-      --   intraSeq
-      -- ]
       [ simplifyGPU,
         intraSeq,
+        optimiseGenRed,
+        simplifyGPU,
+        tileLoops,
+        simplifyGPU,
+        histAccsGPU,
+        babysitKernels,
+        simplifyGPU,
         unstreamGPU,
-        simplifyGPU
+        performCSE True,
+        simplifyGPU,
+        sinkGPU, -- Sink reads before migrating them.
+        reduceDeviceSyncs,
+        simplifyGPU, -- Simplify and hoist storages.
+        performCSE True, -- Eliminate duplicate storages.
+        mergeGPUBodies,
+        simplifyGPU, -- Cleanup merged GPUBody kernels.
+        sinkGPU, -- Sink reads within GPUBody kernels.
+        inPlaceLoweringGPU
       ]
+      -- [ simplifyGPU,
+      --   intraSeq,
+      --   unstreamGPU,
+      --   simplifyGPU
+      -- ]
       -- [
       --   simplifyGPU,
       --   intraSeq,
