@@ -197,7 +197,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
 
 
           exp' <- buildSegMap' $ do
-              env' <- lift $ do mkTiles env
+              env' <- mkTiles env
 
               let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
               let lvl' = SegGroup virt grid'
@@ -878,44 +878,44 @@ mkChunkSize tid env = do
 -- global array
 mkTiles ::
   Env ->
-  Builder GPU Env
+  SeqBuilder Env
 mkTiles env = do
   scope <- askScope
   let arrsInScope = M.toList $ M.filter isArray scope
 
-  tileSize <- letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
+  tileSize <- lift $ do letSubExp "tile_size" =<< eBinOp (Mul Int64 OverflowUndef)
                                                (eSubExp $ seqFactor env)
                                                (eSubExp $ grpSize env)
 
   tiles <- forM arrsInScope $ \ (arrName, arrInfo) -> do
     let tp = elemType $ typeOf arrInfo
 
-    tileScratch <- letExp "tile_scratch" $ BasicOp $
-                      Scratch tp [tileSize]
+    tileScratch <- lift $ do letExp "tile_scratch" $ BasicOp $
+                                Scratch tp [tileSize]
 
     -- Check the type of the array to see if has been transposed
     arrType <- lookupType arrName
     let arrShape = arrayShape arrType
     let dim = DimSlice (intConst Int64 0) (grpsizeOld env) (intConst Int64 1)
-    let slice' = case arrShape of
-                    (Shape [_]) -> Slice [dim]
+    slice' <- case arrShape of
+                    (Shape [_]) -> pure $ Slice [dim]
                     (Shape [n, _])
-                      | grpsizeOld env /= n -> Slice [DimFix $ grpId env, dim]
-                      | otherwise -> Slice [dim, DimFix $ grpId env]
-                    _ -> error "Expected two dimensions in mkTiles"
+                      | grpsizeOld env /= n -> pure $ Slice [DimFix $ grpId env, dim]
+                      | otherwise -> pure $ Slice [dim, DimFix $ grpId env]
+                    _ -> throwError ()
                     
 
-    tileSlice <- letSubExp "tile_slice" $ BasicOp $ Index arrName slice'
-    tileStaging <- letExp "tile_staging" $ BasicOp $
-                      Update Unsafe tileScratch
-                        (Slice [DimSlice (intConst Int64 0)
-                                         (grpsizeOld env)
-                                         (intConst Int64 1)]
-                        ) tileSlice
+    tileSlice <- lift $ do letSubExp "tile_slice" $ BasicOp $ Index arrName slice'
+    tileStaging <- lift $ do letExp "tile_staging" $ BasicOp $
+                                Update Unsafe tileScratch
+                                  (Slice [DimSlice (intConst Int64 0)
+                                                   (grpsizeOld env)
+                                                   (intConst Int64 1)]
+                                ) tileSlice
 
     -- Now read the chunks using a segmap
     let (VName n _) = arrName
-    tile <- buildSegMap_ ("tile_" ++ nameToString n) $ do
+    tile <- lift $ buildSegMap_ ("tile_" ++ nameToString n) $ do
       tid <- newVName "tid"
       phys <- newVName "phys"
 
