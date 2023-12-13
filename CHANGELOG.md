@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Compatibility with CUDA versions prior than 12.
+
 ## [0.25.10]
 
 ### Added
