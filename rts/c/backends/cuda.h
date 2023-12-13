@@ -821,9 +821,10 @@ int backend_context_setup(struct futhark_context* ctx) {
   // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
   // for backwards compatibility.  Add _OPTIN and you seem to get the
   // right number.
-  ctx->max_local_memory =
-    device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN) -
-    device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
+#if CUDART_VERSION >= 12000
+  ctx->max_local_memory - device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
+#endif
   ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
   ctx->max_tile_size = sqrt(ctx->max_group_size);
