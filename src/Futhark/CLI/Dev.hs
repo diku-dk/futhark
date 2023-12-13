@@ -576,7 +576,7 @@ commandLineOptions =
       "Print memory alias information.",
     Option
       "z"
-      ["memory-access-pattern-gpu"]
+      ["memory-access-pattern"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printMemoryAccessAnalysis})
       "Print the result of analyzing memory access patterns. Currently only for --gpu --mc.",
     Option
