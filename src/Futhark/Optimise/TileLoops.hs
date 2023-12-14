@@ -415,7 +415,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
 
         let merge' = zip mergeparams' mergeinit'
 
-        let indexMergeParams slice =
+        let indexLoopParams slice =
               localScope (scopeOfFParams mergeparams') $
                 forM_ (zip mergeparams mergeparams') $ \(to, from) ->
                   letBindNames [paramName to] . BasicOp . Index (paramName from) $
@@ -425,7 +425,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
               private <> namesFromList (map paramName mergeparams ++ map paramName mergeparams')
 
             privstms' =
-              PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
+              PrivStms mempty indexLoopParams <> privstms <> inloop_privstms
 
         loopbody' <-
           localScope (scopeOfFParams mergeparams') . runBodyBuilder $

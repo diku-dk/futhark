@@ -1074,7 +1074,7 @@ expReturns e@(Loop merge _ _) = do
         ( Array pt shape u,
           MemArray _ _ _ (ArrayIn mem ixfun)
           )
-            | Just (i, mem_p) <- isMergeVar mem,
+            | Just (i, mem_p) <- isLoopVar mem,
               Mem space <- paramType mem_p ->
                 pure $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
             | otherwise ->
@@ -1089,7 +1089,7 @@ expReturns e@(Loop merge _ _) = do
           pure $ MemPrim pt
         (Mem space, _) ->
           pure $ MemMem space
-    isMergeVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
+    isLoopVar v = find ((== v) . paramName . snd) $ zip [0 ..] mergevars
     mergevars = map fst merge
 expReturns (Apply _ _ ret _) =
   pure $ Just $ map (funReturnsToExpReturns . fst) ret

@@ -396,7 +396,7 @@ ensureArrayIn space (Var v) = do
   tell ([Var mem'], ctx)
   pure $ Var v'
 
-allocInMergeParams ::
+allocInLoopParams ::
   (Allocable fromrep torep inner) =>
   [(FParam fromrep, SubExp)] ->
   ( [(FParam torep, SubExp)] ->
@@ -404,7 +404,7 @@ allocInMergeParams ::
     AllocM fromrep torep a
   ) ->
   AllocM fromrep torep a
-allocInMergeParams merge m = do
+allocInLoopParams merge m = do
   ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
     runWriterT $ unzip3 <$> mapM allocInMergeParam merge
   let mergeparams' = mem_params <> ctx_params <> valparams
@@ -928,7 +928,7 @@ allocInExp ::
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
 allocInExp (Loop merge form (Body () bodystms bodyres)) =
-  allocInMergeParams merge $ \merge' mk_loop_val -> do
+  allocInLoopParams merge $ \merge' mk_loop_val -> do
     localScope (scopeOfLoopForm form) $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
