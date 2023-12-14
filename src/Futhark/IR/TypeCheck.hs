@@ -650,7 +650,7 @@ checkFunParams ::
   [FParam rep] ->
   TypeM rep ()
 checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkFParamDec (paramName param) (paramDec param)
 
 checkLambdaParams ::
@@ -658,7 +658,7 @@ checkLambdaParams ::
   [LParam rep] ->
   TypeM rep ()
 checkLambdaParams = mapM_ $ \param ->
-  context ("In lambda parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkLParamDec (paramName param) (paramDec param)
 
 checkNoDuplicateParams :: Name -> [VName] -> TypeM rep ()

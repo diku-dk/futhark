@@ -41,7 +41,6 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
-import Data.Foldable (toList)
 import Data.List (foldl', transpose, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -392,7 +391,7 @@ ensureArrayIn _ (Constant v) =
 ensureArrayIn space (Var v) = do
   (mem', v') <- lift $ ensureRowMajorArray (Just space) v
   (_, ixfun) <- lift $ lookupArraySummary v'
-  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (toList ixfun)
+  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (IxFun.existentialized ixfun)
   tell ([Var mem'], ctx)
   pure $ Var v'
 
@@ -474,11 +473,13 @@ allocInLoopParams merge m = do
                     )
             _ -> do
               (v_mem', v') <- lift $ ensureRowMajorArray Nothing v
-              (_, v_ixfun') <- lift $ lookupArraySummary v'
+              let ixfun_ext =
+                    IxFun.existentialize 0 $ IxFun.iota $ map pe64 $ shapeDims shape
+
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
               ctx_params <-
-                replicateM (length v_ixfun') $
+                replicateM (length (IxFun.existentialized ixfun_ext)) $
                   newParam "ctx_param_ext" (MemPrim int64)
 
               param_ixfun <-
@@ -487,7 +488,7 @@ allocInLoopParams merge m = do
                     ( M.fromList . zip (fmap Ext [0 ..]) $
                         map (le64 . Free . paramName) ctx_params
                     )
-                    (IxFun.existentialize v_ixfun')
+                    ixfun_ext
 
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
               tell ([mem_param], ctx_params)
@@ -775,16 +776,16 @@ combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
 contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
-  -- Memory + offset + base_rank + (stride,size)*rank.
+  -- Memory + offset + base_rank + stride*rank.
   MemMem space
     : MemPrim int64
     : replicate base_rank (MemPrim int64)
-    ++ replicate (2 * shapeRank shape) (MemPrim int64)
+    ++ replicate (shapeRank shape) (MemPrim int64)
 contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
-  -- Memory + offset + (base,stride,size)*rank.
+  -- Memory + offset + (base,stride)*rank.
   MemMem space
     : MemPrim int64
-    : replicate (3 * shapeRank shape) (MemPrim int64)
+    : replicate (2 * shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
 -- Add memory information to the body, but do not return memory/ixfun
@@ -837,7 +838,8 @@ mkBranchRet reqs =
       let shape' = fmap (adjustExt num_new_ctx) shape
           (space, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert <$> IxFun.mkExistential base_rank (shapeRank shape) (ctx_offset + 1)
+            convert
+              <$> IxFun.mkExistential base_rank (shapeDims shape') (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -874,7 +876,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
         MemAcc {} -> pure []
         MemMem {} -> pure [] -- should not happen
         MemArray _ _ _ (ArrayIn mem ixfun) -> do
-          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ toList ixfun
+          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ IxFun.existentialized ixfun
           pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
 
 -- Do a a simple form of invariance analysis to simplify a Match.  It

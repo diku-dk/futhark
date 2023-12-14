@@ -914,17 +914,15 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
 
   TC.context ("in index function " <> prettyText ixfun) $ do
     traverse_ (TC.requirePrimExp int64 . untyped) ixfun
-    let ixfun_rank = IxFun.rank ixfun
-        ident_rank = shapeRank shape
-    unless (ixfun_rank == ident_rank) $
+    unless (IxFun.shape ixfun == map pe64 (shapeDims shape)) $
       TC.bad $
         TC.TypeError $
-          "Arity of index function ("
-            <> prettyText ixfun_rank
-            <> ") does not match rank of array "
+          "Shape of index function ("
+            <> prettyText (IxFun.shape ixfun)
+            <> ") does not match shape of array "
             <> prettyText name
             <> " ("
-            <> prettyText ident_rank
+            <> prettyText shape
             <> ")"
 
 bodyReturnsFromPat ::
