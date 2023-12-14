@@ -1,5 +1,4 @@
--- A scan of a two-dimensional array, which is presently not supported
--- in the OpenCL code generator.
+-- A segmented scan of a two-dimensional array.
 --
 -- ==
 -- random input { [20]bool [20][2]i32 } auto output
