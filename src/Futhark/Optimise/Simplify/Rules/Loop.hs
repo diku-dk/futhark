@@ -22,8 +22,8 @@ import Futhark.Transform.Rename
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
-removeRedundantMergeVariables :: (BuilderOps rep) => BottomUpRuleLoop rep
-removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
+removeRedundantLoopParams :: (BuilderOps rep) => BottomUpRuleLoop rep
+removeRedundantLoopParams (_, used) pat aux (merge, form, body)
   | not $ all (usedAfterLoop . fst) merge =
       let necessaryForReturned =
             findNecessaryForReturned
@@ -78,13 +78,13 @@ removeRedundantMergeVariables (_, used) pat aux (merge, form, body)
         Var v <- e =
           ([paramName p], BasicOp $ Replicate mempty $ Var v)
       | otherwise = ([paramName p], BasicOp $ SubExp e)
-removeRedundantMergeVariables _ _ _ _ =
+removeRedundantLoopParams _ _ _ _ =
   Skip
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
-hoistLoopInvariantMergeVariables :: (BuilderOps rep) => TopDownRuleLoop rep
-hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
+hoistLoopInvariantLoopParams :: (BuilderOps rep) => TopDownRuleLoop rep
+hoistLoopInvariantLoopParams vtable pat aux (merge, form, loopbody) = do
   -- Figure out which of the elements of loopresult are
   -- loop-invariant, and hoist them out.
   let explpat = zip (patElems pat) $ map (paramName . fst) merge
@@ -103,7 +103,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
   where
     res = bodyResult loopbody
 
-    namesOfMergeParams = namesFromList $ map (paramName . fst) merge
+    namesOfLoopParams = namesFromList $ map (paramName . fst) merge
 
     removeFromResult cs (mergeParam, mergeInit) explpat' =
       case partition ((== paramName mergeParam) . snd) explpat' of
@@ -167,7 +167,7 @@ hoistLoopInvariantMergeVariables vtable pat aux (merge, form, loopbody) = do
         namesToList $
           freeIn mergeParam `namesSubtract` oneName (paramName mergeParam)
     invariantOrNotMergeParam namesOfInvariant name =
-      (name `notNameIn` namesOfMergeParams)
+      (name `notNameIn` namesOfLoopParams)
         || (name `nameIn` namesOfInvariant)
 
 simplifyClosedFormLoop :: (BuilderOps rep) => TopDownRuleLoop rep
@@ -214,14 +214,14 @@ simplifyKnownIterationLoop _ _ _ _ =
 
 topDownRules :: (BuilderOps rep) => [TopDownRule rep]
 topDownRules =
-  [ RuleLoop hoistLoopInvariantMergeVariables,
+  [ RuleLoop hoistLoopInvariantLoopParams,
     RuleLoop simplifyClosedFormLoop,
     RuleLoop simplifyKnownIterationLoop
   ]
 
 bottomUpRules :: (BuilderOps rep) => [BottomUpRule rep]
 bottomUpRules =
-  [ RuleLoop removeRedundantMergeVariables
+  [ RuleLoop removeRedundantLoopParams
   ]
 
 -- | Standard loop simplification rules.

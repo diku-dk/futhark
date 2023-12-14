@@ -334,7 +334,7 @@ optimiseLoopByCopying pat merge body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
   buffered <-
-    doubleBufferMergeParams
+    doubleBufferLoopParams
       (zip (map fst merge) (bodyResult body))
       (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
@@ -354,12 +354,12 @@ data DoubleBuffer
   | NoBuffer
   deriving (Show)
 
-doubleBufferMergeParams ::
+doubleBufferLoopParams ::
   (MonadFreshNames m) =>
   [(Param FParamMem, SubExpRes)] ->
   Names ->
   m [DoubleBuffer]
-doubleBufferMergeParams ctx_and_res bound_in_loop =
+doubleBufferLoopParams ctx_and_res bound_in_loop =
   evalStateT (mapM buffer ctx_and_res) M.empty
   where
     params = map fst ctx_and_res
