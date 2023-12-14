@@ -137,6 +137,18 @@ def replicate 't (n: i64) (x: t): *[n]t =
 def copy 't (a: t): *t =
   ([a])[0]
 
+-- | Copy a value. The result will not alias anything. Additionally,
+-- there is a guarantee that the result will be laid out in row-major
+-- order in memory. This can be used for locality optimisations in
+-- cases where the compiler does not otherwise do the right thing.
+--
+-- **Work:** O(n).
+--
+-- **Span:** O(1).
+#[inline]
+def manifest 't (a: t): *t =
+  intrinsics.manifest a
+
 -- | Combines the outer two dimensions of an array.
 --
 -- **Complexity:** O(1).

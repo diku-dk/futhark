@@ -1728,6 +1728,13 @@ isIntrinsicFunction qname args loc = do
               I.ReshapeArbitrary
               (reshapeOuter (I.Shape [n', m']) 1 $ I.arrayShape arr_t)
               arr'
+    handleRest [arr] "manifest" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "flatten_arr" arr
+      forM arrs $ \arr' -> do
+        r <- I.arrayRank <$> lookupType arr'
+        if r == 0
+          then pure $ I.Var arr'
+          else letSubExp desc $ I.BasicOp $ I.Manifest [0 .. r - 1] arr'
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do
