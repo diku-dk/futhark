@@ -54,7 +54,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
-import Futhark.Pass.OptimizeArrayLayout
+import Futhark.Pass.OptimiseArrayLayout
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log
@@ -373,15 +373,15 @@ coalesceOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where
     perform (GPU prog) config =
-      GPU <$> runPipeline (onePass optimizeArrayLayout) config prog
+      GPU <$> runPipeline (onePass optimiseArrayLayout) config prog
     perform (MC prog) config =
-      MC <$> runPipeline (onePass optimizeArrayLayout) config prog
+      MC <$> runPipeline (onePass optimiseArrayLayout) config prog
     perform s _ =
       externalErrorS $
         "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
 
     long = [passLongOption pass]
-    pass = optimizeArrayLayout :: Pass GPU.GPU GPU.GPU
+    pass = optimiseArrayLayout :: Pass GPU.GPU GPU.GPU
 
 sinkOption :: String -> FutharkOption
 sinkOption short =
@@ -578,7 +578,7 @@ commandLineOptions =
       "z"
       ["memory-access-pattern"]
       (NoArg $ Right $ \opts -> opts {futharkAction = PolyAction printMemoryAccessAnalysis})
-      "Print the result of analyzing memory access patterns. Currently only for --gpu --mc.",
+      "Print the result of analysing memory access patterns. Currently only for --gpu --mc.",
     Option
       []
       ["call-graph"]

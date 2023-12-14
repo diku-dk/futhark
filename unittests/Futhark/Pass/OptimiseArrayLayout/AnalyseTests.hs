@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimizeArrayLayout.AnalyzeTests (tests) where
+module Futhark.Pass.OptimiseArrayLayout.AnalyseTests (tests) where
 
 import Data.List.NonEmpty
 import Data.Map.Strict qualified as M
@@ -9,18 +9,18 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 tests :: TestTree
-tests = testGroup "Analyze" [analyzeStmTests]
+tests = testGroup "Analyse" [analyseStmTests]
 
-analyzeStmTests :: TestTree
-analyzeStmTests =
+analyseStmTests :: TestTree
+analyseStmTests =
   testGroup
-    "analyzeStm"
-    [analyzeIndexTests, analyzeDimAccesssTests]
+    "analyseStm"
+    [analyseIndexTests, analyseDimAccesssTests]
 
-analyzeIndexTests :: TestTree
-analyzeIndexTests =
+analyseIndexTests :: TestTree
+analyseIndexTests =
   testGroup
-    "analyzeIndex"
+    "analyseIndex"
     $ do
       let arr_name = VName "xss" 5144
       -- ============================= TestCase0 =============================
@@ -60,7 +60,7 @@ analyzeIndexTests =
                           ]
                       )
                     ]
-            let (_, indexTable') = analyzeIndex ctx patternNames arr_name dimFixes
+            let (_, indexTable') = analyseIndex ctx patternNames arr_name dimFixes
             indexTable' @?= indexTable
 
       -- ============================= TestCase2 =============================
@@ -77,7 +77,7 @@ analyzeIndexTests =
             let patternNames = [VName "b" 5211]
             let dimFixes = [DimFix (Var (VName "i" 5209))]
 
-            let (_, indexTable') = analyzeIndex ctx patternNames arr_name dimFixes
+            let (_, indexTable') = analyseIndex ctx patternNames arr_name dimFixes
             indexTable' @?= mempty
 
       -- ============================= TestCase1 =============================
@@ -91,7 +91,7 @@ analyzeIndexTests =
                   [ DimFix (Var (VName "gtid" 5205)),
                     DimFix (Var (VName "i" 5209))
                   ]
-            let (_, indexTable') = analyzeIndex ctx patternNames arr_name dimFixes
+            let (_, indexTable') = analyseIndex ctx patternNames arr_name dimFixes
             indexTable' @?= mempty
 
       -- ============================= TestCase3 =============================
@@ -133,7 +133,7 @@ analyzeIndexTests =
                           ]
                       )
                     ]
-            let (_, indexTable') = analyzeIndex ctx patternNames arr_name dimFixes
+            let (_, indexTable') = analyseIndex ctx patternNames arr_name dimFixes
             indexTable' @?= indexTable
 
       -- ============================= TestCase4 =============================
@@ -178,14 +178,14 @@ analyzeIndexTests =
                           ]
                       )
                     ]
-            let (_, indexTable') = analyzeIndex ctx patternNames arr_name dimFixes
+            let (_, indexTable') = analyseIndex ctx patternNames arr_name dimFixes
             indexTable' @?= indexTable
 
       [testCase0, testCase1, testCase2, testCase3, testCase4]
 
-analyzeDimAccesssTests :: TestTree
-analyzeDimAccesssTests = testGroup
-  "analyzeDimAccesss"
+analyseDimAccesssTests :: TestTree
+analyseDimAccesssTests = testGroup
+  "analyseDimAccesss"
   $ do
     let testCase0 = testCase "Fold" $ do
           let indexTable =
@@ -204,7 +204,7 @@ analyzeDimAccesssTests = testGroup
                         ]
                     )
                   ]
-          let indexTable' = (analyzeDimAccesss @GPU) prog0
+          let indexTable' = (analyseDimAccesss @GPU) prog0
           indexTable' @?= indexTable
 
     let testCase1 = testCase "Long program" $ do
@@ -366,7 +366,7 @@ analyzeDimAccesssTests = testGroup
                         ]
                     )
                   ]
-          let indexTable' = (analyzeDimAccesss @GPU) prog1
+          let indexTable' = (analyseDimAccesss @GPU) prog1
           indexTable' @?= indexTable
 
     [testCase0, testCase1]

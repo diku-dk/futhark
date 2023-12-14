@@ -344,9 +344,9 @@ library
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.AD
-      Futhark.Pass.OptimizeArrayLayout
-      Futhark.Pass.OptimizeArrayLayout.Transform
-      Futhark.Pass.OptimizeArrayLayout.Layout
+      Futhark.Pass.OptimiseArrayLayout
+      Futhark.Pass.OptimiseArrayLayout.Transform
+      Futhark.Pass.OptimiseArrayLayout.Layout
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU
@@ -518,10 +518,10 @@ test-suite unit
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
-      Futhark.Pass.OptimizeArrayLayoutTests
-      Futhark.Pass.OptimizeArrayLayout.AnalyseTests
-      Futhark.Pass.OptimizeArrayLayout.LayoutTests
-      Futhark.Pass.OptimizeArrayLayout.AnalysePrimExpTests
+      Futhark.Pass.OptimiseArrayLayoutTests
+      Futhark.Pass.OptimiseArrayLayout.AnalyseTests
+      Futhark.Pass.OptimiseArrayLayout.LayoutTests
+      Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
