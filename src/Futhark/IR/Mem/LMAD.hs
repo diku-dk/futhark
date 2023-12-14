@@ -276,11 +276,12 @@ iota ::
 iota off = iotaStrided off 1
 {-# NOINLINE iota #-}
 
--- | Create an LMAD that is existential in everything.
-mkExistential :: Int -> Int -> LMAD (Ext a)
-mkExistential r start = LMAD (Ext start) $ map onDim [0 .. r - 1]
+-- | Create an LMAD that is existential in everything except shape.
+mkExistential :: Shape (Ext a) -> Int -> LMAD (Ext a)
+mkExistential shp start = LMAD (Ext start) $ zipWith onDim shp [0 .. r - 1]
   where
-    onDim i = LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2))
+    r = length shp
+    onDim d i = LMADDim {ldStride = Ext (start + 1 + i), ldShape = d}
 
 -- | Permute dimensions.
 permute :: LMAD num -> Permutation -> LMAD num

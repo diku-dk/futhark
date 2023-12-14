@@ -22,6 +22,7 @@ module Futhark.IR.Mem.IxFun
     substituteInIxFun,
     substituteInLMAD,
     existentialize,
+    existentialized,
     closeEnough,
     disjoint,
     disjoint2,
@@ -152,13 +153,13 @@ iotaOffset o ns = IxFun (LMAD.iota o ns) ns
 iota :: (IntegralExp num) => Shape num -> IxFun num
 iota = iotaOffset 0
 
--- | Create a single-LMAD index function that is
--- existential in everything, with the provided permutation.
-mkExistential :: Int -> Int -> Int -> IxFun (Ext a)
-mkExistential basis_rank lmad_rank start =
-  IxFun (LMAD.mkExistential lmad_rank start) basis
+-- | Create a single-LMAD index function that is existential in
+-- everything except shape, with the provided shape.
+mkExistential :: Int -> Shape (Ext a) -> Int -> IxFun (Ext a)
+mkExistential basis_rank lmad_shape start =
+  IxFun (LMAD.mkExistential lmad_shape start) basis
   where
-    basis = take basis_rank $ map Ext [start + 1 + lmad_rank * 2 ..]
+    basis = take basis_rank $ map Ext [start + 1 + length lmad_shape ..]
 
 -- | Permute dimensions.
 permute ::
@@ -241,18 +242,30 @@ expand o p (IxFun lmad base) =
           (map onDim (LMAD.dims lmad))
    in Just $ IxFun lmad' base
 
--- | Turn all the leaves of the index function into 'Ext's.  We
---  require that there's only one LMAD, that the index function is
---  contiguous, and the base shape has only one dimension.
+-- | Turn all the leaves of the index function into 'Ext's, except for
+--  the shape, which where the leaves are simply made 'Free'.
 existentialize ::
+  Int ->
   IxFun (TPrimExp Int64 a) ->
-  IxFun (TPrimExp Int64 (Ext b))
-existentialize ixfun = evalState (traverse (const mkExt) ixfun) 0
+  IxFun (TPrimExp Int64 (Ext a))
+existentialize start (IxFun lmad base) = evalState (IxFun <$> lmad' <*> base') start
   where
     mkExt = do
       i <- get
       put $ i + 1
       pure $ TPrimExp $ LeafExp (Ext i) int64
+    lmad' = LMAD <$> mkExt <*> mapM onDim (dims lmad)
+    base' = traverse (const mkExt) base
+    onDim ld = LMADDim <$> mkExt <*> pure (fmap Free (ldShape ld))
+
+-- | Retrieve those elements that 'existentialize' changes. That is,
+-- everything except the shape (and in the same order as
+-- 'existentialise' existentialises them).
+existentialized :: IxFun a -> [a]
+existentialized (IxFun (LMAD offset dims) base) =
+  offset : concatMap onDim dims <> base
+  where
+    onDim (LMADDim ldstride _) = [ldstride]
 
 -- | When comparing index functions as part of the type check in KernelsMem,
 -- we may run into problems caused by the simplifier. As index functions can be
