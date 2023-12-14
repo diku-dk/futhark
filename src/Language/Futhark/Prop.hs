@@ -698,7 +698,15 @@ intrinsics =
         ++ zipWith
           namify
           [intrinsicStart ..]
-          ( [ ( "flatten",
+          ( [ ( "manifest",
+                IntrinsicPolyFun
+                  [tp_a]
+                  [Scalar $ t_a mempty]
+                  $ RetType []
+                  $ Scalar
+                  $ t_a mempty
+              ),
+              ( "flatten",
                 IntrinsicPolyFun
                   [tp_a, sp_n, sp_m]
                   [Array Observe (shape [n, m]) $ t_a mempty]
