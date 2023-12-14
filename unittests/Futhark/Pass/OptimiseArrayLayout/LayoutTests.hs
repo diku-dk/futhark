@@ -29,7 +29,6 @@ permutationTests =
       -- This isn't the way to test this, in reality we should provide realistic
       -- access patterns that might result in the given permutations.
       -- Luckily we only use the original access for one check atm.
-      let names = generateNames 2
       [ testCase (unwords [show perm, "->", show res]) $
           commonPermutationEliminators perm [] @?= res
         | (perm, res) <-
@@ -61,7 +60,6 @@ nestTests :: TestTree
 nestTests = testGroup "Nests" $
   do
     let names = generateNames 2
-    let dimAccesses = [singleParAccess 0, singleSeqAccess 1] <*> names
     [ testCase (unwords [args, "->", show res]) $
         commonPermutationEliminators [1, 0] nest @?= res
       | (args, nest, res) <-
