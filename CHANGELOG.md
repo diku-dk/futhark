@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * New prelude function: `manifest`.  For doing subtle things to memory.
 
+* The GPU backends now handle up to 20 operators can be handled in a
+  single fused reduction.
+
 ### Removed
 
 ### Changed

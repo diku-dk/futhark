@@ -76,7 +76,7 @@ forM2_ xs ys f = forM_ (zip xs ys) (uncurry f)
 -- | The maximum number of operators we support in a single SegRed.
 -- This limit arises out of the static allocation of counters.
 maxNumOps :: Int
-maxNumOps = 10
+maxNumOps = 20
 
 -- | Code generation for the body of the SegRed, taking a continuation
 -- for saving the results of the body.  The results should be
@@ -143,7 +143,8 @@ compileSegRed' ::
 compileSegRed' pat grid space segbinops map_body_cont
   | genericLength segbinops > maxNumOps =
       compilerLimitationS $
-        "compileSegRed': at most " ++ show maxNumOps ++ " reduction operators are supported."
+        ("compileSegRed': at most " <> show maxNumOps <> " reduction operators are supported.\n")
+          <> ("Pattern: " <> prettyString pat)
   | otherwise = do
       chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
       case unSegSpace space of
