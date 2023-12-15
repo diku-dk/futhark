@@ -591,6 +591,13 @@ entry("main",
 --             0 : dependencies = {i_5768 4 iter}
 --             1 : dependencies = {i_5771 5 iter}
 --     }
+--     (arr) merge_5870 : [0, 1, 2, 3] {
+--         (idx) css_init_5951 :
+--             0 : dependencies = {ltid_y_5947 12 tid}
+--             1 : dependencies = {ltid_x_5946 13 tid}
+--             2 : dependencies = {slice_0 14 iter}
+--             3 : dependencies = {slice_0 14 iter}
+--     }
 --     (arr) reg_mem_5921 : [0, 1, 2] {
 --         (idx) x_6181 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
@@ -610,6 +617,13 @@ entry("main",
 --         (idx) css_5968 :
 --             0 : dependencies = {i_5953 14 iter}
 --             1 : dependencies = {i_5956 14 iter}
+--     }
+--     (arr) merge_6071 : [0, 1, 2, 3] {
+--         (idx) css_init_6154 :
+--             0 : dependencies = {ltid_y_6150 11 tid}
+--             1 : dependencies = {ltid_x_6149 12 tid}
+--             2 : dependencies = {slice_0 13 iter}
+--             3 : dependencies = {slice_0 13 iter}
 --     }
 --     (arr) reg_mem_6124 : [0, 1, 2] {
 --         (idx) x_6176 :
@@ -654,6 +668,13 @@ entry("main",
 --     }
 -- }
 -- (segmap) redomap_res_5969 : {
+--     (arr) merge_5870 : [0, 1, 2, 3] {
+--         (idx) css_init_5951 :
+--             0 : dependencies = {ltid_y_5947 12 tid}
+--             1 : dependencies = {ltid_x_5946 13 tid}
+--             2 : dependencies = {slice_0 14 iter}
+--             3 : dependencies = {slice_0 14 iter}
+--     }
 --     (arr) reg_mem_5921 : [0, 1, 2] {
 --         (idx) x_6181 :
 --             0 : dependencies = {ltid_y_5947 12 tid}
@@ -690,6 +711,13 @@ entry("main",
 --     }
 -- }
 -- (segmap) redomap_res_6172 : {
+--     (arr) merge_6071 : [0, 1, 2, 3] {
+--         (idx) css_init_6154 :
+--             0 : dependencies = {ltid_y_6150 11 tid}
+--             1 : dependencies = {ltid_x_6149 12 tid}
+--             2 : dependencies = {slice_0 13 iter}
+--             3 : dependencies = {slice_0 13 iter}
+--     }
 --     (arr) reg_mem_6124 : [0, 1, 2] {
 --         (idx) x_6176 :
 --             0 : dependencies = {ltid_y_6150 11 tid}

@@ -92,6 +92,10 @@ entry("main",
 -- === Expected output of analysis: CONFIRMED
 -- (segmap) defunc_0_map_res_5337 : {
 --     (arr) xsss_5223 : [0, 1, 2] {
+--         (idx) xsss_transformed_row_5342 :
+--             0 : dependencies = {gtid_5338 0 tid}
+--             1 : dependencies = {}
+--             2 : dependencies = {slice_0 1 iter}
 --         (idx) eta_p_5351 :
 --             0 : dependencies = {gtid_5338 0 tid}
 --             1 : dependencies = {i_5345 1 iter}
