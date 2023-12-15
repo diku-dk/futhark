@@ -47,27 +47,39 @@ instance Transform MC where
     | _ <- mcOp = transformRestOp perm_table expmap stm
 
 transformSegOpGPU :: PermutationTable -> ExpMap GPU -> Stm GPU -> SegOp SegLevel GPU -> TransformM GPU (PermutationTable, ExpMap GPU)
-transformSegOpGPU perm_table expmap (Let pat aux _) op = do
-  let mapper =
-        identitySegOpMapper
-          { mapOnSegOpBody = case segLevel op of
-              SegGroup {} -> transformSegGroupKernelBody perm_table expmap
-              _ -> transformSegThreadKernelBody perm_table patternName
-          }
-  op' <- mapSegOpM mapper op
-  let stm' = Let pat aux $ Op $ SegOp op'
-  addStm stm'
-  pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
+transformSegOpGPU perm_table expmap stm@(Let pat aux _) op =
+  -- Optimization: Only traverse the body of the SegOp if it is represented in
+  -- the permutation table
+  case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
+    Nothing -> do
+      addStm stm
+      pure (perm_table, M.fromList [(name, stm) | name <- patNames pat] <> expmap)
+    Just _ -> do
+      let mapper =
+            identitySegOpMapper
+              { mapOnSegOpBody = case segLevel op of
+                  SegGroup {} -> transformSegGroupKernelBody perm_table expmap
+                  _ -> transformSegThreadKernelBody perm_table patternName
+              }
+      op' <- mapSegOpM mapper op
+      let stm' = Let pat aux $ Op $ SegOp op'
+      addStm stm'
+      pure (perm_table, M.fromList [(name, stm') | name <- patNames pat] <> expmap)
   where
     patternName = patElemName . head $ patElems pat
 
 transformSegOpMC :: PermutationTable -> ExpMap MC -> Stm MC -> Maybe (SegOp () MC) -> SegOp () MC -> TransformM MC (PermutationTable, ExpMap MC)
 transformSegOpMC perm_table expmap (Let pat aux _) maybe_par_segop seqSegOp
   | Nothing <- maybe_par_segop = add Nothing
-  | Just par_segop <- maybe_par_segop = do
-      -- Map the parallel part of the ParOp
-      par_segop' <- mapSegOpM mapper par_segop
-      add (Just par_segop')
+  | Just par_segop <- maybe_par_segop =
+      -- Optimization: Only traverse the body of the SegOp if it is represented in
+      -- the permutation table
+      case M.lookup patternName (M.mapKeys vnameFromSegOp perm_table) of
+        Nothing -> add (Just par_segop)
+        Just _ -> do
+          -- Map the parallel part of the ParOp
+          par_segop' <- mapSegOpM mapper par_segop
+          add (Just par_segop')
   where
     add maybe_par_segop' = do
       -- Map the sequential part of the ParOp
