@@ -449,12 +449,12 @@ analyseIndex ctx pats arr_name dim_indices = do
        in -- If the arrayname is a `DimSlice` we want to fixup the access
           case M.lookup name $ slices context of
             Nothing -> analyseIndex' context pats array_name dim_access
-            Just (arr_name', pats', sliceAccess) -> do
+            Just (arr_name', pats', slice_access) -> do
               analyseIndex'
                 context
                 pats'
                 arr_name'
-                (init sliceAccess ++ [head dim_access <> last sliceAccess] ++ drop 1 dim_access)
+                (init slice_access ++ [head dim_access <> last slice_access] ++ drop 1 dim_access)
 
 analyseIndexContextFromIndices :: Context rep -> [DimIndex SubExp] -> [VName] -> Context rep
 analyseIndexContextFromIndices ctx dim_accesses pats = do
@@ -480,10 +480,9 @@ analyseIndex' ctx _ _ [_] = (ctx, mempty)
 analyseIndex' ctx pats arr_name dim_accesses = do
   -- Get the name of all segmaps in the current "callstack"
   let segmaps = allSegMap ctx
-  let memory_entries = dim_accesses
   let idx_expr_name = pats --                                                IndexExprName
   -- For each pattern, create a mapping to the dimensional indices
-  let map_ixd_expr = map (`M.singleton` memory_entries) idx_expr_name --     IndexExprName |-> [DimAccess]
+  let map_ixd_expr = map (`M.singleton` dim_accesses) idx_expr_name --       IndexExprName |-> [DimAccess]
   -- For each pattern -> [DimAccess] mapping, create a mapping from the array
   -- name that was indexed.
   let map_array = map (M.singleton arr_name) map_ixd_expr --   ArrayName |-> IndexExprName |-> [DimAccess]
