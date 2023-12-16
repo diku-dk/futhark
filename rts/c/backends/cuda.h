@@ -823,7 +823,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   // right number.
   ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
 #if CUDART_VERSION >= 12000
-  ctx->max_local_memory - device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_local_memory -= device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
 #endif
   ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
