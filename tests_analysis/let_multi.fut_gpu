@@ -11,6 +11,7 @@
 --                 #[unsafe]
 --                 let (i,j) = f xs ys
 --                 in xs[i]+ys[j]
+--         ) yss
 
 -- IR:
 

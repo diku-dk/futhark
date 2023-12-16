@@ -5,6 +5,7 @@
 --     #[unsafe]
 --     loop s=0 for i < m do
 --       s + xs[i*2+3]
+--    ) xss
 
 -- IR:
 

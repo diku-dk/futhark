@@ -1,7 +1,7 @@
 -- Source code:
 
 -- def main [n][m] (xss: [n][m]i64) : [m]i64 =
---     foldl (cc xs -> map2 ( x -> x+a) acc xs) (replicate m 0) xss
+--     foldl (\acc xs -> map2 (\a x -> x+a) acc xs) (replicate m 0) xss
 
 -- IR:
 
