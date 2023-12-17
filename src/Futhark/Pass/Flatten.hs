@@ -218,18 +218,18 @@ readInputs segments env is = mapM_ onInput
       case resVar rt env of
         Regular arr ->
           letBindNames [v] =<< eIndex arr (map eSubExp is)
-        Irregular (IrregularRep _ _ offsets elems) -> do
-          offset <- letSubExp "offset" =<< eIndex offsets (map eSubExp is)
+        Irregular (IrregularRep _ _ v_O v_D) -> do
+          offset <- letSubExp "offset" =<< eIndex v_O (map eSubExp is)
           case arrayDims t of
             [num_elems] -> do
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
-              letBindNames [v] $ BasicOp $ Index elems slice
+              letBindNames [v] $ BasicOp $ Index v_D slice
             _ -> do
               num_elems <-
                 letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
               v_flat <-
-                letExp (baseString v <> "_flat") $ BasicOp $ Index elems slice
+                letExp (baseString v <> "_flat") $ BasicOp $ Index v_D slice
               letBindNames [v] . BasicOp $
                 Reshape ReshapeArbitrary (arrayShape t) v_flat
 
@@ -270,15 +270,15 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
           Irregular r -> irregularD r
 
 -- | Only sensible for variables of segment-invariant type.
-elemArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
-elemArr segments env inps (Var v)
+dataArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
+dataArr segments env inps (Var v)
   | Just v_inp <- lookup v inps =
       case v_inp of
         DistInputFree vs _ -> irregularD <$> mkIrregFromReg segments vs
         DistInput rt _ -> case resVar rt env of
           Irregular r -> pure $ irregularD r
           Regular vs -> irregularD <$> mkIrregFromReg segments vs
-elemArr segments _ _ se = do
+dataArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   dims <- arrayDims <$> lookupType rep
   if length dims == 1
@@ -494,13 +494,13 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
     Iota n (Constant x) (Constant s) Int64
       | zeroIsh x,
         oneIsh s -> do
-          ns <- elemArr segments env inps n
+          ns <- dataArr segments env inps n
           (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
           pure $ insertIrregular ns flags offsets (distResTag res) elems env
     Iota n x s it -> do
-      ns <- elemArr segments env inps n
-      xs <- elemArr segments env inps x
-      ss <- elemArr segments env inps s
+      ns <- dataArr segments env inps n
+      xs <- dataArr segments env inps x
+      ss <- dataArr segments env inps s
       (flags, offsets, elems) <- certifying (distCerts inps aux env) $ doSegIota ns
       (_, _, repiota_elems) <- doRepIota ns
       m <- arraySize 0 <$> lookupType elems
@@ -515,12 +515,12 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
             ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
-      ns <- elemArr segments env inps n
+      ns <- dataArr segments env inps n
       rep <- getIrregRep segments env inps v
       rep' <- replicateIrreg segments env ns (baseString v) rep
       pure $ insertRep (distResTag res) (Irregular rep') env
     Replicate (Shape [n]) (Constant v) -> do
-      ns <- elemArr segments env inps n
+      ns <- dataArr segments env inps n
       (flags, offsets, elems) <-
         certifying (distCerts inps aux env) $ doSegIota ns
       w <- arraySize 0 <$> lookupType elems
@@ -739,7 +739,7 @@ transformInnerMap ::
   Lambda SOACS ->
   Builder GPU (VName, VName, VName)
 transformInnerMap segments env inps pat w arrs map_lam = do
-  ws <- elemArr segments env inps w
+  ws <- dataArr segments env inps w
   (ws_flags, ws_offsets, ws_elems) <- doRepIota ws
   new_segment <- arraySize 0 <$> lookupType ws_elems
   arrs' <-
@@ -938,15 +938,10 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- Write back the regular results of a branch to a (partially) blank space
       let scatterRegular space (is, xs) = do
             ~(Array _ (Shape [size]) _) <- lookupType xs
-            letExp "regular_scatter"
-              =<< genScatter
-                space
-                size
-                ( \gtid -> do
-                    x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
-                    i <- letExp "i" =<< eIndex is [eSubExp gtid]
-                    pure (i, x)
-                )
+            letExp "regular_scatter" <=< genScatter space size $ \gtid -> do
+              x <- letSubExp "x" =<< eIndex xs [eSubExp gtid]
+              i <- letExp "i" =<< eIndex is [eSubExp gtid]
+              pure (i, x)
       -- Write back the irregular elements of a branch to a (partially) blank space
       -- The `offsets` variable is the offsets of the final result,
       -- whereas `irregRep` is the irregular representation of the result of a single branch.
@@ -955,16 +950,11 @@ transformDistStm segments env (DistStm inps res stm) = do
             (_, _, ii1) <- doRepIota segs
             (_, _, ii2) <- doSegIota segs
             ~(Array _ (Shape [size]) _) <- lookupType elems
-            letExp "irregular_scatter"
-              =<< genScatter
-                space
-                size
-                ( \gtid -> do
-                    x <- letSubExp "x" =<< eIndex elems [eSubExp gtid]
-                    offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp gtid]]]
-                    i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
-                    pure (i, x)
-                )
+            letExp "irregular_scatter" <=< genScatter space size $ \gtid -> do
+              x <- letSubExp "x" =<< eIndex elems [eSubExp gtid]
+              offset <- letExp "offset" =<< eIndex offsets [eIndex is [eIndex ii1 [eSubExp gtid]]]
+              i <- letExp "i" =<< eBinOp (Add Int64 OverflowUndef) (toExp offset) (eIndex ii2 [eSubExp gtid])
+              pure (i, x)
       -- Given a single result from each branch as well the *unlifted*
       -- result type, merge the results of all branches into a single result.
       let mergeResult iss branchesRep resType =
