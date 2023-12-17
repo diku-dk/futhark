@@ -499,8 +499,7 @@ pLoop pr =
             <* lexeme ":"
             <*> pIntType
             <* lexeme "<"
-            <*> pSubExp
-            <*> many ((,) <$> pLParam pr <* keyword "in" <*> pVName),
+            <*> pSubExp,
           keyword "while" $> WhileLoop <*> pVName
         ]
 
@@ -508,16 +507,14 @@ pLambda :: PR rep -> Parser (Lambda rep)
 pLambda pr =
   choice
     [ lexeme "\\"
-        $> lam
+        $> Lambda
         <*> pLParams pr
         <* pColon
         <*> pTypes
         <* pArrow
         <*> pBody pr,
-      keyword "nilFn" $> Lambda mempty (Body (pBodyDec pr) mempty []) []
+      keyword "nilFn" $> Lambda mempty [] (Body (pBodyDec pr) mempty [])
     ]
-  where
-    lam params ret body = Lambda params body ret
 
 pReduce :: PR rep -> Parser (SOAC.Reduce rep)
 pReduce pr =
@@ -836,10 +833,8 @@ pKernelResult = do
         <*> pure cs
         <*> pSubExp,
       try $
-        flip (SegOp.WriteReturns cs)
+        SegOp.WriteReturns cs
           <$> pVName
-          <* pColon
-          <*> pShape
           <* keyword "with"
           <*> parens (pWrite `sepBy` pComma),
       try "tile"

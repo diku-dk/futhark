@@ -239,14 +239,6 @@ bindLParams :: (SimplifiableRep rep) => [LParam (Wise rep)] -> SimpleM rep a -> 
 bindLParams params =
   localVtable $ \vtable -> foldr ST.insertLParam vtable params
 
-bindArrayLParams ::
-  (SimplifiableRep rep) =>
-  [LParam (Wise rep)] ->
-  SimpleM rep a ->
-  SimpleM rep a
-bindArrayLParams params =
-  localVtable $ \vtable -> foldl' (flip ST.insertLParam) vtable params
-
 bindMerge ::
   (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp, SubExpRes)] ->
@@ -336,7 +328,7 @@ protectIf _ _ _ stm =
 protectLoopHoisted ::
   (SimplifiableRep rep) =>
   [(FParam (Wise rep), SubExp)] ->
-  LoopForm (Wise rep) ->
+  LoopForm ->
   SimpleM rep (a, b, Stms (Wise rep)) ->
   SimpleM rep (a, b, Stms (Wise rep))
 protectLoopHoisted merge form m = do
@@ -357,7 +349,7 @@ protectLoopHoisted merge form m = do
               find ((== cond) . paramName . fst) merge ->
               pure cond_init
           | otherwise -> pure $ constant True -- infinite loop
-        ForLoop _ it bound _ ->
+        ForLoop _ it bound ->
           letSubExp "loop_nonempty" $
             BasicOp $
               CmpOp (CmpSlt it) (intConst it 0) bound
@@ -688,7 +680,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
                  && loopInvariantStm vtable stm
                  -- Avoid hoisting out something that might change the
                  -- asymptotics of the program.
-                 && all primType (patTypes (stmPat stm))
+                 && ( all primType (patTypes (stmPat stm))
+                        || (ifsort == MatchEquiv && isManifest (stmExp stm))
+                    )
              )
           || ( ifsort /= MatchFallback
                  && any (`UT.isSize` usage) (patNames (stmPat stm))
@@ -711,6 +705,9 @@ matchBlocker cond (MatchDec _ ifsort) = do
       isNotHoistableBnd _ _ _ =
         -- Hoist aggressively out of versioning branches.
         ifsort /= MatchEquiv
+
+      isManifest (BasicOp Manifest {}) = True
+      isManifest _ = False
 
       block =
         branch_blocker
@@ -780,11 +777,16 @@ simplifyStms ::
   (SimplifiableRep rep) =>
   Stms (Wise rep) ->
   SimpleM rep (Stms (Wise rep))
-simplifyStms stms = do
-  simplifyStmsWithUsage all_used stms
+simplifyStms stms = simplifyStmsWithUsage usage stms
   where
-    all_used =
-      UT.usages (namesFromList (M.keys (scopeOf stms)))
+    -- XXX: treat everything as consumed, because when these are
+    -- constants it is otherwise complicated to ensure we do not
+    -- introduce more aliasing than specified by the return types.
+    -- CSE has the same problem.
+    all_bound = M.keys (scopeOf stms)
+    usage =
+      UT.usages (namesFromList all_bound)
+        <> foldMap UT.consumedUsage all_bound
 
 simplifyStmsWithUsage ::
   (SimplifiableRep rep) =>
@@ -833,18 +835,13 @@ simplifyExp _ _ (Loop merge form loopbody) = do
   args' <- mapM simplify args
   let merge' = zip params' args'
   (form', boundnames, wrapbody) <- case form of
-    ForLoop loopvar it boundexp loopvars -> do
+    ForLoop loopvar it boundexp -> do
       boundexp' <- simplify boundexp
-      let (loop_params, loop_arrs) = unzip loopvars
-      loop_params' <- mapM (traverse simplify) loop_params
-      loop_arrs' <- mapM simplify loop_arrs
-      let form' = ForLoop loopvar it boundexp' (zip loop_params' loop_arrs')
+      let form' = ForLoop loopvar it boundexp'
       pure
         ( form',
-          namesFromList (loopvar : map paramName loop_params') <> fparamnames,
-          bindLoopVar loopvar it boundexp'
-            . protectLoopHoisted merge' form'
-            . bindArrayLParams loop_params'
+          oneName loopvar <> fparamnames,
+          bindLoopVar loopvar it boundexp' . protectLoopHoisted merge' form'
         )
     WhileLoop cond -> do
       cond' <- simplify cond
@@ -1088,7 +1085,7 @@ simplifyLambdaWith ::
   UT.UsageTable ->
   Lambda (Wise rep) ->
   SimpleM rep (Lambda (Wise rep), Stms (Wise rep))
-simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
+simplifyLambdaWith f blocked usage lam@(Lambda params rettype body) = do
   params' <- mapM (traverse simplify) params
   let paramnames = namesFromList $ boundByLambda lam
   (hoisted, body') <-
@@ -1099,7 +1096,7 @@ simplifyLambdaWith f blocked usage lam@(Lambda params body rettype) = do
         (map (const mempty) rettype)
         body
   rettype' <- simplify rettype
-  pure (Lambda params' body' rettype', hoisted)
+  pure (Lambda params' rettype' body', hoisted)
 
 instance Simplifiable Certs where
   simplify (Certs ocs) = Certs . nubOrd . concat <$> mapM check ocs

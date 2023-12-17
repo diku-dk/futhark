@@ -30,7 +30,7 @@ module Language.Futhark.TypeChecker.Monad
     module Language.Futhark.Warnings,
     Env (..),
     TySet,
-    FunSig (..),
+    FunModType (..),
     ImportTable,
     NameMap,
     BoundV (..),
@@ -153,7 +153,7 @@ underscoreUse loc name =
   typeError loc mempty $
     "Use of"
       <+> dquotes (pretty name)
-        <> ": variables prefixed with underscore may not be accessed."
+      <> ": variables prefixed with underscore may not be accessed."
 
 -- | A mapping from import import names to 'Env's.  This is used to
 -- resolve @import@ declarations.
@@ -240,7 +240,7 @@ enteringModule = local $ \ctx -> ctx {contextAtTopLevel = False}
 lookupMTy :: SrcLoc -> QualName Name -> TypeM (QualName VName, MTy)
 lookupMTy loc qn = do
   (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Signature qn loc
-  (qn',) <$> maybe explode pure (M.lookup name $ envSigTable scope)
+  (qn',) <$> maybe explode pure (M.lookup name $ envModTypeTable scope)
   where
     explode = unknownVariable Signature qn loc
 

@@ -124,13 +124,12 @@ genSegPrefixSum desc flags ns = do
 
 genScatter :: VName -> SubExp -> (SubExp -> Builder GPU (VName, SubExp)) -> Builder GPU (Exp GPU)
 genScatter dest n f = do
-  m <- arraySize 0 <$> lookupType dest
   gtid <- newVName "gtid"
   space <- mkSegSpace [(gtid, n)]
   ((res, v_t), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
     (i, v) <- f $ Var gtid
     v_t <- subExpType v
-    pure (WriteReturns mempty (Shape [m]) dest [(Slice [DimFix (Var i)], v)], v_t)
+    pure (WriteReturns mempty dest [(Slice [DimFix (Var i)], v)], v_t)
   let kbody = KernelBody () stms [res]
   pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [v_t] kbody
 

@@ -253,7 +253,7 @@ lastUseExp (Match _ cases body _) used_nms = do
   let used_nms' = used_cases <> body_used_nms
   (_, last_used_arrs) <- lastUsedInNames used_nms $ free_in_body <> free_in_cases
   pure (lutab_cases <> lutab', last_used_arrs, used_nms')
-lastUseExp (Loop var_ses lf body) used_nms0 = inScopeOf lf $ do
+lastUseExp (Loop var_ses form body) used_nms0 = localScope (scopeOfLoopForm form) $ do
   free_in_body <- aliasTransitiveClosure $ freeIn body
   -- compute the aliasing transitive closure of initializers that are not last-uses
   var_inis <- catMaybes <$> mapM (initHelper (free_in_body <> used_nms0)) var_ses
@@ -364,7 +364,7 @@ lastUseSegBinOp sbos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper sbos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (SegBinOp _ l@(Lambda _ body _) neutral shp) = inScopeOf l $ do
+    helper (SegBinOp _ l@(Lambda _ _ body) neutral shp) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn neutral <> freeIn shp
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')
@@ -378,7 +378,7 @@ lastUseHistOp hos used_nms = do
   (lutab, lu_vars, used_nms') <- unzip3 <$> mapM helper hos
   pure (mconcat lutab, mconcat lu_vars, mconcat used_nms')
   where
-    helper (HistOp shp rf dest neutral shp' l@(Lambda _ body _)) = inScopeOf l $ do
+    helper (HistOp shp rf dest neutral shp' l@(Lambda _ _ body)) = inScopeOf l $ do
       (used_nms', lu_vars) <- lastUsedInNames used_nms $ freeIn shp <> freeIn rf <> freeIn dest <> freeIn neutral <> freeIn shp'
       (body_lutab, used_nms'') <- lastUseBody body (mempty, used_nms')
       pure (body_lutab, lu_vars, used_nms'')

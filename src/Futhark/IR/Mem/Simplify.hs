@@ -134,8 +134,8 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
       (arr_to_mem, oldmem_to_mem) <-
         fmap unzip $
           forM fixable $ \(arr_pe, mem_size, oldmem, space) -> do
-            size <- toSubExp "size" mem_size
-            mem <- letExp "mem" $ Op $ Alloc size space
+            size <- toSubExp "unext_mem_size" mem_size
+            mem <- letExp "unext_mem" $ Op $ Alloc size space
             pure ((patElemName arr_pe, mem), (oldmem, mem))
 
       -- Update the branches to contain Copy expressions putting the

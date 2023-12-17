@@ -26,6 +26,7 @@ module Futhark.IR.TypeCheck
     checkExp,
     checkStms,
     checkStm,
+    checkSlice,
     checkType,
     checkExtType,
     matchExtPat,
@@ -517,9 +518,7 @@ checkAnnotation desc t1 t2
 require :: (Checkable rep) => [Type] -> SubExp -> TypeM rep ()
 require ts se = do
   t <- checkSubExp se
-  unless (t `elem` ts) $
-    bad $
-      UnexpectedType (BasicOp $ SubExp se) t ts
+  unless (t `elem` ts) $ bad $ UnexpectedType (BasicOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
 requireI :: (Checkable rep) => [Type] -> VName -> TypeM rep ()
@@ -562,7 +561,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
-      when (s `notElem` known) $
+      unless (s `elem` known) $
         Left . Error [] . TypeError $
           "Opaque not defined before first use: " <> nameToText s
     checkEntryPointType _ (TypeTransparent _) = pure ()
@@ -651,7 +650,7 @@ checkFunParams ::
   [FParam rep] ->
   TypeM rep ()
 checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkFParamDec (paramName param) (paramDec param)
 
 checkLambdaParams ::
@@ -659,7 +658,7 @@ checkLambdaParams ::
   [LParam rep] ->
   TypeM rep ()
 checkLambdaParams = mapM_ $ \param ->
-  context ("In lambda parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkLParamDec (paramName param) (paramDec param)
 
 checkNoDuplicateParams :: Name -> [VName] -> TypeM rep ()
@@ -824,6 +823,13 @@ checkBody (Body (_, rep) stms res) = do
   where
     bound_here = namesFromList $ M.keys $ scopeOf stms
 
+-- | Check a slicing operation of an array of the provided type.
+checkSlice :: (Checkable rep) => Type -> Slice SubExp -> TypeM rep ()
+checkSlice vt (Slice idxes) = do
+  when (arrayRank vt /= length idxes) . bad $
+    SlicingError (arrayRank vt) (length idxes)
+  mapM_ (traverse $ require [Prim int64]) idxes
+
 checkBasicOp :: (Checkable rep) => BasicOp -> TypeM rep ()
 checkBasicOp (SubExp es) =
   void $ checkSubExp es
@@ -849,26 +855,20 @@ checkBasicOp (UnOp op e) = require [Prim $ unOpType op] e
 checkBasicOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 checkBasicOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 checkBasicOp (ConvOp op e) = require [Prim $ fst $ convOpType op] e
-checkBasicOp (Index ident (Slice idxes)) = do
+checkBasicOp (Index ident slice) = do
   vt <- lookupType ident
   observe ident
-  when (arrayRank vt /= length idxes) $
-    bad $
-      SlicingError (arrayRank vt) (length idxes)
-  mapM_ checkDimIndex idxes
-checkBasicOp (Update _ src (Slice idxes) se) = do
+  checkSlice vt slice
+checkBasicOp (Update _ src slice se) = do
   (src_shape, src_pt) <- checkArrIdent src
-  when (shapeRank src_shape /= length idxes) $
-    bad $
-      SlicingError (shapeRank src_shape) (length idxes)
 
   se_aliases <- subExpAliasesM se
   when (src `nameIn` se_aliases) $
     bad $
       TypeError "The target of an Update must not alias the value to be written."
 
-  mapM_ checkDimIndex idxes
-  require [arrayOf (Prim src_pt) (Shape (sliceDims (Slice idxes))) NoUniqueness] se
+  checkSlice (arrayOf (Prim src_pt) src_shape NoUniqueness) slice
+  require [arrayOf (Prim src_pt) (sliceShape slice) NoUniqueness] se
   consume =<< lookupAliases src
 checkBasicOp (FlatIndex ident slice) = do
   vt <- lookupType ident
@@ -1023,7 +1023,7 @@ checkExp (Loop merge form loopbody) = do
 
   checkLoopArgs
 
-  binding (scopeOf form) $ do
+  binding (scopeOfLoopForm form) $ do
     form_consumable <- checkForm mergeargs form
 
     let rettype = map paramDeclType mergepat
@@ -1059,38 +1059,15 @@ checkExp (Loop merge form loopbody) = do
           map (`namesSubtract` bound_here)
             <$> mapM (subExpAliasesM . resSubExp) (bodyResult loopbody)
   where
-    checkLoopVar (p, a) = do
-      a_t <- lookupType a
-      observe a
-      case peelArray 1 a_t of
-        Just a_t_r -> do
-          checkLParamDec (paramName p) $ paramDec p
-          unless (a_t_r `subtypeOf` typeOf (paramDec p)) $
-            bad . TypeError $
-              "Loop parameter "
-                <> prettyText p
-                <> " not valid for element of "
-                <> prettyText a
-                <> ", which has row type "
-                <> prettyText a_t_r
-          als <- lookupAliases a
-          pure (paramName p, als)
-        _ ->
-          bad . TypeError $
-            "Cannot loop over "
-              <> prettyText a
-              <> " of type "
-              <> prettyText a_t
-    checkForm mergeargs (ForLoop loopvar it boundexp loopvars) = do
+    checkForm mergeargs (ForLoop loopvar it boundexp) = do
       iparam <- primFParam loopvar $ IntType it
       let mergepat = map fst merge
           funparams = iparam : mergepat
           paramts = map paramDeclType funparams
 
-      consumable <- mapM checkLoopVar loopvars
       boundarg <- checkArg boundexp
       checkFuncall Nothing paramts $ boundarg : mergeargs
-      pure consumable
+      pure mempty
     checkForm mergeargs (WhileLoop cond) = do
       case find ((== cond) . paramName . fst) merge of
         Just (condparam, _) ->
@@ -1260,13 +1237,6 @@ checkFlatSlice (FlatSlice offset idxs) = do
   require [Prim int64] offset
   mapM_ checkFlatDimIndex idxs
 
-checkDimIndex ::
-  (Checkable rep) =>
-  DimIndex SubExp ->
-  TypeM rep ()
-checkDimIndex (DimFix i) = require [Prim int64] i
-checkDimIndex (DimSlice i n s) = mapM_ (require [Prim int64]) [i, n, s]
-
 checkStm ::
   (Checkable rep) =>
   Stm (Aliases rep) ->
@@ -1396,7 +1366,7 @@ consumeArgs paramts args =
 -- parameters.
 checkAnyLambda ::
   (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
-checkAnyLambda soac (Lambda params body rettype) args = do
+checkAnyLambda soac (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
     then do

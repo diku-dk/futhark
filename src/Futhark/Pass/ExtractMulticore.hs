@@ -27,7 +27,6 @@ import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.ToGPU (injectSOACS)
 import Futhark.Tools
 import Futhark.Transform.Rename (Rename, renameSomething)
-import Futhark.Util (takeLast)
 import Futhark.Util.Log
 
 newtype ExtractM a = ExtractM (ReaderT (Scope MC) (State VNameSource) a)
@@ -101,21 +100,16 @@ mkSegSpace w = do
   let space = SegSpace flat [(gtid, w)]
   pure (gtid, space)
 
-transformLoopForm :: LoopForm SOACS -> LoopForm MC
-transformLoopForm (WhileLoop cond) = WhileLoop cond
-transformLoopForm (ForLoop i it bound params) = ForLoop i it bound params
-
 transformStm :: Stm SOACS -> ExtractM (Stms MC)
 transformStm (Let pat aux (BasicOp op)) =
   pure $ oneStm $ Let pat aux $ BasicOp op
 transformStm (Let pat aux (Apply f args ret info)) =
   pure $ oneStm $ Let pat aux $ Apply f args ret info
 transformStm (Let pat aux (Loop merge form body)) = do
-  let form' = transformLoopForm form
   body' <-
-    localScope (scopeOfFParams (map fst merge) <> scopeOf form') $
+    localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm form) $
       transformBody body
-  pure $ oneStm $ Let pat aux $ Loop merge form' body'
+  pure $ oneStm $ Let pat aux $ Loop merge form body'
 transformStm (Let pat aux (Match ses cases defbody ret)) =
   oneStm . Let pat aux
     <$> (Match ses <$> mapM transformCase cases <*> transformBody defbody <*> pure ret)
@@ -131,10 +125,9 @@ transformStm (Let pat aux (Op op)) =
   fmap (certify (stmAuxCerts aux)) <$> transformSOAC pat (stmAuxAttrs aux) op
 
 transformLambda :: Lambda SOACS -> ExtractM (Lambda MC)
-transformLambda (Lambda params body ret) =
-  Lambda params
+transformLambda (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody body)
-    <*> pure ret
 
 transformStms :: Stms SOACS -> ExtractM (Stms MC)
 transformStms stms =
@@ -264,21 +257,15 @@ transformSOAC pat _ (Scatter w ivs lam dests) = do
 
   Body () kstms res <- mapLambdaToBody transformBody gtid lam ivs
 
-  let rets = takeLast (length dests) $ lambdaReturnType lam
-      kres = do
-        (a_w, a, is_vs) <- groupScatterResults dests res
-        let cs =
-              foldMap (foldMap resCerts . fst) is_vs
-                <> foldMap (resCerts . snd) is_vs
-            is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns cs a_w a is_vs'
-      kbody = KernelBody () kstms kres
-  pure $
-    oneStm $
-      Let pat (defAux ()) $
-        Op $
-          ParOp Nothing $
-            SegMap () space rets kbody
+  (rets, kres) <- fmap unzip $ forM (groupScatterResults dests res) $ \(_a_w, a, is_vs) -> do
+    a_t <- lookupType a
+    let cs =
+          foldMap (foldMap resCerts . fst) is_vs
+            <> foldMap (resCerts . snd) is_vs
+        is_vs' = [(fullSlice a_t $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
+    pure (a_t, WriteReturns cs a is_vs')
+  pure . oneStm . Let pat (defAux ()) . Op . ParOp Nothing $
+    SegMap () space rets (KernelBody () kstms kres)
 transformSOAC pat _ (Hist w arrs hists map_lam) = do
   (seq_hist_stms, seq_op) <-
     transformHist DoNotRename sequentialiseBody w hists map_lam arrs

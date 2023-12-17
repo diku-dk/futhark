@@ -80,9 +80,9 @@ transformLambda ::
   AliasTable ->
   Lambda (Aliases GPU) ->
   PassM (Lambda GPU, Dependencies)
-transformLambda aliases (Lambda params body types) = do
+transformLambda aliases (Lambda params types body) = do
   (body', deps) <- transformBody aliases body
-  pure (Lambda params body' types, deps)
+  pure (Lambda params types body', deps)
 
 -- | Optimize a body and determine its dependencies.
 transformBody ::
@@ -188,11 +188,15 @@ transformExp aliases e =
       let (params, args) = unzip merge
       let deps = body_deps <> depsOf params <> depsOf args <> depsOf lform
 
-      let scope = scopeOf lform <> scopeOfFParams params
+      let scope =
+            scopeOfLoopForm lform <> scopeOfFParams params ::
+              Scope (Aliases GPU)
       let bound = IS.fromList $ map baseTag (M.keys scope)
       let deps' = deps \\ bound
 
-      let dummy = Loop merge lform (Body (bodyDec body) SQ.empty [])
+      let dummy =
+            Loop merge lform (Body (bodyDec body) SQ.empty []) ::
+              Exp (Aliases GPU)
       let Loop merge' lform' _ = removeExpAliases dummy
 
       pure (Loop merge' lform' body', deps')

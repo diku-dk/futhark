@@ -56,13 +56,13 @@ forLoop' ::
   Builder GPU [VName]
 forLoop' i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
-  let loop_form = ForLoop i Int64 i_bound []
+  let loop_form = ForLoop i Int64 i_bound
 
   merge_ts <- mapM lookupType merge
   loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
 
   loop_body <-
-    runBodyBuilder . inScopeOf loop_form . localScope (scopeOfFParams loop_inits) $
+    runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
       body i $
         map paramName loop_inits
 
@@ -160,13 +160,12 @@ segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
 
 segScatter2D ::
   String ->
-  SubExp ->
   VName ->
   [SubExp] -> -- dims of sequential loop on top
   (SubExp, SubExp) -> -- (dim_y, dim_x)
   ([VName] -> (VName, VName) -> Builder GPU (SubExp, SubExp)) -> -- f
   Builder GPU VName
-segScatter2D desc arr_size updt_arr seq_dims (dim_x, dim_y) f = do
+segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
   ltid_flat <- newVName "ltid_flat"
   ltid_y <- newVName "ltid_y"
   ltid_x <- newVName "ltid_x"
@@ -179,17 +178,15 @@ segScatter2D desc arr_size updt_arr seq_dims (dim_x, dim_y) f = do
         SegThreadInGroup
           (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
-  ((t_v, res_v, res_i), stms) <- runBuilder $ do
-    (res_v, res_i) <-
-      localScope (scopeOfSegSpace segspace) $
-        f seq_is (ltid_y, ltid_x)
-    t_v <- subExpType res_v
-    pure (t_v, res_v, res_i)
+  ((res_v, res_i), stms) <-
+    runBuilder . localScope (scopeOfSegSpace segspace) $
+      f seq_is (ltid_y, ltid_x)
 
-  let ret = WriteReturns mempty (Shape [arr_size]) updt_arr [(Slice [DimFix res_i], res_v)]
+  let ret = WriteReturns mempty updt_arr [(Slice [DimFix res_i], res_v)]
   let body = KernelBody () stms [ret]
 
-  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [t_v] body
+  updt_arr_t <- lookupType updt_arr
+  letExp desc <=< renameExp $ Op $ SegOp $ SegMap lvl segspace [updt_arr_t] body
 
 -- | The variance table keeps a mapping from a variable name
 -- (something produced by a 'Stm') to the kernel thread indices

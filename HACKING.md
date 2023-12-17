@@ -73,6 +73,18 @@ Note that GHCs code generator is sometimes slightly buggy in its
 handling of profiled code.  If you encounter a compiler crash with an
 error message like "PAP object entered", then this is a GHC bug.
 
+### Debugging compiler crashes
+
+By default, Haskell does not produce very good stack traces.  If you
+compile with `make configure-profile` as mentioned above, you can pass
+`+RTS -xc` to the Futhark compiler in order to get better stack
+traces.  You will see that you actually get *multiple* stack traces,
+as the Haskell runtime system will print a stack trace for every
+signal it receives, and several of these occur early, when the program
+is read from disk.  Also, the *final* stack trace is often some
+diagnostic artifact.  Usually the second-to-last stack trace is what
+you are looking for.
+
 ## Testing
 
 ### Only internal compilation
@@ -165,13 +177,13 @@ There are also various shorthands for running entire standard pipelines:
 By default, `futhark dev` will print the resulting IR. You can switch to
 a different *action* with one of the following options:
 
-- `--compile-imperative`: generate sequential ImpCode and print it.
-- `--compile-imperative-kernels`: generate GPU ImpCode and print it.
-- `--compile-imperative-multicore`: generate multicore ImpCode and
+- `--compile-imp-seq`: generate sequential ImpCode and print it.
+- `--compile-imp-gpu`: generate GPU ImpCode and print it.
+- `--compile-imp-multicore`: generate multicore ImpCode and
   print it.
 
 You must use the appropriate pipeline as well (e.g. `--gpu-mem` for
-`--compile-imperative-kernels`).
+`--compile-imp-gpu`).
 
 You can also use e.g. `--backend=c` to run the same code generation
 and compilation as `futhark c`.  This is useful for experimenting with

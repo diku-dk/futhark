@@ -41,7 +41,6 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor (first)
 import Data.Either (partitionEithers)
-import Data.Foldable (toList)
 import Data.List (foldl', transpose, zip4)
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -392,11 +391,11 @@ ensureArrayIn _ (Constant v) =
 ensureArrayIn space (Var v) = do
   (mem', v') <- lift $ ensureRowMajorArray (Just space) v
   (_, ixfun) <- lift $ lookupArraySummary v'
-  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (toList ixfun)
+  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (IxFun.existentialized ixfun)
   tell ([Var mem'], ctx)
   pure $ Var v'
 
-allocInMergeParams ::
+allocInLoopParams ::
   (Allocable fromrep torep inner) =>
   [(FParam fromrep, SubExp)] ->
   ( [(FParam torep, SubExp)] ->
@@ -404,7 +403,7 @@ allocInMergeParams ::
     AllocM fromrep torep a
   ) ->
   AllocM fromrep torep a
-allocInMergeParams merge m = do
+allocInLoopParams merge m = do
   ((valparams, valargs, handle_loop_subexps), (mem_params, ctx_params)) <-
     runWriterT $ unzip3 <$> mapM allocInMergeParam merge
   let mergeparams' = mem_params <> ctx_params <> valparams
@@ -474,11 +473,13 @@ allocInMergeParams merge m = do
                     )
             _ -> do
               (v_mem', v') <- lift $ ensureRowMajorArray Nothing v
-              (_, v_ixfun') <- lift $ lookupArraySummary v'
+              let ixfun_ext =
+                    IxFun.existentialize 0 $ IxFun.iota $ map pe64 $ shapeDims shape
+
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
               ctx_params <-
-                replicateM (length v_ixfun') $
+                replicateM (length (IxFun.existentialized ixfun_ext)) $
                   newParam "ctx_param_ext" (MemPrim int64)
 
               param_ixfun <-
@@ -487,7 +488,7 @@ allocInMergeParams merge m = do
                     ( M.fromList . zip (fmap Ext [0 ..]) $
                         map (le64 . Free . paramName) ctx_params
                     )
-                    (IxFun.existentialize v_ixfun')
+                    ixfun_ext
 
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
               tell ([mem_param], ctx_params)
@@ -775,16 +776,16 @@ combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
 contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
-  -- Memory + offset + base_rank + (stride,size)*rank.
+  -- Memory + offset + base_rank + stride*rank.
   MemMem space
     : MemPrim int64
     : replicate base_rank (MemPrim int64)
-    ++ replicate (2 * shapeRank shape) (MemPrim int64)
+    ++ replicate (shapeRank shape) (MemPrim int64)
 contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
-  -- Memory + offset + (base,stride,size)*rank.
+  -- Memory + offset + (base,stride)*rank.
   MemMem space
     : MemPrim int64
-    : replicate (3 * shapeRank shape) (MemPrim int64)
+    : replicate (2 * shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
 -- Add memory information to the body, but do not return memory/ixfun
@@ -837,7 +838,8 @@ mkBranchRet reqs =
       let shape' = fmap (adjustExt num_new_ctx) shape
           (space, base_rank) = arrayInfo (shapeRank shape) req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
-            convert <$> IxFun.mkExistential base_rank (shapeRank shape) (ctx_offset + 1)
+            convert
+              <$> IxFun.mkExistential base_rank (shapeDims shape') (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -874,7 +876,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
         MemAcc {} -> pure []
         MemMem {} -> pure [] -- should not happen
         MemArray _ _ _ (ArrayIn mem ixfun) -> do
-          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ toList ixfun
+          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ IxFun.existentialized ixfun
           pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
 
 -- Do a a simple form of invariance analysis to simplify a Match.  It
@@ -928,14 +930,13 @@ allocInExp ::
   Exp fromrep ->
   AllocM fromrep torep (Exp torep)
 allocInExp (Loop merge form (Body () bodystms bodyres)) =
-  allocInMergeParams merge $ \merge' mk_loop_val -> do
-    form' <- allocInLoopForm form
-    localScope (scopeOf form') $ do
+  allocInLoopParams merge $ \merge' mk_loop_val -> do
+    localScope (scopeOfLoopForm form) $ do
       body' <-
         buildBody_ . allocInStms bodystms $ do
           (valctx, valres') <- mk_loop_val $ map resSubExp bodyres
           pure $ subExpsRes valctx <> zipWith SubExpRes (map resCerts bodyres) valres'
-      pure $ Loop merge' form' body'
+      pure $ Loop merge' form body'
 allocInExp (Apply fname args rettype loc) = do
   args' <- funcallArgs args
   space <- askDefaultSpace
@@ -1028,28 +1029,6 @@ allocInExp e = mapExpM alloc e
             handle <- asks allocInOp
             handle op
         }
-
-allocInLoopForm ::
-  (Allocable fromrep torep inner) =>
-  LoopForm fromrep ->
-  AllocM fromrep torep (LoopForm torep)
-allocInLoopForm (WhileLoop v) = pure $ WhileLoop v
-allocInLoopForm (ForLoop i it n loopvars) =
-  ForLoop i it n <$> mapM allocInLoopVar loopvars
-  where
-    allocInLoopVar (p, a) = do
-      (mem, ixfun) <- lookupArraySummary a
-      case paramType p of
-        Array pt shape u -> do
-          dims <- map pe64 . arrayDims <$> lookupType a
-          let ixfun' = IxFun.slice ixfun $ fullSliceNum dims [DimFix $ le64 i]
-          pure (p {paramDec = MemArray pt shape u $ ArrayIn mem ixfun'}, a)
-        Prim bt ->
-          pure (p {paramDec = MemPrim bt}, a)
-        Mem space ->
-          pure (p {paramDec = MemMem space}, a)
-        Acc acc ispace ts u ->
-          pure (p {paramDec = MemAcc acc ispace ts u}, a)
 
 class SizeSubst op where
   opIsConst :: op -> Bool

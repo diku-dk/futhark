@@ -164,7 +164,7 @@ tileInBody branch_variant initial_variance initial_lvl initial_space res_ts (Bod
               poststms'
               stms_res
       -- Tiling inside for-loop.
-      | Loop merge (ForLoop i it bound []) loopbody <- stmExp stm_to_tile,
+      | Loop merge (ForLoop i it bound) loopbody <- stmExp stm_to_tile,
         not $ any ((`nameIn` freeIn merge) . paramName . fst) merge,
         Just (prestms', poststms') <-
           preludeToPostlude variance prestms stm_to_tile (stmsFromList poststms) = do
@@ -415,7 +415,7 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
 
         let merge' = zip mergeparams' mergeinit'
 
-        let indexMergeParams slice =
+        let indexLoopParams slice =
               localScope (scopeOfFParams mergeparams') $
                 forM_ (zip mergeparams mergeparams') $ \(to, from) ->
                   letBindNames [paramName to] . BasicOp . Index (paramName from) $
@@ -425,14 +425,14 @@ tileLoop initial_space variance prestms used_in_body (host_stms, tiling, tiledBo
               private <> namesFromList (map paramName mergeparams ++ map paramName mergeparams')
 
             privstms' =
-              PrivStms mempty indexMergeParams <> privstms <> inloop_privstms
+              PrivStms mempty indexLoopParams <> privstms <> inloop_privstms
 
         loopbody' <-
           localScope (scopeOfFParams mergeparams') . runBodyBuilder $
             resultBody . map Var <$> tiledBody private' privstms'
         accs' <-
           letTupExp "tiled_inside_loop" $
-            Loop merge' (ForLoop i it bound []) loopbody'
+            Loop merge' (ForLoop i it bound) loopbody'
 
         postludeGeneric tiling (privstms <> inloop_privstms) pat accs' poststms poststms_res res_ts
 
@@ -699,20 +699,19 @@ tileGeneric doTiling res_ts pat gtids kdims w form inputs poststms poststms_res 
           <*> pure (Var mergeinit)
 
       tile_id <- newVName "tile_id"
-      let loopform = ForLoop tile_id Int64 num_whole_tiles []
+      let loopform = ForLoop tile_id Int64 num_whole_tiles
       loopbody <- renameBody <=< runBodyBuilder $
-        inScopeOf loopform $
-          localScope (scopeOfFParams $ map fst merge) $ do
-            -- Collectively read a tile.
-            tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) inputs
+        localScope (scopeOfLoopForm loopform <> scopeOfFParams (map fst merge)) $ do
+          -- Collectively read a tile.
+          tile <- tilingReadTile tiling TilePartial privstms (Var tile_id) inputs
 
-            -- Now each thread performs a traversal of the tile and
-            -- updates its accumulator.
-            let accs =
-                  map (paramName . fst) merge
-                tile_args =
-                  ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
-            resultBody . map Var <$> tilingProcessTile tiling tile_args
+          -- Now each thread performs a traversal of the tile and
+          -- updates its accumulator.
+          let accs =
+                map (paramName . fst) merge
+              tile_args =
+                ProcessTileArgs privstms red_comm red_lam map_lam tile accs (Var tile_id)
+          resultBody . map Var <$> tilingProcessTile tiling tile_args
 
       accs <- letTupExp "accs" $ Loop merge loopform loopbody
 

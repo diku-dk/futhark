@@ -102,6 +102,16 @@ def apply_size_heuristics(self, size_heuristics, sizes):
     return sizes
 
 
+def to_c_str_rep(x):
+    if type(x) is bool or type(x) is np.bool_:
+        if x:
+            return "true"
+        else:
+            return "false"
+    else:
+        return str(x)
+
+
 def initialise_opencl_object(
     self,
     program_src="",
@@ -119,6 +129,7 @@ def initialise_opencl_object(
     required_types=[],
     all_sizes={},
     user_sizes={},
+    constants=[],
 ):
     if command_queue is None:
         self.ctx = get_prefered_context(
@@ -285,6 +296,10 @@ def initialise_opencl_object(
             for (s, v) in self.sizes.items()
         ]
 
+        build_options += [
+            "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants
+        ]
+
         if self.platform.name == "Oclgrind":
             build_options += ["-DEMULATE_F16"]
 
@@ -430,7 +445,7 @@ def copy_elements_gpu2gpu(
             "Futhark runtime limitation:\nCannot copy array of greater than rank 8.\n"
         )
 
-    n = np.product(shape)
+    n = np.prod(shape)
     zero = np.int64(0)
     layout_args = [None] * (8 * 3)
     for i in range(8):
@@ -464,7 +479,7 @@ def lmad_copy_gpu2gpu(
     self, pt, dst, dst_offset, dst_strides, src, src_offset, src_strides, shape
 ):
     elem_size = ct.sizeof(pt)
-    nbytes = np.product(shape) * elem_size
+    nbytes = np.prod(shape) * elem_size
     if nbytes == 0:
         return None
     if lmad_memcpyable(dst_strides, src_strides, shape):

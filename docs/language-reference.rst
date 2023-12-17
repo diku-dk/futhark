@@ -576,6 +576,9 @@ in natural text.
   ``t``.  To pass a single array-typed parameter, enclose it in
   parens.
 
+* The bodies of ``let``, ``if``, and ``loop`` extend as far to the
+  right as possible.
+
 * The following table describes the precedence and associativity of
   infix operators in both expressions and type expressions.  All
   operators in the same row have the same precedence.  The rows are
@@ -836,10 +839,10 @@ are:
 
     Company any two values of numeric type for equality.
 
-  ```symbol```
+  ```qualname```
 
-    Use ``symbol``, which may be any non-operator function name, as an
-    infix operator.
+    Use ``qualname``, which may be any non-operator function name, as
+    an infix operator.
 
 ``x && y``
 ..........
@@ -1499,14 +1502,14 @@ Modules
    mod_param: "(" `name` ":" `mod_type_exp` ")"
    mod_type_bind: "module" "type" `name` "=" `mod_type_exp`
 
-Futhark supports an ML-style higher-order module system.  *Modules*
-can contain types, functions, and other modules and module types.
-*Module types* are used to classify the contents of modules, and
-*parametric modules* are used to abstract over modules (essentially
-module-level functions).  In Standard ML, modules, module types and
-parametric modules are called structs, signatures, and functors,
-respectively.  Module names exist in the same name space as values,
-but module types are their own name space.
+Futhark supports an ML-style higher-order module system. *Modules* can
+contain types, functions, and other modules and module types. *Module
+types* are used to classify the contents of modules, and *parametric
+modules* are used to abstract over modules (essentially module-level
+functions). In Standard ML, modules, module types and parametric
+modules are called *structs*, *signatures*, and *functors*,
+respectively. Module names exist in the same name space as values, but
+module types are their own name space.
 
 Module bindings
 ~~~~~~~~~~~~~~~

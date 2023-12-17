@@ -89,20 +89,12 @@ import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Transform.Substitute
 import Futhark.Util (mapAccumLM, maybeHead)
 
--- | The pass for GPU kernels.
-doubleBufferGPU :: Pass GPUMem GPUMem
-doubleBufferGPU = doubleBuffer optimiseGPUOp
-
--- | The pass for multicore
-doubleBufferMC :: Pass MCMem MCMem
-doubleBufferMC = doubleBuffer optimiseMCOp
-
 -- | The double buffering pass definition.
-doubleBuffer :: (Mem rep inner) => OptimiseOp rep -> Pass rep rep
-doubleBuffer onOp =
+doubleBuffer :: (Mem rep inner) => String -> String -> OptimiseOp rep -> Pass rep rep
+doubleBuffer name desc onOp =
   Pass
-    { passName = "Double buffer",
-      passDescription = "Perform double buffering for merge parameters of sequential loops.",
+    { passName = name,
+      passDescription = desc,
       passFunction = intraproceduralTransformation optimise
     }
   where
@@ -113,6 +105,22 @@ doubleBuffer onOp =
 
     env = Env mempty doNotTouchLoop onOp
     doNotTouchLoop pat merge body = pure (mempty, pat, merge, body)
+
+-- | The pass for GPU kernels.
+doubleBufferGPU :: Pass GPUMem GPUMem
+doubleBufferGPU =
+  doubleBuffer
+    "Double buffer GPU"
+    "Double buffer memory in sequential loops (GPU rep)."
+    optimiseGPUOp
+
+-- | The pass for multicore
+doubleBufferMC :: Pass MCMem MCMem
+doubleBufferMC =
+  doubleBuffer
+    "Double buffer MC"
+    "Double buffer memory in sequential loops (MC rep)."
+    optimiseMCOp
 
 type OptimiseLoop rep =
   Pat (LetDec rep) ->
@@ -161,7 +169,7 @@ optimiseStms (e : es) = do
 optimiseStm :: forall rep. (ASTRep rep) => Stm rep -> DoubleBufferM rep (Stms rep)
 optimiseStm (Let pat aux (Loop merge form body)) = do
   body' <-
-    localScope (scopeOf form <> scopeOfFParams (map fst merge)) $
+    localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $
       optimiseBody body
   opt_loop <- asks envOptimiseLoop
   (stms, pat', merge', body'') <- opt_loop pat merge body'
@@ -326,7 +334,7 @@ optimiseLoopByCopying pat merge body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
   buffered <-
-    doubleBufferMergeParams
+    doubleBufferLoopParams
       (zip (map fst merge) (bodyResult body))
       (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
@@ -346,12 +354,12 @@ data DoubleBuffer
   | NoBuffer
   deriving (Show)
 
-doubleBufferMergeParams ::
+doubleBufferLoopParams ::
   (MonadFreshNames m) =>
   [(Param FParamMem, SubExpRes)] ->
   Names ->
   m [DoubleBuffer]
-doubleBufferMergeParams ctx_and_res bound_in_loop =
+doubleBufferLoopParams ctx_and_res bound_in_loop =
   evalStateT (mapM buffer ctx_and_res) M.empty
   where
     params = map fst ctx_and_res

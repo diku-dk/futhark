@@ -48,8 +48,8 @@ import Futhark.CodeGen.ImpGen.GPU.SegRed (compileSegRed')
 import Futhark.Construct (fullSliceNum)
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Pass.ExplicitAllocations ()
+import Futhark.Transform.Substitute
 import Futhark.Util (chunks, mapAccumLM, maxinum, splitFromEnd, takeLast)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
 import Prelude hiding (quot, rem)
@@ -157,13 +157,14 @@ computeHistoUsage space op = do
 
 prepareAtomicUpdateGlobal ::
   Maybe Locking ->
+  Shape ->
   [VName] ->
   SegHistSlug ->
   CallKernelGen
     ( Maybe Locking,
       [Imp.TExp Int64] -> InKernelGen ()
     )
-prepareAtomicUpdateGlobal l dests slug =
+prepareAtomicUpdateGlobal l segments dests slug =
   -- We need a separate lock array if the operators are not all of a
   -- particularly simple form that permits pure atomic operations.
   case (l, slugAtomicUpdate slug) of
@@ -181,7 +182,8 @@ prepareAtomicUpdateGlobal l dests slug =
       let num_locks = 100151
           dims =
             map pe64 $
-              shapeDims (histOpShape (slugOp slug))
+              shapeDims segments
+                ++ shapeDims (histOpShape (slugOp slug))
                 ++ [tvSize (slugNumSubhistos slug)]
                 ++ shapeDims (histShape (slugOp slug))
 
@@ -202,6 +204,7 @@ bodyPassage kbody
 
 prepareIntermediateArraysGlobal ::
   Passage ->
+  Shape ->
   Imp.TExp Int32 ->
   Imp.TExp Int64 ->
   [SegHistSlug] ->
@@ -209,7 +212,7 @@ prepareIntermediateArraysGlobal ::
     ( Imp.TExp Int32,
       [[Imp.TExp Int64] -> InKernelGen ()]
     )
-prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
+prepareIntermediateArraysGlobal passage segments hist_T hist_N slugs = do
   -- The paper formulae assume there is only one histogram, but in our
   -- implementation there can be multiple that have been horisontally
   -- fused.  We do a bit of trickery with summings and averages to
@@ -239,17 +242,9 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
           t64 $
             r64 hist_T / hist_C_max
 
-  -- Querying L2 cache size is not reliable.  Instead we provide a
-  -- tunable knob with a hopefully sane default.
-  let hist_L2_def = 4 * 1024 * 1024
   hist_L2 <- dPrim "L2_size" int32
-  entry <- askFunction
   -- Equivalent to F_L2*L2 in paper.
-  sOp
-    $ Imp.GetSize
-      (tvVar hist_L2)
-      (keyWithEntryPoint entry $ nameFromString (prettyString (tvVar hist_L2)))
-    $ Imp.SizeBespoke (nameFromString "L2_for_histogram") hist_L2_def
+  sOp $ Imp.GetSizeMax (tvVar hist_L2) Imp.SizeCache
 
   let hist_L2_ln_sz = 16 * 4 -- L2 cache line size approximation
   hist_RACE_exp <-
@@ -379,7 +374,7 @@ prepareIntermediateArraysGlobal passage hist_T hist_N slugs = do
 
         pure $ subhistosArray info
 
-      (l', do_op') <- prepareAtomicUpdateGlobal l dests slug
+      (l', do_op') <- prepareAtomicUpdateGlobal l segments dests slug
 
       pure (l', do_op')
 
@@ -457,8 +452,10 @@ histKernelGlobalPass map_pes num_groups group_size space slugs kbody histograms 
                       dest_shape' = map pe64 $ shapeDims dest_shape
                       flat_bucket = flattenIndex dest_shape' bucket'
                       bucket_in_bounds =
-                        chk_beg .<=. flat_bucket
-                          .&&. flat_bucket .<. (chk_beg + hist_H_chk)
+                        chk_beg
+                          .<=. flat_bucket
+                          .&&. flat_bucket
+                          .<. (chk_beg + hist_H_chk)
                           .&&. inBounds (Slice (map DimFix bucket')) dest_shape'
                       vs_params = takeLast (length vs') $ lambdaParams lam
 
@@ -492,6 +489,7 @@ histKernelGlobal map_pes num_groups group_size space slugs kbody = do
   (hist_S, histograms) <-
     prepareIntermediateArraysGlobal
       (bodyPassage kbody)
+      (Shape (init space_sizes))
       num_threads
       (pe64 $ last space_sizes)
       slugs
@@ -756,8 +754,10 @@ histKernelLocalPass
                       flat_bucket = flattenIndex dest_shape' bucket'
                       bucket_in_bounds =
                         inBounds (Slice (map DimFix bucket')) dest_shape'
-                          .&&. chk_beg .<=. flat_bucket
-                          .&&. flat_bucket .<. (chk_beg + tvExp hist_H_chk)
+                          .&&. chk_beg
+                          .<=. flat_bucket
+                          .&&. flat_bucket
+                          .<. (chk_beg + tvExp hist_H_chk)
                       bucket_is =
                         [sExt64 thread_local_subhisto_i, flat_bucket - chk_beg]
                       vs_params = takeLast (length vs') $ lambdaParams lam
@@ -1021,11 +1021,14 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   -- asymptotically efficient.  This mostly matters for the segmented
   -- case.
   let pick_local =
-        hist_Nin .>=. hist_H
+        hist_Nin
+          .>=. hist_H
           .&&. (local_mem_needed .<=. tvExp hist_L)
           .&&. (hist_S .<=. max_S)
-          .&&. hist_C .<=. hist_B
-          .&&. tvExp hist_M .>. 0
+          .&&. hist_C
+          .<=. hist_B
+          .&&. tvExp hist_M
+          .>. 0
 
       run = do
         emit $ Imp.DebugPrint "## Using local memory" Nothing
@@ -1062,7 +1065,8 @@ compileSegHist ::
   KernelBody GPUMem ->
   CallKernelGen ()
 compileSegHist (Pat pes) lvl space ops kbody = do
-  KernelAttrs _ _ num_groups group_size <- lvlKernelAttrs lvl
+  KernelAttrs {kAttrNumGroups = num_groups, kAttrGroupSize = group_size} <-
+    lvlKernelAttrs lvl
   -- Most of this function is not the histogram part itself, but
   -- rather figuring out whether to use a local or global memory
   -- strategy, as well as collapsing the subhistograms produced (which
@@ -1169,8 +1173,11 @@ compileSegHist (Pat pes) lvl space ops kbody = do
                   ++ zip bucket_ids (shapeDims (histShape op))
                   ++ zip vector_ids (shapeDims $ histOpShape op)
                   ++ [(subhistogram_id, Var $ tvVar num_histos)]
+            -- The operator may have references to the old flat thread
+            -- ID, which we must update to point at the new one.
+            subst = M.singleton (segFlat space) flat_gtid
 
-        let segred_op = SegBinOp Commutative (histOp op) (histNeutral op) mempty
+        let segred_op = SegBinOp Commutative (substituteNames subst $ histOp op) (histNeutral op) mempty
         compileSegRed' (Pat red_pes) grid segred_space [segred_op] $ \red_cont ->
           red_cont . flip map subhistos $ \subhisto ->
             ( Var subhisto,

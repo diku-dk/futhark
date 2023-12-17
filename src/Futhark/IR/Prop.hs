@@ -10,7 +10,7 @@ module Futhark.IR.Prop
     module Futhark.IR.Prop.Types,
     module Futhark.IR.Prop.Constants,
     module Futhark.IR.Prop.TypeOf,
-    module Futhark.IR.Prop.Patterns,
+    module Futhark.IR.Prop.Pat,
     module Futhark.IR.Prop.Names,
     module Futhark.IR.RetType,
     module Futhark.IR.Rephrase,
@@ -45,7 +45,7 @@ import Data.Set qualified as S
 import Futhark.IR.Pretty
 import Futhark.IR.Prop.Constants
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Prop.Rearrange
 import Futhark.IR.Prop.Reshape
 import Futhark.IR.Prop.TypeOf
@@ -191,9 +191,13 @@ class (ASTConstraints op, TypedOp op) => IsOp op where
   -- | Should we try to hoist this out of branches?
   cheapOp :: op -> Bool
 
+  -- | Compute the data dependencies of an operation.
+  opDependencies :: op -> [Names]
+
 instance IsOp (NoOp rep) where
   safeOp NoOp = True
   cheapOp NoOp = True
+  opDependencies NoOp = []
 
 -- | Representation-specific attributes; also means the rep supports
 -- some basic facilities.

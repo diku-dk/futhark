@@ -47,12 +47,9 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (foldl')
 import Data.Map qualified as M
-import Data.Sequence ((<|))
-import Data.Sequence qualified as SQ
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Builder.Class
-import Futhark.Construct (sliceDim)
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
@@ -113,35 +110,16 @@ optimiseBranch onOp vtable sinking (Body dec stms res) =
 optimiseLoop ::
   (Constraints rep) =>
   Sinker rep (Op rep) ->
-  Sinker rep ([(FParam rep, SubExp)], LoopForm rep, Body rep)
-optimiseLoop onOp vtable sinking (merge, form, body0)
-  | WhileLoop {} <- form =
-      let (body1, sunk) = optimiseBody onOp vtable' sinking body0
-       in ((merge, form, body1), sunk)
-  | ForLoop i it bound loop_vars <- form =
-      let stms' = foldr (inline i) (bodyStms body0) loop_vars
-          body1 = body0 {bodyStms = stms'}
-          (body2, sunk) = optimiseBody onOp vtable' sinking body1
-          notSunk (x, _) = paramName x `notNameIn` sunk
-          loop_vars' = filter notSunk loop_vars
-          form' = ForLoop i it bound loop_vars'
-          body3 = body2 {bodyStms = SQ.drop (length loop_vars') (bodyStms body2)}
-       in ((merge, form', body3), sunk)
+  Sinker rep ([(FParam rep, SubExp)], LoopForm, Body rep)
+optimiseLoop onOp vtable sinking (merge, form, body0) =
+  let (body1, sunk) = optimiseBody onOp vtable' sinking body0
+   in ((merge, form, body1), sunk)
   where
     (params, _) = unzip merge
     scope = case form of
       WhileLoop {} -> scopeOfFParams params
-      ForLoop i it _ _ -> M.insert i (IndexName it) $ scopeOfFParams params
+      ForLoop i it _ -> M.insert i (IndexName it) $ scopeOfFParams params
     vtable' = ST.fromScope scope <> vtable
-
-    inline i (x, arr) stms =
-      let pt = typeOf x
-          slice = Slice $ DimFix (Var i) : map sliceDim (arrayDims pt)
-          e = BasicOp (Index arr slice)
-          pat = mkExpPat [Ident (paramName x) pt] e
-          aux = StmAux mempty mempty (mkExpDec pat e)
-          stm = Let pat aux e
-       in stm <| stms
 
 optimiseStms ::
   (Constraints rep) =>
@@ -186,10 +164,10 @@ optimiseStms onOp init_vtable init_sinking all_stms free_in_res =
       | Loop merge lform body <- stmExp stm =
           let comps = (merge, lform, body)
               (comps', loop_sunk) = optimiseLoop onOp vtable sinking comps
-              (merge', lform', body') = comps'
+              (merge', _, body') = comps'
 
               (stms', stms_sunk) = optimiseStms' vtable' sinking stms
-           in ( stm {stmExp = Loop merge' lform' body'} : stms',
+           in ( stm {stmExp = Loop merge' lform body'} : stms',
                 stms_sunk <> loop_sunk
               )
       | Op op <- stmExp stm =

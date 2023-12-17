@@ -33,6 +33,7 @@ compileProg mode class_name prog = do
     Imp.Program
       opencl_code
       opencl_prelude
+      macros
       kernels
       types
       sizes
@@ -89,7 +90,7 @@ compileProg mode class_name prog = do
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
-          [Escape $ openClInit types assign sizes failures]
+          [Escape $ openClInit macros types assign sizes failures]
       options =
         [ Option
             { optionLongName = "platform",
@@ -190,7 +191,6 @@ compileProg mode class_name prog = do
           opsWriteScalar = writeOpenCLScalar,
           opsReadScalar = readOpenCLScalar,
           opsAllocate = allocateOpenCLBuffer,
-          opsCopy = copyOpenCLMemory,
           opsCopies =
             M.insert (Imp.Space "device", Imp.Space "device") copygpu2gpu $
               opsCopies defaultOperations,
@@ -203,9 +203,12 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = simpleCall "np.int64" [x]
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 kernelConstToExp :: Imp.KernelConst -> PyExp
-kernelConstToExp (Imp.SizeConst key) =
-  Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+kernelConstToExp (Imp.SizeConst key _) =
+  getParamByKey key
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
@@ -216,13 +219,11 @@ compileGroupDim (Right kc) = pure $ kernelConstToExp kc
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
+  stm $ Assign v' $ getParamByKey key
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $
-    Assign v' $
-      BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
+  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
@@ -330,55 +331,6 @@ allocateOpenCLBuffer mem size "device" =
       simpleCall "opencl_alloc" [Var "self", size, String $ prettyText mem]
 allocateOpenCLBuffer _ _ space =
   error $ "Cannot allocate in '" ++ space ++ "' space"
-
-copyOpenCLMemory :: Copy Imp.OpenCL ()
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
-  let divide = BinOp "//" nbytes (Integer $ Imp.primByteSize bt)
-      end = BinOp "+" destidx divide
-      dest = Index destmem (IdxRange destidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg dest,
-            Arg srcmem,
-            ArgKeyword "device_offset" $ asLong srcidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes _ = do
-  let end = BinOp "+" srcidx nbytes
-      src = Index (simpleCall "createArray" [srcmem, List [nbytes], Var "np.byte"]) (IdxRange srcidx end)
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg src,
-            ArgKeyword "device_offset" $ asLong destidx,
-            ArgKeyword "is_blocking" $ Var "synchronous"
-          ]
-copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
-  stm $
-    ifNotZeroSize nbytes $
-      Exp $
-        Call
-          (Var "cl.enqueue_copy")
-          [ Arg $ Var "self.queue",
-            Arg destmem,
-            Arg srcmem,
-            ArgKeyword "dst_offset" $ asLong destidx,
-            ArgKeyword "src_offset" $ asLong srcidx,
-            ArgKeyword "byte_count" $ asLong nbytes
-          ]
-  finishIfSynchronous
-copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx Imp.DefaultSpace nbytes _ =
-  copyMemoryDefaultSpace destmem destidx srcmem srcidx nbytes
-copyOpenCLMemory _ _ destspace _ _ srcspace _ _ =
-  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
 packArrayOutput :: EntryOutput Imp.OpenCL ()
 packArrayOutput mem "device" bt ept dims = do

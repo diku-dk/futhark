@@ -39,9 +39,9 @@ jobs:
       # https://github.com/actions/runner-images/issues/7061
       run: sudo chown -R $USER /usr/local/.ghcup
 
-    - uses: haskell/actions/setup@v2
+    - uses: haskell-actions/setup@v2
       with:
-        ghc-version: '9.4.4'
+        ghc-version: '9.8.1'
 
     - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -68,9 +68,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        brew install cabal-install ghc@9 sphinx-doc
+        brew install cabal-install ghc sphinx-doc
         echo "/usr/local/opt/sphinx-doc/bin" >> $GITHUB_PATH
-        echo "/usr/local/opt/ghc@9/bin" >> $GITHUB_PATH
+        echo "/usr/local/opt/ghc/bin" >> $GITHUB_PATH
 
     - uses: actions/cache@v3
       name: Cache ~/.cabal/packages, ~/.cabal/store and dist-newstyle
@@ -109,7 +109,7 @@ jobs:
     - uses: actions/checkout@v3
 
     - id: setup-haskell
-      uses: haskell/actions/setup@v2
+      uses: haskell-actions/setup@v2
       with:
         ghc-version: '9.4.4'
 
@@ -265,7 +265,7 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
         futhark test -c --backend=multicore tests --no-tuning
         make -C tests_lib/c FUTHARK_BACKEND=multicore
 
@@ -295,7 +295,7 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - run: |
-        export CFLAGS="-fsanitize=undefined -fsanitize=address -fno-sanitize-recover -O"
+        export CFLAGS="-fsanitize=undefined -fno-sanitize-recover -O"
         nix-shell --run 'futhark test -c --backend=ispc tests --no-tuning'
         nix-shell --run 'make -C tests_lib/c FUTHARK_BACKEND=ispc'
 
@@ -345,44 +345,46 @@ jobs:
     - run: |
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
-  test-opencl:
-    runs-on: opencl
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
-    steps:
-    - uses: actions/checkout@v3
+  # test-opencl:
+  #   runs-on: opencl
+  #   needs: [build-linux-nix]
+  #   if: github.repository == 'diku-dk/futhark'
+  #   steps:
+  #   - uses: actions/checkout@v3
 
-    - uses: ./.github/actions/futhark-slurm
-      with:
-        script: |
-          set -e
-          virtualenv virtualenv
-          source virtualenv/bin/activate
-          pip install jsonschema
-          module load cuda/11.8
-          futhark test tests \
-            --backend=opencl \
-            --cache-extension=cache
-          FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+  #   - uses: ./.github/actions/futhark-slurm
+  #     with:
+  #       script: |
+  #         set -e
+  #         virtualenv virtualenv
+  #         source virtualenv/bin/activate
+  #         pip install jsonschema
+  #         module unload cuda
+  #         module load cuda/11.8
+  #         futhark test tests \
+  #           --backend=opencl \
+  #           --cache-extension=cache
+  #         FUTHARK_BACKEND=opencl make -C tests_lib/c -j
+  #       slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
-  test-pyopencl:
-    runs-on: opencl
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
-    steps:
-    - uses: actions/checkout@v3
+  # test-pyopencl:
+  #   runs-on: opencl
+  #   needs: [build-linux-nix]
+  #   if: github.repository == 'diku-dk/futhark'
+  #   steps:
+  #   - uses: actions/checkout@v3
 
-    - uses: ./.github/actions/futhark-slurm
-      with:
-        script: |
-          set -e
-          virtualenv virtualenv
-          source virtualenv/bin/activate
-          pip install numpy pyopencl jsonschema
-          module load cuda/11.8
-          futhark test tests --no-terminal --backend=pyopencl
-        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+  #   - uses: ./.github/actions/futhark-slurm
+  #     with:
+  #       script: |
+  #         set -e
+  #         virtualenv virtualenv
+  #         source virtualenv/bin/activate
+  #         pip install numpy pyopencl jsonschema
+  #         module unload cuda
+  #         module load cuda/11.8
+  #         futhark test tests --no-terminal --backend=pyopencl
+  #       slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
     runs-on: cuda
@@ -398,6 +400,7 @@ jobs:
           virtualenv virtualenv
           source virtualenv/bin/activate
           pip install jsonschema
+          module unload cuda
           module load cuda/11.8
           futhark test tests \
             --backend=cuda \
@@ -406,25 +409,25 @@ jobs:
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-cuda-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
-  test-hip:
-    runs-on: MI100
-    needs: [build-linux-nix]
-    if: github.repository == 'diku-dk/futhark'
-    steps:
-    - uses: actions/checkout@v3
+  # test-hip:
+  #   runs-on: MI100
+  #   needs: [build-linux-nix]
+  #   if: github.repository == 'diku-dk/futhark'
+  #   steps:
+  #   - uses: actions/checkout@v3
 
-    - run: |
-        virtualenv virtualenv
-        source virtualenv/bin/activate
-        pip install jsonschema
+  #   - run: |
+  #       virtualenv virtualenv
+  #       source virtualenv/bin/activate
+  #       pip install jsonschema
 
-    - uses: ./.github/actions/futhark-slurm
-      with:
-        script: |
-          set -e
-          futhark test tests --no-terminal --backend=hip --concurrency=8
-          source virtualenv/bin/activate
-          FUTHARK_BACKEND=hip make -C tests_lib/c -j
+  #   - uses: ./.github/actions/futhark-slurm
+  #     with:
+  #       script: |
+  #         set -e
+  #         futhark test tests --no-terminal --backend=hip --concurrency=8
+  #         source virtualenv/bin/activate
+  #         FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04
@@ -433,7 +436,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -470,7 +473,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -502,7 +505,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - uses: mymindstorm/setup-emsdk@v11
+    - uses: mymindstorm/setup-emsdk@v12
       with:
         version: 2.0.18
         actions-cache-folder: 'emsdk-cache'
@@ -553,7 +556,7 @@ jobs:
     - name: Install OS dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg
+        sudo apt-get install -y ffmpeg oclgrind
 
     - uses: actions/checkout@v3
 

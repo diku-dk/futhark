@@ -112,12 +112,14 @@ instance Pretty Checking where
         case f of
           Nothing ->
             "Cannot apply function to"
-              <+> dquotes (shorten $ group $ pretty e) <> " (invalid type)."
+              <+> dquotes (shorten $ group $ pretty e)
+              <> " (invalid type)."
           Just fname ->
             "Cannot apply"
               <+> dquotes (pretty fname)
               <+> "to"
-              <+> dquotes (align $ shorten $ group $ pretty e) <> " (invalid type)."
+              <+> dquotes (align $ shorten $ group $ pretty e)
+              <> " (invalid type)."
   pretty (CheckingReturn expected actual) =
     "Function body does not have expected type."
       </> "Expected:"
@@ -159,24 +161,24 @@ instance Pretty Checking where
     "Type mismatch when updating record field"
       <+> dquotes fs'
       <> "."
-      </> "Existing:"
-      <+> align (pretty expected)
-      </> "New:     "
-      <+> align (pretty actual)
+        </> "Existing:"
+        <+> align (pretty expected)
+        </> "New:     "
+        <+> align (pretty actual)
     where
       fs' = mconcat $ punctuate "." $ map pretty fs
   pretty (CheckingRequired [expected] actual) =
     "Expression must must have type"
       <+> pretty expected
       <> "."
-      </> "Actual type:"
-      <+> align (pretty actual)
+        </> "Actual type:"
+        <+> align (pretty actual)
   pretty (CheckingRequired expected actual) =
     "Type of expression must must be one of "
       <+> expected'
       <> "."
-      </> "Actual type:"
-      <+> align (pretty actual)
+        </> "Actual type:"
+        <+> align (pretty actual)
     where
       expected' = commasep (map pretty expected)
   pretty (CheckingBranches t1 t2) =

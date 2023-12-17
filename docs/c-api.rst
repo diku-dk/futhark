@@ -22,6 +22,11 @@ non-zero value on error, as documented below.  Others return a
 ``NULL`` pointer.  Use :c:func:`futhark_context_get_error` to get a
 (possibly) more precise error message.
 
+Some functions take a C string (``const char*``) as argument.  Unless
+otherwise indicated, the string will be copied if necessary, meaning
+the argument string can always be modified (or freed) after the
+function returns.
+
 .. c:macro:: FUTHARK_BACKEND_foo
 
    A preprocessor macro identifying that the backend *foo* was used to
@@ -32,7 +37,7 @@ non-zero value on error, as documented below.  Others return a
 Error codes
 -----------
 
-Most errors are result in a not otherwise specified nonzero return
+Most errors result in a not otherwise specified nonzero return
 code, but a few classes of errors have distinct error codes.
 
 .. c:macro:: FUTHARK_SUCCESS
@@ -136,9 +141,7 @@ Configuration objects are cheap to create and destroy.
    cache was hit succesfully, but you can enable logging to see what
    happens.
 
-   The lifespan of ``fname`` must exceed the lifespan of the
-   configuration object.  Pass ``NULL`` to disable caching (this is
-   the default).
+   Pass ``NULL`` to disable caching (this is the default).
 
 Context
 -------
@@ -202,7 +205,7 @@ Context
 
 .. c:function:: char *futhark_context_report(struct futhark_context *ctx)
 
-   Produce a human-readable C string with debug and profiling
+   Produce a C string encoding a JSON object with debug and profiling
    information collected during program runtime.  It is the caller's
    responsibility to free the returned string.  It is likely to only
    contain interesting information if

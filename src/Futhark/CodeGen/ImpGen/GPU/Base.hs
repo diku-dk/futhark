@@ -29,6 +29,9 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     fenceForArrays,
     updateAcc,
     genZeroes,
+    isPrimParam,
+    kernelConstToExp,
+    getChunkSize,
 
     -- * Host-level bulk operations
     sReplicate,
@@ -52,7 +55,6 @@ import Futhark.CodeGen.ImpGen
 import Futhark.Error
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.LMAD qualified as LMAD
-import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Util (dropLast, nubOrd, splitFromEnd)
 import Futhark.Util.IntegralExp (divUp, quot, rem)
@@ -257,6 +259,44 @@ fenceForArrays = fmap (foldl' max Imp.FenceLocal) . mapM need
         . entryArrayLoc
         =<< lookupArray arr
 
+isPrimParam :: (Typed p) => Param p -> Bool
+isPrimParam = primType . paramType
+
+kernelConstToExp :: Imp.KernelConstExp -> CallKernelGen Imp.Exp
+kernelConstToExp = traverse f
+  where
+    f (Imp.SizeMaxConst c) = do
+      v <- dPrim (prettyString c) int64
+      sOp $ Imp.GetSizeMax (tvVar v) c
+      pure $ tvVar v
+    f (Imp.SizeConst k c) = do
+      v <- dPrim (nameToString k) int64
+      sOp $ Imp.GetSize (tvVar v) k c
+      pure $ tvVar v
+
+-- | Given available register and a list of parameter types, compute
+-- the largest available chunk size given the parameters for which we
+-- want chunking and the available resources. Used in
+-- 'SegScan.SinglePass.compileSegScan', and 'SegRed.compileSegRed'
+-- (with primitive non-commutative operators only).
+getChunkSize :: [Type] -> Imp.KernelConstExp
+getChunkSize types = do
+  let max_group_size = Imp.SizeMaxConst SizeGroup
+      max_group_mem = Imp.SizeMaxConst SizeLocalMemory
+      max_group_reg = Imp.SizeMaxConst SizeRegisters
+      k_mem = le64 max_group_mem `quot` le64 max_group_size
+      k_reg = le64 max_group_reg `quot` le64 max_group_size
+      types' = map elemType $ filter primType types
+      sizes = map primByteSize types'
+
+      sum_sizes = sum sizes
+      sum_sizes' = sum (map (sMax64 4 . primByteSize) types') `quot` 4
+      max_size = maximum sizes
+
+      mem_constraint = max k_mem sum_sizes `quot` max_size
+      reg_constraint = (k_reg - 1 - sum_sizes') `quot` (2 * sum_sizes')
+  untyped $ sMax64 1 $ sMin64 mem_constraint reg_constraint
+
 inBlockScan ::
   KernelConstants ->
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
@@ -275,7 +315,7 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
         splitAt (length actual_params `div` 2) actual_params
       y_to_x =
         forM_ (zip x_params y_params) $ \(x, y) ->
-          when (primType (paramType x)) $
+          when (isPrimParam x) $
             copyDWIM (paramName x) [] (Var (paramName y)) []
 
   -- Set initial y values
@@ -290,9 +330,10 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
 
   let op_to_x in_block_thread_active
         | Nothing <- seg_flag =
-            sWhen in_block_thread_active $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
         | Just flag_true <- seg_flag = do
             inactive <-
               dPrimVE "inactive" $ flag_true (ltid32 - tvExp skip_threads) ltid32
@@ -302,9 +343,11 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
             -- The convoluted control flow is to ensure all threads
             -- hit this barrier (if applicable).
             when array_scan barrier
-            sWhen in_block_thread_active . sUnless inactive $
-              compileBody' x_params $
-                lambdaBody scan_lam
+            localOps threadOperations
+              . sWhen in_block_thread_active
+              . sUnless inactive
+              $ compileBody' x_params
+              $ lambdaBody scan_lam
 
       maybeBarrier =
         sWhen
@@ -339,23 +382,21 @@ inBlockScan constants seg_flag arrs_full_size lockstep_width block_size active a
     array_scan = not $ all primType $ lambdaReturnType scan_lam
 
     readInitial p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix ltid]
+      | isPrimParam p =
+          copyDWIMFix (paramName p) [] (Var arr) [ltid]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix gtid]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid]
 
     readParam behind p arr
-      | primType $ paramType p =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ ltid - behind]
+      | isPrimParam p =
+          copyDWIMFix (paramName p) [] (Var arr) [ltid - behind]
       | otherwise =
-          copyDWIM (paramName p) [] (Var arr) [DimFix $ gtid - behind + arrs_full_size]
+          copyDWIMFix (paramName p) [] (Var arr) [gtid - behind + arrs_full_size]
 
-    writeResult x y arr
-      | primType $ paramType x = do
-          copyDWIM arr [DimFix ltid] (Var $ paramName x) []
-          copyDWIM (paramName y) [] (Var $ paramName x) []
-      | otherwise =
-          copyDWIM (paramName y) [] (Var $ paramName x) []
+    writeResult x y arr = do
+      when (isPrimParam x) $
+        copyDWIMFix arr [ltid] (Var $ paramName x) []
+      copyDWIM (paramName y) [] (Var $ paramName x) []
 
 groupScan ::
   Maybe (Imp.TExp Int32 -> Imp.TExp Int32 -> Imp.TExp Bool) ->
@@ -418,16 +459,16 @@ groupScan seg_flag arrs_full_size w lam arrs = do
       group_offset = sExt64 (kernelGroupId constants) * kernelGroupSize constants
 
       writeBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM arr [DimFix $ sExt64 block_id] (Var $ paramName p) []
+        | isPrimParam p =
+            copyDWIMFix arr [sExt64 block_id] (Var $ paramName p) []
         | otherwise =
-            copyDWIM arr [DimFix $ group_offset + sExt64 block_id] (Var $ paramName p) []
+            copyDWIMFix arr [group_offset + sExt64 block_id] (Var $ paramName p) []
 
       readPrevBlockResult p arr
-        | primType $ paramType p =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ sExt64 block_id - 1]
+        | isPrimParam p =
+            copyDWIMFix (paramName p) [] (Var arr) [sExt64 block_id - 1]
         | otherwise =
-            copyDWIM (paramName p) [] (Var arr) [DimFix $ group_offset + sExt64 block_id - 1]
+            copyDWIMFix (paramName p) [] (Var arr) [group_offset + sExt64 block_id - 1]
 
   doInBlockScan seg_flag ltid_in_bounds lam
   barrier
@@ -437,8 +478,8 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     sComment "save correct values for first block" $
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM arr [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
+          unless (isPrimParam x) $
+            copyDWIMFix arr [arrs_full_size + group_offset + sExt64 block_size + ltid] (Var $ paramName x) []
 
     barrier
 
@@ -454,7 +495,7 @@ groupScan seg_flag arrs_full_size w lam arrs = do
         flag_true <- seg_flag
         Just $ \from to ->
           flag_true (from * block_size + block_size - 1) (to * block_size + block_size - 1)
-  comment
+  sComment
     "scan the first block, after which offset 'i' contains carry-in for block 'i+1'"
     $ doInBlockScan first_block_seg_flag (is_first_block .&&. ltid_in_bounds) renamed_lam
 
@@ -464,12 +505,12 @@ groupScan seg_flag arrs_full_size w lam arrs = do
     sComment "move correct values for first block back a block" $
       sWhen is_first_block $
         forM_ (zip x_params arrs) $ \(x, arr) ->
-          unless (primType $ paramType x) $
-            copyDWIM
+          unless (isPrimParam x) $
+            copyDWIMFix
               arr
-              [DimFix $ arrs_full_size + group_offset + ltid]
+              [arrs_full_size + group_offset + ltid]
               (Var arr)
-              [DimFix $ arrs_full_size + group_offset + sExt64 block_size + ltid]
+              [arrs_full_size + group_offset + sExt64 block_size + ltid]
 
     barrier
 
@@ -495,22 +536,23 @@ groupScan seg_flag arrs_full_size w lam arrs = do
 
       write_final_result =
         forM_ (zip x_params arrs) $ \(p, arr) ->
-          when (primType $ paramType p) $
-            copyDWIM arr [DimFix ltid] (Var $ paramName p) []
+          when (isPrimParam p) $
+            copyDWIMFix arr [ltid] (Var $ paramName p) []
 
-  sComment "carry-in for every block except the first" $ do
-    sComment "read operands" read_carry_in
-    sComment "perform operation" op_to_x
-    sComment "write final result" $ sUnless no_carry_in write_final_result
+  sComment "carry-in for every block except the first" $
+    localOps threadOperations $ do
+      sComment "read operands" read_carry_in
+      sComment "perform operation" op_to_x
+      sComment "write final result" $ sUnless no_carry_in write_final_result
 
   barrier
 
   sComment "restore correct values for first block" $
     sWhen (is_first_block .&&. ltid_in_bounds) $
       forM_ (zip3 x_params y_params arrs) $ \(x, y, arr) ->
-        if primType (paramType y)
-          then copyDWIM arr [DimFix ltid] (Var $ paramName y) []
-          else copyDWIM (paramName x) [] (Var arr) [DimFix $ arrs_full_size + group_offset + ltid]
+        if isPrimParam y
+          then copyDWIMFix arr [ltid] (Var $ paramName y) []
+          else copyDWIMFix (paramName x) [] (Var arr) [arrs_full_size + group_offset + ltid]
 
   barrier
 
@@ -546,17 +588,13 @@ groupReduceWithOffset offset w lam arrs = do
         let i = local_tid + tvExp offset
         copyDWIMFix (paramName param) [] (Var arr) [sExt64 i]
 
-      writeReduceOpResult param arr
-        | Prim _ <- paramType param =
-            copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
-        | otherwise =
-            pure ()
+      writeReduceOpResult param arr =
+        when (isPrimParam param) $
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
-      writeArrayOpResult param arr
-        | Prim _ <- paramType param =
-            pure ()
-        | otherwise =
-            copyDWIMFix arr [0] (Var $ paramName param) []
+      writeArrayOpResult param arr =
+        unless (isPrimParam param) $
+          copyDWIMFix arr [sExt64 local_tid] (Var $ paramName param) []
 
   let (reduce_acc_params, reduce_arr_params) =
         splitAt (length arrs) $ lambdaParams lam
@@ -566,17 +604,17 @@ groupReduceWithOffset offset w lam arrs = do
 
   offset <-- (0 :: Imp.TExp Int32)
 
-  comment "participating threads read initial accumulator" $
+  sComment "participating threads read initial accumulator" $
     localOps threadOperations . sWhen (local_tid .<. w) $
       zipWithM_ readReduceArgument reduce_acc_params arrs
 
   let do_reduce = localOps threadOperations $ do
-        comment "read array element" $
+        sComment "read array element" $
           zipWithM_ readReduceArgument reduce_arr_params arrs
-        comment "apply reduction operation" $
+        sComment "apply reduction operation" $
           compileBody' reduce_acc_params $
             lambdaBody lam
-        comment "write result of operation" $
+        sComment "write result of operation" $
           zipWithM_ writeReduceOpResult reduce_acc_params arrs
       in_wave_reduce = everythingVolatile do_reduce
 
@@ -618,10 +656,11 @@ groupReduceWithOffset offset w lam arrs = do
   cross_wave_reductions
   errorsync
 
-  sComment "Copy array-typed operands to result array" $ do
-    sWhen (local_tid .==. 0) $
-      localOps threadOperations $
-        zipWithM_ writeArrayOpResult reduce_acc_params arrs
+  unless (all isPrimParam reduce_acc_params) $
+    sComment "Copy array-typed operands to result array" $
+      sWhen (local_tid .==. 0) $
+        localOps threadOperations $
+          zipWithM_ writeArrayOpResult reduce_acc_params arrs
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
@@ -896,10 +935,10 @@ isConstExp vtable size = do
   let onLeaf name _ = lookupConstExp name
       lookupConstExp name =
         constExp =<< hasExp =<< M.lookup name vtable
-      constExp (Op (Inner (SizeOp (GetSize key _)))) =
-        Just $ LeafExp (Imp.SizeConst $ keyWithEntryPoint fname key) int32
-      constExp (Op (Inner (SizeOp (GetSizeMax size_class)))) =
-        Just $ LeafExp (Imp.SizeMaxConst size_class) int32
+      constExp (Op (Inner (SizeOp (GetSize key c)))) =
+        Just $ LeafExp (Imp.SizeConst (keyWithEntryPoint fname key) c) int32
+      constExp (Op (Inner (SizeOp (GetSizeMax c)))) =
+        Just $ LeafExp (Imp.SizeMaxConst c) int32
       constExp e = primExpFromExp lookupConstExp e
   pure $ replaceInPrimExpM onLeaf size
   where
@@ -1088,7 +1127,12 @@ data KernelAttrs = KernelAttrs
     -- | Number of groups.
     kAttrNumGroups :: Count NumGroups SubExp,
     -- | Group size.
-    kAttrGroupSize :: Count GroupSize SubExp
+    kAttrGroupSize :: Count GroupSize SubExp,
+    -- | Variables that are specially in scope inside the kernel.
+    -- Operationally, these will be available at kernel compile time
+    -- (which happens at run-time, with access to machine-specific
+    -- information).
+    kAttrConstExps :: M.Map VName Imp.KernelConstExp
   }
 
 -- | The default kernel attributes.
@@ -1101,7 +1145,8 @@ defKernelAttrs num_groups group_size =
     { kAttrFailureTolerant = False,
       kAttrCheckLocalMemory = True,
       kAttrNumGroups = num_groups,
-      kAttrGroupSize = group_size
+      kAttrGroupSize = group_size,
+      kAttrConstExps = mempty
     }
 
 getSize :: String -> SizeClass -> CallKernelGen (TV Int64)
@@ -1166,12 +1211,12 @@ sKernelOp ::
 sKernelOp attrs constants ops name m = do
   HostEnv atomics _ locks <- askEnv
   body <- makeAllMemoryGlobal $ subImpM_ (KernelEnv atomics constants locks) ops m
-  uses <- computeKernelUses body mempty
+  uses <- computeKernelUses body $ M.keys $ kAttrConstExps attrs
   group_size <- onGroupSize $ kernelGroupSize constants
   emit . Imp.Op . Imp.CallKernel $
     Imp.Kernel
       { Imp.kernelBody = body,
-        Imp.kernelUses = uses,
+        Imp.kernelUses = uses <> map constToUse (M.toList (kAttrConstExps attrs)),
         Imp.kernelNumGroups = [untyped $ kernelNumGroups constants],
         Imp.kernelGroupSize = [group_size],
         Imp.kernelName = name,
@@ -1188,6 +1233,8 @@ sKernelOp attrs constants ops name m = do
         case x of
           Just (LeafExp kc _) -> Right kc
           _ -> Left $ untyped e
+
+    constToUse (v, e) = Imp.ConstUse v e
 
 sKernelFailureTolerant ::
   Bool ->
@@ -1345,7 +1392,7 @@ iotaForType bt = do
 
     let params =
           [ Imp.MemParam mem (Space "device"),
-            Imp.ScalarParam n int32,
+            Imp.ScalarParam n int64,
             Imp.ScalarParam x $ IntType bt,
             Imp.ScalarParam s $ IntType bt
           ]
@@ -1358,7 +1405,7 @@ iotaForType bt = do
       arr <-
         sArray "arr" (IntType bt) shape mem $
           LMAD.iota 0 (map pe64 (shapeDims shape))
-      sIotaKernel arr (sExt64 n') x' s' bt
+      sIotaKernel arr n' x' s' bt
 
   pure fname
 
@@ -1392,8 +1439,9 @@ compileThreadResult _ _ RegTileReturns {} =
 compileThreadResult space pe (Returns _ _ what) = do
   let is = map (Imp.le64 . fst) $ unSegSpace space
   copyDWIMFix (patElemName pe) is what []
-compileThreadResult _ pe (WriteReturns _ (Shape rws) _arr dests) = do
-  let rws' = map pe64 rws
+compileThreadResult _ pe (WriteReturns _ arr dests) = do
+  arr_t <- lookupType arr
+  let rws' = map pe64 $ arrayDims arr_t
   forM_ dests $ \(slice, e) -> do
     let slice' = fmap pe64 slice
         write = inBounds slice' rws'

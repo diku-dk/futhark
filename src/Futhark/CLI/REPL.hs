@@ -17,8 +17,9 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Data.Version
 import Futhark.Compiler
+import Futhark.Format (parseFormatString)
 import Futhark.MonadFreshNames
-import Futhark.Util (fancyTerminal)
+import Futhark.Util (fancyTerminal, showText)
 import Futhark.Util.Options
 import Futhark.Util.Pretty (AnsiStyle, Color (..), Doc, align, annotate, bgColorDull, bold, brackets, color, docText, docTextForHandle, hardline, italicized, oneLine, pretty, putDoc, putDocLn, unAnnotate, (<+>))
 import Futhark.Version
@@ -223,7 +224,11 @@ readEvalPrint = do
       case parseDecOrExp prompt line of
         Left (SyntaxError _ err) -> liftIO $ T.putStrLn err
         Right (Left d) -> onDec d
-        Right (Right e) -> onExp e
+        Right (Right e) -> do
+          valOrErr <- onExp e
+          case valOrErr of
+            Left err -> liftIO $ putDocLn err
+            Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
     inputLine prompt = do
@@ -274,22 +279,29 @@ onDec d = do
                   futharkiProg = prog {lpNameSource = src'}
                 }
 
-onExp :: UncheckedExp -> FutharkiM ()
+onExp :: UncheckedExp -> FutharkiM (Either (Doc AnsiStyle) I.Value)
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case T.checkExp imports src tenv e of
-    (_, Left err) -> liftIO $ putDoc $ T.prettyTypeErrorNoLoc err
+    (_, Left err) -> pure $ Left $ T.prettyTypeErrorNoLoc err
     (_, Right (tparams, e'))
       | null tparams -> do
           r <- runInterpreter $ I.interpretExp ienv e'
           case r of
-            Left err -> liftIO $ print err
-            Right v -> liftIO $ putDoc $ I.prettyValue v <> hardline
-      | otherwise -> liftIO $ do
-          putDocLn $ "Inferred type of expression: " <> align (pretty (typeOf e'))
-          T.putStrLn $
-            "The following types are ambiguous: "
-              <> T.intercalate ", " (map (nameToText . toName . typeParamName) tparams)
+            Left err -> pure $ Left $ pretty $ showText err
+            Right v -> pure $ Right v
+      | otherwise ->
+          pure $
+            Left $
+              ("Inferred type of expression: " <> align (pretty (typeOf e')))
+                <> hardline
+                <> pretty
+                  ( "The following types are ambiguous: "
+                      <> T.intercalate
+                        ", "
+                        (map (nameToText . toName . typeParamName) tparams)
+                  )
+                <> hardline
 
 prettyBreaking :: Breaking -> T.Text
 prettyBreaking b =
@@ -399,11 +411,29 @@ typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
       then
         annotate italicized $
           "\n\nPolymorphic in"
-            <+> mconcat (intersperse " " $ map pretty ps) <> "."
+            <+> mconcat (intersperse " " $ map pretty ps)
+            <> "."
       else mempty
 
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
+
+formatCommand :: Command
+formatCommand input = do
+  case parseFormatString input of
+    Left err -> liftIO $ T.putStrLn err
+    Right parts -> do
+      prompt <- getPrompt
+      case mapM (traverse $ parseExp prompt) parts of
+        Left (SyntaxError _ err) ->
+          liftIO $ T.putStr err
+        Right parts' -> do
+          parts'' <- mapM sequenceA <$> mapM (traverse onExp) parts'
+          case parts'' of
+            Left err -> liftIO $ putDoc err
+            Right parts''' ->
+              liftIO . T.putStrLn . mconcat $
+                map (either id (docText . I.prettyValue)) parts'''
 
 unbreakCommand :: Command
 unbreakCommand _ = do
@@ -483,6 +513,15 @@ Only one source file can be loaded at a time.  Using the :load command a
 second time will replace the previously loaded file.  It will also replace
 any declarations entered at the REPL.
 
+|]
+      )
+    ),
+    ( "format",
+      ( formatCommand,
+        [text|
+Use format strings to print arbitrary futhark expressions. Usage:
+
+  > :format The value of foo: {foo}. The value of 2+2={2+2}
 |]
       )
     ),

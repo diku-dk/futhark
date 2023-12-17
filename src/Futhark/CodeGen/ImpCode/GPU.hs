@@ -34,7 +34,7 @@ type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
 data KernelConst
-  = SizeConst Name
+  = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
   deriving (Eq, Ord, Show)
 
@@ -62,15 +62,14 @@ data Kernel = Kernel
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
-    -- | If true, this kernel does not need to check
-    -- whether we are in a failing state, as it can cope.
-    -- Intuitively, it means that the kernel does not
-    -- depend on any non-scalar parameters to make control
-    -- flow decisions.  Replication, transpose, and copy
+    -- | If true, this kernel does not need to check whether we are in
+    -- a failing state, as it can cope. Intuitively, it means that the
+    -- kernel does not depend on any non-scalar parameters to make
+    -- control flow decisions. Replication, transpose, and copy
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements.  Set this to
+    -- when considering the local memory requirements. Set this to
     -- false for kernels that do their own checking.
     kernelCheckLocalMemory :: Bool
   }
@@ -86,11 +85,13 @@ data KernelUse
   deriving (Eq, Ord, Show)
 
 instance Pretty KernelConst where
-  pretty (SizeConst key) = "get_size" <> parens (pretty key)
-  pretty (SizeMaxConst size_class) = "get_max_size" <> parens (pretty size_class)
+  pretty (SizeConst key size_class) =
+    "get_size" <> parens (commasep [pretty key, pretty size_class])
+  pretty (SizeMaxConst size_class) =
+    "get_max_size" <> parens (pretty size_class)
 
 instance FreeIn KernelConst where
-  freeIn' (SizeConst _) = mempty
+  freeIn' SizeConst {} = mempty
   freeIn' (SizeMaxConst _) = mempty
 
 instance Pretty KernelUse where
@@ -105,15 +106,17 @@ instance Pretty HostOp where
   pretty (GetSize dest key size_class) =
     pretty dest
       <+> "<-"
-      <+> "get_size" <> parens (commasep [pretty key, pretty size_class])
+      <+> "get_size"
+      <> parens (commasep [pretty key, pretty size_class])
   pretty (GetSizeMax dest size_class) =
     pretty dest <+> "<-" <+> "get_size_max" <> parens (pretty size_class)
   pretty (CmpSizeLe dest name size_class x) =
     pretty dest
       <+> "<-"
-      <+> "get_size" <> parens (commasep [pretty name, pretty size_class])
-      <+> "<"
-      <+> pretty x
+      <+> "get_size"
+      <> parens (commasep [pretty name, pretty size_class])
+        <+> "<"
+        <+> pretty x
   pretty (CallKernel c) =
     pretty c
 
@@ -211,15 +214,18 @@ instance Pretty KernelOp where
   pretty (GetGroupId dest i) =
     pretty dest
       <+> "<-"
-      <+> "get_group_id" <> parens (pretty i)
+      <+> "get_group_id"
+      <> parens (pretty i)
   pretty (GetLocalId dest i) =
     pretty dest
       <+> "<-"
-      <+> "get_local_id" <> parens (pretty i)
+      <+> "get_local_id"
+      <> parens (pretty i)
   pretty (GetLocalSize dest i) =
     pretty dest
       <+> "<-"
-      <+> "get_local_size" <> parens (pretty i)
+      <+> "get_local_size"
+      <> parens (pretty i)
   pretty (GetLockstepWidth dest) =
     pretty dest
       <+> "<-"
@@ -242,68 +248,68 @@ instance Pretty KernelOp where
     pretty old
       <+> "<-"
       <+> "atomic_add_"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicFAdd t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_fadd_"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicSMax t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_smax"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicSMin t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_smin"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicUMax t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_umax"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicUMin t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_umin"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicAnd t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_and"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicOr t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_or"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicXor t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_xor"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
   pretty (Atomic _ (AtomicCmpXchg t old arr ind x y)) =
     pretty old
       <+> "<-"
       <+> "atomic_cmp_xchg"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x, pretty y])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x, pretty y])
   pretty (Atomic _ (AtomicXchg t old arr ind x)) =
     pretty old
       <+> "<-"
       <+> "atomic_xchg"
-        <> pretty t
-        <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
+      <> pretty t
+      <> parens (commasep [pretty arr <> brackets (pretty ind), pretty x])
 
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op

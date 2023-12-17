@@ -424,7 +424,7 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
   let merge = zip (shapepat ++ mergepat') args'
       merge_ts = map (I.paramType . fst) merge
   loopbody'' <-
-    localScope (scopeOfFParams $ map fst merge) . inScopeOf form' . buildBody_ $
+    localScope (scopeOfFParams (map fst merge) <> scopeOfLoopForm form') . buildBody_ $
       fmap subExpsRes
         . ensureArgShapes
           "shape of loop result does not match shapes in loop parameter"
@@ -442,8 +442,10 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
   where
     sparams' = map (`TypeParamDim` mempty) sparams
 
-    forLoop mergepat' shapepat mergeinit form' =
-      bodyFromStms . inScopeOf form' $ do
+    forLoop mergepat' shapepat mergeinit i loopvars form' =
+      bodyFromStms . localScope (scopeOfLoopForm form') $ do
+        forM_ loopvars $ \(p, arr) ->
+          letBindNames [I.paramName p] =<< eIndex arr [eSubExp (I.Var i)]
         ses <- internaliseExp "loopres" loopbody
         sets <- mapM subExpType ses
         shapeargs <- argShapes (map I.paramName shapepat) mergepat' sets
@@ -467,8 +469,7 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
       bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
         bindingLambdaParams [toParam E.Observe <$> x] (map rowType arr_ts) $ \x_params -> do
           let loopvars = zip x_params arr'
-          forLoop mergepat' shapepat mergeinit $
-            I.ForLoop i Int64 w loopvars
+          forLoop mergepat' shapepat mergeinit i loopvars $ I.ForLoop i Int64 w
     handleForm mergeinit (E.For i num_iterations) = do
       num_iterations' <- internaliseExp1 "upper_bound" num_iterations
       num_iterations_t <- I.subExpType num_iterations'
@@ -477,10 +478,9 @@ internaliseAppExp desc _ (E.Loop sparams mergepat mergeexp form loopbody loc) = 
         _ -> error "internaliseExp Loop: invalid type"
 
       ts <- mapM subExpType mergeinit
-      bindingLoopParams sparams' mergepat ts $
-        \shapepat mergepat' ->
-          forLoop mergepat' shapepat mergeinit $
-            I.ForLoop (E.identName i) it num_iterations' []
+      bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' ->
+        forLoop mergepat' shapepat mergeinit (E.identName i) [] $
+          I.ForLoop (E.identName i) it num_iterations'
     handleForm mergeinit (E.While cond) = do
       ts <- mapM subExpType mergeinit
       bindingLoopParams sparams' mergepat ts $ \shapepat mergepat' -> do
@@ -1237,7 +1237,7 @@ internaliseStreamAcc desc dest op lam bs = do
         (lam_params, lam_body, lam_rettype) <-
           internaliseLambda op_lam $ ne_ts ++ ne_ts
         idxp <- newParam "idx" $ I.Prim int64
-        let op_lam' = I.Lambda (idxp : lam_params) lam_body lam_rettype
+        let op_lam' = I.Lambda (idxp : lam_params) lam_rettype lam_body
         pure $ Just (op_lam', ne')
       Nothing ->
         pure Nothing
@@ -1699,9 +1699,12 @@ isIntrinsicFunction qname args loc = do
       old_dim <- I.arraysSize 0 <$> mapM lookupType arrs
       dim_ok <-
         letSubExp "dim_ok" <=< toExp $
-          pe64 old_dim .==. pe64 n' * pe64 m'
-            .&&. pe64 n' .>=. 0
-            .&&. pe64 m' .>=. 0
+          pe64 old_dim .==. pe64 n'
+            * pe64 m'
+              .&&. pe64 n'
+              .>=. 0
+              .&&. pe64 m'
+              .>=. 0
       dim_ok_cert <-
         assert
           "dim_ok_cert"
@@ -1725,6 +1728,13 @@ isIntrinsicFunction qname args loc = do
               I.ReshapeArbitrary
               (reshapeOuter (I.Shape [n', m']) 1 $ I.arrayShape arr_t)
               arr'
+    handleRest [arr] "manifest" = Just $ \desc -> do
+      arrs <- internaliseExpToVars "flatten_arr" arr
+      forM arrs $ \arr' -> do
+        r <- I.arrayRank <$> lookupType arr'
+        if r == 0
+          then pure $ I.Var arr'
+          else letSubExp desc $ I.BasicOp $ I.Manifest [0 .. r - 1] arr'
     handleRest [arr] "flatten" = Just $ \desc -> do
       arrs <- internaliseExpToVars "flatten_arr" arr
       forM arrs $ \arr' -> do

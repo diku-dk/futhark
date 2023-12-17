@@ -3,10 +3,9 @@
 -- If merging occurs before hoisting then this test will fail.
 -- ==
 -- structure gpu {
---   GPUBody 3
---   /GPUBody 1
+--   GPUBody 1
 --   /Loop/GPUBody/Index 2
---   /Loop/Loop/GPUBody/BinOp 1
+--   /Loop/GPUBody/Loop/BinOp 2
 -- }
 
 def main [n] (A: *[n]i64) (x: i64) : *[n]i64 =

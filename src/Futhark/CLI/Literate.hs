@@ -10,7 +10,7 @@ import Data.Bits
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Char
-import Data.Functor
+import Data.Functor (($>))
 import Data.Int (Int64)
 import Data.List (foldl', transpose)
 import Data.Map qualified as M
@@ -45,7 +45,9 @@ import System.Directory
   ( copyFile,
     createDirectoryIfMissing,
     doesFileExist,
+    getCurrentDirectory,
     removePathForcibly,
+    setCurrentDirectory,
   )
 import System.Environment (getExecutablePath)
 import System.Exit
@@ -329,7 +331,7 @@ atStartOfLine = do
   when (col /= pos1) empty
 
 afterExp :: Parser ()
-afterExp = choice [atStartOfLine, void eol]
+afterExp = choice [atStartOfLine, choice [void eol, eof]]
 
 withParsedSource :: Parser a -> (a -> T.Text -> b) -> Parser b
 withParsedSource p f = do
@@ -369,12 +371,12 @@ parseBlock =
             $> DirectiveImg
             <*> parseExp postlexeme
             <*> parseImgParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "plot2d"
             $> DirectivePlot
             <*> parseExp postlexeme
             <*> parsePlotParams
-            <* eol,
+            <* choice [void eol, eof],
           directiveName "gnuplot"
             $> DirectiveGnuplot
             <*> parseExp postlexeme
@@ -388,7 +390,7 @@ parseBlock =
             $> DirectiveAudio
             <*> parseExp postlexeme
             <*> parseAudioParams
-            <* eol
+            <* choice [void eol, eof]
         ]
     directiveName s = try $ token (":" <> s)
 
@@ -675,18 +677,15 @@ initialOptions =
 
 data Env = Env
   { envImgDir :: FilePath,
-    -- | Image dir relative to program.
-    envRelImgDir :: FilePath,
     envOpts :: Options,
     envServer :: ScriptServer,
     envHash :: T.Text
   }
 
-newFileWorker :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM (FilePath, FilePath)
-newFileWorker env (fname_desired, template) m = do
+newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
+newFile env (fname_desired, template) m = do
   let fname_base = fromMaybe (T.unpack (envHash env) <> "-" <> template) fname_desired
       fname = envImgDir env </> fname_base
-      fname_rel = envRelImgDir env </> fname_base
   exists <- liftIO $ doesFileExist fname
   liftIO $ createDirectoryIfMissing True $ envImgDir env
   when (exists && scriptVerbose (envOpts env) > 0) $
@@ -698,14 +697,11 @@ newFileWorker env (fname_desired, template) m = do
         "Generating new file: " <> T.pack fname
     m fname
   modify $ \s -> s {stateFiles = S.insert fname $ stateFiles s}
-  pure (fname, fname_rel)
-
-newFile :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM FilePath
-newFile env f m = snd <$> newFileWorker env f m
+  pure fname
 
 newFileContents :: Env -> (Maybe FilePath, FilePath) -> (FilePath -> ScriptM ()) -> ScriptM T.Text
 newFileContents env f m =
-  liftIO . T.readFile . fst =<< newFileWorker env f m
+  liftIO . T.readFile =<< newFile env f m
 
 processDirective :: Env -> Directive -> ScriptM T.Text
 processDirective env (DirectiveBrief d) =
@@ -808,7 +804,7 @@ processDirective env (DirectiveGnuplot e script) = do
       void $ system "gnuplot" [] script'
 --
 processDirective env (DirectiveVideo e params) = do
-  when (format `notElem` ["webm", "gif"]) $
+  unless (format `elem` ["webm", "gif"]) $
     throwError $
       "Unknown video format: " <> format
 
@@ -1165,8 +1161,8 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
           system futhark ["hash", prog] mempty
 
       let mdfile = fromMaybe (prog `replaceExtension` "md") $ scriptOutput opts
-          imgdir_rel = dropExtension (takeFileName mdfile) <> "-img"
-          imgdir = takeDirectory mdfile </> imgdir_rel
+          prog_dir = takeDirectory prog
+          imgdir = dropExtension (takeFileName mdfile) <> "-img"
           run_options = scriptExtraOptions opts
           onLine "call" l = T.putStrLn l
           onLine _ _ = pure ()
@@ -1178,16 +1174,22 @@ main = mainWithOptions initialOptions commandLineOptions "program" $ \args opts 
                     else const . const $ pure ()
               }
 
+      orig_dir <- getCurrentDirectory
+
       withScriptServer cfg $ \server -> do
         let env =
               Env
                 { envServer = server,
                   envOpts = opts,
                   envHash = proghash,
-                  envImgDir = imgdir,
-                  envRelImgDir = imgdir_rel
+                  envImgDir = imgdir
                 }
+
+        when (scriptVerbose opts > 0) $ do
+          T.hPutStrLn stderr $ "Executing from " <> T.pack prog_dir
+        setCurrentDirectory prog_dir
+
         (failure, md) <- processScript env script
-        T.writeFile mdfile md
+        T.writeFile (orig_dir </> mdfile) md
         when (failure == Failure) exitFailure
     _ -> Nothing

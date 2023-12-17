@@ -300,12 +300,12 @@ diffStm stm@(Let pat _aux (WithAcc inputs lam)) m = do
       f' <- renameLambda f
       pure (shape, as, Just (f', nes))
     renameInputLambda input = pure input
-    diffLambda' res_adjs get_adjs_for (Lambda params body ts) =
+    diffLambda' res_adjs get_adjs_for (Lambda params ts body) =
       localScope (scopeOfLParams params) $ do
         Body () stms res <- diffBody res_adjs get_adjs_for body
         let body' = Body () stms $ take (length inputs) res <> takeLast (length get_adjs_for) res
         ts' <- mapM lookupType get_adjs_for
-        pure $ Lambda params body' $ take (length inputs) ts <> ts'
+        pure $ Lambda params (take (length inputs) ts <> ts') body'
 diffStm stm _ = error $ "diffStm unhandled:\n" ++ prettyString stm
 
 diffStms :: Stms SOACS -> ADM ()
@@ -336,15 +336,15 @@ diffBody res_adjs get_adjs_for (Body () stms res) = subAD $
     pure $ Body () stms' $ res <> varsRes adjs
 
 diffLambda :: [Adj] -> [VName] -> Lambda SOACS -> ADM (Lambda SOACS)
-diffLambda res_adjs get_adjs_for (Lambda params body _) =
+diffLambda res_adjs get_adjs_for (Lambda params _ body) =
   localScope (scopeOfLParams params) $ do
     Body () stms res <- diffBody res_adjs get_adjs_for body
     let body' = Body () stms $ takeLast (length get_adjs_for) res
     ts' <- mapM lookupType get_adjs_for
-    pure $ Lambda params body' ts'
+    pure $ Lambda params ts' body'
 
 revVJP :: (MonadFreshNames m) => Scope SOACS -> Lambda SOACS -> m (Lambda SOACS)
-revVJP scope (Lambda params body ts) =
+revVJP scope (Lambda params ts body) =
   runADM . localScope (scope <> scopeOfLParams params) $ do
     params_adj <- forM (zip (map resSubExp (bodyResult body)) ts) $ \(se, t) ->
       Param mempty <$> maybe (newVName "const_adj") adjVName (subExpVar se) <*> pure t
@@ -356,7 +356,7 @@ revVJP scope (Lambda params body ts) =
           (map paramName params)
           body
 
-    pure $ Lambda (params ++ params_adj) body' (ts <> map paramType params)
+    pure $ Lambda (params ++ params_adj) (ts <> map paramType params) body'
 
 -- Note [Adjoints of accumulators]
 --

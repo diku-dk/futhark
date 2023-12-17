@@ -77,13 +77,15 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
 
 mkBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-mkBoilerplate opencl_program kernels types failures = do
+mkBoilerplate opencl_program macros kernels types failures = do
   generateGPUBoilerplate
     opencl_program
+    macros
     backendsOpenclH
     (M.keys kernels)
     types
@@ -169,13 +171,6 @@ cliOptions =
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            },
          Option
-           { optionLongName = "profile",
-             optionShortName = Just 'P',
-             optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
-             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           },
-         Option
            { optionLongName = "list-devices",
              optionShortName = Nothing,
              optionArgument = NoArgument,
@@ -194,7 +189,7 @@ openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "'
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program opencl_code opencl_prelude kernels types params failures prog'
+    Program opencl_code opencl_prelude macros kernels types params failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
@@ -203,7 +198,7 @@ compileProg version prog = do
       version
       params
       operations
-      (mkBoilerplate (opencl_prelude <> opencl_code) kernels types failures)
+      (mkBoilerplate (opencl_prelude <> opencl_code) macros kernels types failures)
       opencl_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

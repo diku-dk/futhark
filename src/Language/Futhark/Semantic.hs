@@ -12,7 +12,7 @@ module Language.Futhark.Semantic
     Namespace (..),
     Env (..),
     TySet,
-    FunSig (..),
+    FunModType (..),
     NameMap,
     BoundV (..),
     Mod (..),
@@ -96,15 +96,15 @@ type TySet = M.Map (QualName VName) Liftedness
 -- or a parametric module ("functor" in SML).
 data Mod
   = ModEnv Env
-  | ModFun FunSig
+  | ModFun FunModType
   deriving (Show)
 
 -- | A parametric functor consists of a set of abstract types, the
 -- environment of its parameter, and the resulting module type.
-data FunSig = FunSig
-  { funSigAbs :: TySet,
-    funSigMod :: Mod,
-    funSigMty :: MTy
+data FunModType = FunModType
+  { funModTypeAbs :: TySet,
+    funModTypeMod :: Mod,
+    funModTypeMty :: MTy
   }
   deriving (Show)
 
@@ -137,7 +137,7 @@ type NameMap = M.Map (Namespace, Name) (QualName VName)
 data Env = Env
   { envVtable :: M.Map VName BoundV,
     envTypeTable :: M.Map VName TypeBinding,
-    envSigTable :: M.Map VName MTy,
+    envModTypeTable :: M.Map VName MTy,
     envModTable :: M.Map VName Mod,
     envNameMap :: NameMap
   }
@@ -160,7 +160,7 @@ instance Pretty MTy where
 
 instance Pretty Mod where
   pretty (ModEnv e) = pretty e
-  pretty (ModFun (FunSig _ mod mty)) = pretty mod <+> "->" </> pretty mty
+  pretty (ModFun (FunModType _ mod mty)) = pretty mod <+> "->" </> pretty mty
 
 instance Pretty Env where
   pretty (Env vtable ttable sigtable modtable _) =
@@ -177,9 +177,9 @@ instance Pretty Env where
       renderTypeBind (name, TypeAbbr l tps tp) =
         p l
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty tp
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty tp
         where
           p Lifted = "type^"
           p SizeLifted = "type~"
@@ -187,9 +187,9 @@ instance Pretty Env where
       renderValBind (name, BoundV tps t) =
         "val"
           <+> prettyName name
-            <> mconcat (map ((" " <>) . pretty) tps)
-            <> " ="
-          <+> pretty t
+          <> mconcat (map ((" " <>) . pretty) tps)
+          <> " ="
+            <+> pretty t
       renderModType (name, _sig) =
         "module type" <+> prettyName name
       renderMod (name, mod) =

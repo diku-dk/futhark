@@ -197,7 +197,8 @@ instance Pretty BasicOp where
       Array {} -> brackets $ commastack $ map pretty es
       _ -> brackets $ commasep $ map pretty es
       <+> colon
-      <+> "[]" <> pretty rt
+      <+> "[]"
+      <> pretty rt
   pretty (BinOp bop x y) = pretty bop <> parens (pretty x <> comma <+> pretty y)
   pretty (CmpOp op x y) = pretty op <> parens (pretty x <> comma <+> pretty y)
   pretty (ConvOp conv x) =
@@ -271,13 +272,13 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
   pretty (Match [c] [Case [Just (BoolValue True)] t] f (MatchDec ret ifsort)) =
     "if"
       <> info'
-      <+> pretty c
-      </> "then"
-      <+> maybeNest t
-      <+> "else"
-      <+> maybeNest f
-      </> colon
-      <+> ppTupleLines' (map pretty ret)
+        <+> pretty c
+        </> "then"
+        <+> maybeNest t
+        <+> "else"
+        <+> maybeNest f
+        </> colon
+        <+> ppTupleLines' (map pretty ret)
     where
       info' = case ifsort of
         MatchNormal -> mempty
@@ -301,8 +302,8 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
     applykw
       <+> pretty (nameToString fname)
       <> apply (map (align . prettyArg) args)
-      </> colon
-      <+> braces (commasep $ map prettyRet ret)
+        </> colon
+        <+> braces (commasep $ map prettyRet ret)
     where
       prettyArg (arg, Consume) = "*" <> pretty arg
       prettyArg (arg, _) = pretty arg
@@ -316,22 +317,14 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
       <+> equals
       <+> ppTuple' (map pretty args)
       </> ( case form of
-              ForLoop i it bound [] ->
-                "for"
-                  <+> align
-                    ( pretty i <> ":" <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
-                    )
-              ForLoop i it bound loop_vars ->
+              ForLoop i it bound ->
                 "for"
                   <+> align
                     ( pretty i
                         <> ":"
                         <> pretty it
-                        <+> "<"
-                        <+> align (pretty bound)
-                        </> stack (map prettyLoopVar loop_vars)
+                          <+> "<"
+                          <+> align (pretty bound)
                     )
               WhileLoop cond ->
                 "while" <+> pretty cond
@@ -340,24 +333,24 @@ instance (PrettyRep rep) => Pretty (Exp rep) where
       <+> nestedBlock "{" "}" (pretty loopbody)
     where
       (params, args) = unzip merge
-      prettyLoopVar (p, a) = pretty p <+> "in" <+> pretty a
   pretty (WithAcc inputs lam) =
     "with_acc"
       <> parens (braces (commastack $ map ppInput inputs) <> comma </> pretty lam)
     where
       ppInput (shape, arrs, op) =
         parens
-          ( pretty shape <> comma
-              <+> ppTuple' (map pretty arrs)
-                <> case op of
-                  Nothing -> mempty
-                  Just (op', nes) ->
-                    comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
+          ( pretty shape
+              <> comma
+                <+> ppTuple' (map pretty arrs)
+              <> case op of
+                Nothing -> mempty
+                Just (op', nes) ->
+                  comma </> parens (pretty op' <> comma </> ppTuple' (map pretty nes))
           )
 
 instance (PrettyRep rep) => Pretty (Lambda rep) where
-  pretty (Lambda [] (Body _ stms []) []) | stms == mempty = "nilFn"
-  pretty (Lambda params body rettype) =
+  pretty (Lambda [] [] (Body _ stms [])) | stms == mempty = "nilFn"
+  pretty (Lambda params rettype body) =
     "\\"
       <+> braces (commastack $ map pretty params)
       </> indent 2 (colon <+> ppTupleLines' (map pretty rettype) <+> "->")
@@ -400,9 +393,9 @@ instance (PrettyRep rep) => Pretty (FunDef rep) where
                   <> pretty p_name
                   <> "\""
                   <> comma
-                  </> ppTupleLines' (map pretty p_entry)
+                    </> ppTupleLines' (map pretty p_entry)
                   <> comma
-                  </> ppTupleLines' (map pretty ret_entry)
+                    </> ppTupleLines' (map pretty ret_entry)
               )
 
 instance Pretty OpaqueType where

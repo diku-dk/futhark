@@ -29,13 +29,15 @@ import NeatInterpolation (untrimming)
 
 mkBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-mkBoilerplate cuda_program kernels types failures = do
+mkBoilerplate cuda_program macros kernels types failures = do
   generateGPUBoilerplate
     cuda_program
+    macros
     backendsCudaH
     (M.keys kernels)
     types
@@ -67,7 +69,7 @@ cliOptions =
                           fprintf(stderr, "%s: %s\n", optarg, strerror(errno));
                           exit(1);
                         }
-                        exit(1);}|]
+                        exit(0);}|]
            },
          Option
            { optionLongName = "load-cuda",
@@ -102,13 +104,6 @@ cliOptions =
              optionArgument = RequiredArgument "OPT",
              optionDescription = "Add an additional build option to the string passed to NVRTC.",
              optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
-           },
-         Option
-           { optionLongName = "profile",
-             optionShortName = Just 'P',
-             optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
-             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
            }
        ]
 
@@ -120,7 +115,7 @@ cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' m
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program cuda_code cuda_prelude kernels types params failures prog'
+    Program cuda_code cuda_prelude macros kernels types params failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
@@ -129,7 +124,7 @@ compileProg version prog = do
       version
       params
       operations
-      (mkBoilerplate (cuda_prelude <> cuda_code) kernels types failures)
+      (mkBoilerplate (cuda_prelude <> cuda_code) macros kernels types failures)
       cuda_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

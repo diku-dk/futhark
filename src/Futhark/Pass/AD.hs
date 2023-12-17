@@ -25,7 +25,7 @@ bindLambda ::
   Lambda SOACS ->
   [SubExp] ->
   m ()
-bindLambda pat aux (Lambda params body _) args = do
+bindLambda pat aux (Lambda params _ body) args = do
   auxing aux . forM_ (zip params args) $ \(param, arg) ->
     letBindNames [paramName param] $
       BasicOp $ case paramType param of

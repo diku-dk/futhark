@@ -103,7 +103,7 @@ modifyArrayShape ::
   TypeBase newshape u
 modifyArrayShape f (Array t ds u)
   | shapeRank ds' == 0 = Prim t
-  | otherwise = Array t (f ds) u
+  | otherwise = Array t ds' u
   where
     ds' = f ds
 modifyArrayShape _ (Prim t) = Prim t

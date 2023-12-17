@@ -77,7 +77,7 @@ struct futhark_context_config {
   int debugging;
   int profiling;
   int logging;
-  const char *cache_fname;
+  char* cache_fname;
   int num_tuning_params;
   int64_t *tuning_params;
   const char** tuning_param_names;
@@ -87,9 +87,9 @@ struct futhark_context_config {
 
   char* program;
   int num_build_opts;
-  const char **build_opts;
+  char* *build_opts;
 
-  const char *preferred_device;
+  char* preferred_device;
   int preferred_device_num;
 
   size_t default_block_size;
@@ -105,10 +105,10 @@ struct futhark_context_config {
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->num_build_opts = 0;
-  cfg->build_opts = (const char**) malloc(sizeof(const char*));
+  cfg->build_opts = (char**) malloc(sizeof(char*));
   cfg->build_opts[0] = NULL;
   cfg->preferred_device_num = 0;
-  cfg->preferred_device = "";
+  cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
 
   cfg->default_block_size = 256;
@@ -123,14 +123,19 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 }
 
 static void backend_context_config_teardown(struct futhark_context_config* cfg) {
+  for (int i = 0; i < cfg->num_build_opts; i++) {
+    free(cfg->build_opts[i]);
+  }
+
   free(cfg->build_opts);
+  free(cfg->preferred_device);
   free(cfg->program);
 }
 
 void futhark_context_config_add_build_option(struct futhark_context_config *cfg, const char *opt) {
-  cfg->build_opts[cfg->num_build_opts] = opt;
+  cfg->build_opts[cfg->num_build_opts] = strdup(opt);
   cfg->num_build_opts++;
-  cfg->build_opts = (const char **) realloc(cfg->build_opts, (cfg->num_build_opts + 1) * sizeof(const char *));
+  cfg->build_opts = (char **) realloc(cfg->build_opts, (cfg->num_build_opts + 1) * sizeof(char *));
   cfg->build_opts[cfg->num_build_opts] = NULL;
 }
 
@@ -146,7 +151,8 @@ void futhark_context_config_set_device(struct futhark_context_config *cfg, const
       s++;
     }
   }
-  cfg->preferred_device = s;
+  free(cfg->preferred_device);
+  cfg->preferred_device = strdup(s);
   cfg->preferred_device_num = x;
 }
 
@@ -156,6 +162,7 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 }
 
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
+  free(cfg->program);
   cfg->program = strdup(s);
 }
 
@@ -214,12 +221,6 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
   return 1;
 }
 
-// A record of something that happened.
-struct profiling_record {
-  hipEvent_t *events; // Points to two events.
-  const char *name;
-};
-
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -233,6 +234,7 @@ struct futhark_context {
   FILE *log;
   struct constants *constants;
   struct free_list free_list;
+  struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   // Uniform fields above.
@@ -261,12 +263,10 @@ struct futhark_context {
   size_t max_threshold;
   size_t max_local_memory;
   size_t max_bespoke;
+  size_t max_registers;
+  size_t max_cache;
 
   size_t lockstep_width;
-
-  struct profiling_record *profiling_records;
-  int profiling_records_capacity;
-  int profiling_records_used;
 
   struct builtin_kernels* kernels;
 };
@@ -454,6 +454,10 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   int arch_set = 0, num_extra_opts;
   struct futhark_context_config *cfg = ctx->cfg;
 
+  char** macro_names;
+  int64_t* macro_vals;
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+
   for (num_extra_opts = 0; extra_opts[num_extra_opts] != NULL; num_extra_opts++) {
     if (strstr(extra_opts[num_extra_opts], "--gpu-architecture")
         == extra_opts[num_extra_opts]) {
@@ -461,7 +465,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     }
   }
 
-  size_t i = 0, n_opts_alloc = 20 + num_extra_opts + cfg->num_tuning_params;
+  size_t i = 0, n_opts_alloc = 20 + num_macros + num_extra_opts + cfg->num_tuning_params;
   char **opts = (char**) malloc(n_opts_alloc * sizeof(char *));
   if (!arch_set) {
     hipDeviceProp_t props;
@@ -475,6 +479,17 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   opts[i++] = msgprintf("-D%s=%d",
                         "max_group_size",
                         (int)ctx->max_group_size);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_local_memory",
+                        (int)ctx->max_local_memory);
+  opts[i++] = msgprintf("-D%s=%d",
+                        "max_registers",
+                        (int)ctx->max_registers);
+
+  for (int j = 0; j < num_macros; j++) {
+    opts[i++] = msgprintf("-D%s=%zu", macro_names[j], macro_vals[j]);
+  }
+
   for (int j = 0; j < cfg->num_tuning_params; j++) {
     opts[i++] = msgprintf("-D%s=%zu", cfg->tuning_param_vars[j],
                           cfg->tuning_params[j]);
@@ -489,6 +504,9 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
   opts[i++] = msgprintf("-DTR_BLOCK_DIM=%d", TR_BLOCK_DIM);
   opts[i++] = msgprintf("-DTR_TILE_DIM=%d", TR_TILE_DIM);
   opts[i++] = msgprintf("-DTR_ELEMS_PER_THREAD=%d", TR_ELEMS_PER_THREAD);
+
+  free(macro_names);
+  free(macro_vals);
 
   *n_opts = i;
   *opts_out = opts;
@@ -568,56 +586,43 @@ static char* hip_module_setup(struct futhark_context *ctx,
   return NULL;
 }
 
-static int tally_profiling_records(struct futhark_context *ctx,
-                                   struct cost_centres* ccs) {
-  hipError_t err;
-  for (int i = 0; i < ctx->profiling_records_used; i++) {
-    struct profiling_record record = ctx->profiling_records[i];
+struct hip_event {
+  hipEvent_t start;
+  hipEvent_t end;
+};
 
-    float ms;
-    if ((err = hipEventElapsedTime(&ms, record.events[0], record.events[1])) != hipSuccess) {
-      return err;
-    }
-
-    if (ccs) {
-      struct cost_centre c = {
-        .name = record.name,
-        .runs = 1,
-        .runtime = ms*1000
-      };
-      cost_centres_add(ccs, c);
-    }
-
-    if ((err = hipEventDestroy(record.events[0])) != hipSuccess) {
-      return 1;
-    }
-    if ((err = hipEventDestroy(record.events[1])) != hipSuccess) {
-      return 1;
-    }
-
-    free(record.events);
+static struct hip_event* hip_event_new(struct futhark_context* ctx) {
+  if (ctx->profiling && !ctx->profiling_paused) {
+    struct hip_event* e = malloc(sizeof(struct hip_event));
+    hipEventCreate(&e->start);
+    hipEventCreate(&e->end);
+    return e;
+  } else {
+    return NULL;
   }
-
-  ctx->profiling_records_used = 0;
-
-  return 0;
 }
 
-static hipEvent_t* hip_get_events(struct futhark_context *ctx, const char* name) {
-  if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
-    ctx->profiling_records_capacity *= 2;
-    ctx->profiling_records =
-      realloc(ctx->profiling_records,
-              ctx->profiling_records_capacity *
-              sizeof(struct profiling_record));
+static int hip_event_report(struct str_builder* sb, struct hip_event* e) {
+  float ms;
+  hipError_t err;
+  if ((err = hipEventElapsedTime(&ms, e->start, e->end)) != hipSuccess) {
+    return err;
   }
-  hipEvent_t *events = calloc(2, sizeof(hipEvent_t));
-  hipEventCreate(&events[0]);
-  hipEventCreate(&events[1]);
-  ctx->profiling_records[ctx->profiling_records_used].events = events;
-  ctx->profiling_records[ctx->profiling_records_used].name = name;
-  ctx->profiling_records_used++;
-  return events;
+
+  // HIP provides milisecond resolution, but we want microseconds.
+  str_builder(sb, ",\"duration\":%f", ms*1000);
+
+  if ((err = hipEventDestroy(e->start)) != hipSuccess) {
+    return 1;
+  }
+
+  if ((err = hipEventDestroy(e->end)) != hipSuccess) {
+    return 1;
+  }
+
+  free(e);
+
+  return 0;
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {
@@ -655,11 +660,6 @@ struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
 void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context* ctx) {
-  ctx->profiling_records_capacity = 200;
-  ctx->profiling_records_used = 0;
-  ctx->profiling_records =
-    malloc(ctx->profiling_records_capacity *
-           sizeof(struct profiling_record));
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
@@ -679,6 +679,8 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->max_tile_size = sqrt(ctx->max_group_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
+  ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
+  ctx->max_cache = device_query(ctx->dev, hipDeviceAttributeL2CacheSize);
   // FIXME: in principle we should query hipDeviceAttributeWarpSize
   // from the device, which will provide 64 on AMD GPUs.
   // Unfortunately, we currently do nasty implicit intra-warp
@@ -688,8 +690,10 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 32;
   HIP_SUCCEED_FATAL(hipStreamCreate(&ctx->stream));
   hip_size_setup(ctx);
-  ctx->error = hip_module_setup(ctx, ctx->cfg->program,
-                                ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  ctx->error = hip_module_setup(ctx,
+                                ctx->cfg->program,
+                                (const char**)ctx->cfg->build_opts,
+                                ctx->cfg->cache_fname);
 
   if (ctx->error != NULL) {
     futhark_panic(1, "During HIP initialisation:\n%s\n", ctx->error);
@@ -713,8 +717,6 @@ void backend_context_teardown(struct futhark_context* ctx) {
   hipFree(ctx->global_failure);
   hipFree(ctx->global_failure_args);
   HIP_SUCCEED_FATAL(gpu_free_all(ctx));
-  (void)tally_profiling_records(ctx, NULL);
-  free(ctx->profiling_records);
   HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
   HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
 }
@@ -742,14 +744,18 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 static int gpu_scalar_to_device(struct futhark_context* ctx,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
-  hipEvent_t *pevents = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    pevents = hip_get_events(ctx, "copy_scalar_to_dev");
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+  struct hip_event *event = hip_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_to_dev",
+              strdup(""),
+              event,
+              (event_report_fn)hip_event_report);
+    HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyHtoD((unsigned char*)dst + offset, src, size));
-  if (pevents != NULL) {
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
+  if (event != NULL) {
+    HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
   return FUTHARK_SUCCESS;
 }
@@ -757,14 +763,18 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 static int gpu_scalar_from_device(struct futhark_context* ctx,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
-  hipEvent_t *pevents = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    pevents = hip_get_events(ctx, "copy_scalar_from_dev");
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+  struct hip_event *event = hip_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_from_dev",
+              strdup(""),
+              event,
+              (event_report_fn)hip_event_report);
+    HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyDtoH(dst, (unsigned char*)src + offset, size));
-  if (pevents != NULL) {
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
+  if (event != NULL) {
+    HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
   return FUTHARK_SUCCESS;
 }
@@ -773,15 +783,19 @@ static int gpu_memcpy(struct futhark_context* ctx,
                       gpu_mem dst, int64_t dst_offset,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
-  hipEvent_t *pevents = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    pevents = hip_get_events(ctx, "copy_dev_to_dev");
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+  struct hip_event *event = hip_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_dev_to_dev",
+              strdup(""),
+              event,
+              (event_report_fn)hip_event_report);
+    HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
                                             nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
-  if (pevents != NULL) {
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
+  if (event != NULL) {
+    HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
   return FUTHARK_SUCCESS;
 }
@@ -791,10 +805,14 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    hipEvent_t* pevents = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      pevents = hip_get_events(ctx, "copy_host_to_dev");
-      HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+    struct hip_event *event = hip_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_host_to_dev",
+                strdup(""),
+                event,
+                (event_report_fn)hip_event_report);
+      HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
     }
     if (sync) {
       HIP_SUCCEED_OR_RETURN
@@ -806,8 +824,8 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                             (unsigned char*)src + src_offset,
                             nbytes, ctx->stream));
     }
-    if (pevents != NULL) {
-      HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
+    if (event != NULL) {
+      HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
     }
   }
   return FUTHARK_SUCCESS;
@@ -818,10 +836,14 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    hipEvent_t* pevents = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      pevents = hip_get_events(ctx, "copy_dev_to_host");
-      HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+    struct hip_event *event = hip_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_dev_to_host",
+                strdup(""),
+                event,
+                (event_report_fn)hip_event_report);
+      HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
     }
     if (sync) {
       HIP_SUCCEED_OR_RETURN
@@ -833,6 +855,9 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
         (hipMemcpyDtoHAsync(dst + dst_offset,
                             (unsigned char*)src + src_offset,
                             nbytes, ctx->stream));
+    }
+    if (event != NULL) {
+      HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
     }
     if (sync &&
         ctx->failure_is_an_option &&
@@ -853,23 +878,26 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              size_t args_sizes[num_args]) {
   (void) args_sizes;
   int64_t time_start = 0, time_end = 0;
-  if (ctx->logging) {
-    fprintf(ctx->log,
-            "Launching kernel %s with\n"
-            "  grid=(%d,%d,%d)\n"
-            "  block=(%d,%d,%d)\n"
-            "  local memory=%d\n",
-            name,
-            grid[0], grid[1], grid[2],
-            block[0], block[1], block[2],
-            local_mem_bytes);
+  if (ctx->debugging) {
     time_start = get_wall_time();
   }
 
-  hipEvent_t *pevents = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    pevents = hip_get_events(ctx, name);
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[0], ctx->stream));
+  struct hip_event *event = hip_event_new(ctx);
+
+  if (event != NULL) {
+    HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
+    add_event(ctx,
+              name,
+              msgprintf("Kernel %s with\n"
+                        "  grid=(%d,%d,%d)\n"
+                        "  block=(%d,%d,%d)\n"
+                        "  local memory=%d",
+                        name,
+                        grid[0], grid[1], grid[2],
+                        block[0], block[1], block[2],
+                        local_mem_bytes),
+              event,
+              (event_report_fn)hip_event_report);
   }
 
   HIP_SUCCEED_OR_RETURN
@@ -879,8 +907,8 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                            local_mem_bytes, ctx->stream,
                            args, NULL));
 
-  if (pevents != NULL) {
-    HIP_SUCCEED_FATAL(hipEventRecord(pevents[1], ctx->stream));
+  if (event != NULL) {
+    HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
 
   if (ctx->debugging) {

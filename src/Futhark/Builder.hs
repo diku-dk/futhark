@@ -222,7 +222,7 @@ runLambdaBuilder params m = do
     res <- m
     ret <- mapM subExpResType res
     pure (res, ret)
-  pure $ Lambda params (mkBody stms res) ret
+  pure $ Lambda params ret $ mkBody stms res
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

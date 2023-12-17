@@ -340,10 +340,9 @@ kernelAlternatives pat default_body ((cond, alt) : alts) = runBuilder_ $ do
     MatchDec (staticShapes (patTypes pat)) MatchEquiv
 
 transformLambda :: KernelPath -> Lambda SOACS -> DistribM (Lambda GPU)
-transformLambda path (Lambda params body ret) =
-  Lambda params
+transformLambda path (Lambda params ret body) =
+  Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody path body)
-    <*> pure ret
 
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm
@@ -364,15 +363,10 @@ transformStm path (Let pat aux (WithAcc inputs lam)) =
     transformInput (shape, arrs, op) =
       (shape, arrs, fmap (first soacsLambdaToGPU) op)
 transformStm path (Let pat aux (Loop merge form body)) =
-  localScope (castScope (scopeOf form) <> scopeOfFParams params) $
-    oneStm . Let pat aux . Loop merge form' <$> transformBody path body
+  localScope (scopeOfLoopForm form <> scopeOfFParams params) $
+    oneStm . Let pat aux . Loop merge form <$> transformBody path body
   where
     params = map fst merge
-    form' = case form of
-      WhileLoop cond ->
-        WhileLoop cond
-      ForLoop i it bound ps ->
-        ForLoop i it bound ps
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
       onMap path $ MapLoop pat aux w lam arrs
@@ -454,19 +448,66 @@ transformStm path (Let pat _ (Op (Stream w arrs nes fold_fun))) = do
   types <- asksScope scopeForSOACs
   transformStms path . stmsToList . snd
     =<< runBuilderT (sequentialStreamWholeArray pat w nes fold_fun arrs) types
+--
+-- When we are scattering into a multidimensional array, we want to
+-- fully parallelise, such that we do not have threads writing
+-- potentially large rows. We do this by fissioning the scatter into a
+-- map part and a scatter part, where the former is flattened as
+-- usual, and the latter has a thread per primitive element to be
+-- written.
+--
+-- TODO: this could be slightly smarter. If we are dealing with a
+-- horizontally fused Scatter that targets both single- and
+-- multi-dimensional arrays, we could handle the former in the map
+-- stage. This would save us from having to store all the intermediate
+-- results to memory. Troels suspects such cases are very rare, but
+-- they may appear some day.
+transformStm path (Let pat aux (Op (Scatter w arrs lam as)))
+  | not $ all primType $ lambdaReturnType lam = do
+      -- Produce map stage.
+      map_pat <- fmap Pat $ forM (lambdaReturnType lam) $ \t ->
+        PatElem <$> newVName "scatter_tmp" <*> pure (t `arrayOfRow` w)
+      map_stms <- onMap path $ MapLoop map_pat aux w lam arrs
+
+      -- Now do the scatters.
+      runBuilder_ $ do
+        addStms map_stms
+        zipWithM_ doScatter (patElems pat) $ groupScatterResults as $ patNames map_pat
+  where
+    -- Generate code for a scatter where each thread writes only a scalar.
+    doScatter res_pe (scatter_space, arr, is_vs) = do
+      kernel_i <- newVName "write_i"
+      arr_t <- lookupType arr
+      val_t <- stripArray (shapeRank scatter_space) <$> lookupType arr
+      val_is <- replicateM (arrayRank val_t) (newVName "val_i")
+      (kret, kstms) <- collectStms $ do
+        is_vs' <- forM is_vs $ \(is, v) -> do
+          v' <- letSubExp (baseString v <> "_elem") $ BasicOp $ Index v $ Slice $ map (DimFix . Var) $ kernel_i : val_is
+          is' <- forM is $ \i' ->
+            letSubExp (baseString i' <> "_i") $ BasicOp $ Index i' $ Slice [DimFix $ Var kernel_i]
+          pure (Slice $ map DimFix $ is' <> map Var val_is, v')
+        pure $ WriteReturns mempty arr is_vs'
+      (kernel, stms) <-
+        mapKernel
+          segThreadCapped
+          ((kernel_i, w) : zip val_is (arrayDims val_t))
+          mempty
+          [arr_t]
+          (KernelBody () kstms [kret])
+      addStms stms
+      letBind (Pat [res_pe]) $ Op $ SegOp kernel
+--
 transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilder_ $ do
   let lam' = soacsLambdaToGPU lam
   write_i <- newVName "write_i"
-  let (as_ws, _, _) = unzip3 as
-      kstms = bodyStms $ lambdaBody lam'
-      krets = do
-        (a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
+  let krets = do
+        (_a_w, a, is_vs) <- groupScatterResults as $ bodyResult $ lambdaBody lam'
         let res_cs =
               foldMap (foldMap resCerts . fst) is_vs
                 <> foldMap (resCerts . snd) is_vs
             is_vs' = [(Slice $ map (DimFix . resSubExp) is, resSubExp v) | (is, v) <- is_vs]
-        pure $ WriteReturns res_cs a_w a is_vs'
-      body = KernelBody () kstms krets
+        pure $ WriteReturns res_cs a is_vs'
+      body = KernelBody () (bodyStms $ lambdaBody lam') krets
       inputs = do
         (p, p_a) <- zip (lambdaParams lam') ivs
         pure $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
@@ -475,7 +516,7 @@ transformStm _ (Let pat (StmAux cs _ _) (Op (Scatter w ivs lam as))) = runBuilde
       segThreadCapped
       [(write_i, w)]
       inputs
-      (zipWith (stripArray . length) as_ws $ patTypes pat)
+      (patTypes pat)
       body
   certifying cs $ do
     addStms stms

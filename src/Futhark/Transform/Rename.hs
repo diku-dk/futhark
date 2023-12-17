@@ -35,7 +35,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.FreshNames hiding (newName)
 import Futhark.IR.Prop.Names
-import Futhark.IR.Prop.Patterns
+import Futhark.IR.Prop.Pat
 import Futhark.IR.Syntax
 import Futhark.IR.Traversals
 import Futhark.MonadFreshNames (MonadFreshNames (..), modifyNameSource, newName)
@@ -270,19 +270,16 @@ instance (Renameable rep) => Rename (Exp rep) where
       -- It is important that 'i' is renamed before the loop_vars, as
       -- 'i' may be used in the annotations for loop_vars (e.g. index
       -- functions).
-      ForLoop i it boundexp loop_vars -> renameBound [i] $ do
-        let (arr_params, loop_arrs) = unzip loop_vars
+      ForLoop i it boundexp -> renameBound [i] $ do
         boundexp' <- rename boundexp
-        loop_arrs' <- rename loop_arrs
-        renameBound (map paramName params ++ map paramName arr_params) $ do
+        renameBound (map paramName params) $ do
           params' <- mapM rename params
-          arr_params' <- mapM rename arr_params
           i' <- rename i
           loopbody' <- rename loopbody
           pure $
             Loop
               (zip params' args')
-              (ForLoop i' it boundexp' $ zip arr_params' loop_arrs')
+              (ForLoop i' it boundexp')
               loopbody'
       WhileLoop cond ->
         renameBound (map paramName params) $ do
@@ -315,12 +312,9 @@ instance (Rename shape) => Rename (TypeBase shape u) where
     Acc <$> rename acc <*> rename ispace <*> rename ts <*> pure u
 
 instance (Renameable rep) => Rename (Lambda rep) where
-  rename (Lambda params body ret) =
-    renameBound (map paramName params) $ do
-      params' <- mapM rename params
-      body' <- rename body
-      ret' <- mapM rename ret
-      pure $ Lambda params' body' ret'
+  rename (Lambda params ret body) =
+    renameBound (map paramName params) $
+      Lambda <$> mapM rename params <*> mapM rename ret <*> rename body
 
 instance Rename Names where
   rename = fmap namesFromList . mapM rename . namesToList
