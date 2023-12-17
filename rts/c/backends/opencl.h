@@ -1325,7 +1325,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
   }
   if (ctx->logging) {
-    printf("\n");
+    fprintf(ctx->log, "\n");
   }
 
   return FUTHARK_SUCCESS;
