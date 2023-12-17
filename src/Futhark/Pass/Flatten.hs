@@ -61,8 +61,11 @@ import Prelude hiding (div, rem)
 --   - A_O : [n]i64; the offset array, indicating for each segment
 --     where it starts in the data (and flag) array.
 --
---   - A_II : [m]t; the "inner indices"; indicating for each element
---     its index within its corresponding segment.
+--   - A_II1 : [m]t; the "segment indices"; a mapping from element
+--     index to index of the segment it belongs to.
+--
+--   - A_II2 : [m]t; the "inner indices"; a mapping from element index
+--     to index within its corresponding segment.
 --
 -- Some of these structures can be computed from each other, but
 -- conceptually they all coexist.
@@ -93,7 +96,9 @@ import Prelude hiding (div, rem)
 --
 --   A_O = [0, 0, 6]
 --
---   A_II = [1,1,1,1,1,1,2,2,2,2]
+--   A_II1 = [0,0,0,1,3,3,4,6,6,6]
+--
+--   A_II2 = [1,1,1,1,1,1,2,2,2,2]
 
 data FlattenEnv = FlattenEnv
 
@@ -291,18 +296,18 @@ mkIrregFromReg segments arr = do
   segment_size <-
     letSubExp "reg_seg_size" <=< toExp . product . map pe64 $
       drop (segmentsRank segments) (arrayDims arr_t)
-  segments_arr <-
+  arr_S <-
     letExp "reg_segments" . BasicOp $
       Replicate (segmentsShape segments) segment_size
   num_elems <-
     letSubExp "reg_num_elems" <=< toExp $ product $ map pe64 $ arrayDims arr_t
-  elems <-
-    letExp "reg_elems" . BasicOp $
+  arr_D <-
+    letExp "reg_D" . BasicOp $
       Reshape ReshapeArbitrary (Shape [num_elems]) arr
-  flags <- letExp "reg_flags" <=< segMap (Solo num_elems) $ \(Solo i) -> do
+  arr_F <- letExp "reg_F" <=< segMap (Solo num_elems) $ \(Solo i) -> do
     flag <- letSubExp "flag" <=< toExp $ (pe64 i `rem` pe64 segment_size) .==. 0
     pure [subExpRes flag]
-  offsets <- letExp "reg_offsets" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
+  arr_O <- letExp "reg_O" <=< segMap (shapeDims (segmentsShape segments)) $ \is -> do
     let flat_seg_i =
           flattenIndex
             (map pe64 (shapeDims (segmentsShape segments)))
@@ -311,10 +316,10 @@ mkIrregFromReg segments arr = do
     pure [subExpRes offset]
   pure $
     IrregularRep
-      { irregularS = segments_arr,
-        irregularF = flags,
-        irregularO = offsets,
-        irregularD = elems
+      { irregularS = arr_S,
+        irregularF = arr_F,
+        irregularO = arr_O,
+        irregularD = arr_D
       }
 
 -- Get the irregular representation of a var.
