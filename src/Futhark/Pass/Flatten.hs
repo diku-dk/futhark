@@ -614,11 +614,8 @@ onMapInputArr segments env inps ii2 p arr = do
   case lookup arr inps of
     Just v_inp ->
       case v_inp of
-        DistInputFree vs t -> do
-          v <-
-            letExp (baseString vs <> "_flat") . BasicOp $
-              Reshape ReshapeArbitrary (Shape [ws_prod]) vs
-          pure $ MapArray v t
+        DistInputFree vs t ->
+          pure $ MapArray vs t
         DistInput rt _ ->
           case resVar rt env of
             Irregular rep -> do
