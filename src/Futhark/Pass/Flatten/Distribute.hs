@@ -48,14 +48,14 @@ distInputType (DistInput _ t) = t
 
 data DistType
   = DistType
+      -- | Outer regular size.
       SubExp
-      -- ^ Outer regular size.
-      Rank
-      -- ^ Irregular dimensions on top (but after the leading regular
+      -- | Irregular dimensions on top (but after the leading regular
       -- size).
-      Type
-      -- ^ The regular "element type" - in the worst case, at least a
+      Rank
+      -- | The regular "element type" - in the worst case, at least a
       -- scalar.
+      Type
   deriving (Eq, Ord, Show)
 
 data DistResult = DistResult {distResTag :: ResTag, distResType :: DistType}

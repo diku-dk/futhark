@@ -448,7 +448,7 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         fmap (subExpsRes . pure) . letSubExp "v" <=< toExp $
           primExpFromSubExp (IntType it) x'
             ~+~ sExt it (untyped (pe64 v'))
-              ~*~ primExpFromSubExp (IntType it) s'
+            ~*~ primExpFromSubExp (IntType it) s'
       pure $ insertIrregular ns flags offsets (distResTag res) elems' env
     Replicate (Shape [n]) (Var v) -> do
       ns <- elemArr segments env inps n
@@ -574,7 +574,8 @@ onMapFreeVar segments env inps ws (ws_flags, ws_offsets, ws_elems) v = do
     ws_prod <- arraySize 0 <$> lookupType ws_elems
     fmap (v,) $ case v_inp of
       DistInputFree v' t -> do
-        fmap (`MapArray` t) . letExp (baseString v <> "_rep_free_free_inp")
+        fmap (`MapArray` t)
+          . letExp (baseString v <> "_rep_free_free_inp")
           <=< segMap (Solo ws_prod)
           $ \(Solo i) -> do
             segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
@@ -595,7 +596,8 @@ onMapFreeVar segments env inps ws (ws_flags, ws_offsets, ws_elems) v = do
                   }
           pure $ MapOther rep' t
         Regular vs ->
-          fmap (`MapArray` t) . letExp (baseString v <> "_rep_free_reg_inp")
+          fmap (`MapArray` t)
+            . letExp (baseString v <> "_rep_free_reg_inp")
             <=< segMap (Solo ws_prod)
             $ \(Solo i) -> do
               segment <- letSubExp "segment" =<< eIndex segments_per_elem [eSubExp i]
