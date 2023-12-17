@@ -165,7 +165,7 @@ readInputs segments env is = mapM_ onInput
                 letSubExp "num_elems" =<< toExp (product $ map pe64 $ arrayDims t)
               let slice = Slice [DimSlice offset num_elems (intConst Int64 1)]
               v_flat <-
-                letExp (baseString v <> "_float") $ BasicOp $ Index elems slice
+                letExp (baseString v <> "_flat") $ BasicOp $ Index elems slice
               letBindNames [v] . BasicOp $
                 Reshape ReshapeArbitrary (arrayShape t) v_flat
 
