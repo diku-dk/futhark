@@ -128,8 +128,8 @@ genScatter dest n f = do
   space <- mkSegSpace [(gtid, n)]
   ((res, v_t), stms) <- collectStms $ localScope (scopeOfSegSpace space) $ do
     (i, v) <- f $ Var gtid
-    v_t <- subExpType v
-    pure (WriteReturns mempty dest [(Slice [DimFix (Var i)], v)], v_t)
+    dest_t <- lookupType dest
+    pure (WriteReturns mempty dest [(Slice [DimFix (Var i)], v)], dest_t)
   let kbody = KernelBody () stms [res]
   pure $ Op $ SegOp $ SegMap (SegThread SegVirt Nothing) space [v_t] kbody
 
