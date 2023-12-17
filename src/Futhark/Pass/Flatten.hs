@@ -36,6 +36,65 @@ import Futhark.Util (mapEither)
 import Futhark.Util.IntegralExp
 import Prelude hiding (div, rem)
 
+-- Note [Representation of Flat Arrays]
+--
+-- This flattening implementation uses largely the nomenclature and
+-- structure described by Cosmin Oancea. In particular, consider an
+-- irregular array 'A' where
+--
+--   - A has 'n' segments (outermost dimension).
+--
+--   - A has element type 't'.
+--
+--   - A has a total of 'm' elements (where 'm' is divisible by 'n',
+--     and may indeed be 'm').
+--
+-- Then A is represented by the following arrays:
+--
+--   - A_D : [m]t; the "data array".
+--
+--   - A_S : [n]i64; the "shape array" giving the size of each segment.
+--
+--   - A_F : [m]bool; the "flag array", indicating when an element begins a
+--     new segment.
+--
+--   - A_O : [n]i64; the offset array, indicating for each segment
+--     where it starts in the data (and flag) array.
+--
+--   - A_II : [m]t; the "inner indices"; indicating for each element
+--     its index within its corresponding segment.
+--
+-- Some of these structures can be computed from each other, but
+-- conceptually they all coexist.
+--
+-- Note that we only consider the *outer* dimension to be the
+-- "segments". Also, 't' may actually be an array itself (although in
+-- this case, the shape must be invariant to all parallel dimensions).
+-- The inner structure is preserved through code, not data. (Or in
+-- practice, ad-hoc auxiliary arrays produced by code.) In Cosmin's
+-- notation, we maintain only the information for the outermost
+-- dimension.
+--
+-- As an example, consider an irregular array
+--
+--   A = [ [], [ [1,2,3], [4], [], [5,6] ], [ [7], [], [8,9,10] ] ]
+--
+-- then
+--
+--   n = 3
+--
+--   m = 10
+--
+--   A_D = [1,2,3,4,5,6,7,8,9,10]
+--
+--   A_S = [0, 4, 3]
+--
+--   A_F = [T,F,F,F,F,F,T,F,F,F]
+--
+--   A_O = [0, 0, 6]
+--
+--   A_II = [1,1,1,1,1,1,2,2,2,2]
+
 data FlattenEnv = FlattenEnv
 
 newtype FlattenM a = FlattenM (StateT VNameSource (Reader FlattenEnv) a)
@@ -50,10 +109,10 @@ newtype FlattenM a = FlattenM (StateT VNameSource (Reader FlattenEnv) a)
 
 data IrregularRep = IrregularRep
   { -- | Array of size of each segment, type @[]i64@.
-    irregularSegments :: VName,
-    irregularFlags :: VName,
-    irregularOffsets :: VName,
-    irregularElems :: VName
+    irregularS :: VName,
+    irregularF :: VName,
+    irregularO :: VName,
+    irregularD :: VName
   }
   deriving (Show)
 
@@ -203,17 +262,17 @@ distCerts inps aux env = Certs $ map f $ unCerts $ stmAuxCerts aux
       Just (DistInput rt _) ->
         case resVar rt env of
           Regular vs -> vs
-          Irregular r -> irregularElems r
+          Irregular r -> irregularD r
 
 -- | Only sensible for variables of segment-invariant type.
 elemArr :: Segments -> DistEnv -> DistInputs -> SubExp -> Builder GPU VName
 elemArr segments env inps (Var v)
   | Just v_inp <- lookup v inps =
       case v_inp of
-        DistInputFree vs _ -> irregularElems <$> mkIrregFromReg segments vs
+        DistInputFree vs _ -> irregularD <$> mkIrregFromReg segments vs
         DistInput rt _ -> case resVar rt env of
-          Irregular r -> pure $ irregularElems r
-          Regular vs -> irregularElems <$> mkIrregFromReg segments vs
+          Irregular r -> pure $ irregularD r
+          Regular vs -> irregularD <$> mkIrregFromReg segments vs
 elemArr segments _ _ se = do
   rep <- letExp "rep" $ BasicOp $ Replicate (segmentsShape segments) se
   dims <- arrayDims <$> lookupType rep
@@ -252,10 +311,10 @@ mkIrregFromReg segments arr = do
     pure [subExpRes offset]
   pure $
     IrregularRep
-      { irregularSegments = segments_arr,
-        irregularFlags = flags,
-        irregularOffsets = offsets,
-        irregularElems = elems
+      { irregularS = segments_arr,
+        irregularF = flags,
+        irregularO = offsets,
+        irregularD = elems
       }
 
 -- Get the irregular representation of a var.
@@ -294,7 +353,7 @@ replicateIrreg segments env ns desc rep = do
       n <-
         letSubExp "n" =<< eIndex ns [eSubExp i]
       old_segment <-
-        letSubExp "old_segment" =<< eIndex (irregularSegments rep) [eSubExp i]
+        letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp i]
       full_segment <-
         letSubExp "new_segment" =<< toExp (pe64 n * pe64 old_segment)
       pure $ subExpsRes [full_segment]
@@ -310,7 +369,7 @@ replicateIrreg segments env ns desc rep = do
       letSubExp "segment_i" =<< eIndex ns_full_elems [eSubExp i]
     -- Size of original segment.
     old_segment <-
-      letSubExp "old_segment" =<< eIndex (irregularSegments rep) [eSubExp segment_i]
+      letSubExp "old_segment" =<< eIndex (irregularS rep) [eSubExp segment_i]
     -- Index of value inside *new* segment.
     j_new <-
       letSubExp "j_new" =<< eIndex flat_to_segs [eSubExp i]
@@ -319,18 +378,18 @@ replicateIrreg segments env ns desc rep = do
       letSubExp "j_old" =<< toExp (pe64 j_new `rem` pe64 old_segment)
     -- Offset of values in original segment.
     offset <-
-      letSubExp "offset" =<< eIndex (irregularOffsets rep) [eSubExp segment_i]
+      letSubExp "offset" =<< eIndex (irregularO rep) [eSubExp segment_i]
     v <-
       letSubExp "v"
-        =<< eIndex (irregularElems rep) [toExp $ pe64 offset + pe64 j_old]
+        =<< eIndex (irregularD rep) [toExp $ pe64 offset + pe64 j_old]
     pure $ subExpsRes [v]
 
   pure $
     IrregularRep
-      { irregularSegments = ns_full,
-        irregularFlags = ns_full_flags,
-        irregularOffsets = ns_full_offsets,
-        irregularElems = elems
+      { irregularS = ns_full,
+        irregularF = ns_full_flags,
+        irregularO = ns_full_offsets,
+        irregularD = elems
       }
 
 rearrangeFlat :: (IntegralExp num) => [Int] -> [num] -> num -> num
@@ -364,10 +423,10 @@ rearrangeIrreg segments env v_t perm (IrregularRep shape flags offsets elems) = 
       pure [subExpRes v']
   pure $
     IrregularRep
-      { irregularSegments = shape,
-        irregularFlags = flags,
-        irregularOffsets = offsets,
-        irregularElems = elems'
+      { irregularS = shape,
+        irregularF = flags,
+        irregularO = offsets,
+        irregularD = elems'
       }
 
 transformDistBasicOp ::
@@ -472,11 +531,11 @@ transformDistBasicOp segments env (inps, res, pe, aux, e) =
         Just (DistInput rt _) ->
           case resVar rt env of
             Irregular r -> do
-              let name = baseString (irregularElems r) <> "_copy"
+              let name = baseString (irregularD r) <> "_copy"
               elems_copy <-
                 letExp name . BasicOp $
-                  Replicate mempty (Var $ irregularElems r)
-              let rep = Irregular $ r {irregularElems = elems_copy}
+                  Replicate mempty (Var $ irregularD r)
+              let rep = Irregular $ r {irregularD = elems_copy}
               pure $ insertRep (distResTag res) rep env
             Regular v' -> do
               v'' <-
@@ -586,13 +645,13 @@ onMapFreeVar segments env inps ws (ws_flags, ws_offsets, ws_elems) v = do
             <=< segMap (Solo ws_prod)
             $ \(Solo i) -> do
               segment <- letSubExp "segment" =<< eIndex ws_elems [eSubExp i]
-              subExpsRes . pure <$> (letSubExp "v" =<< eIndex (irregularOffsets rep) [eSubExp segment])
+              subExpsRes . pure <$> (letSubExp "v" =<< eIndex (irregularO rep) [eSubExp segment])
           let rep' =
                 IrregularRep
-                  { irregularSegments = ws,
-                    irregularFlags = irregularFlags rep,
-                    irregularOffsets = offsets,
-                    irregularElems = irregularElems rep
+                  { irregularS = ws,
+                    irregularF = irregularF rep,
+                    irregularO = offsets,
+                    irregularD = irregularD rep
                   }
           pure $ MapOther rep' t
         Regular vs ->
@@ -621,12 +680,12 @@ onMapInputArr segments env inps ii2 p arr = do
         DistInput rt _ ->
           case resVar rt env of
             Irregular rep -> do
-              elems_t <- lookupType $ irregularElems rep
+              elems_t <- lookupType $ irregularD rep
               -- If parameter type of the map corresponds to the
               -- element type of the value array, we can map it
               -- directly.
               if stripArray (segmentsRank segments) elems_t == paramType p
-                then pure $ MapArray (irregularElems rep) elems_t
+                then pure $ MapArray (irregularD rep) elems_t
                 else do
                   -- Otherwise we need to perform surgery on the metadata.
                   ~[p_segments, p_offsets] <- letTupExp
@@ -636,16 +695,16 @@ onMapInputArr segments env inps ii2 p arr = do
                       segment_i <-
                         letSubExp "segment" =<< eIndex ii2 [eSubExp i]
                       segment <-
-                        letSubExp "v" =<< eIndex (irregularSegments rep) [eSubExp segment_i]
+                        letSubExp "v" =<< eIndex (irregularS rep) [eSubExp segment_i]
                       offset <-
-                        letSubExp "v" =<< eIndex (irregularOffsets rep) [eSubExp segment_i]
+                        letSubExp "v" =<< eIndex (irregularO rep) [eSubExp segment_i]
                       pure $ subExpsRes [segment, offset]
                   let rep' =
                         IrregularRep
-                          { irregularElems = irregularElems rep,
-                            irregularFlags = irregularFlags rep,
-                            irregularSegments = p_segments,
-                            irregularOffsets = p_offsets
+                          { irregularD = irregularD rep,
+                            irregularF = irregularF rep,
+                            irregularS = p_segments,
+                            irregularO = p_offsets
                           }
                   pure $ MapOther rep' elems_t
             Regular vs ->
@@ -831,10 +890,10 @@ transformDistStm segments env (DistStm inps res stm) = do
                 pure $
                   Irregular $
                     IrregularRep
-                      { irregularSegments = segs',
-                        irregularFlags = flags',
-                        irregularOffsets = offsets',
-                        irregularElems = elems'
+                      { irregularS = segs',
+                        irregularF = flags',
+                        irregularO = offsets',
+                        irregularD = elems'
                       }
       -- Given the indices for which a branch is taken and its body,
       -- distribute the statements of the body of that branch.
@@ -887,7 +946,7 @@ transformDistStm segments env (DistStm inps res stm) = do
       -- The `offsets` variable is the offsets of the final result,
       -- whereas `irregRep` is the irregular representation of the result of a single branch.
       let scatterIrregular offsets space (is, irregRep) = do
-            let IrregularRep {irregularSegments = segs, irregularElems = elems} = irregRep
+            let IrregularRep {irregularS = segs, irregularD = elems} = irregRep
             (_, _, ii1) <- doRepIota segs
             (_, _, ii2) <- doSegIota segs
             ~(Array _ (Shape [size]) _) <- lookupType elems
@@ -921,7 +980,7 @@ transformDistStm segments env (DistStm inps res stm) = do
                 -- Create a blank space for the 'segs'
                 segsSpace <- letExp "blank_segs" =<< eBlank segsType
                 -- Write back the segs of each branch to the blank space
-                segs <- foldM scatterRegular segsSpace $ zip iss (irregularSegments <$> branchesIrregRep)
+                segs <- foldM scatterRegular segsSpace $ zip iss (irregularS <$> branchesIrregRep)
                 (_, offsets, num_elems) <- exScanAndSum segs
                 let resultType = Array pt (Shape [num_elems]) NoUniqueness
                 -- Create the blank space for the result
@@ -932,10 +991,10 @@ transformDistStm segments env (DistStm inps res stm) = do
                 pure $
                   Irregular $
                     IrregularRep
-                      { irregularSegments = segs,
-                        irregularFlags = flags,
-                        irregularOffsets = offsets,
-                        irregularElems = elems
+                      { irregularS = segs,
+                        irregularF = flags,
+                        irregularO = offsets,
+                        irregularD = elems
                       }
               Acc {} -> error "transformDistStm: Acc"
               Mem {} -> error "transformDistStm: Mem"
@@ -1011,7 +1070,7 @@ transformDistributed irregs segments dist = do
           let shape = segmentsShape segments <> arrayShape v_t
           v_copy <-
             letExp (baseString v) . BasicOp $
-              Replicate mempty (Var $ irregularElems irreg)
+              Replicate mempty (Var $ irregularD irreg)
           letBindNames [v] $
             BasicOp (Reshape ReshapeArbitrary shape v_copy)
   forM_ reps $ \(v, r) ->
@@ -1096,10 +1155,10 @@ liftParam w fparam =
         ( [num_elems, segments, flags, offsets, elems],
           Irregular $
             IrregularRep
-              { irregularSegments = paramName segments,
-                irregularFlags = paramName flags,
-                irregularOffsets = paramName offsets,
-                irregularElems = paramName elems
+              { irregularS = paramName segments,
+                irregularF = paramName flags,
+                irregularO = paramName offsets,
+                irregularD = paramName elems
               }
         )
     Acc {} ->
@@ -1118,10 +1177,10 @@ liftArg segments inps env (se, d) = do
   where
     mkIrrep
       ( IrregularRep
-          { irregularSegments = segs,
-            irregularFlags = flags,
-            irregularOffsets = offsets,
-            irregularElems = elems
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
           }
         ) = do
         t <- lookupType elems
@@ -1161,10 +1220,10 @@ liftResult segments inps env res = map (SubExpRes mempty . Var) <$> vs
         Irregular irreg -> mkIrrep irreg
     mkIrrep
       ( IrregularRep
-          { irregularSegments = segs,
-            irregularFlags = flags,
-            irregularOffsets = offsets,
-            irregularElems = elems
+          { irregularS = segs,
+            irregularF = flags,
+            irregularO = offsets,
+            irregularD = elems
           }
         ) = do
         t <- lookupType elems
