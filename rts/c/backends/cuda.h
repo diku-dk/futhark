@@ -196,6 +196,10 @@ void futhark_context_config_set_default_grid_size(struct futhark_context_config 
   cfg->default_grid_size_changed = 1;
 }
 
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+  futhark_context_config_set_default_thread_block_size(cfg, size);
+}
+
 void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
   futhark_context_config_set_default_grid_size(cfg, num);
 }
