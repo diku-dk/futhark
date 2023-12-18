@@ -573,7 +573,7 @@ generateTuningParams params = do
       size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
       size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
       num_params = length params
-  earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  earlyDecl [C.cedecl|struct tuning_params { int dummy; $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
   earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
