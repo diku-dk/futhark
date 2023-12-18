@@ -3,14 +3,14 @@
 -- | Code generation for 'SegMap' is quite straightforward.  The only
 -- trick is virtualisation in case the physical number of threads is
 -- not sufficient to cover the logical thread space.  This is handled
--- by having actual workgroups run a loop to imitate multiple workgroups.
+-- by having actual threadblocks run a loop to imitate multiple threadblocks.
 module Futhark.CodeGen.ImpGen.GPU.SegMap (compileSegMap) where
 
 import Control.Monad
 import Futhark.CodeGen.ImpCode.GPU qualified as Imp
 import Futhark.CodeGen.ImpGen
 import Futhark.CodeGen.ImpGen.GPU.Base
-import Futhark.CodeGen.ImpGen.GPU.Group
+import Futhark.CodeGen.ImpGen.GPU.Block
 import Futhark.IR.GPUMem
 import Futhark.Util.IntegralExp (divUp)
 import Prelude hiding (quot, rem)
@@ -27,19 +27,19 @@ compileSegMap pat lvl space kbody = do
 
   let (is, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
-      group_size' = pe64 <$> kAttrGroupSize attrs
+      tblock_size' = pe64 <$> kAttrBlockSize attrs
 
   emit $ Imp.DebugPrint "\n# SegMap" Nothing
   case lvl of
     SegThread {} -> do
-      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims' `divUp` unCount group_size'
+      virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ sExt32 $ product dims' `divUp` unCount tblock_size'
       sKernelThread "segmap" (segFlat space) attrs $
-        virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
+        virtualiseBlocks (segVirt lvl) virt_num_tblocks $ \tblock_id -> do
           local_tid <- kernelLocalThreadId . kernelConstants <$> askEnv
 
           global_tid <-
             dPrimVE "global_tid" $
-              sExt64 group_id * sExt64 (unCount group_size')
+              sExt64 tblock_id * sExt64 (unCount tblock_size')
                 + sExt64 local_tid
 
           dIndexSpace (zip is dims') global_tid
@@ -48,17 +48,17 @@ compileSegMap pat lvl space kbody = do
             compileStms mempty (kernelBodyStms kbody) $
               zipWithM_ (compileThreadResult space) (patElems pat) $
                 kernelBodyResult kbody
-    SegGroup {} -> do
-      pc <- precomputeConstants group_size' $ kernelBodyStms kbody
-      virt_num_groups <- dPrimVE "virt_num_groups" $ sExt32 $ product dims'
-      sKernelGroup "segmap_intragroup" (segFlat space) attrs $ do
+    SegBlock {} -> do
+      pc <- precomputeConstants tblock_size' $ kernelBodyStms kbody
+      virt_num_tblocks <- dPrimVE "virt_num_tblocks" $ sExt32 $ product dims'
+      sKernelBlock "segmap_intrablock" (segFlat space) attrs $ do
         precomputedConstants pc $
-          virtualiseGroups (segVirt lvl) virt_num_groups $ \group_id -> do
-            dIndexSpace (zip is dims') $ sExt64 group_id
+          virtualiseBlocks (segVirt lvl) virt_num_tblocks $ \tblock_id -> do
+            dIndexSpace (zip is dims') $ sExt64 tblock_id
 
             compileStms mempty (kernelBodyStms kbody) $
-              zipWithM_ (compileGroupResult space) (patElems pat) $
+              zipWithM_ (compileBlockResult space) (patElems pat) $
                 kernelBodyResult kbody
-    SegThreadInGroup {} ->
-      error "compileSegMap: SegThreadInGroup"
+    SegThreadInBlock {} ->
+      error "compileSegMap: SegThreadInBlock"
   emit $ Imp.DebugPrint "" Nothing

@@ -186,14 +186,22 @@ void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, co
   cfg->load_ptx_from = strdup(path);
 }
 
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
   cfg->default_block_size = size;
   cfg->default_block_size_changed = 1;
 }
 
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
   cfg->default_grid_size = num;
   cfg->default_grid_size_changed = 1;
+}
+
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+  futhark_context_config_set_default_thread_block_size(cfg, size);
+}
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_grid_size(cfg, num);
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
@@ -218,11 +226,13 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
       return 0;
     }
   }
-  if (strcmp(param_name, "default_group_size") == 0) {
+  if (strcmp(param_name, "default_thread_block_size") == 0
+      || strcmp(param_name, "default_group_size") == 0) {
     cfg->default_block_size = new_value;
     return 0;
   }
-  if (strcmp(param_name, "default_num_groups") == 0) {
+  if (strcmp(param_name, "default_num_groups") == 0 ||
+      strcmp(param_name, "default_grid_size") == 0) {
     cfg->default_grid_size = new_value;
     return 0;
   }
@@ -283,11 +293,11 @@ struct futhark_context {
 
   struct free_list gpu_free_list;
 
-  size_t max_group_size;
+  size_t max_thread_block_size;
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_local_memory;
+  size_t max_shared_memory;
   size_t max_bespoke;
   size_t max_registers;
   size_t max_cache;
@@ -461,11 +471,11 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
     opts[i++] = strdup("--disable-warnings");
   }
   opts[i++] = msgprintf("-D%s=%d",
-                        "max_group_size",
-                        (int)ctx->max_group_size);
+                        "max_thread_block_size",
+                        (int)ctx->max_thread_block_size);
   opts[i++] = msgprintf("-D%s=%d",
-                        "max_local_memory",
-                        (int)ctx->max_local_memory);
+                        "max_shared_memory",
+                        (int)ctx->max_shared_memory);
   opts[i++] = msgprintf("-D%s=%d",
                         "max_registers",
                         (int)ctx->max_registers);
@@ -479,7 +489,7 @@ static void cuda_nvrtc_mk_build_options(struct futhark_context *ctx, const char 
                           cfg->tuning_params[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
-  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_group_size);
+  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);
 
   // Time for the best lines of the code in the entire compiler.
   if (getenv("CUDA_HOME") != NULL) {
@@ -570,13 +580,13 @@ static void cuda_load_ptx_from_cache(struct futhark_context_config *cfg,
 static void cuda_size_setup(struct futhark_context *ctx)
 {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_group_size) {
+  if (cfg->default_block_size > ctx->max_thread_block_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_group_size, cfg->default_block_size);
+              ctx->max_thread_block_size, cfg->default_block_size);
     }
-    cfg->default_block_size = ctx->max_group_size;
+    cfg->default_block_size = ctx->max_thread_block_size;
   }
   if (cfg->default_grid_size > ctx->max_grid_size) {
     if (cfg->default_grid_size_changed) {
@@ -608,10 +618,10 @@ static void cuda_size_setup(struct futhark_context *ctx)
     const char* size_name = cfg->tuning_param_names[i];
     int64_t max_value = 0, default_value = 0;
 
-    if (strstr(size_class, "group_size") == size_class) {
-      max_value = ctx->max_group_size;
+    if (strstr(size_class, "thread_block_size") == size_class) {
+      max_value = ctx->max_thread_block_size;
       default_value = cfg->default_block_size;
-    } else if (strstr(size_class, "num_groups") == size_class) {
+    } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = cfg->default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
@@ -821,13 +831,13 @@ int backend_context_setup(struct futhark_context* ctx) {
   // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
   // for backwards compatibility.  Add _OPTIN and you seem to get the
   // right number.
-  ctx->max_local_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
+  ctx->max_shared_memory = device_query(ctx->dev, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
 #if CUDART_VERSION >= 12000
-  ctx->max_local_memory -= device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
+  ctx->max_shared_memory -= device_query(ctx->dev, RESERVED_SHARED_MEMORY_PER_BLOCK);
 #endif
-  ctx->max_group_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
+  ctx->max_thread_block_size = device_query(ctx->dev, MAX_THREADS_PER_BLOCK);
   ctx->max_grid_size = device_query(ctx->dev, MAX_GRID_DIM_X);
-  ctx->max_tile_size = sqrt(ctx->max_group_size);
+  ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, MAX_REGISTERS_PER_BLOCK);
@@ -884,7 +894,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   // Unless the below is set, the kernel is limited to 48KiB of memory.
   CUDA_SUCCEED_FATAL(cuFuncSetAttribute(*kernel,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                        ctx->max_local_memory));
+                                        ctx->max_shared_memory));
 }
 
 static void gpu_free_kernel(struct futhark_context *ctx,
@@ -1016,7 +1026,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              gpu_kernel kernel, const char *name,
                              const int32_t grid[3],
                              const int32_t block[3],
-                             unsigned int local_mem_bytes,
+                             unsigned int shared_mem_bytes,
                              int num_args,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
@@ -1040,7 +1050,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],
-                        local_mem_bytes),
+                        shared_mem_bytes),
               event,
               (event_report_fn)cuda_event_report);
   }
@@ -1049,7 +1059,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     (cuLaunchKernel(kernel,
                     grid[0], grid[1], grid[2],
                     block[0], block[1], block[2],
-                    local_mem_bytes, ctx->stream,
+                    shared_mem_bytes, ctx->stream,
                     args, NULL));
 
   if (event != NULL) {

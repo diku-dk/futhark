@@ -237,9 +237,9 @@ type ReorderM = StateT State PassM
 data State = State
   { -- | All statements that already have been processed from the sequence,
     -- divided into alternating groups of non-GPUBody and GPUBody statements.
-    -- Groups at even indices only contain non-GPUBody statements. Groups at
+    -- Blocks at even indices only contain non-GPUBody statements. Blocks at
     -- odd indices only contain GPUBody statements.
-    stateGroups :: Groups,
+    stateBlocks :: Blocks,
     stateEquivalents :: EquivalenceTable
   }
 
@@ -257,14 +257,14 @@ data Entry = Entry
     -- In @let res = gpu { x }@ this is @res@.
     entryResult :: VName,
     -- | The index of the group that `entryResult` is bound in.
-    entryGroupIdx :: Int,
+    entryBlockIdx :: Int,
     -- | If 'False' then the entry key is a variable that binds the same value
     -- as the 'entryValue'. Otherwise it binds an array with an outer dimension
     -- of one whose row equals that value.
     entryStored :: Bool
   }
 
-type Groups = SQ.Seq Group
+type Blocks = SQ.Seq Group
 
 -- | A group is a subsequence of statements, usually either only GPUBody
 -- statements or only non-GPUBody statements. The 'Usage' statistics of those
@@ -313,14 +313,14 @@ groupDependencies = usageDependencies . groupUsage
 initialState :: State
 initialState =
   State
-    { stateGroups = SQ.singleton mempty,
+    { stateBlocks = SQ.singleton mempty,
       stateEquivalents = mempty
     }
 
 -- | Modify the groups that the sequence has been split into so far.
-modifyGroups :: (Groups -> Groups) -> ReorderM ()
-modifyGroups f =
-  modify $ \st -> st {stateGroups = f (stateGroups st)}
+modifyBlocks :: (Blocks -> Blocks) -> ReorderM ()
+modifyBlocks f =
+  modify $ \st -> st {stateBlocks = f (stateBlocks st)}
 
 -- | Remove these keys from the equivalence table.
 removeEquivalents :: IS.IntSet -> ReorderM ()
@@ -352,14 +352,14 @@ moveGPUBody stm usage consumed = do
   let usage' = usage {usageDependencies = deps'}
 
   -- Move the GPUBody.
-  grps <- gets stateGroups
+  grps <- gets stateBlocks
   let f = groupBlocks usage' consumed
   let idx = fromMaybe 1 (SQ.findIndexR f grps)
   let idx' = case idx `mod` 2 of
         0 -> idx + 1
         _ | consumes idx grps -> idx + 2
         _ -> idx
-  modifyGroups $ moveToGrp (stm, usage) idx'
+  modifyBlocks $ moveToGrp (stm, usage) idx'
 
   -- Record the kernel equivalents of the bound results.
   let pes = patElems (stmPat stm)
@@ -382,11 +382,11 @@ moveGPUBody stm usage consumed = do
 -- statement sequence, possibly a new group at the end of sequence.
 moveOther :: Stm GPU -> Usage -> Consumption -> ReorderM ()
 moveOther stm usage consumed = do
-  grps <- gets stateGroups
+  grps <- gets stateBlocks
   let f = groupBlocks usage consumed
   let idx = fromMaybe 0 (SQ.findIndexR f grps)
   let idx' = ((idx + 1) `div` 2) * 2
-  modifyGroups $ moveToGrp (stm, usage) idx'
+  modifyBlocks $ moveToGrp (stm, usage) idx'
   recordEquivalentsOf stm idx'
 
 -- | @recordEquivalentsOf stm idx@ records the GPUBody result and/or return
@@ -406,11 +406,11 @@ recordEquivalentsOf stm idx = do
   case stm of
     Let (Pat [PatElem x _]) _ (BasicOp (SubExp (Var n)))
       | Just entry <- IM.lookup (baseTag n) eqs,
-        entryGroupIdx entry == idx - 1 ->
+        entryBlockIdx entry == idx - 1 ->
           recordEquivalent x entry
     Let (Pat [PatElem x _]) _ (BasicOp (Index arr slice))
       | Just entry <- IM.lookup (baseTag arr) eqs,
-        entryGroupIdx entry == idx - 1,
+        entryBlockIdx entry == idx - 1,
         Slice (DimFix i : dims) <- slice,
         i == intConst Int64 0,
         dims == map sliceDim (arrayDims $ entryType entry) ->
@@ -429,7 +429,7 @@ groupBlocks usage consumed grp =
 
 -- | @moveToGrp stm idx grps@ moves @stm@ into the group at index @idx@ of
 -- @grps@.
-moveToGrp :: (Stm GPU, Usage) -> Int -> Groups -> Groups
+moveToGrp :: (Stm GPU, Usage) -> Int -> Blocks -> Blocks
 moveToGrp stm idx grps
   | idx >= SQ.length grps =
       moveToGrp stm idx (grps |> mempty)
@@ -464,10 +464,10 @@ type RewriteM = StateT (Stms GPU) ReorderM
 -- it, merging GPUBody groups into single kernels in the process.
 collapse :: ReorderM Group
 collapse = do
-  grps <- zip (cycle [False, True]) . toList <$> gets stateGroups
+  grps <- zip (cycle [False, True]) . toList <$> gets stateBlocks
   grp <- foldM clps mempty grps
 
-  modify $ \st -> st {stateGroups = SQ.singleton grp}
+  modify $ \st -> st {stateBlocks = SQ.singleton grp}
   pure grp
   where
     clps grp0 (gpu_bodies, Group stms usage) = do

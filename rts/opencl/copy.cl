@@ -1,7 +1,7 @@
 // Start of copy.cl
 
 #define GEN_COPY_KERNEL(NAME, ELEM_TYPE) \
-FUTHARK_KERNEL void lmad_copy_##NAME(LOCAL_MEM_PARAM                    \
+FUTHARK_KERNEL void lmad_copy_##NAME(SHARED_MEM_PARAM                   \
                                __global ELEM_TYPE *dst_mem,             \
                                int64_t dst_offset,                      \
                                __global ELEM_TYPE *src_mem,             \

@@ -10,7 +10,7 @@ int gpu_launch_kernel(struct futhark_context* ctx,
                       gpu_kernel kernel, const char *name,
                       const int32_t grid[3],
                       const int32_t block[3],
-                      unsigned int local_mem_bytes,
+                      unsigned int shared_mem_bytes,
                       int num_args,
                       void* args[num_args],
                       size_t args_sizes[num_args]);
@@ -28,9 +28,9 @@ void gpu_create_kernel(struct futhark_context *ctx,
                        gpu_kernel* kernel,
                        const char* name);
 
-// Max number of groups we allow along the second or third dimension
-// for transpositions.
-#define MAX_TR_GROUPS 65535
+// Max number of thead blocks we allow along the second or third
+// dimension for transpositions.
+#define MAX_TR_THREAD_BLOCKS 65535
 
 struct builtin_kernels {
   // We have a lot of ways to transpose arrays.
@@ -327,12 +327,12 @@ static int gpu_map_transpose(struct futhark_context* ctx,
     args_sizes[8] = sizeof(int64_t);
   }
 
-  // Cap the number of groups we launch and figure out how many
+  // Cap the number of thead blocks we launch and figure out how many
   // repeats we need alongside each dimension.
-  int32_t repeat_1 = grid[1] / MAX_TR_GROUPS;
-  int32_t repeat_2 = grid[2] / MAX_TR_GROUPS;
-  grid[1] = repeat_1 > 0 ? MAX_TR_GROUPS : grid[1];
-  grid[2] = repeat_2 > 0 ? MAX_TR_GROUPS : grid[2];
+  int32_t repeat_1 = grid[1] / MAX_TR_THREAD_BLOCKS;
+  int32_t repeat_2 = grid[2] / MAX_TR_THREAD_BLOCKS;
+  grid[1] = repeat_1 > 0 ? MAX_TR_THREAD_BLOCKS : grid[1];
+  grid[2] = repeat_2 > 0 ? MAX_TR_THREAD_BLOCKS : grid[2];
   args[9] = &repeat_1;
   args[10] = &repeat_2;
   args_sizes[9] = sizeof(repeat_1);
@@ -412,7 +412,7 @@ static int gpu_lmad_copy(struct futhark_context* ctx,
       args[6+i*3+2] = &zero;
     }
   }
-  const size_t w = 256; // XXX: hardcoded workgroup size.
+  const size_t w = 256; // XXX: hardcoded thread block size.
 
   return gpu_launch_kernel(ctx, kernel, "copy_lmad_dev_to_dev",
                            (const int32_t[3]) {(n+w-1)/w,1,1},

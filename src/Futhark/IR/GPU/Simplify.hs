@@ -59,9 +59,9 @@ simplifyKernelOp _ (SizeOp (GetSizeMax size_class)) =
 simplifyKernelOp _ (SizeOp (CmpSizeLe key size_class x)) = do
   x' <- Engine.simplify x
   pure (SizeOp $ CmpSizeLe key size_class x', mempty)
-simplifyKernelOp _ (SizeOp (CalcNumGroups w max_num_groups group_size)) = do
+simplifyKernelOp _ (SizeOp (CalcNumBlocks w max_num_tblocks tblock_size)) = do
   w' <- Engine.simplify w
-  pure (SizeOp $ CalcNumGroups w' max_num_groups group_size, mempty)
+  pure (SizeOp $ CalcNumBlocks w' max_num_tblocks tblock_size, mempty)
 simplifyKernelOp _ (GPUBody ts body) = do
   ts' <- Engine.simplify ts
   (hoisted, body') <-
