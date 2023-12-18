@@ -1525,17 +1525,19 @@ genCoalStmtInfo ::
   Stm (Aliases rep) ->
   ShortCircuitM rep (Maybe [SSPointInfo])
 -- CASE a) @let x <- copy(b^{lu})@
-genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Replicate (Shape []) (Var b))))
+genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Replicate (Shape []) (Var b))))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
+    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
       pure $ Just [(CopyCoal, id, x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
 -- CASE c) @let x[i] = b^{lu}@
-genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Update _ x slice_x (Var b))))
+genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Update _ x slice_x (Var b))))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x' lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
+    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
       pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
@@ -1543,10 +1545,11 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Update _ x slice_x (Var 
     updateIndFunSlice ind_fun slc_x =
       let slc_x' = map (fmap pe64) $ unSlice slc_x
        in IxFun.slice ind_fun $ Slice slc_x'
-genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b)))
+genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b)))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x' lutab,
     Just (MemBlock tpb shpb m_b ind_b) <- getScopeMemInfo b scopetab,
+    sameSpace td_env m_x m_b,
     b `nameIn` last_uses =
       pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
@@ -1555,7 +1558,7 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b))
       IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
-genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
+genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
   | Pat [PatElem x (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x lutab =
       pure $
@@ -1568,7 +1571,7 @@ genCoalStmtInfo lutab _ scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :|
       | Just (MemBlock tpb shpb@(Shape dims@(_ : _)) m_b ind_b) <- getScopeMemInfo b scopetab,
         Just d <- maybeNth concat_dim dims,
         offs' <- offs + pe64 d =
-          if b `nameIn` last_uses
+          if b `nameIn` last_uses && sameSpace td_env m_x m_b
             then
               let slc =
                     Slice $
@@ -1588,6 +1591,13 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (Op op)) = do
   pure $ ss_op lutab td_env scopetab pat (stmAuxCerts aux) op
 -- CASE other than a), b), c), or d) not supported
 genCoalStmtInfo _ _ _ _ = pure Nothing
+
+sameSpace :: (Coalesceable rep inner) => TopdownEnv rep -> VName -> VName -> Bool
+sameSpace td_env m_x m_b
+  | MemMem pat_space <- runReader (lookupMemInfo m_x) $ removeScopeAliases $ scope td_env,
+    MemMem return_space <- runReader (lookupMemInfo m_b) $ removeScopeAliases $ scope td_env =
+      pat_space == return_space
+  | otherwise = False
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
