@@ -175,7 +175,7 @@ segScatter2D desc updt_arr seq_dims (dim_x, dim_y) f = do
 
   let segspace = SegSpace ltid_flat $ seq_space ++ [(ltid_y, dim_y), (ltid_x, dim_x)]
       lvl =
-        SegThreadInGroup
+        SegThreadInBlock
           (SegNoVirtFull (SegSeqDims [0 .. length seq_dims - 1]))
 
   ((res_v, res_i), stms) <-

@@ -20,7 +20,7 @@ typedef unsigned long long uint64_t;
 #define __write_only
 #define __read_only
 
-static inline __device__ int get_group_id(int d) {
+static inline __device__ int get_tblock_id(int d) {
   switch (d) {
   case 0: return blockIdx.x;
   case 1: return blockIdx.y;
@@ -29,7 +29,7 @@ static inline __device__ int get_group_id(int d) {
   }
 }
 
-static inline __device__ int get_num_groups(int d) {
+static inline __device__ int get_num_tblocks(int d) {
   switch(d) {
   case 0: return gridDim.x;
   case 1: return gridDim.y;
@@ -93,9 +93,9 @@ static inline __device__ void barrier_local() {
 
 #define NAN (0.0/0.0)
 #define INFINITY (1.0/0.0)
-extern volatile __shared__ unsigned char local_mem[];
+extern volatile __shared__ unsigned char shared_mem[];
 
-#define LOCAL_MEM_PARAM
+#define SHARED_MEM_PARAM
 #define FUTHARK_KERNEL extern "C" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK)
 #define FUTHARK_KERNEL_SIZED(a,b,c) extern "C" __global__ __launch_bounds__(a*b*c)
 
