@@ -140,21 +140,20 @@ static inline int getrusage_thread(struct rusage *rusage)
 }
 
 /* returns the number of logical cores */
-static int num_processors()
-{
+static int num_processors(void) {
 #if  defined(_WIN32)
-/* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    int ncores = sysinfo.dwNumberOfProcessors;
-    fprintf(stderr, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
-    return ncores;
+  /* https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info */
+  SYSTEM_INFO sysinfo;
+  GetSystemInfo(&sysinfo);
+  int ncores = sysinfo.dwNumberOfProcessors;
+  fprintf(stderr, "Found %d cores on your Windows machine\n Is that correct?\n", ncores);
+  return ncores;
 #elif defined(__APPLE__)
-    int ncores;
-    size_t ncores_size = sizeof(ncores);
-    CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
-                "sysctlbyname (hw.logicalcpu)");
-    return ncores;
+  int ncores;
+  size_t ncores_size = sizeof(ncores);
+  CHECK_ERRNO(sysctlbyname("hw.logicalcpu", &ncores, &ncores_size, NULL, 0),
+              "sysctlbyname (hw.logicalcpu)");
+  return ncores;
 #elif defined(__linux__)
   return get_nprocs();
 #elif __EMSCRIPTEN__
