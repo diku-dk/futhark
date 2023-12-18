@@ -766,8 +766,8 @@ pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
   choice
     [ keyword "tblock_size" $> GPU.SizeThreadBlock,
-      keyword "num_tblocks" $> GPU.SizeNumThreadBlocks,
-      keyword "num_tblocks" $> GPU.SizeNumThreadBlocks,
+      keyword "num_tblocks" $> GPU.SizeGrid,
+      keyword "num_tblocks" $> GPU.SizeGrid,
       keyword "tile_size" $> GPU.SizeTile,
       keyword "reg_tile_size" $> GPU.SizeRegTile,
       keyword "shared_memory" $> GPU.SizeSharedMemory,

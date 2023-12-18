@@ -199,7 +199,7 @@ ensureGridKnown lvl =
       (grid, stms) <-
         runBuilder $
           KernelGrid
-            <$> (Count <$> getSize "num_tblocks" SizeNumThreadBlocks)
+            <$> (Count <$> getSize "num_tblocks" SizeGrid)
             <*> (Count <$> getSize "tblock_size" SizeThreadBlock)
       pure (stms, f $ Just grid, grid)
 

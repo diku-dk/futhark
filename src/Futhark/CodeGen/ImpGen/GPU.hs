@@ -113,7 +113,7 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblo
   max_num_tblocks :: TV Int32 <- dPrim "max_num_tblocks" int32
   sOp $
     Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
-      sizeClassWithEntryPoint fname SizeNumThreadBlocks
+      sizeClassWithEntryPoint fname SizeGrid
 
   -- If 'w' is small, we launch fewer blocks than we normally would.
   -- We don't want any idle blocks.

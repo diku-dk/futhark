@@ -441,12 +441,12 @@ void futhark_context_config_set_default_group_size(struct futhark_context_config
   futhark_context_config_set_default_thread_block_size(cfg, size);
 }
 
-void futhark_context_config_set_default_num_thread_blocks(struct futhark_context_config *cfg, int num) {
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
   cfg->default_num_groups = num;
 }
 
 void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_num_thread_blocks(cfg, num);
+  futhark_context_config_set_default_grid_size(cfg, num);
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
@@ -476,7 +476,7 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
     cfg->default_group_size = new_value;
     return 0;
   }
-  if (strcmp(param_name, "default_num_thread_blocks") == 0 ||
+  if (strcmp(param_name, "default_grid_size") == 0 ||
       strcmp(param_name, "default_num_groups") == 0) {
     cfg->default_num_groups = new_value;
     return 0;
@@ -853,7 +853,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = max_thread_block_size;
       default_value = ctx->cfg->default_group_size;
-    } else if (strstr(size_class, "num_thread_blocks") == size_class) {
+    } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = max_thread_block_size; // Futhark assumes this constraint.
       default_value = ctx->cfg->default_num_groups;
       // XXX: as a quick and dirty hack, use twice as many threads for

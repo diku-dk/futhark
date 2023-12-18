@@ -191,13 +191,13 @@ void futhark_context_config_set_default_thread_block_size(struct futhark_context
   cfg->default_block_size_changed = 1;
 }
 
-void futhark_context_config_set_default_num_thread_blocks(struct futhark_context_config *cfg, int num) {
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
   cfg->default_grid_size = num;
   cfg->default_grid_size_changed = 1;
 }
 
 void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
-  futhark_context_config_set_default_num_thread_blocks(cfg, num);
+  futhark_context_config_set_default_grid_size(cfg, num);
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
@@ -228,7 +228,7 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
     return 0;
   }
   if (strcmp(param_name, "default_num_groups") == 0 ||
-      strcmp(param_name, "default_num_thread_blocks") == 0) {
+      strcmp(param_name, "default_grid_size") == 0) {
     cfg->default_grid_size = new_value;
     return 0;
   }
@@ -617,7 +617,7 @@ static void cuda_size_setup(struct futhark_context *ctx)
     if (strstr(size_class, "thread_block_size") == size_class) {
       max_value = ctx->max_thread_block_size;
       default_value = cfg->default_block_size;
-    } else if (strstr(size_class, "num_groups") == size_class) {
+    } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = cfg->default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for

@@ -330,11 +330,11 @@ gpuOptions =
         optionAction = [C.cstm|futhark_context_config_set_default_thread_block_size(cfg, atoi(optarg));|]
       },
     Option
-      { optionLongName = "default-num-thread-blocks",
+      { optionLongName = "default-grid-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
         optionDescription = "The default number of thread blocks that are launched.",
-        optionAction = [C.cstm|futhark_context_config_set_default_num_thread_blocks(cfg, atoi(optarg));|]
+        optionAction = [C.cstm|futhark_context_config_set_default_grid_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-group-size",
@@ -456,7 +456,7 @@ generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   GC.onClear [C.citem|if (ctx->error == NULL) { gpu_free_all(ctx); }|]
 
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_thread_blocks(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]

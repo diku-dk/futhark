@@ -81,9 +81,9 @@ instance HasSegOp GPU where
 -- Kernel: A GPU program that can be launched from the host.
 --
 -- Grid: The geometry of the thread blocks launched for a kernel. The
--- size of a grid is always in terms of the number of thread blocks. A
--- grid can have up to 3 dimensions, although we do not make much use
--- of it - and not at all prior to code generation.
+-- size of a grid is always in terms of the number of thread blocks
+-- ("grid size"). A grid can have up to 3 dimensions, although we do
+-- not make much use of it - and not at all prior to code generation.
 --
 -- Thread block: Just as in CUDA. "Workgroup" in OpenCL. Abbretiation:
 -- tblock. Never just call this "block"; there are too many things

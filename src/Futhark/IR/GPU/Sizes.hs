@@ -30,7 +30,8 @@ data SizeClass
   = -- | A threshold with an optional default.
     SizeThreshold KernelPath (Maybe Int64)
   | SizeThreadBlock
-  | SizeNumThreadBlocks
+  | -- | The number of thread blocks.
+    SizeGrid
   | SizeTile
   | SizeRegTile
   | -- | Likely not useful on its own, but querying the
@@ -54,7 +55,7 @@ instance Pretty SizeClass where
       pStep (v, False) = "!" <> pretty v
       def' = maybe "def" pretty def
   pretty SizeThreadBlock = "thread_block_size"
-  pretty SizeNumThreadBlocks = "num_thread_blocks"
+  pretty SizeGrid = "grid_size"
   pretty SizeTile = "tile_size"
   pretty SizeRegTile = "reg_tile_size"
   pretty SizeSharedMemory = "shared_memory"

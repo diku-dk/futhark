@@ -37,7 +37,7 @@ segThread desc =
   where
     kernelGrid =
       KernelGrid
-        <$> (Count <$> getSize (desc ++ "_num_tblocks") SizeNumThreadBlocks)
+        <$> (Count <$> getSize (desc ++ "_num_tblocks") SizeGrid)
         <*> (Count <$> getSize (desc ++ "_tblock_size") SizeThreadBlock)
 
 injectSOACS ::

@@ -1172,7 +1172,7 @@ lvlKernelAttrs lvl =
   where
     mkGrid = do
       tblock_size <- getSize "tblock_size" Imp.SizeThreadBlock
-      num_tblocks <- getSize "num_tblocks" Imp.SizeNumThreadBlocks
+      num_tblocks <- getSize "num_tblocks" Imp.SizeGrid
       pure $ defKernelAttrs (Count $ tvSize num_tblocks) (Count $ tvSize tblock_size)
 
 sKernel ::

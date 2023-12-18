@@ -471,14 +471,14 @@ The following functions are not interesting to most users.
    :c:func:`futhark_context_config_set_default_thread_block_size`;
    provided for backwards compatibility.
 
-.. c:function:: void futhark_context_config_set_default_num_thread_blocks(struct futhark_context_config *cfg, int num)
+.. c:function:: void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num)
 
    Set the default number of thread blocks used for kernels.
 
 .. c:function:: void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num)
 
    Identical to
-   :c:func:`futhark_context_config_set_default_num_thread_blocks`;
+   :c:func:`futhark_context_config_set_default_grid_size`;
    provided for backwards compatibility.
 
 .. c:function:: void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int num)
