@@ -765,9 +765,8 @@ pSOAC pr =
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
   choice
-    [ keyword "tblock_size" $> GPU.SizeThreadBlock,
-      keyword "num_tblocks" $> GPU.SizeGrid,
-      keyword "num_tblocks" $> GPU.SizeGrid,
+    [ keyword "thread_block_size" $> GPU.SizeThreadBlock,
+      keyword "grid_size" $> GPU.SizeGrid,
       keyword "tile_size" $> GPU.SizeTile,
       keyword "reg_tile_size" $> GPU.SizeRegTile,
       keyword "shared_memory" $> GPU.SizeSharedMemory,
@@ -938,8 +937,8 @@ pSegLevel =
         ]
     pKernelGrid =
       GPU.KernelGrid
-        <$> (lexeme "blocks=" $> GPU.Count <*> pSubExp <* pSemi)
-        <*> (lexeme "tblocksize=" $> GPU.Count <*> pSubExp)
+        <$> (lexeme "grid=" $> GPU.Count <*> pSubExp <* pSemi)
+        <*> (lexeme "blocksize=" $> GPU.Count <*> pSubExp)
 
 pHostOp :: PR rep -> Parser (op rep) -> Parser (GPU.HostOp op rep)
 pHostOp pr pOther =

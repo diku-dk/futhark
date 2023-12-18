@@ -110,7 +110,7 @@ instance PP.Pretty SegVirt where
 
 instance PP.Pretty KernelGrid where
   pretty (KernelGrid num_tblocks tblock_size) =
-    "blocks="
+    "grid="
       <> pretty num_tblocks
       <> PP.semi
         <+> "blocksize="
