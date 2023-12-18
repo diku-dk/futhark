@@ -5,8 +5,8 @@ module Futhark.IR.GPU.Sizes
     sizeDefault,
     KernelPath,
     Count (..),
-    NumGroups,
-    GroupSize,
+    NumBlocks,
+    BlockSize,
     NumThreads,
   )
 where
@@ -29,16 +29,16 @@ type KernelPath = [(Name, Bool)]
 data SizeClass
   = -- | A threshold with an optional default.
     SizeThreshold KernelPath (Maybe Int64)
-  | SizeGroup
-  | SizeNumGroups
+  | SizeThreadBlock
+  | SizeNumThreadBlocks
   | SizeTile
   | SizeRegTile
   | -- | Likely not useful on its own, but querying the
     -- maximum can be handy.
-    SizeLocalMemory
+    SizeSharedMemory
   | -- | A bespoke size with a default.
     SizeBespoke Name Int64
-  | -- | Amount of registers available per workgroup. Mostly
+  | -- | Amount of registers available per threadblock. Mostly
     -- meaningful for querying the maximum.
     SizeRegisters
   | -- | Amount of L2 cache memory, in bytes. Mostly meaningful for
@@ -53,11 +53,11 @@ instance Pretty SizeClass where
       pStep (v, True) = pretty v
       pStep (v, False) = "!" <> pretty v
       def' = maybe "def" pretty def
-  pretty SizeGroup = "group_size"
-  pretty SizeNumGroups = "num_groups"
+  pretty SizeThreadBlock = "thread_block_size"
+  pretty SizeNumThreadBlocks = "num_thread_blocks"
   pretty SizeTile = "tile_size"
   pretty SizeRegTile = "reg_tile_size"
-  pretty SizeLocalMemory = "local_memory"
+  pretty SizeSharedMemory = "shared_memory"
   pretty (SizeBespoke k def) =
     "bespoke" <> parens (pretty k <> comma <+> pretty def)
   pretty SizeRegisters = "registers"
@@ -82,11 +82,11 @@ instance Foldable (Count u) where
 instance Traversable (Count u) where
   traverse f (Count x) = Count <$> f x
 
--- | Phantom type for the number of groups of some kernel.
-data NumGroups
+-- | Phantom type for the number of blocks of some kernel.
+data NumBlocks
 
--- | Phantom type for the group size of some kernel.
-data GroupSize
+-- | Phantom type for the block size of some kernel.
+data BlockSize
 
 -- | Phantom type for number of threads.
 data NumThreads

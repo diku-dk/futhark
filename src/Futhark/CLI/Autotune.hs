@@ -76,8 +76,8 @@ runOptions timeout_s opts =
 
 type Path = [(T.Text, Int)]
 
-regexGroups :: Regex -> T.Text -> Maybe [T.Text]
-regexGroups regex s = do
+regexBlocks :: Regex -> T.Text -> Maybe [T.Text]
+regexBlocks regex s = do
   (_, _, _, groups) <-
     matchM regex s :: Maybe (T.Text, T.Text, T.Text, [T.Text])
   Just groups
@@ -87,7 +87,7 @@ comparisons = mapMaybe isComparison . T.lines
   where
     regex = makeRegex ("Compared ([^ ]+) <= (-?[0-9]+)" :: String)
     isComparison l = do
-      [thresh, val] <- regexGroups regex l
+      [thresh, val] <- regexBlocks regex l
       val' <- readMaybe $ T.unpack val
       pure (thresh, val')
 
@@ -246,7 +246,7 @@ thresholdForest server = do
 
     findThreshold :: (T.Text, T.Text) -> Maybe (T.Text, [(T.Text, Bool)])
     findThreshold (name, param_class) = do
-      [_, grp] <- regexGroups regex param_class
+      [_, grp] <- regexBlocks regex param_class
       pure
         ( name,
           filter (not . T.null . fst)

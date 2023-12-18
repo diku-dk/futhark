@@ -68,7 +68,7 @@ nonlinearInMemory name m =
 transformStm :: ExpMap -> Stm GPU -> BabysitM ExpMap
 transformStm expmap (Let pat aux (Op (SegOp op)))
   -- FIXME: We only make coalescing optimisations for SegThread
-  -- SegOps, because that's what the analysis assumes.  For SegGroup
+  -- SegOps, because that's what the analysis assumes.  For SegBlock
   -- we should probably look at the component SegThreads, but it
   -- apparently hasn't come up in practice yet.
   | SegThread {} <- segLevel op = do

@@ -189,7 +189,7 @@ data ResultManifest
 data KernelResult
   = -- | Each "worker" in the kernel returns this.
     -- Whether this is a result-per-thread or a
-    -- result-per-group depends on where the 'SegOp' occurs.
+    -- result-per-block depends on where the 'SegOp' occurs.
     Returns ResultManifest Certs SubExp
   | WriteReturns
       Certs
@@ -209,7 +209,7 @@ data KernelResult
           SubExp -- reg tile size for this dim.
         )
       ]
-      VName -- Tile returned by this worker/group.
+      VName -- Tile returned by this thread/block.
   deriving (Eq, Show, Ord)
 
 -- | Get the certs for this 'KernelResult'.
@@ -437,7 +437,7 @@ checkSegSpace (SegSpace _ dims) =
 -- as well as a *level*.  The *level* is a representation-specific bit
 -- of information.  For example, in GPU backends, it is used to
 -- indicate whether the 'SegOp' is expected to run at the thread-level
--- or the group-level.
+-- or the block-level.
 --
 -- The type list is usually the type of the element returned by a
 -- single thread. The result of the SegOp is then an array of that

@@ -802,7 +802,7 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
 
     checkSuffIntraPar
       path'
-      ((_intra_min_par, intra_avail_par), group_size, _, intra_prelude, intra_stms) = do
+      ((_intra_min_par, intra_avail_par), tblock_size, _, intra_prelude, intra_stms) = do
         -- We must check that all intra-group parallelism fits in a group.
         ((intra_ok, intra_suff_key), intra_suff_stms) <- do
           ((intra_suff, suff_key), check_suff_stms) <-
@@ -815,12 +815,12 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
           runBuilder $ do
             addStms intra_prelude
 
-            max_group_size <-
-              letSubExp "max_group_size" $ Op $ SizeOp $ GetSizeMax SizeGroup
+            max_tblock_size <-
+              letSubExp "max_tblock_size" $ Op $ SizeOp $ GetSizeMax SizeThreadBlock
             fits <-
               letSubExp "fits" $
                 BasicOp $
-                  CmpOp (CmpSle Int64) group_size max_group_size
+                  CmpOp (CmpSle Int64) tblock_size max_tblock_size
 
             addStms check_suff_stms
 

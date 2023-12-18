@@ -62,3 +62,55 @@ instance HasSegOp GPU where
   asSegOp (SegOp op) = Just op
   asSegOp _ = Nothing
   segOp = SegOp
+
+-- Note [GPU Terminology]
+--
+-- For lack of a better spot to put it, this Note summarises the
+-- terminology used for GPU concepts in the Futhark compiler. The
+-- terminology is based on CUDA terminology, and tries to match it as
+-- closely as possible. However, this was not always the case (issue
+-- #2062), so you may find some code that uses e.g. OpenCL
+-- terminology. In most cases there is no ambiguity, but there are a
+-- few instances where the same term is used for different things.
+-- Please fix any instances you find.
+--
+-- The terminology is as follows:
+--
+-- Host: Essentially the CPU; whatever is controlling the GPU.
+--
+-- Kernel: A GPU program that can be launched from the host.
+--
+-- Grid: The geometry of the thread blocks launched for a kernel. The
+-- size of a grid is always in terms of the number of thread blocks. A
+-- grid can have up to 3 dimensions, although we do not make much use
+-- of it - and not at all prior to code generation.
+--
+-- Thread block: Just as in CUDA. "Workgroup" in OpenCL. Abbretiation:
+-- tblock. Never just call this "block"; there are too many things
+-- called "block". Must match the dimensionality of the grid.
+--
+-- Thread: Just as in CUDA.  "Workitem" in OpenCL.
+--
+-- Global thread identifier: A globally unique number for a thread
+-- along one dimension. Abbreviation: gtid. We also use this term for
+-- the identifiers bound by SegOps. In OpenCL, corresponds to
+-- get_global_id(). (Except when we virtualise the thread space.)
+--
+-- Local thread identifier: A locally unique number (within the thread
+-- block) for each thread. Abbreviation: ltid. In OpenCL, corresponds
+-- to get_local_id().  In CUDA, corresponds to threadIdx.
+--
+-- Thread block identifier: A number unique to each thread block in a
+-- single dimension.  In CUDA, corresponds to blockIdx.
+--
+-- Local memory: Thread-local private memory. In CUDA, this is
+-- sometimes put in registers (if you are very careful in how you use
+-- it). In OpenCL, this is called "private memory", and "local memory"
+-- is something else entirely.
+--
+-- Shared memory: Just as in CUDA. Fast scratchpad memory accessible
+-- to all threads within the same thread block. In OpenCL, this is
+-- "local memory".
+--
+-- Device memory: Sometimes also called "global memory"; this is the
+-- big-but-slow memory on the GPU.

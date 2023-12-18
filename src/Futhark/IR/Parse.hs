@@ -765,12 +765,12 @@ pSOAC pr =
 pSizeClass :: Parser GPU.SizeClass
 pSizeClass =
   choice
-    [ keyword "group_size" $> GPU.SizeGroup,
-      keyword "num_groups" $> GPU.SizeNumGroups,
-      keyword "num_groups" $> GPU.SizeNumGroups,
+    [ keyword "tblock_size" $> GPU.SizeThreadBlock,
+      keyword "num_tblocks" $> GPU.SizeNumThreadBlocks,
+      keyword "num_tblocks" $> GPU.SizeNumThreadBlocks,
       keyword "tile_size" $> GPU.SizeTile,
       keyword "reg_tile_size" $> GPU.SizeRegTile,
-      keyword "local_memory" $> GPU.SizeLocalMemory,
+      keyword "shared_memory" $> GPU.SizeSharedMemory,
       keyword "threshold"
         *> parens
           ( flip GPU.SizeThreshold
@@ -800,9 +800,9 @@ pSizeOp =
         *> ( parens (GPU.CmpSizeLe <$> pName <* pComma <*> pSizeClass)
                <*> (lexeme "<=" *> pSubExp)
            ),
-      keyword "calc_num_groups"
+      keyword "calc_num_tblocks"
         *> parens
-          ( GPU.CalcNumGroups
+          ( GPU.CalcNumBlocks
               <$> pSubExp
               <* pComma
               <*> pName
@@ -917,13 +917,13 @@ pSegLevel =
         <*> pSegVirt
         <* pSemi
         <*> optional pKernelGrid,
-      "group"
-        $> GPU.SegGroup
+      "block"
+        $> GPU.SegBlock
         <* pSemi
         <*> pSegVirt
         <* pSemi
         <*> optional pKernelGrid,
-      "ingroup" $> GPU.SegThreadInGroup <* pSemi <*> pSegVirt
+      "inblock" $> GPU.SegThreadInBlock <* pSemi <*> pSegVirt
     ]
   where
     pSegVirt =
@@ -938,8 +938,8 @@ pSegLevel =
         ]
     pKernelGrid =
       GPU.KernelGrid
-        <$> (lexeme "groups=" $> GPU.Count <*> pSubExp <* pSemi)
-        <*> (lexeme "groupsize=" $> GPU.Count <*> pSubExp)
+        <$> (lexeme "blocks=" $> GPU.Count <*> pSubExp <* pSemi)
+        <*> (lexeme "tblocksize=" $> GPU.Count <*> pSubExp)
 
 pHostOp :: PR rep -> Parser (op rep) -> Parser (GPU.HostOp op rep)
 pHostOp pr pOther =

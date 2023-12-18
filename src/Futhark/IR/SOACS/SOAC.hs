@@ -326,7 +326,7 @@ scremaLambda (ScremaForm _ _ map_lam) = map_lam
 
 -- | @groupScatterResults <output specification> <results>@
 --
--- Groups the index values and result values of <results> according to the
+-- Blocks the index values and result values of <results> according to the
 -- <output specification>.
 --
 -- This function is used for extracting and grouping the results of a
@@ -348,7 +348,7 @@ groupScatterResults output_spec results =
 
 -- | @groupScatterResults' <output specification> <results>@
 --
--- Groups the index values and result values of <results> according to the
+-- Blocks the index values and result values of <results> according to the
 -- output specification. This is the simpler version of @groupScatterResults@,
 -- which doesn't return any information about shapes or output arrays.
 --
@@ -625,9 +625,9 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
          in map (is_flat <>) vs
   opDependencies (Scatter w arrs lam outputs) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
-     in map flattenGroups (groupScatterResults outputs deps)
+     in map flattenBlocks (groupScatterResults outputs deps)
     where
-      flattenGroups (_, arr, ivs) =
+      flattenBlocks (_, arr, ivs) =
         oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
   opDependencies (JVP lam args vec) =
     mconcat $

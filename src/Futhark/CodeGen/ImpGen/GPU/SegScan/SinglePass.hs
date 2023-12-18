@@ -26,31 +26,31 @@ yParams scan =
   drop (length (segBinOpNeutral scan)) (lambdaParams (segBinOpLambda scan))
 
 createLocalArrays ::
-  Count GroupSize SubExp ->
+  Count BlockSize SubExp ->
   SubExp ->
   [PrimType] ->
   InKernelGen (VName, [VName], [VName], VName, [VName])
-createLocalArrays (Count groupSize) chunk types = do
-  let groupSizeE = pe64 groupSize
-      workSize = pe64 chunk * groupSizeE
+createLocalArrays (Count block_size) chunk types = do
+  let block_sizeE = pe64 block_size
+      workSize = pe64 chunk * block_sizeE
       prefixArraysSize =
-        foldl (\acc tySize -> nextMul acc tySize + tySize * groupSizeE) 0 $
+        foldl (\acc tySize -> nextMul acc tySize + tySize * block_sizeE) 0 $
           map primByteSize types
       maxTransposedArraySize =
         foldl1 sMax64 $ map (\ty -> workSize * primByteSize ty) types
 
-      warpSize :: (Num a) => a
-      warpSize = 32
+      warp_size :: (Num a) => a
+      warp_size = 32
       maxWarpExchangeSize =
-        foldl (\acc tySize -> nextMul acc tySize + tySize * fromInteger warpSize) 0 $
+        foldl (\acc tySize -> nextMul acc tySize + tySize * fromInteger warp_size) 0 $
           map primByteSize types
-      maxLookbackSize = maxWarpExchangeSize + warpSize
+      maxLookbackSize = maxWarpExchangeSize + warp_size
       size = Imp.bytes $ maxLookbackSize `sMax64` prefixArraysSize `sMax64` maxTransposedArraySize
 
   (_, byteOffsets) <-
     mapAccumLM
       ( \off tySize -> do
-          off' <- dPrimVE "byte_offsets" $ nextMul off tySize + pe64 groupSize * tySize
+          off' <- dPrimVE "byte_offsets" $ nextMul off tySize + pe64 block_size * tySize
           pure (off', off)
       )
       0
@@ -59,15 +59,15 @@ createLocalArrays (Count groupSize) chunk types = do
   (_, warpByteOffsets) <-
     mapAccumLM
       ( \off tySize -> do
-          off' <- dPrimVE "warp_byte_offset" $ nextMul off tySize + warpSize * tySize
+          off' <- dPrimVE "warp_byte_offset" $ nextMul off tySize + warp_size * tySize
           pure (off', off)
       )
-      warpSize
+      warp_size
       $ map primByteSize types
 
   sComment "Allocate reusable shared memory" $ pure ()
 
-  localMem <- sAlloc "local_mem" size (Space "local")
+  localMem <- sAlloc "local_mem" size (Space "shared")
   transposeArrayLength <- dPrimV "trans_arr_len" workSize
 
   sharedId <- sArrayInMem "shared_id" int32 (Shape [constant (1 :: Int32)]) localMem
@@ -86,20 +86,20 @@ createLocalArrays (Count groupSize) chunk types = do
       sArray
         "local_prefix_arr"
         ty
-        (Shape [groupSize])
+        (Shape [block_size])
         localMem
-        $ LMAD.iota off' [pe64 groupSize]
+        $ LMAD.iota off' [pe64 block_size]
 
-  warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warpSize :: Int64)]) localMem
+  warpscan <- sArrayInMem "warpscan" int8 (Shape [constant (warp_size :: Int64)]) localMem
   warpExchanges <-
     forM (zip warpByteOffsets types) $ \(off, ty) -> do
       let off' = off `quot` primByteSize ty
       sArray
         "warp_exchange"
         ty
-        (Shape [constant (warpSize :: Int64)])
+        (Shape [constant (warp_size :: Int64)])
         localMem
-        $ LMAD.iota off' [warpSize]
+        $ LMAD.iota off' [warp_size]
 
   pure (sharedId, transposedArrays, prefixArrays, warpscan, warpExchanges)
 
@@ -232,19 +232,19 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       tys = map elemType tys'
 
-      group_size_e = pe64 $ unCount $ kAttrGroupSize attrs
-      num_physgroups_e = pe64 $ unCount $ kAttrNumGroups attrs
+      tblock_size_e = pe64 $ unCount $ kAttrBlockSize attrs
+      num_phys_blocks_e = pe64 $ unCount $ kAttrNumBlocks attrs
 
   let chunk_const = getChunkSize tys'
   chunk_v <- dPrimV "chunk_size" . isInt64 =<< kernelConstToExp chunk_const
   let chunk = tvExp chunk_v
 
-  num_virtgroups <-
-    tvSize <$> dPrimV "num_virtgroups" (n `divUp` (group_size_e * chunk))
-  let num_virtgroups_e = pe64 num_virtgroups
+  num_virt_blocks <-
+    tvSize <$> dPrimV "num_virt_blocks" (n `divUp` (tblock_size_e * chunk))
+  let num_virt_blocks_e = pe64 num_virt_blocks
 
   num_virt_threads <-
-    dPrimVE "num_virt_threads" $ num_virtgroups_e * group_size_e
+    dPrimVE "num_virt_threads" $ num_virt_blocks_e * tblock_size_e
 
   let (gtids, dims) = unzip $ unSegSpace space
       dims' = map pe64 dims
@@ -254,15 +254,15 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
   emit $ Imp.DebugPrint "Sequential elements per thread (chunk)" $ Just $ untyped chunk
 
-  statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virtgroups]) (Space "device")
+  statusFlags <- sAllocArray "status_flags" int8 (Shape [num_virt_blocks]) (Space "device")
   sReplicate statusFlags $ intConst Int8 statusX
 
   (aggregateArrays, incprefixArrays) <-
     fmap unzip $
       forM tys $ \ty ->
         (,)
-          <$> sAllocArray "aggregates" ty (Shape [num_virtgroups]) (Space "device")
-          <*> sAllocArray "incprefixes" ty (Shape [num_virtgroups]) (Space "device")
+          <$> sAllocArray "aggregates" ty (Shape [num_virt_blocks]) (Space "device")
+          <*> sAllocArray "incprefixes" ty (Shape [num_virt_blocks]) (Space "device")
 
   global_id <- genZeroes "global_dynid" 1
 
@@ -277,22 +277,23 @@ compileSegScan pat lvl space scan_op map_kbody = do
         ltid = sExt64 ltid32
 
     (sharedId, transposedArrays, prefixArrays, warpscan, exchanges) <-
-      createLocalArrays (kAttrGroupSize attrs) (tvSize chunk_v) tys
+      createLocalArrays (kAttrBlockSize attrs) (tvSize chunk_v) tys
 
-    -- We wrap the entire kernel body in a virtualisation loop to handle the
-    -- case where we do not have enough workgroups to cover the iteration space.
-    -- Dynamic group indexing has no implication on this, since each group
-    -- simply fetches a new dynamic ID upon entry into the virtualisation loop.
+    -- We wrap the entire kernel body in a virtualisation loop to
+    -- handle the case where we do not have enough thread blocks to
+    -- cover the iteration space. Dynamic block indexing has no
+    -- implication on this, since each block simply fetches a new
+    -- dynamic ID upon entry into the virtualisation loop.
     --
-    -- We could use virtualiseGroups, but this introduces a barrier which is
-    -- redundant in this case, and also we don't need to base virtual group IDs
+    -- We could use virtualiseBlocks, but this introduces a barrier which is
+    -- redundant in this case, and also we don't need to base virtual block IDs
     -- on the loop variable, but rather on the dynamic IDs.
-    physgroup_id <- dPrim "physgroup_id" int32
-    sOp $ Imp.GetGroupId (tvVar physgroup_id) 0
+    phys_block_id <- dPrim "phys_block_id" int32
+    sOp $ Imp.GetBlockId (tvVar phys_block_id) 0
     iters <-
       dPrimVE "virtloop_bound" $
-        (num_virtgroups_e - tvExp physgroup_id)
-          `divUp` num_physgroups_e
+        (num_virt_blocks_e - tvExp phys_block_id)
+          `divUp` num_phys_blocks_e
 
     sFor "virtloop_i" iters $ const $ do
       dyn_id <- dPrim "dynamic_id" int32
@@ -311,7 +312,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
             copyDWIMFix sharedId [0] (tvSize dyn_id) []
 
           sComment "First thread in last (virtual) block resets global dynamic_id" $ do
-            sWhen (tvExp dyn_id .==. num_virtgroups_e - 1) $
+            sWhen (tvExp dyn_id .==. num_virt_blocks_e - 1) $
               copyDWIMFix global_id [0] (intConst Int32 0) []
 
       let local_barrier = Imp.Barrier Imp.FenceLocal
@@ -324,16 +325,16 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       block_offset <-
         dPrimVE "block_offset" $
-          sExt64 (tvExp dyn_id) * chunk * group_size_e
+          sExt64 (tvExp dyn_id) * chunk * tblock_size_e
       sgm_idx <- dPrimVE "sgm_idx" $ block_offset `mod` segment_size
       boundary <-
         dPrimVE "boundary" $
           sExt32 $
-            sMin64 (chunk * group_size_e) (segment_size - sgm_idx)
+            sMin64 (chunk * tblock_size_e) (segment_size - sgm_idx)
       segsize_compact <-
         dPrimVE "segsize_compact" $
           sExt32 $
-            sMin64 (chunk * group_size_e) segment_size
+            sMin64 (chunk * tblock_size_e) segment_size
       private_chunks <-
         forM tys $ \ty ->
           sAllocArray
@@ -347,7 +348,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
       sComment "Load and map" $
         sFor "i" chunk $ \i -> do
           -- The map's input index
-          virt_tid <- dPrimVE "virt_tid" $ thd_offset + i * group_size_e
+          virt_tid <- dPrimVE "virt_tid" $ thd_offset + i * tblock_size_e
           dIndexSpace (zip gtids dims') virt_tid
           -- Perform the map
           let in_bounds =
@@ -373,7 +374,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
       sComment "Transpose scan inputs" $ do
         forM_ (zip transposedArrays private_chunks) $ \(trans, priv) -> do
           sFor "i" chunk $ \i -> do
-            sharedIdx <- dPrimVE "sharedIdx" $ ltid + i * group_size_e
+            sharedIdx <- dPrimVE "sharedIdx" $ ltid + i * tblock_size_e
             copyDWIMFix trans [sharedIdx] (Var priv) [i]
           sOp local_barrier
           sFor "i" chunk $ \i -> do
@@ -422,9 +423,9 @@ compileSegScan pat lvl space scan_op map_kbody = do
 
       accs <- mapM (dPrim "acc") tys
       sComment "Scan results (with warp scan)" $ do
-        groupScan
+        blockScan
           crossesSegment
-          group_size_e
+          tblock_size_e
           num_virt_threads
           scan_op1
           prefixArrays
@@ -432,7 +433,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
         sOp $ Imp.ErrorSync Imp.FenceLocal
 
         let firstThread acc prefixes =
-              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 group_size_e - 1]
+              copyDWIMFix (tvVar acc) [] (Var prefixes) [sExt64 tblock_size_e - 1]
             notFirstThread acc prefixes =
               copyDWIMFix (tvVar acc) [] (Var prefixes) [ltid - 1]
         sIf
@@ -457,11 +458,11 @@ compileSegScan pat lvl space scan_op map_kbody = do
             copyDWIMFix (tvVar acc) [] ne []
         -- end sWhen
 
-        let warpSize = kernelWaveSize constants
-        sWhen (bNot blockNewSgm .&&. ltid32 .<. warpSize) $ do
+        let warp_size = kernelWaveSize constants
+        sWhen (bNot blockNewSgm .&&. ltid32 .<. warp_size) $ do
           sWhen (ltid32 .==. 0) $ do
             sIf
-              (not_segmented_e .||. boundary .==. sExt32 (group_size_e * chunk))
+              (not_segmented_e .||. boundary .==. sExt32 (tblock_size_e * chunk))
               ( do
                   everythingVolatile $
                     forM_ (zip aggregateArrays accs) $ \(aggregateArray, acc) ->
@@ -498,10 +499,10 @@ compileSegScan pat lvl space scan_op map_kbody = do
                   dPrimV "readOffset" $
                     sExt32 $
                       tvExp dyn_id - sExt64 (kernelWaveSize constants)
-                let loopStop = warpSize * (-1)
+                let loopStop = warp_size * (-1)
                     sameSegment readIdx
                       | segmented =
-                          let startIdx = sExt64 (tvExp readIdx + 1) * group_size_e * chunk - 1
+                          let startIdx = sExt64 (tvExp readIdx + 1) * tblock_size_e * chunk - 1
                            in block_offset - startIdx .<=. sgm_idx
                       | otherwise = true
                 sWhile (tvExp readOffset .>. loopStop) $ do
@@ -533,7 +534,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
                   copyDWIMFix warpscan [ltid] (tvSize flag) []
 
                   -- execute warp-parallel reduction but only if the last read flag in not STATUS_P
-                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warpSize - 1]
+                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
                   sWhen (tvExp flag .<. statusP) $ do
                     lam' <- renameLambda scan_op1
                     inBlockScanLookback
@@ -544,15 +545,15 @@ compileSegScan pat lvl space scan_op map_kbody = do
                       lam'
 
                   -- all threads of the warp read the result of reduction
-                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warpSize - 1]
+                  copyDWIMFix (tvVar flag) [] (Var warpscan) [sExt64 warp_size - 1]
                   forM_ (zip aggrs exchanges) $ \(aggr, exchange) ->
-                    copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warpSize - 1]
+                    copyDWIMFix (tvVar aggr) [] (Var exchange) [sExt64 warp_size - 1]
                   -- update read offset
                   sIf
                     (tvExp flag .==. statusP)
                     (readOffset <-- loopStop)
                     ( sWhen (tvExp flag .==. statusA) $ do
-                        readOffset <-- tvExp readOffset - zExt32 warpSize
+                        readOffset <-- tvExp readOffset - zExt32 warp_size
                     )
 
                   -- update prefix if flag different than STATUS_X:
@@ -573,7 +574,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
             scan_op2 <- renameLambda scan_op1
             let xs = map paramName $ take (length tys) $ lambdaParams scan_op2
                 ys = map paramName $ drop (length tys) $ lambdaParams scan_op2
-            sWhen (boundary .==. sExt32 (group_size_e * chunk)) $ do
+            sWhen (boundary .==. sExt32 (tblock_size_e * chunk)) $ do
               forM_ (zip xs prefixes) $ \(x, prefix) -> dPrimV_ x $ tvExp prefix
               forM_ (zip ys accs) $ \(y, acc) -> dPrimV_ y $ tvExp acc
               compileStms mempty (bodyStms $ lambdaBody scan_op2) $
@@ -643,7 +644,7 @@ compileSegScan pat lvl space scan_op map_kbody = do
             copyDWIMFix locmem [tvExp sharedIdx] (Var priv) [i]
           sOp local_barrier
           sFor "i" chunk $ \i -> do
-            flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * group_size_e
+            flat_idx <- dPrimVE "flat_idx" $ thd_offset + i * tblock_size_e
             dIndexSpace (zip gtids dims') flat_idx
             sWhen (flat_idx .<. n) $ do
               copyDWIMFix

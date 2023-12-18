@@ -461,13 +461,25 @@ Exotic
 
 The following functions are not interesting to most users.
 
+.. c:function:: void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size)
+
+   Set the default number of work-items in a thread block.
+
 .. c:function:: void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size)
 
-   Set the default number of work-items in a work-group.
+   Identical to
+   :c:func:`futhark_context_config_set_default_thread_block_size`;
+   provided for backwards compatibility.
+
+.. c:function:: void futhark_context_config_set_default_num_thread_blocks(struct futhark_context_config *cfg, int num)
+
+   Set the default number of thread blocks used for kernels.
 
 .. c:function:: void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num)
 
-   Set the default number of work-groups used for kernels.
+   Identical to
+   :c:func:`futhark_context_config_set_default_num_thread_blocks`;
+   provided for backwards compatibility.
 
 .. c:function:: void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int num)
 

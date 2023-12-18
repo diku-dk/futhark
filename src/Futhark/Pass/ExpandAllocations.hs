@@ -190,17 +190,17 @@ ensureGridKnown :: SegLevel -> ExpandM (Stms GPUMem, SegLevel, KernelGrid)
 ensureGridKnown lvl =
   case lvl of
     SegThread _ (Just grid) -> pure (mempty, lvl, grid)
-    SegGroup _ (Just grid) -> pure (mempty, lvl, grid)
+    SegBlock _ (Just grid) -> pure (mempty, lvl, grid)
     SegThread virt Nothing -> mkGrid (SegThread virt)
-    SegGroup virt Nothing -> mkGrid (SegGroup virt)
-    SegThreadInGroup {} -> error "ensureGridKnown: SegThreadInGroup"
+    SegBlock virt Nothing -> mkGrid (SegBlock virt)
+    SegThreadInBlock {} -> error "ensureGridKnown: SegThreadInBlock"
   where
     mkGrid f = do
       (grid, stms) <-
         runBuilder $
           KernelGrid
-            <$> (Count <$> getSize "num_groups" SizeNumGroups)
-            <*> (Count <$> getSize "group_size" SizeGroup)
+            <$> (Count <$> getSize "num_tblocks" SizeNumThreadBlocks)
+            <*> (Count <$> getSize "tblock_size" SizeThreadBlock)
       pure (stms, f $ Just grid, grid)
 
     getSize desc size_class = do
@@ -237,9 +237,9 @@ transformScanRed lvl space ops kbody = do
       pure ()
 
   case lvl of
-    SegGroup {}
+    SegBlock {}
       | not $ null variant_allocs ->
-          throwError "Cannot handle invariant allocations in SegGroup."
+          throwError "Cannot handle invariant allocations in SegBlock."
     _ ->
       pure ()
 
@@ -297,15 +297,15 @@ memoryRequirements grid space kstms variant_allocs invariant_allocs = do
     runBuilder . letSubExp "num_threads" . BasicOp $
       BinOp
         (Mul Int64 OverflowUndef)
-        (unCount $ gridNumGroups grid)
-        (unCount $ gridGroupSize grid)
+        (unCount $ gridNumBlocks grid)
+        (unCount $ gridBlockSize grid)
 
   (invariant_alloc_stms, invariant_alloc_offsets) <-
     inScopeOf num_threads_stms $
       expandedInvariantAllocations
         num_threads
-        (gridNumGroups grid)
-        (gridGroupSize grid)
+        (gridNumBlocks grid)
+        (gridBlockSize grid)
         invariant_allocs
 
   (variant_alloc_stms, variant_alloc_offsets) <-
@@ -385,7 +385,7 @@ extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms 
    in (set_stms (stmsFromList stms) body, allocs)
 
 expandable, notScalar :: Space -> Bool
-expandable (Space "local") = False
+expandable (Space "shared") = False
 expandable ScalarSpace {} = False
 expandable _ = True
 notScalar ScalarSpace {} = False
@@ -474,9 +474,9 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
             product dims
           )
 
-    newBase user@(SegThreadInGroup {}, _) = newBaseThread user
+    newBase user@(SegThreadInBlock {}, _) = newBaseThread user
     newBase user@(SegThread {}, _) = newBaseThread user
-    newBase user@(SegGroup {}, _) = \_old_shape ->
+    newBase user@(SegBlock {}, _) = \_old_shape ->
       let (users_shape, user_ids) = getNumUsers user
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids,
@@ -485,18 +485,18 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
 
 expandedInvariantAllocations ::
   SubExp ->
-  Count NumGroups SubExp ->
-  Count GroupSize SubExp ->
+  Count NumBlocks SubExp ->
+  Count BlockSize SubExp ->
   Extraction ->
   ExpandM (Stms GPUMem, RebaseMap)
-expandedInvariantAllocations num_threads (Count num_groups) (Count group_size) =
+expandedInvariantAllocations num_threads (Count num_tblocks) (Count tblock_size) =
   genericExpandedInvariantAllocations getNumUsers
   where
     getNumUsers (SegThread {}, [gtid]) = (Shape [num_threads], [gtid])
-    getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
-    getNumUsers (SegThreadInGroup {}, [gtid]) = (Shape [num_threads], [gtid])
-    getNumUsers (SegThreadInGroup {}, [gid, ltid]) = (Shape [num_groups, group_size], [gid, ltid])
-    getNumUsers (SegGroup {}, [gid]) = (Shape [num_groups], [gid])
+    getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_tblocks, tblock_size], [gid, ltid])
+    getNumUsers (SegThreadInBlock {}, [gtid]) = (Shape [num_threads], [gtid])
+    getNumUsers (SegThreadInBlock {}, [gid, ltid]) = (Shape [num_tblocks, tblock_size], [gid, ltid])
+    getNumUsers (SegBlock {}, [gid]) = (Shape [num_tblocks], [gid])
     getNumUsers user = error $ "getNumUsers: unhandled " ++ show user
 
 expandedVariantAllocations ::

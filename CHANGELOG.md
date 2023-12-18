@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The GPU backends now handle up to 20 operators can be handled in a
   single fused reduction.
 
+* CUDA/HIP terminology for GPU concepts (e.g. "thread block") is now
+  used in all public interfaces. The OpenCL names are still supported
+  for backwards compatibility.
+
 ### Removed
 
 ### Changed

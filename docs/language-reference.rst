@@ -1745,13 +1745,13 @@ parallelism" version for the attributed SOACs.
 ``incremental_flattening(no_intra)``
 ....................................
 
-When using incremental flattening, do not generate the "intra-group
+When using incremental flattening, do not generate the "intra-block
 parallelism" version for the attributed SOACs.
 
 ``incremental_flattening(only_intra)``
 ......................................
 
-When using incremental flattening, *only* generate the "intra-group
+When using incremental flattening, *only* generate the "intra-block
 parallelism" version of the attributed SOACs.  **Beware**: the
 resulting program will fail to run if the inner parallelism does not
 fit on the device.
