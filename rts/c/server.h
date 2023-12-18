@@ -282,14 +282,14 @@ struct entry_point* get_entry_point(struct server_state *s, const char *name) {
 
 // Print the command-done marker, indicating that we are ready for
 // more input.
-void ok() {
+void ok(void) {
   printf("%%%%%% OK\n");
   fflush(stdout);
 }
 
 // Print the failure marker.  Output is now an error message until the
 // next ok().
-void failure() {
+void failure(void) {
   printf("%%%%%% FAILURE\n");
 }
 
