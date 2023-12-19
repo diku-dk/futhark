@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimiseArrayLayout (optimiseArrayLayout, printAST) where
+module Futhark.Pass.GALOP (galop, printAST) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
@@ -8,8 +8,8 @@ import Futhark.Analysis.AnalysePrimExp
 import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.Pass
-import Futhark.Pass.OptimiseArrayLayout.Layout
-import Futhark.Pass.OptimiseArrayLayout.Transform
+import Futhark.Pass.GALOP.Layout
+import Futhark.Pass.GALOP.Transform
 
 printAST :: (RepTypes rep) => Pass rep rep
 printAST =
@@ -19,8 +19,8 @@ printAST =
     $ pure . pTraceShowId
 
 -- | The pass definition.
-optimiseArrayLayout :: (Transform rep, BuilderOps rep) => Pass rep rep
-optimiseArrayLayout =
+galop :: (Transform rep, BuilderOps rep) => Pass rep rep
+galop =
   Pass
     "coalesce access"
     "Transform kernel input arrays for better performance."

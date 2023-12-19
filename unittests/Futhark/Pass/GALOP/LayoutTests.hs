@@ -1,11 +1,11 @@
-module Futhark.Pass.OptimiseArrayLayout.LayoutTests (tests) where
+module Futhark.Pass.GALOP.LayoutTests (tests) where
 
 import Data.Map.Strict qualified as M
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.IR.GPU (GPU)
-import Futhark.Pass.OptimiseArrayLayout.Layout
+import Futhark.Pass.GALOP.Layout
 import Language.Futhark.Core
 import Test.Tasty
 import Test.Tasty.HUnit
