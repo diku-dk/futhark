@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimiseArrayLayout.Layout (permutationTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, PermutationTable) where
+module Futhark.Pass.OptimiseArrayLayout.Layout (layoutTableFromIndexTable, Layout, Permutation, commonPermutationEliminators, LayoutTable) where
 
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -12,7 +12,7 @@ import Futhark.IR.MCMem
 
 type Permutation = [Int]
 
-type PermutationTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
+type LayoutTable = M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName Permutation))
 
 class (PrimExpAnalysis rep) => Layout rep where
   -- | Return a coalescing permutation that will be used to create a manifest of the array.
@@ -138,10 +138,10 @@ commonPermutationEliminators perm nest = do
       _ -> False
 
 -- | Given an ordering function for `DimAccess`, and an IndexTable, return
--- a PermutationTable.
+-- a LayoutTable.
 -- We remove entries with no results after `permutationFromDimAccess`
-permutationTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> PermutationTable
-permutationTableFromIndexTable primExpTable = tableMapMaybe (permutationFromDimAccess primExpTable)
+layoutTableFromIndexTable :: (Layout rep) => PrimExpTable -> IndexTable rep -> LayoutTable
+layoutTableFromIndexTable primExpTable = tableMapMaybe (permutationFromDimAccess primExpTable)
 
 sortGPU :: [(Int, DimAccess rep)] -> [(Int, DimAccess rep)]
 sortGPU =

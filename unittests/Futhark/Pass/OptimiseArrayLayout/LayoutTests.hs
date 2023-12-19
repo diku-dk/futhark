@@ -85,7 +85,7 @@ constInLastIndexElimTests =
                 [ (VName "gtid" 4, Just (LeafExp (VName "n" 4) (IntType Int64))),
                   (VName "i" 5, Just (LeafExp (VName "n" 4) (IntType Int64)))
                 ]
-        permutationTableFromIndexTable primExpTable accessTableGPU @?= mempty,
+        layoutTableFromIndexTable primExpTable accessTableGPU @?= mempty,
       testCase "gpu ignores when not last" $ do
         let primExpTable =
               M.fromList
@@ -93,7 +93,7 @@ constInLastIndexElimTests =
                   (VName "gtid" 5, Just (LeafExp (VName "n" 4) (IntType Int64))),
                   (VName "i" 6, Just (LeafExp (VName "n" 4) (IntType Int64)))
                 ]
-        permutationTableFromIndexTable primExpTable accessTableGPUrev
+        layoutTableFromIndexTable primExpTable accessTableGPUrev
           @?= M.fromList
             [ ( SegmentedMap $ VName "mapres" 1,
                 M.fromList

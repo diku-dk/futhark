@@ -30,10 +30,10 @@ optimiseArrayLayout =
       -- Compute primExps for all variables
       let primExpTable = primExpAnalysis prog
       -- Compute permutations to acheive coalescence for all arrays
-      let permutation_table = permutationTableFromIndexTable primExpTable index_table
+      let permutation_table = layoutTableFromIndexTable primExpTable index_table
       -- Insert permutations in the AST
       intraproceduralTransformation (onStms permutation_table) prog
   where
-    onStms permutationTable scope stms = do
-      let m = localScope scope $ transformStms permutationTable mempty stms
+    onStms layout_table scope stms = do
+      let m = localScope scope $ transformStms layout_table mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)

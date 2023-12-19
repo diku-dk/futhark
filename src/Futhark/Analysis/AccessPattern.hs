@@ -40,15 +40,16 @@ import Futhark.Util.Pretty
 class Analyse rep where
   analyseOp :: Op rep -> (Context rep -> [VName] -> (Context rep, IndexTable rep))
 
--- | Map patterns of Segmented operations on arrays, to index expressions with
--- their index descriptors.
--- segmap(pattern) → A(pattern) → indexExpressionName(pattern) → [DimAccess]
+-- | For each array access in a program, this data structure stores the
+-- dependencies of each dimension in the access, the array name, and the
+-- name of the SegOp that the access is contained in.
 -- Each DimAccess element corresponds to an access to a given dimension
 -- in the given array, in the same order of the dimensions.
 type IndexTable rep =
   M.Map SegOpName (M.Map ArrayName (M.Map IndexExprName [DimAccess rep]))
 
--- | SegOpName stores the nested "level" at which it is declared in the AST.
+-- | Name of a SegOp, used to identify the SegOp that an array access is
+-- contained in.
 data SegOpName
   = SegmentedMap {vnameFromSegOp :: VName}
   | SegmentedRed {vnameFromSegOp :: VName}
@@ -58,11 +59,10 @@ data SegOpName
 
 type IndexExprName = VName
 
--- Stores the name of the array,
--- the "stack trace" where it was allocated at,
--- and the original layout.
--- The latter is currently unused, but can prove useful when throwing
--- transpositions into the mix.
+-- | Stores the name of an array,
+-- the nest of loops, kernels, conditionals in which it is allocated,
+-- and the layout of the array.
+-- The latter is currently unused, but might be useful in the future.
 type ArrayName = (VName, [BodyType], [Int])
 
 data BodyType
@@ -73,16 +73,18 @@ data BodyType
 
 -- | Collect all features of access to a specific dimension of an array.
 data DimAccess rep = DimAccess
-  { -- | Set of VNames of gtid's that some access is variant to.
+  { -- | Set of VNames of iteration variables (gtids, loop counters, etc.)
+    -- that some access is variant to.
     -- An empty set indicates that the access is invariant.
-    -- Tuple of patternName and nested `level` it index occurred at, as well as
-    -- what the actual iteration type is.
     dependencies :: M.Map VName Dependency,
-    -- | Nothing if it is a constant.
+    -- | Used to store the name of the original expression from which `dependencies`
+    -- was computed. `Nothing` if it is a constant.
     originalVar :: Maybe VName
   }
   deriving (Eq, Show)
 
+-- | Tuple of patternName and nested `level` it index occurred at, as well as
+-- what the actual iteration type is.
 data Dependency = Dependency
   { lvl :: Int,
     varType :: VarType
