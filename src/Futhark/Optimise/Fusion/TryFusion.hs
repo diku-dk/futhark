@@ -673,11 +673,10 @@ pullIndex ::
   SOAC ->
   SOAC.ArrayTransforms ->
   TryFusion (SOAC, SOAC.ArrayTransforms)
-pullIndex (SOAC.Screma w form inps) ots
+pullIndex (SOAC.Screma _ form inps) ots
   | SOAC.Index cs slice@(Slice (ds@(DimSlice _ w' _) : inner_ds))
       SOAC.:< ots' <-
       SOAC.viewf ots,
-    w /= w',
     Just lam <- isMapSOAC form = do
       let sliceInput inp =
             SOAC.addTransform
