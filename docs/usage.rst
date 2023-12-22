@@ -314,9 +314,7 @@ Compiling to Library
 While compiling a Futhark program to an executable is useful for
 testing, it is not suitable for production use.  Instead, a Futhark
 program should be compiled into a reusable library in some target
-language, enabling integration into a larger program.  Five of the
-Futhark compilers support this: ``futhark c``, ``futhark opencl``,
-``futhark cuda``, ``futhark py``, and ``futhark pyopencl``.
+language, enabling integration into a larger program.
 
 General Concerns
 ^^^^^^^^^^^^^^^^
