@@ -166,6 +166,15 @@ GPU backends (``opencl``, ``pyopencl``, ``hip``, and ``cuda``).
     special string ``#k``, where ``k`` is an integer, can be used to
     pick the *k*-th device, numbered from zero.
 
+  ``--default-thread-block-size INT``
+
+    The default size of GPU thread blocks that are launched. Capped to
+    the hardware limit if necessary.
+
+  ``--default-num-thread-blocks INT``
+
+    The default number of GPU thread blocks that are launched.
+
   ``-P/--profile``
 
     Measure the time taken by various GPU operations (such as kernels)
