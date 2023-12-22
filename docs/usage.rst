@@ -328,7 +328,8 @@ below).  Extra parameters may be added to pass in context data, or
 *out*-parameters for writing the result, for target languages that do
 not support multiple return values from functions.
 
-The entry point should have a name that is also a valid C identifier.
+The entry point should have a name that is also a valid identifier in
+the target language (usually C).
 
 Not all Futhark types can be mapped cleanly to the target language.
 Arrays of tuples, for example, are a common issue.  In such cases,
