@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* `f16.copysign`, `f32.copysign`, `f64.copysign`.
+
 ### Removed
 
 ### Changed
