@@ -16,7 +16,7 @@ module Futhark.CodeGen.ImpCode.OpenCL
     numFailureParams,
     KernelTarget (..),
     FailureMsg (..),
-    GroupDim,
+    BlockDim,
     KernelConst (..),
     KernelConstExp,
     module Futhark.CodeGen.ImpCode,
@@ -27,7 +27,7 @@ where
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.ImpCode.GPU (GroupDim, KernelConst (..), KernelConstExp)
+import Futhark.CodeGen.ImpCode.GPU (BlockDim, KernelConst (..), KernelConstExp)
 import Futhark.IR.GPU.Sizes
 import Futhark.Util.Pretty
 
@@ -97,7 +97,7 @@ numFailureParams SafetyFull = 3
 
 -- | Host-level OpenCL operation.
 data OpenCL
-  = LaunchKernel KernelSafety KernelName (Count Bytes (TExp Int64)) [KernelArg] [Exp] [GroupDim]
+  = LaunchKernel KernelSafety KernelName (Count Bytes (TExp Int64)) [KernelArg] [Exp] [BlockDim]
   | GetSize VName Name
   | CmpSizeLe VName Name Exp
   | GetSizeMax VName SizeClass

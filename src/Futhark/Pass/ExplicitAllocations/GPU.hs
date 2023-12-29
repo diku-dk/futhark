@@ -30,9 +30,9 @@ allocAtLevel lvl = local $ \env ->
     }
   where
     space = case lvl of
-      SegGroup {} -> Space "local"
+      SegBlock {} -> Space "shared"
       SegThread {} -> Space "device"
-      SegThreadInGroup {} -> Space "device"
+      SegThreadInBlock {} -> Space "device"
 
 handleSegOp ::
   Maybe SegLevel ->
@@ -44,7 +44,7 @@ handleSegOp outer_lvl op = do
       -- This implies we are in the intragroup parallelism situation.
       -- Just allocate for a single group; memory expansion will
       -- handle the rest later.
-      (Just (SegGroup _ (Just grid)), _) -> pure $ unCount $ gridGroupSize grid
+      (Just (SegBlock _ (Just grid)), _) -> pure $ unCount $ gridBlockSize grid
       _ ->
         letSubExp "num_threads"
           =<< case maybe_grid of
@@ -52,8 +52,8 @@ handleSegOp outer_lvl op = do
               pure . BasicOp $
                 BinOp
                   (Mul Int64 OverflowUndef)
-                  (unCount (gridNumGroups grid))
-                  (unCount (gridGroupSize grid))
+                  (unCount (gridNumBlocks grid))
+                  (unCount (gridBlockSize grid))
             Nothing ->
               foldBinOp
                 (Mul Int64 OverflowUndef)
@@ -64,9 +64,9 @@ handleSegOp outer_lvl op = do
     maybe_grid =
       case (outer_lvl, segLevel op) of
         (Just (SegThread _ (Just grid)), _) -> Just grid
-        (Just (SegGroup _ (Just grid)), _) -> Just grid
+        (Just (SegBlock _ (Just grid)), _) -> Just grid
         (_, SegThread _ (Just grid)) -> Just grid
-        (_, SegGroup _ (Just grid)) -> Just grid
+        (_, SegBlock _ (Just grid)) -> Just grid
         _ -> Nothing
     scope = scopeOfSegSpace $ segSpace op
     mapper num_threads =
@@ -79,8 +79,8 @@ handleSegOp outer_lvl op = do
         }
     f = case segLevel op of
       SegThread {} -> inThread
-      SegThreadInGroup {} -> inThread
-      SegGroup {} -> inGroup
+      SegThreadInBlock {} -> inThread
+      SegBlock {} -> inGroup
     inThread env = env {envExpHints = inThreadExpHints}
     inGroup env = env {envExpHints = inGroupExpHints}
 

@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Extract limited nested parallelism for execution inside
--- individual kernel workgroups.
+-- individual kernel threadblocks.
 module Futhark.Pass.ExtractKernels.Intragroup (intraGroupParallelise) where
 
 import Control.Monad
@@ -51,15 +51,15 @@ intraGroupParallelise ::
 intraGroupParallelise knest lam = runMaybeT $ do
   (ispace, inps) <- lift $ flatKernel knest
 
-  (num_groups, w_stms) <-
+  (num_tblocks, w_stms) <-
     lift $
       runBuilder $
-        letSubExp "intra_num_groups"
+        letSubExp "intra_num_tblocks"
           =<< foldBinOp (Mul Int64 OverflowUndef) (intConst Int64 1) (map snd ispace)
 
   let body = lambdaBody lam
 
-  group_size <- newVName "computed_group_size"
+  tblock_size <- newVName "computed_tblock_size"
   (wss_min, wss_avail, log, kbody) <-
     lift . localScope (scopeOfLParams $ lambdaParams lam) $
       intraGroupParalleliseBody body
@@ -92,12 +92,12 @@ intraGroupParallelise knest lam = runMaybeT $ do
       -- The group size is either the maximum of the minimum parallelism
       -- exploited, or the desired parallelism (bounded by the max group
       -- size) in case there is no minimum.
-      letBindNames [group_size]
+      letBindNames [tblock_size]
         =<< if null ws_min
           then
             eBinOp
               (SMin Int64)
-              (eSubExp =<< letSubExp "max_group_size" (Op $ SizeOp $ GetSizeMax SizeGroup))
+              (eSubExp =<< letSubExp "max_tblock_size" (Op $ SizeOp $ GetSizeMax SizeThreadBlock))
               (eSubExp intra_avail_par)
           else foldBinOp' (SMax Int64) ws_min
 
@@ -106,22 +106,22 @@ intraGroupParallelise knest lam = runMaybeT $ do
 
       addStms w_stms
       read_input_stms <- runBuilder_ $ mapM readGroupKernelInput used_inps
-      space <- SegSpace <$> newVName "phys_group_id" <*> pure ispace
+      space <- SegSpace <$> newVName "phys_tblock_id" <*> pure ispace
       pure (intra_avail_par, space, read_input_stms)
 
   let kbody' = kbody {kernelBodyStms = read_input_stms <> kernelBodyStms kbody}
 
   let nested_pat = loopNestingPat first_nest
       rts = map (length ispace `stripArray`) $ patTypes nested_pat
-      grid = KernelGrid (Count num_groups) (Count $ Var group_size)
-      lvl = SegGroup SegNoVirt (Just grid)
+      grid = KernelGrid (Count num_tblocks) (Count $ Var tblock_size)
+      lvl = SegBlock SegNoVirt (Just grid)
       kstm =
         Let nested_pat aux $ Op $ SegOp $ SegMap lvl kspace rts kbody'
 
   let intra_min_par = intra_avail_par
   pure
     ( (intra_min_par, intra_avail_par),
-      Var group_size,
+      Var tblock_size,
       log,
       prelude_stms,
       oneStm kstm
@@ -253,7 +253,7 @@ intraGroupStm stm@(Let pat aux e) = do
             =<< runDistNestT env (distributeMapBodyStms acc (bodyStms $ lambdaBody lam))
     Op (Screma w arrs form)
       | Just (scans, mapfun) <- isScanomapSOAC form,
-        -- FIXME: Futhark.CodeGen.ImpGen.GPU.Group.compileGroupOp
+        -- FIXME: Futhark.CodeGen.ImpGen.GPU.Block.compileGroupOp
         -- cannot handle multiple scan operators yet.
         Scan scanfun nes <- singleScan scans -> do
           let scanfun' = soacsLambdaToGPU scanfun

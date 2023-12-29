@@ -38,8 +38,8 @@ segThread desc =
   where
     kernelGrid =
       KernelGrid
-        <$> (Count <$> getSize (desc ++ "_num_groups") SizeNumGroups)
-        <*> (Count <$> getSize (desc ++ "_group_size") SizeGroup)
+        <$> (Count <$> getSize (desc ++ "_num_tblocks") SizeGrid)
+        <*> (Count <$> getSize (desc ++ "_tblock_size") SizeThreadBlock)
 
 injectSOACS ::
   ( Monad m,

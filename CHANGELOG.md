@@ -9,14 +9,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* New prelude function: `manifest`.  For doing subtle things to memory.
-
-* The GPU backends now handle up to 20 operators can be handled in a
-  single fused reduction.
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+## [0.25.11]
+
+### Added
+
+* New prelude function: `manifest`.  For doing subtle things to memory.
+
+* The GPU backends now handle up to 20 operators in a single fused
+  reduction.
+
+* CUDA/HIP terminology for GPU concepts (e.g. "thread block") is now
+  used in all public interfaces. The OpenCL names are still supported
+  for backwards compatibility.
+
+* More fusion across array slicing.
 
 ### Fixed
 
