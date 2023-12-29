@@ -1026,4 +1026,6 @@ def futhark_fma64(a, b, c):
     return a * b + c
 
 
+futhark_copysign16 = futhark_copysign32 = futhark_copysign64 = np.copysign
+
 # End of scalar.py.
