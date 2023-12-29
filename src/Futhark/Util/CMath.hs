@@ -24,6 +24,8 @@ module Futhark.Util.CMath
     hypotf,
     ldexp,
     ldexpf,
+    copysign,
+    copysignf,
   )
 where
 
@@ -162,3 +164,15 @@ ldexp = c_ldexp
 -- | The system-level @ldexpf@ function.
 ldexpf :: Float -> CInt -> Float
 ldexpf = c_ldexpf
+
+foreign import ccall "copysign" c_copysign :: Double -> Double -> Double
+
+foreign import ccall "copysignf" c_copysignf :: Float -> Float -> Float
+
+-- | The system-level @copysign@ function.
+copysign :: Double -> Double -> Double
+copysign = c_copysign
+
+-- | The system-level @copysignf@ function.
+copysignf :: Float -> Float -> Float
+copysignf = c_copysignf
