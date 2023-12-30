@@ -1,0 +1,1982 @@
+module Futhark.Analysis.Refinement.Rules where
+
+import Control.Applicative
+import Control.Monad.RWS
+import Data.Bifunctor
+import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as M
+import Data.Maybe
+import Data.Set (Set)
+import Data.Set qualified as S
+import Debug.Trace
+import Futhark.Analysis.Refinement.CNFNew
+import Futhark.Analysis.Refinement.Convert
+import Futhark.Analysis.Refinement.Monad
+import Futhark.Analysis.Refinement.Relations
+import Futhark.Analysis.Refinement.Representation
+import Futhark.MonadFreshNames
+import Futhark.SoP.FourierMotzkin
+import Futhark.SoP.Refine
+import Futhark.SoP.SoP (SoP)
+import Futhark.SoP.SoP qualified as SoP
+import Futhark.SoP.Util
+import Futhark.Util.Pretty
+import Language.Futhark qualified as E
+
+-- 'Exp' contexts for matching holes.
+type ExpContext = Exp -> Exp
+
+-- 'Prop' contexts for matching holes.
+type PropContext = [Exp] -> Prop
+
+type BoundVars = Set E.VName
+
+-- General rules on goal; yields a CNF formula.
+data Rule = Rule
+  { conditions :: PropContext -> [(ExpContext, BoundVars)] -> [Exp] -> CNFM (Maybe Prop),
+    conclusion :: Prop
+  }
+
+-- Simple substitutions on 'Exp's.
+data SubstRule = SubstRule
+  { to :: [(ExpContext, BoundVars)] -> [Exp] -> CNFM (Maybe Exp),
+    from :: Exp
+  }
+
+class Anywhere a where
+  anywhere :: a -> a
+
+instance Anywhere Exp where
+  anywhere = Nested
+
+instance Anywhere Prop where
+  anywhere = NestedProp
+
+addInfo :: CNF Prop -> CNFM ()
+addInfo =
+  asum
+    . map
+      ( \props -> do
+          modify (\env -> env {known = known env ++ props})
+          mapM_ addToAlgEnv props
+      )
+    . dnfToLists
+    . toDNF
+  where
+    addToAlgEnv :: Prop -> CNFM ()
+    addToAlgEnv (x :> y) = addRel $ expToSoP x SoP.:>: expToSoP y
+    addToAlgEnv (x :>= y) = addRel $ expToSoP x SoP.:>=: expToSoP y
+    addToAlgEnv (x :< y) = addRel $ expToSoP x SoP.:<: expToSoP y
+    addToAlgEnv (x :<= y) = addRel $ expToSoP x SoP.:<=: expToSoP y
+    addToAlgEnv (Not (x :> y)) = addRel $ expToSoP x SoP.:<=: expToSoP y
+    addToAlgEnv (Not (x :>= y)) = addRel $ expToSoP x SoP.:<: expToSoP y
+    addToAlgEnv p = pure ()
+
+nope :: CNFM (Maybe a)
+nope = pure Nothing
+
+yep :: a -> CNFM (Maybe a)
+yep = pure . Just
+
+yepM :: CNFM a -> CNFM (Maybe a)
+yepM = fmap Just
+
+convertToForEach :: (String, Rule) -> (String, Rule)
+convertToForEach (name, r) =
+  ( name ++ "_foreach",
+    Rule
+      { conditions =
+          \pctx -> \ctxs -> \(i : set : rest) -> do
+            mgoal <- conditions r pctx ctxs rest
+            case mgoal of
+              Nothing -> nope
+              Just goal -> yep $ ForEach i set goal,
+        conclusion = ForEach Hole Hole (conclusion r)
+      }
+  )
+
+rules :: [(String, Rule)]
+rules =
+  concatMap (\r -> [r, convertToForEach r]) rules'
+  where
+    constCtx :: ExpContext -> Bool
+    constCtx ctx =
+      isJust $ SoP.justConstant $ expToSoP (ctx $ intToExp 0)
+    rules' :: [(String, Rule)]
+    rules' =
+      [ ( "axiom",
+          Rule
+            { conditions = \pctx -> \_ -> \_ ->
+                yep $ Bool True,
+              conclusion = Axiom (anyProp Hole)
+            }
+        ),
+        ( "eq",
+          Rule
+            { conditions = \_ -> \_ -> \[x, y] ->
+                ifM
+                  (x ^==^ y)
+                  (yep $ Bool True)
+                  nope,
+              conclusion = Hole :== Hole
+            }
+        ),
+        ( "true_foreach",
+          Rule
+            { conditions = \_ -> \_ -> \_ -> yep $ Bool True,
+              conclusion = ForEach Hole Hole (Bool True)
+            }
+        ),
+        ( "eq_sigma",
+          Rule
+            { conditions = \_ -> \_ ->
+                \[Var i, set_i, e_i, Var j, set_j, e_j] -> do
+                  es <- massageInto i e_i e_j
+                  case es of
+                    [_] ->
+                      ifM
+                        (set_i ^==^ set_j)
+                        (yep $ Bool True)
+                        nope
+                    _ -> nope,
+              conclusion = Sigma Hole Hole Hole :== Sigma Hole Hole Hole
+            }
+        ),
+        ( "permutation_of",
+          Rule
+            { conditions =
+                \_ ->
+                  \_ ->
+                    \[xs, ys] ->
+                      yepM $
+                        addGoals
+                          [ pure $ Len xs :== Len ys,
+                            pure $ Elems xs :== Elems ys
+                          ],
+              conclusion = PermutationOf Hole Hole
+            }
+        ),
+        ( "const_ordered",
+          Rule
+            { conditions =
+                \_ ->
+                  \_ ->
+                    \[xs] ->
+                      case xs of
+                        Lit (Array xs')
+                          | all constExp xs' -> yep $ Bool True
+                        Concats i set conds e
+                          | constExp e -> yep $ Bool True
+                        _ -> nope,
+              conclusion = Ordered Hole
+            }
+        ),
+        ( "empty_sigma",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[i, set, e] -> do
+                      aenv <- gets algenv
+                      isempty <- isEmptySet set
+                      ifM
+                        (isEmptySet set)
+                        (yep $ intToExp 0)
+                        nope,
+                from = anywhere $ Sigma Hole Hole Hole
+              }
+        ),
+        ( "empty_rset",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[from, step, to] ->
+                      ifM
+                        (isEmptySet $ Range from step to)
+                        (yep Empty)
+                        nope,
+                from = anywhere $ Range Hole Hole Hole
+              }
+        ),
+        ( "empty_concats",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \_ ->
+                      yep (Lit $ Array $ []),
+                from = anywhere $ Concats Hole Empty Hole Hole
+              }
+        ),
+        ( "empty_concats2",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[_, _, CNFExp cnf, _] -> do
+                      r <- isFalse cnf
+                      t <- SoP.int2SoP (-1) $<=$ SoP.int2SoP 0
+                      k <- intToExp (-1) ^<=^ intToExp 0
+                      ifM
+                        (isFalse cnf)
+                        (yep $ Lit $ Array $ [])
+                        nope,
+                from = anywhere $ Concats Hole Hole Hole Hole
+              }
+        ),
+        ( "contract_union",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, _), (ctx2, _)] ->
+                    \[Var i, i_set, i_cond, i_exp, Var j, j_set, j_cond, j_exp] ->
+                      ifM
+                        ( andM
+                            [ i_set ^==^ SoP.substituteOne (j, Var i) j_set,
+                              i_cond ^==^ SoP.substituteOne (j, Var i) j_cond
+                            ]
+                        )
+                        ( yep $ ctx1 $ ctx2 $ Unions (Var i) i_set i_cond $ i_exp `union` SoP.substituteOne (j, Var i) j_exp
+                        )
+                        nope,
+                from =
+                  anywhere $
+                    InUnion $
+                      Unions Hole Hole Hole Hole
+                        `U` Unions Hole Hole Hole Hole
+              }
+        ),
+        ( "empty_unions",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \_ ->
+                      yep Empty,
+                from = anywhere $ Unions Hole Empty Hole Hole
+              }
+        ),
+        ( "singleton_union",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \xs ->
+                      case xs of
+                        [x] -> yep $ x
+                        _ -> nope,
+                from = anywhere $ Union LHole
+              }
+        ),
+        ( "empty_union_filter",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \xs ->
+                      let xs' = filter (/= Empty) xs
+                       in if (xs' /= xs)
+                            then yep $ Union $ Set $ S.fromList xs'
+                            else nope,
+                from = anywhere $ Union LHole
+              }
+        ),
+        ( "elems_concat",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[xs, ys] ->
+                      yep $ Elems xs `union` Elems ys,
+                from = anywhere $ Elems $ Hole `Concat` Hole
+              }
+        ),
+        ( "elems_range",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[from, step, to] ->
+                      yep $ Range from step to,
+                from = anywhere $ Elems (Range Hole Hole Hole)
+              }
+        ),
+        ( "combine_range_l",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, _), (ctx2, _)] -> \es ->
+                    case es of
+                      [from, step, to, e] ->
+                        ifM
+                          ((to ~+~ step) ^==^ e)
+                          (yep $ ctx1 $ ctx2 $ Range from step e)
+                          nope
+                      _ -> nope,
+                from = anywhere $ InUnion $ Range Hole Hole Hole `U` Lit LHole
+              }
+        ),
+        ( "elems_array_lit",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    yep . Lit . Set . S.fromList,
+                from = anywhere $ Elems $ Lit $ LHole
+              }
+        ),
+        ( "elems_union",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[xs] -> do
+                      i <- newVName "i"
+                      yep $
+                        Unions
+                          (Var i)
+                          (intToExp 0 ... Len xs ~-~ intToExp 1)
+                          (CNFExp cnfTrue)
+                          (Idx xs (Var i)),
+                from = anywhere $ Elems Hole
+              }
+        ),
+        ( "len_range_unit_step",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[from, to] -> yep $ to ~-~ from ~+~ intToExp 1,
+                from = anywhere $ Len (Range Hole (intToExp 1) Hole)
+              }
+        ),
+        ( "union_if",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, _), (ctx2, _)] ->
+                    \[i, range, CNFExp cond, CNFExp b, t, f] ->
+                      yep $
+                        ctx1 $
+                          Unions i range (CNFExp $ cond &&& b) (ctx2 t)
+                            `union` Unions i range (CNFExp $ cond &&& negateCNF negateProp b) (ctx2 f),
+                from = anywhere $ Unions Hole Hole Hole (InSum $ If Hole Hole Hole)
+              }
+        ),
+        ( "combine_unions",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, _), (ctx2, _)] ->
+                    \[i, range, CNFExp cond, CNFExp b, t, f] ->
+                      yep $
+                        ctx1 $
+                          Unions i range (CNFExp $ cond &&& b) (ctx2 t)
+                            `union` Unions i range (CNFExp $ cond &&& negateCNF negateProp b) (ctx2 f),
+                from = anywhere $ Unions Hole Hole Hole (InSum $ If Hole Hole Hole)
+              }
+        ),
+        ( "len",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[xs] ->
+                      case xs of
+                        Var u -> do
+                          withType u $ \t ->
+                            toExp $ head $ E.shapeDims $ E.arrayShape t
+                        Lit xs' -> pure $ Just $ intToExp $ fromIntegral $ litLength xs'
+                        Idx xs' (Range start step end) ->
+                          ifM
+                            (step ^==^ intToExp 1)
+                            (yep $ (end ~-~ start) ~+~ intToExp 1)
+                            nope
+                        _ -> pure Nothing,
+                from = anywhere $ Len Hole
+              }
+        ),
+        ( "iota_index",
+          toRule $
+            SubstRule
+              { to = withExpContext $
+                  \[from, step, to, i] ->
+                    ifM
+                      (from ^==^ intToExp 0 ^&& step ^==^ intToExp 1)
+                      (yep i)
+                      nope,
+                from = anywhere $ Idx (Range Hole Hole Hole) Hole
+              }
+        ),
+        ( "map_index",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[arr, i] ->
+                      case arr of
+                        Var arr' -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just fname <- getFun f,
+                                  "map" `L.isPrefixOf` fname,
+                                  E.Lambda params body _ _ _ : args' <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+                                    let ps = map (\p -> let (E.Named x, _, _) = E.patternParam p in x) params
+                                    body' <- toExp body
+                                    argsm'' <- sequence <$> mapM toExp args'
+                                    case argsm'' of
+                                      Nothing -> pure Nothing
+                                      Just args'' ->
+                                        let subst = M.fromList $ zip ps (map (\arg -> Idx arg i) args'')
+                                         in pure $ fmap (SoP.substitute subst) body'
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Idx Hole Hole
+              }
+        ),
+        ( "map_unions",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[i, set, conds, e] ->
+                      case e of
+                        Var arr' -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just fname <- getFun f,
+                                  "map" `L.isPrefixOf` fname,
+                                  E.Lambda params body _ _ _ : args' <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+                                    let ps = map (\p -> let (E.Named x, _, _) = E.patternParam p in x) params
+                                    mbody' <- toExp body
+                                    argsm'' <- sequence <$> mapM toExp args'
+                                    case (argsm'', mbody') of
+                                      (Just args'', Just body') ->
+                                        let subst = M.fromList $ zip ps (map (\arg -> Idx arg i) args'')
+                                            body'' = SoP.substitute subst $ body'
+                                         in yep $ Unions i set conds body''
+                                      _ -> nope
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Unions Hole Hole Hole Hole
+              }
+        ),
+        ( "map_concats",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[i, set, conds, e] ->
+                      case e of
+                        Var arr' -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just fname <- getFun f,
+                                  "map" `L.isPrefixOf` fname,
+                                  E.Lambda params body _ _ _ : args' <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+                                    let ps = map (\p -> let (E.Named x, _, _) = E.patternParam p in x) params
+                                    mbody' <- toExp body
+                                    argsm'' <- sequence <$> mapM toExp args'
+                                    case (argsm'', mbody') of
+                                      (Just args'', Just body') ->
+                                        let subst = M.fromList $ zip ps (map (\arg -> Idx arg i) args'')
+                                            body'' = SoP.substitute subst $ body'
+                                         in yep $ Concats i set conds body''
+                                      _ -> nope
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Concats Hole Hole Hole Hole
+              }
+        ),
+        ( "unions_slice",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[i, set, conds, xs, from, step, to, j] ->
+                      yep $
+                        Unions
+                          i
+                          set
+                          conds
+                          (Idx xs $ from ~+~ i ~*~ step),
+                from =
+                  anywhere $
+                    Unions
+                      Hole
+                      Hole
+                      Hole
+                      (Idx (Idx Hole (Range Hole Hole Hole)) Hole)
+              }
+        ),
+        ( "scatter_subeq",
+          Rule
+            { conditions =
+                \_ ->
+                  \_ ->
+                    \[l, r] ->
+                      let dropWith (Without _ x) = x
+                          dropWith x = x
+                       in case dropWith l of
+                            Var sct ->
+                              withBinding sct $ \e ->
+                                case e of
+                                  E.AppExp (E.Apply f args _) _
+                                    | Just "scatter" <- getFun f,
+                                      [arr, idxs, vals] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+                                        mvals' <- toExp vals
+                                        midxs' <- toExp idxs
+                                        case (mvals', midxs') of
+                                          (Just vals', Just idxs')
+                                            | vals' == r -> do
+                                                f <- mkFilter (\i -> atomCNF $ (Idx idxs' i :>= intToExp 0)) idxs'
+                                                yep $ Ordered f
+                                          _ -> nope
+                                  _ -> nope
+                            _ -> nope,
+              conclusion = SubEq Hole Hole
+            }
+        ),
+        ( "scan_sum",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, bv1), (ctx2, bv2)] ->
+                    \args ->
+                      case args of
+                        [j, js, c, Var arr', i] -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just "scan" <- getFun f,
+                                  [E.OpSection (E.QualName [] vn) _ _, _, xs] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args,
+                                  "+" <- E.baseString vn -> do
+                                    xsm <- toExp xs
+                                    case xsm of
+                                      Nothing -> pure Nothing
+                                      Just xs' -> do
+                                        k <- newVName "j"
+                                        yep $
+                                          ctx1 $
+                                            Unions j js c $
+                                              ctx2 $
+                                                Sigma
+                                                  (Var k)
+                                                  (intToExp 0 ... i)
+                                                  (Idx xs' $ Var k)
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Unions Hole Hole Hole (anywhere $ Idx Hole Hole)
+              }
+        ),
+        ( "scan_sum_concat",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, bv1), (ctx2, bv2)] ->
+                    \args ->
+                      case args of
+                        [j, js, c, Var arr', i] -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just "scan" <- getFun f,
+                                  [E.OpSection (E.QualName [] vn) _ _, _, xs] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args,
+                                  "+" <- E.baseString vn -> do
+                                    xsm <- toExp xs
+                                    case xsm of
+                                      Nothing -> pure Nothing
+                                      Just xs' -> do
+                                        k <- newVName "j"
+                                        yep $
+                                          ctx1 $
+                                            Concats j js c $
+                                              ctx2 $
+                                                Sigma
+                                                  (Var k)
+                                                  (intToExp 0 ... i)
+                                                  (Idx xs' $ Var k)
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Concats Hole Hole Hole (anywhere $ Idx Hole Hole)
+              }
+        ),
+        ( "scan_sum",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \args ->
+                      case args of
+                        [Var arr', i] -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just "scan" <- getFun f,
+                                  [E.OpSection (E.QualName [] vn) _ _, _, xs] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args,
+                                  "+" <- E.baseString vn -> do
+                                    xsm <- toExp xs
+                                    case xsm of
+                                      Nothing -> pure Nothing
+                                      Just xs' -> do
+                                        k <- newVName "j"
+                                        yep $
+                                          Sigma
+                                            (Var k)
+                                            (intToExp 0 ... i)
+                                            (Idx xs' $ Var k)
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Idx Hole Hole
+              }
+        ),
+        ( "var",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \args ->
+                      case args of
+                        [Var x] ->
+                          withBinding x $ \e ->
+                            toExp e
+                        _ -> nope,
+                from = anywhere $ Hole
+              }
+        ),
+        ( "split_sigma",
+          toRule $
+            SubstRule
+              { to = withExpContext $
+                  \[i, set, e] ->
+                    case e of
+                      SoP sop
+                        | isNothing $ SoP.justSingleTerm sop ->
+                            let sums = map (Sigma i set . SoP . uncurry SoP.term2SoP) $ SoP.sopToLists sop
+                             in yep $ foldl1 (~+~) sums
+                      _ -> nope,
+                from = anywhere $ Sigma Hole Hole Hole
+              }
+        ),
+        ( "const_sigma",
+          toRule $
+            SubstRule
+              { to = withExpContext $
+                  \[i, set, e] ->
+                    case SoP.justConstant $ expToSoP e of
+                      Just c ->
+                        pure $ (intToExp c ~*~) <$> setSize set
+                      _ -> nope,
+                from = anywhere $ Sigma Hole Hole Hole
+              }
+        ),
+        -- ( "const_concats",
+        --  toRule $
+        --    SubstRule
+        --      { to =
+        --          withExpContext $
+        --            \[i, set, conds, e] ->
+        --              if (constExp e)
+        --                then yep $ Lit $ Array [e]
+        --                else nope,
+        --        from = anywhere $ Concats Hole Hole Hole Hole
+        --      }
+        -- ),
+        ( "union_sigma_bool", -- fix
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, bv1), (ctx2, bv2)] ->
+                    \[i, range, conds, j, jset, e] ->
+                      case (range, e, jset) of
+                        (Range from step to, BoolToInt arg, Range jstart jstep jend)
+                          | jend == i,
+                            jstart == intToExp 0,
+                            jstep == intToExp 1,
+                            from == intToExp 0,
+                            step == intToExp 1,
+                            constCtx ctx2 ->
+                              -- error $ show (ctx2 $ intToExp 1) ++ "\n" ++ show (flatten (ctx2 $ intToExp 1))
+                              yep $
+                                ctx1 $
+                                  Range
+                                    (ctx2 $ intToExp 1)
+                                    (intToExp 1)
+                                    ( ctx2 $
+                                        Sigma
+                                          j
+                                          (Range jstart jstep to)
+                                          e
+                                    )
+                        _ -> nope,
+                from =
+                  anywhere $
+                    Unions Hole Hole Hole $
+                      anywhere $
+                        Sigma Hole Hole Hole
+              }
+        ),
+        ( "mul_sigma",
+          toRule $
+            SubstRule
+              { to = withExpContext $
+                  \[i, set, e] ->
+                    case SoP.justSingleTerm $ expToSoP e of
+                      Just (t, n)
+                        | n /= 1 ->
+                            pure $ Just $ intToExp n ~*~ Sigma i set (SoP $ SoP.term2SoP t 1)
+                      _ -> pure Nothing,
+                from = anywhere $ Sigma Hole Hole Hole
+              }
+        ),
+        ( "from_if_sigma", -- generalize better
+          toRule $
+            SubstRule
+              { to = withExpContext $
+                  \[i, Range from step to, CNFExp cond, t, f] ->
+                    case (i, cnfToLists cond) of
+                      (Var i, [[Var i' :== from]])
+                        | i == i' ->
+                            yep $ t ~+~ Sigma (Var i) (Range (from ~+~ step) step to) f
+                      _ -> nope,
+                from = anywhere $ Sigma Hole Hole (If Hole Hole Hole)
+              }
+        ),
+        ( "combine_sigma_and_term",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, bv1), (ctx2, bv2)] ->
+                    \[e, Var i, Range from step to, sigma_e] -> do
+                      es <- massageInto i sigma_e e
+                      case es of
+                        [new_elem] ->
+                          ifM
+                            (new_elem ^>^ to)
+                            ( yep $
+                                ctx1 $
+                                  ctx2 $
+                                    Sigma
+                                      (Var i)
+                                      ( Range from step to
+                                          `union` Lit (Set (S.singleton new_elem))
+                                      )
+                                      sigma_e
+                            )
+                            nope
+                        _ -> nope,
+                from =
+                  anywhere $
+                    InSum $
+                      Hole :+: Sigma Hole Hole Hole
+              }
+        ),
+        ( "basic_combine_sigma", -- Should really be adding info...maybe the matching
+          toRule $
+            SubstRule -- should populate the algebraic environment?
+              { to =
+                  \[(ctx1, bv1), (ctx2, bv2)] ->
+                    \args@[ Var u_i,
+                            range,
+                            cond,
+                            Var x_i,
+                            x_set,
+                            x_e,
+                            Var y_i,
+                            y_set,
+                            y_e
+                            ] -> do
+                        case (range, x_set, y_set) of
+                          (Range _ _ u_end, Range x_start x_step x_end, Range y_start y_step y_end)
+                            | and
+                                [ x_e == SoP.substituteOne (y_i, Var x_i) y_e,
+                                  y_end == Var u_i,
+                                  x_end == u_end,
+                                  x_start == y_start
+                                ] ->
+                                yep $
+                                  ctx1 $
+                                    Unions (Var u_i) range cond $
+                                      ctx2 $
+                                        Sigma (Var x_i) ((Var u_i ~+~ intToExp 1) ... x_end) x_e
+                          _ -> nope,
+                from =
+                  anywhere $
+                    Unions Hole Hole Hole $
+                      InSum $
+                        Sigma Hole Hole Hole :-: Sigma Hole Hole Hole
+              }
+        ),
+        ( "i + sigma bool",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \args -> do
+                      case args of
+                        [u_i, range, cond, vi, y_j, y_set, y_e] -> do
+                          case (flatten vi, range, y_e, y_set) of
+                            (Var i, Range u_min u_step u_end, BoolToInt (Idx arr idx), Range (SoP y_start_sop) y_step y_end)
+                              | Just (1, y_start_i, c) <- SoP.justAffine y_start_sop,
+                                and
+                                  [ u_min == intToExp 0,
+                                    u_step == intToExp 1,
+                                    y_start_i == Var i,
+                                    u_end == y_end,
+                                    idx == y_j
+                                  ] -> do
+                                  let e_min = Sigma y_j ((SoP.substituteOne (i, intToExp 0) y_start_i) ... y_end) y_e
+                                      e_max = y_end
+                                  yep $
+                                    e_min ... e_max
+                            _ -> nope
+                        _ -> error $ prettyString args,
+                from =
+                  anywhere $
+                    Unions Hole Hole Hole $
+                      Hole :+: Sigma Hole Hole Hole
+              }
+        ),
+        ( "combine_ranges",
+          toRule $
+            SubstRule
+              { to =
+                  \[(ctx1, _), (ctx2, _)] ->
+                    \[from1, step1, to1, from2, step2, to2] ->
+                      ifM
+                        ( andM
+                            [ from1 ^<=^ from2,
+                              from2 ^<=^ (to1 ~+~ intToExp 1),
+                              step1 ^==^ step2
+                            ]
+                        )
+                        ( yep $ ctx1 $ ctx2 $ Range from1 step1 to2
+                        )
+                        nope,
+                from = anywhere $ InUnion $ Range Hole Hole Hole `U` Range Hole Hole Hole
+              }
+        ),
+        ( "simplify_if",
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \[CNFExp cnf, t, f] ->
+                      ifM
+                        (isTrue cnf)
+                        (yep t)
+                        ( ifM
+                            (isFalse cnf)
+                            (yep f)
+                            nope
+                        ),
+                from =
+                  anywhere $ If Hole Hole Hole
+              }
+        ),
+        ( "split_on_if",
+          Rule
+            { conditions =
+                \gctx -> \[(ctx, bvs)] -> \[CNFExp p, t, f] ->
+                  if (not . S.null $ varsOf p `S.intersection` bvs)
+                    then nope
+                    else do
+                      yepM $
+                        addGoals
+                          [ addInfo p >> (pure (gctx [ctx $ t])),
+                            addInfo (negateCNF (negateProp) p) >> (pure (gctx [ctx $ f]))
+                          ],
+              conclusion =
+                anyProp $ anywhere $ If Hole Hole Hole
+            }
+        ),
+        ( "ordered_concat_sigma",
+          Rule
+            { conditions -- fix
+              =
+                \_ -> \_ -> \[i, i_set, conds, j, j_set, e] ->
+                  case (i_set, j_set) of
+                    (Range i_start i_step i_end, Range j_start j_step j_end)
+                      | j_end == i -> do
+                          ifM
+                            (e ^>=^ intToExp 0)
+                            (yep $ Bool True)
+                            nope
+                    _ -> nope,
+              conclusion =
+                Ordered $ Concats Hole Hole Hole $ Sigma Hole Hole Hole
+            }
+        ),
+        ( "sgmSumInt'", -- To be removed once typechecker bug is fixed
+          toRule $
+            SubstRule
+              { to =
+                  withExpContext $
+                    \args ->
+                      case args of
+                        [Var arr', k] -> do
+                          withBinding arr' $ \e -> do
+                            case e of
+                              E.AppExp (E.Apply f args _) _
+                                | Just "sgmSumInt'" <- getFun f,
+                                  [shp, flags, input] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+                                    margs <- sequence <$> mapM toExp [shp, flags, input]
+                                    case margs of
+                                      Nothing -> error ""
+                                      Just [shp', flags', input'] -> do
+                                        i <- newVName "t"
+                                        j <- newVName "r"
+                                        l <- newVName "l"
+
+                                        let segs x = do
+                                              j <- newVName "j"
+                                              pure $ Sigma (Var j) (intToExp 0 ... x ~-~ intToExp 1) shp'
+
+                                        segs_start <- segs (Var i)
+                                        segs_end <- segs (Var i ~+~ intToExp 1)
+                                        segs_i <- segs $ Var i
+                                        let info =
+                                              ForEach
+                                                (Var i)
+                                                (intToExp 0 ... Len shp' ~-~ intToExp 2)
+                                                ( ForEach
+                                                    (Var j)
+                                                    (intToExp 0 ... segs_end ~-~ segs_start)
+                                                    ( Idx (Var arr') (segs_i ~+~ Var j)
+                                                        :== Sigma
+                                                          (Var l)
+                                                          (intToExp 0 ... Var l)
+                                                          (Idx input' (segs_i ~+~ Var l))
+                                                    )
+                                                )
+
+                                        -- modify $ \senv ->
+                                        --  senv
+                                        --    { known_map =
+                                        --        M.insert arr' [info] $ known_map senv
+                                        --    }
+
+                                        -- km <- gets known_map
+
+                                        test <- instantiateProp info (Idx (Var arr') k)
+                                        case test of
+                                          [] -> nope
+                                          ((l :== r) : _) -> yep $ r
+                                          _ -> error $ unlines $ map prettyString test
+
+                              -- pms <- instantiateProp info (Idx (Var arr') k)
+                              -- case pms of
+                              --  [] -> nope
+                              --  ps ->
+                              --    error $
+                              --      unlines
+                              --        [ "sgmSumInt",
+                              --          prettyString $ (Idx (Var arr') k),
+                              --          prettyString i,
+                              --          "\n"
+                              --        ]
+                              --        ++ unlines
+                              --          (map prettyString ps)
+                              _ -> nope
+                        _ -> nope,
+                from = anywhere $ Idx Hole Hole
+              }
+        )
+        -- addInfo :: CNF Prop -> CNFM ()
+
+        -- ( "sgmSumInt'", -- To be removed once typechecker bug is fixed
+        --  toRule $
+        --    SubstRule
+        --      { to =
+        --          withExpContext $
+        --            \args ->
+        --              case args of
+        --                [Var arr', i] -> do
+        --                  withBinding arr' $ \e -> do
+        --                    case e of
+        --                      E.AppExp (E.Apply f args _) _
+        --                        | Just "sgmSumInt'" <- getFun f,
+        --                          [shp, flags, xs] <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+        --                            margs <- sequence <$> mapM toExp [shp, flags, xs]
+        --                            case margs of
+        --                              Nothing -> nope
+        --                              Just [shp', flags', xs] ->
+        --                                k <- newVName "j"
+        --                                yep $
+        --                                  Sigma
+        --                                    (Var k)
+        --                                    (intToExp 0 ... i)
+        --                                    (Idx xs' $ Var k)
+        --                      _ -> nope
+        --                _ -> nope,
+        --        from = anywhere $ Idx Hole Hole
+        --      }
+
+        --
+        -- )
+        -- ( "sigma_normalize_index",
+        --  toRule $
+        --    SubstRule
+        --      { to = withExpContext $
+        --          \[Var i, set, e] ->
+        --            case set of
+        --              Range from step to ->
+        --                ifM
+        --                  (e `contains` (anywhere $ If Hole Hole Hole))
+        --                  nope
+        --                  ( if (from == intToExp 0)
+        --                      then nope
+        --                      else
+        --                        let range' = Range (intToExp 0) step (to ~-~ from)
+        --                            e' = SoP.substituteOne (i, Var i ~+~ from) e
+        --                         in yep $ Sigma (Var i) range' e'
+        --                  )
+        --              _ -> nope,
+        --        from = anywhere $ Sigma Hole Hole Hole
+        --      }
+        -- )
+      ]
+
+anyProp = PHole
+
+class ToRule a where
+  toRule :: a -> Rule
+
+instance ToRule Rule where
+  toRule = id
+
+instance ToRule SubstRule where
+  toRule (SubstRule t f) =
+    Rule
+      { conditions = \pctx -> \ctxs -> \args ->
+          (fmap . fmap) (pctx . pure) $ t ctxs args,
+        conclusion = anyProp f
+      }
+
+addContextInfo :: (Monad m) => ExpContext -> RefineT m a -> RefineT m a
+addContextInfo ctx m =
+  localS id $ do
+    astMap mapper (ctx Hole)
+    m
+  where
+    mapper =
+      ASTMapper
+        { mapOnLit = pure,
+          mapOnExp = \e ->
+            case e of
+              Concats i set (CNFExp cond) e
+                | [[prop]] <- cnfToLists cond -> do
+                    modify $ \env -> env {known = known env ++ [prop]}
+                    astMap mapper e
+              (Var x) -> pure $ Var x
+              _ -> astMap mapper e,
+          mapOnProp = pure
+        }
+
+withExpContext :: ([Exp] -> CNFM (Maybe Exp)) -> [(ExpContext, BoundVars)] -> [Exp] -> CNFM (Maybe Exp)
+withExpContext f ctx_bvs holes = withExpContext' f (contractContexts ctx_bvs) holes
+  where
+    contractContexts ((ctx1, bvs1) : (ctx2, bvs2) : rest) =
+      contractContexts (((ctx1 . ctx2), bvs1 <> bvs2) : rest)
+    contractContexts [ctx_bv] = [ctx_bv]
+
+    withExpContext' f [] holes = f holes
+    withExpContext' f [(ctx, _)] holes = (fmap . fmap) ctx $ f holes
+    withExpContext' _ ctxs es =
+      error $
+        unlines
+          [ prettyString es,
+            prettyString $ map (($ Hole) . fst) ctxs
+          ]
+
+withBinding :: (Monad m) => E.VName -> (E.Exp -> RefineT m (Maybe a)) -> RefineT m (Maybe a)
+withBinding x f = do
+  me <- lookupVName x
+  case me of
+    Just e -> f e
+    Nothing -> pure Nothing
+
+withType :: (Monad m) => E.VName -> (E.PatType -> RefineT m (Maybe a)) -> RefineT m (Maybe a)
+withType x f = do
+  me <- lookupVName x
+  mt <- lookupType x
+  case (me, mt) of
+    (Just e, _) -> f $ E.typeOf e
+    (_, Just t) -> f t
+    _ -> pure Nothing
+
+mkFilter :: (Monad m) => (Exp -> CNF Prop) -> Exp -> RefineT m Exp
+mkFilter p xs = do
+  i <- newVName "i"
+  pure $ Concats (Var i) (intToExp 0 ... Len xs) (CNFExp $ p $ Var i) xs
+
+--------------------------------------------------------------------------------
+-- Matching
+--------------------------------------------------------------------------------
+
+type Pattern = Exp
+
+-- Need to know which Exps belong to which Context
+-- Need a more sophisticated handling of bound variables, e.g. by a Sigma
+-- Each argument needs to know about bound vars...
+data MatchRes = MatchRes
+  { match_ctxs :: [(ExpContext, BoundVars)],
+    match_exps :: [Exp],
+    match_known :: [Prop]
+  }
+
+instance Semigroup MatchRes where
+  MatchRes cs xs ks <> MatchRes ds ys ts = MatchRes (cs <> ds) (xs <> ys) (ks <> ts)
+
+instance Monoid MatchRes where
+  mempty = MatchRes mempty mempty mempty
+
+instance Show MatchRes where
+  show (MatchRes ctxs exps ks) =
+    unlines
+      [ "Contexts:",
+        prettyString $ map (first ($ Hole)) ctxs,
+        "Exps:",
+        prettyString exps,
+        "Known:",
+        prettyString ks
+      ]
+
+class Match a b c where
+  match :: (Monad m) => a -> b -> RefineT m [c]
+
+instance Match Pattern Exp MatchRes where
+  match :: forall m. (Monad m) => Pattern -> Exp -> RefineT m [MatchRes]
+  match x x'
+    | x == x' = pure [mempty]
+  match Hole x = pure [MatchRes mempty [x] mempty]
+  -- match x Hole = pure [MatchRes mempty [x] mempty]
+  match x (PExp p) = do
+    -- TODO: fix
+    (pms :: [PropMatch]) <- match (PHole x) p
+    mapM doOneMatch pms
+    where
+      doOneMatch pm = do
+        let m = prop_exp_match pm
+            -- pctxs = map (\pctx -> ((\e -> PExp $ pctx [e]), mempty)) $ prop_match_ctxs pm -- fix
+            [pctx] = prop_match_ctxs pm -- fix
+            -- pctxs = ((\e -> PExp $ pctx [e]), mempty)
+            ctxs =
+              case match_ctxs m of
+                [] -> []
+                ((c, bvs) : ctxs) -> (\e -> PExp $ pctx [c e], bvs) : ctxs
+
+        pure $ m {match_ctxs = ctxs}
+  match (Lit x) (Lit x') = matchLit x x'
+    where
+      matchLit (Array xs) (Array xs') =
+        matchs $ zip xs xs'
+      matchLit (Set xs) (Set xs') =
+        matchs $ zip (S.toList xs) (S.toList xs')
+      matchLit LHole (Array xs) =
+        pure [MatchRes mempty xs mempty]
+      matchLit LHole (Set xs) =
+        pure [MatchRes mempty (S.toList xs) mempty]
+  match (SoP sop) (SoP sop') = do
+    -- concat
+    --  <$> sequence
+    --    [reject <$> zipWithM matchTerm (SoP.sopToList sop) cand | cand <- L.permutations $ SoP.sopToList sop']
+
+    concat
+      <$> zipWithM matchTerm (SoP.sopToList sop) (SoP.sopToList sop')
+    where
+      -- concat
+      --  <$> zipWithM matchTerm (SoP.sopToList sop) (SoP.sopToList sop')
+
+      -- reject ms
+      --  -- \| any null ms = mempty
+      --  | otherwise = mconcat ms
+      matchTerm (t, n) (t', n')
+        -- \| [Hole] <- SoP.termToList t =
+        --    pure [MatchRes mempty [foldl (~*~) (intToExp n') $ SoP.termToList t'] mempty]
+        -- \| [Hole] <- SoP.termToList t' =
+        --    pure [MatchRes mempty [foldl (~*~) (intToExp n) $ SoP.termToList t] mempty]
+        | n == n' =
+            matchs $ zip (SoP.termToList t) (SoP.termToList t')
+        | otherwise = pure mempty
+  match (Concat x y) (Concat x' y') =
+    matchs [(x, x'), (y, y')]
+  match (Elems x) (Elems x') =
+    match x x'
+  match (Union x) (Union x') =
+    match (Lit x) (Lit x')
+  match (Idx x y) (Idx x' y') =
+    matchs [(x, x'), (y, y')]
+  match (Unions x y z k) (Unions x' y' z' k') =
+    matchs [(x, x'), (y, y'), (z, z'), (k, k')]
+  match (Concats x y z k) (Concats x' y' z' k') =
+    matchs [(x, x'), (y, y'), (z, z'), (k, k')]
+  match (Range x y z) (Range x' y' z') =
+    matchs [(x, x'), (y, y'), (z, z')]
+  match (Len x) (Len x') =
+    match x x'
+  match (If x y z) (If x' y' z') =
+    matchs [(x, x'), (y, y'), (z, z')]
+  match (Sigma x y z) (Sigma x' y' z') =
+    -- addBoundVarsM (varsOf x') $ -- TODO FIX
+    matchs [(x, x'), (y, y'), (z, z')]
+  match (Nested x) x' =
+    matchNested x x'
+  match (InSum x) (SoP x') =
+    concat <$> sequence [doMatch ctx summands cand | (cand, ctx) <- sop_splits]
+    where
+      summands = flattenPlus x
+      sop_splits =
+        [L.splitAt (length summands) perm | perm <- L.permutations $ SoP.sopToLists x']
+      doMatch ctx summands cand =
+        map (addExpContext (~+~ (SoP $ SoP.sopFromList ctx)) mempty) <$> match x (flatten $ SoP $ SoP.sopFromList cand)
+  match (InSum x) x' =
+    map (addExpContext id mempty) <$> match x x'
+  match e@(x :+: y) (SoP sop)
+    | length summands == length (SoP.sopToLists sop) = do
+        concat <$> sequence [matchs $ zip summands cand | cand <- L.permutations terms]
+    where
+      summands = flattenPlus e
+
+      processTerm (_, 0) = intToExp 0
+      processTerm ([], 1) = intToExp 1
+      processTerm (ts, 1) = foldl1 (:*:) ts
+      processTerm (ts, n) = foldl (:*:) (intToExp n) ts
+
+      terms = map processTerm $ SoP.sopToLists sop
+  match e@(x :-: y) z =
+    match (x :+: (intToExp (-1) :*: y)) z
+  match (x :*: y) (x' :*: y') =
+    matchs [(x, x'), (y, y')]
+  match e@(x :*: y) (SoP sop)
+    | [(ts, n)] <- SoP.sopToLists sop,
+      length ts + 1 == length multiplicands = do
+        let terms = intToExp n : ts
+
+        concat <$> sequence [matchs $ zip cand terms | cand <- L.permutations multiplicands]
+    where
+      multiplicands = flattenMult e
+  match (InUnion x) (Union es) =
+    concat <$> sequence [doMatch ctx unionands cand | (cand, ctx) <- union_splits]
+    where
+      unionands = flattenUnion x
+      union_splits =
+        [L.splitAt (length unionands) perm | perm <- L.permutations $ litToList es]
+      doMatch ctx summands cand =
+        map (addExpContext (union (Lit $ Set $ S.fromList ctx)) mempty) <$> match x (Union $ Set $ S.fromList cand)
+  match (InUnion x) x' =
+    map (addExpContext id mempty) <$> match x x'
+  match e@(U x y) (Union es)
+    | length unionands == litLength es = do
+        concat <$> sequence [matchs $ zip unionands cand | cand <- L.permutations $ litToList es]
+    where
+      unionands = flattenUnion e
+  match _ _ = pure mempty
+
+matchs :: (Monad m) => [(Pattern, Exp)] -> RefineT m [MatchRes]
+matchs [] = pure [mempty]
+matchs ((x, x') : rest) = do
+  mx <- match x x'
+  mrest <- matchs rest
+  pure [m <> m' | m <- mx, m' <- mrest]
+
+addExpContext :: ExpContext -> BoundVars -> MatchRes -> MatchRes
+addExpContext ctx bvs (MatchRes ctxs exps ks) = MatchRes ((ctx, bvs) : ctxs) exps ks
+
+-- Fix
+addKnown :: CNF Prop -> MatchRes -> MatchRes
+addKnown p (MatchRes ctx exps ks)
+  | [[prop]] <- cnfToLists p =
+      MatchRes ctx exps (ks ++ [prop])
+  | otherwise = error $ prettyString p
+
+addBoundVarsM :: (Monad m) => BoundVars -> RefineT m [MatchRes] -> RefineT m [MatchRes]
+addBoundVarsM bvs ms =
+  (fmap . fmap) f ms
+  where
+    f (MatchRes [] exps kn) = MatchRes [(id, bvs)] exps kn
+    f m = addBoundVars bvs m
+
+addBoundVars :: BoundVars -> MatchRes -> MatchRes
+addBoundVars bvs m =
+  m
+    { match_ctxs =
+        map (second $ (<> bvs)) $ match_ctxs m
+    }
+
+matchNested :: forall m. (Monad m) => Pattern -> Exp -> RefineT m [MatchRes]
+matchNested p exp = tryMatch id mempty exp
+  where
+    noMatch :: RefineT m [MatchRes]
+    noMatch = pure mempty
+
+    tryMatch :: ExpContext -> BoundVars -> Exp -> RefineT m [MatchRes]
+    tryMatch ctx bvs x = do
+      topMatches <- match p x
+      nestedMatches <- doNested ctx bvs x
+      pure $ (map (addExpContext ctx bvs) topMatches) <> nestedMatches
+
+    matchNestedLit :: ExpContext -> BoundVars -> Lit -> RefineT m [MatchRes]
+    matchNestedLit ctx bvs (Array xs) = do
+      matchMany (Lit . Array) ctx bvs xs
+    matchNestedLit ctx bvs (Set xs) = do
+      matchMany (Lit . Set . S.fromList) ctx bvs (S.toList xs)
+
+    doNested :: ExpContext -> BoundVars -> Exp -> RefineT m [MatchRes]
+    doNested ctx bvs (Lit x) = matchNestedLit ctx bvs x
+    doNested ctx bvs Empty = noMatch
+    doNested ctx bvs Var {} = noMatch
+    doNested ctx bvs (SoP sop) =
+      matchSoP ctx bvs sop
+    doNested ctx bvs (Concat x y) =
+      matchTwo Concat ctx bvs x y
+    doNested ctx bvs (Elems x) =
+      matchOne Elems ctx bvs x
+    doNested ctx bvs (Union (Set xs)) =
+      matchMany (Union . Set . S.fromList) ctx bvs (S.toList xs)
+    doNested ctx bvs (Idx x y) =
+      matchTwo Idx ctx bvs x y
+    doNested ctx bvs (Unions x y z k) =
+      addBoundVarsM (varsOf x) $
+        matchFour Unions ctx bvs x y z k
+    doNested ctx bvs (Concats x y (CNFExp cnf) k) =
+      asumM
+        [ matchThree (\x' y' z' -> Concats x' y' z' k) ctx bvs x y (CNFExp cnf),
+          (map $ addKnown cnf) <$> tryMatch (ctx . Concats x y (CNFExp cnf)) bvs k
+        ]
+    doNested ctx bvs (Range x y z) =
+      matchThree Range ctx bvs x y z
+    doNested ctx bvs (Len x) =
+      matchOne Len ctx bvs x
+    doNested ctx bvs (If x y z) =
+      matchThree If ctx bvs x y z
+    doNested ctx bvs (Sigma x y z) =
+      addBoundVarsM (varsOf x) $
+        matchThree Sigma ctx bvs x y z
+    doNested ctx bvs (BoolToInt x) =
+      matchOne BoolToInt ctx bvs x
+    doNested ctx bvs (Without x y) =
+      matchTwo Without ctx bvs x y
+    doNested ctx bvs (CNFExp cnf)
+      | justAnds cnf =
+          -- traceM $ unlines ["Pattern:", prettyString p, show p]
+          -- exps_map <- gets exps
+          concat <$> mapM (uncurry doMatch) cands
+      where
+        -- traceM $
+        --  unlines
+        --    [ prettyString cnf,
+        --      show ms,
+        --      prettyString cands
+        --    ]
+        -- pure ms
+
+        cands = [(p', ps') | (p' : ps') <- L.permutations $ concat $ cnfToLists cnf]
+        doMatch cand ps' = do
+          -- traceM $
+          --  unlines
+          --    [ "Trying match",
+          --      prettyString p,
+          --      prettyString cand
+          --    ]
+          pms <- match (PHole $ Nested p) cand
+          let cnfctx prop =
+                CNFExp $ listsToCNF $ [prop] : map pure ps'
+          pure $ map (fix cnfctx) pms
+        fix cnfctx (PropMatch [pctx] (MatchRes [] args ks)) =
+          MatchRes [(\e -> ctx $ cnfctx $ pctx $ pure $ e, mempty)] args ks
+        fix cnfctx (PropMatch [pctx] (MatchRes ctxs args ks)) =
+          MatchRes (map (\(ctx', bvs) -> (\e -> ctx $ cnfctx $ pctx $ pure $ ctx' e, bvs)) ctxs) args ks
+    doNested _ _ _ = noMatch
+
+    matchMany :: ([Exp] -> Exp) -> ExpContext -> BoundVars -> [Exp] -> RefineT m [MatchRes]
+    matchMany mkExp ctx bvs = matchMany' []
+      where
+        matchMany' _ [] = noMatch
+        matchMany' xs (y : ys) =
+          asumM
+            [ tryMatch (\y' -> ctx (mkExp $ xs ++ [y'] ++ ys)) bvs y,
+              matchMany' (xs ++ [y]) ys
+            ]
+
+    matchOne mkExp ctx bvs x =
+      matchMany (\[x'] -> mkExp x') ctx bvs [x]
+
+    matchTwo mkExp ctx bvs x y =
+      matchMany (\[x', y'] -> mkExp x' y') ctx bvs [x, y]
+
+    matchThree mkExp ctx bvs x y z =
+      matchMany (\[x', y', z'] -> mkExp x' y' z') ctx bvs [x, y, z]
+
+    matchFour mkExp ctx bvs x y z k =
+      matchMany (\[x', y', z', k'] -> mkExp x' y' z' k') ctx bvs [x, y, z, k]
+
+    matchSoP :: ExpContext -> BoundVars -> SoP Exp -> RefineT m [MatchRes]
+    matchSoP ctx bvs =
+      matchSummond [] . SoP.sopToLists
+      where
+        matchSummond _ [] = noMatch
+        matchSummond xs ((y, n) : ys) =
+          asumM
+            [ matchTerm (\term -> ctx $ SoP $ SoP.sopFromList $ xs ++ [(term, n)] ++ ys) [] y,
+              matchSummond (xs ++ [(y, n)]) ys
+            ]
+
+        matchTerm ctx _ [] = pure mempty
+        matchTerm ctx xs (y : ys) =
+          asumM
+            [ tryMatch (\rexp -> ctx $ xs ++ [rexp] ++ ys) bvs y,
+              matchTerm ctx (xs ++ [y]) ys
+            ]
+
+-- PropContext is to enable 'anyProp'
+data PropMatch = PropMatch
+  { prop_match_ctxs :: [PropContext],
+    prop_exp_match :: MatchRes
+  }
+
+instance Semigroup PropMatch where
+  PropMatch cs xs <> PropMatch ds ys = PropMatch (cs <> ds) (xs <> ys)
+
+instance Monoid PropMatch where
+  mempty = PropMatch mempty mempty
+
+instance Show PropMatch where
+  show (PropMatch pctxs m) = show m
+
+-- instance Match Exp Prop PropMatch where
+
+instance Match Prop Prop PropMatch where
+  match = matchProp'
+    where
+      matchProp' (x :< y) (x' :< y') =
+        withPropContext (listifyTwo (:<)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (x :<= y) (x' :<= y') =
+        withPropContext (listifyTwo (:<=)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (x :> y) (x' :> y') =
+        withPropContext (listifyTwo (:>)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (x :>= y) (x' :>= y') =
+        withPropContext (listifyTwo (:>=)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (x :== y) (x' :== y') =
+        withPropContext (listifyTwo (:==)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (x :/= y) (x' :/= y') =
+        withPropContext (listifyTwo (:/=)) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (PermutationOf x y) (PermutationOf x' y') =
+        withPropContext (listifyTwo PermutationOf) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (SubsetEq x y) (SubsetEq x' y') =
+        withPropContext (listifyTwo SubsetEq) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (SubEq x y) (SubEq x' y') =
+        withPropContext (listifyTwo SubEq) $
+          matchs [(x, x'), (y, y')]
+      matchProp' (Ordered x) (Ordered x') =
+        withPropContext (listifyOne Ordered) $
+          matchs [(x, x')]
+      matchProp' (Not x) (Not x') =
+        addPropContext Not $
+          match x x'
+      matchProp' (Bool x) (Bool x')
+        | x == x' =
+            withPropContext (const $ Bool x) $
+              pure [mempty]
+      matchProp' (GExp x) (GExp x') =
+        withPropContext (listifyOne GExp) $
+          match x x'
+      matchProp' (ForEach i set p) (ForEach i' set' p') = do
+        ms <- matchs [(i, i'), (set, set')]
+        pms <- match p p'
+        pure
+          [ PropMatch
+              pctx
+              (m <> pmatches)
+            | PropMatch pctx pmatches <- pms,
+              m <- ms
+          ]
+      matchProp' (Axiom _) (Axiom _) =
+        withPropContext (const $ Bool True) $
+          pure [mempty]
+      -- [ PropMatch
+      --    ( ( \xs -> case xs of
+      --          (x : y : rest) -> ForEach x y (pctx rest)
+      --          _ -> error $ prettyString xs
+      --      )
+      --        : pctxs
+      --    )
+      --    (m <> pmatches)
+      --  | PropMatch (pctx : pctxs) pmatches <- pms,
+      --    m <- ms
+      -- ]
+      matchProp' (PHole x) p = do
+        let pctx_xs = contextAndExps p
+        -- case (null $ head $ map snd pctx_xs) of
+        --  True -> pure mempty
+        --  _ -> do
+        --    -- (m :: [MatchRes]) <- match x (last $ head $ map snd pctx_xs) -- Rather, can be a prop
+        -- traceM $
+        --  unlines
+        --    [ "pctx_xs",
+        --      prettyString $ map snd pctx_xs,
+        --      show (m :: [MatchRes]),
+        --      "x",
+        --      prettyString x,
+        --      prettyString (last $ head $ map snd pctx_xs),
+        --      show (last $ head $ map snd pctx_xs)
+        --    ]
+        concat <$> mapM (\(pctx, xs) -> matchHole pctx [] xs) pctx_xs
+        where
+          -- matchHole :: PropContext -> [Exp] -> [Exp] -> RefineT m [PropMatch]
+          matchHole pctx rs [] = pure []
+          matchHole pctx rs (e : es) = do
+            ms <- match x e
+            rest <- matchHole pctx (rs ++ [e]) es
+            let pctx' es' = pctx $ rs ++ es' ++ es
+            pure $ map (PropMatch [pctx']) ms ++ rest
+
+          contextAndExps :: Prop -> [(PropContext, [Exp])]
+          contextAndExps (x :< y) = [(listifyTwo (:<), [x, y])]
+          contextAndExps (x :<= y) = [(listifyTwo (:<=), [x, y])]
+          contextAndExps (x :> y) = [(listifyTwo (:>), [x, y])]
+          contextAndExps (x :>= y) = [(listifyTwo (:>=), [x, y])]
+          contextAndExps (x :== y) = [(listifyTwo (:==), [x, y])]
+          contextAndExps (x :/= y) = [(listifyTwo (:/=), [x, y])]
+          contextAndExps (PermutationOf x y) =
+            [(listifyTwo PermutationOf, [x, y])]
+          contextAndExps (SubsetEq x y) =
+            [(listifyTwo SubsetEq, [x, y])]
+          contextAndExps (SubEq x y) =
+            [(listifyTwo SubEq, [x, y])]
+          contextAndExps (Ordered x) = [(listifyOne Ordered, [x])]
+          contextAndExps (Not p) =
+            map (\(ctx, ex) -> (Not . ctx, ex)) $ contextAndExps p
+          contextAndExps p@Bool {} = [(const p, mempty)]
+          contextAndExps (GExp x) = [(listifyOne GExp, [x])]
+          contextAndExps (PHole x) = [(error "phole", [x])]
+          -- contextAndExps (ForEach i set pred) =
+          --  [(listifyTwo (\i' set' -> ForEach i' set' pred), [i, set])]
+
+          contextAndExps (ForEach i set pred) =
+            [(listifyThree (\i' set' (PExp pred') -> ForEach i' set' pred'), [i, set, PExp pred])]
+          -- [(listifyTwo (\set' (PExp pred') -> ForEach i set' pred'), [set, PExp pred])]
+          contextAndExps p = error $ prettyString p
+      -- Hack to make instantiateForEach work
+      -- matchProp' p (PHole x) = do
+      --  let pctx_xs = contextAndExps p
+      --  concat <$> mapM (\(pctx, xs) -> matchHole pctx [] xs) pctx_xs
+      --  where
+      --    matchHole :: PropContext -> [Exp] -> [Exp] -> RefineT m [PropMatch]
+      --    matchHole pctx rs [] = pure []
+      --    matchHole pctx rs (e : es) = do
+      --      ms <- match e x
+      --      rest <- matchHole pctx (rs ++ [e]) es
+      --      let pctx' es' = pctx $ rs ++ es' ++ es
+      --      pure $ map (PropMatch [pctx']) ms ++ rest
+
+      --    contextAndExps :: Prop -> [(PropContext, [Exp])]
+      --    contextAndExps (x :< y) = [(listifyTwo (:<), [x, y])]
+      --    contextAndExps (x :<= y) = [(listifyTwo (:<=), [x, y])]
+      --    contextAndExps (x :> y) = [(listifyTwo (:>), [x, y])]
+      --    contextAndExps (x :>= y) = [(listifyTwo (:>=), [x, y])]
+      --    contextAndExps (x :== y) = [(listifyTwo (:==), [x, y])]
+      --    contextAndExps (x :/= y) = [(listifyTwo (:/=), [x, y])]
+      --    contextAndExps (PermutationOf x y) =
+      --      [(listifyTwo PermutationOf, [x, y])]
+      --    contextAndExps (SubsetEq x y) =
+      --      [(listifyTwo SubsetEq, [x, y])]
+      --    contextAndExps (SubEq x y) =
+      --      [(listifyTwo SubEq, [x, y])]
+      --    contextAndExps (Ordered x) = [(listifyOne Ordered, [x])]
+      --    contextAndExps (Not p) =
+      --      map (\(ctx, ex) -> (Not . ctx, ex)) $ contextAndExps p
+      --    contextAndExps p@Bool {} = [(const p, mempty)]
+      --    contextAndExps (GExp x) = [(listifyOne GExp, [x])]
+      --    contextAndExps (PHole x) = [(error "phole", [x])]
+      --    contextAndExps (ForEach i set pred) =
+      --      [(listifyThree (\i' set' (PExp pred') -> ForEach i' set' pred'), [i, set, PExp pred])]
+      --    contextAndExps p = error $ prettyString p
+      matchProp' _ _ = pure mempty
+
+      withPropContext pctx =
+        fmap $ map (PropMatch [pctx])
+
+      addPropContext pctx =
+        fmap $ map (\(PropMatch pctx' ms) -> PropMatch (map (pctx .) pctx') ms)
+
+      listifyOne f [x] = f x
+
+      listifyTwo f [x, y] = f x y
+
+      listifyThree f [x, y, z] = f x y z
+
+matchRule :: Rule -> Prop -> CNFM (Maybe Prop)
+matchRule r g =
+  match (conclusion r) g >>= tryMatches
+  where
+    tryMatches [] = pure Nothing
+    tryMatches (PropMatch [pctx] (MatchRes ctxs exps ks) : pms) = do
+      mg <- do
+        -- FIX THIS
+        -- localS (\senv -> senv {known = known senv ++ ks}) $
+        modify (\senv -> senv {known = known senv ++ ks})
+        g <- conditions r pctx ctxs exps
+        modify (\senv -> senv {known = known senv L.\\ ks})
+        pure g
+      case mg of
+        Nothing -> tryMatches pms
+        _ -> pure mg -- conditions r pctx ctxs exps
+
+applyRules :: [(String, Rule)] -> Prop -> CNFM (Maybe (String, Prop))
+applyRules [] _ = pure Nothing
+applyRules ((label, r) : rs) g = do
+  mg' <- matchRule r g
+  case mg' of
+    Nothing -> applyRules rs g
+    Just g' -> pure $ Just (label, g')
+
+contains :: forall m. (Monad m) => Exp -> Exp -> RefineT m Bool
+contains e p = (not . null) <$> (match p e :: RefineT m [MatchRes])
+
+-- instantiateForEach :: (Monad m) => Prop -> Exp -> RefineT m [Prop]
+-- instantiateForEach fe e = do
+--  instantiateForEach' vars [p]
+--  where
+--    flattenForEach (ForEach (Var j) set_j k) =
+--      let (vars, p_inner) = flattenForEach k
+--       in ((j, set_j) : vars, p_inner)
+--    flattenForEach p' = (mempty, p')
+--
+--    (vars, p) = flattenForEach fe
+--
+--    instantiateForEach' [] ps = pure $ ps
+--    instantiateForEach' ((i, set) : res) ps = do
+--      ps' <- concat <$> mapM (matchAndInstantiate i e) ps -- can't be recursive
+--      instantiateForEach' res ps'
+--
+---- Assumes all Holes are from the same (free) variable
+-- matchAndInstantiate :: (Monad m) => E.VName -> Exp -> Prop -> RefineT m [Prop]
+-- matchAndInstantiate i e p = do
+--  let p' = SoP.substituteOne (i, Hole) p
+--  ms <- match (PHole e) p'
+--  traceM $
+--    unlines
+--      [ prettyString e,
+--        prettyString p',
+--        show ms
+--      ]
+--  let es = map (head . match_exps . prop_exp_match) $ filter (\m -> length (L.nub $ match_exps $ prop_exp_match m) == 1) ms
+--      cands = map (\e' -> SoP.substituteOne (i, e') p) es
+--  pure cands
+
+--       ms <- filter (\z -> length z >= 1) <$> ((fmap . fmap) match_exps $ match p' e)
+
+massageInto :: (Monad m) => E.VName -> Exp -> Exp -> RefineT m [Exp]
+massageInto x p e = do
+  ms <- filter (\z -> length z >= 1) <$> ((fmap . fmap) match_exps $ match p' e)
+  when (length ms > 1) $
+    error $
+      unlines
+        [ prettyString x,
+          prettyString p,
+          prettyString e,
+          show ms,
+          show $ length ms
+        ]
+  pure $ concat $ filter (\m -> length (L.nub m) == 1) ms
+  where
+    p' = SoP.substituteOne (x, Hole) p
+
+-- pms <- matchProp p' (PHole e)
+-- let props =
+--      map
+--        ( \pm ->
+--            let [pctx] = prop_match_ctxs pm
+--                holes = match_exps $ prop_exp_match pm
+--                ctx =
+--                  case map fst $ match_ctxs $ prop_exp_match pm of
+--                    [ctx'] -> ctx
+--                    _ -> id
+--             in pctx $ map ctx $ holes
+--        )
+--        pms
+-- error $
+--  unlines
+--    [ prettyString p',
+--      prettyString props,
+--      prettyString $ ForEach (Var i) set p,
+--      prettyString e,
+--      prettyString hole_candidates
+--    ]
+
+-- instantiateForEach :: Monad m => Prop -> Exp -> RefineT m [Exp]
+-- instantiateForEach prop e = do
+--
+--
+--  where flattenForEach (ForEach i iset p@(ForEach{})) =
+--          let (rest, p') = flattenForEach p
+--          in ((i, iset) :  rest, p')
+--        flattenForEach (ForEach i iset p) =
+--          ([(i, iset)], p)
+--        (vars, prop') = flattenForEach prop
+
+-- convertMapBody :: Monad m => [E.Exp] -> E.Exp -> RefineT m (Maybe Exp)
+-- convertMapBody args body = do
+--  let (:arrays) =  map ((\x -> fromMaybe x (E.stripExp x)) . snd)
+--     $ NE.toList args
+--  case args' of
+--    (E.Lambda params
+--  | E.Lambda params body _ _ _ : args' <- -> do
+
+sopToHole sop = foldr1 (:+:) $ replicate (SoP.numTerms sop) Hole
+
+holifyMapper =
+  identityMapper
+    { mapOnExp =
+        \e ->
+          case e of
+            SoP sop -> pure $ sopToHole sop
+            e -> pure $ Hole
+    }
+
+holify = idMap holifyMapper
+
+combinations [] = pure mempty
+combinations [ms] = ms
+combinations (ms : mss) = do
+  m <- ms
+  m' <- combinations mss
+  pure $ m <> m'
+
+instantiateProp :: (Monad m) => Prop -> Exp -> RefineT m [Prop]
+instantiateProp =
+  instantiateProp' mempty
+  where
+    instantiateProp' free (ForEach (Var i) set p) e =
+      instantiateProp' (S.insert i free) p e
+    instantiateProp' free p e = do
+      ms <- reversePropMatch free p e
+      pure $ L.nub $ map (flip SoP.substitute p) ms
+
+-- instantiateForEach :: (Monad m) => Prop -> Exp -> RefineT m [Prop]
+-- instantiateForEach fe e = do
+--  instantiateForEach' vars [p]
+--  where
+--    flattenForEach (ForEach (Var j) set_j k) =
+--      let (vars, p_inner) = flattenForEach k
+--       in ((j, set_j) : vars, p_inner)
+--    flattenForEach p' = (mempty, p')
+--
+--    (vars, p) = flattenForEach fe
+--
+--    instantiateForEach' [] ps = pure $ ps
+--    instantiateForEach' ((i, set) : res) ps = do
+--      ps' <- concat <$> mapM (matchAndInstantiate i e) ps -- can't be recursive
+--      instantiateForEach' res ps'
+
+reversePropMatch :: forall m. (Monad m) => Set E.VName -> Prop -> Exp -> RefineT m [M.Map E.VName Exp]
+reversePropMatch free p e = do
+  -- Match @e@ with holes on all arguments.
+  (pattern_matches :: [PropMatch]) <- match (PHole $ Nested $ holify e) p
+  -- Figure out what the arguments actually were matched
+  (e_args :: [MatchRes]) <- match (holify e) e
+  -- Form potential matching pairs
+  let match_pairs = [(prop_exp_match pm, em) | pm <- pattern_matches, em <- e_args]
+  -- traceM $
+  --  unlines $
+  --    [ "p",
+  --      prettyString p,
+  --      "e",
+  --      prettyString e,
+  --      "holify e",
+  --      prettyString $ holify e,
+  --      "pattern_matches",
+  --      show pattern_matches,
+  --      "e_args",
+  --      show e_args
+  --    ]
+  res <-
+    (L.nub . concat)
+      <$> mapM
+        ( \(pm, em) ->
+            assign free e pm em
+        )
+        match_pairs
+  -- error $ unlines $ (prettyString . map M.toList) res
+  pure res
+
+---- Match @e@ with holes on all arguments.
+-- (ms :: [PropMatch]) <- match (PHole $ Nested $ holify e) p
+---- Figure out what the arguments actually were matched
+-- (e_args :: [MatchRes]) <- match (holify e) e
+-- let exps = L.nub [(match_exps $ prop_exp_match m1, match_exps m2) | m1 <- ms, m2 <- e_args]
+-- traceM $
+--  unlines
+--    [ "propmatch",
+--      "p",
+--      prettyString p,
+--      "e",
+--      prettyString e
+--    ]
+---- undefined
+---- error $ show $ length exps
+-- res <-
+--  (L.nub . concat)
+--    <$> mapM
+--      ( \(m1, m2) ->
+--          combinations <$> zipWithM (assign free e) m1 m2
+--      )
+--      exps
+---- error $ show $ length res -- (prettyString . map M.toList) res
+-- pure res
+
+assign :: forall m. (Monad m) => Set E.VName -> Exp -> MatchRes -> MatchRes -> RefineT m [M.Map E.VName Exp]
+assign free e pm em = do
+  traceM $ "free':" <> prettyString free'
+  -- combinations <$> zipWithM processExp p_exps e_exps
+  doExp [(mempty, free')] (zip p_exps e_exps)
+  where
+    (p_exps, p_bvs) = toExpBVs pm
+    (e_exps, _) = toExpBVs em
+    free' = free <> mconcat p_bvs
+    toExpBVs m =
+      (match_exps m, map snd $ match_ctxs m)
+
+    doExp :: [(M.Map E.VName Exp, Set E.VName)] -> [(Exp, Exp)] -> RefineT m [M.Map E.VName Exp]
+    doExp msf [] = pure $ map fst msf
+    doExp msf ((p, e') : rest) =
+      concat
+        <$> ( forM msf $
+                \(m, f) -> do
+                  new_maps <- processExp m f (SoP.substitute m p) (SoP.substitute m e')
+                  let msf' = do
+                        new <- new_maps
+                        let f' = f S.\\ S.fromList (M.keys new)
+                        pure (m <> new, f')
+                  doExp msf' rest
+            )
+
+    processExp u f (Var i) (Var j)
+      | i == j = pure [mempty]
+      | i `S.member` free' && not (j `S.member` free') = pure [M.singleton i (Var j)]
+      | j `S.member` free' && not (i `S.member` free') = pure [M.singleton j (Var i)]
+      | otherwise = pure []
+    processExp u f (Var i) y
+      | i `S.member` free' = pure [M.singleton i y]
+      | otherwise = pure []
+    processExp u f x y = do
+      ifM
+        (x ^==^ y)
+        (pure [mempty])
+        (if (e == y) then pure [] else reverseMatch free' x y)
+
+-- assign :: (Monad m) => Set E.VName -> Exp -> Exp -> Exp -> RefineT m [M.Map E.VName Exp]
+-- assign free e (Var i) (Var j)
+--  | i == j = pure [mempty]
+--  | i `S.member` free && not (j `S.member` free) = pure [M.singleton i (Var j)]
+--  | j `S.member` free && not (i `S.member` free) = pure [M.singleton j (Var i)]
+--  | otherwise = pure []
+-- assign free e (Var i) y
+--  | i `S.member` free = pure [M.singleton i y]
+--  | otherwise = pure []
+-- assign free e x y = do
+--  ifM
+--    (x ^==^ y)
+--    (pure [mempty])
+--    (if (e == y) then pure [] else reverseMatch free x y)
+
+-- The pattern is larger than the expression and we
+-- attempt to instantiate the pattern in such a way that
+-- the expression then appears within the pattern
+reverseMatch :: forall m. (Monad m) => Set E.VName -> Pattern -> Exp -> RefineT m [M.Map E.VName Exp]
+reverseMatch free p e = do
+  -- Match @e@ with holes on all arguments.
+  (pattern_matches :: [MatchRes]) <- match (Nested $ holify e) p
+  -- Figure out what the arguments actually were matched
+  (e_args :: [MatchRes]) <- match (holify e) e
+  -- Form potential matching pairs
+  let match_pairs = [(pm, em) | pm <- pattern_matches, em <- e_args]
+  traceM $
+    unlines $
+      [ "p",
+        prettyString p,
+        "e",
+        prettyString e,
+        "holify e",
+        prettyString $ holify e,
+        "pattern_matches",
+        show pattern_matches,
+        "e_args",
+        show e_args
+      ]
+  res <-
+    (L.nub . concat)
+      <$> mapM
+        ( \(pm, em) ->
+            assign free e pm em
+        )
+        match_pairs
+  -- error $ unlines $ (prettyString . map M.toList) res
+  pure res
+
+-- reverseMatch' free p e
+-- where
+--  reverseMatch' _ p e
+--    | p == e = pure [mempty]
+--  reverseMatch' free (Idx xs i) e@(Idx xs' i') =
+--    reverseAndSubMatches free [(xs, xs'), (i, i')]
+--  -- reverseMatches free [(xs, xs'), (i, i')]
+--  reverseMatch' free (Var x) e
+--    | x `S.member` free =
+--        pure [M.singleton x e]
+--    | otherwise = pure mempty
+--  -- Expensive to match
+--  reverseMatch' free (SoP sop) e
+--    | Just x <- SoP.justSym sop =
+--        reverseMatch' free x e
+--  reverseMatch' free (SoP sop) (SoP sop') =
+--    (concat . concat)
+--      <$> sequence
+--        [ zipWithM matchTerm (SoP.sopToList sop) cand'
+--          | cand <- S.toList $ S.filter ((== SoP.numTerms sop') . S.size) $ S.powerSet $ S.fromList $ SoP.sopToList sop',
+--            cand' <- L.permutations $ S.toList cand
+--        ]
+--    where
+--      matchTerm (t, n) (t', n')
+--        | SoP.isConstTerm t',
+--          [Var x] <- SoP.termToList t,
+--          x `S.member` free,
+--          n == 1 =
+--            pure [M.singleton x $ intToExp n']
+--        | n == n' =
+--            reverseMatches free $ zip (SoP.termToList t) (SoP.termToList t')
+--        | otherwise = pure mempty
+--  reverseMatch' free (SoP sop) e = do
+--    concat <$> mapM (\term -> reverseMatch' free (SoP $ uncurry SoP.term2SoP term) e) (SoP.sopToList sop)
+--  reverseMatch' _ _ _ = pure mempty
+
+--  combinations [] = pure mempty
+--  combinations [ms] = ms
+--  combinations (ms : mss) = do
+--    m <- ms
+--    m' <- combinations mss
+--    pure $ m <> m'
+
+--  reverseAndSubMatches :: Set E.VName -> [(Pattern, Exp)] -> RefineT m [M.Map E.VName Exp]
+--  reverseAndSubMatches free pes =
+--    (++)
+--      <$> reverseMatches free pes
+--      <*> (concat <$> mapM (flip (reverseMatch free) e) (map fst pes))
+
+--  reverseMatches :: Set E.VName -> [(Pattern, Exp)] -> RefineT m [M.Map E.VName Exp]
+--  reverseMatches free pes =
+--    combinations <$> mapM (uncurry $ reverseMatch free) pes
