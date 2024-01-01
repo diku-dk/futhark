@@ -544,7 +544,10 @@ isDirect :: (Eq num, IntegralExp num) => LMAD num -> Bool
 isDirect lmad = lmad == iota 0 (map ldShape $ dims lmad)
 {-# NOINLINE isDirect #-}
 
--- | The largest possible linear address reachable by this LMAD.
+-- | The largest possible linear address reachable by this LMAD. If
+-- you add one to this number (and multiply it with the element size),
+-- you get the amount of bytes you need to allocate for an array with
+-- this LMAD.
 range :: (Pretty num) => LMAD (TPrimExp Int64 num) -> TPrimExp Int64 num
 range lmad =
   -- The idea is that the largest possible offset must be the offset
@@ -553,5 +556,5 @@ range lmad =
   offset lmad + sum (map dimRange $ dims lmad)
   where
     dimRange LMADDim {ldStride, ldShape} =
-      (0 * ldStride) `sMax64` (ldShape - 1 * ldStride)
+      0 `sMax64` ((0 `sMax64` (ldShape - 1)) * ldStride)
 {-# NOINLINE range #-}
