@@ -180,8 +180,7 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         any (defbody_se /=) cases_ses =
-          let mem_size =
-                untyped $ product $ primByteSize pt : map sExt64 (IxFun.base ixfun)
+          let mem_size = untyped $ primByteSize pt * (1 + IxFun.range ixfun)
            in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
           fixable

@@ -284,7 +284,7 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
         Var res_v <- resSubExp res,
         Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
           num_bytes <-
-            letSubExp "num_bytes" =<< toExp (primByteSize pt * IxFun.range ixfun)
+            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range ixfun))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
           pe_unused <-
