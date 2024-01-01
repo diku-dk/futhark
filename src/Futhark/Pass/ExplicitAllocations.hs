@@ -324,10 +324,7 @@ summaryForBindage def_space t@(Array pt shape u) NoHint = do
 summaryForBindage _ t@(Array pt _ _) (Hint ixfun space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
-      product
-        [ product $ IxFun.base ixfun,
-          fromIntegral (primByteSize pt :: Int64)
-        ]
+      primByteSize pt * (1 + IxFun.range ixfun)
   m <- letExp "mem" $ Op $ Alloc bytes space
   pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 
