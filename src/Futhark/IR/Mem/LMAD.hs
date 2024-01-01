@@ -25,6 +25,7 @@ module Futhark.IR.Mem.LMAD
     mkExistential,
     equivalent,
     isDirect,
+    range,
   )
 where
 
@@ -542,3 +543,15 @@ equivalent lmad1 lmad2 =
 isDirect :: (Eq num, IntegralExp num) => LMAD num -> Bool
 isDirect lmad = lmad == iota 0 (map ldShape $ dims lmad)
 {-# NOINLINE isDirect #-}
+
+-- | The largest possible linear address reachable by this LMAD.
+range :: (Pretty num) => LMAD (TPrimExp Int64 num) -> TPrimExp Int64 num
+range lmad =
+  -- The idea is that the largest possible offset must be the offset
+  -- plus the sum of the maximum offsets reachable in each dimension,
+  -- which must be at either the minimum or maximum index.
+  offset lmad + sum (map dimRange $ dims lmad)
+  where
+    dimRange LMADDim {ldStride, ldShape} =
+      (0 * ldStride) `sMax64` (ldShape - 1 * ldStride)
+{-# NOINLINE range #-}
