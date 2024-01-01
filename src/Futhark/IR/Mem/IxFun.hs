@@ -27,6 +27,7 @@ module Futhark.IR.Mem.IxFun
     disjoint,
     disjoint2,
     disjoint3,
+    range,
   )
 where
 
@@ -45,6 +46,7 @@ import Futhark.IR.Mem.LMAD hiding
     isDirect,
     mkExistential,
     permute,
+    range,
     rank,
     reshape,
     shape,
@@ -284,3 +286,8 @@ closeEnough ixf1 ixf2 =
   where
     closeEnoughLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
+
+-- | The largest possible linear address reachable by this index
+-- function.
+range :: (Pretty num) => IxFun (TPrimExp Int64 num) -> TPrimExp Int64 num
+range = LMAD.range . ixfunLMAD
