@@ -963,10 +963,7 @@ pMCOp pr pOther =
 
 pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
 pIxFunBase pNum =
-  braces $ do
-    base <- pLab "base" $ brackets (pNum `sepBy` pComma) <* pSemi
-    lmad <- pLab "LMAD" pLMAD
-    pure $ IxFun.IxFun lmad base
+  IxFun.IxFun <$> pLMAD
   where
     pLab s m = keyword s *> pColon *> m
     pLMAD = braces $ do
