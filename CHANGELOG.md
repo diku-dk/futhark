@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Somewhat obscure simplification error caused by neglecting to update
+  metadata when removing dead scatter outputs.
+
 ## [0.25.11]
 
 ### Added
