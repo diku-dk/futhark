@@ -576,7 +576,8 @@ removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
         unzip6 $ filter isUsed $ zip6 (patElems pat) i_ses v_ses i_ts v_ts dests
       fun' =
         fun
-          { lambdaBody = (lambdaBody fun) {bodyResult = concat i_ses' ++ v_ses'},
+          { lambdaBody =
+              mkBody (bodyStms (lambdaBody fun)) (concat i_ses' ++ v_ses'),
             lambdaReturnType = concat i_ts' ++ v_ts'
           }
    in if pat /= Pat pat'
