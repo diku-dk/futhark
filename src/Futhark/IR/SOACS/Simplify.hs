@@ -582,10 +582,8 @@ removeDeadWrite (_, used) pat aux (Scatter w arrs fun dests) =
           }
    in if pat /= Pat pat'
         then
-          Simplify . auxing aux $
-            letBind (Pat pat') $
-              Op $
-                Scatter w arrs fun' dests'
+          Simplify . auxing aux . letBind (Pat pat') $
+            Op (Scatter w arrs fun' dests')
         else Skip
 removeDeadWrite _ _ _ _ = Skip
 
