@@ -622,9 +622,9 @@ whose entry points do not have unique parameter types
 Manifest
 --------
 
-The C backends generate a machine-readable *manifest* in JSON format
-that describes the API of the compiled Futhark program.  Specifically,
-the manifest contains:
+When compiling with ``--library``, the C backends generate a
+machine-readable *manifest* in JSON format that describes the API of
+the compiled Futhark program. Specifically, the manifest contains:
 
 * A mapping from the name of each entry point to:
 
