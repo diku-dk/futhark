@@ -557,8 +557,9 @@ boundFreeInExp e = do
 -- functions.
 type Loop = (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
--- | Mark bindings of consumed names as Consume.
-updateParamDiet :: Names -> Pat ParamType -> Pat ParamType
+-- | Mark bindings of consumed names as Consume, except those under a
+-- 'PatAscription', which are left unchanged.
+updateParamDiet :: (VName -> Bool) -> Pat ParamType -> Pat ParamType
 updateParamDiet cons = recurse
   where
     recurse (Wildcard (Info t) wloc) =
@@ -568,7 +569,7 @@ updateParamDiet cons = recurse
     recurse (PatAttr attr p ploc) =
       PatAttr attr (recurse p) ploc
     recurse (Id name (Info t) iloc)
-      | name `S.member` cons =
+      | cons name =
           let t' = t `setUniqueness` Consume
            in Id name (Info t') iloc
       | otherwise =
@@ -587,7 +588,7 @@ updateParamDiet cons = recurse
 convergeLoopParam :: Loc -> Pat ParamType -> Names -> TypeAliases -> CheckM (Pat ParamType)
 convergeLoopParam loop_loc param body_cons body_als = do
   let -- Make the pattern Consume where needed.
-      param' = updateParamDiet (S.filter (`elem` patNames param) body_cons) param
+      param' = updateParamDiet (`S.member` S.filter (`elem` patNames param) body_cons) param
 
   -- Check that the new values of consumed merge parameters do not
   -- alias something bound outside the loop, AND that anything
@@ -653,7 +654,7 @@ checkLoop loop_loc (param, arg, form, body) = do
   -- use to infer the proper diet of the parameter.
   ((body', body_cons), body_als) <-
     noConsumable
-      . bindingParam (fmap (second (const Consume)) param)
+      . bindingParam (updateParamDiet (const True) param)
       . bindingLoopForm form'
       $ do
         ((body', body_als), body_cons) <- contain $ checkExp body

@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Somewhat obscure simplification error caused by neglecting to update
   metadata when removing dead scatter outputs.
 
+* Compiler crash due to the type checker forgetting to respect the
+  explicitly ascribed non-consuming diet of loop parameters (#2067).
+
 ## [0.25.11]
 
 ### Added
