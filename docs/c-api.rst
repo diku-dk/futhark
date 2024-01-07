@@ -363,8 +363,9 @@ Records
 
 A record is an opaque type (see above) that supports additional
 functions to *project* individual fields (read their values) and to
-construct a value given values for the fields.  An opaque type is a
-record if its definition is a record at the Futhark level.
+construct a value given values for the fields. An opaque type is a
+record if its definition is a record at the Futhark level. Note that a
+tuple is simply a record with numeric fields.
 
 The projection and construction functions are equivalent in
 functionality to writing entry points by hand, and so serve only to
