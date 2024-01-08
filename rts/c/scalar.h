@@ -18,7 +18,6 @@
 // macro FUTHARK_F64_ENABLED is set.
 
 SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x);
-SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x);
 SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x);
 
 SCALAR_FUN_ATTR uint8_t add8(uint8_t x, uint8_t y) {
@@ -2305,6 +2304,7 @@ SCALAR_FUN_ATTR float fsignum32(float x) {
 #ifdef FUTHARK_F64_ENABLED
 
 SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x);
+SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x);
 
 #if ISPC
 SCALAR_FUN_ATTR bool futrts_isinf64(float x) {
