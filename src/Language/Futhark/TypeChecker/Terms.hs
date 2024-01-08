@@ -614,9 +614,9 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   -- Not technically an ascription, but we want the pattern to have
   -- exactly the type of 'e'.
   t <- expType e'
-  incLevel . bindingSizes sizes $ \sizes' ->
-    bindingPat sizes' pat t $ \pat' -> do
-      body' <- checkExp body
+  bindingSizes sizes $ \sizes' ->
+    incLevel . bindingPat sizes' pat t $ \pat' -> do
+      body' <- incLevel $ checkExp body
       body_t <- expTypeFully body'
 
       -- If the bound expression is of type i64, then we replace the
