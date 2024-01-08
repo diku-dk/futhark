@@ -824,10 +824,10 @@ linkVarToDim usage bcs vn lvl e = do
             ParamSize {} -> do
               notes <- dimNotes usage e
               unifyError usage notes bcs $
-                "Cannot unify size variable"
-                  <+> dquotes (pretty e)
-                  <+> "with"
+                "Cannot link size"
                   <+> dquotes (prettyName vn)
+                  <+> "to"
+                  <+> dquotes (pretty e)
                   <+> "(scope violation)."
                   </> "This is because"
                   <+> dquotes (pretty $ qualName dim')
