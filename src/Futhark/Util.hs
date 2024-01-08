@@ -21,6 +21,7 @@ module Futhark.Util
     partitionMaybe,
     maybeNth,
     maybeHead,
+    lookupWithIndex,
     splitFromEnd,
     splitAt3,
     focusNth,
@@ -180,6 +181,11 @@ maybeNth i l
 maybeHead :: [a] -> Maybe a
 maybeHead [] = Nothing
 maybeHead (x : _) = Just x
+
+-- | Lookup a value, returning also the index at which it appears.
+lookupWithIndex :: (Eq a) => a -> [(a, b)] -> Maybe (Int, b)
+lookupWithIndex needle haystack =
+  lookup needle $ zip (map fst haystack) (zip [0 ..] (map snd haystack))
 
 -- | Like 'splitAt', but from the end.
 splitFromEnd :: Int -> [a] -> ([a], [a])

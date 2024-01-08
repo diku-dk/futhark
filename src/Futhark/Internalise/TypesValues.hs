@@ -285,15 +285,15 @@ internaliseTypeM exts orig_t =
 internaliseConstructors ::
   M.Map Name [Tree (I.TypeBase ExtShape Uniqueness)] ->
   ( [Tree (I.TypeBase ExtShape Uniqueness)],
-    M.Map Name (Int, [Int])
+    [(Name, [Int])]
   )
 internaliseConstructors cs =
-  foldl' onConstructor mempty $ zip (E.sortConstrs cs) [0 ..]
+  L.mapAccumL onConstructor mempty $ E.sortConstrs cs
   where
-    onConstructor (ts, mapping) ((c, c_ts), i) =
+    onConstructor ts (c, c_ts) =
       let (_, js, new_ts) =
             foldl' f (withOffsets (map (fmap fromDecl) ts), mempty, mempty) c_ts
-       in (ts ++ new_ts, M.insert c (i, js) mapping)
+       in (ts ++ new_ts, (c, js))
       where
         size = sum . map length
         f (ts', js, new_ts) t
@@ -312,7 +312,7 @@ internaliseSumType ::
   M.Map Name [E.StructType] ->
   InternaliseM
     ( [I.TypeBase ExtShape Uniqueness],
-      M.Map Name (Int, [Int])
+      [(Name, [Int])]
     )
 internaliseSumType cs =
   bitraverse (mapM mkAccCerts . foldMap toList) pure . runInternaliseTypeM $

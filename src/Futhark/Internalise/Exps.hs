@@ -23,7 +23,7 @@ import Futhark.Internalise.Lambdas
 import Futhark.Internalise.Monad as I
 import Futhark.Internalise.TypesValues
 import Futhark.Transform.Rename as I
-import Futhark.Util (splitAt3)
+import Futhark.Util (lookupWithIndex, splitAt3)
 import Futhark.Util.Pretty (align, docText, pretty)
 import Language.Futhark as E hiding (TypeArg)
 import Language.Futhark.TypeChecker.Types qualified as E
@@ -796,7 +796,7 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
   let noExt _ = pure $ intConst Int64 0
   ts' <- instantiateShapes noExt $ map fromDecl ts
 
-  case M.lookup c constr_map of
+  case lookupWithIndex c constr_map of
     Just (i, js) ->
       (intConst Int8 (toInteger i) :) <$> clauses 0 ts' (zip js es')
     Nothing ->
@@ -889,7 +889,7 @@ generateCond orig_p orig_ses = do
       pure ([Just $ internalisePatLit l t], [se], ses)
     compares (E.PatConstr c (Info (E.Scalar (E.Sum fs))) pats _) (_ : ses) = do
       (payload_ts, m) <- internaliseSumType $ M.map (map toStruct) fs
-      case M.lookup c m of
+      case lookupWithIndex c m of
         Just (tag, payload_is) -> do
           let (payload_ses, ses') = splitAt (length payload_ts) ses
           (cmps, pertinent, _) <-
