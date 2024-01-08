@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Compiler crash due to the type checker forgetting to respect the
   explicitly ascribed non-consuming diet of loop parameters (#2067).
 
+* Size inference did incomplete level/scope checking, which could
+  result in circular sizes, which usually manifested as the type
+  checker going into an infinite loop (#2073).
+
 ## [0.25.11]
 
 ### Added

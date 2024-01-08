@@ -346,4 +346,4 @@ bindingParams tps orig_ps m = do
             binding (patIdents $ fmap toStruct p') $ incLevel $ descend (p' : ps') ps
         descend ps' [] = m tps' $ reverse ps'
 
-    descend [] orig_ps
+    incLevel $ descend [] orig_ps
