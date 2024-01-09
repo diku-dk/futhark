@@ -1,6 +1,7 @@
 -- Sumtype equality.
 -- ==
--- error: use pattern matching
+-- input { }
+-- output { 2 }
 
 type foobar = #foo i32 | #bar i32
 
