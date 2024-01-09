@@ -513,8 +513,8 @@ struct futhark_context {
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
-
-  // Common fields above.
+  bool program_initialised;
+  // Uniform fields above.
 
   cl_mem global_failure;
   cl_mem global_failure_args;
@@ -546,7 +546,7 @@ struct futhark_context {
   struct builtin_kernels* kernels;
 };
 
-static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options) {
+static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options, char** log) {
   cl_int clBuildProgram_error = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
@@ -563,7 +563,7 @@ static cl_build_status build_gpu_program(cl_program program, cl_device_id device
                                              &build_status,
                                              NULL));
 
-  if (build_status != CL_SUCCESS) {
+  if (build_status != CL_BUILD_SUCCESS) {
     char *build_log;
     size_t ret_val_size;
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size));
@@ -571,12 +571,10 @@ static cl_build_status build_gpu_program(cl_program program, cl_device_id device
     build_log = (char*) malloc(ret_val_size+1);
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL));
 
-    // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
+    // The spec technically does not say whether the build log is
+    // zero-terminated, so let's be careful.
     build_log[ret_val_size] = '\0';
-
-    fprintf(stderr, "Build log:\n%s\n", build_log);
-
-    free(build_log);
+    *log = build_log;
   }
 
   return build_status;
@@ -977,9 +975,24 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
-  OPENCL_SUCCEED_FATAL(build_gpu_program(prog, device_option.device, compile_opts));
-
+  char* build_log;
+  cl_build_status status =
+    build_gpu_program(prog, device_option.device, compile_opts, &build_log);
   free(compile_opts);
+
+  if (status != CL_BUILD_SUCCESS) {
+    ctx->error = msgprintf("Compilation of OpenCL program failed.\nBuild log:\n%s",
+                           build_log);
+    // We are giving up on initialising this OpenCL context. That also
+    // means we need to free all the OpenCL bits we have managed to
+    // allocate thus far, as futhark_context_free() will not touch
+    // these unless initialisation was completely successful.
+    (void)clReleaseProgram(prog);
+    (void)clReleaseCommandQueue(ctx->queue);
+    (void)clReleaseContext(ctx->ctx);
+    free(build_log);
+    return;
+  }
 
   size_t binary_size = 0;
   unsigned char *binary = NULL;
@@ -1011,7 +1024,8 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   ctx->clprogram = prog;
 }
 
-static struct opencl_device_option get_preferred_device(const struct futhark_context_config *cfg) {
+static struct opencl_device_option get_preferred_device(struct futhark_context *ctx,
+                                                        const struct futhark_context_config *cfg) {
   struct opencl_device_option *devices;
   size_t num_devices;
 
@@ -1038,14 +1052,19 @@ static struct opencl_device_option get_preferred_device(const struct futhark_con
     }
   }
 
-  futhark_panic(1, "Could not find acceptable OpenCL device.\n");
-  exit(1); // Never reached
+  ctx->error = strdup("Could not find acceptable OpenCL device.\n");
+  struct opencl_device_option device;
+  return device;
 }
 
 static void setup_opencl(struct futhark_context *ctx,
                          const char *extra_build_opts[],
                          const char* cache_fname) {
-  struct opencl_device_option device_option = get_preferred_device(ctx->cfg);
+  struct opencl_device_option device_option = get_preferred_device(ctx, ctx->cfg);
+
+  if (ctx->error != NULL) {
+    return;
+  }
 
   if (ctx->cfg->logging) {
     fprintf(stderr, "Using platform: %s\n", device_option.platform_name);
@@ -1084,11 +1103,16 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   if (ctx->cfg->queue_set) {
     setup_opencl_with_command_queue(ctx, ctx->cfg->queue, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
     setup_opencl(ctx, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  }
+
+  if (ctx->error != NULL) {
+    return 1;
   }
 
   cl_int error;
@@ -1116,13 +1140,16 @@ int backend_context_setup(struct futhark_context* ctx) {
 static int gpu_free_all(struct futhark_context *ctx);
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
-  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)gpu_free_all(ctx);
-  (void)clReleaseProgram(ctx->clprogram);
-  (void)clReleaseCommandQueue(ctx->queue);
-  (void)clReleaseContext(ctx->ctx);
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
+    (void)gpu_free_all(ctx);
+    (void)clReleaseProgram(ctx->clprogram);
+    (void)clReleaseCommandQueue(ctx->queue);
+    (void)clReleaseContext(ctx->ctx);
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) {

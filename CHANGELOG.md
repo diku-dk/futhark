@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   result in circular sizes, which usually manifested as the type
   checker going into an infinite loop (#2073).
 
+* The OpenCL backend now more gracefully handles lack of platform.
+
 ## [0.25.11]
 
 ### Added
