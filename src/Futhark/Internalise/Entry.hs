@@ -8,7 +8,7 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (find)
+import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
 import Futhark.Internalise.TypesValues (internalisedTypeSize)
@@ -52,12 +52,25 @@ rootType (E.TEUnique te _) = rootType te
 rootType te = te
 
 typeExpOpaqueName :: E.TypeExp E.Info VName -> Name
-typeExpOpaqueName = f . rootType
+typeExpOpaqueName = nameFromText . f
   where
-    f (E.TEArray _ te _) =
+    f = g . rootType
+    g (E.TEArray _ te _) =
       let (d, te') = withoutDims te
-       in nameFromText (mconcat (replicate (1 + d) "[]")) <> typeExpOpaqueName te'
-    f te = nameFromText $ prettyTextOneLine te
+       in mconcat (replicate (1 + d) "[]") <> f te'
+    g (E.TETuple tes _) =
+      "(" <> mconcat (intersperse ", " (map f tes)) <> ")"
+    g (E.TERecord tes _) =
+      "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
+      where
+        onField (k, te) = E.nameToText k <> ":" <> f te
+    g (E.TESum cs _) =
+      mconcat (intersperse " | " (map onConstr cs))
+      where
+        onConstr (k, tes) =
+          E.nameToText k <> ":" <> mconcat (intersperse " " (map f tes))
+    g (E.TEParens te _) = "(" <> f te <> ")"
+    g te = prettyTextOneLine te
 
 type GenOpaque = State I.OpaqueTypes
 
