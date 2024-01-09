@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * `f16.copysign`, `f32.copysign`, `f64.copysign`.
 
+* Trailing commas are now allowed for all syntactical elements that
+  involve comma-separation. (#2068)
+
 ### Removed
 
 ### Changed

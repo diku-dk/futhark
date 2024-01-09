@@ -26,6 +26,12 @@ a *documentation comment* and has special meaning to documentation
 tools.  Documentation comments are only allowed immediately before
 declarations.
 
+Trailing commas
+---------------
+
+All syntactical elements that involve comma-separated sequencing
+permit an optional trailing comma.
+
 Identifiers and Keywords
 ------------------------
 
@@ -142,17 +148,17 @@ definition has been hidden via the module system (see
 :ref:`module-system`).
 
 .. productionlist::
-   tuple_type: "(" ")" | "(" `type` ("," `type`)+ ")"
+   tuple_type: "(" ")" | "(" `type` ("," `type`)+ [","] ")"
 
 A tuple value or type is written as a sequence of comma-separated
-values or types enclosed in parentheses.  For example, ``(0, 1)`` is a
-tuple value of type ``(i32,i32)``.  The elements of a tuple need not
+values or types enclosed in parentheses. For example, ``(0, 1)`` is a
+tuple value of type ``(i32,i32)``. The elements of a tuple need not
 have the same type -- the value ``(false, 1, 2.0)`` is of type
-``(bool, i32, f64)``.  A tuple element can also be another tuple, as
-in ``((1,2),(3,4))``, which is of type ``((i32,i32),(i32,i32))``.  A
-tuple cannot have just one element, but empty tuples are permitted,
-although they are not very useful.  Empty tuples are written ``()``
-and are of type ``()``.
+``(bool, i32, f64)``. A tuple element can also be another tuple, as in
+``((1,2),(3,4))``, which is of type ``((i32,i32),(i32,i32))``. A tuple
+cannot have just one element, but empty tuples are permitted, although
+they are not very useful. Empty tuples are written ``()`` and are of
+type ``()``.
 
 .. productionlist::
    array_type: "[" [`exp`] "]" `type`
@@ -199,12 +205,13 @@ value will be resident in memory.  Avoid using sum types where
 multiple constructors have large payloads.
 
 .. productionlist::
-   record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* "}"
+   record_type: "{" "}" | "{" `fieldid` ":" `type` ("," `fieldid` ":" `type`)* [","] "}"
 
 Records are mappings from field names to values, with the field names
-known statically.  A tuple behaves in all respects like a record with
-numeric field names starting from zero, and vice versa.  It is an
-error for a record type to name the same field twice.
+known statically. A tuple behaves in all respects like a record with
+numeric field names starting from zero, and vice versa. It is an error
+for a record type to name the same field twice. A trailing comma is
+permitted.
 
 .. productionlist::
    type_application: `type` `type_arg` | "*" `type`
@@ -458,18 +465,18 @@ literals and variables, but also more complicated forms.
        : | `charlit`
        : | "(" ")"
        : | "(" `exp` ")" ("." `fieldid`)*
-       : | "(" `exp` ("," `exp`)* ")"
+       : | "(" `exp` ("," `exp`)+ [","] ")"
        : | "{" "}"
-       : | "{" `field` ("," `field`)* "}"
-       : | `qualname` "[" `index` ("," `index`)* "]"
-       : | "(" `exp` ")" "[" `index` ("," `index`)* "]"
+       : | "{" `field` ("," `field`)* [","] "}"
+       : | `qualname` `slice`
+       : | "(" `exp` ")" `slice`
        : | `quals` "." "(" `exp` ")"
-       : | "[" `exp` ("," `exp`)* "]"
+       : | "[" `exp` ("," `exp`)* [","] "]"
        : | "(" `qualsymbol` ")"
        : | "(" `exp` `qualsymbol` ")"
        : | "(" `qualsymbol` `exp` ")"
        : | "(" ( "." `field` )+ ")"
-       : | "(" "." "[" `index` ("," `index`)* "]" ")"
+       : | "(" "." `slice` ")"
        : | "???"
    exp:   `atom`
       : | `exp` `qualsymbol` `exp`
@@ -484,16 +491,17 @@ literals and variables, but also more complicated forms.
       : | `exp` [ ".." `exp` ] "..>" `exp`
       : | "if" `exp` "then" `exp` "else" `exp`
       : | "let" `size`* `pat` "=" `exp` "in" `exp`
-      : | "let" `name` "[" `index` ("," `index`)* "]" "=" `exp` "in" `exp`
+      : | "let" `name` `slice` "=" `exp` "in" `exp`
       : | "let" `name` `type_param`* `pat`+ [":" `type`] "=" `exp` "in" `exp`
       : | "(" "\" `pat`+ [":" `type`] "->" `exp` ")"
       : | "loop" `pat` ["=" `exp`] `loopform` "do" `exp`
       : | "#[" `attr` "]" `exp`
       : | "unsafe" `exp`
       : | "assert" `atom` `atom`
-      : | `exp` "with" "[" `index` ("," `index`)* "]" "=" `exp`
+      : | `exp` "with" `slice` "=" `exp`
       : | `exp` "with" `fieldid` ("." `fieldid`)* "=" `exp`
       : | "match" `exp` ("case" `pat` "->" `exp`)+
+   slice: "[" `index` ("," `index`)* [","] "]"
    field:   `fieldid` "=" `exp`
         : | `name`
    size : "[" `name` "]"
@@ -502,9 +510,9 @@ literals and variables, but also more complicated forms.
       : | "_"
       : | "(" ")"
       : | "(" `pat` ")"
-      : | "(" `pat` ("," `pat`)+ ")"
+      : | "(" `pat` ("," `pat`)+ [","] ")"
       : | "{" "}"
-      : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* "}"
+      : | "{" `fieldid` ["=" `pat`] ("," `fieldid` ["=" `pat`])* [","] "}"
       : | `constructor` `pat`*
       : | `pat` ":" `type`
       : | "#[" `attr` "]" `pat`
@@ -1686,7 +1694,7 @@ Attributes
 .. productionlist::
    attr:   `name`
        : | `decimal`
-       : | `name` "(" [`attr` ("," `attr`)*] ")"
+       : | `name` "(" [`attr` ("," `attr`)* [","]] ")"
 
 An expression, declaration, pattern, or module type spec can be
 prefixed with an attribute, written as ``#[attr]``.  This may affect

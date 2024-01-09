@@ -495,8 +495,7 @@ TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'                { TEParens $2 (srcspan $1 $>) }
              | '(' ')'                        { TETuple [] (srcspan $1 $>) }
              | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) (srcspan $1 $>) }
-             | '{' '}'                        { TERecord [] (srcspan $1 $>) }
-             | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
+             | '{' FieldTypes '}'             { TERecord $2 (srcspan $1 $>) }
              | SizeExp TypeExpTerm            { TEArray $1 $2 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (srclocOf (snd $1)) }
 
@@ -512,12 +511,14 @@ TypeArg :: { TypeArgExp NoInfo Name }
 FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
-FieldTypes1 :: { [(Name, UncheckedTypeExp)] }
-FieldTypes1 : FieldType                 { [$1] }
-            | FieldType ',' FieldTypes1 { $1 : $3 }
+FieldTypes :: { [(Name, UncheckedTypeExp)] }
+FieldTypes :                          { [] }
+           | FieldType                { [$1] }
+           | FieldType ',' FieldTypes { $1 : $3 }
 
 TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
+            | TypeExp ','            { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
 
@@ -658,6 +659,7 @@ Exps1 :: { [UncheckedExp] }
 
 Exps1_ :: { [UncheckedExp] }
         : Exps1_ ',' Exp { $3 : $1 }
+        | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
 FieldAccesses :: { [(Name, Loc)] }
@@ -672,12 +674,9 @@ Field :: { FieldBase NoInfo Name }
        | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo (srclocOf loc) }
 
 Fields :: { [FieldBase NoInfo Name] }
-        : Fields1 { $1 }
-        |         { [] }
-
-Fields1 :: { [FieldBase NoInfo Name] }
-        : Field ',' Fields1 { $1 : $3 }
-        | Field             { [$1] }
+       : Field ',' Fields { $1 : $3 }
+       | Field            { [$1] }
+       |                  { [] }
 
 LetExp :: { UncheckedExp }
      : let SizeBinders1 Pat '=' Exp LetBody
@@ -807,7 +806,8 @@ ParamPat :: { PatBase NoInfo Name StructType }
                                         in PatConstr n NoInfo [] (srclocOf loc) }
 
 Pats1 :: { [PatBase NoInfo Name StructType] }
-           : Pat               { [$1] }
+           : Pat            { [$1] }
+           | Pat ','       { [$1] }
            | Pat ',' Pats1 { $1 : $3 }
 
 InnerPat :: { PatBase NoInfo Name StructType }
@@ -840,7 +840,8 @@ CFieldPats :: { [(Name, PatBase NoInfo Name StructType)] }
 
 CFieldPats1 :: { [(Name, PatBase NoInfo Name StructType)] }
                  : CFieldPat ',' CFieldPats1 { $1 : $3 }
-                 | CFieldPat                    { [$1] }
+                 | CFieldPat ','             { [$1] }
+                 | CFieldPat                 { [$1] }
 
 PatLiteralNoNeg :: { (PatLit, Loc) }
              : charlit  { let L loc (CHARLIT x) = $1
@@ -877,12 +878,9 @@ DimIndex :: { UncheckedDimIndex }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
 DimIndices :: { [UncheckedDimIndex] }
-            :             { [] }
-            | DimIndices1 { fst $1 : snd $1 }
-
-DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
-             : DimIndex                 { ($1, []) }
-             | DimIndex ',' DimIndices1 { ($1, fst $3 : snd $3) }
+             :                         { [] }
+             | DimIndex                { [$1] }
+             | DimIndex ',' DimIndices { $1 : $3 }
 
 VarId :: { IdentBase NoInfo Name StructType }
 VarId : id { let L loc (ID name) = $1 in Ident name NoInfo (srclocOf loc) }
@@ -901,9 +899,9 @@ AttrAtom :: { (AttrAtom Name, Loc) }
 
 AttrInfo :: { AttrInfo Name }
          : AttrAtom         { let (x,y) = $1 in AttrAtom x (srclocOf y) }
-         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] (srcspan $1 $>) }
          | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 (srcspan $1 $>) }
 
 Attrs :: { [AttrInfo Name] }
-       : AttrInfo           { [$1] }
+       :                    { [] }
+       | AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }
