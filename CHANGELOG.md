@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * C API would define distinct entry point types for Futhark types that
   differed only in naming of sizes (#2080).
 
+* `==` and `!=` on sum types with array payloads. Constructing them is
+  now a bit slower, though. (#2081)
+
 * Somewhat obscure simplification error caused by neglecting to update
   metadata when removing dead scatter outputs.
 

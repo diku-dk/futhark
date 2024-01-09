@@ -806,7 +806,17 @@ internaliseExp _ (E.Constr c es (Info (E.Scalar (E.Sum fs))) _) = do
       | Just e <- j `lookup` js_to_es =
           (e :) <$> clauses (j + 1) ts js_to_es
       | otherwise = do
-          blank <- letSubExp "zero" =<< eBlank t
+          blank <-
+            -- Cannot use eBlank here for arrays, because when doing
+            -- equality comparisons on sum types, we end up looking at
+            -- the array elements. (#2081) This is a bit of an edge
+            -- case, but arrays in sum types are known to be
+            -- inefficient.
+            letSubExp "zero"
+              =<< case t of
+                I.Array {} ->
+                  pure $ BasicOp $ Replicate (I.arrayShape t) $ I.Constant $ blankPrimValue $ elemType t
+                _ -> eBlank t
           (blank :) <$> clauses (j + 1) ts js_to_es
     clauses _ [] _ =
       pure []
