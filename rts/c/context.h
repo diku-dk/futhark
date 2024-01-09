@@ -116,6 +116,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   assert(!cfg->in_use);
   ctx->cfg = cfg;
   ctx->cfg->in_use = 1;
+  ctx->program_initialised = false;
   create_lock(&ctx->error_lock);
   create_lock(&ctx->lock);
   free_list_init(&ctx->free_list);
@@ -134,6 +135,7 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
   if (backend_context_setup(ctx) == 0) {
     setup_program(ctx);
     init_constants(ctx);
+    ctx->program_initialised = true;
     (void)futhark_context_clear_caches(ctx);
     (void)futhark_context_sync(ctx);
   }
@@ -141,8 +143,10 @@ struct futhark_context* futhark_context_new(struct futhark_context_config* cfg) 
 }
 
 void futhark_context_free(struct futhark_context* ctx) {
-  free_constants(ctx);
-  teardown_program(ctx);
+  if (ctx->program_initialised) {
+    free_constants(ctx);
+    teardown_program(ctx);
+  }
   backend_context_teardown(ctx);
   free_all_in_free_list(ctx);
   free_list_destroy(&ctx->free_list);
