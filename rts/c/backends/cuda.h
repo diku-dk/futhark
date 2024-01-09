@@ -273,6 +273,8 @@ struct futhark_context {
   struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
+  struct program* program;
+  bool program_initialised;
   // Uniform fields above.
 
   CUdeviceptr global_failure;
@@ -284,7 +286,6 @@ struct futhark_context {
   long int total_runtime;
   int64_t peak_mem_usage_device;
   int64_t cur_mem_usage_device;
-  struct program* program;
 
   CUdevice dev;
   CUcontext cu_ctx;
@@ -819,6 +820,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   CUDA_SUCCEED_FATAL(cuInit(0));
   if (cuda_device_setup(ctx) != 0) {
@@ -868,13 +870,16 @@ int backend_context_setup(struct futhark_context* ctx) {
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  cuMemFree(ctx->global_failure);
-  cuMemFree(ctx->global_failure_args);
-  CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
-  CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
-  CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
-  CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    cuMemFree(ctx->global_failure);
+    cuMemFree(ctx->global_failure_args);
+    CUDA_SUCCEED_FATAL(gpu_free_all(ctx));
+    CUDA_SUCCEED_FATAL(cuStreamDestroy(ctx->stream));
+    CUDA_SUCCEED_FATAL(cuModuleUnload(ctx->module));
+    CUDA_SUCCEED_FATAL(cuCtxDestroy(ctx->cu_ctx));
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 // GPU ABSTRACTION LAYER

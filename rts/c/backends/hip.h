@@ -248,6 +248,7 @@ struct futhark_context {
   struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
+  bool program_initialised;
   // Uniform fields above.
 
   void* global_failure;
@@ -676,6 +677,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   HIP_SUCCEED_FATAL(hipInit(0));
   if (hip_device_setup(ctx) != 0) {
@@ -724,12 +726,15 @@ int backend_context_setup(struct futhark_context* ctx) {
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  hipFree(ctx->global_failure);
-  hipFree(ctx->global_failure_args);
-  HIP_SUCCEED_FATAL(gpu_free_all(ctx));
-  HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
-  HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    hipFree(ctx->global_failure);
+    hipFree(ctx->global_failure_args);
+    HIP_SUCCEED_FATAL(gpu_free_all(ctx));
+    HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
+    HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 // GPU ABSTRACTION LAYER
