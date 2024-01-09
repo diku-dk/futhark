@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* C API would define distinct entry point types for Futhark types that
+  differed only in naming of sizes (#2080).
+
 * Somewhat obscure simplification error caused by neglecting to update
   metadata when removing dead scatter outputs.
 
