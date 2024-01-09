@@ -936,8 +936,6 @@ equalityType usage t = do
           pure () -- All primtypes support equality.
         Just (_, Equality {}) ->
           pure ()
-        Just (_, HasConstrs _ cs _) ->
-          mapM_ (equalityType usage) $ concat $ M.elems cs
         _ ->
           unifyError usage mempty noBreadCrumbs $
             "Type" <+> prettyName vn <+> "does not support equality."
