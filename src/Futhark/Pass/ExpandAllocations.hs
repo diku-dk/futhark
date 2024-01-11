@@ -8,6 +8,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
+import Data.Bifunctor
 import Data.Either (rights)
 import Data.List (find, foldl')
 import Data.Map.Strict qualified as M
@@ -19,6 +20,7 @@ import Futhark.IR
 import Futhark.IR.GPU.Simplify qualified as GPU
 import Futhark.IR.GPUMem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Rep (addScopeWisdom)
 import Futhark.Pass
@@ -178,11 +180,10 @@ transformExp (WithAcc inputs lam) = do
         genericExpandedInvariantAllocations (const (shape, map le64 is)) invariant_allocs
 
       scope <- askScope
-      let scope' = scopeOf op_lam <> scope
-      either throwError pure $
-        runOffsetM scope' alloc_offsets $ do
-          op_lam'' <- offsetMemoryInLambda op_lam'
-          pure (alloc_stms, (shape, arrs, Just (op_lam'', nes)))
+      let scope' = scopeOf op_lam <> scope <> scopeOf alloc_stms
+      either throwError pure <=< runOffsetM scope' $ do
+        op_lam'' <- offsetMemoryInLambda alloc_offsets op_lam'
+        pure (alloc_stms, (shape, arrs, Just (op_lam'', nes)))
 transformExp e =
   pure (mempty, e)
 
@@ -248,9 +249,9 @@ transformScanRed lvl space ops kbody = do
     else do
       (lvl_stms, lvl', grid) <- ensureGridKnown lvl
       allocsForBody variant_allocs invariant_allocs grid space kbody kbody' $
-        \alloc_stms kbody'' -> do
+        \offsets alloc_stms kbody'' -> do
           ops'' <- forM ops' $ \op' ->
-            localScope (scopeOf op') $ offsetMemoryInLambda op'
+            localScope (scopeOf op') $ offsetMemoryInLambda offsets op'
           pure (lvl_stms <> alloc_stms, (lvl', ops'', kbody''))
   where
     bound_in_kernel =
@@ -267,7 +268,7 @@ allocsForBody ::
   SegSpace ->
   KernelBody GPUMem ->
   KernelBody GPUMem ->
-  (Stms GPUMem -> KernelBody GPUMem -> OffsetM b) ->
+  (RebaseMap -> Stms GPUMem -> KernelBody GPUMem -> OffsetM b) ->
   ExpandM b
 allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
   (alloc_offsets, alloc_stms) <-
@@ -279,11 +280,10 @@ allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
       invariant_allocs
 
   scope <- askScope
-  let scope' = scopeOfSegSpace space <> scope
-  either throwError pure $
-    runOffsetM scope' alloc_offsets $ do
-      kbody'' <- offsetMemoryInKernelBody kbody'
-      m alloc_stms kbody''
+  let scope' = scopeOfSegSpace space <> scope <> scopeOf alloc_stms
+  either throwError pure <=< runOffsetM scope' $ do
+    kbody'' <- offsetMemoryInKernelBody alloc_offsets kbody'
+    m alloc_offsets alloc_stms kbody''
 
 memoryRequirements ::
   KernelGrid ->
@@ -552,65 +552,123 @@ type Expansion = (Exp64, Exp64)
 type RebaseMap = M.Map VName ([Exp64] -> Expansion)
 
 newtype OffsetM a
-  = OffsetM
-      ( ReaderT
-          (Scope GPUMem)
-          (ReaderT RebaseMap (Either String))
-          a
-      )
+  = OffsetM (BuilderT GPUMem (StateT VNameSource (Either String)) a)
   deriving
     ( Applicative,
       Functor,
       Monad,
       HasScope GPUMem,
       LocalScope GPUMem,
-      MonadError String
+      MonadError String,
+      MonadFreshNames
     )
 
-runOffsetM :: Scope GPUMem -> RebaseMap -> OffsetM a -> Either String a
-runOffsetM scope offsets (OffsetM m) =
-  runReaderT (runReaderT m scope) offsets
+instance MonadBuilder OffsetM where
+  type Rep OffsetM = GPUMem
+  mkExpDecM pat e = OffsetM $ mkExpDecM pat e
+  mkBodyM stms res = OffsetM $ mkBodyM stms res
+  mkLetNamesM pat e = OffsetM $ mkLetNamesM pat e
 
-askRebaseMap :: OffsetM RebaseMap
-askRebaseMap = OffsetM $ lift ask
+  addStms = OffsetM . addStms
+  collectStms (OffsetM m) = OffsetM $ collectStms m
 
-localRebaseMap :: (RebaseMap -> RebaseMap) -> OffsetM a -> OffsetM a
-localRebaseMap f (OffsetM m) = OffsetM $ do
-  scope <- ask
-  lift $ local f $ runReaderT m scope
+runOffsetM ::
+  (MonadFreshNames m) =>
+  Scope GPUMem ->
+  OffsetM a ->
+  m (Either String a)
+runOffsetM scope (OffsetM m) = modifyNameSource $ \src ->
+  case runStateT (runBuilderT m scope) src of
+    Left e -> (Left e, src)
+    Right (x, src') -> (Right (fst x), src')
 
-lookupNewBase :: VName -> [Exp64] -> OffsetM (Maybe Expansion)
-lookupNewBase name x = do
-  offsets <- askRebaseMap
-  pure $ ($ x) <$> M.lookup name offsets
+lookupNewBase :: VName -> [Exp64] -> RebaseMap -> Maybe Expansion
+lookupNewBase name x offsets =
+  ($ x) <$> M.lookup name offsets
 
-offsetMemoryInKernelBody :: KernelBody GPUMem -> OffsetM (KernelBody GPUMem)
-offsetMemoryInKernelBody kbody = do
-  scope <- askScope
+offsetMemoryInKernelBody :: RebaseMap -> KernelBody GPUMem -> OffsetM (KernelBody GPUMem)
+offsetMemoryInKernelBody offsets kbody = do
   stms' <-
-    stmsFromList . snd
-      <$> mapAccumLM
-        (\scope' -> localScope scope' . offsetMemoryInStm)
-        scope
-        (stmsToList $ kernelBodyStms kbody)
+    collectStms_ $
+      mapM_ (addStm <=< offsetMemoryInStm offsets) (kernelBodyStms kbody)
   pure kbody {kernelBodyStms = stms'}
 
-offsetMemoryInBody :: Body GPUMem -> OffsetM (Body GPUMem)
-offsetMemoryInBody (Body dec stms res) = do
-  scope <- askScope
-  stms' <-
-    stmsFromList . snd
-      <$> mapAccumLM
-        (\scope' -> localScope scope' . offsetMemoryInStm)
-        scope
-        (stmsToList stms)
-  pure $ Body dec stms' res
+offsetMemoryInBody :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
+offsetMemoryInBody offsets (Body _ stms res) = do
+  buildBody_ $ do
+    mapM_ (addStm <=< offsetMemoryInStm offsets) stms
+    pure res
 
-offsetMemoryInStm :: Stm GPUMem -> OffsetM (Scope GPUMem, Stm GPUMem)
-offsetMemoryInStm (Let pat dec e) = do
-  e' <- offsetMemoryInExp e
+offsetMemoryInBodyReturnCtx :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
+offsetMemoryInBodyReturnCtx offsets (Body _ stms res) = do
+  buildBody_ $ do
+    mapM_ (addStm <=< offsetMemoryInStm offsets) stms
+    ctx <- concat <$> mapM (resCtx . resSubExp) res
+    pure $ res <> ctx
+  where
+    resCtx se = do
+      v_t <- subExpMemInfo se
+      case v_t of
+        MemArray _ _ _ (ArrayIn mem ixfun) -> do
+          ctxs <- mapM (letSubExp "ctx" <=< toExp) (IxFun.existentialized ixfun)
+          pure $ subExpsRes $ Var mem : ctxs
+        _ -> pure []
+
+ixfunFrom :: IxFun.Shape num -> [num] -> IxFun.IxFun num
+ixfunFrom shape xs =
+  IxFun.IxFun $ LMAD.LMAD (head xs) $ zipWith LMAD.LMADDim (drop 1 xs) shape
+
+offsetBranch ::
+  Pat LetDecMem ->
+  [BranchTypeMem] ->
+  OffsetM (Pat LetDecMem, [BranchTypeMem])
+offsetBranch (Pat pes) ts = do
+  ((pes_ctx, ts_ctx), (pes', ts')) <-
+    bimap unzip unzip <$> mapAccumLM onType [] (zip pes ts)
+  pure (Pat $ pes' <> pes_ctx, ts' <> ts_ctx)
+  where
+    onType
+      acc
+      ( PatElem pe_v (MemArray _ pe_shape pe_u (ArrayIn pe_mem pe_ixfun)),
+        MemArray pt shape u meminfo
+        ) = do
+        (space, ixfun) <- case meminfo of
+          ReturnsInBlock mem ixfun -> do
+            space <- lookupMemSpace mem
+            pure (space, ixfun)
+          ReturnsNewBlock space _ ixfun ->
+            pure (space, ixfun)
+        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        let start = length ts + length acc
+            num_exts = length (IxFun.existentialized ixfun)
+            ext (Free se) = Free <$> pe64 se
+            ext (Ext i) = le64 (Ext i)
+        ixfun_exts <-
+          replicateM num_exts $
+            PatElem <$> newVName "ext" <*> pure (MemPrim int64)
+        let pe_ixfun' = ixfunFrom (IxFun.shape pe_ixfun) $ map (le64 . patElemName) ixfun_exts
+        pure
+          ( (PatElem pe_mem' $ MemMem space, MemMem space)
+              : map (,MemPrim int64) ixfun_exts,
+            ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_ixfun',
+              MemArray pt shape u . ReturnsNewBlock space start $
+                IxFun.IxFun . fmap ext $
+                  LMAD.mkExistential (shapeDims shape) (1 + start)
+            )
+          )
+    onType acc t = pure (acc, t)
+
+offsetMemoryInStm :: RebaseMap -> Stm GPUMem -> OffsetM (Stm GPUMem)
+offsetMemoryInStm offsets (Let pat dec (Match cond cases defbody (MatchDec ts kind))) = do
+  cases' <- forM cases $ \(Case vs body) ->
+    Case vs <$> offsetMemoryInBodyReturnCtx offsets body
+  defbody' <- offsetMemoryInBodyReturnCtx offsets defbody
+  (pat', ts') <- offsetBranch pat ts
+  pure $ Let pat' dec $ Match cond cases' defbody' $ MatchDec ts' kind
+offsetMemoryInStm offsets (Let pat dec e) = do
+  e' <- offsetMemoryInExp offsets e
   pat' <-
-    offsetMemoryInPat pat
+    offsetMemoryInPat offsets pat
       =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
       =<< expReturns e'
   scope <- askScope
@@ -620,9 +678,7 @@ offsetMemoryInStm (Let pat dec e) = do
     maybe (throwError "offsetMemoryInStm: ill-typed") pure $
       runReader (expReturns e') scope
   let pat'' = Pat $ zipWith pick (patElems pat') rts
-      stm = Let pat'' dec e'
-  let scope' = scopeOf stm <> scope
-  pure (scope', stm)
+  pure $ Let pat'' dec e'
   where
     pick ::
       PatElem (MemInfo SubExp NoUniqueness MemBind) ->
@@ -641,8 +697,8 @@ offsetMemoryInStm (Let pat dec e) = do
         inst Ext {} = Nothing
         inst (Free x) = pure x
 
-offsetMemoryInPat :: Pat LetDecMem -> [ExpReturns] -> OffsetM (Pat LetDecMem)
-offsetMemoryInPat (Pat pes) rets = do
+offsetMemoryInPat :: RebaseMap -> Pat LetDecMem -> [ExpReturns] -> OffsetM (Pat LetDecMem)
+offsetMemoryInPat offsets (Pat pes) rets = do
   Pat <$> zipWithM onPE pes rets
   where
     onPE
@@ -652,7 +708,7 @@ offsetMemoryInPat (Pat pes) rets = do
             pure . PatElem name . MemArray pt shape u . ArrayIn mem $
               fmap (fmap unExt) ixfun
     onPE pe _ = do
-      new_dec <- offsetMemoryInMemBound (patElemName pe) $ patElemDec pe
+      new_dec <- offsetMemoryInMemBound offsets (patElemName pe) $ patElemDec pe
       pure pe {patElemDec = new_dec}
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
@@ -660,17 +716,14 @@ offsetMemoryInPat (Pat pes) rets = do
     getIxFun (Just (ReturnsInBlock _ ixfun)) = Just ixfun
     getIxFun _ = Nothing
 
-offsetMemoryInParam :: Param (MemBound u) -> OffsetM (Param (MemBound u))
-offsetMemoryInParam fparam = do
-  fparam' <- offsetMemoryInMemBound (paramName fparam) $ paramDec fparam
+offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> OffsetM (Param (MemBound u))
+offsetMemoryInParam offsets fparam = do
+  fparam' <- offsetMemoryInMemBound offsets (paramName fparam) $ paramDec fparam
   pure fparam {paramDec = fparam'}
 
-offsetMemoryInMemBound :: VName -> MemBound u -> OffsetM (MemBound u)
-offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
-  embedding <- lookupNewBase mem $ IxFun.shape ixfun
-  case embedding of
-    Nothing -> pure summary
-    Just (o, p) -> do
+offsetMemoryInMemBound :: RebaseMap -> VName -> MemBound u -> OffsetM (MemBound u)
+offsetMemoryInMemBound offsets v (MemArray pt shape u (ArrayIn mem ixfun))
+  | Just (o, p) <- lookupNewBase mem (IxFun.shape ixfun) offsets = do
       let problem =
             throwError . unlines $
               [ "offsetMemoryInMemBound",
@@ -680,31 +733,28 @@ offsetMemoryInMemBound v summary@(MemArray pt shape u (ArrayIn mem ixfun)) = do
               ]
       ixfun' <- maybe problem pure $ IxFun.expand o p ixfun
       pure $ MemArray pt shape u $ ArrayIn mem ixfun'
-offsetMemoryInMemBound _ summary = pure summary
+offsetMemoryInMemBound _ _ summary = pure summary
 
-offsetMemoryInBodyReturns :: BodyReturns -> OffsetM BodyReturns
-offsetMemoryInBodyReturns br@(MemArray pt shape u (ReturnsInBlock mem ixfun))
-  | Just ixfun' <- isStaticIxFun ixfun = do
-      embedding <- lookupNewBase mem $ IxFun.shape ixfun'
-      case embedding of
-        Nothing -> pure br
-        Just (o, p) -> do
-          let problem =
-                throwError . unlines $
-                  [ "offsetMemoryInBodyReturns",
-                    prettyString (o, p),
-                    prettyString ixfun
-                  ]
-          ixfun'' <-
-            maybe problem pure $
-              IxFun.expand (Free <$> o) (fmap Free p) ixfun
-          pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
-offsetMemoryInBodyReturns br = pure br
+offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> OffsetM BodyReturns
+offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun))
+  | Just ixfun' <- isStaticIxFun ixfun,
+    Just (o, p) <- lookupNewBase mem (IxFun.shape ixfun') offsets = do
+      let problem =
+            throwError . unlines $
+              [ "offsetMemoryInBodyReturns",
+                prettyString (o, p),
+                prettyString ixfun
+              ]
+      ixfun'' <-
+        maybe problem pure $
+          IxFun.expand (Free <$> o) (fmap Free p) ixfun
+      pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
+offsetMemoryInBodyReturns _ br = pure br
 
-offsetMemoryInLambda :: Lambda GPUMem -> OffsetM (Lambda GPUMem)
-offsetMemoryInLambda lam = do
-  body <- inScopeOf lam $ offsetMemoryInBody $ lambdaBody lam
-  params <- mapM offsetMemoryInParam $ lambdaParams lam
+offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
+offsetMemoryInLambda offsets lam = do
+  body <- inScopeOf lam $ offsetMemoryInBody offsets $ lambdaBody lam
+  params <- mapM (offsetMemoryInParam offsets) $ lambdaParams lam
   pure $ lam {lambdaBody = body, lambdaParams = params}
 
 -- A loop may have memory parameters, and those memory blocks may
@@ -712,35 +762,36 @@ offsetMemoryInLambda lam = do
 -- initial value of a loop parameter is an expanded memory block,
 -- then so will the result be.
 offsetMemoryInLoopParams ::
+  RebaseMap ->
   [(FParam GPUMem, SubExp)] ->
-  ([(FParam GPUMem, SubExp)] -> OffsetM a) ->
+  (RebaseMap -> [(FParam GPUMem, SubExp)] -> OffsetM a) ->
   OffsetM a
-offsetMemoryInLoopParams merge f = do
+offsetMemoryInLoopParams offsets merge f = do
   let (params, args) = unzip merge
-  localRebaseMap extend $ do
-    params' <- mapM offsetMemoryInParam params
-    f $ zip params' args
+  params' <- mapM (offsetMemoryInParam offsets') params
+  f offsets' $ zip params' args
   where
+    offsets' = extend offsets
     extend rm = foldl' onParamArg rm merge
     onParamArg rm (param, Var arg)
       | Just x <- M.lookup arg rm =
           M.insert (paramName param) x rm
     onParamArg rm _ = rm
 
-offsetMemoryInExp :: Exp GPUMem -> OffsetM (Exp GPUMem)
-offsetMemoryInExp (Loop merge form body) = do
-  offsetMemoryInLoopParams merge $ \merge' -> do
+offsetMemoryInExp :: RebaseMap -> Exp GPUMem -> OffsetM (Exp GPUMem)
+offsetMemoryInExp offsets (Loop merge form body) = do
+  offsetMemoryInLoopParams offsets merge $ \offsets' merge' -> do
     body' <-
       localScope
         (scopeOfFParams (map fst merge') <> scopeOfLoopForm form)
-        (offsetMemoryInBody body)
+        (offsetMemoryInBody offsets' body)
     pure $ Loop merge' form body'
-offsetMemoryInExp e = mapExpM recurse e
+offsetMemoryInExp offsets e = mapExpM recurse e
   where
     recurse =
       (identityMapper @GPUMem)
-        { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody,
-          mapOnBranchType = offsetMemoryInBodyReturns,
+        { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody offsets,
+          mapOnBranchType = offsetMemoryInBodyReturns offsets,
           mapOnOp = onOp
         }
     onOp (Inner (SegOp op)) =
@@ -749,8 +800,8 @@ offsetMemoryInExp e = mapExpM recurse e
       where
         segOpMapper =
           identitySegOpMapper
-            { mapOnSegOpBody = offsetMemoryInKernelBody,
-              mapOnSegOpLambda = offsetMemoryInLambda
+            { mapOnSegOpBody = offsetMemoryInKernelBody offsets,
+              mapOnSegOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
 
