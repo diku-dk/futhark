@@ -763,6 +763,13 @@ matchReturnType rettype res ts = do
             </> indent 2 (ppTupleLines' $ map pretty ts)
             </> pretty s
 
+  unless (length rettype == length ts) $
+    TC.bad . TC.TypeError . docText $
+      "Return type"
+        </> indent 2 (ppTupleLines' $ map pretty rettype)
+        </> "does not have same number of elements as results"
+        </> indent 2 (ppTupleLines' $ map pretty ts)
+
   either bad pure =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
 matchPatToExp ::
