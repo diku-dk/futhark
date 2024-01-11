@@ -297,9 +297,15 @@ instance (FixExt ret) => ExtTyped (MemInfo ExtSize NoUniqueness ret) where
 instance (FixExt ret) => FixExt (MemInfo ExtSize u ret) where
   fixExt _ _ (MemPrim pt) = MemPrim pt
   fixExt _ _ (MemMem space) = MemMem space
+  fixExt _ _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
   fixExt i se (MemArray pt shape u ret) =
     MemArray pt (fixExt i se shape) u (fixExt i se ret)
-  fixExt _ _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+
+  mapExt _ (MemPrim pt) = MemPrim pt
+  mapExt _ (MemMem space) = MemMem space
+  mapExt _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
+  mapExt f (MemArray pt shape u ret) =
+    MemArray pt (mapExt f shape) u (mapExt f ret)
 
 instance Typed (MemInfo SubExp Uniqueness ret) where
   typeOf = fromDecl . declTypeOf
@@ -463,6 +469,14 @@ instance FixExt MemReturn where
         | otherwise = j
   fixExt i se (ReturnsInBlock mem ixfun) =
     ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
+
+  mapExt f (ReturnsNewBlock space i ixfun) =
+    ReturnsNewBlock space (f i) ixfun
+  mapExt f (ReturnsInBlock mem ixfun) =
+    ReturnsInBlock mem (fmap (fmap f') ixfun)
+    where
+      f' (Ext i) = Ext $ f i
+      f' v = v
 
 fixExtIxFun :: Int -> PrimExp VName -> ExtIxFun -> ExtIxFun
 fixExtIxFun i e = fmap $ isInt64 . replaceInPrimExp update . untyped

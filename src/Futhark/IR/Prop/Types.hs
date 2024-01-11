@@ -620,14 +620,20 @@ class FixExt t where
   -- value.
   fixExt :: Int -> SubExp -> t -> t
 
+  -- | Map a function onto any existential.
+  mapExt :: (Int -> Int) -> t -> t
+
 instance (FixExt shape, ArrayShape shape) => FixExt (TypeBase shape u) where
   fixExt i se = modifyArrayShape $ fixExt i se
+  mapExt f = modifyArrayShape $ mapExt f
 
 instance (FixExt d) => FixExt (ShapeBase d) where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance (FixExt a) => FixExt [a] where
   fixExt i se = fmap $ fixExt i se
+  mapExt f = fmap $ mapExt f
 
 instance FixExt ExtSize where
   fixExt i se (Ext j)
@@ -636,5 +642,9 @@ instance FixExt ExtSize where
     | otherwise = Ext j
   fixExt _ _ (Free x) = Free x
 
+  mapExt f (Ext i) = Ext $ f i
+  mapExt _ (Free x) = Free x
+
 instance FixExt () where
   fixExt _ _ () = ()
+  mapExt _ () = ()
