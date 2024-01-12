@@ -551,6 +551,8 @@ type Expansion = (Exp64, Exp64)
 -- | A map from memory block names to index function embeddings..
 type RebaseMap = M.Map VName ([Exp64] -> Expansion)
 
+--- Modifying the index functions of code.
+
 newtype OffsetM a
   = OffsetM (BuilderT GPUMem (StateT VNameSource (Either String)) a)
   deriving
@@ -599,24 +601,71 @@ offsetMemoryInBody offsets (Body _ stms res) = do
     mapM_ (addStm <=< offsetMemoryInStm offsets) stms
     pure res
 
-offsetMemoryInBodyReturnCtx :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
-offsetMemoryInBodyReturnCtx offsets (Body _ stms res) = do
-  buildBody_ $ do
-    mapM_ (addStm <=< offsetMemoryInStm offsets) stms
-    ctx <- concat <$> mapM (resCtx . resSubExp) res
-    pure $ res <> ctx
+argsContext :: [SubExp] -> OffsetM [SubExp]
+argsContext = fmap concat . mapM resCtx
   where
     resCtx se = do
       v_t <- subExpMemInfo se
       case v_t of
         MemArray _ _ _ (ArrayIn mem ixfun) -> do
           ctxs <- mapM (letSubExp "ctx" <=< toExp) (IxFun.existentialized ixfun)
-          pure $ subExpsRes $ Var mem : ctxs
+          pure $ Var mem : ctxs
         _ -> pure []
+
+offsetMemoryInBodyReturnCtx :: RebaseMap -> Body GPUMem -> OffsetM (Body GPUMem)
+offsetMemoryInBodyReturnCtx offsets (Body _ stms res) = do
+  buildBody_ $ do
+    mapM_ (addStm <=< offsetMemoryInStm offsets) stms
+    ctx <- argsContext $ map resSubExp res
+    pure $ res <> subExpsRes ctx
 
 ixfunFrom :: IxFun.Shape num -> [num] -> IxFun.IxFun num
 ixfunFrom shape xs =
   IxFun.IxFun $ LMAD.LMAD (head xs) $ zipWith LMAD.LMADDim (drop 1 xs) shape
+
+-- | Append pattern elements corresponding to memory and index
+-- function components for every array bound in the pattern.
+addPatternContext :: Pat LetDecMem -> OffsetM (Pat LetDecMem)
+addPatternContext (Pat pes) = localScope (scopeOfPat (Pat pes)) $ do
+  (pes_ctx, pes') <- mapAccumLM onType [] pes
+  pure $ Pat $ pes' <> pes_ctx
+  where
+    onType
+      acc
+      (PatElem pe_v (MemArray pt pe_shape pe_u (ArrayIn pe_mem ixfun))) = do
+        space <- lookupMemSpace pe_mem
+        pe_mem' <- newVName $ baseString pe_mem <> "_ext"
+        let num_exts = length (IxFun.existentialized ixfun)
+        ixfun_exts <-
+          replicateM num_exts $
+            PatElem <$> newVName "ext" <*> pure (MemPrim int64)
+        let pe_ixfun' = ixfunFrom (IxFun.shape ixfun) $ map (le64 . patElemName) ixfun_exts
+        pure
+          ( acc ++ PatElem pe_mem' (MemMem space) : ixfun_exts,
+            PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_ixfun'
+          )
+    onType acc t = pure (acc, t)
+
+-- | Append pattern elements corresponding to memory and index
+-- function components for every array bound in the parameters.
+addParamsContext :: [Param FParamMem] -> OffsetM [Param FParamMem]
+addParamsContext ps = localScope (scopeOfFParams ps) $ do
+  (ps_ctx, ps') <- mapAccumLM onType [] ps
+  pure $ ps' <> ps_ctx
+  where
+    onType acc (Param attr v (MemArray pt shape u (ArrayIn mem ixfun))) = do
+      space <- lookupMemSpace mem
+      mem' <- newVName $ baseString mem <> "_ext"
+      let num_exts = length (IxFun.existentialized ixfun)
+      ixfun_exts <-
+        replicateM num_exts $
+          Param mempty <$> newVName "ext" <*> pure (MemPrim int64)
+      let ixfun' = ixfunFrom (IxFun.shape ixfun) $ map (le64 . paramName) ixfun_exts
+      pure
+        ( acc ++ Param mempty mem' (MemMem space) : ixfun_exts,
+          Param attr v $ MemArray pt shape u $ ArrayIn mem' ixfun'
+        )
+    onType acc t = pure (acc, t)
 
 offsetBranch ::
   Pat LetDecMem ->
@@ -648,7 +697,8 @@ offsetBranch (Pat pes) ts = do
             PatElem <$> newVName "ext" <*> pure (MemPrim int64)
         let pe_ixfun' = ixfunFrom (IxFun.shape pe_ixfun) $ map (le64 . patElemName) ixfun_exts
         pure
-          ( (PatElem pe_mem' $ MemMem space, MemMem space)
+          ( acc
+              ++ (PatElem pe_mem' $ MemMem space, MemMem space)
               : map (,MemPrim int64) ixfun_exts,
             ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_ixfun',
               MemArray pt shape u . ReturnsNewBlock space start $
@@ -657,45 +707,6 @@ offsetBranch (Pat pes) ts = do
             )
           )
     onType acc t = pure (acc, t)
-
-offsetMemoryInStm :: RebaseMap -> Stm GPUMem -> OffsetM (Stm GPUMem)
-offsetMemoryInStm offsets (Let pat dec (Match cond cases defbody (MatchDec ts kind))) = do
-  cases' <- forM cases $ \(Case vs body) ->
-    Case vs <$> offsetMemoryInBodyReturnCtx offsets body
-  defbody' <- offsetMemoryInBodyReturnCtx offsets defbody
-  (pat', ts') <- offsetBranch pat ts
-  pure $ Let pat' dec $ Match cond cases' defbody' $ MatchDec ts' kind
-offsetMemoryInStm offsets (Let pat dec e) = do
-  e' <- offsetMemoryInExp offsets e
-  pat' <-
-    offsetMemoryInPat offsets pat
-      =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
-      =<< expReturns e'
-  scope <- askScope
-  -- Try to recompute the index function.  Fall back to creating rebase
-  -- operations with the RebaseMap.
-  rts <-
-    maybe (throwError "offsetMemoryInStm: ill-typed") pure $
-      runReader (expReturns e') scope
-  let pat'' = Pat $ zipWith pick (patElems pat') rts
-  pure $ Let pat'' dec e'
-  where
-    pick ::
-      PatElem (MemInfo SubExp NoUniqueness MemBind) ->
-      ExpReturns ->
-      PatElem (MemInfo SubExp NoUniqueness MemBind)
-    pick
-      (PatElem name (MemArray pt s u _ret))
-      (MemArray _ _ _ (Just (ReturnsInBlock m extixfun)))
-        | Just ixfun <- instantiateIxFun extixfun =
-            PatElem name (MemArray pt s u (ArrayIn m ixfun))
-    pick p _ = p
-
-    instantiateIxFun :: ExtIxFun -> Maybe IxFun
-    instantiateIxFun = traverse (traverse inst)
-      where
-        inst Ext {} = Nothing
-        inst (Free x) = pure x
 
 offsetMemoryInPat :: RebaseMap -> Pat LetDecMem -> [ExpReturns] -> OffsetM (Pat LetDecMem)
 offsetMemoryInPat offsets (Pat pes) rets = do
@@ -768,8 +779,9 @@ offsetMemoryInLoopParams ::
   OffsetM a
 offsetMemoryInLoopParams offsets merge f = do
   let (params, args) = unzip merge
-  params' <- mapM (offsetMemoryInParam offsets') params
-  f offsets' $ zip params' args
+  params' <- addParamsContext params
+  args' <- (args <>) <$> argsContext args
+  f offsets' $ zip params' args'
   where
     offsets' = extend offsets
     extend rm = foldl' onParamArg rm merge
@@ -778,18 +790,13 @@ offsetMemoryInLoopParams offsets merge f = do
           M.insert (paramName param) x rm
     onParamArg rm _ = rm
 
+-- | Handles only the expressions where we do not change the number of
+-- results; meaning anything except Loop, Match, and nonscalar Apply.
 offsetMemoryInExp :: RebaseMap -> Exp GPUMem -> OffsetM (Exp GPUMem)
-offsetMemoryInExp offsets (Loop merge form body) = do
-  offsetMemoryInLoopParams offsets merge $ \offsets' merge' -> do
-    body' <-
-      localScope
-        (scopeOfFParams (map fst merge') <> scopeOfLoopForm form)
-        (offsetMemoryInBody offsets' body)
-    pure $ Loop merge' form body'
-offsetMemoryInExp offsets e = mapExpM recurse e
+offsetMemoryInExp offsets = mapExpM recurse
   where
     recurse =
-      (identityMapper @GPUMem)
+      identityMapper
         { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody offsets,
           mapOnBranchType = offsetMemoryInBodyReturns offsets,
           mapOnOp = onOp
@@ -804,6 +811,51 @@ offsetMemoryInExp offsets e = mapExpM recurse e
               mapOnSegOpLambda = offsetMemoryInLambda offsets
             }
     onOp op = pure op
+
+offsetMemoryInStm :: RebaseMap -> Stm GPUMem -> OffsetM (Stm GPUMem)
+offsetMemoryInStm offsets (Let pat dec (Match cond cases defbody (MatchDec ts kind))) = do
+  cases' <- forM cases $ \(Case vs body) ->
+    Case vs <$> offsetMemoryInBodyReturnCtx offsets body
+  defbody' <- offsetMemoryInBodyReturnCtx offsets defbody
+  (pat', ts') <- offsetBranch pat ts
+  pure $ Let pat' dec $ Match cond cases' defbody' $ MatchDec ts' kind
+offsetMemoryInStm offsets (Let pat dec (Loop merge form body)) = do
+  loop' <-
+    offsetMemoryInLoopParams offsets merge $ \offsets' merge' -> do
+      body' <-
+        localScope
+          (scopeOfFParams (map fst merge') <> scopeOfLoopForm form)
+          (offsetMemoryInBodyReturnCtx offsets' body)
+      pure $ Loop merge' form body'
+  pat' <- addPatternContext pat
+  pure $ Let pat' dec loop'
+offsetMemoryInStm offsets (Let pat dec e) = do
+  e' <- offsetMemoryInExp offsets e
+  pat' <-
+    offsetMemoryInPat offsets pat
+      =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
+      =<< expReturns e'
+  scope <- askScope
+  -- Try to recompute the index function.  Fall back to creating rebase
+  -- operations with the RebaseMap.
+  rts <-
+    maybe (throwError "offsetMemoryInStm: ill-typed") pure $
+      runReader (expReturns e') scope
+  let pat'' = Pat $ zipWith pick (patElems pat') rts
+  pure $ Let pat'' dec e'
+  where
+    pick
+      (PatElem name (MemArray pt s u _ret))
+      (MemArray _ _ _ (Just (ReturnsInBlock m extixfun)))
+        | Just ixfun <- instantiateIxFun extixfun =
+            PatElem name (MemArray pt s u (ArrayIn m ixfun))
+    pick p _ = p
+
+    instantiateIxFun :: ExtIxFun -> Maybe IxFun
+    instantiateIxFun = traverse (traverse inst)
+      where
+        inst Ext {} = Nothing
+        inst (Free x) = pure x
 
 ---- Slicing allocation sizes out of a kernel.
 
