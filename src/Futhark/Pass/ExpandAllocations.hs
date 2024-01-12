@@ -796,7 +796,7 @@ offsetMemoryInExp :: RebaseMap -> Exp GPUMem -> OffsetM (Exp GPUMem)
 offsetMemoryInExp offsets = mapExpM recurse
   where
     recurse =
-      identityMapper
+      (identityMapper @GPUMem)
         { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody offsets,
           mapOnBranchType = offsetMemoryInBodyReturns offsets,
           mapOnOp = onOp
