@@ -4,7 +4,7 @@
 -- It is perhaps a pretty far-out case.
 -- ==
 -- structure seq-mem { Alloc 2 }
--- structure gpu-mem { Alloc 3 }
+-- structure gpu-mem { Alloc 2 }
 
 let main (cond: bool, lengths: []i64, index: i64): []i64 =
   if cond
