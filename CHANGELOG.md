@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Trailing commas are now allowed for all syntactical elements that
   involve comma-separation. (#2068)
 
+* The C API now allows destruction and construction of sum types (with
+  some caveats). (#2074)
+
 ### Removed
 
 ### Changed

@@ -204,6 +204,7 @@ lookupOpaqueType v (OpaqueTypes types) =
 
 opaquePayload :: OpaqueTypes -> OpaqueType -> [ValueType]
 opaquePayload _ (OpaqueType ts) = ts
+opaquePayload _ (OpaqueSum ts _) = ts
 opaquePayload types (OpaqueRecord fs) = concatMap f fs
   where
     f (_, TypeOpaque s) = opaquePayload types $ lookupOpaqueType s types
@@ -226,56 +227,62 @@ recordFieldPayloads types = chunks . map typeLength
     typeLength (TypeOpaque desc) =
       length $ opaquePayload types $ lookupOpaqueType desc types
 
-opaqueProjectFunctions ::
+projectField ::
+  Operations op s ->
+  EntryPointType ->
+  [(Int, ValueType)] ->
+  CompilerM op s (C.Type, [C.BlockItem])
+projectField _ (TypeTransparent (ValueType sign (Rank 0) pt)) [(i, _)] = do
+  pure
+    ( primAPIType sign pt,
+      [C.citems|v = obj->$id:(tupleField i);|]
+    )
+projectField ops (TypeTransparent vt) [(i, _)] = do
+  ct <- valueTypeToCType Public vt
+  pure
+    ( [C.cty|$ty:ct *|],
+      criticalSection
+        ops
+        [C.citems|v = malloc(sizeof($ty:ct));
+                  memcpy(v, obj->$id:(tupleField i), sizeof($ty:ct));
+                  (void)(*(v->mem.references))++;|]
+    )
+projectField _ (TypeTransparent _) rep =
+  error $ "projectField: invalid representation of transparent type: " ++ show rep
+projectField ops (TypeOpaque f_desc) components = do
+  ct <- opaqueToCType f_desc
+  let setField j (i, ValueType _ (Rank r) _) =
+        if r == 0
+          then [C.citems|v->$id:(tupleField j) = obj->$id:(tupleField i);|]
+          else
+            [C.citems|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));
+                      *v->$id:(tupleField j) = *obj->$id:(tupleField i);
+                      (void)(*(v->$id:(tupleField j)->mem.references))++;|]
+  pure
+    ( [C.cty|$ty:ct *|],
+      criticalSection
+        ops
+        [C.citems|v = malloc(sizeof($ty:ct));
+                  $items:(concat (zipWith setField [0..] components))|]
+    )
+
+recordProjectFunctions ::
   OpaqueTypes ->
   Name ->
   [(Name, EntryPointType)] ->
   [ValueType] ->
   CompilerM op s [Manifest.RecordField]
-opaqueProjectFunctions types desc fs vds = do
+recordProjectFunctions types desc fs vds = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
-  let mkProject (TypeTransparent (ValueType sign (Rank 0) pt)) [(i, _)] = do
-        pure
-          ( primAPIType sign pt,
-            [C.citems|v = obj->$id:(tupleField i);|]
-          )
-      mkProject (TypeTransparent vt) [(i, _)] = do
-        ct <- valueTypeToCType Public vt
-        pure
-          ( [C.cty|$ty:ct *|],
-            criticalSection
-              ops
-              [C.citems|v = malloc(sizeof($ty:ct));
-                        memcpy(v, obj->$id:(tupleField i), sizeof($ty:ct));
-                        (void)(*(v->mem.references))++;|]
-          )
-      mkProject (TypeTransparent _) rep =
-        error $ "mkProject: invalid representation of transparent type: " ++ show rep
-      mkProject (TypeOpaque f_desc) components = do
-        ct <- opaqueToCType f_desc
-        let setField j (i, ValueType _ (Rank r) _) =
-              if r == 0
-                then [C.citems|v->$id:(tupleField j) = obj->$id:(tupleField i);|]
-                else
-                  [C.citems|v->$id:(tupleField j) = malloc(sizeof(*v->$id:(tupleField j)));
-                            *v->$id:(tupleField j) = *obj->$id:(tupleField i);
-                            (void)(*(v->$id:(tupleField j)->mem.references))++;|]
-        pure
-          ( [C.cty|$ty:ct *|],
-            criticalSection
-              ops
-              [C.citems|v = malloc(sizeof($ty:ct));
-                        $items:(concat (zipWith setField [0..] components))|]
-          )
   let onField ((f, et), elems) = do
         let f' =
               if isValidCName $ opaqueName desc <> "_" <> nameToText f
                 then nameToText f
                 else zEncodeText (nameToText f)
         project <- publicName $ "project_" <> opaqueName desc <> "_" <> f'
-        (et_ty, project_items) <- mkProject et elems
+        (et_ty, project_items) <- projectField ops et elems
         headerDecl
           (OpaqueDecl desc)
           [C.cedecl|int $id:project($ty:ctx_ty *ctx, $ty:et_ty *out, const $ty:opaque_type *obj);|]
@@ -292,13 +299,22 @@ opaqueProjectFunctions types desc fs vds = do
   mapM onField . zip fs . recordFieldPayloads types (map snd fs) $
     zip [0 ..] vds
 
-opaqueNewFunctions ::
+setFieldField :: (C.ToExp a) => Int -> a -> ValueType -> C.Stm
+setFieldField i e (ValueType _ (Rank r) _)
+  | r == 0 =
+      [C.cstm|v->$id:(tupleField i) = $exp:e;|]
+  | otherwise =
+      [C.cstm|{v->$id:(tupleField i) = malloc(sizeof(*$exp:e));
+               *v->$id:(tupleField i) = *$exp:e;
+               (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
+
+recordNewFunctions ::
   OpaqueTypes ->
   Name ->
   [(Name, EntryPointType)] ->
   [ValueType] ->
   CompilerM op s Manifest.CFuncName
-opaqueNewFunctions types desc fs vds = do
+recordNewFunctions types desc fs vds = do
   opaque_type <- opaqueToCType desc
   ctx_ty <- contextType
   ops <- asks envOperations
@@ -319,7 +335,7 @@ opaqueNewFunctions types desc fs vds = do
                 $ty:opaque_type* v = malloc(sizeof($ty:opaque_type));
                 $items:(criticalSection ops new_stms)
                 *out = v;
-                return 0;
+                return FUTHARK_SUCCESS;
               }|]
   pure new
   where
@@ -359,33 +375,173 @@ opaqueNewFunctions types desc fs vds = do
               )
             )
 
-    setFieldField i e (ValueType _ (Rank r) _)
-      | r == 0 =
-          [C.cstm|v->$id:(tupleField i) = $exp:e;|]
-      | otherwise =
-          [C.cstm|{v->$id:(tupleField i) = malloc(sizeof(*$exp:e));
-                   *v->$id:(tupleField i) = *$exp:e;
-                   (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
+sumVariants ::
+  Name ->
+  [(Name, [(EntryPointType, [Int])])] ->
+  [ValueType] ->
+  CompilerM op s [Manifest.SumVariant]
+sumVariants desc variants vds = do
+  opaque_ty <- opaqueToCType desc
+  ctx_ty <- contextType
+  ops <- asks envOperations
+
+  let onVariant i (name, payload) = do
+        construct <- publicName $ "new_" <> opaqueName desc <> "_" <> nameToText name
+        destruct <- publicName $ "destruct_" <> opaqueName desc <> "_" <> nameToText name
+
+        constructFunction ops ctx_ty opaque_ty i construct payload
+        destructFunction ops ctx_ty opaque_ty i destruct payload
+
+        pure $
+          Manifest.SumVariant
+            { Manifest.sumVariantName = nameToText name,
+              Manifest.sumVariantPayload = map (entryTypeName . fst) payload,
+              Manifest.sumVariantConstruct = construct,
+              Manifest.sumVariantDestruct = destruct
+            }
+
+  zipWithM onVariant [0 :: Int ..] variants
+  where
+    constructFunction ops ctx_ty opaque_ty i fname payload = do
+      (params, new_stms) <- unzip <$> zipWithM constructPayload [0 ..] payload
+
+      let used = concatMap snd payload
+      set_unused_stms <-
+        mapM setUnused $ filter ((`notElem` used) . fst) (zip [0 ..] vds)
+
+      headerDecl
+        (OpaqueDecl desc)
+        [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
+                                $ty:opaque_ty **out,
+                                $params:params);|]
+
+      libDecl
+        [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
+                                $ty:opaque_ty **out,
+                                $params:params) {
+                    (void)ctx;
+                    $ty:opaque_ty* v = malloc(sizeof($ty:opaque_ty));
+                    v->$id:(tupleField 0) = $int:i;
+                    { $items:(criticalSection ops new_stms) }
+                    // Set other fields
+                    { $items:set_unused_stms }
+                    *out = v;
+                    return FUTHARK_SUCCESS;
+                  }|]
+
+    -- We must initialise some of the fields that are unused in this
+    -- variant; specifically the ones corresponding to arrays. This
+    -- has the unfortunate effect that all arrays in the nonused
+    -- constructor are set to have size 0.
+    setUnused (_, ValueType _ (Rank 0) _) =
+      pure [C.citem|{}|]
+    setUnused (i, ValueType signed (Rank rank) pt) = do
+      new_array <- publicName $ "new_" <> arrayName pt signed rank
+      let dims = replicate rank [C.cexp|0|]
+      pure [C.citem|v->$id:(tupleField i) = $id:new_array(ctx, NULL, $args:dims);|]
+
+    constructPayload j (et, is) = do
+      let param_name = "v" <> show (j :: Int)
+      case et of
+        TypeTransparent (ValueType sign (Rank 0) pt) -> do
+          let ct = primAPIType sign pt
+              i = head is
+          pure
+            ( [C.cparam|const $ty:ct $id:param_name|],
+              [C.citem|v->$id:(tupleField i) = $id:param_name;|]
+            )
+        TypeTransparent vt -> do
+          ct <- valueTypeToCType Public vt
+          let i = head is
+          pure
+            ( [C.cparam|const $ty:ct* $id:param_name|],
+              [C.citem|{v->$id:(tupleField i) = malloc(sizeof($ty:ct));
+                        memcpy(v->$id:(tupleField i), $id:param_name, sizeof(const $ty:ct));
+                        (void)(*(v->$id:(tupleField i)->mem.references))++;}|]
+            )
+        TypeOpaque f_desc -> do
+          ct <- opaqueToCType f_desc
+          let param_fields = do
+                i <- [0 ..]
+                pure [C.cexp|$id:param_name->$id:(tupleField i)|]
+              vts = map (vds !!) is
+          pure
+            ( [C.cparam|const $ty:ct* $id:param_name|],
+              [C.citem|{$stms:(zipWith3 setFieldField is param_fields vts)}|]
+            )
+
+    destructFunction ops ctx_ty opaque_ty i fname payload = do
+      (params, destruct_stms) <- unzip <$> zipWithM (destructPayload ops) [0 ..] payload
+      headerDecl
+        (OpaqueDecl desc)
+        [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
+                                $params:params,
+                                const $ty:opaque_ty *obj);|]
+
+      libDecl
+        [C.cedecl|int $id:fname($ty:ctx_ty *ctx,
+                                $params:params,
+                                const $ty:opaque_ty *obj) {
+                    (void)ctx;
+                    assert(obj->$id:(tupleField 0) == $int:i);
+                    $stms:destruct_stms
+                    return FUTHARK_SUCCESS;
+                  }|]
+
+    destructPayload ops j (et, is) = do
+      let param_name = "v" <> show (j :: Int)
+      (ct, project_items) <- projectField ops et $ zip is $ map (vds !!) is
+      pure
+        ( [C.cparam|$ty:ct* $id:param_name|],
+          [C.cstm|{$ty:ct v;
+                   $items:project_items
+                   *$id:param_name = v;
+                  }|]
+        )
+
+sumVariantFunction :: Name -> CompilerM op s Manifest.CFuncName
+sumVariantFunction desc = do
+  opaque_ty <- opaqueToCType desc
+  ctx_ty <- contextType
+  variant <- publicName $ "variant_" <> opaqueName desc
+  headerDecl
+    (OpaqueDecl desc)
+    [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v);|]
+  -- This depends on the assumption that the first value always
+  -- encodes the variant.
+  libDecl
+    [C.cedecl|int $id:variant($ty:ctx_ty *ctx, const $ty:opaque_ty* v) {
+                (void)ctx;
+                return v->$id:(tupleField 0);
+              }|]
+  pure variant
 
 processOpaqueRecord ::
   OpaqueTypes ->
   Name ->
   OpaqueType ->
   [ValueType] ->
-  CompilerM op s (Maybe Manifest.RecordOps)
-processOpaqueRecord _ _ (OpaqueType _) _ = pure Nothing
+  CompilerM op s (Maybe Manifest.RecordOps, Maybe Manifest.SumOps)
+processOpaqueRecord _ _ (OpaqueType _) _ =
+  pure (Nothing, Nothing)
+processOpaqueRecord _types desc (OpaqueSum _ cs) vds =
+  (Nothing,) . Just
+    <$> ( Manifest.SumOps
+            <$> sumVariants desc cs vds
+            <*> sumVariantFunction desc
+        )
 processOpaqueRecord types desc (OpaqueRecord fs) vds =
-  Just
+  (,Nothing) . Just
     <$> ( Manifest.RecordOps
-            <$> opaqueProjectFunctions types desc fs vds
-            <*> opaqueNewFunctions types desc fs vds
+            <$> recordProjectFunctions types desc fs vds
+            <*> recordNewFunctions types desc fs vds
         )
 
 opaqueLibraryFunctions ::
   OpaqueTypes ->
   Name ->
   OpaqueType ->
-  CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.RecordOps)
+  CompilerM op s (Manifest.OpaqueOps, Maybe Manifest.RecordOps, Maybe Manifest.SumOps)
 opaqueLibraryFunctions types desc ot = do
   name <- publicName $ opaqueName desc
   free_opaque <- publicName $ "free_" <> opaqueName desc
@@ -484,7 +640,7 @@ opaqueLibraryFunctions types desc ot = do
     (OpaqueDecl desc)
     [C.cedecl|$ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx, const void *p);|]
 
-  record <- processOpaqueRecord types desc ot vds
+  (record, sumops) <- processOpaqueRecord types desc ot vds
 
   -- We do not need to enclose most bodies in a critical section,
   -- because when we operate on the components of the opaque, we are
@@ -511,6 +667,7 @@ opaqueLibraryFunctions types desc ot = do
 
           $ty:opaque_type* $id:restore_opaque($ty:ctx_ty *ctx,
                                               const void *p) {
+            (void)ctx;
             int err = 0;
             const unsigned char *src = p;
             $ty:opaque_type* obj = malloc(sizeof($ty:opaque_type));
@@ -531,7 +688,8 @@ opaqueLibraryFunctions types desc ot = do
           Manifest.opaqueStore = store_opaque,
           Manifest.opaqueRestore = restore_opaque
         },
-      record
+      record,
+      sumops
     )
 
 generateArray ::
@@ -564,9 +722,9 @@ generateOpaque types (desc, ot) = do
   name <- publicName $ opaqueName desc
   members <- zipWithM field (opaquePayload types ot) [(0 :: Int) ..]
   libDecl [C.cedecl|struct $id:name { $sdecls:members };|]
-  (ops, record) <- opaqueLibraryFunctions types desc ot
+  (ops, record, sumops) <- opaqueLibraryFunctions types desc ot
   let opaque_type = [C.cty|struct $id:name*|]
-  pure (nameToText desc, Manifest.TypeOpaque (typeText opaque_type) ops record)
+  pure (nameToText desc, Manifest.TypeOpaque (typeText opaque_type) ops record sumops)
   where
     field vt@(ValueType _ (Rank r) _) i = do
       ct <- valueTypeToCType Private vt
@@ -583,10 +741,12 @@ generateAPITypes arr_space types@(OpaqueTypes opaques) = do
   pure $ M.fromList $ catMaybes array_ts <> opaque_ts
   where
     -- Ensure that array types will be generated before the opaque
-    -- records that allow projection of them.  This is because the
+    -- types that allow projection of them.  This is because the
     -- projection functions somewhat uglily directly poke around in
     -- the innards to increment reference counts.
     findNecessaryArrays (OpaqueType _) =
       pure ()
+    findNecessaryArrays (OpaqueSum _ variants) =
+      mapM_ (mapM_ (entryPointTypeToCType Public . fst) . snd) variants
     findNecessaryArrays (OpaqueRecord fs) =
       mapM_ (entryPointTypeToCType Public . snd) fs

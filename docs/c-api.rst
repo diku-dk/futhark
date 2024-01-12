@@ -408,6 +408,61 @@ types.
    The resulting value *aliases* the record, but has its own lifetime,
    and must eventually be freed.
 
+.. _sums:
+
+Sums
+~~~~
+
+A sum type is an opaque type (see above) that supports construction
+and destruction functions. An opaque type is a sum type if its
+definition is a sum type at the Futhark level.
+
+Similarly to records (see :ref:`Records`), this functionality is
+equivalent to writing entry points by hand, and have the same
+properties regarding lifetimes.
+
+A sum type consists of one or more variants. A value of this type is
+always an instance of one of these variants. In the C API, these
+variants are numbered from zero. The numbering is given by the order
+in which they are represented in the manifest (see :ref:`manifest`),
+which is also the order in which their associated functions are
+defined in the header file.
+
+For an opaque sum type ``t``, the following function is always
+generated.
+
+.. c:function:: int futhark_variant_opaque_t(struct futhark_context *ctx, const struct futhark_opaque_t *v);
+
+   Return the identifying number of the variant of which this sum type
+   is an instance (see above). Cannot fail.
+
+For each variant ``foo``, construction and destruction functions are
+defined. The following assume ``t`` is defined as ``type t = #foo
+([]i32) bool``.
+
+.. c:function:: int futhark_new_opaque_t_foo(struct futhark_context *ctx, struct futhark_opaque_contrived **out, const struct futhark_i32_1d *v0, const bool v1);
+
+   Construct a value of type ``t`` that is an instance of the variant
+   ``foo``. Arguments are provided in the same order as in the
+   Futhark-level ``foo`` constructr.
+
+   **Beware:** if ``t`` has size parameters that are only used for
+   *other* variants than the one that is being instantiated, those
+   size parameters will be set to 0. If this is a problem for your
+   application, define your own entry point for constructing a value
+   with the proper sizes.
+
+.. c:function:: int futhark_destruct_opaque_contrived_foo(struct futhark_context *ctx, struct futhark_i32_1d **v0, bool *v1, const struct futhark_opaque_contrived *obj);
+
+   Extract the payload of variant ``foo`` from the sum value. Despite
+   the name, "destruction" does not free the sum type value. The
+   extracted values alias the sum value, but has their own lifetime,
+   and must eventually be freed.
+
+   **Precondition:** ``t`` must be an instance of the ``foo`` variant,
+   which can be determined with :c:func:`futhark_variant_opaque_t`.
+
+
 Entry points
 ------------
 
