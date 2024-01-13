@@ -369,12 +369,11 @@ ensureRowMajorArray ::
   VName ->
   AllocM fromrep torep (VName, VName)
 ensureRowMajorArray space_ok v = do
-  (mem, ixfun) <- lookupArraySummary v
+  (mem, _) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
   let space = fromMaybe default_space space_ok
-  if length (IxFun.base ixfun) == IxFun.rank ixfun
-    && maybe True (== mem_space) space_ok
+  if maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocLinearArray space (baseString v) v
 
@@ -562,11 +561,10 @@ ensurePermArray ::
   VName ->
   AllocM fromrep torep (VName, VName)
 ensurePermArray space_ok perm v = do
-  (mem, ixfun) <- lookupArraySummary v
+  (mem, _) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
-  if length (IxFun.base ixfun) == length (IxFun.shape ixfun)
-    && maybe True (== mem_space) space_ok
+  if maybe True (== mem_space) space_ok
     then pure (mem, v)
     else allocPermArray (fromMaybe default_space space_ok) perm (baseString v) v
 
@@ -754,14 +752,14 @@ allocInLambda params body =
   mkLambda params . allocInStms (bodyStms body) $ pure $ bodyResult body
 
 data MemReq
-  = MemReq Space Rank
+  = MemReq Space
   | NeedsNormalisation Space
   deriving (Eq, Show)
 
 combMemReqs :: MemReq -> MemReq -> MemReq
 combMemReqs x@NeedsNormalisation {} _ = x
 combMemReqs _ y@NeedsNormalisation {} = y
-combMemReqs x@(MemReq x_space _) y@MemReq {} =
+combMemReqs x@(MemReq x_space) y@MemReq {} =
   if x == y then x else NeedsNormalisation x_space
 
 type MemReqType = MemInfo (Ext SubExp) NoUniqueness MemReq
@@ -772,17 +770,14 @@ combMemReqTypes (MemArray pt shape u x) (MemArray _ _ _ y) =
 combMemReqTypes x _ = x
 
 contextRets :: MemReqType -> [MemInfo d u r]
-contextRets (MemArray _ shape _ (MemReq space (Rank base_rank))) =
-  -- Memory + offset + base_rank + stride*rank.
-  MemMem space
-    : MemPrim int64
-    : replicate base_rank (MemPrim int64)
+contextRets (MemArray _ shape _ (MemReq space)) =
+  -- Memory + offset + stride*rank.
+  [MemMem space, MemPrim int64]
     ++ replicate (shapeRank shape) (MemPrim int64)
 contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
-  -- Memory + offset + (base,stride)*rank.
-  MemMem space
-    : MemPrim int64
-    : replicate (2 * shapeRank shape) (MemPrim int64)
+  -- Memory + offset + stride*rank.
+  [MemMem space, MemPrim int64]
+    ++ replicate (shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
 -- Add memory information to the body, but do not return memory/ixfun
@@ -802,10 +797,9 @@ allocInMatchBody rets (Body _ stms res) =
     restriction t se = do
       v_info <- subExpMemInfo se
       case (t, v_info) of
-        (Array pt shape u, MemArray _ _ _ (ArrayIn mem ixfun)) -> do
+        (Array pt shape u, MemArray _ _ _ (ArrayIn mem _)) -> do
           space <- lookupMemSpace mem
-          pure . MemArray pt shape u $
-            MemReq space (Rank $ length $ IxFun.base ixfun)
+          pure $ MemArray pt shape u $ MemReq space
         (_, MemMem space) -> pure $ MemMem space
         (_, MemPrim pt) -> pure $ MemPrim pt
         (_, MemAcc acc ispace ts u) -> pure $ MemAcc acc ispace ts u
@@ -826,17 +820,17 @@ mkBranchRet reqs =
         res_rets_acc ++ [inspect ctx_offset req]
       )
 
-    arrayInfo rank (NeedsNormalisation space) =
-      (space, rank)
-    arrayInfo _ (MemReq space (Rank base_rank)) =
-      (space, base_rank)
+    arrayInfo (NeedsNormalisation space) =
+      space
+    arrayInfo (MemReq space) =
+      space
 
     inspect ctx_offset (MemArray pt shape u req) =
       let shape' = fmap (adjustExt num_new_ctx) shape
-          (space, base_rank) = arrayInfo (shapeRank shape) req
+          space = arrayInfo req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
             convert
-              <$> IxFun.mkExistential base_rank (shapeDims shape') (ctx_offset + 1)
+              <$> IxFun.mkExistential (shapeDims shape') (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space

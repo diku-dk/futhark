@@ -252,7 +252,7 @@ recordMemRefUses td_env bu_env stm =
         <> fromMaybe mempty (M.lookup m (m_alias td_env))
     mbLmad indfun
       | Just subs <- freeVarSubstitutions (scope td_env) (scals bu_env) indfun,
-        (IxFun.IxFun lmad _) <- IxFun.substituteInIxFun subs indfun =
+        (IxFun.IxFun lmad) <- IxFun.substituteInIxFun subs indfun =
           Just lmad
     mbLmad _ = Nothing
     addLmads wrts uses etry =

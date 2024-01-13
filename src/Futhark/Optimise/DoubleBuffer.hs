@@ -76,7 +76,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
-import Data.List (find)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Construct
@@ -84,10 +84,9 @@ import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
 import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.Pass
-import Futhark.Pass.ExplicitAllocations (arraySizeInBytesExp)
 import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Transform.Substitute
-import Futhark.Util (mapAccumLM, maybeHead)
+import Futhark.Util (mapAccumLM)
 
 -- | The double buffering pass definition.
 doubleBuffer :: (Mem rep inner) => String -> String -> OptimiseOp rep -> Pass rep rep
@@ -262,44 +261,103 @@ isArrayIn :: VName -> Param FParamMem -> Bool
 isArrayIn x (Param _ _ (MemArray _ _ _ (ArrayIn y _))) = x == y
 isArrayIn _ _ = False
 
+doubleBufferSpace :: Space -> Bool
+doubleBufferSpace ScalarSpace {} = False
+doubleBufferSpace _ = True
+
 optimiseLoopBySwitching :: (Constraints rep inner) => OptimiseLoop rep
-optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
+optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
-    ((buffered, body_stms'), (pes', merge', body_res')) <-
-      second unzip3 <$> mapAccumLM check (mempty, body_stms) (zip3 pes merge body_res)
-    merge'' <- mapM (maybeCopyInitial buffered) $ mconcat merge'
-    pure (Pat $ mconcat pes', merge'', Body () body_stms' $ mconcat body_res')
+    ((param_changes, body_stms'), (pes', merge', body_res')) <-
+      second unzip3 <$> mapAccumLM check (id, body_stms) (zip3 pes merge body_res)
+    pure
+      ( Pat $ mconcat pes',
+        map param_changes $ mconcat merge',
+        Body () body_stms' $ mconcat body_res'
+      )
   pure (outer_stms, pat', merge', body')
   where
-    merge_bound = namesFromList $ map (paramName . fst) merge
+    bound_in_loop =
+      namesFromList (map (paramName . fst) merge) <> boundInBody body
 
-    check (buffered, body_stms') (pe, (param, arg), res)
+    findIxfunOfArray v = listToMaybe . mapMaybe onStm $ stmsToList body_stms
+      where
+        onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
+        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ ixfun)))
+          | v == pe_v,
+            not $ bound_in_loop `namesIntersect` freeIn ixfun =
+              Just ixfun
+        onPatElem _ = Nothing
+
+    changeParam p_needle new (p, p_initial) =
+      if p == p_needle then new else (p, p_initial)
+
+    check (param_changes, body_stms') (pe, (param, arg), res)
       | Mem space <- paramType param,
+        doubleBufferSpace space,
         Var arg_v <- arg,
         -- XXX: what happens if there are multiple arrays in the same
         -- memory block?
-        [arr_param] <- filter (isArrayIn (paramName param)) $ map fst merge,
-        MemArray pt _ _ (ArrayIn _ ixfun) <- paramDec arr_param,
-        not $ merge_bound `namesIntersect` freeIn ixfun,
-        Var res_v <- resSubExp res,
-        Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
+        [((arr_param, Var arr_param_initial), Var arr_v)] <-
+          filter
+            (isArrayIn (paramName param) . fst . fst)
+            (zip merge $ map resSubExp body_res),
+        MemArray pt shape _ (ArrayIn _ param_ixfun) <- paramDec arr_param,
+        Var arr_mem_out <- resSubExp res,
+        Just arr_ixfun <- findIxfunOfArray arr_v,
+        Just (arr_mem_out_alloc, body_stms'') <-
+          extractAllocOf bound_in_loop arr_mem_out body_stms' = do
+          -- Put the allocations outside the loop.
           num_bytes <-
-            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range ixfun))
+            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range arr_ixfun))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
+          addStm arr_mem_out_alloc
+
+          -- Construct additional pattern element and parameter for
+          -- the memory block that is not used afterwards.
           pe_unused <-
             PatElem
               <$> newVName (baseString (patElemName pe) <> "_unused")
               <*> pure (MemMem space)
           param_out <-
             newParam (baseString (paramName param) <> "_out") (MemMem space)
-          addStm res_v_alloc
+
+          -- Copy the initial array value to the input memory, with
+          -- the same index function as the result.
+          arr_v_copy <- newVName $ baseString arr_v <> "_db_copy"
+          let arr_initial_info =
+                MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_ixfun
+              arr_initial_pe =
+                PatElem arr_v_copy arr_initial_info
+          addStm . Let (Pat [arr_initial_pe]) (defAux ()) . BasicOp $
+            Replicate mempty (Var arr_param_initial)
+          -- AS a trick we must make the array parameter Unique to
+          -- avoid unfortunate hoisting (see #1533) because we are
+          -- invalidating the underlying memory.
+          let arr_param' =
+                Param mempty (paramName arr_param) $
+                  MemArray pt shape Unique (ArrayIn (paramName param) param_ixfun)
+
+          -- We must also update the initial values of the parameters
+          -- used in the index function of this array parameter, such
+          -- that they match the result.
+          let mkUpdate ixfun_v =
+                case L.find ((== ixfun_v) . paramName . fst . fst) $
+                  zip merge body_res of
+                  Nothing -> id
+                  Just ((p, _), p_res) -> changeParam p (p, resSubExp p_res)
+              updateIxfunParam =
+                foldl (.) id $ map mkUpdate $ namesToList $ freeIn param_ixfun
+
           pure
-            ( ( M.insert (paramName param) arr_mem_in buffered,
-                substituteNames (M.singleton res_v (paramName param_out)) body_stms''
+            ( ( updateIxfunParam
+                  . changeParam arr_param (arr_param', Var arr_v_copy)
+                  . param_changes,
+                substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms''
               ),
               ( [pe, pe_unused],
-                [(param, Var arr_mem_in), (param_out, resSubExp res)],
+                [(param, Var arr_mem_in), (param_out, Var arr_mem_out)],
                 [ res {resSubExp = Var $ paramName param_out},
                   subExpRes $ Var $ paramName param
                 ]
@@ -307,27 +365,9 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             )
       | otherwise =
           pure
-            ( (buffered, body_stms'),
+            ( (param_changes, body_stms'),
               ([pe], [(param, arg)], [res])
             )
-
-    maybeCopyInitial buffered (param@(Param _ _ (MemArray _ _ _ (ArrayIn mem _))), Var arg)
-      | Just mem' <- mem `M.lookup` buffered = do
-          arg_info <- lookupMemInfo arg
-          case arg_info of
-            MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
-              arg_copy <- newVName (baseString arg <> "_dbcopy")
-              letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
-                BasicOp (Replicate mempty $ Var arg)
-              -- We need to make this parameter unique to avoid invalid
-              -- hoisting (see #1533), because we are invalidating the
-              -- underlying memory.
-              pure (fmap mkUnique param, Var arg_copy)
-            _ -> pure (fmap mkUnique param, Var arg)
-    maybeCopyInitial _ (param, arg) = pure (param, arg)
-
-    mkUnique (MemArray bt shape _ ret) = MemArray bt shape Unique ret
-    mkUnique x = x
 
 optimiseLoopByCopying :: (Constraints rep inner) => OptimiseLoop rep
 optimiseLoopByCopying pat merge body = do
@@ -336,7 +376,7 @@ optimiseLoopByCopying pat merge body = do
   buffered <-
     doubleBufferLoopParams
       (zip (map fst merge) (bodyResult body))
-      (boundInBody body)
+      body
   -- Then create the allocations of the buffers and copies of the
   -- initial values.
   (merge', allocs) <- allocStms merge buffered
@@ -347,72 +387,60 @@ optimiseLoopByCopying pat merge body = do
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
 data DoubleBuffer
-  = BufferAlloc VName (PrimExp VName) Space Bool
+  = BufferAlloc VName (TPrimExp Int64 VName) Space
   | -- | First name is the memory block to copy to,
     -- second is the name of the array copy.
-    BufferCopy VName IxFun VName Bool
+    BufferCopy VName IxFun VName
   | NoBuffer
   deriving (Show)
 
 doubleBufferLoopParams ::
-  (MonadFreshNames m) =>
+  (Constraints rep inner, MonadFreshNames m) =>
   [(Param FParamMem, SubExpRes)] ->
-  Names ->
+  Body rep ->
   m [DoubleBuffer]
-doubleBufferLoopParams ctx_and_res bound_in_loop =
+doubleBufferLoopParams ctx_and_res body =
   evalStateT (mapM buffer ctx_and_res) M.empty
   where
-    params = map fst ctx_and_res
+    bound_in_loop = boundInBody body
     loopVariant v =
-      v
-        `nameIn` bound_in_loop
-        || v
-          `elem` map (paramName . fst) ctx_and_res
+      (v `nameIn` bound_in_loop)
+        || (v `elem` map (paramName . fst) ctx_and_res)
 
-    loopInvariantSize (Constant v) =
-      Just (Constant v, True)
-    loopInvariantSize (Var v) =
-      case find ((== v) . paramName . fst) ctx_and_res of
-        Just (_, SubExpRes _ (Constant val)) ->
-          Just (Constant val, False)
-        Just (_, SubExpRes _ (Var v'))
-          | not $ loopVariant v' ->
-              Just (Var v', False)
-        Just _ ->
-          Nothing
-        Nothing ->
-          Just (Var v, True)
+    invariant Constant {} = True
+    invariant (Var v) = not $ loopVariant v
 
-    sizeForMem mem = maybeHead $ mapMaybe (arrayInMem . paramDec) params
+    findSizeOfAlloc v = listToMaybe . mapMaybe p $ stmsToList $ bodyStms body
       where
-        arrayInMem (MemArray pt shape _ (ArrayIn arraymem ixfun))
-          | IxFun.isDirect ixfun,
-            Just (dims, b) <-
-              mapAndUnzipM loopInvariantSize $ shapeDims shape,
-            mem == arraymem =
-              Just
-                ( arraySizeInBytesExp $
-                    Array pt (Shape dims) NoUniqueness,
-                  or b
-                )
-        arrayInMem _ = Nothing
+        p (Let (Pat [pe]) _ (Op (Alloc size _)))
+          | patElemName pe == v, invariant size = Just $ pe64 size
+        p _ = Nothing
+
+    findIxfunOfArray v = listToMaybe . mapMaybe onStm $ stmsToList $ bodyStms body
+      where
+        onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
+        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ ixfun)))
+          | v == pe_v = Just ixfun
+        onPatElem _ = Nothing
 
     buffer (fparam, res) = case paramType fparam of
       Mem space
-        | Just (size, b) <- sizeForMem $ paramName fparam,
-          Var res_v <- resSubExp res,
-          res_v `nameIn` bound_in_loop -> do
+        | Var res_v <- resSubExp res,
+          res_v `nameIn` bound_in_loop,
+          Just size <- findSizeOfAlloc res_v -> do
             -- Let us double buffer this!
             bufname <- lift $ newVName "double_buffer_mem"
-            modify $ M.insert (paramName fparam) (bufname, b)
-            pure $ BufferAlloc bufname size space b
+            modify $ M.insert (paramName fparam) bufname
+            pure $ BufferAlloc bufname size space
       Array {}
-        | MemArray _ _ _ (ArrayIn mem ixfun) <- paramDec fparam -> do
+        | MemArray _ _ _ (ArrayIn mem _) <- paramDec fparam,
+          Var res_v <- resSubExp res,
+          Just ixfun <- findIxfunOfArray res_v -> do
             buffered <- gets $ M.lookup mem
             case buffered of
-              Just (bufname, b) -> do
+              Just bufname -> do
                 copyname <- lift $ newVName "double_buffer_array"
-                pure $ BufferCopy bufname ixfun copyname b
+                pure $ BufferCopy bufname ixfun copyname
               Nothing ->
                 pure NoBuffer
       _ -> pure NoBuffer
@@ -424,33 +452,13 @@ allocStms ::
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
 allocStms merge = runWriterT . zipWithM allocation merge
   where
-    allocation m@(Param attrs pname _, _) (BufferAlloc name size space b) = do
+    allocation (Param attrs pname _, Var initial_mem) (BufferAlloc name size space) = do
       stms <- lift $
         runBuilder_ $ do
           size' <- toSubExp "double_buffer_size" size
           letBindNames [name] $ Op $ Alloc size' space
       tell $ stmsToList stms
-      if b
-        then pure (Param attrs pname $ MemMem space, Var name)
-        else pure m
-    allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
-      v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
-      (_v_mem, v_ixfun) <- lift $ lookupArraySummary v
-      let bt = elemType $ paramType f
-          shape = arrayShape $ paramType f
-          bound = MemArray bt shape NoUniqueness $ ArrayIn mem v_ixfun
-      tell
-        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
-            BasicOp (Replicate mempty $ Var v)
-        ]
-      -- It is important that we treat this as a consumption, to
-      -- avoid the Copy from being hoisted out of any enclosing
-      -- loops.  Since we re-use (=overwrite) memory in the loop,
-      -- the copy is critical for initialisation.  See issue #816.
-      let uniqueMemInfo (MemArray pt pshape _ ret) =
-            MemArray pt pshape Unique ret
-          uniqueMemInfo info = info
-      pure (uniqueMemInfo <$> f, Var v_copy)
+      pure (Param attrs pname $ MemMem space, Var initial_mem)
     allocation (f, se) _ =
       pure (f, se)
 
@@ -466,9 +474,9 @@ doubleBufferResult valparams buffered (Body _ stms res) =
         unzip $ zipWith3 buffer valparams buffered val_res
    in Body () (stms <> stmsFromList (catMaybes copystms)) $ ctx_res ++ val_res'
   where
-    buffer _ (BufferAlloc bufname _ _ _) se =
+    buffer _ (BufferAlloc bufname _ _) se =
       (Nothing, se {resSubExp = Var bufname})
-    buffer fparam (BufferCopy bufname ixfun copyname _) (SubExpRes cs (Var v)) =
+    buffer fparam (BufferCopy bufname ixfun copyname) (SubExpRes cs (Var v)) =
       -- To construct the copy we will need to figure out its type
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
