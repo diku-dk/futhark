@@ -410,30 +410,13 @@ allocStms ::
   DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
 allocStms merge = runWriterT . zipWithM allocation merge
   where
-    allocation (Param attrs pname _, _) (BufferAlloc name size space) = do
+    allocation (Param attrs pname _, Var initial_mem) (BufferAlloc name size space) = do
       stms <- lift $
         runBuilder_ $ do
           size' <- toSubExp "double_buffer_size" size
           letBindNames [name] $ Op $ Alloc size' space
       tell $ stmsToList stms
-      pure (Param attrs pname $ MemMem space, Var name)
-    allocation (f, Var v) (BufferCopy mem ixfun _) = do
-      v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
-      let bt = elemType $ paramType f
-          shape = arrayShape $ paramType f
-          bound = MemArray bt shape NoUniqueness $ ArrayIn mem ixfun
-      tell
-        [ Let (Pat [PatElem v_copy bound]) (defAux ()) $
-            BasicOp (Replicate mempty $ Var v)
-        ]
-      -- It is important that we treat this as a consumption, to
-      -- avoid the Copy from being hoisted out of any enclosing
-      -- loops.  Since we re-use (=overwrite) memory in the loop,
-      -- the copy is critical for initialisation.  See issue #816.
-      let uniqueMemInfo (MemArray pt pshape _ ret) =
-            MemArray pt pshape Unique ret
-          uniqueMemInfo info = info
-      pure (uniqueMemInfo <$> f, Var v_copy)
+      pure (Param attrs pname $ MemMem space, Var initial_mem)
     allocation (f, se) _ =
       pure (f, se)
 
