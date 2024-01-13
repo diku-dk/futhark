@@ -15,7 +15,6 @@ import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.Optimise.Simplify qualified as Simplify
@@ -168,7 +167,7 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
     inContext = (`elem` patNames pat)
 
     hasConcretisableMemory fixable pat_elem
-      | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemDec pat_elem,
+      | (_, MemArray pt shape _ (ArrayIn mem lmad)) <- patElemDec pat_elem,
         Just (j, Mem space) <-
           fmap patElemType
             <$> find
@@ -178,10 +177,10 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
         Just defbody_se <- maybeNth j $ bodyResult defbody,
         mem `onlyUsedIn` patElemName pat_elem,
         all knownSize (shapeDims shape),
-        not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
+        not $ freeIn lmad `namesIntersect` namesFromList (patNames pat),
         any (defbody_se /=) cases_ses,
-        LMAD.offset (IxFun.ixfunLMAD ixfun) == 0 =
-          let mem_size = untyped $ primByteSize pt * (1 + IxFun.range ixfun)
+        LMAD.offset lmad == 0 =
+          let mem_size = untyped $ primByteSize pt * (1 + LMAD.range lmad)
            in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
           fixable
