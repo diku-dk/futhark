@@ -37,7 +37,6 @@ import Control.Monad.State
 import Data.Map.Strict qualified as M
 import Data.Traversable
 import Futhark.Analysis.PrimExp
-import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Mem.LMAD hiding
   ( equivalent,
     flatSlice,
@@ -74,20 +73,11 @@ import Prelude hiding (gcd, id, mod, (.))
 -- distinguish row-major and column-major representations.
 --
 -- An index function is represented as an LMAD.
-data IxFun num = IxFun
-  { ixfunLMAD :: LMAD num,
-    -- | the shape of the support array, i.e., the original array
-    --   that birthed (is the start point) of this index function.
-    base :: Shape num
-  }
+newtype IxFun num = IxFun {ixfunLMAD :: LMAD num}
   deriving (Show, Eq)
 
 instance (Pretty num) => Pretty (IxFun num) where
-  pretty (IxFun lmad oshp) =
-    braces . semistack $
-      [ "base:" <+> brackets (commasep $ map pretty oshp),
-        "LMAD:" <+> pretty lmad
-      ]
+  pretty (IxFun lmad) = pretty lmad
 
 instance (Substitute num) => Substitute (IxFun num) where
   substituteNames substs = fmap $ substituteNames substs
@@ -107,8 +97,8 @@ instance Foldable IxFun where
 -- It is important that the traversal order here is the same as in
 -- mkExistential.
 instance Traversable IxFun where
-  traverse f (IxFun lmad oshp) =
-    IxFun <$> traverse f lmad <*> traverse f oshp
+  traverse f (IxFun lmad) =
+    IxFun <$> traverse f lmad
 
 -- | Substitute a name with a PrimExp in an index function.
 substituteInIxFun ::
@@ -116,22 +106,17 @@ substituteInIxFun ::
   M.Map a (TPrimExp t a) ->
   IxFun (TPrimExp t a) ->
   IxFun (TPrimExp t a)
-substituteInIxFun tab (IxFun lmad oshp) =
-  IxFun
-    (substituteInLMAD tab lmad)
-    (map (TPrimExp . substituteInPrimExp tab' . untyped) oshp)
-  where
-    tab' = fmap untyped tab
+substituteInIxFun tab (IxFun lmad) =
+  IxFun $ substituteInLMAD tab lmad
 
 -- | Is this is a row-major array?
 isDirect :: (Eq num, IntegralExp num) => IxFun num -> Bool
-isDirect (IxFun (LMAD offset dims) oshp) =
-  let strides_expected = reverse $ scanl (*) 1 (reverse (tail oshp))
-   in length oshp == length dims
-        && offset == 0
+isDirect (IxFun lmad@(LMAD offset dims)) =
+  let strides_expected = reverse $ scanl (*) 1 $ reverse $ tail $ LMAD.shape lmad
+   in offset == 0
         && all
-          (\(LMADDim s n, d, se) -> s == se && n == d)
-          (zip3 dims oshp strides_expected)
+          (\(LMADDim s _, se) -> s == se)
+          (zip dims strides_expected)
 
 -- | The index space of the index function.  This is the same as the
 -- shape of arrays that the index function supports.
@@ -149,7 +134,7 @@ index = LMAD.index . ixfunLMAD
 
 -- | iota with offset.
 iotaOffset :: (IntegralExp num) => num -> Shape num -> IxFun num
-iotaOffset o ns = IxFun (LMAD.iota o ns) ns
+iotaOffset o ns = IxFun $ LMAD.iota o ns
 
 -- | iota.
 iota :: (IntegralExp num) => Shape num -> IxFun num
@@ -157,11 +142,9 @@ iota = iotaOffset 0
 
 -- | Create a single-LMAD index function that is existential in
 -- everything except shape, with the provided shape.
-mkExistential :: Int -> Shape (Ext a) -> Int -> IxFun (Ext a)
-mkExistential basis_rank lmad_shape start =
-  IxFun (LMAD.mkExistential lmad_shape start) basis
-  where
-    basis = take basis_rank $ map Ext [start + 1 + length lmad_shape ..]
+mkExistential :: Shape (Ext a) -> Int -> IxFun (Ext a)
+mkExistential lmad_shape start =
+  IxFun (LMAD.mkExistential lmad_shape start)
 
 -- | Permute dimensions.
 permute ::
@@ -169,8 +152,8 @@ permute ::
   IxFun num ->
   Permutation ->
   IxFun num
-permute (IxFun lmad oshp) perm_new =
-  IxFun (LMAD.permute lmad perm_new) oshp
+permute (IxFun lmad) perm_new =
+  IxFun (LMAD.permute lmad perm_new)
 
 -- | Slice an index function.
 slice ::
@@ -178,11 +161,11 @@ slice ::
   IxFun num ->
   Slice num ->
   IxFun num
-slice ixfun@(IxFun lmad@(LMAD _ _) oshp) (Slice is)
+slice ixfun@(IxFun lmad@(LMAD _ _)) (Slice is)
   -- Avoid identity slicing.
   | is == map (unitSlice 0) (shape ixfun) = ixfun
   | otherwise =
-      IxFun (LMAD.slice lmad (Slice is)) oshp
+      IxFun (LMAD.slice lmad (Slice is))
 
 -- | Flat-slice an index function.
 flatSlice ::
@@ -190,7 +173,7 @@ flatSlice ::
   IxFun num ->
   FlatSlice num ->
   IxFun num
-flatSlice (IxFun lmad oshp) s = IxFun (LMAD.flatSlice lmad s) oshp
+flatSlice (IxFun lmad) s = IxFun (LMAD.flatSlice lmad s)
 
 -- | Reshape an index function.
 --
@@ -211,8 +194,8 @@ reshape ::
   IxFun num ->
   Shape num ->
   Maybe (IxFun num)
-reshape (IxFun lmad _) new_shape =
-  IxFun <$> LMAD.reshape lmad new_shape <*> pure new_shape
+reshape (IxFun lmad) new_shape =
+  IxFun <$> LMAD.reshape lmad new_shape
 
 -- | Coerce an index function to look like it has a new shape.
 -- Dynamically the shape must be the same.
@@ -221,28 +204,28 @@ coerce ::
   IxFun num ->
   Shape num ->
   IxFun num
-coerce (IxFun lmad _) new_shape =
-  IxFun (onLMAD lmad) new_shape
+coerce (IxFun lmad) new_shape =
+  IxFun (onLMAD lmad)
   where
     onLMAD (LMAD offset dims) = LMAD offset $ zipWith onDim dims new_shape
     onDim ld d = ld {ldShape = d}
 
 -- | The number of dimensions in the domain of the input function.
 rank :: (IntegralExp num) => IxFun num -> Int
-rank (IxFun (LMAD _ sss) _) = length sss
+rank (IxFun (LMAD _ sss)) = length sss
 
 -- | Conceptually expand index function to be a particular slice of
 -- another by adjusting the offset and strides.  Used for memory
 -- expansion.
 expand ::
   (Eq num, IntegralExp num) => num -> num -> IxFun num -> Maybe (IxFun num)
-expand o p (IxFun lmad base) =
+expand o p (IxFun lmad) =
   let onDim ld = ld {LMAD.ldStride = p * LMAD.ldStride ld}
       lmad' =
         LMAD
           (o + p * LMAD.offset lmad)
           (map onDim (LMAD.dims lmad))
-   in Just $ IxFun lmad' base
+   in Just $ IxFun lmad'
 
 -- | Turn all the leaves of the index function into 'Ext's, except for
 --  the shape, which where the leaves are simply made 'Free'.
@@ -250,22 +233,21 @@ existentialize ::
   Int ->
   IxFun (TPrimExp Int64 a) ->
   IxFun (TPrimExp Int64 (Ext a))
-existentialize start (IxFun lmad base) = evalState (IxFun <$> lmad' <*> base') start
+existentialize start (IxFun lmad) = evalState (IxFun <$> lmad') start
   where
     mkExt = do
       i <- get
       put $ i + 1
       pure $ TPrimExp $ LeafExp (Ext i) int64
     lmad' = LMAD <$> mkExt <*> mapM onDim (dims lmad)
-    base' = traverse (const mkExt) base
     onDim ld = LMADDim <$> mkExt <*> pure (fmap Free (ldShape ld))
 
 -- | Retrieve those elements that 'existentialize' changes. That is,
 -- everything except the shape (and in the same order as
 -- 'existentialise' existentialises them).
 existentialized :: IxFun a -> [a]
-existentialized (IxFun (LMAD offset dims) base) =
-  offset : concatMap onDim dims <> base
+existentialized (IxFun (LMAD offset dims)) =
+  offset : concatMap onDim dims
   where
     onDim (LMADDim ldstride _) = [ldstride]
 
@@ -281,13 +263,12 @@ existentialized (IxFun (LMAD offset dims) base) =
 -- this instead of `ixfun1 == ixfun2` and hope that it's good enough.
 closeEnough :: IxFun num -> IxFun num -> Bool
 closeEnough ixf1 ixf2 =
-  (length (base ixf1) == length (base ixf2))
-    && closeEnoughLMADs (ixfunLMAD ixf1) (ixfunLMAD ixf2)
+  closeEnoughLMADs (ixfunLMAD ixf1) (ixfunLMAD ixf2)
   where
     closeEnoughLMADs lmad1 lmad2 =
       length (LMAD.dims lmad1) == length (LMAD.dims lmad2)
 
 -- | The largest possible linear address reachable by this index
--- function.
+-- function, not counting the offset.
 range :: (Pretty num) => IxFun (TPrimExp Int64 num) -> TPrimExp Int64 num
 range = LMAD.range . ixfunLMAD

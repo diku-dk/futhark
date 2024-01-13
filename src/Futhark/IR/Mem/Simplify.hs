@@ -11,12 +11,12 @@ where
 
 import Control.Monad
 import Data.List (find)
-import Data.Maybe (isJust)
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.Construct
 import Futhark.IR.Mem
 import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.Optimise.Simplify qualified as Simplify
 import Futhark.Optimise.Simplify.Engine qualified as Engine
@@ -128,7 +128,7 @@ memRuleBook =
 unExistentialiseMemory :: (SimplifyMemory rep inner) => TopDownRuleMatch (Wise rep)
 unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
   | ST.simplifyMemory vtable,
-    fixable <- foldl hasConcretisableMemory mempty $ zip [0 ..] $ patElems pat,
+    fixable <- foldl hasConcretisableMemory mempty $ patElems pat,
     not $ null fixable = Simplify $ do
       -- Create non-existential memory blocks big enough to hold the
       -- arrays.
@@ -167,7 +167,7 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
     knownSize (Var v) = not $ inContext v
     inContext = (`elem` patNames pat)
 
-    hasConcretisableMemory fixable (i, pat_elem)
+    hasConcretisableMemory fixable pat_elem
       | (_, MemArray pt shape _ (ArrayIn mem ixfun)) <- patElemDec pat_elem,
         Just (j, Mem space) <-
           fmap patElemType
@@ -180,24 +180,11 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
         all knownSize (shapeDims shape),
         not $ freeIn ixfun `namesIntersect` namesFromList (patNames pat),
         any (defbody_se /=) cases_ses,
-        all (notIndex i) (defbody : map caseBody cases) =
+        LMAD.offset (IxFun.ixfunLMAD ixfun) == 0 =
           let mem_size = untyped $ primByteSize pt * (1 + IxFun.range ixfun)
            in (pat_elem, mem_size, mem, space) : fixable
       | otherwise =
           fixable
-
-    -- Check if the i'th result is not an index; see #1325. This is a
-    -- rather crude check, but this is also a rather crude
-    -- simplification rule. We only need to keep it around until
-    -- memory expansion can handle existential memory generally.
-    notIndex i body
-      | Just (SubExpRes _ (Var v)) <- maybeNth (i :: Int) $ bodyResult body =
-          not $ any (bad v) $ bodyStms body
-      where
-        bad v (Let index_pat _ (BasicOp (Index _ slice))) =
-          (v `elem` patNames index_pat) && any (isJust . dimFix) (unSlice slice)
-        bad _ _ = False
-    notIndex _ _ = True
 unExistentialiseMemory _ _ _ _ = Skip
 
 -- If an allocation is statically known to be safe, then we can remove
