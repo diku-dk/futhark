@@ -260,29 +260,47 @@ isArrayIn :: VName -> Param FParamMem -> Bool
 isArrayIn x (Param _ _ (MemArray _ _ _ (ArrayIn y _))) = x == y
 isArrayIn _ _ = False
 
+doubleBufferSpace :: Space -> Bool
+doubleBufferSpace ScalarSpace {} = False
+doubleBufferSpace _ = True
+
 optimiseLoopBySwitching :: (Constraints rep inner) => OptimiseLoop rep
-optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
+optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
-    ((buffered, body_stms'), (pes', merge', body_res')) <-
-      second unzip3 <$> mapAccumLM check (mempty, body_stms) (zip3 pes merge body_res)
-    merge'' <- mapM (maybeCopyInitial buffered) $ mconcat merge'
-    pure (Pat $ mconcat pes', merge'', Body () body_stms' $ mconcat body_res')
+    (body_stms', (pes', merge', body_res')) <-
+      second unzip3 <$> mapAccumLM check body_stms (zip3 pes merge body_res)
+    pure (Pat $ mconcat pes', mconcat merge', Body () body_stms' $ mconcat body_res')
   pure (outer_stms, pat', merge', body')
   where
-    merge_bound = namesFromList $ map (paramName . fst) merge
+    bound_in_loop =
+      namesFromList (map (paramName . fst) merge) <> boundInBody body
 
-    check (buffered, body_stms') (pe, (param, arg), res)
+    findIxfunOfArray v = listToMaybe . mapMaybe onStm $ stmsToList body_stms
+      where
+        onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
+        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ ixfun)))
+          | v == pe_v,
+            not $ bound_in_loop `namesIntersect` freeIn ixfun =
+              Just ixfun
+        onPatElem _ = Nothing
+
+    check body_stms' (pe, (param, arg), res)
       | Mem space <- paramType param,
+        doubleBufferSpace space,
         Var arg_v <- arg,
         -- XXX: what happens if there are multiple arrays in the same
         -- memory block?
-        [arr_param] <- filter (isArrayIn (paramName param)) $ map fst merge,
-        MemArray pt _ _ (ArrayIn _ ixfun) <- paramDec arr_param,
-        not $ merge_bound `namesIntersect` freeIn ixfun,
-        Var res_v <- resSubExp res,
-        Just (res_v_alloc, body_stms'') <- extractAllocOf merge_bound res_v body_stms' = do
+        [(arr_param, Var arr_v)] <-
+          filter
+            (isArrayIn (paramName param) . fst)
+            (zip (map fst merge) $ map resSubExp body_res),
+        MemArray pt _ _ _ <- paramDec arr_param,
+        Var arr_mem_out <- resSubExp res,
+        Just arr_ixfun <- findIxfunOfArray arr_v,
+        Just (arr_mem_out_alloc, body_stms'') <-
+          extractAllocOf bound_in_loop arr_mem_out body_stms' = do
           num_bytes <-
-            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range ixfun))
+            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range arr_ixfun))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
           pe_unused <-
@@ -291,13 +309,11 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
               <*> pure (MemMem space)
           param_out <-
             newParam (baseString (paramName param) <> "_out") (MemMem space)
-          addStm res_v_alloc
+          addStm arr_mem_out_alloc
           pure
-            ( ( M.insert (paramName param) arr_mem_in buffered,
-                substituteNames (M.singleton res_v (paramName param_out)) body_stms''
-              ),
+            ( substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms'',
               ( [pe, pe_unused],
-                [(param, Var arr_mem_in), (param_out, resSubExp res)],
+                [(param, Var arr_mem_in), (param_out, Var arr_mem_out)],
                 [ res {resSubExp = Var $ paramName param_out},
                   subExpRes $ Var $ paramName param
                 ]
@@ -305,27 +321,9 @@ optimiseLoopBySwitching (Pat pes) merge (Body _ body_stms body_res) = do
             )
       | otherwise =
           pure
-            ( (buffered, body_stms'),
+            ( body_stms',
               ([pe], [(param, arg)], [res])
             )
-
-    maybeCopyInitial buffered (param@(Param _ _ (MemArray _ _ _ (ArrayIn mem _))), Var arg)
-      | Just mem' <- mem `M.lookup` buffered = do
-          arg_info <- lookupMemInfo arg
-          case arg_info of
-            MemArray pt shape u (ArrayIn _ arg_ixfun) -> do
-              arg_copy <- newVName (baseString arg <> "_dbcopy")
-              letBind (Pat [PatElem arg_copy $ MemArray pt shape u $ ArrayIn mem' arg_ixfun]) $
-                BasicOp (Replicate mempty $ Var arg)
-              -- We need to make this parameter unique to avoid invalid
-              -- hoisting (see #1533), because we are invalidating the
-              -- underlying memory.
-              pure (fmap mkUnique param, Var arg_copy)
-            _ -> pure (fmap mkUnique param, Var arg)
-    maybeCopyInitial _ (param, arg) = pure (param, arg)
-
-    mkUnique (MemArray bt shape _ ret) = MemArray bt shape Unique ret
-    mkUnique x = x
 
 optimiseLoopByCopying :: (Constraints rep inner) => OptimiseLoop rep
 optimiseLoopByCopying pat merge body = do
