@@ -76,6 +76,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Bifunctor
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.Construct
@@ -267,9 +268,13 @@ doubleBufferSpace _ = True
 optimiseLoopBySwitching :: (Constraints rep inner) => OptimiseLoop rep
 optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
-    (body_stms', (pes', merge', body_res')) <-
-      second unzip3 <$> mapAccumLM check body_stms (zip3 pes merge body_res)
-    pure (Pat $ mconcat pes', mconcat merge', Body () body_stms' $ mconcat body_res')
+    ((param_changes, body_stms'), (pes', merge', body_res')) <-
+      second unzip3 <$> mapAccumLM check (id, body_stms) (zip3 pes merge body_res)
+    pure
+      ( Pat $ mconcat pes',
+        map param_changes $ mconcat merge',
+        Body () body_stms' $ mconcat body_res'
+      )
   pure (outer_stms, pat', merge', body')
   where
     bound_in_loop =
@@ -284,34 +289,73 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
               Just ixfun
         onPatElem _ = Nothing
 
-    check body_stms' (pe, (param, arg), res)
+    changeParam p_needle new (p, p_initial) =
+      if p == p_needle then new else (p, p_initial)
+
+    check (param_changes, body_stms') (pe, (param, arg), res)
       | Mem space <- paramType param,
         doubleBufferSpace space,
         Var arg_v <- arg,
         -- XXX: what happens if there are multiple arrays in the same
         -- memory block?
-        [(arr_param, Var arr_v)] <-
+        [((arr_param, Var arr_param_initial), Var arr_v)] <-
           filter
-            (isArrayIn (paramName param) . fst)
-            (zip (map fst merge) $ map resSubExp body_res),
-        MemArray pt _ _ _ <- paramDec arr_param,
+            (isArrayIn (paramName param) . fst . fst)
+            (zip merge $ map resSubExp body_res),
+        MemArray pt shape _ (ArrayIn _ param_ixfun) <- paramDec arr_param,
         Var arr_mem_out <- resSubExp res,
         Just arr_ixfun <- findIxfunOfArray arr_v,
         Just (arr_mem_out_alloc, body_stms'') <-
           extractAllocOf bound_in_loop arr_mem_out body_stms' = do
+          -- Put the allocations outside the loop.
           num_bytes <-
             letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range arr_ixfun))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
+          addStm arr_mem_out_alloc
+
+          -- Construct additional pattern element and parameter for
+          -- the memory block that is not used afterwards.
           pe_unused <-
             PatElem
               <$> newVName (baseString (patElemName pe) <> "_unused")
               <*> pure (MemMem space)
           param_out <-
             newParam (baseString (paramName param) <> "_out") (MemMem space)
-          addStm arr_mem_out_alloc
+
+          -- Copy the initial array value to the input memory, with
+          -- the same index function as the result.
+          arr_v_copy <- newVName $ baseString arr_v <> "_db_copy"
+          let arr_initial_info =
+                MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_ixfun
+              arr_initial_pe =
+                PatElem arr_v_copy arr_initial_info
+          addStm . Let (Pat [arr_initial_pe]) (defAux ()) . BasicOp $
+            Replicate mempty (Var arr_param_initial)
+          -- AS a trick we must make the array parameter Unique to
+          -- avoid unfortunate hoisting (see #1533) because we are
+          -- invalidating the underlying memory.
+          let arr_param' =
+                Param mempty (paramName arr_param) $
+                  MemArray pt shape Unique (ArrayIn (paramName param) param_ixfun)
+
+          -- We must also update the initial values of the parameters
+          -- used in the index function of this array parameter, such
+          -- that they match the result.
+          let mkUpdate ixfun_v =
+                case L.find ((== ixfun_v) . paramName . fst . fst) $
+                  zip merge body_res of
+                  Nothing -> id
+                  Just ((p, _), p_res) -> changeParam p (p, resSubExp p_res)
+              updateIxfunParam =
+                foldl (.) id $ map mkUpdate $ namesToList $ freeIn param_ixfun
+
           pure
-            ( substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms'',
+            ( ( updateIxfunParam
+                  . changeParam arr_param (arr_param', Var arr_v_copy)
+                  . param_changes,
+                substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms''
+              ),
               ( [pe, pe_unused],
                 [(param, Var arr_mem_in), (param_out, Var arr_mem_out)],
                 [ res {resSubExp = Var $ paramName param_out},
@@ -321,7 +365,7 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
             )
       | otherwise =
           pure
-            ( body_stms',
+            ( (param_changes, body_stms'),
               ([pe], [(param, arg)], [res])
             )
 
