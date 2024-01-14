@@ -18,7 +18,6 @@ module Futhark.Pass.ExplicitAllocations
     allocInStms,
     allocForArray,
     simplifiable,
-    arraySizeInBytesExp,
     mkLetNamesB',
     mkLetNamesB'',
 
@@ -154,17 +153,8 @@ arraySizeInBytesExp :: Type -> PrimExp VName
 arraySizeInBytesExp t =
   untyped $ foldl' (*) (elemSize t) $ map pe64 (arrayDims t)
 
-arraySizeInBytesExpM :: (MonadBuilder m) => Type -> m (PrimExp VName)
-arraySizeInBytesExpM t = do
-  let dim_prod_i64 = product $ map pe64 (arrayDims t)
-      elm_size_i64 = elemSize t
-  pure $
-    BinOpExp (SMax Int64) (ValueExp $ IntValue $ Int64Value 0) $
-      untyped $
-        dim_prod_i64 * elm_size_i64
-
 arraySizeInBytes :: (MonadBuilder m) => Type -> m SubExp
-arraySizeInBytes = letSubExp "bytes" <=< toExp <=< arraySizeInBytesExpM
+arraySizeInBytes = letSubExp "bytes" <=< toExp . arraySizeInBytesExp
 
 allocForArray' ::
   (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m)) =>
