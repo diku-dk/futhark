@@ -45,7 +45,7 @@ flattenArray k flat arr = do
 
 sliceArray :: Imp.TExp Int64 -> TV Int64 -> VName -> ImpM rep r op VName
 sliceArray start size arr = do
-  MemLoc mem _ ixfun <- entryArrayLoc <$> lookupArray arr
+  MemLoc mem _ lmad <- entryArrayLoc <$> lookupArray arr
   arr_t <- lookupType arr
   let slice =
         fullSliceNum
@@ -56,7 +56,7 @@ sliceArray start size arr = do
     (elemType arr_t)
     (arrayShape arr_t `setOuterDim` Var (tvVar size))
     mem
-    $ LMAD.slice ixfun slice
+    $ LMAD.slice lmad slice
 
 -- | @applyLambda lam dests args@ emits code that:
 --

@@ -1581,8 +1581,8 @@ copyDWIM dest dest_slice src src_slice = do
         case dest_entry of
           ScalarVar _ _ ->
             ScalarDestination dest
-          ArrayVar _ (ArrayEntry (MemLoc mem shape ixfun) _) ->
-            ArrayDestination $ Just $ MemLoc mem shape ixfun
+          ArrayVar _ (ArrayEntry (MemLoc mem shape lmad) _) ->
+            ArrayDestination $ Just $ MemLoc mem shape lmad
           MemVar _ _ ->
             MemoryDestination dest
           AccVar {} ->
@@ -1707,9 +1707,9 @@ sAlloc name size space = do
   pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
-sArray name bt shape mem ixfun = do
+sArray name bt shape mem lmad = do
   name' <- newVName name
-  dArray name' bt shape mem ixfun
+  dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
@@ -1725,9 +1725,9 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  let iota_ixfun = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
+  let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    LMAD.permute iota_ixfun $
+    LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.

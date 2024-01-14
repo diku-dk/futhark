@@ -42,11 +42,11 @@ optimiseFun consts_table fd =
   where
     table = consts_table <> mkTable (bodyStms (funDefBody fd))
     mkSubst (Var v0)
-      | Just (MemArray _ _ _ (ArrayIn mem0 ixfun0), BasicOp (Manifest _ v1)) <-
+      | Just (MemArray _ _ _ (ArrayIn mem0 lmad0), BasicOp (Manifest _ v1)) <-
           varInfo v0 table,
-        Just (MemArray _ _ _ (ArrayIn mem1 ixfun1), _) <-
+        Just (MemArray _ _ _ (ArrayIn mem1 lmad1), _) <-
           varInfo v1 table,
-        ixfun0 == ixfun1 =
+        lmad0 == lmad1 =
           M.fromList [(mem0, mem1), (v0, v1)]
     mkSubst _ = mempty
     onBody (Body dec stms res) =

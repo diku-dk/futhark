@@ -410,15 +410,15 @@ instance Rename MemBind where
   rename = substituteRename
 
 instance Substitute MemBind where
-  substituteNames substs (ArrayIn ident ixfun) =
-    ArrayIn (substituteNames substs ident) (substituteNames substs ixfun)
+  substituteNames substs (ArrayIn ident lmad) =
+    ArrayIn (substituteNames substs ident) (substituteNames substs lmad)
 
 instance PP.Pretty MemBind where
-  pretty (ArrayIn mem ixfun) =
-    PP.pretty mem <+> "->" PP.</> PP.pretty ixfun
+  pretty (ArrayIn mem lmad) =
+    PP.pretty mem <+> "->" PP.</> PP.pretty lmad
 
 instance FreeIn MemBind where
-  freeIn' (ArrayIn mem ixfun) = freeIn' mem <> freeIn' ixfun
+  freeIn' (ArrayIn mem lmad) = freeIn' mem <> freeIn' lmad
 
 -- | A description of the memory properties of an array being returned
 -- by an operation.
@@ -441,35 +441,35 @@ instance Rename MemReturn where
   rename = substituteRename
 
 instance Substitute MemReturn where
-  substituteNames substs (ReturnsInBlock ident ixfun) =
-    ReturnsInBlock (substituteNames substs ident) (substituteNames substs ixfun)
-  substituteNames substs (ReturnsNewBlock space i ixfun) =
-    ReturnsNewBlock space i (substituteNames substs ixfun)
+  substituteNames substs (ReturnsInBlock ident lmad) =
+    ReturnsInBlock (substituteNames substs ident) (substituteNames substs lmad)
+  substituteNames substs (ReturnsNewBlock space i lmad) =
+    ReturnsNewBlock space i (substituteNames substs lmad)
 
 instance FixExt MemReturn where
-  fixExt i (Var v) (ReturnsNewBlock _ j ixfun)
+  fixExt i (Var v) (ReturnsNewBlock _ j lmad)
     | j == i =
         ReturnsInBlock v $
           fixExtLMAD
             i
             (primExpFromSubExp int64 (Var v))
-            ixfun
-  fixExt i se (ReturnsNewBlock space j ixfun) =
+            lmad
+  fixExt i se (ReturnsNewBlock space j lmad) =
     ReturnsNewBlock
       space
       j'
-      (fixExtLMAD i (primExpFromSubExp int64 se) ixfun)
+      (fixExtLMAD i (primExpFromSubExp int64 se) lmad)
     where
       j'
         | i < j = j - 1
         | otherwise = j
-  fixExt i se (ReturnsInBlock mem ixfun) =
-    ReturnsInBlock mem (fixExtLMAD i (primExpFromSubExp int64 se) ixfun)
+  fixExt i se (ReturnsInBlock mem lmad) =
+    ReturnsInBlock mem (fixExtLMAD i (primExpFromSubExp int64 se) lmad)
 
-  mapExt f (ReturnsNewBlock space i ixfun) =
-    ReturnsNewBlock space (f i) ixfun
-  mapExt f (ReturnsInBlock mem ixfun) =
-    ReturnsInBlock mem (fmap (fmap f') ixfun)
+  mapExt f (ReturnsNewBlock space i lmad) =
+    ReturnsNewBlock space (f i) lmad
+  mapExt f (ReturnsInBlock mem lmad) =
+    ReturnsInBlock mem (fmap (fmap f') lmad)
     where
       f' (Ext i) = Ext $ f i
       f' v = v
@@ -492,24 +492,24 @@ existentialiseLMAD ctx = LMAD.substitute ctx' . fmap (fmap Free)
     ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0 ..]
 
 instance PP.Pretty MemReturn where
-  pretty (ReturnsInBlock v ixfun) =
-    pretty v <+> "->" PP.</> PP.pretty ixfun
-  pretty (ReturnsNewBlock space i ixfun) =
-    "?" <> pretty i <> PP.pretty space <+> "->" PP.</> PP.pretty ixfun
+  pretty (ReturnsInBlock v lmad) =
+    pretty v <+> "->" PP.</> PP.pretty lmad
+  pretty (ReturnsNewBlock space i lmad) =
+    "?" <> pretty i <> PP.pretty space <+> "->" PP.</> PP.pretty lmad
 
 instance FreeIn MemReturn where
-  freeIn' (ReturnsInBlock v ixfun) = freeIn' v <> freeIn' ixfun
-  freeIn' (ReturnsNewBlock space _ ixfun) = freeIn' space <> freeIn' ixfun
+  freeIn' (ReturnsInBlock v lmad) = freeIn' v <> freeIn' lmad
+  freeIn' (ReturnsNewBlock space _ lmad) = freeIn' space <> freeIn' lmad
 
 instance Engine.Simplifiable MemReturn where
-  simplify (ReturnsNewBlock space i ixfun) =
-    ReturnsNewBlock space i <$> simplifyExtLMAD ixfun
-  simplify (ReturnsInBlock v ixfun) =
-    ReturnsInBlock <$> Engine.simplify v <*> simplifyExtLMAD ixfun
+  simplify (ReturnsNewBlock space i lmad) =
+    ReturnsNewBlock space i <$> simplifyExtLMAD lmad
+  simplify (ReturnsInBlock v lmad) =
+    ReturnsInBlock <$> Engine.simplify v <*> simplifyExtLMAD lmad
 
 instance Engine.Simplifiable MemBind where
-  simplify (ArrayIn mem ixfun) =
-    ArrayIn <$> Engine.simplify mem <*> simplifyLMAD ixfun
+  simplify (ArrayIn mem lmad) =
+    ArrayIn <$> Engine.simplify mem <*> simplifyLMAD lmad
 
 instance Engine.Simplifiable [FunReturns] where
   simplify = mapM Engine.simplify
@@ -563,11 +563,11 @@ bodyReturnsToExpReturns :: BodyReturns -> ExpReturns
 bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 varInfoToExpReturns :: MemInfo SubExp NoUniqueness MemBind -> ExpReturns
-varInfoToExpReturns (MemArray et shape u (ArrayIn mem ixfun)) =
+varInfoToExpReturns (MemArray et shape u (ArrayIn mem lmad)) =
   MemArray et (fmap Free shape) u $
     Just $
       ReturnsInBlock mem $
-        existentialiseLMAD [] ixfun
+        existentialiseLMAD [] lmad
 varInfoToExpReturns (MemPrim pt) = MemPrim pt
 varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
 varInfoToExpReturns (MemMem space) = MemMem space
@@ -599,15 +599,15 @@ matchFunctionReturnType rettype result = do
         MemPrim _ -> pure ()
         MemMem {} -> pure ()
         MemAcc {} -> pure ()
-        MemArray _ _ _ (ArrayIn _ ixfun)
-          | LMAD.isDirect ixfun ->
+        MemArray _ _ _ (ArrayIn _ lmad)
+          | LMAD.isDirect lmad ->
               pure ()
           | otherwise ->
               TC.bad . TC.TypeError $
                 "Array "
                   <> prettyText v
                   <> " returned by function, but has nontrivial index function:\n"
-                  <> prettyText ixfun
+                  <> prettyText lmad
 
 matchLoopResultMem ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -635,15 +635,15 @@ matchLoopResultMem params = matchRetTypeToResult rettype
       MemMem space
     toRet (MemAcc acc ispace ts u) =
       MemAcc acc ispace ts u
-    toRet (MemArray pt shape u (ArrayIn mem ixfun))
+    toRet (MemArray pt shape u (ArrayIn mem lmad))
       | Just i <- mem `elemIndex` param_names,
         Param _ _ (MemMem space) : _ <- drop i params =
-          MemArray pt shape' u $ ReturnsNewBlock space i ixfun'
+          MemArray pt shape' u $ ReturnsNewBlock space i lmad'
       | otherwise =
-          MemArray pt shape' u $ ReturnsInBlock mem ixfun'
+          MemArray pt shape' u $ ReturnsInBlock mem lmad'
       where
         shape' = fmap toExtSE shape
-        ixfun' = existentialiseLMAD param_names ixfun
+        lmad' = existentialiseLMAD param_names lmad
 
 matchBranchReturnType ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -724,27 +724,27 @@ matchReturnType rettype res ts = do
         unless (x == y) . throwError . T.unwords $
           ["Expected ext dim", prettyText i, "=>", prettyText x, "but got", prettyText y]
 
-      checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
+      checkMemReturn (ReturnsInBlock x_mem x_lmad) (ArrayIn y_mem y_lmad)
         | x_mem == y_mem =
-            unless (LMAD.closeEnough x_ixfun $ existentialiseLMAD0 y_ixfun) $
+            unless (LMAD.closeEnough x_lmad $ existentialiseLMAD0 y_lmad) $
               throwError . T.unwords $
                 [ "Index function unification failed (ReturnsInBlock)",
-                  "\nixfun of body result: ",
-                  prettyText y_ixfun,
-                  "\nixfun of return type: ",
-                  prettyText x_ixfun
+                  "\nlmad of body result: ",
+                  prettyText y_lmad,
+                  "\nlmad of return type: ",
+                  prettyText x_lmad
                 ]
       checkMemReturn
-        (ReturnsNewBlock x_space x_ext x_ixfun)
-        (ArrayIn y_mem y_ixfun) = do
+        (ReturnsNewBlock x_space x_ext x_lmad)
+        (ArrayIn y_mem y_lmad) = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
-          unless (LMAD.closeEnough x_ixfun $ existentialiseLMAD0 y_ixfun) $
+          unless (LMAD.closeEnough x_lmad $ existentialiseLMAD0 y_lmad) $
             throwError . docText $
               "Index function unification failed (ReturnsNewBlock)"
-                </> "Ixfun of body result:"
-                </> indent 2 (pretty y_ixfun)
-                </> "Ixfun of return type:"
-                </> indent 2 (pretty x_ixfun)
+                </> "Lmad of body result:"
+                </> indent 2 (pretty y_lmad)
+                </> "Lmad of return type:"
+                </> indent 2 (pretty x_lmad)
           case x_mem_type of
             MemMem y_space ->
               unless (x_space == y_space) . throwError . T.unwords $
@@ -819,22 +819,22 @@ matchPatToExp pat e = do
       x_pt == y_pt
         && x_shape == y_shape
         && case (x_ret, y_ret) of
-          (ReturnsInBlock _ x_ixfun, Just (ReturnsInBlock _ y_ixfun)) ->
-            let x_ixfun' = LMAD.substitute ctxids x_ixfun
-                y_ixfun' = LMAD.substitute ctxexts y_ixfun
-             in LMAD.closeEnough x_ixfun' y_ixfun'
-          ( ReturnsInBlock _ x_ixfun,
-            Just (ReturnsNewBlock _ _ y_ixfun)
+          (ReturnsInBlock _ x_lmad, Just (ReturnsInBlock _ y_lmad)) ->
+            let x_lmad' = LMAD.substitute ctxids x_lmad
+                y_lmad' = LMAD.substitute ctxexts y_lmad
+             in LMAD.closeEnough x_lmad' y_lmad'
+          ( ReturnsInBlock _ x_lmad,
+            Just (ReturnsNewBlock _ _ y_lmad)
             ) ->
-              let x_ixfun' = LMAD.substitute ctxids x_ixfun
-                  y_ixfun' = LMAD.substitute ctxexts y_ixfun
-               in LMAD.closeEnough x_ixfun' y_ixfun'
-          ( ReturnsNewBlock _ x_i x_ixfun,
-            Just (ReturnsNewBlock _ y_i y_ixfun)
+              let x_lmad' = LMAD.substitute ctxids x_lmad
+                  y_lmad' = LMAD.substitute ctxexts y_lmad
+               in LMAD.closeEnough x_lmad' y_lmad'
+          ( ReturnsNewBlock _ x_i x_lmad,
+            Just (ReturnsNewBlock _ y_i y_lmad)
             ) ->
-              let x_ixfun' = LMAD.substitute ctxids x_ixfun
-                  y_ixfun' = LMAD.substitute ctxexts y_ixfun
-               in x_i == y_i && LMAD.closeEnough x_ixfun' y_ixfun'
+              let x_lmad' = LMAD.substitute ctxids x_lmad
+                  y_lmad' = LMAD.substitute ctxexts y_lmad
+               in x_i == y_i && LMAD.closeEnough x_lmad' y_lmad'
           (_, Nothing) -> True
           _ -> False
     matches _ _ _ _ = False
@@ -880,8 +880,8 @@ lookupArraySummary ::
 lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
-    MemArray _ _ _ (ArrayIn mem ixfun) ->
-      pure (mem, ixfun)
+    MemArray _ _ _ (ArrayIn mem lmad) ->
+      pure (mem, lmad)
     _ ->
       error . T.unpack $
         "Expected "
@@ -915,7 +915,7 @@ checkMemInfo _ (MemMem (ScalarSpace d _)) = mapM_ (TC.require [Prim int64]) d
 checkMemInfo _ (MemMem _) = pure ()
 checkMemInfo _ (MemAcc acc ispace ts u) =
   TC.checkType $ Acc acc ispace ts u
-checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
+checkMemInfo name (MemArray _ shape _ (ArrayIn v lmad)) = do
   t <- lookupType v
   case t of
     Mem {} ->
@@ -929,13 +929,13 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
             <> prettyText t
             <> "."
 
-  TC.context ("in index function " <> prettyText ixfun) $ do
-    traverse_ (TC.requirePrimExp int64 . untyped) ixfun
-    unless (LMAD.shape ixfun == map pe64 (shapeDims shape)) $
+  TC.context ("in index function " <> prettyText lmad) $ do
+    traverse_ (TC.requirePrimExp int64 . untyped) lmad
+    unless (LMAD.shape lmad == map pe64 (shapeDims shape)) $
       TC.bad $
         TC.TypeError $
           "Shape of index function ("
-            <> prettyText (LMAD.shape ixfun)
+            <> prettyText (LMAD.shape lmad)
             <> ") does not match shape of array "
             <> prettyText name
             <> " ("
@@ -959,13 +959,13 @@ bodyReturnsFromPat pat =
         case patElemDec pe of
           MemPrim pt -> MemPrim pt
           MemMem space -> MemMem space
-          MemArray pt shape u (ArrayIn mem ixfun) ->
+          MemArray pt shape u (ArrayIn mem lmad) ->
             MemArray pt (Shape $ map ext $ shapeDims shape) u $
               case find ((== mem) . patElemName . snd) $ zip [0 ..] ctx of
                 Just (i, PatElem _ (MemMem space)) ->
                   ReturnsNewBlock space i $
-                    existentialiseLMAD (map patElemName ctx) ixfun
-                _ -> ReturnsInBlock mem $ existentialiseLMAD [] ixfun
+                    existentialiseLMAD (map patElemName ctx) lmad
+                _ -> ReturnsInBlock mem $ existentialiseLMAD [] lmad
           MemAcc acc ispace ts u -> MemAcc acc ispace ts u
       )
 
@@ -997,8 +997,8 @@ arrayVarReturns ::
 arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
-    MemArray et shape _ (ArrayIn mem ixfun) ->
-      pure (et, Shape $ shapeDims shape, mem, ixfun)
+    MemArray et shape _ (ArrayIn mem lmad) ->
+      pure (et, Shape $ shapeDims shape, mem, lmad)
     _ ->
       error . T.unpack $ "arrayVarReturns: " <> prettyText v <> " is not an array."
 
@@ -1011,12 +1011,12 @@ varReturns v = do
   case summary of
     MemPrim bt ->
       pure $ MemPrim bt
-    MemArray et shape _ (ArrayIn mem ixfun) ->
+    MemArray et shape _ (ArrayIn mem lmad) ->
       pure $
         MemArray et (fmap Free shape) NoUniqueness $
           Just $
             ReturnsInBlock mem $
-              existentialiseLMAD [] ixfun
+              existentialiseLMAD [] lmad
     MemMem space ->
       pure $ MemMem space
     MemAcc acc ispace ts u ->
@@ -1042,29 +1042,29 @@ expReturns (BasicOp (SubExp se)) =
 expReturns (BasicOp (Opaque _ (Var v))) =
   Just . pure <$> varReturns v
 expReturns (BasicOp (Reshape k newshape v)) = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
-  case reshaper k ixfun $ map pe64 $ shapeDims newshape of
-    Just ixfun' ->
+  (et, _, mem, lmad) <- arrayVarReturns v
+  case reshaper k lmad $ map pe64 $ shapeDims newshape of
+    Just lmad' ->
       pure . Just $
         [ MemArray et (fmap Free newshape) NoUniqueness . Just $
-            ReturnsInBlock mem (existentialiseLMAD [] ixfun')
+            ReturnsInBlock mem (existentialiseLMAD [] lmad')
         ]
     Nothing -> pure Nothing
   where
-    reshaper ReshapeArbitrary ixfun =
-      LMAD.reshape ixfun
-    reshaper ReshapeCoerce ixfun =
-      Just . LMAD.coerce ixfun
+    reshaper ReshapeArbitrary lmad =
+      LMAD.reshape lmad
+    reshaper ReshapeCoerce lmad =
+      Just . LMAD.coerce lmad
 expReturns (BasicOp (Rearrange perm v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let ixfun' = LMAD.permute ixfun perm
+  (et, Shape dims, mem, lmad) <- arrayVarReturns v
+  let lmad' = LMAD.permute lmad perm
       dims' = rearrangeShape perm dims
   pure $
     Just
       [ MemArray et (Shape $ map Free dims') NoUniqueness $
           Just $
             ReturnsInBlock mem $
-              existentialiseLMAD [] ixfun'
+              existentialiseLMAD [] lmad'
       ]
 expReturns (BasicOp (Index v slice)) = do
   Just . pure . varInfoToExpReturns <$> sliceInfo v slice
@@ -1083,15 +1083,15 @@ expReturns e@(Loop merge _ _) = do
     typeWithDec t p =
       case (t, paramDec p) of
         ( Array pt shape u,
-          MemArray _ _ _ (ArrayIn mem ixfun)
+          MemArray _ _ _ (ArrayIn mem lmad)
           )
             | Just (i, mem_p) <- isLoopVar mem,
               Mem space <- paramType mem_p ->
-                pure $ MemArray pt shape u $ Just $ ReturnsNewBlock space i ixfun'
+                pure $ MemArray pt shape u $ Just $ ReturnsNewBlock space i lmad'
             | otherwise ->
-                pure $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
+                pure $ MemArray pt shape u $ Just $ ReturnsInBlock mem lmad'
             where
-              ixfun' = existentialiseLMAD (map paramName mergevars) ixfun
+              lmad' = existentialiseLMAD (map paramName mergevars) lmad
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
         (Acc acc ispace ts u, _) ->
@@ -1127,13 +1127,13 @@ sliceInfo ::
   Slice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 sliceInfo v slice = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
+  (et, _, mem, lmad) <- arrayVarReturns v
   case sliceDims slice of
     [] -> pure $ MemPrim et
     dims ->
       pure $
         MemArray et (Shape dims) NoUniqueness . ArrayIn mem $
-          LMAD.slice ixfun (fmap pe64 slice)
+          LMAD.slice lmad (fmap pe64 slice)
 
 flatSliceInfo ::
   (Monad m, HasScope rep m, Mem rep inner) =>
@@ -1141,10 +1141,10 @@ flatSliceInfo ::
   FlatSlice SubExp ->
   m (MemInfo SubExp NoUniqueness MemBind)
 flatSliceInfo v slice@(FlatSlice offset idxs) = do
-  (et, _, mem, ixfun) <- arrayVarReturns v
+  (et, _, mem, lmad) <- arrayVarReturns v
   map (fmap pe64) idxs
     & FlatSlice (pe64 offset)
-    & LMAD.flatSlice ixfun
+    & LMAD.flatSlice lmad
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness . ArrayIn mem
     & pure
 
@@ -1195,11 +1195,11 @@ applyFunReturns rets params args
     correctDim (Ext i) = Ext i
     correctDim (Free se) = Free $ substSubExp se
 
-    correctSummary (ReturnsNewBlock space i ixfun) =
-      ReturnsNewBlock space i ixfun
-    correctSummary (ReturnsInBlock mem ixfun) =
-      -- FIXME: we should also do a replacement in ixfun here.
-      ReturnsInBlock mem' ixfun
+    correctSummary (ReturnsNewBlock space i lmad) =
+      ReturnsNewBlock space i lmad
+    correctSummary (ReturnsInBlock mem lmad) =
+      -- FIXME: we should also do a replacement in lmad here.
+      ReturnsInBlock mem' lmad
       where
         mem' = case M.lookup mem parammap of
           Just (Var v, _) -> v

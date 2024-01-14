@@ -102,8 +102,8 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
-      ixfun = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
-  pure [Hint ixfun $ Space "device"]
+      lmad = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
+  pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
@@ -142,9 +142,9 @@ innermost space_dims t_dims =
           ++ [0 .. length space_dims - 1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
-      ixfun_base = LMAD.iota 0 $ map pe64 dims_perm
-      ixfun_rearranged = LMAD.permute ixfun_base perm_inv
-   in ixfun_rearranged
+      lmad_base = LMAD.iota 0 $ map pe64 dims_perm
+      lmad_rearranged = LMAD.permute lmad_base perm_inv
+   in lmad_rearranged
 
 semiStatic :: S.Set VName -> SubExp -> Bool
 semiStatic _ Constant {} = True
@@ -182,8 +182,8 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-          let ixfun = LMAD.iota 0 $ map pe64 $ shapeDims shape
-          pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
+          let lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
+          pure $ Hint lmad $ ScalarSpace (shapeDims shape) pt
       | otherwise =
           pure NoHint
 

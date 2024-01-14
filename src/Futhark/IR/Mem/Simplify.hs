@@ -145,10 +145,10 @@ unExistentialiseMemory vtable pat _ (cond, cases, defbody, ifdec)
             zipWithM updateResult (patElems pat) res
           updateResult pat_elem (SubExpRes cs (Var v))
             | Just mem <- lookup (patElemName pat_elem) arr_to_mem,
-              (_, MemArray pt shape u (ArrayIn _ ixfun)) <- patElemDec pat_elem = do
+              (_, MemArray pt shape u (ArrayIn _ lmad)) <- patElemDec pat_elem = do
                 v_copy <- newVName $ baseString v <> "_nonext_copy"
                 let v_pat =
-                      Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun]
+                      Pat [PatElem v_copy $ MemArray pt shape u $ ArrayIn mem lmad]
                 addStm $ mkWiseStm v_pat (defAux ()) $ BasicOp $ Replicate mempty $ Var v
                 pure $ SubExpRes cs $ Var v_copy
             | Just mem <- lookup (patElemName pat_elem) oldmem_to_mem =
