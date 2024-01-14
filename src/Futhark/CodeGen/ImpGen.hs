@@ -140,7 +140,6 @@ import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
@@ -508,7 +507,7 @@ compileInParam fparam = case paramDec fparam of
   MemMem space ->
     pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem lmad) ->
-    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) lmad
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -1103,7 +1102,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
-  let location = MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+  let location = MemLoc mem (shapeDims shape) lmad
    in ArrayVar
         e
         ArrayEntry

@@ -20,7 +20,7 @@ import Futhark.Analysis.Alias qualified as AnlAls
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem
 import Futhark.IR.MCMem
-import Futhark.IR.Mem.IxFun (substituteInIxFun)
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem
 import Futhark.Optimise.ArrayShortCircuiting.ArrayCoalescing
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
@@ -193,7 +193,7 @@ generalizeIxfun
     coaltab <- asks envCoalesceTab
     if any (M.member vname . vartab) coaltab
       then
-        existentialiseIxFun (map patElemName pat_elems) ixf
+        existentialiseLMAD (map patElemName pat_elems) ixf
           & ReturnsInBlock mem
           & MemArray pt shp u
           & pure
@@ -221,7 +221,7 @@ lookupAndReplace vname f u = do
   case M.lookup vname $ foldMap vartab coaltab of
     Just (Coalesced _ (MemBlock pt shp mem ixf) subs) ->
       ixf
-        & fixPoint (substituteInIxFun subs)
+        & fixPoint (LMAD.substitute subs)
         & ArrayIn mem
         & MemArray pt shp u
         & f vname
