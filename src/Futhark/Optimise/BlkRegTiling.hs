@@ -24,7 +24,6 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
@@ -140,14 +139,13 @@ kkLoopBody
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
-          Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmad) <- ixf_fn =
+          Just lmad <- M.lookup x ixfn_env =
             innerHasStride1 lmad
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
-            stride = IxFun.ldStride $ last lmad_dims
+            stride = LMAD.ldStride $ last lmad_dims
          in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do

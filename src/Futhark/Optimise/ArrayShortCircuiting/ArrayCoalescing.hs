@@ -26,7 +26,7 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem
 import Futhark.MonadFreshNames
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
@@ -405,8 +405,8 @@ shortCircuitSegOpHelper num_reds lvlOK lvl lutab pat@(Pat ps0) pat_certs space0 
                   maybe
                     Undeterminable
                     ( ixfunToAccessSummary
-                        . IxFun.slice ixf
-                        . fullSlice (IxFun.shape ixf)
+                        . LMAD.slice ixf
+                        . fullSlice (LMAD.shape ixf)
                     )
                     $ threadSlice space res
                 Nothing -> mempty
@@ -580,7 +580,7 @@ makeSegMapCoals lvlOK lvl td_env kernel_body pat_certs (active, inhb) (PatElem p
       unSegSpace space
         & map (DimFix . TPrimExp . flip LeafExp (IntType Int64) . fst)
         & Slice
-    resultSlice ixf = IxFun.slice ixf $ fullSlice (IxFun.shape ixf) thread_slice
+    resultSlice ixf = LMAD.slice ixf $ fullSlice (LMAD.shape ixf) thread_slice
 makeSegMapCoals _ _ td_env _ _ x (_, _, WriteReturns _ return_name _) =
   case getScopeMemInfo return_name $ scope td_env of
     Just (MemBlock _ _ return_mem _) -> markFailedCoal x return_mem
@@ -1256,8 +1256,8 @@ mkCoalsTabStm lutab stm@(Let pat _ e) td_env bu_env = do
                                       ((M.insert mb info' a_acc, inhb), s_acc)
                         _ -> (failed, s_acc) -- fail!
 
-ixfunToAccessSummary :: IxFun.IxFun (TPrimExp Int64 VName) -> AccessSummary
-ixfunToAccessSummary (IxFun.IxFun lmad) = Set $ S.singleton lmad
+ixfunToAccessSummary :: LMAD.LMAD (TPrimExp Int64 VName) -> AccessSummary
+ixfunToAccessSummary = Set . S.singleton
 
 -- | Check safety conditions 2 and 5 and update new substitutions:
 -- called on the pat-elements of loop and if-then-else expressions.
@@ -1406,13 +1406,13 @@ mkCoalsHelper3PatternMatch stm lutab td_env bu_env = do
 -- | Information about a particular short-circuit point
 type SSPointInfo =
   ( CoalescedKind,
-    IxFun -> IxFun,
+    LMAD -> LMAD,
     VName,
     VName,
-    IxFun,
+    LMAD,
     VName,
     VName,
-    IxFun,
+    LMAD,
     PrimType,
     Shape,
     Certs
@@ -1444,7 +1444,7 @@ genSSPointInfoSeqMem _ _ _ _ _ _ =
 --  3. The array being indexed is last-used in that statement, is free in the
 --  'SegMap', is unique or has been recently allocated (specifically, it should
 --  not be a non-unique argument to the enclosing function), has elements with
---  the same bit-size as the pattern elements, and has the exact same 'IxFun' as
+--  the same bit-size as the pattern elements, and has the exact same 'LMAD' as
 --  the pattern of the 'SegMap' statement.
 --
 -- There can be multiple candidate arrays, but the current implementation will
@@ -1541,10 +1541,10 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Update _ x slice_x 
     b `nameIn` last_uses =
       pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
-    updateIndFunSlice :: IxFun -> Slice SubExp -> IxFun
+    updateIndFunSlice :: LMAD -> Slice SubExp -> LMAD
     updateIndFunSlice ind_fun slc_x =
       let slc_x' = map (fmap pe64) $ unSlice slc_x
-       in IxFun.slice ind_fun $ Slice slc_x'
+       in LMAD.slice ind_fun $ Slice slc_x'
 genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (FlatUpdate x slice_x b)))
   | Pat [PatElem x' (_, MemArray _ _ _ (ArrayIn m_x ind_x))] <- pat,
     Just last_uses <- M.lookup x' lutab,
@@ -1553,9 +1553,9 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (FlatUpdate x slice_
     b `nameIn` last_uses =
       pure $ Just [(InPlaceCoal, (`updateIndFunSlice` slice_x), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)]
   where
-    updateIndFunSlice :: IxFun -> FlatSlice SubExp -> IxFun
+    updateIndFunSlice :: LMAD -> FlatSlice SubExp -> LMAD
     updateIndFunSlice ind_fun (FlatSlice offset dims) =
-      IxFun.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
+      LMAD.flatSlice ind_fun $ FlatSlice (pe64 offset) $ map (fmap pe64) dims
 
 -- CASE b) @let x = concat(a, b^{lu})@
 genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Concat concat_dim (b0 :| bs) _)))
@@ -1578,7 +1578,7 @@ genCoalStmtInfo lutab td_env scopetab (Let pat aux (BasicOp (Concat concat_dim (
                       map (unitSlice zero . pe64) (take concat_dim dims)
                         <> [unitSlice offs (pe64 d)]
                         <> map (unitSlice zero . pe64) (drop (concat_dim + 1) dims)
-               in ( acc ++ [(ConcatCoal, (`IxFun.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)],
+               in ( acc ++ [(ConcatCoal, (`LMAD.slice` slc), x, m_x, ind_x, b, m_b, ind_b, tpb, shpb, stmAuxCerts aux)],
                     offs',
                     True
                   )
@@ -1655,7 +1655,7 @@ transferCoalsToBody exist_subs activeCoals_tab (MemBodyResult m_b b r m_r)
       -- by definition of if-stmt, r and b have the same basic type, shape and
       -- index function, hence, for example, do not need to rebase
       -- We will check whether it is translatable at the definition point of r.
-      let ind_r = IxFun.substituteInIxFun exist_subs ind_b
+      let ind_r = LMAD.substitute exist_subs ind_b
           subst_r = M.union exist_subs subst_b
           mem_info = Coalesced knd (MemBlock btp shp (dstmem etry) ind_r) subst_r
        in if m_r == m_b -- already unified, just add binding for @r@

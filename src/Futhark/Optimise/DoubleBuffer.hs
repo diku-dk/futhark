@@ -82,7 +82,7 @@ import Data.Maybe
 import Futhark.Construct
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Transform.Substitute
@@ -309,7 +309,7 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
           extractAllocOf bound_in_loop arr_mem_out body_stms' = do
           -- Put the allocations outside the loop.
           num_bytes <-
-            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + IxFun.range arr_ixfun))
+            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + LMAD.range arr_ixfun))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
           addStm arr_mem_out_alloc
@@ -390,7 +390,7 @@ data DoubleBuffer
   = BufferAlloc VName (TPrimExp Int64 VName) Space
   | -- | First name is the memory block to copy to,
     -- second is the name of the array copy.
-    BufferCopy VName IxFun VName
+    BufferCopy VName LMAD VName
   | NoBuffer
   deriving (Show)
 

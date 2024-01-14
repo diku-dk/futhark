@@ -48,7 +48,7 @@ import Data.Set qualified as S
 import Futhark.Analysis.SymbolTable (IndexOp)
 import Futhark.Analysis.UsageTable qualified as UT
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Prop.Aliases (AliasedOp)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplify.Engine (SimpleOps (..))
@@ -271,14 +271,14 @@ allocsForPat def_space some_idents rts hints = do
       MemMem space ->
         pure $ PatElem (identName ident) $ MemMem space
       MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
-        let ixfn = instantiateExtIxFun idents extixfun
+        let ixfn = instantiateExtLMAD idents extixfun
         pure . PatElem (identName ident) . MemArray bt ident_shape u $ ArrayIn mem ixfn
       MemArray _ extshape _ Nothing
         | Just _ <- knownShape extshape -> do
             summary <- summaryForBindage def_space (identType ident) hint
             pure $ PatElem (identName ident) summary
       MemArray bt _ u (Just (ReturnsNewBlock _ i extixfn)) -> do
-        let ixfn = instantiateExtIxFun idents extixfn
+        let ixfn = instantiateExtLMAD idents extixfn
         pure . PatElem (identName ident) . MemArray bt ident_shape u $
           ArrayIn (getIdent idents i) ixfn
       MemAcc acc ispace ts u ->
@@ -295,15 +295,15 @@ allocsForPat def_space some_idents rts hints = do
         Nothing ->
           error $ "getIdent: Ext " <> show i <> " but pattern has " <> show (length idents) <> " elements: " <> prettyString idents
 
-    instantiateExtIxFun idents = fmap $ fmap inst
+    instantiateExtLMAD idents = fmap $ fmap inst
       where
         inst (Free v) = v
         inst (Ext i) = getIdent idents i
 
-instantiateIxFun :: (Monad m) => ExtIxFun -> m IxFun
-instantiateIxFun = traverse $ traverse inst
+instantiateLMAD :: (Monad m) => ExtLMAD -> m LMAD
+instantiateLMAD = traverse $ traverse inst
   where
-    inst Ext {} = error "instantiateIxFun: not yet"
+    inst Ext {} = error "instantiateLMAD: not yet"
     inst (Free x) = pure x
 
 summaryForBindage ::
@@ -320,11 +320,11 @@ summaryForBindage _ (Acc acc ispace ts u) _ =
   pure $ MemAcc acc ispace ts u
 summaryForBindage def_space t@(Array pt shape u) NoHint = do
   m <- allocForArray' t def_space
-  pure $ MemArray pt shape u $ ArrayIn m $ IxFun.iota $ map pe64 $ arrayDims t
+  pure $ MemArray pt shape u $ ArrayIn m $ LMAD.iota 0 $ map pe64 $ arrayDims t
 summaryForBindage _ t@(Array pt _ _) (Hint ixfun space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
-      primByteSize pt * (1 + IxFun.range ixfun)
+      primByteSize pt * (1 + LMAD.range ixfun)
   m <- letExp "mem" $ Op $ Alloc bytes space
   pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
 
@@ -352,7 +352,7 @@ allocInFParam param pspace =
   case paramDeclType param of
     Array pt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
-          ixfun = IxFun.iota $ map pe64 $ shapeDims shape
+          ixfun = LMAD.iota 0 $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
       pure param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
@@ -387,7 +387,7 @@ ensureArrayIn _ (Constant v) =
 ensureArrayIn space (Var v) = do
   (mem', v') <- lift $ ensureRowMajorArray (Just space) v
   (_, ixfun) <- lift $ lookupArraySummary v'
-  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (IxFun.existentialized ixfun)
+  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (LMAD.existentialized ixfun)
   tell ([Var mem'], ctx)
   pure $ Var v'
 
@@ -426,7 +426,7 @@ allocInLoopParams merge m = do
       (res_mem', res') <-
         if (res_mem_space, res_ixfun) == (v_mem_space, v_ixfun)
           then pure (res_mem, res)
-          else lift $ arrayWithIxFun v_mem_space v_ixfun (fromDecl param_t) res
+          else lift $ arrayWithLMAD v_mem_space v_ixfun (fromDecl param_t) res
       tell ([Var res_mem'], [])
       pure $ Var res'
     scalarRes _ _ _ se = pure se
@@ -470,17 +470,17 @@ allocInLoopParams merge m = do
             _ -> do
               (v_mem', v') <- lift $ ensureRowMajorArray Nothing v
               let ixfun_ext =
-                    IxFun.existentialize 0 $ IxFun.iota $ map pe64 $ shapeDims shape
+                    LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
 
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
               ctx_params <-
-                replicateM (length (IxFun.existentialized ixfun_ext)) $
+                replicateM (length (LMAD.existentialized ixfun_ext)) $
                   newParam "ctx_param_ext" (MemPrim int64)
 
               param_ixfun <-
-                instantiateIxFun $
-                  IxFun.substituteInIxFun
+                instantiateLMAD $
+                  LMAD.substitute
                     ( M.fromList . zip (fmap Ext [0 ..]) $
                         map (le64 . Free . paramName) ctx_params
                     )
@@ -499,14 +499,14 @@ allocInLoopParams merge m = do
       mergeparam' <- allocInFParam mergeparam space
       pure (mergeparam', se, linearFuncallArg (paramType mergeparam) space)
 
-arrayWithIxFun ::
+arrayWithLMAD ::
   (MonadBuilder m, Op (Rep m) ~ MemOp inner (Rep m), LetDec (Rep m) ~ LetDecMem) =>
   Space ->
-  IxFun ->
+  LMAD ->
   Type ->
   VName ->
   m (VName, VName)
-arrayWithIxFun space ixfun v_t v = do
+arrayWithLMAD space ixfun v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseString v <> "_scalcopy"
@@ -523,7 +523,7 @@ ensureDirectArray space_ok v = do
   (mem, ixfun) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
-  if IxFun.isDirect ixfun && maybe True (== mem_space) space_ok
+  if LMAD.isDirect ixfun && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else needCopy (fromMaybe default_space space_ok)
   where
@@ -547,7 +547,7 @@ allocPermArray space perm s v = do
       v' <- newVName $ s <> "_desired_form"
       let info =
             MemArray pt shape u . ArrayIn mem $
-              IxFun.permute (IxFun.iota $ map pe64 $ arrayDims t) perm
+              LMAD.permute (LMAD.iota 0 $ map pe64 $ arrayDims t) perm
           pat = Pat [PatElem v' info]
       addStm $ Let pat (defAux ()) $ BasicOp $ Manifest perm v
       pure (mem, v')
@@ -663,9 +663,7 @@ memoryInDeclExtType space k dets = evalState (mapM addMem dets) 0
       i <- get <* modify (+ 1)
       let shape' = fmap shift shape
       pure . MemArray pt shape' u . ReturnsNewBlock space i $
-        IxFun.iota $
-          map convert $
-            shapeDims shape'
+        LMAD.iota 0 (map convert $ shapeDims shape')
     addMem (Acc acc ispace ts u) = pure $ MemAcc acc ispace ts u
 
     convert (Ext i) = le64 $ Ext i
@@ -830,7 +828,7 @@ mkBranchRet reqs =
           space = arrayInfo req
        in MemArray pt shape' u . ReturnsNewBlock space ctx_offset $
             convert
-              <$> IxFun.mkExistential (shapeDims shape') (ctx_offset + 1)
+              <$> LMAD.mkExistential (shapeDims shape') (ctx_offset + 1)
     inspect _ (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
     inspect _ (MemPrim pt) = MemPrim pt
     inspect _ (MemMem space) = MemMem space
@@ -867,7 +865,7 @@ addCtxToMatchBody reqs body = buildBody_ $ do
         MemAcc {} -> pure []
         MemMem {} -> pure [] -- should not happen
         MemArray _ _ _ (ArrayIn mem ixfun) -> do
-          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ IxFun.existentialized ixfun
+          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ LMAD.existentialized ixfun
           pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
 
 -- Do a a simple form of invariance analysis to simplify a Match.  It
@@ -983,7 +981,7 @@ allocInExp (WithAcc inputs bodylam) =
       pure (lam', nes)
 
     mkP attrs p pt shape u mem ixfun is =
-      Param attrs p . MemArray pt shape u . ArrayIn mem . IxFun.slice ixfun $
+      Param attrs p . MemArray pt shape u . ArrayIn mem . LMAD.slice ixfun $
         fmap pe64 $
           Slice $
             is ++ map sliceDim (shapeDims shape)
@@ -1003,7 +1001,7 @@ allocInExp (WithAcc inputs bodylam) =
       space <- askDefaultSpace
       mem <- allocForArray arr_t space
       let base_dims = map pe64 $ arrayDims arr_t
-          ixfun = IxFun.iota base_dims
+          ixfun = LMAD.iota 0 base_dims
       pure $ mkP attrs p pt shape u mem ixfun is
     onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ prettyString p
@@ -1135,7 +1133,7 @@ simplifiable innerUsage simplifyInnerOp =
 
 data ExpHint
   = NoHint
-  | Hint IxFun Space
+  | Hint LMAD Space
 
 defaultExpHints :: (ASTRep rep, HasScope rep m) => Exp rep -> m [ExpHint]
 defaultExpHints e = map (const NoHint) <$> expExtType e

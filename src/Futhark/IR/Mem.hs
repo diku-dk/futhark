@@ -62,10 +62,9 @@ module Futhark.IR.Mem
     MemBound,
     MemBind (..),
     MemReturn (..),
-    IxFun,
-    ExtIxFun,
     LMAD,
-    isStaticIxFun,
+    ExtLMAD,
+    isStaticLMAD,
     ExpReturns,
     BodyReturns,
     FunReturns,
@@ -81,7 +80,7 @@ module Futhark.IR.Mem
     subExpMemInfo,
     lookupArraySummary,
     lookupMemSpace,
-    existentialiseIxFun,
+    existentialiseLMAD,
 
     -- * Type checking parts
     matchBranchReturnType,
@@ -123,7 +122,7 @@ import Futhark.IR.Aliases
     removePatAliases,
     removeScopeAliases,
   )
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Prop.Aliases
@@ -250,14 +249,11 @@ instance (ST.IndexOp (inner rep)) => ST.IndexOp (MemOp inner rep) where
   indexOp vtable k (Inner op) is = ST.indexOp vtable k op is
   indexOp _ _ _ _ = Nothing
 
--- | The index function representation used for memory annotations.
-type IxFun = IxFun.IxFun (TPrimExp Int64 VName)
-
 -- | The LMAD representation used for memory annotations.
-type LMAD = IxFun.LMAD (TPrimExp Int64 VName)
+type LMAD = LMAD.LMAD (TPrimExp Int64 VName)
 
 -- | An index function that may contain existential variables.
-type ExtIxFun = IxFun.IxFun (TPrimExp Int64 (Ext VName))
+type ExtLMAD = LMAD.LMAD (TPrimExp Int64 (Ext VName))
 
 -- | A summary of the memory information for every let-bound
 -- identifier, function parameter, and return value.  Parameterisered
@@ -349,20 +345,20 @@ instance (Substitute d, Substitute ret) => Substitute (MemInfo d u ret) where
 instance (Substitute d, Substitute ret) => Rename (MemInfo d u ret) where
   rename = substituteRename
 
-simplifyIxFun ::
+simplifyLMAD ::
   (Engine.SimplifiableRep rep) =>
-  IxFun ->
-  Engine.SimpleM rep IxFun
-simplifyIxFun = traverse $ fmap isInt64 . simplifyPrimExp . untyped
+  LMAD ->
+  Engine.SimpleM rep LMAD
+simplifyLMAD = traverse $ fmap isInt64 . simplifyPrimExp . untyped
 
-simplifyExtIxFun ::
+simplifyExtLMAD ::
   (Engine.SimplifiableRep rep) =>
-  ExtIxFun ->
-  Engine.SimpleM rep ExtIxFun
-simplifyExtIxFun = traverse $ fmap isInt64 . simplifyExtPrimExp . untyped
+  ExtLMAD ->
+  Engine.SimpleM rep ExtLMAD
+simplifyExtLMAD = traverse $ fmap isInt64 . simplifyExtPrimExp . untyped
 
-isStaticIxFun :: ExtIxFun -> Maybe IxFun
-isStaticIxFun = traverse $ traverse inst
+isStaticLMAD :: ExtLMAD -> Maybe LMAD
+isStaticLMAD = traverse $ traverse inst
   where
     inst Ext {} = Nothing
     inst (Free x) = Just x
@@ -401,7 +397,7 @@ instance
 data MemBind
   = -- | Located in this memory block with this index
     -- function.
-    ArrayIn VName IxFun
+    ArrayIn VName LMAD
   deriving (Show)
 
 instance Eq MemBind where
@@ -429,10 +425,10 @@ instance FreeIn MemBind where
 data MemReturn
   = -- | The array is located in a memory block that is
     -- already in scope.
-    ReturnsInBlock VName ExtIxFun
+    ReturnsInBlock VName ExtLMAD
   | -- | The operation returns a new (existential) memory
     -- block.
-    ReturnsNewBlock Space Int ExtIxFun
+    ReturnsNewBlock Space Int ExtLMAD
   deriving (Show)
 
 instance Eq MemReturn where
@@ -454,7 +450,7 @@ instance FixExt MemReturn where
   fixExt i (Var v) (ReturnsNewBlock _ j ixfun)
     | j == i =
         ReturnsInBlock v $
-          fixExtIxFun
+          fixExtLMAD
             i
             (primExpFromSubExp int64 (Var v))
             ixfun
@@ -462,13 +458,13 @@ instance FixExt MemReturn where
     ReturnsNewBlock
       space
       j'
-      (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
+      (fixExtLMAD i (primExpFromSubExp int64 se) ixfun)
     where
       j'
         | i < j = j - 1
         | otherwise = j
   fixExt i se (ReturnsInBlock mem ixfun) =
-    ReturnsInBlock mem (fixExtIxFun i (primExpFromSubExp int64 se) ixfun)
+    ReturnsInBlock mem (fixExtLMAD i (primExpFromSubExp int64 se) ixfun)
 
   mapExt f (ReturnsNewBlock space i ixfun) =
     ReturnsNewBlock space (f i) ixfun
@@ -478,8 +474,8 @@ instance FixExt MemReturn where
       f' (Ext i) = Ext $ f i
       f' v = v
 
-fixExtIxFun :: Int -> PrimExp VName -> ExtIxFun -> ExtIxFun
-fixExtIxFun i e = fmap $ isInt64 . replaceInPrimExp update . untyped
+fixExtLMAD :: Int -> PrimExp VName -> ExtLMAD -> ExtLMAD
+fixExtLMAD i e = fmap $ isInt64 . replaceInPrimExp update . untyped
   where
     update (Ext j) t
       | j > i = LeafExp (Ext $ j - 1) t
@@ -490,8 +486,8 @@ fixExtIxFun i e = fmap $ isInt64 . replaceInPrimExp update . untyped
 leafExp :: Int -> TPrimExp Int64 (Ext a)
 leafExp i = isInt64 $ LeafExp (Ext i) int64
 
-existentialiseIxFun :: [VName] -> IxFun -> ExtIxFun
-existentialiseIxFun ctx = IxFun.substituteInIxFun ctx' . fmap (fmap Free)
+existentialiseLMAD :: [VName] -> LMAD -> ExtLMAD
+existentialiseLMAD ctx = LMAD.substitute ctx' . fmap (fmap Free)
   where
     ctx' = M.map leafExp $ M.fromList $ zip (map Free ctx) [0 ..]
 
@@ -507,13 +503,13 @@ instance FreeIn MemReturn where
 
 instance Engine.Simplifiable MemReturn where
   simplify (ReturnsNewBlock space i ixfun) =
-    ReturnsNewBlock space i <$> simplifyExtIxFun ixfun
+    ReturnsNewBlock space i <$> simplifyExtLMAD ixfun
   simplify (ReturnsInBlock v ixfun) =
-    ReturnsInBlock <$> Engine.simplify v <*> simplifyExtIxFun ixfun
+    ReturnsInBlock <$> Engine.simplify v <*> simplifyExtLMAD ixfun
 
 instance Engine.Simplifiable MemBind where
   simplify (ArrayIn mem ixfun) =
-    ArrayIn <$> Engine.simplify mem <*> simplifyIxFun ixfun
+    ArrayIn <$> Engine.simplify mem <*> simplifyLMAD ixfun
 
 instance Engine.Simplifiable [FunReturns] where
   simplify = mapM Engine.simplify
@@ -571,7 +567,7 @@ varInfoToExpReturns (MemArray et shape u (ArrayIn mem ixfun)) =
   MemArray et (fmap Free shape) u $
     Just $
       ReturnsInBlock mem $
-        existentialiseIxFun [] ixfun
+        existentialiseLMAD [] ixfun
 varInfoToExpReturns (MemPrim pt) = MemPrim pt
 varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
 varInfoToExpReturns (MemMem space) = MemMem space
@@ -604,7 +600,7 @@ matchFunctionReturnType rettype result = do
         MemMem {} -> pure ()
         MemAcc {} -> pure ()
         MemArray _ _ _ (ArrayIn _ ixfun)
-          | IxFun.isDirect ixfun ->
+          | LMAD.isDirect ixfun ->
               pure ()
           | otherwise ->
               TC.bad . TC.TypeError $
@@ -647,7 +643,7 @@ matchLoopResultMem params = matchRetTypeToResult rettype
           MemArray pt shape' u $ ReturnsInBlock mem ixfun'
       where
         shape' = fmap toExtSE shape
-        ixfun' = existentialiseIxFun param_names ixfun
+        ixfun' = existentialiseLMAD param_names ixfun
 
 matchBranchReturnType ::
   (Mem rep inner, TC.Checkable rep) =>
@@ -694,8 +690,8 @@ matchReturnType ::
   [MemInfo SubExp NoUniqueness MemBind] ->
   TC.TypeM rep ()
 matchReturnType rettype res ts = do
-  let existentialiseIxFun0 :: IxFun -> ExtIxFun
-      existentialiseIxFun0 = fmap $ fmap Free
+  let existentialiseLMAD0 :: LMAD -> ExtLMAD
+      existentialiseLMAD0 = fmap $ fmap Free
 
       fetchCtx i = case maybeNth i $ zip res ts of
         Nothing ->
@@ -730,7 +726,7 @@ matchReturnType rettype res ts = do
 
       checkMemReturn (ReturnsInBlock x_mem x_ixfun) (ArrayIn y_mem y_ixfun)
         | x_mem == y_mem =
-            unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+            unless (LMAD.closeEnough x_ixfun $ existentialiseLMAD0 y_ixfun) $
               throwError . T.unwords $
                 [ "Index function unification failed (ReturnsInBlock)",
                   "\nixfun of body result: ",
@@ -742,7 +738,7 @@ matchReturnType rettype res ts = do
         (ReturnsNewBlock x_space x_ext x_ixfun)
         (ArrayIn y_mem y_ixfun) = do
           (x_mem, x_mem_type) <- fetchCtx x_ext
-          unless (IxFun.closeEnough x_ixfun $ existentialiseIxFun0 y_ixfun) $
+          unless (LMAD.closeEnough x_ixfun $ existentialiseLMAD0 y_ixfun) $
             throwError . docText $
               "Index function unification failed (ReturnsNewBlock)"
                 </> "Ixfun of body result:"
@@ -824,21 +820,21 @@ matchPatToExp pat e = do
         && x_shape == y_shape
         && case (x_ret, y_ret) of
           (ReturnsInBlock _ x_ixfun, Just (ReturnsInBlock _ y_ixfun)) ->
-            let x_ixfun' = IxFun.substituteInIxFun ctxids x_ixfun
-                y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-             in IxFun.closeEnough x_ixfun' y_ixfun'
+            let x_ixfun' = LMAD.substitute ctxids x_ixfun
+                y_ixfun' = LMAD.substitute ctxexts y_ixfun
+             in LMAD.closeEnough x_ixfun' y_ixfun'
           ( ReturnsInBlock _ x_ixfun,
             Just (ReturnsNewBlock _ _ y_ixfun)
             ) ->
-              let x_ixfun' = IxFun.substituteInIxFun ctxids x_ixfun
-                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-               in IxFun.closeEnough x_ixfun' y_ixfun'
+              let x_ixfun' = LMAD.substitute ctxids x_ixfun
+                  y_ixfun' = LMAD.substitute ctxexts y_ixfun
+               in LMAD.closeEnough x_ixfun' y_ixfun'
           ( ReturnsNewBlock _ x_i x_ixfun,
             Just (ReturnsNewBlock _ y_i y_ixfun)
             ) ->
-              let x_ixfun' = IxFun.substituteInIxFun ctxids x_ixfun
-                  y_ixfun' = IxFun.substituteInIxFun ctxexts y_ixfun
-               in x_i == y_i && IxFun.closeEnough x_ixfun' y_ixfun'
+              let x_ixfun' = LMAD.substitute ctxids x_ixfun
+                  y_ixfun' = LMAD.substitute ctxexts y_ixfun
+               in x_i == y_i && LMAD.closeEnough x_ixfun' y_ixfun'
           (_, Nothing) -> True
           _ -> False
     matches _ _ _ _ = False
@@ -880,7 +876,7 @@ subExpMemInfo (Constant v) = pure $ MemPrim $ primValueType v
 lookupArraySummary ::
   (Mem rep inner, HasScope rep m, Monad m) =>
   VName ->
-  m (VName, IxFun.IxFun (TPrimExp Int64 VName))
+  m (VName, LMAD.LMAD (TPrimExp Int64 VName))
 lookupArraySummary name = do
   summary <- lookupMemInfo name
   case summary of
@@ -935,11 +931,11 @@ checkMemInfo name (MemArray _ shape _ (ArrayIn v ixfun)) = do
 
   TC.context ("in index function " <> prettyText ixfun) $ do
     traverse_ (TC.requirePrimExp int64 . untyped) ixfun
-    unless (IxFun.shape ixfun == map pe64 (shapeDims shape)) $
+    unless (LMAD.shape ixfun == map pe64 (shapeDims shape)) $
       TC.bad $
         TC.TypeError $
           "Shape of index function ("
-            <> prettyText (IxFun.shape ixfun)
+            <> prettyText (LMAD.shape ixfun)
             <> ") does not match shape of array "
             <> prettyText name
             <> " ("
@@ -968,8 +964,8 @@ bodyReturnsFromPat pat =
               case find ((== mem) . patElemName . snd) $ zip [0 ..] ctx of
                 Just (i, PatElem _ (MemMem space)) ->
                   ReturnsNewBlock space i $
-                    existentialiseIxFun (map patElemName ctx) ixfun
-                _ -> ReturnsInBlock mem $ existentialiseIxFun [] ixfun
+                    existentialiseLMAD (map patElemName ctx) ixfun
+                _ -> ReturnsInBlock mem $ existentialiseLMAD [] ixfun
           MemAcc acc ispace ts u -> MemAcc acc ispace ts u
       )
 
@@ -984,13 +980,9 @@ extReturns ets =
     addDec t@(Array bt shape u)
       | existential t = do
           i <- get <* modify (+ 1)
-          pure $
-            MemArray bt shape u $
-              Just $
-                ReturnsNewBlock DefaultSpace i $
-                  IxFun.iota $
-                    map convert $
-                      shapeDims shape
+          pure . MemArray bt shape u . Just $
+            ReturnsNewBlock DefaultSpace i $
+              LMAD.iota 0 (map convert $ shapeDims shape)
       | otherwise =
           pure $ MemArray bt shape u Nothing
     addDec (Acc acc ispace ts u) =
@@ -1001,7 +993,7 @@ extReturns ets =
 arrayVarReturns ::
   (HasScope rep m, Monad m, Mem rep inner) =>
   VName ->
-  m (PrimType, Shape, VName, IxFun)
+  m (PrimType, Shape, VName, LMAD)
 arrayVarReturns v = do
   summary <- lookupMemInfo v
   case summary of
@@ -1024,7 +1016,7 @@ varReturns v = do
         MemArray et (fmap Free shape) NoUniqueness $
           Just $
             ReturnsInBlock mem $
-              existentialiseIxFun [] ixfun
+              existentialiseLMAD [] ixfun
     MemMem space ->
       pure $ MemMem space
     MemAcc acc ispace ts u ->
@@ -1055,24 +1047,24 @@ expReturns (BasicOp (Reshape k newshape v)) = do
     Just ixfun' ->
       pure . Just $
         [ MemArray et (fmap Free newshape) NoUniqueness . Just $
-            ReturnsInBlock mem (existentialiseIxFun [] ixfun')
+            ReturnsInBlock mem (existentialiseLMAD [] ixfun')
         ]
     Nothing -> pure Nothing
   where
     reshaper ReshapeArbitrary ixfun =
-      IxFun.reshape ixfun
+      LMAD.reshape ixfun
     reshaper ReshapeCoerce ixfun =
-      Just . IxFun.coerce ixfun
+      Just . LMAD.coerce ixfun
 expReturns (BasicOp (Rearrange perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let ixfun' = IxFun.permute ixfun perm
+  let ixfun' = LMAD.permute ixfun perm
       dims' = rearrangeShape perm dims
   pure $
     Just
       [ MemArray et (Shape $ map Free dims') NoUniqueness $
           Just $
             ReturnsInBlock mem $
-              existentialiseIxFun [] ixfun'
+              existentialiseLMAD [] ixfun'
       ]
 expReturns (BasicOp (Index v slice)) = do
   Just . pure . varInfoToExpReturns <$> sliceInfo v slice
@@ -1099,7 +1091,7 @@ expReturns e@(Loop merge _ _) = do
             | otherwise ->
                 pure $ MemArray pt shape u $ Just $ ReturnsInBlock mem ixfun'
             where
-              ixfun' = existentialiseIxFun (map paramName mergevars) ixfun
+              ixfun' = existentialiseLMAD (map paramName mergevars) ixfun
         (Array {}, _) ->
           error "expReturns: Array return type but not array merge variable."
         (Acc acc ispace ts u, _) ->
@@ -1141,7 +1133,7 @@ sliceInfo v slice = do
     dims ->
       pure $
         MemArray et (Shape dims) NoUniqueness . ArrayIn mem $
-          IxFun.slice ixfun (fmap pe64 slice)
+          LMAD.slice ixfun (fmap pe64 slice)
 
 flatSliceInfo ::
   (Monad m, HasScope rep m, Mem rep inner) =>
@@ -1152,7 +1144,7 @@ flatSliceInfo v slice@(FlatSlice offset idxs) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   map (fmap pe64) idxs
     & FlatSlice (pe64 offset)
-    & IxFun.flatSlice ixfun
+    & LMAD.flatSlice ixfun
     & MemArray et (Shape (flatSliceDims slice)) NoUniqueness . ArrayIn mem
     & pure
 

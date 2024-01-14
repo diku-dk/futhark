@@ -32,7 +32,7 @@ import Futhark.IR.MC (MC)
 import Futhark.IR.MC.Op qualified as MC
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SOACS.SOAC qualified as SOAC
 import Futhark.IR.SegOp qualified as SegOp
@@ -961,16 +961,14 @@ pMCOp pr pOther =
   where
     pMCSegOp = pSegOp pr (void $ lexeme "()")
 
-pIxFunBase :: Parser a -> Parser (IxFun.IxFun a)
-pIxFunBase pNum =
-  IxFun.IxFun <$> pLMAD
+pLMADBase :: Parser a -> Parser (LMAD.LMAD a)
+pLMADBase pNum = braces $ do
+  offset <- pLab "offset" pNum <* pSemi
+  strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
+  shape <- pLab "shape" $ brackets (pNum `sepBy` pComma)
+  pure $ LMAD.LMAD offset $ zipWith LMAD.LMADDim strides shape
   where
     pLab s m = keyword s *> pColon *> m
-    pLMAD = braces $ do
-      offset <- pLab "offset" pNum <* pSemi
-      strides <- pLab "strides" $ brackets (pNum `sepBy` pComma) <* pSemi
-      shape <- pLab "shape" $ brackets (pNum `sepBy` pComma)
-      pure $ IxFun.LMAD offset $ zipWith IxFun.LMADDim strides shape
 
 pPrimExpLeaf :: Parser VName
 pPrimExpLeaf = pVName
@@ -978,11 +976,11 @@ pPrimExpLeaf = pVName
 pExtPrimExpLeaf :: Parser (Ext VName)
 pExtPrimExpLeaf = pExt pVName
 
-pIxFun :: Parser IxFun
-pIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pPrimExpLeaf
+pLMAD :: Parser LMAD
+pLMAD = pLMADBase $ isInt64 <$> pPrimExp int64 pPrimExpLeaf
 
-pExtIxFun :: Parser ExtIxFun
-pExtIxFun = pIxFunBase $ isInt64 <$> pPrimExp int64 pExtPrimExpLeaf
+pExtLMAD :: Parser ExtLMAD
+pExtLMAD = pLMADBase $ isInt64 <$> pPrimExp int64 pExtPrimExpLeaf
 
 pMemInfo :: Parser d -> Parser u -> Parser ret -> Parser (MemInfo d u ret)
 pMemInfo pd pu pret =
@@ -1020,16 +1018,16 @@ pSpace =
       ]
 
 pMemBind :: Parser MemBind
-pMemBind = ArrayIn <$> pVName <* lexeme "->" <*> pIxFun
+pMemBind = ArrayIn <$> pVName <* lexeme "->" <*> pLMAD
 
 pMemReturn :: Parser MemReturn
 pMemReturn =
   choice
-    [ ReturnsInBlock <$> pVName <* lexeme "->" <*> pExtIxFun,
+    [ ReturnsInBlock <$> pVName <* lexeme "->" <*> pExtLMAD,
       do
         i <- "?" *> pInt
         space <- choice [pSpace, pure DefaultSpace] <* lexeme "->"
-        ReturnsNewBlock space i <$> pExtIxFun
+        ReturnsNewBlock space i <$> pExtLMAD
     ]
 
 pRetTypeMem :: Parser RetTypeMem

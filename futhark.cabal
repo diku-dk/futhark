@@ -254,7 +254,6 @@ library
       Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.Interval
-      Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.LMAD
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse

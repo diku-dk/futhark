@@ -9,7 +9,7 @@ where
 
 import Control.Monad
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations
 
 instance SizeSubst (SegOp lvl rep)
@@ -54,12 +54,12 @@ allocInBinOpParams num_threads my_id other_id xs ys = unzip <$> zipWithM alloc x
           -- XXX: this iota ixfun is a bit inefficient; leading to
           -- uncoalesced access.
           let base_dims = map pe64 $ arrayDims t
-              ixfun_base = IxFun.iota base_dims
+              ixfun_base = LMAD.iota 0 base_dims
               ixfun_x =
-                IxFun.slice ixfun_base $
+                LMAD.slice ixfun_base $
                   fullSliceNum base_dims [DimFix my_id]
               ixfun_y =
-                IxFun.slice ixfun_base $
+                LMAD.slice ixfun_base $
                   fullSliceNum base_dims [DimFix other_id]
           pure
             ( x {paramDec = MemArray pt shape u $ ArrayIn mem ixfun_x},
