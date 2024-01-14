@@ -706,64 +706,46 @@ offsetBranch (Pat pes) ts = do
           )
     onType acc t = pure (acc, t)
 
-offsetMemoryInPat :: RebaseMap -> Pat LetDecMem -> [ExpReturns] -> OffsetM (Pat LetDecMem)
+offsetMemoryInPat :: RebaseMap -> Pat LetDecMem -> [ExpReturns] -> Pat LetDecMem
 offsetMemoryInPat offsets (Pat pes) rets = do
-  Pat <$> zipWithM onPE pes rets
+  Pat $ zipWith onPE pes rets
   where
     onPE
       (PatElem name (MemArray pt shape u (ArrayIn mem _)))
       (MemArray _ _ _ info)
         | Just ixfun <- getLMAD info =
-            pure . PatElem name . MemArray pt shape u . ArrayIn mem $
+            PatElem name . MemArray pt shape u . ArrayIn mem $
               fmap (fmap unExt) ixfun
-    onPE pe _ = do
-      new_dec <- offsetMemoryInMemBound offsets (patElemName pe) $ patElemDec pe
-      pure pe {patElemDec = new_dec}
+    onPE pe _ =
+      offsetMemoryInMemBound offsets <$> pe
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
     getLMAD (Just (ReturnsNewBlock _ _ ixfun)) = Just ixfun
     getLMAD (Just (ReturnsInBlock _ ixfun)) = Just ixfun
     getLMAD _ = Nothing
 
-offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> OffsetM (Param (MemBound u))
-offsetMemoryInParam offsets fparam = do
-  fparam' <- offsetMemoryInMemBound offsets (paramName fparam) $ paramDec fparam
-  pure fparam {paramDec = fparam'}
+offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
+offsetMemoryInParam offsets = fmap $ offsetMemoryInMemBound offsets
 
-offsetMemoryInMemBound :: RebaseMap -> VName -> MemBound u -> OffsetM (MemBound u)
-offsetMemoryInMemBound offsets v (MemArray pt shape u (ArrayIn mem ixfun))
-  | Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun) offsets = do
-      let problem =
-            throwError . unlines $
-              [ "offsetMemoryInMemBound",
-                prettyString v,
-                prettyString (o, p),
-                prettyString ixfun
-              ]
-      ixfun' <- maybe problem pure $ LMAD.expand o p ixfun
-      pure $ MemArray pt shape u $ ArrayIn mem ixfun'
-offsetMemoryInMemBound _ _ summary = pure summary
+offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
+offsetMemoryInMemBound offsets (MemArray pt shape u (ArrayIn mem ixfun))
+  | Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun) offsets =
+      MemArray pt shape u $ ArrayIn mem $ LMAD.expand o p ixfun
+offsetMemoryInMemBound _ info = info
 
-offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> OffsetM BodyReturns
+offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> BodyReturns
 offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun))
   | Just ixfun' <- isStaticLMAD ixfun,
-    Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun') offsets = do
-      let problem =
-            throwError . unlines $
-              [ "offsetMemoryInBodyReturns",
-                prettyString (o, p),
-                prettyString ixfun
-              ]
-      ixfun'' <-
-        maybe problem pure $
+    Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun') offsets =
+      MemArray pt shape u $
+        ReturnsInBlock mem $
           LMAD.expand (Free <$> o) (fmap Free p) ixfun
-      pure $ MemArray pt shape u $ ReturnsInBlock mem ixfun''
-offsetMemoryInBodyReturns _ br = pure br
+offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
 offsetMemoryInLambda offsets lam = do
   body <- inScopeOf lam $ offsetMemoryInBody offsets $ lambdaBody lam
-  params <- mapM (offsetMemoryInParam offsets) $ lambdaParams lam
+  let params = map (offsetMemoryInParam offsets) $ lambdaParams lam
   pure $ lam {lambdaBody = body, lambdaParams = params}
 
 -- A loop may have memory parameters, and those memory blocks may
@@ -796,7 +778,7 @@ offsetMemoryInExp offsets = mapExpM recurse
     recurse =
       (identityMapper @GPUMem)
         { mapOnBody = \bscope -> localScope bscope . offsetMemoryInBody offsets,
-          mapOnBranchType = offsetMemoryInBodyReturns offsets,
+          mapOnBranchType = pure . offsetMemoryInBodyReturns offsets,
           mapOnOp = onOp
         }
     onOp (Inner (SegOp op)) =
@@ -831,8 +813,9 @@ offsetMemoryInStm offsets (Let pat dec e) = do
   e' <- offsetMemoryInExp offsets e
   pat' <-
     offsetMemoryInPat offsets pat
-      =<< maybe (throwError "offsetMemoryInStm: ill-typed") pure
-      =<< expReturns e'
+      <$> ( maybe (throwError "offsetMemoryInStm: ill-typed") pure
+              =<< expReturns e'
+          )
   scope <- askScope
   -- Try to recompute the index function.  Fall back to creating rebase
   -- operations with the RebaseMap.
