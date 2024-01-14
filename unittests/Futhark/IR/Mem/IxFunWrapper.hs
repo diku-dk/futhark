@@ -69,4 +69,4 @@ expand ::
   num ->
   IxFun num ->
   IxFun num
-expand o p (lf, af) = (I.expand o p =<< lf, IA.expand o p af)
+expand o p (lf, af) = (Just . I.expand o p =<< lf, IA.expand o p af)

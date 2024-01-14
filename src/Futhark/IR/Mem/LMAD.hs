@@ -632,8 +632,8 @@ existentialized (LMAD offset dims) =
 -- another by adjusting the offset and strides.  Used for memory
 -- expansion.
 expand ::
-  (IntegralExp num) => num -> num -> LMAD num -> Maybe (LMAD num)
+  (IntegralExp num) => num -> num -> LMAD num -> LMAD num
 expand o p lmad =
-  let onDim ld = ld {ldStride = p * ldStride ld}
-      lmad' = LMAD (o + p * offset lmad) (map onDim (dims lmad))
-   in Just lmad'
+  LMAD (o + p * offset lmad) (map onDim (dims lmad))
+  where
+    onDim ld = ld {ldStride = p * ldStride ld}
