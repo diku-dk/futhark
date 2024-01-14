@@ -606,8 +606,8 @@ argsContext = fmap concat . mapM resCtx
     resCtx se = do
       v_t <- subExpMemInfo se
       case v_t of
-        MemArray _ _ _ (ArrayIn mem ixfun) -> do
-          ctxs <- mapM (letSubExp "ctx" <=< toExp) (LMAD.existentialized ixfun)
+        MemArray _ _ _ (ArrayIn mem lmad) -> do
+          ctxs <- mapM (letSubExp "ctx" <=< toExp) (LMAD.existentialized lmad)
           pure $ Var mem : ctxs
         _ -> pure []
 
@@ -631,17 +631,17 @@ addPatternContext (Pat pes) = localScope (scopeOfPat (Pat pes)) $ do
   where
     onType
       acc
-      (PatElem pe_v (MemArray pt pe_shape pe_u (ArrayIn pe_mem ixfun))) = do
+      (PatElem pe_v (MemArray pt pe_shape pe_u (ArrayIn pe_mem lmad))) = do
         space <- lookupMemSpace pe_mem
         pe_mem' <- newVName $ baseString pe_mem <> "_ext"
-        let num_exts = length (LMAD.existentialized ixfun)
-        ixfun_exts <-
+        let num_exts = length (LMAD.existentialized lmad)
+        lmad_exts <-
           replicateM num_exts $
             PatElem <$> newVName "ext" <*> pure (MemPrim int64)
-        let pe_ixfun' = lmadFrom (LMAD.shape ixfun) $ map (le64 . patElemName) ixfun_exts
+        let pe_lmad' = lmadFrom (LMAD.shape lmad) $ map (le64 . patElemName) lmad_exts
         pure
-          ( acc ++ PatElem pe_mem' (MemMem space) : ixfun_exts,
-            PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_ixfun'
+          ( acc ++ PatElem pe_mem' (MemMem space) : lmad_exts,
+            PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_lmad'
           )
     onType acc t = pure (acc, t)
 
@@ -652,17 +652,17 @@ addParamsContext ps = localScope (scopeOfFParams ps) $ do
   (ps_ctx, ps') <- mapAccumLM onType [] ps
   pure $ ps' <> ps_ctx
   where
-    onType acc (Param attr v (MemArray pt shape u (ArrayIn mem ixfun))) = do
+    onType acc (Param attr v (MemArray pt shape u (ArrayIn mem lmad))) = do
       space <- lookupMemSpace mem
       mem' <- newVName $ baseString mem <> "_ext"
-      let num_exts = length (LMAD.existentialized ixfun)
-      ixfun_exts <-
+      let num_exts = length (LMAD.existentialized lmad)
+      lmad_exts <-
         replicateM num_exts $
           Param mempty <$> newVName "ext" <*> pure (MemPrim int64)
-      let ixfun' = lmadFrom (LMAD.shape ixfun) $ map (le64 . paramName) ixfun_exts
+      let lmad' = lmadFrom (LMAD.shape lmad) $ map (le64 . paramName) lmad_exts
       pure
-        ( acc ++ Param mempty mem' (MemMem space) : ixfun_exts,
-          Param attr v $ MemArray pt shape u $ ArrayIn mem' ixfun'
+        ( acc ++ Param mempty mem' (MemMem space) : lmad_exts,
+          Param attr v $ MemArray pt shape u $ ArrayIn mem' lmad'
         )
     onType acc t = pure (acc, t)
 
@@ -677,29 +677,29 @@ offsetBranch (Pat pes) ts = do
   where
     onType
       acc
-      ( PatElem pe_v (MemArray _ pe_shape pe_u (ArrayIn pe_mem pe_ixfun)),
+      ( PatElem pe_v (MemArray _ pe_shape pe_u (ArrayIn pe_mem pe_lmad)),
         MemArray pt shape u meminfo
         ) = do
-        (space, ixfun) <- case meminfo of
-          ReturnsInBlock mem ixfun -> do
+        (space, lmad) <- case meminfo of
+          ReturnsInBlock mem lmad -> do
             space <- lookupMemSpace mem
-            pure (space, ixfun)
-          ReturnsNewBlock space _ ixfun ->
-            pure (space, ixfun)
+            pure (space, lmad)
+          ReturnsNewBlock space _ lmad ->
+            pure (space, lmad)
         pe_mem' <- newVName $ baseString pe_mem <> "_ext"
         let start = length ts + length acc
-            num_exts = length (LMAD.existentialized ixfun)
+            num_exts = length (LMAD.existentialized lmad)
             ext (Free se) = Free <$> pe64 se
             ext (Ext i) = le64 (Ext i)
-        ixfun_exts <-
+        lmad_exts <-
           replicateM num_exts $
             PatElem <$> newVName "ext" <*> pure (MemPrim int64)
-        let pe_ixfun' = lmadFrom (LMAD.shape pe_ixfun) $ map (le64 . patElemName) ixfun_exts
+        let pe_lmad' = lmadFrom (LMAD.shape pe_lmad) $ map (le64 . patElemName) lmad_exts
         pure
           ( acc
               ++ (PatElem pe_mem' $ MemMem space, MemMem space)
-              : map (,MemPrim int64) ixfun_exts,
-            ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_ixfun',
+              : map (,MemPrim int64) lmad_exts,
+            ( PatElem pe_v $ MemArray pt pe_shape pe_u $ ArrayIn pe_mem' pe_lmad',
               MemArray pt shape u . ReturnsNewBlock space start . fmap ext $
                 LMAD.mkExistential (shapeDims shape) (1 + start)
             )
@@ -713,33 +713,33 @@ offsetMemoryInPat offsets (Pat pes) rets = do
     onPE
       (PatElem name (MemArray pt shape u (ArrayIn mem _)))
       (MemArray _ _ _ info)
-        | Just ixfun <- getLMAD info =
+        | Just lmad <- getLMAD info =
             PatElem name . MemArray pt shape u . ArrayIn mem $
-              fmap (fmap unExt) ixfun
+              fmap (fmap unExt) lmad
     onPE pe _ =
       offsetMemoryInMemBound offsets <$> pe
     unExt (Ext i) = patElemName (pes !! i)
     unExt (Free v) = v
-    getLMAD (Just (ReturnsNewBlock _ _ ixfun)) = Just ixfun
-    getLMAD (Just (ReturnsInBlock _ ixfun)) = Just ixfun
+    getLMAD (Just (ReturnsNewBlock _ _ lmad)) = Just lmad
+    getLMAD (Just (ReturnsInBlock _ lmad)) = Just lmad
     getLMAD _ = Nothing
 
 offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
 offsetMemoryInParam offsets = fmap $ offsetMemoryInMemBound offsets
 
 offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
-offsetMemoryInMemBound offsets (MemArray pt shape u (ArrayIn mem ixfun))
-  | Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun) offsets =
-      MemArray pt shape u $ ArrayIn mem $ LMAD.expand o p ixfun
+offsetMemoryInMemBound offsets (MemArray pt shape u (ArrayIn mem lmad))
+  | Just (o, p) <- lookupNewBase mem (LMAD.shape lmad) offsets =
+      MemArray pt shape u $ ArrayIn mem $ LMAD.expand o p lmad
 offsetMemoryInMemBound _ info = info
 
 offsetMemoryInBodyReturns :: RebaseMap -> BodyReturns -> BodyReturns
-offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem ixfun))
-  | Just ixfun' <- isStaticLMAD ixfun,
-    Just (o, p) <- lookupNewBase mem (LMAD.shape ixfun') offsets =
+offsetMemoryInBodyReturns offsets (MemArray pt shape u (ReturnsInBlock mem lmad))
+  | Just lmad' <- isStaticLMAD lmad,
+    Just (o, p) <- lookupNewBase mem (LMAD.shape lmad') offsets =
       MemArray pt shape u $
         ReturnsInBlock mem $
-          LMAD.expand (Free <$> o) (fmap Free p) ixfun
+          LMAD.expand (Free <$> o) (fmap Free p) lmad
 offsetMemoryInBodyReturns _ br = br
 
 offsetMemoryInLambda :: RebaseMap -> Lambda GPUMem -> OffsetM (Lambda GPUMem)
@@ -827,9 +827,9 @@ offsetMemoryInStm offsets (Let pat dec e) = do
   where
     pick
       (PatElem name (MemArray pt s u _ret))
-      (MemArray _ _ _ (Just (ReturnsInBlock m extixfun)))
-        | Just ixfun <- instantiateLMAD extixfun =
-            PatElem name (MemArray pt s u (ArrayIn m ixfun))
+      (MemArray _ _ _ (Just (ReturnsInBlock m extlmad)))
+        | Just lmad <- instantiateLMAD extlmad =
+            PatElem name (MemArray pt s u (ArrayIn m lmad))
     pick p _ = p
 
     instantiateLMAD :: ExtLMAD -> Maybe LMAD

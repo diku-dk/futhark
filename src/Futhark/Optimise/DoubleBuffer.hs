@@ -280,13 +280,13 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
     bound_in_loop =
       namesFromList (map (paramName . fst) merge) <> boundInBody body
 
-    findIxfunOfArray v = listToMaybe . mapMaybe onStm $ stmsToList body_stms
+    findLmadOfArray v = listToMaybe . mapMaybe onStm $ stmsToList body_stms
       where
         onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
-        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ ixfun)))
+        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ lmad)))
           | v == pe_v,
-            not $ bound_in_loop `namesIntersect` freeIn ixfun =
-              Just ixfun
+            not $ bound_in_loop `namesIntersect` freeIn lmad =
+              Just lmad
         onPatElem _ = Nothing
 
     changeParam p_needle new (p, p_initial) =
@@ -302,14 +302,14 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
           filter
             (isArrayIn (paramName param) . fst . fst)
             (zip merge $ map resSubExp body_res),
-        MemArray pt shape _ (ArrayIn _ param_ixfun) <- paramDec arr_param,
+        MemArray pt shape _ (ArrayIn _ param_lmad) <- paramDec arr_param,
         Var arr_mem_out <- resSubExp res,
-        Just arr_ixfun <- findIxfunOfArray arr_v,
+        Just arr_lmad <- findLmadOfArray arr_v,
         Just (arr_mem_out_alloc, body_stms'') <-
           extractAllocOf bound_in_loop arr_mem_out body_stms' = do
           -- Put the allocations outside the loop.
           num_bytes <-
-            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + LMAD.range arr_ixfun))
+            letSubExp "num_bytes" =<< toExp (primByteSize pt * (1 + LMAD.range arr_lmad))
           arr_mem_in <-
             letExp (baseString arg_v <> "_in") $ Op $ Alloc num_bytes space
           addStm arr_mem_out_alloc
@@ -327,7 +327,7 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
           -- the same index function as the result.
           arr_v_copy <- newVName $ baseString arr_v <> "_db_copy"
           let arr_initial_info =
-                MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_ixfun
+                MemArray pt shape NoUniqueness $ ArrayIn arr_mem_in arr_lmad
               arr_initial_pe =
                 PatElem arr_v_copy arr_initial_info
           addStm . Let (Pat [arr_initial_pe]) (defAux ()) . BasicOp $
@@ -337,21 +337,21 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
           -- invalidating the underlying memory.
           let arr_param' =
                 Param mempty (paramName arr_param) $
-                  MemArray pt shape Unique (ArrayIn (paramName param) param_ixfun)
+                  MemArray pt shape Unique (ArrayIn (paramName param) param_lmad)
 
           -- We must also update the initial values of the parameters
           -- used in the index function of this array parameter, such
           -- that they match the result.
-          let mkUpdate ixfun_v =
-                case L.find ((== ixfun_v) . paramName . fst . fst) $
+          let mkUpdate lmad_v =
+                case L.find ((== lmad_v) . paramName . fst . fst) $
                   zip merge body_res of
                   Nothing -> id
                   Just ((p, _), p_res) -> changeParam p (p, resSubExp p_res)
-              updateIxfunParam =
-                foldl (.) id $ map mkUpdate $ namesToList $ freeIn param_ixfun
+              updateLmadParam =
+                foldl (.) id $ map mkUpdate $ namesToList $ freeIn param_lmad
 
           pure
-            ( ( updateIxfunParam
+            ( ( updateLmadParam
                   . changeParam arr_param (arr_param', Var arr_v_copy)
                   . param_changes,
                 substituteNames (M.singleton arr_mem_out (paramName param_out)) body_stms''
@@ -416,11 +416,11 @@ doubleBufferLoopParams ctx_and_res body =
           | patElemName pe == v, invariant size = Just $ pe64 size
         p _ = Nothing
 
-    findIxfunOfArray v = listToMaybe . mapMaybe onStm $ stmsToList $ bodyStms body
+    findLmadOfArray v = listToMaybe . mapMaybe onStm $ stmsToList $ bodyStms body
       where
         onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
-        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ ixfun)))
-          | v == pe_v = Just ixfun
+        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ lmad)))
+          | v == pe_v = Just lmad
         onPatElem _ = Nothing
 
     buffer (fparam, res) = case paramType fparam of
@@ -435,12 +435,12 @@ doubleBufferLoopParams ctx_and_res body =
       Array {}
         | MemArray _ _ _ (ArrayIn mem _) <- paramDec fparam,
           Var res_v <- resSubExp res,
-          Just ixfun <- findIxfunOfArray res_v -> do
+          Just lmad <- findLmadOfArray res_v -> do
             buffered <- gets $ M.lookup mem
             case buffered of
               Just bufname -> do
                 copyname <- lift $ newVName "double_buffer_array"
-                pure $ BufferCopy bufname ixfun copyname
+                pure $ BufferCopy bufname lmad copyname
               Nothing ->
                 pure NoBuffer
       _ -> pure NoBuffer
@@ -476,11 +476,11 @@ doubleBufferResult valparams buffered (Body _ stms res) =
   where
     buffer _ (BufferAlloc bufname _ _) se =
       (Nothing, se {resSubExp = Var bufname})
-    buffer fparam (BufferCopy bufname ixfun copyname) (SubExpRes cs (Var v)) =
+    buffer fparam (BufferCopy bufname lmad copyname) (SubExpRes cs (Var v)) =
       -- To construct the copy we will need to figure out its type
       -- based on the type of the function parameter.
       let t = resultType $ paramType fparam
-          summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname ixfun
+          summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname lmad
           copystm =
             Let
               (Pat [PatElem copyname summary])

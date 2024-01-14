@@ -1314,11 +1314,11 @@ replicateForType bt = do
 
 replicateIsFill :: VName -> SubExp -> CallKernelGen (Maybe (CallKernelGen ()))
 replicateIsFill arr v = do
-  ArrayEntry (MemLoc arr_mem arr_shape arr_ixfun) _ <- lookupArray arr
+  ArrayEntry (MemLoc arr_mem arr_shape arr_lmad) _ <- lookupArray arr
   v_t <- subExpType v
   case v_t of
     Prim v_t'
-      | LMAD.isDirect arr_ixfun -> pure $
+      | LMAD.isDirect arr_lmad -> pure $
           Just $ do
             fname <- replicateForType v_t'
             emit $
@@ -1417,8 +1417,8 @@ sIota ::
   IntType ->
   CallKernelGen ()
 sIota arr n x s et = do
-  ArrayEntry (MemLoc arr_mem _ arr_ixfun) _ <- lookupArray arr
-  if LMAD.isDirect arr_ixfun
+  ArrayEntry (MemLoc arr_mem _ arr_lmad) _ <- lookupArray arr
+  if LMAD.isDirect arr_lmad
     then do
       fname <- iotaForType et
       emit $

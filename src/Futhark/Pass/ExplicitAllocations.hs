@@ -270,8 +270,8 @@ allocsForPat def_space some_idents rts hints = do
         pure $ PatElem (identName ident) summary
       MemMem space ->
         pure $ PatElem (identName ident) $ MemMem space
-      MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
-        let ixfn = instantiateExtLMAD idents extixfun
+      MemArray bt _ u (Just (ReturnsInBlock mem extlmad)) -> do
+        let ixfn = instantiateExtLMAD idents extlmad
         pure . PatElem (identName ident) . MemArray bt ident_shape u $ ArrayIn mem ixfn
       MemArray _ extshape _ Nothing
         | Just _ <- knownShape extshape -> do
@@ -321,12 +321,12 @@ summaryForBindage _ (Acc acc ispace ts u) _ =
 summaryForBindage def_space t@(Array pt shape u) NoHint = do
   m <- allocForArray' t def_space
   pure $ MemArray pt shape u $ ArrayIn m $ LMAD.iota 0 $ map pe64 $ arrayDims t
-summaryForBindage _ t@(Array pt _ _) (Hint ixfun space) = do
+summaryForBindage _ t@(Array pt _ _) (Hint lmad space) = do
   bytes <-
     letSubExp "bytes" <=< toExp . untyped $
-      primByteSize pt * (1 + LMAD.range ixfun)
+      primByteSize pt * (1 + LMAD.range lmad)
   m <- letExp "mem" $ Op $ Alloc bytes space
-  pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m ixfun
+  pure $ MemArray pt (arrayShape t) NoUniqueness $ ArrayIn m lmad
 
 allocInFParams ::
   (Allocable fromrep torep inner) =>
@@ -352,10 +352,10 @@ allocInFParam param pspace =
   case paramDeclType param of
     Array pt shape u -> do
       let memname = baseString (paramName param) <> "_mem"
-          ixfun = LMAD.iota 0 $ map pe64 $ shapeDims shape
+          lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
       mem <- lift $ newVName memname
       tell ([Param (paramAttrs param) mem $ MemMem pspace], [])
-      pure param {paramDec = MemArray pt shape u $ ArrayIn mem ixfun}
+      pure param {paramDec = MemArray pt shape u $ ArrayIn mem lmad}
     Prim pt ->
       pure param {paramDec = MemPrim pt}
     Mem space ->
@@ -386,8 +386,8 @@ ensureArrayIn _ (Constant v) =
   error $ "ensureArrayIn: " ++ prettyString v ++ " cannot be an array."
 ensureArrayIn space (Var v) = do
   (mem', v') <- lift $ ensureRowMajorArray (Just space) v
-  (_, ixfun) <- lift $ lookupArraySummary v'
-  ctx <- lift $ mapM (letSubExp "ixfun_arg" <=< toExp) (LMAD.existentialized ixfun)
+  (_, lmad) <- lift $ lookupArraySummary v'
+  ctx <- lift $ mapM (letSubExp "lmad_arg" <=< toExp) (LMAD.existentialized lmad)
   tell ([Var mem'], ctx)
   pure $ Var v'
 
@@ -418,15 +418,15 @@ allocInLoopParams merge m = do
     param_names = namesFromList $ map (paramName . fst) merge
     anyIsLoopParam names = names `namesIntersect` param_names
 
-    scalarRes param_t v_mem_space v_ixfun (Var res) = do
+    scalarRes param_t v_mem_space v_lmad (Var res) = do
       -- Try really hard to avoid copying needlessly, but the result
       -- _must_ be in ScalarSpace and have the right index function.
-      (res_mem, res_ixfun) <- lift $ lookupArraySummary res
+      (res_mem, res_lmad) <- lift $ lookupArraySummary res
       res_mem_space <- lift $ lookupMemSpace res_mem
       (res_mem', res') <-
-        if (res_mem_space, res_ixfun) == (v_mem_space, v_ixfun)
+        if (res_mem_space, res_lmad) == (v_mem_space, v_lmad)
           then pure (res_mem, res)
-          else lift $ arrayWithLMAD v_mem_space v_ixfun (fromDecl param_t) res
+          else lift $ arrayWithLMAD v_mem_space v_lmad (fromDecl param_t) res
       tell ([Var res_mem'], [])
       pure $ Var res'
     scalarRes _ _ _ se = pure se
@@ -443,7 +443,7 @@ allocInLoopParams merge m = do
         )
     allocInMergeParam (mergeparam, Var v)
       | param_t@(Array pt shape u) <- paramDeclType mergeparam = do
-          (v_mem, v_ixfun) <- lift $ lookupArraySummary v
+          (v_mem, v_lmad) <- lift $ lookupArraySummary v
           v_mem_space <- lift $ lookupMemSpace v_mem
 
           -- Loop-invariant array parameters that are in scalar space
@@ -463,33 +463,33 @@ allocInLoopParams merge m = do
                   tell ([p], [])
 
                   pure
-                    ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_ixfun},
+                    ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName p) v_lmad},
                       Var v,
-                      scalarRes param_t v_mem_space v_ixfun
+                      scalarRes param_t v_mem_space v_lmad
                     )
             _ -> do
               (v_mem', v') <- lift $ ensureRowMajorArray Nothing v
-              let ixfun_ext =
+              let lmad_ext =
                     LMAD.existentialize 0 $ LMAD.iota 0 $ map pe64 $ shapeDims shape
 
               v_mem_space' <- lift $ lookupMemSpace v_mem'
 
               ctx_params <-
-                replicateM (length (LMAD.existentialized ixfun_ext)) $
+                replicateM (length (LMAD.existentialized lmad_ext)) $
                   newParam "ctx_param_ext" (MemPrim int64)
 
-              param_ixfun <-
+              param_lmad <-
                 instantiateLMAD $
                   LMAD.substitute
                     ( M.fromList . zip (fmap Ext [0 ..]) $
                         map (le64 . Free . paramName) ctx_params
                     )
-                    ixfun_ext
+                    lmad_ext
 
               mem_param <- newParam "mem_param" $ MemMem v_mem_space'
               tell ([mem_param], ctx_params)
               pure
-                ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_ixfun},
+                ( mergeparam {paramDec = MemArray pt shape u $ ArrayIn (paramName mem_param) param_lmad},
                   Var v',
                   ensureArrayIn v_mem_space'
                 )
@@ -506,11 +506,11 @@ arrayWithLMAD ::
   Type ->
   VName ->
   m (VName, VName)
-arrayWithLMAD space ixfun v_t v = do
+arrayWithLMAD space lmad v_t v = do
   let Array pt shape u = v_t
   mem <- allocForArray' v_t space
   v_copy <- newVName $ baseString v <> "_scalcopy"
-  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem ixfun
+  let pe = PatElem v_copy $ MemArray pt shape u $ ArrayIn mem lmad
   letBind (Pat [pe]) $ BasicOp $ Replicate mempty $ Var v
   pure (mem, v_copy)
 
@@ -520,10 +520,10 @@ ensureDirectArray ::
   VName ->
   AllocM fromrep torep (VName, VName)
 ensureDirectArray space_ok v = do
-  (mem, ixfun) <- lookupArraySummary v
+  (mem, lmad) <- lookupArraySummary v
   mem_space <- lookupMemSpace mem
   default_space <- askDefaultSpace
-  if LMAD.isDirect ixfun && maybe True (== mem_space) space_ok
+  if LMAD.isDirect lmad && maybe True (== mem_space) space_ok
     then pure (mem, v)
     else needCopy (fromMaybe default_space space_ok)
   where
@@ -778,7 +778,7 @@ contextRets (MemArray _ shape _ (NeedsNormalisation space)) =
     ++ replicate (shapeRank shape) (MemPrim int64)
 contextRets _ = []
 
--- Add memory information to the body, but do not return memory/ixfun
+-- Add memory information to the body, but do not return memory/lmad
 -- information.  Instead, return restrictions on what the index
 -- function should look like.  We will then (crudely) unify these
 -- restrictions across all bodies.
@@ -864,9 +864,9 @@ addCtxToMatchBody reqs body = buildBody_ $ do
         MemPrim {} -> pure []
         MemAcc {} -> pure []
         MemMem {} -> pure [] -- should not happen
-        MemArray _ _ _ (ArrayIn mem ixfun) -> do
-          ixfun_exts <- mapM (letSubExp "ixfun_ext" <=< toExp) $ LMAD.existentialized ixfun
-          pure $ subExpRes (Var mem) : subExpsRes ixfun_exts
+        MemArray _ _ _ (ArrayIn mem lmad) -> do
+          lmad_exts <- mapM (letSubExp "lmad_ext" <=< toExp) $ LMAD.existentialized lmad
+          pure $ subExpRes (Var mem) : subExpsRes lmad_exts
 
 -- Do a a simple form of invariance analysis to simplify a Match.  It
 -- is unfortunate that we have to do it here, but functions such as
@@ -980,8 +980,8 @@ allocInExp (WithAcc inputs bodylam) =
           (lambdaBody lam)
       pure (lam', nes)
 
-    mkP attrs p pt shape u mem ixfun is =
-      Param attrs p . MemArray pt shape u . ArrayIn mem . LMAD.slice ixfun $
+    mkP attrs p pt shape u mem lmad is =
+      Param attrs p . MemArray pt shape u . ArrayIn mem . LMAD.slice lmad $
         fmap pe64 $
           Slice $
             is ++ map sliceDim (shapeDims shape)
@@ -989,8 +989,8 @@ allocInExp (WithAcc inputs bodylam) =
     onXParam _ (Param attrs p (Prim t)) _ =
       pure $ Param attrs p (MemPrim t)
     onXParam is (Param attrs p (Array pt shape u)) arr = do
-      (mem, ixfun) <- lookupArraySummary arr
-      pure $ mkP attrs p pt shape u mem ixfun is
+      (mem, lmad) <- lookupArraySummary arr
+      pure $ mkP attrs p pt shape u mem lmad is
     onXParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ prettyString p
 
@@ -1001,8 +1001,8 @@ allocInExp (WithAcc inputs bodylam) =
       space <- askDefaultSpace
       mem <- allocForArray arr_t space
       let base_dims = map pe64 $ arrayDims arr_t
-          ixfun = LMAD.iota 0 base_dims
-      pure $ mkP attrs p pt shape u mem ixfun is
+          lmad = LMAD.iota 0 base_dims
+      pure $ mkP attrs p pt shape u mem lmad is
     onYParam _ p _ =
       error $ "Cannot handle MkAcc param: " ++ prettyString p
 allocInExp e = mapExpM alloc e
