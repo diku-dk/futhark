@@ -49,6 +49,7 @@ withoutDims te = (0 :: Int, te)
 rootType :: E.TypeExp E.Info VName -> E.TypeExp E.Info VName
 rootType (E.TEApply te E.TypeArgExpSize {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
+rootType (E.TEDim _ te _) = rootType te
 rootType te = te
 
 typeExpOpaqueName :: E.TypeExp E.Info VName -> Name
