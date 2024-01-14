@@ -404,6 +404,10 @@ instance Pretty OpaqueType where
     "record" <+> nestedBlock "{" "}" (stack $ map p fs)
     where
       p (f, et) = pretty f <> ":" <+> pretty et
+  pretty (OpaqueSum ts cs) =
+    "sum" <+> nestedBlock "{" "}" (stack $ pretty ts : map p cs)
+    where
+      p (c, ets) = hsep $ "#" <> pretty c : map pretty ets
 
 instance Pretty OpaqueTypes where
   pretty (OpaqueTypes ts) = "types" <+> nestedBlock "{" "}" (stack $ map p ts)

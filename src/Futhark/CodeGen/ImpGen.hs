@@ -485,6 +485,7 @@ entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueSum vts _ -> map valueTypeSign vts
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
@@ -496,6 +497,7 @@ entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueSum vts _ -> length vts
 
 compileInParam ::
   (Mem rep inner) =>

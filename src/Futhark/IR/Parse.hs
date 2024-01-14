@@ -641,11 +641,27 @@ pOpaqueType :: Parser (Name, OpaqueType)
 pOpaqueType =
   (,)
     <$> (keyword "type" *> (nameFromText <$> pStringLiteral) <* pEqual)
-    <*> choice [pRecord, pOpaque]
+    <*> choice [pRecord, pSum, pOpaque]
   where
     pFieldName = choice [pName, nameFromString . show <$> pInt]
     pField = (,) <$> pFieldName <* pColon <*> pEntryPointType
     pRecord = keyword "record" $> OpaqueRecord <*> braces (many pField)
+
+    pConstructor = "#" *> pName
+    pPayload =
+      parens $
+        (,)
+          <$> (pEntryPointType <* pComma)
+          <*> brackets (pInt `sepBy` pComma)
+    pVariant = (,) <$> pConstructor <*> many pPayload
+    pSum =
+      keyword "sum"
+        *> braces
+          ( OpaqueSum
+              <$> brackets (pValueType `sepBy` pComma)
+              <*> many pVariant
+          )
+
     pOpaque = keyword "opaque" $> OpaqueType <*> braces (many pValueType)
 
 pOpaqueTypes :: Parser OpaqueTypes

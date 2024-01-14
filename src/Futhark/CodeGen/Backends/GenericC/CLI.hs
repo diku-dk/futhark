@@ -190,7 +190,7 @@ readInput manifest i tname =
             [C.cstm|;|],
             [C.cexp|$id:dest|]
           )
-    Just (TypeOpaque desc _ _) ->
+    Just (TypeOpaque desc _ _ _) ->
       ( [C.citems|futhark_panic(1, "Cannot read input #%d of type %s\n", $int:i, $string:(T.unpack desc));|],
         [C.cstm|;|],
         [C.cstm|;|],
@@ -256,7 +256,7 @@ prepareOutputs manifest = zipWith prepareResult [(0 :: Int) ..]
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(arrayFree ops)(ctx, $id:result) == 0);|]
           )
-        Just (TypeOpaque t ops _) ->
+        Just (TypeOpaque t ops _ _) ->
           ( [C.citem|typename $id:t $id:result;|],
             [C.cexp|$id:result|],
             [C.cstm|assert($id:(opaqueFree ops)(ctx, $id:result) == 0);|]
@@ -269,7 +269,7 @@ printStm manifest tname e =
     Nothing ->
       let info = tname <> "_info"
        in [C.cstm|write_scalar(stdout, binary_output, &$id:info, &$exp:e);|]
-    Just (TypeOpaque desc _ _) ->
+    Just (TypeOpaque desc _ _ _) ->
       [C.cstm|{
          fprintf(stderr, "Values of type \"%s\" have no external representation.\n", $string:(T.unpack desc));
          retval = 1;

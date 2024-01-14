@@ -9,6 +9,7 @@ module Futhark.Internalise.TypesValues
     internaliseLoopParamType,
     internalisePrimType,
     internalisedTypeSize,
+    internaliseSumTypeRep,
     internaliseSumType,
     Tree,
 
@@ -24,6 +25,7 @@ where
 import Control.Monad
 import Control.Monad.Free (Free (..))
 import Control.Monad.State
+import Data.Bifunctor
 import Data.Bitraversable (bitraverse)
 import Data.Foldable (toList)
 import Data.List (delete, find, foldl')
@@ -308,16 +310,24 @@ internaliseConstructors cs =
                 new_ts ++ [t]
               )
 
+internaliseSumTypeRep ::
+  M.Map Name [E.StructType] ->
+  ( [I.TypeBase ExtShape Uniqueness],
+    [(Name, [Int])]
+  )
+internaliseSumTypeRep cs =
+  first (foldMap toList) . runInternaliseTypeM $
+    internaliseConstructors
+      <$> traverse (fmap concat . mapM (internaliseTypeM mempty . E.toRes E.Nonunique)) cs
+
 internaliseSumType ::
   M.Map Name [E.StructType] ->
   InternaliseM
     ( [I.TypeBase ExtShape Uniqueness],
       [(Name, [Int])]
     )
-internaliseSumType cs =
-  bitraverse (mapM mkAccCerts . foldMap toList) pure . runInternaliseTypeM $
-    internaliseConstructors
-      <$> traverse (fmap concat . mapM (internaliseTypeM mempty . E.toRes E.Nonunique)) cs
+internaliseSumType =
+  bitraverse (mapM mkAccCerts) pure . internaliseSumTypeRep
 
 -- | How many core language values are needed to represent one source
 -- language value of the given type?

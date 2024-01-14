@@ -79,6 +79,28 @@
                                   }
                               },
                               "additionalProperties": false
+                          },
+                          "sum": {
+                              "type": "object",
+                              "properties": {
+                                  "variant": {"type": "string"},
+                                  "variants": {
+                                      "type": "array",
+                                      "items": {
+                                          "type": "object",
+                                          "properties": {
+                                              "construct": {"type": "string"},
+                                              "destruct": {"type": "string"},
+                                              "payload": {"type": "array",
+                                                          "items": {
+                                                              "type": "string"
+                                                          }
+                                                         }
+                                          }
+                                      }
+                                  }
+                              },
+                              "additionalProperties": false
                           }
                       },
                       "required": [ "kind", "ctype", "ops" ]
