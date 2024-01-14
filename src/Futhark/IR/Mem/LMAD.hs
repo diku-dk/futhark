@@ -17,7 +17,6 @@ module Futhark.IR.Mem.LMAD
     coerce,
     permute,
     shape,
-    rank,
     substitute,
     iota,
     equivalent,
@@ -277,10 +276,6 @@ substitute tab (LMAD offset dims) =
 -- | Shape of an LMAD.
 shape :: LMAD num -> Shape num
 shape = map ldShape . dims
-
--- | Rank of an LMAD.
-rank :: LMAD num -> Int
-rank = length . shape
 
 iotaStrided ::
   (IntegralExp num) =>
