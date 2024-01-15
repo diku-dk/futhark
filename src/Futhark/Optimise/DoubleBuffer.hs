@@ -71,10 +71,8 @@
 -- per iteration (and an initial one, elided above).
 module Futhark.Optimise.DoubleBuffer (doubleBufferGPU, doubleBufferMC) where
 
-import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad.Writer
 import Data.Bifunctor
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
@@ -87,39 +85,6 @@ import Futhark.Pass
 import Futhark.Pass.ExplicitAllocations.GPU ()
 import Futhark.Transform.Substitute
 import Futhark.Util (mapAccumLM)
-
--- | The double buffering pass definition.
-doubleBuffer :: (Mem rep inner) => String -> String -> OptimiseOp rep -> Pass rep rep
-doubleBuffer name desc onOp =
-  Pass
-    { passName = name,
-      passDescription = desc,
-      passFunction = intraproceduralTransformation optimise
-    }
-  where
-    optimise scope stms = modifyNameSource $ \src ->
-      let m =
-            runDoubleBufferM $ localScope scope $ optimiseStms $ stmsToList stms
-       in runState (runReaderT m env) src
-
-    env = Env mempty doNotTouchLoop onOp
-    doNotTouchLoop pat merge body = pure (mempty, pat, merge, body)
-
--- | The pass for GPU kernels.
-doubleBufferGPU :: Pass GPUMem GPUMem
-doubleBufferGPU =
-  doubleBuffer
-    "Double buffer GPU"
-    "Double buffer memory in sequential loops (GPU rep)."
-    optimiseGPUOp
-
--- | The pass for multicore
-doubleBufferMC :: Pass MCMem MCMem
-doubleBufferMC =
-  doubleBuffer
-    "Double buffer MC"
-    "Double buffer memory in sequential loops (MC rep)."
-    optimiseMCOp
 
 type OptimiseLoop rep =
   Pat (LetDec rep) ->
@@ -249,14 +214,6 @@ extractAllocOf bound needle stms = do
     invariant Constant {} = True
     invariant (Var v) = v `notNameIn` bound
 
-optimiseLoop :: (Constraints rep inner) => OptimiseLoop rep
-optimiseLoop pat merge body = do
-  (outer_stms_1, pat', merge', body') <-
-    optimiseLoopBySwitching pat merge body
-  (outer_stms_2, pat'', merge'', body'') <-
-    inScopeOf outer_stms_1 $ optimiseLoopByCopying pat' merge' body'
-  pure (outer_stms_1 <> outer_stms_2, pat'', merge'', body'')
-
 isArrayIn :: VName -> Param FParamMem -> Bool
 isArrayIn x (Param _ _ (MemArray _ _ _ (ArrayIn y _))) = x == y
 isArrayIn _ _ = False
@@ -265,8 +222,8 @@ doubleBufferSpace :: Space -> Bool
 doubleBufferSpace ScalarSpace {} = False
 doubleBufferSpace _ = True
 
-optimiseLoopBySwitching :: (Constraints rep inner) => OptimiseLoop rep
-optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
+optimiseLoop :: (Constraints rep inner) => OptimiseLoop rep
+optimiseLoop (Pat pes) merge body@(Body _ body_stms body_res) = do
   ((pat', merge', body'), outer_stms) <- runBuilder $ do
     ((param_changes, body_stms'), (pes', merge', body_res')) <-
       second unzip3 <$> mapAccumLM check (id, body_stms) (zip3 pes merge body_res)
@@ -369,132 +326,35 @@ optimiseLoopBySwitching (Pat pes) merge body@(Body _ body_stms body_res) = do
               ([pe], [(param, arg)], [res])
             )
 
-optimiseLoopByCopying :: (Constraints rep inner) => OptimiseLoop rep
-optimiseLoopByCopying pat merge body = do
-  -- We start out by figuring out which of the merge variables should
-  -- be double-buffered.
-  buffered <-
-    doubleBufferLoopParams
-      (zip (map fst merge) (bodyResult body))
-      body
-  -- Then create the allocations of the buffers and copies of the
-  -- initial values.
-  (merge', allocs) <- allocStms merge buffered
-  -- Modify the loop body to copy buffered result arrays.
-  let body' = doubleBufferResult (map fst merge) buffered body
-  pure (stmsFromList allocs, pat, merge', body')
-
--- | The booleans indicate whether we should also play with the
--- initial merge values.
-data DoubleBuffer
-  = BufferAlloc VName (TPrimExp Int64 VName) Space
-  | -- | First name is the memory block to copy to,
-    -- second is the name of the array copy.
-    BufferCopy VName LMAD VName
-  | NoBuffer
-  deriving (Show)
-
-doubleBufferLoopParams ::
-  (Constraints rep inner, MonadFreshNames m) =>
-  [(Param FParamMem, SubExpRes)] ->
-  Body rep ->
-  m [DoubleBuffer]
-doubleBufferLoopParams ctx_and_res body =
-  evalStateT (mapM buffer ctx_and_res) M.empty
+-- | The double buffering pass definition.
+doubleBuffer :: (Mem rep inner) => String -> String -> OptimiseOp rep -> Pass rep rep
+doubleBuffer name desc onOp =
+  Pass
+    { passName = name,
+      passDescription = desc,
+      passFunction = intraproceduralTransformation optimise
+    }
   where
-    bound_in_loop = boundInBody body
-    loopVariant v =
-      (v `nameIn` bound_in_loop)
-        || (v `elem` map (paramName . fst) ctx_and_res)
+    optimise scope stms = modifyNameSource $ \src ->
+      let m =
+            runDoubleBufferM $ localScope scope $ optimiseStms $ stmsToList stms
+       in runState (runReaderT m env) src
 
-    invariant Constant {} = True
-    invariant (Var v) = not $ loopVariant v
+    env = Env mempty doNotTouchLoop onOp
+    doNotTouchLoop pat merge body = pure (mempty, pat, merge, body)
 
-    findSizeOfAlloc v = listToMaybe . mapMaybe p $ stmsToList $ bodyStms body
-      where
-        p (Let (Pat [pe]) _ (Op (Alloc size _)))
-          | patElemName pe == v, invariant size = Just $ pe64 size
-        p _ = Nothing
+-- | The pass for GPU kernels.
+doubleBufferGPU :: Pass GPUMem GPUMem
+doubleBufferGPU =
+  doubleBuffer
+    "Double buffer GPU"
+    "Double buffer memory in sequential loops (GPU rep)."
+    optimiseGPUOp
 
-    findLmadOfArray v = listToMaybe . mapMaybe onStm $ stmsToList $ bodyStms body
-      where
-        onStm = listToMaybe . mapMaybe onPatElem . patElems . stmPat
-        onPatElem (PatElem pe_v (MemArray _ _ _ (ArrayIn _ lmad)))
-          | v == pe_v = Just lmad
-        onPatElem _ = Nothing
-
-    buffer (fparam, res) = case paramType fparam of
-      Mem space
-        | Var res_v <- resSubExp res,
-          res_v `nameIn` bound_in_loop,
-          Just size <- findSizeOfAlloc res_v -> do
-            -- Let us double buffer this!
-            bufname <- lift $ newVName "double_buffer_mem"
-            modify $ M.insert (paramName fparam) bufname
-            pure $ BufferAlloc bufname size space
-      Array {}
-        | MemArray _ _ _ (ArrayIn mem _) <- paramDec fparam,
-          Var res_v <- resSubExp res,
-          Just lmad <- findLmadOfArray res_v -> do
-            buffered <- gets $ M.lookup mem
-            case buffered of
-              Just bufname -> do
-                copyname <- lift $ newVName "double_buffer_array"
-                pure $ BufferCopy bufname lmad copyname
-              Nothing ->
-                pure NoBuffer
-      _ -> pure NoBuffer
-
-allocStms ::
-  (Constraints rep inner) =>
-  [(FParam rep, SubExp)] ->
-  [DoubleBuffer] ->
-  DoubleBufferM rep ([(FParam rep, SubExp)], [Stm rep])
-allocStms merge = runWriterT . zipWithM allocation merge
-  where
-    allocation (Param attrs pname _, Var initial_mem) (BufferAlloc name size space) = do
-      stms <- lift $
-        runBuilder_ $ do
-          size' <- toSubExp "double_buffer_size" size
-          letBindNames [name] $ Op $ Alloc size' space
-      tell $ stmsToList stms
-      pure (Param attrs pname $ MemMem space, Var initial_mem)
-    allocation (f, se) _ =
-      pure (f, se)
-
-doubleBufferResult ::
-  (Constraints rep inner) =>
-  [FParam rep] ->
-  [DoubleBuffer] ->
-  Body rep ->
-  Body rep
-doubleBufferResult valparams buffered (Body _ stms res) =
-  let (ctx_res, val_res) = splitAt (length res - length valparams) res
-      (copystms, val_res') =
-        unzip $ zipWith3 buffer valparams buffered val_res
-   in Body () (stms <> stmsFromList (catMaybes copystms)) $ ctx_res ++ val_res'
-  where
-    buffer _ (BufferAlloc bufname _ _) se =
-      (Nothing, se {resSubExp = Var bufname})
-    buffer fparam (BufferCopy bufname lmad copyname) (SubExpRes cs (Var v)) =
-      -- To construct the copy we will need to figure out its type
-      -- based on the type of the function parameter.
-      let t = resultType $ paramType fparam
-          summary = MemArray (elemType t) (arrayShape t) NoUniqueness $ ArrayIn bufname lmad
-          copystm =
-            Let
-              (Pat [PatElem copyname summary])
-              (defAux ())
-              (BasicOp $ Replicate mempty $ Var v)
-       in (Just copystm, SubExpRes cs (Var copyname))
-    buffer _ _ se =
-      (Nothing, se)
-
-    parammap = M.fromList $ zip (map paramName valparams) $ map resSubExp res
-
-    resultType t = t `setArrayDims` map substitute (arrayDims t)
-
-    substitute (Var v)
-      | Just replacement <- M.lookup v parammap = replacement
-    substitute se =
-      se
+-- | The pass for multicore
+doubleBufferMC :: Pass MCMem MCMem
+doubleBufferMC =
+  doubleBuffer
+    "Double buffer MC"
+    "Double buffer memory in sequential loops (MC rep)."
+    optimiseMCOp
