@@ -18,7 +18,7 @@ module Futhark.CodeGen.Backends.GenericC.Monad
     Deallocate,
     CopyBarrier (..),
     Copy,
-    DoLMADCopy,
+    DoCopy,
 
     -- * Monadic compiler interface
     CompilerM,
@@ -201,9 +201,9 @@ type Copy op s =
   C.Exp ->
   CompilerM op s ()
 
--- | Perform an 'LMADCopy'.  It is expected that these functions are
+-- | Perform an 'Copy'.  It is expected that these functions are
 -- each specialised on which spaces they operate on, so that is not part of their arguments.
-type DoLMADCopy op s =
+type DoCopy op s =
   CopyBarrier ->
   PrimType ->
   [Count Elements C.Exp] ->
@@ -231,7 +231,7 @@ data Operations op s = Operations
     opsError :: ErrorCompiler op s,
     opsCall :: CallCompiler op s,
     -- | @(dst,src)@-space mapping to copy functions.
-    opsCopies :: M.Map (Space, Space) (DoLMADCopy op s),
+    opsCopies :: M.Map (Space, Space) (DoCopy op s),
     -- | If true, use reference counting.  Otherwise, bare
     -- pointers.
     opsFatMemory :: Bool,

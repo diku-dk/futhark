@@ -155,7 +155,7 @@ callKernel (GetSizeMax v size_class) = do
 callKernel (LaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size) =
   genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size
 
-copygpu2gpu :: GC.DoLMADCopy op s
+copygpu2gpu :: GC.DoCopy op s
 copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname = "lmad_copy_gpu2gpu_" <> show (primByteSize t :: Int) <> "b"
       r = length shape
@@ -175,7 +175,7 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
          }
      |]
 
-copyhost2gpu :: GC.DoLMADCopy op s
+copyhost2gpu :: GC.DoCopy op s
 copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -199,7 +199,7 @@ copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       GC.CopyBarrier -> [C.cexp|true|]
       GC.CopyNoBarrier -> [C.cexp|false|]
 
-copygpu2host :: GC.DoLMADCopy op s
+copygpu2host :: GC.DoCopy op s
 copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -223,7 +223,7 @@ copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       GC.CopyBarrier -> [C.cexp|true|]
       GC.CopyNoBarrier -> [C.cexp|false|]
 
-gpuCopies :: M.Map (Space, Space) (GC.DoLMADCopy op s)
+gpuCopies :: M.Map (Space, Space) (GC.DoCopy op s)
 gpuCopies =
   M.fromList
     [ ((Space "device", Space "device"), copygpu2gpu),

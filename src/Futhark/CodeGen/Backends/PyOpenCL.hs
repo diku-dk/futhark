@@ -390,7 +390,7 @@ finishIfSynchronous :: CompilerM op s ()
 finishIfSynchronous =
   stm $ If (Var "synchronous") [Exp $ simpleCall "sync" [Var "self"]] []
 
-copygpu2gpu :: DoLMADCopy op s
+copygpu2gpu :: DoCopy op s
 copygpu2gpu t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   stm . Exp . simpleCall "lmad_copy_gpu2gpu" $
     [ Var "self",

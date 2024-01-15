@@ -7,8 +7,8 @@ module Futhark.CodeGen.Backends.GenericC.Code
     compileCode,
     compileDest,
     compileArg,
-    compileLMADCopy,
-    compileLMADCopyWith,
+    compileCopy,
+    compileCopyWith,
     errorMsgString,
     linearCode,
   )
@@ -326,11 +326,11 @@ compileCode (If cond tbranch fbranch) = do
       [C.cstm|if ($exp:cond') { $items:tbranch' } else $stm:x|]
     _ ->
       [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
-compileCode (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
+compileCode (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
   cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
   case cp of
     Nothing ->
-      compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
     Just cp' -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
       dst' <- rawMem dst
@@ -396,9 +396,9 @@ compileCode (Call dests fname args) = do
       <*> mapM compileArg args
   stms $ mconcat unpack_dest
 
--- | Compile an 'LMADCopy' using sequential nested loops, but
+-- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.
-compileLMADCopyWith ::
+compileCopyWith ::
   [Count Elements (TExp Int64)] ->
   (C.Exp -> C.Exp -> CompilerM op s ()) ->
   ( Count Elements (TExp Int64),
@@ -409,7 +409,7 @@ compileLMADCopyWith ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
+compileCopyWith shape doWrite dst_lmad doRead src_lmad = do
   let (dstoffset, dststrides) = dst_lmad
       (srcoffset, srcstrides) = src_lmad
   shape' <- mapM (compileExp . untyped . unCount) shape
@@ -432,10 +432,10 @@ compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
       [C.citems|for (typename int64_t $id:i = 0; $id:i < $exp:n; $id:i++)
                   { $items:(loops ins body) }|]
 
--- | Compile an 'LMADCopy' using sequential nested loops and
+-- | Compile an 'Copy' using sequential nested loops and
 -- t'Read'/t'Write' of individual scalars.  This always works, but can
 -- be pretty slow if those reads and writes are costly.
-compileLMADCopy ::
+compileCopy ::
   PrimType ->
   [Count Elements (TExp Int64)] ->
   (VName, Space) ->
@@ -447,9 +447,9 @@ compileLMADCopy ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
+compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
   src' <- rawMem src
   dst' <- rawMem dst
   let doWrite dst_i = generateWrite dst' dst_i t dstspace Nonvolatile
       doRead src_i = generateRead src' src_i t srcspace Nonvolatile
-  compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
+  compileCopyWith shape doWrite dst_lmad doRead src_lmad
