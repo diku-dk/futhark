@@ -1406,7 +1406,7 @@ lmadCopy t dstloc srcloc = do
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
-    Imp.LMADCopy
+    Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
       (dstmem, dstspace)

@@ -563,7 +563,7 @@ compileCode (Read x src (Count iexp) restype DefaultSpace _) = do
         <$> compileExp (untyped iexp)
         <*> getMemType src restype
   GC.stm [C.cstm|$id:x = $exp:e;|]
-compileCode (LMADCopy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
+compileCode (Copy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) src_lmad) = do
   dst' <- GC.rawMem dst
   src' <- GC.rawMem src
   let doWrite dst_i ve = do
@@ -575,7 +575,7 @@ compileCode (LMADCopy t shape (dst, DefaultSpace) dst_lmad (src, DefaultSpace) s
         GC.stm [C.cstm|$exp:deref = $exp:(toStorage t ve);|]
       doRead src_i =
         fromStorage t . GC.derefPointer src' src_i <$> getMemType src t
-  GC.compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
+  GC.compileCopyWith shape doWrite dst_lmad doRead src_lmad
 compileCode (Free name space) = do
   cached <- isJust <$> GC.cacheMem name
   unless cached $ unRefMem name space
