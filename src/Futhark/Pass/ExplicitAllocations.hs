@@ -74,10 +74,7 @@ type Allocable fromrep torep inner =
   )
 
 data AllocEnv fromrep torep = AllocEnv
-  { -- | Aggressively try to reuse memory in do-loops -
-    -- should be True inside kernels, False outside.
-    aggressiveReuse :: Bool,
-    -- | When allocating memory, put it in this memory space.
+  { -- | When allocating memory, put it in this memory space.
     -- This is primarily used to ensure that group-wide
     -- statements store their results in local memory.
     allocSpace :: Space,
@@ -139,8 +136,7 @@ runAllocM space handleOp hints (AllocM m) =
   where
     env =
       AllocEnv
-        { aggressiveReuse = False,
-          allocSpace = space,
+        { allocSpace = space,
           envConsts = mempty,
           allocInOp = handleOp,
           envExpHints = hints

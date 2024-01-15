@@ -25,7 +25,6 @@ allocAtLevel :: SegLevel -> AllocM GPU GPUMem a -> AllocM GPU GPUMem a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
-      aggressiveReuse = True,
       allocInOp = handleHostOp (Just lvl)
     }
   where
