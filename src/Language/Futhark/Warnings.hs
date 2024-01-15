@@ -28,6 +28,7 @@ instance Semigroup Warnings where
 instance Monoid Warnings where
   mempty = Warnings mempty
 
+-- | Prettyprint warnings, making use of colours and such.
 prettyWarnings :: Warnings -> Doc AnsiStyle
 prettyWarnings (Warnings []) = mempty
 prettyWarnings (Warnings ws) =

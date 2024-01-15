@@ -1,3 +1,4 @@
+-- | @futhark profile@
 module Futhark.CLI.Profile (main) where
 
 import Control.Exception (catch)

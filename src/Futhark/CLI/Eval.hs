@@ -1,3 +1,4 @@
+-- | @futhark eval@
 module Futhark.CLI.Eval (main) where
 
 import Control.Exception
