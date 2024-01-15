@@ -433,7 +433,7 @@ compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
                   { $items:(loops ins body) }|]
 
 -- | Compile an 'LMADCopy' using sequential nested loops and
--- 'Read'/'Write' of individual scalars.  This always works, but can
+-- t'Read'/t'Write' of individual scalars.  This always works, but can
 -- be pretty slow if those reads and writes are costly.
 compileLMADCopy ::
   PrimType ->

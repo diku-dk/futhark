@@ -44,9 +44,9 @@
 --
 -- An optimization specfically targeted at non-segmented and large-segments
 -- segmented reductions with non-commutative is made: The stage one main loop is
--- essentially stripmined by a factor `chunk`, inserting collective copies via
+-- essentially stripmined by a factor *chunk*, inserting collective copies via
 -- local memory of each reduction parameter going into the intra-block (partial)
--- reductions. This saves a factor `chunk` number of intra-block reductions at
+-- reductions. This saves a factor *chunk* number of intra-block reductions at
 -- the cost of some overhead in collective copies.
 module Futhark.CodeGen.ImpGen.GPU.SegRed
   ( compileSegRed,
