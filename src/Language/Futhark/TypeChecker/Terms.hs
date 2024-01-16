@@ -410,7 +410,7 @@ checkExp (ArrayLit all_es _ loc) =
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
-  start_t <- expTypeFully start'
+  start_t <- expType start'
   maybe_step' <- case maybe_step of
     Nothing -> pure Nothing
     Just step -> do
@@ -849,12 +849,12 @@ checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
 checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
   es' <- mapM checkExp es
-  ets <- mapM expTypeFully es'
+  ets <- mapM expType es'
   mustHaveConstr (mkUsage loc "use of constructor") name t ets
   pure $ Constr name es' (Info t) loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
-  mt <- expTypeFully e'
+  mt <- expType e'
   (cs', t, retext) <- checkCases mt cs
   zeroOrderType
     (mkUsage loc "being returned 'match'")
