@@ -194,17 +194,16 @@ checkPat' _ (Wildcard _ loc) (Ascribed t) =
 checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
   t <- newTypeVar loc "t"
   pure $ Wildcard (Info t) loc
-checkPat' sizes (TuplePat ps loc) (Ascribed t)
+checkPat' sizes p@(TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
       TuplePat
         <$> zipWithM (checkPat' sizes) ps (map Ascribed ts)
         <*> pure loc
-checkPat' sizes p@(TuplePat ps loc) (Ascribed t) = do
-  ps_t <- replicateM (length ps) (newTypeVar loc "t")
-  unify (mkUsage loc "matching a tuple pattern") (Scalar (tupleRecord ps_t)) (toStruct t)
-  t' <- normTypeFully t
-  checkPat' sizes p $ Ascribed t'
+  | otherwise = do
+      ps_t <- replicateM (length ps) (newTypeVar loc "t")
+      unify (mkUsage loc "matching a tuple pattern") (Scalar (tupleRecord ps_t)) (toStruct t)
+      checkPat' sizes p $ Ascribed $ toParam Observe $ Scalar $ tupleRecord ps_t
 checkPat' sizes (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (\p -> checkPat' sizes p NoneInferred) ps <*> pure loc
 checkPat' _ (RecordPat p_fs _) _
@@ -214,23 +213,23 @@ checkPat' _ (RecordPat p_fs _) _
           </> "Did you mean"
           <> dquotes (pretty (drop 1 (nameToString f)) <> "=_")
           <> "?"
-checkPat' sizes (RecordPat p_fs loc) (Ascribed (Scalar (Record t_fs)))
-  | sort (map fst p_fs) == sort (M.keys t_fs) =
-      RecordPat . M.toList <$> check <*> pure loc
+checkPat' sizes p@(RecordPat p_fs loc) (Ascribed t)
+  | Scalar (Record t_fs) <- t,
+    sort (map fst p_fs) == sort (M.keys t_fs) =
+      RecordPat . M.toList <$> check t_fs <*> pure loc
+  | otherwise = do
+      p_fs' <- traverse (const $ newTypeVar loc "t") $ M.fromList p_fs
+
+      when (sort (M.keys p_fs') /= sort (map fst p_fs)) $
+        typeError loc mempty $
+          "Duplicate fields in record pattern" <+> pretty p <> "."
+
+      unify (mkUsage loc "matching a record pattern") (Scalar (Record p_fs')) (toStruct t)
+      checkPat' sizes p $ Ascribed $ toParam Observe $ Scalar (Record p_fs')
   where
-    check =
+    check t_fs =
       traverse (uncurry (checkPat' sizes)) $
         M.intersectionWith (,) (M.fromList p_fs) (fmap Ascribed t_fs)
-checkPat' sizes p@(RecordPat fields loc) (Ascribed t) = do
-  fields' <- traverse (const $ newTypeVar loc "t") $ M.fromList fields
-
-  when (sort (M.keys fields') /= sort (map fst fields)) $
-    typeError loc mempty $
-      "Duplicate fields in record pattern" <+> pretty p <> "."
-
-  unify (mkUsage loc "matching a record pattern") (Scalar (Record fields')) (toStruct t)
-  t' <- normTypeFully t
-  checkPat' sizes p $ Ascribed t'
 checkPat' sizes (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (\p -> checkPat' sizes p NoneInferred) (M.fromList fs)
@@ -279,8 +278,7 @@ checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do
     checkPat' sizes p $ Ascribed p_t
   mustHaveConstr usage n (toStruct t') (patternStructType <$> ps')
   unify usage t' (toStruct t)
-  t'' <- normTypeFully t
-  pure $ PatConstr n (Info t'') ps' loc
+  pure $ PatConstr n (Info t) ps' loc
   where
     usage = mkUsage loc "matching against constructor"
 checkPat' sizes (PatConstr n NoInfo ps loc) NoneInferred = do

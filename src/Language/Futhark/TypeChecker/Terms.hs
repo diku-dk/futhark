@@ -406,8 +406,7 @@ checkExp (ArrayLit all_es _ loc) =
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
-      et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [sizeFromInteger (genericLength all_es) mempty])
+      t <- arrayOfM loc et (Shape [sizeFromInteger (genericLength all_es) mempty])
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
