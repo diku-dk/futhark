@@ -344,6 +344,29 @@ transformLambda path (Lambda params ret body) =
   Lambda params ret
     <$> localScope (scopeOfLParams params) (transformBody path body)
 
+versionScanRed ::
+  KernelPath ->
+  Pat Type ->
+  StmAux () ->
+  SubExp ->
+  Lambda SOACS ->
+  DistribM (Stms GPU) ->
+  DistribM (Body GPU) ->
+  ([(Name, Bool)] -> DistribM (Body GPU)) ->
+  DistribM (Stms GPU)
+versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody =
+  if not (lambdaContainsParallelism map_lam)
+    || ("sequential_inner" `inAttrs` stmAuxAttrs aux)
+    then paralleliseOuter
+    else do
+      ((outer_suff, outer_suff_key), suff_stms) <-
+        sufficientParallelism "suff_outer_screma" [w] path Nothing
+
+      outer_stms <- outerParallelBody
+      inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
+
+      (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+
 transformStm :: KernelPath -> Stm SOACS -> DistribM GPUStms
 transformStm _ stm
   | "sequential" `inAttrs` stmAuxAttrs (stmAux stm) =
@@ -370,21 +393,39 @@ transformStm path (Let pat aux (Loop merge form body)) =
 transformStm path (Let pat aux (Op (Screma w arrs form)))
   | Just lam <- isMapSOAC form =
       onMap path $ MapLoop pat aux w lam arrs
-transformStm path (Let res_pat (StmAux cs _ _) (Op (Screma w arrs form)))
+transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
   | Just scans <- isScanSOAC form,
     Scan scan_lam nes <- singleScan scans,
-    Just do_iswim <- iswim res_pat w scan_lam $ zip nes arrs = do
+    Just do_iswim <- iswim pat w scan_lam $ zip nes arrs = do
       types <- asksScope scopeForSOACs
       transformStms path . stmsToList . snd =<< runBuilderT (certifying cs do_iswim) types
-  | Just (scans, map_lam) <- isScanomapSOAC form = runBuilder_ $ do
-      scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
-        (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
-        let scan_lam'' = soacsLambdaToGPU scan_lam'
-        pure $ SegBinOp Noncommutative scan_lam'' nes' shape
-      let map_lam_sequential = soacsLambdaToGPU map_lam
-      lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
-      addStms . fmap (certify cs)
-        =<< segScan lvl res_pat mempty w scan_ops map_lam_sequential arrs [] []
+  | Just (scans, map_lam) <- isScanomapSOAC form = do
+      let paralleliseOuter = runBuilder_ $ do
+            scan_ops <- forM scans $ \(Scan scan_lam nes) -> do
+              (scan_lam', nes', shape) <- determineReduceOp scan_lam nes
+              let scan_lam'' = soacsLambdaToGPU scan_lam'
+              pure $ SegBinOp Noncommutative scan_lam'' nes' shape
+            let map_lam_sequential = soacsLambdaToGPU map_lam
+            lvl <- segThreadCapped [w] "segscan" $ NoRecommendation SegNoVirt
+            addStms . fmap (certify cs)
+              =<< segScan lvl pat mempty w scan_ops map_lam_sequential arrs [] []
+
+          outerParallelBody =
+            renameBody
+              =<< (mkBody <$> paralleliseOuter <*> pure (varsRes (patNames pat)))
+
+          paralleliseInner path' = do
+            (mapstm, scanstm) <-
+              scanomapToMapAndScan pat (w, scans, map_lam, arrs)
+            types <- asksScope scopeForSOACs
+            transformStms path' . stmsToList <=< (`runBuilderT_` types) $
+              addStms =<< simplifyStms (stmsFromList [certify cs mapstm, certify cs scanstm])
+
+          innerParallelBody path' =
+            renameBody
+              =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
+
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
 transformStm path (Let res_pat aux (Op (Screma w arrs form)))
   | Just [Reduce comm red_fun nes] <- isReduceSOAC form,
     let comm'
@@ -424,18 +465,7 @@ transformStm path (Let pat aux@(StmAux cs _ _) (Op (Screma w arrs form)))
             renameBody
               =<< (mkBody <$> paralleliseInner path' <*> pure (varsRes (patNames pat)))
 
-      if not (lambdaContainsParallelism map_lam)
-        || "sequential_inner"
-          `inAttrs` stmAuxAttrs aux
-        then paralleliseOuter
-        else do
-          ((outer_suff, outer_suff_key), suff_stms) <-
-            sufficientParallelism "suff_outer_redomap" [w] path Nothing
-
-          outer_stms <- outerParallelBody
-          inner_stms <- innerParallelBody ((outer_suff_key, False) : path)
-
-          (suff_stms <>) <$> kernelAlternatives pat inner_stms [(outer_suff, outer_stms)]
+      versionScanRed path pat aux w map_lam paralleliseOuter outerParallelBody innerParallelBody
 transformStm path (Let pat (StmAux cs _ _) (Op (Screma w arrs form))) = do
   -- This screma is too complicated for us to immediately do
   -- anything, so split it up and try again.

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Incremental flattening of `map`-`scan` compositions with nested
+  parallelism (similar to the logic for `map`-`reduce` compositions
+  that we have had for years).
+
 ### Removed
 
 ### Changed
