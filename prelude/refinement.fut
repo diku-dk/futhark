@@ -23,3 +23,5 @@ def forall 'a '^b 'c (_ : a) (_ : b) : c = ???
 def elem 'a 'b 'c (_ : a) (_ : b) : c = ???
 
 def axiom 'a 'b (_ : a) : b = ???
+
+def is_indexfn 'a 'b (_ : a) : b = ???
