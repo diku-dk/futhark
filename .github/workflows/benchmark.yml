@@ -78,12 +78,12 @@ jobs:
       with:
         backend: opencl
         system: A100
-        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-opencl-A100
+        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-opencl-A100 --exclude=hendrixgpu21fl
     - uses: ./.github/actions/benchmark
       with:
         backend: cuda
         system: A100
-        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-cuda-A100
+        slurm-options: -p gpu --gres=gpu:a100:1 --job-name=fut-cuda-A100 --exclude=hendrixgpu21fl
 
   # benchmark-titanx-cuda:
   #   runs-on: hendrix
