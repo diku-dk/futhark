@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Flattening of `scatter` with multi-dimensional elements (#2089).
 
+* Some instances of not-actually-irregular allocations were mistakenly
+  interpreted as irregular. Fixing this was a dividend of the memory
+  representation simplifications of 0.25.12.
+
 ## [0.25.12]
 
 ### Added
