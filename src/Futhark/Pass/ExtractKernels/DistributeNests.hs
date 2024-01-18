@@ -793,13 +793,15 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
 
   let grouped = groupScatterResults (zip3 as_ws as_ns as_inps) (is' ++ vs)
       (_, dest_arrs, _) = unzip3 grouped
-      k_body = KernelBody () k_body_stms (map (inPlaceReturn ispace) grouped)
+
+  dest_arrs_ts <- mapM (lookupType . kernelInputArray) dest_arrs
+
+  let k_body = KernelBody () k_body_stms (zipWith (inPlaceReturn ispace) dest_arrs_ts grouped)
       -- Remove unused kernel inputs, since some of these might
       -- reference the array we are scattering into.
       kernel_inps' =
         filter ((`nameIn` freeIn k_body) . kernelInputName) kernel_inps
 
-  dest_arrs_ts <- mapM (lookupType . kernelInputArray) dest_arrs
   (k, k_stms) <- mapKernel mk_lvl ispace kernel_inps' dest_arrs_ts k_body
 
   traverse renameStm <=< runBuilder_ $ do
@@ -817,13 +819,13 @@ segmentedScatterKernel nest perm scatter_pat cs scatter_w lam ivs dests = do
       maybe bad pure $ find ((== a) . kernelInputName) kernel_inps
     bad = error "Ill-typed nested scatter encountered."
 
-    inPlaceReturn ispace (_aw, inp, is_vs) =
+    inPlaceReturn ispace arr_t (_, inp, is_vs) =
       WriteReturns
         ( foldMap (foldMap resCerts . fst) is_vs
             <> foldMap (resCerts . snd) is_vs
         )
         (kernelInputArray inp)
-        [ (Slice $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
+        [ (fullSlice arr_t $ map DimFix $ map Var (init gtids) ++ map resSubExp is, resSubExp v)
           | (is, v) <- is_vs
         ]
       where

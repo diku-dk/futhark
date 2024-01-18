@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Flattening of `scatter` with multi-dimensional elements (#2089).
+
 ## [0.25.12]
 
 ### Added
