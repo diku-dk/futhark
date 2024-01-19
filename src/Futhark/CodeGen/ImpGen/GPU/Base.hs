@@ -21,7 +21,6 @@ module Futhark.CodeGen.ImpGen.GPU.Base
     defKernelAttrs,
     lvlKernelAttrs,
     allocLocal,
-    kernelAlloc,
     compileThreadResult,
     virtualiseBlocks,
     kernelLoop,
@@ -117,20 +116,18 @@ allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
   sOp $ Imp.LocalAlloc mem size
 
-kernelAlloc ::
+threadAlloc ::
   Pat LetDecMem ->
   SubExp ->
   Space ->
   InKernelGen ()
-kernelAlloc (Pat [_]) _ ScalarSpace {} =
+threadAlloc (Pat [_]) _ ScalarSpace {} =
   -- Handled by the declaration of the memory block, which is then
   -- translated to an actual scalar variable during C code generation.
   pure ()
-kernelAlloc (Pat [mem]) size (Space "shared") =
-  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
-kernelAlloc (Pat [mem]) _ _ =
-  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel."
-kernelAlloc dest _ _ =
+threadAlloc (Pat [mem]) _ _ =
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel thread."
+threadAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
 updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
@@ -663,7 +660,7 @@ blockReduceWithOffset offset w lam arrs = do
 
 compileThreadOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileThreadOp pat (Alloc size space) =
-  kernelAlloc pat size space
+  threadAlloc pat size space
 compileThreadOp pat _ =
   compilerBugS $ "compileThreadOp: cannot compile rhs of binding " ++ prettyString pat
 

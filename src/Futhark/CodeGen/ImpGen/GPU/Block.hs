@@ -336,9 +336,25 @@ compileBlockExp dest e = do
     doSync Match {} = True
     doSync _ = False
 
+blockAlloc ::
+  Pat LetDecMem ->
+  SubExp ->
+  Space ->
+  InKernelGen ()
+blockAlloc (Pat [_]) _ ScalarSpace {} =
+  -- Handled by the declaration of the memory block, which is then
+  -- translated to an actual scalar variable during C code generation.
+  pure ()
+blockAlloc (Pat [mem]) size (Space "shared") =
+  allocLocal (patElemName mem) $ Imp.bytes $ pe64 size
+blockAlloc (Pat [mem]) _ _ =
+  compilerLimitationS $ "Cannot allocate memory block " ++ prettyString mem ++ " in kernel block."
+blockAlloc dest _ _ =
+  error $ "Invalid target for in-kernel allocation: " ++ show dest
+
 compileBlockOp :: OpCompiler GPUMem KernelEnv Imp.KernelOp
 compileBlockOp pat (Alloc size space) =
-  kernelAlloc pat size space
+  blockAlloc pat size space
 compileBlockOp pat (Inner (SegOp (SegMap lvl space _ body))) = do
   compileFlatId space
 
