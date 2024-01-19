@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   interpreted as irregular. Fixing this was a dividend of the memory
   representation simplifications of 0.25.12.
 
+* Obscure issue related to expansion of shared memory allocations (#2092).
+
 ## [0.25.12]
 
 ### Added
