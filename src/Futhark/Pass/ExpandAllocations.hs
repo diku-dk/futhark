@@ -13,6 +13,7 @@ import Data.Either (rights)
 import Data.List (find, foldl')
 import Data.Map.Strict qualified as M
 import Data.Maybe
+import Data.Sequence qualified as Seq
 import Futhark.Analysis.Alias as Alias
 import Futhark.Analysis.SymbolTable qualified as ST
 import Futhark.Error
@@ -176,7 +177,7 @@ transformExp (WithAcc inputs lam) = do
       let num_is = shapeRank shape
           is = map paramName $ take num_is $ lambdaParams op_lam
       (alloc_stms, alloc_offsets) <-
-        genericExpandedInvariantAllocations (const (shape, map le64 is)) invariant_allocs
+        genericExpandedInvariantAllocations (const $ const (shape, map le64 is)) invariant_allocs
 
       scope <- askScope
       let scope' = scopeOf op_lam <> scope <> scopeOf alloc_stms
@@ -260,6 +261,10 @@ transformScanRed lvl space ops kbody = do
 boundInKernelBody :: KernelBody GPUMem -> Names
 boundInKernelBody = namesFromList . M.keys . scopeOf . kernelBodyStms
 
+addStmsToKernelBody :: Stms GPUMem -> KernelBody GPUMem -> KernelBody GPUMem
+addStmsToKernelBody stms kbody =
+  kbody {kernelBodyStms = stms <> kernelBodyStms kbody}
+
 allocsForBody ::
   Extraction ->
   Extraction ->
@@ -278,11 +283,25 @@ allocsForBody variant_allocs invariant_allocs grid space kbody kbody' m = do
       variant_allocs
       invariant_allocs
 
+  -- We assume that any shared memory allocations can be inserted back
+  -- into kbody'. This would not work if we had SegRed/SegScan
+  -- operations that performed shared memory allocations. We don't
+  -- currently, and if we would in the future, we would need to be
+  -- more careful about summarising the allocations in
+  -- transformScanRed.
+  let (alloc_stms_dev, alloc_stms_shared) =
+        Seq.partition (not . isSharedAlloc) alloc_stms
+
   scope <- askScope
   let scope' = scopeOfSegSpace space <> scope <> scopeOf alloc_stms
   either throwError pure <=< runOffsetM scope' $ do
-    kbody'' <- offsetMemoryInKernelBody alloc_offsets kbody'
-    m alloc_offsets alloc_stms kbody''
+    kbody'' <-
+      addStmsToKernelBody alloc_stms_shared
+        <$> offsetMemoryInKernelBody alloc_offsets kbody'
+    m alloc_offsets alloc_stms_dev kbody''
+  where
+    isSharedAlloc (Let _ _ (Op (Alloc _ (Space "shared")))) = True
+    isSharedAlloc _ = False
 
 memoryRequirements ::
   KernelGrid ->
@@ -383,10 +402,12 @@ extractGenericBodyAllocations user bound_outside bound_kernel get_stms set_stms 
             stmsToList (get_stms body)
    in (set_stms (stmsFromList stms) body, allocs)
 
-expandable, notScalar :: Space -> Bool
-expandable (Space "shared") = False
-expandable ScalarSpace {} = False
-expandable _ = True
+expandable :: User -> Space -> Bool
+expandable (SegBlock {}, _) (Space "shared") = False
+expandable _ ScalarSpace {} = False
+expandable _ _ = True
+
+notScalar :: Space -> Bool
 notScalar ScalarSpace {} = False
 notScalar _ = True
 
@@ -397,7 +418,7 @@ extractStmAllocations ::
   Stm GPUMem ->
   Writer Extraction (Maybe (Stm GPUMem))
 extractStmAllocations user bound_outside bound_kernel (Let (Pat [patElem]) _ (Op (Alloc size space)))
-  | expandable space && expandableSize size
+  | expandable user space && expandableSize size
       -- FIXME: the '&& notScalar space' part is a hack because we
       -- don't otherwise hoist the sizes out far enough, and we
       -- promise to be super-duper-careful about not having variant
@@ -449,7 +470,7 @@ extractStmAllocations user bound_outside bound_kernel stm = do
       pure lam {lambdaBody = body}
 
 genericExpandedInvariantAllocations ::
-  (User -> (Shape, [Exp64])) -> Extraction -> ExpandM (Stms GPUMem, RebaseMap)
+  (User -> Space -> (Shape, [Exp64])) -> Extraction -> ExpandM (Stms GPUMem, RebaseMap)
 genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   -- We expand the invariant allocations by adding an inner dimension
   -- equal to the number of kernel threads.
@@ -458,25 +479,25 @@ genericExpandedInvariantAllocations getNumUsers invariant_allocs = do
   pure (alloc_stms, mconcat rebases)
   where
     expand (mem, (user, per_thread_size, space)) = do
-      let num_users = fst $ getNumUsers user
+      let num_users = fst $ getNumUsers user space
           allocpat = Pat [PatElem mem $ MemMem space]
       total_size <-
         letExp "total_size" <=< toExp . product $
           pe64 per_thread_size : map pe64 (shapeDims num_users)
       letBind allocpat $ Op $ Alloc (Var total_size) space
-      pure $ M.singleton mem $ newBase user
+      pure $ M.singleton mem $ newBase user space
 
-    newBaseThread user _old_shape =
-      let (users_shape, user_ids) = getNumUsers user
+    newBaseThread user space _old_shape =
+      let (users_shape, user_ids) = getNumUsers user space
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids,
             product dims
           )
 
-    newBase user@(SegThreadInBlock {}, _) = newBaseThread user
-    newBase user@(SegThread {}, _) = newBaseThread user
-    newBase user@(SegBlock {}, _) = \_old_shape ->
-      let (users_shape, user_ids) = getNumUsers user
+    newBase user@(SegThreadInBlock {}, _) space = newBaseThread user space
+    newBase user@(SegThread {}, _) space = newBaseThread user space
+    newBase user@(SegBlock {}, _) space = \_old_shape ->
+      let (users_shape, user_ids) = getNumUsers user space
           dims = map pe64 (shapeDims users_shape)
        in ( flattenIndex dims user_ids,
             product dims
@@ -491,12 +512,15 @@ expandedInvariantAllocations ::
 expandedInvariantAllocations num_threads (Count num_tblocks) (Count tblock_size) =
   genericExpandedInvariantAllocations getNumUsers
   where
-    getNumUsers (SegThread {}, [gtid]) = (Shape [num_threads], [gtid])
-    getNumUsers (SegThread {}, [gid, ltid]) = (Shape [num_tblocks, tblock_size], [gid, ltid])
-    getNumUsers (SegThreadInBlock {}, [gtid]) = (Shape [num_threads], [gtid])
-    getNumUsers (SegThreadInBlock {}, [gid, ltid]) = (Shape [num_tblocks, tblock_size], [gid, ltid])
-    getNumUsers (SegBlock {}, [gid]) = (Shape [num_tblocks], [gid])
-    getNumUsers user = error $ "getNumUsers: unhandled " ++ show user
+    getNumUsers (SegThread {}, [gtid]) _ = (Shape [num_threads], [gtid])
+    getNumUsers (SegThread {}, [gid, ltid]) _ = (Shape [num_tblocks, tblock_size], [gid, ltid])
+    getNumUsers (SegThreadInBlock {}, [gtid]) _ = (Shape [num_threads], [gtid])
+    getNumUsers (SegThreadInBlock {}, [_gid, ltid]) (Space "shared") =
+      (Shape [tblock_size], [ltid])
+    getNumUsers (SegThreadInBlock {}, [gid, ltid]) (Space "device") =
+      (Shape [num_tblocks, tblock_size], [gid, ltid])
+    getNumUsers (SegBlock {}, [gid]) _ = (Shape [num_tblocks], [gid])
+    getNumUsers user space = error $ "getNumUsers: unhandled " ++ show (user, space)
 
 expandedVariantAllocations ::
   SubExp ->

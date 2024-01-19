@@ -199,7 +199,7 @@ intraGroupWithAccInput (shape, arrs, Just (lam, nes)) = do
 intraGroupStm :: Stm SOACS -> IntraGroupM ()
 intraGroupStm stm@(Let pat aux e) = do
   scope <- askScope
-  let lvl = SegThread SegNoVirt Nothing
+  let lvl = SegThreadInBlock SegNoVirt
 
   case e of
     Loop merge form loopbody ->
