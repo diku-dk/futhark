@@ -79,12 +79,7 @@ simplifyStmsGeneric ::
   m (Stms rep)
 simplifyStmsGeneric rules ops stms = do
   scope <- askScope
-  Simplify.simplifyStms
-    ops
-    rules
-    blockers
-    scope
-    stms
+  Simplify.simplifyStms ops rules blockers scope stms
 
 isResultAlloc :: (OpC rep ~ MemOp op) => Engine.BlockPred rep
 isResultAlloc _ usage (Let (Pat [pe]) _ (Op Alloc {})) =
