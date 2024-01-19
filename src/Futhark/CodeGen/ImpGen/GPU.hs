@@ -165,7 +165,7 @@ segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
 
 -- Create boolean expression that checks whether all kernels in the
--- enclosed code do not use more local memory than we have available.
+-- enclosed code do not use more shared memory than we have available.
 -- We look at *all* the kernels here, even those that might be
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
@@ -193,7 +193,7 @@ checkSharedMemoryReqs in_scope code = do
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
-    localAllocSize (Imp.LocalAlloc _ size) = [size]
+    localAllocSize (Imp.SharedAlloc _ size) = [size]
     localAllocSize _ = []
 
     -- These allocations will actually be padded to an 8-byte aligned

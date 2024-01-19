@@ -69,7 +69,7 @@ data Kernel = Kernel
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements. Set this to
+    -- when considering the shared memory requirements. Set this to
     -- false for kernels that do their own checking.
     kernelCheckSharedMemory :: Bool
   }
@@ -170,7 +170,7 @@ data KernelOp
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
-  | LocalAlloc VName (Count Bytes (TExp Int64))
+  | SharedAlloc VName (Count Bytes (TExp Int64))
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -238,8 +238,8 @@ instance Pretty KernelOp where
     "mem_fence_local()"
   pretty (MemFence FenceGlobal) =
     "mem_fence_global()"
-  pretty (LocalAlloc name size) =
-    pretty name <+> equals <+> "local_alloc" <> parens (pretty size)
+  pretty (SharedAlloc name size) =
+    pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
   pretty (ErrorSync FenceLocal) =
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =

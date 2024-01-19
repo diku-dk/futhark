@@ -370,7 +370,7 @@ onKernel target kernel = do
 
   -- The local_failure variable is an int despite only really storing
   -- a single bit of information, as some OpenCL implementations
-  -- (e.g. AMD) does not like byte-sized local memory (and the others
+  -- (e.g. AMD) does not like byte-sized shared memory (and the others
   -- likely pad to a whole word anyway).
   let (safety, error_init)
         -- We conservatively assume that any called function can fail.
@@ -629,7 +629,7 @@ inKernelOperations env mode body =
       GC.stm [C.cstm|mem_fence_local();|]
     kernelOps (MemFence FenceGlobal) =
       GC.stm [C.cstm|mem_fence_global();|]
-    kernelOps (LocalAlloc name size) = do
+    kernelOps (SharedAlloc name size) = do
       name' <- newVName $ prettyString name ++ "_backing"
       GC.modifyUserState $ \s ->
         s {kernelSharedMemory = (name', size) : kernelSharedMemory s}

@@ -10,29 +10,29 @@
 -- respect the asymptotics, and do not copy the destination array.
 --
 -- We also use a heuristic strategy for computing subhistograms in
--- local memory when possible.  Given:
+-- shared memory when possible.  Given:
 --
 -- H: total size of histograms in bytes, including any lock arrays.
 --
 -- G: block size
 --
--- T: number of bytes of local memory each thread can be given without
+-- T: number of bytes of shared memory each thread can be given without
 -- impacting occupancy (determined experimentally, e.g. 32).
 --
--- LMAX: maximum amount of local memory per threadblock (hard limit).
+-- LMAX: maximum amount of shared memory per threadblock (hard limit).
 --
 -- We wish to compute:
 --
 -- COOP: cooperation level (number of threads per subhistogram)
 --
--- LH: number of local memory subhistograms
+-- LH: number of shared memory subhistograms
 --
 -- We do this as:
 --
 -- COOP = ceil(H / T)
 -- LH = ceil((G*T)/H)
 -- if COOP <= G && H <= LMAX then
---   use local memory
+--   use shared memory
 -- else
 --   use global memory
 module Futhark.CodeGen.ImpGen.GPU.SegHist (compileSegHist) where
@@ -706,7 +706,7 @@ histKernelLocalPass
                           local_bucket_is
                           global_bucket_is
 
-        sComment "initialize histograms in local memory" $
+        sComment "initialize histograms in shared memory" $
           onAllHistograms $ \dest_local dest_global op ne local_subhisto_i global_subhisto_i local_bucket_is global_bucket_is ->
             sComment "First subhistogram is initialised from global memory; others with neutral element." $ do
               let global_is = map Imp.le64 segment_is ++ [0] ++ global_bucket_is
@@ -772,7 +772,7 @@ histKernelLocalPass
 
         sOp $ Imp.ErrorSync Imp.FenceGlobal
 
-        sComment "Compact the multiple local memory subhistograms to result in global memory" $
+        sComment "Compact the multiple shared memory subhistograms to result in global memory" $
           onSlugs $ \slug dests hist_H_chk histo_dims _histo_size bins_per_thread -> do
             trunc_H <-
               dPrimV "trunc_H" . sMin64 hist_H_chk $
@@ -988,7 +988,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
   emit $ Imp.DebugPrint "local B" $ Just $ untyped hist_B
   emit $ Imp.DebugPrint "local M" $ Just $ untyped $ tvExp hist_M
   emit $
-    Imp.DebugPrint "local memory needed" $
+    Imp.DebugPrint "shared memory needed" $
       Just $
         untyped $
           hist_H * hist_el_size * sExt64 (tvExp hist_M)
@@ -1016,7 +1016,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
             unCount num_tblocks' `divUp` hist_Nout
       else pure num_tblocks'
 
-  -- We only use local memory if the number of updates per histogram
+  -- We only use shared memory if the number of updates per histogram
   -- at least matches the histogram size, as otherwise it is not
   -- asymptotically efficient.  This mostly matters for the segmented
   -- case.
@@ -1031,7 +1031,7 @@ localMemoryCase map_pes hist_T space hist_H hist_el_size hist_N _ slugs kbody = 
           .>. 0
 
       run = do
-        emit $ Imp.DebugPrint "## Using local memory" Nothing
+        emit $ Imp.DebugPrint "## Using shared memory" Nothing
         emit $ Imp.DebugPrint "Histogram size (H)" $ Just $ untyped hist_H
         emit $ Imp.DebugPrint "Multiplication degree (M)" $ Just $ untyped $ tvExp hist_M
         emit $ Imp.DebugPrint "Cooperation level (C)" $ Just $ untyped hist_C
