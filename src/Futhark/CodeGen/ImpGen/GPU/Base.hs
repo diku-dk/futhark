@@ -114,7 +114,7 @@ keyWithEntryPoint fname key =
 
 allocLocal :: AllocCompiler GPUMem r Imp.KernelOp
 allocLocal mem size =
-  sOp $ Imp.LocalAlloc mem size
+  sOp $ Imp.SharedAlloc mem size
 
 threadAlloc ::
   Pat LetDecMem ->
@@ -997,7 +997,7 @@ isActive limit = case actives of
     active i = (Imp.le64 i .<.)
 
 -- | Change every memory block to be in the global address space,
--- except those who are in the local memory space.  This only affects
+-- except those who are in the shared memory space.  This only affects
 -- generated code - we still need to make sure that the memory is
 -- actually present on the device (and declared as variables in the
 -- kernel).
@@ -1118,7 +1118,7 @@ virtualiseBlocks _ _ m = do
 data KernelAttrs = KernelAttrs
   { -- | Can this kernel execute correctly even if previous kernels failed?
     kAttrFailureTolerant :: Bool,
-    -- | Does whatever launch this kernel check for local memory capacity itself?
+    -- | Does whatever launch this kernel check for shared memory capacity itself?
     kAttrCheckSharedMemory :: Bool,
     -- | Number of blocks.
     kAttrNumBlocks :: Count NumBlocks SubExp,

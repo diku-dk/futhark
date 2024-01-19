@@ -1315,7 +1315,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               msgprintf("Kernel %s with\n"
                         "  grid=(%d,%d,%d)\n"
                         "  block=(%d,%d,%d)\n"
-                        "  local memory=%d",
+                        "  shared memory=%d",
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],
@@ -1328,7 +1328,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     time_start = get_wall_time();
   }
 
-  // Some implementations do not work with 0-byte local memory.
+  // Some implementations do not work with 0-byte shared memory.
   if (shared_mem_bytes == 0) {
     shared_mem_bytes = 4;
   }

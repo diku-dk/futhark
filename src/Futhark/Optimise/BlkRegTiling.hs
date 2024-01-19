@@ -79,7 +79,7 @@ kkLoopBody
   epilogue = do
     let (map_t1, map_t2) = (pt_A, pt_B)
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
-    -- copy A to local memory
+    -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
       copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
@@ -100,9 +100,9 @@ kkLoopBody
           ( do
               reg_mem <- segMap2D "reg_mem" segthd_lvl ResultPrivate (ty, tx) $
                 \(ltid_y, ltid_x) -> do
-                  -- copy A from local memory to registers
+                  -- copy A from shared memory to registers
                   asss <- aCopyLoc2Reg k ltid_y
-                  -- copy B from local memory to registers
+                  -- copy B from shared memory to registers
                   bsss <- bCopyLoc2Reg k ltid_x
                   pure $ varsRes [asss, bsss]
               let [asss, bsss] = reg_mem

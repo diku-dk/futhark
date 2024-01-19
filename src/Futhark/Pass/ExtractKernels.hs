@@ -167,7 +167,7 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.DistributeNests
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.Intragroup
+import Futhark.Pass.ExtractKernels.Intrablock
 import Futhark.Pass.ExtractKernels.StreamKernel
 import Futhark.Pass.ExtractKernels.ToGPU
 import Futhark.Tools
@@ -577,8 +577,8 @@ sufficientParallelism desc ws path def =
 -- | Intra-group parallelism is worthwhile if the lambda contains more
 -- than one instance of non-map nested parallelism, or any nested
 -- parallelism inside a loop.
-worthIntraGroup :: Lambda SOACS -> Bool
-worthIntraGroup lam = bodyInterest (lambdaBody lam) > 1
+worthIntrablock :: Lambda SOACS -> Bool
+worthIntrablock lam = bodyInterest (lambdaBody lam) > 1
   where
     bodyInterest body =
       sum $ interest <$> bodyStms body
@@ -737,11 +737,11 @@ onMap' loopnest path mk_seq_stms mk_par_stms pat lam = do
   types <- askScope
 
   let only_intra = onlyExploitIntra (stmAuxAttrs aux)
-      may_intra = worthIntraGroup lam && mayExploitIntra attrs
+      may_intra = worthIntrablock lam && mayExploitIntra attrs
 
   intra <-
     if only_intra || may_intra
-      then flip runReaderT types $ intraGroupParallelise loopnest lam
+      then flip runReaderT types $ intrablockParallelise loopnest lam
       else pure Nothing
 
   case intra of

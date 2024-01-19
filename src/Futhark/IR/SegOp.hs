@@ -1255,7 +1255,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
 
 -- If a SegRed contains two reduction operations that have the same
 -- vector shape, merge them together.  This saves on communication
--- overhead, but can in principle lead to more local memory usage.
+-- overhead, but can in principle lead to more shared memory usage.
 topDownSegOp _ (Pat pes) _ (SegRed lvl space ops ts kbody)
   | length ops > 1,
     op_groupings <-

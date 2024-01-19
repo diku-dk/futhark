@@ -1051,7 +1051,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               msgprintf("Kernel %s with\n"
                         "  grid=(%d,%d,%d)\n"
                         "  block=(%d,%d,%d)\n"
-                        "  local memory=%d",
+                        "  shared memory=%d",
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],

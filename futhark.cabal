@@ -353,7 +353,7 @@ library
       Futhark.Pass.ExtractKernels.Distribution
       Futhark.Pass.ExtractKernels.ISRWIM
       Futhark.Pass.ExtractKernels.Interchange
-      Futhark.Pass.ExtractKernels.Intragroup
+      Futhark.Pass.ExtractKernels.Intrablock
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore

@@ -687,7 +687,7 @@ compileBlockResult space pe (Returns _ _ what) = do
       localOps threadOperations $
         sWhen (kernelLocalThreadId constants .==. 0) $
           copyDWIMFix (patElemName pe) gids what []
-    else -- If the result of the block is an array in local memory, we
+    else -- If the result of the block is an array in shared memory, we
     -- store it by collective copying among all the threads of the
     -- block.  TODO: also do this if the array is in global memory
     -- (but this is a bit more tricky, synchronisation-wise).

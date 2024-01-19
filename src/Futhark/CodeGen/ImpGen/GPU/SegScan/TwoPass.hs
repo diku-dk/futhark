@@ -242,7 +242,7 @@ scanStage1 (Pat all_pes) num_tblocks tblock_size space scans kbody = do
                       copyDWIMFix (paramName p) [] ne []
                   )
 
-              sComment "combine with carry and write to local memory" $
+              sComment "combine with carry and write to shared memory" $
                 compileStms mempty (bodyStms $ lambdaBody scan_op) $
                   forM_ (zip3 rets local_arrs $ map resSubExp $ bodyResult $ lambdaBody scan_op) $
                     \(t, arr, se) ->

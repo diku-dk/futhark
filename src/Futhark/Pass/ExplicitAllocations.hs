@@ -76,7 +76,7 @@ type Allocable fromrep torep inner =
 data AllocEnv fromrep torep = AllocEnv
   { -- | When allocating memory, put it in this memory space.
     -- This is primarily used to ensure that group-wide
-    -- statements store their results in local memory.
+    -- statements store their results in shared memory.
     allocSpace :: Space,
     -- | The set of names that are known to be constants at
     -- kernel compile time.
