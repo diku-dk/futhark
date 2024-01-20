@@ -668,7 +668,13 @@ pOpaqueTypes :: Parser OpaqueTypes
 pOpaqueTypes = keyword "types" $> OpaqueTypes <*> braces (many pOpaqueType)
 
 pProg :: PR rep -> Parser (Prog rep)
-pProg pr = Prog <$> pOpaqueTypes <*> pStms pr <*> many (pFunDef pr)
+pProg pr =
+  Prog
+    <$> (fromMaybe noTypes <$> optional pOpaqueTypes)
+    <*> pStms pr
+    <*> many (pFunDef pr)
+  where
+    noTypes = OpaqueTypes mempty
 
 pSOAC :: PR rep -> Parser (SOAC.SOAC rep)
 pSOAC pr =
