@@ -326,7 +326,7 @@ data Code a
     -- statement.
     DebugPrint String (Maybe Exp)
   | -- | Log the given message, *without* a trailing linebreak (unless
-    -- part of the mssage).
+    -- part of the message).
     TracePrint (ErrorMsg Exp)
   | -- | Perform an extensible operation.
     Op a
