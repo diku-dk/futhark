@@ -24,7 +24,6 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Sequence qualified as Seq
 import Futhark.IR.GPU
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.MonadFreshNames
 import Futhark.Optimise.TileLoops.Shared
@@ -57,7 +56,6 @@ kkLoopBody ::
     SegLevel,
     [Int],
     (VName, SubExp, VName, SubExp, SubExp),
-    (SubExp, SubExp),
     (VName, VName),
     (Stm GPU, VName, PrimType, Stm GPU, VName, PrimType),
     (Lambda GPU, Lambda GPU)
@@ -72,7 +70,6 @@ kkLoopBody
     segthd_lvl,
     var_dims,
     (gtid_x, width_B, gtid_y, height_A, common_dim),
-    (a_loc_sz, b_loc_sz),
     (iii, jjj),
     (load_A, inp_A, pt_A, load_B, inp_B, pt_B),
     (map_lam, red_lam)
@@ -82,13 +79,13 @@ kkLoopBody
   epilogue = do
     let (map_t1, map_t2) = (pt_A, pt_B)
     kk <- letExp "kk" =<< toExp (le64 kk0 * pe64 tk)
-    -- copy A to local memory
+    -- copy A to shared memory
     (a_loc, aCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_sz, a_loc_init')
+      copyGlb2ShMem kk (gtid_y, iii, map_t1, height_A, inp_A, load_A, a_loc_init')
 
     -- copy B from global to shared memory
     (b_loc, bCopyLoc2Reg) <-
-      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_sz, b_loc_init')
+      copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_loc_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
     thd_acc <- forLoop tk [thd_res_merge] $ \k [acc_merge] ->
@@ -103,9 +100,9 @@ kkLoopBody
           ( do
               reg_mem <- segMap2D "reg_mem" segthd_lvl ResultPrivate (ty, tx) $
                 \(ltid_y, ltid_x) -> do
-                  -- copy A from local memory to registers
+                  -- copy A from shared memory to registers
                   asss <- aCopyLoc2Reg k ltid_y
-                  -- copy B from local memory to registers
+                  -- copy B from shared memory to registers
                   bsss <- bCopyLoc2Reg k ltid_x
                   pure $ varsRes [asss, bsss]
               let [asss, bsss] = reg_mem
@@ -142,14 +139,13 @@ kkLoopBody
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
           slc_X == slc_X',
-          Just ixf_fn <- M.lookup x ixfn_env,
-          (IxFun.IxFun lmad _) <- ixf_fn =
+          Just lmad <- M.lookup x ixfn_env =
             innerHasStride1 lmad
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
-            stride = IxFun.ldStride $ last lmad_dims
+            stride = LMAD.ldStride $ last lmad_dims
          in stride == pe64 (intConst Int64 1)
       --
       mkRedomapOneTileBody acc_merge asss bsss fits_ij = do
@@ -173,10 +169,16 @@ kkLoopBody
                           -- is garbage anyways and should not be written.
                           -- so fits_ij should be always true!!!
 
-                            le64 iii + le64 i + pe64 ry * le64 ltid_y
-                              .<. pe64 height_A
-                              .&&. le64 jjj + le64 j + pe64 rx * le64 ltid_x
-                                .<. pe64 width_B
+                            le64 iii
+                              + le64 i
+                              + pe64 ry
+                                * le64 ltid_y
+                                  .<. pe64 height_A
+                                  .&&. le64 jjj
+                              + le64 j
+                              + pe64 rx
+                                * le64 ltid_x
+                                  .<. pe64 width_B
                     )
                     ( do
                         a <- index "a" as [i]
@@ -204,14 +206,14 @@ kkLoopBody
       --
       copyGlb2ShMem ::
         VName ->
-        (VName, VName, PrimType, SubExp, VName, Stm GPU, SubExp, VName) ->
+        (VName, VName, PrimType, SubExp, VName, Stm GPU, VName) ->
         Builder GPU (VName, VName -> VName -> Builder GPU VName)
-      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, loc_sz_X, x_loc_init') = do
+      copyGlb2ShMem kk (gtid, ii, ptp_X_el, parlen_X, inp_X, load_X, x_loc_init') = do
         let (t_par, r_par, tseq_div_tpar) = (tx, rx, tk_div_tx)
             is_inner_coal = isInnerCoal env inp_X load_X
             str_A = baseString inp_X
         x_loc <-
-          segScatter2D (str_A ++ "_glb2loc") loc_sz_X x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
+          segScatter2D (str_A ++ "_glb2loc") x_loc_init' [r_par, tseq_div_tpar] (t_par, t_par) $
             scatterFun is_inner_coal
 
         pure (x_loc, copyLoc2Reg is_inner_coal str_A x_loc)
@@ -255,7 +257,8 @@ kkLoopBody
               letSubExp (str_A ++ "_elem")
                 =<< eIf
                   ( toExp $
-                      le64 gtid .<. pe64 parlen_X
+                      le64 gtid
+                        .<. pe64 parlen_X
                         .&&. if epilogue
                           then le64 a_seqdim_idx .<. pe64 common_dim
                           else true
@@ -327,7 +330,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
               foldl (\x d -> pe64 d * x) gridxyt_pexp $
                 map snd rem_outer_dims_rev
 
-        (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
+        (grid_size, tblock_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
         (gid_x, gid_y, gid_flat) <- mkGidsXYF
         gid_t <- newVName "gid_t"
 
@@ -355,7 +358,6 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   segthd_lvl,
                   var_dims,
                   (gtid_x, width_B, gtid_y, height_A, common_dim),
-                  (a_loc_sz, b_loc_sz),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -376,8 +378,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             letTupExp "redomap_res_if"
               =<< eIf
                 ( toExp $
-                    le64 full_tiles .==. pe64 rk
-                      .||. pe64 common_dim .==. (pe64 tk * le64 full_tiles + le64 ttt)
+                    le64 full_tiles
+                      .==. pe64 rk
+                      .||. pe64 common_dim
+                      .==. (pe64 tk * le64 full_tiles + le64 ttt)
                 )
                 (resultBodyM $ map Var prologue_res_list)
                 ( do
@@ -406,8 +410,8 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             (height_A, width_B, rem_outer_dims)
             code2'
 
-        let grid = KernelGrid (Count grid_size) (Count group_size)
-            level' = SegGroup SegNoVirt (Just grid)
+        let grid = KernelGrid (Count grid_size) (Count tblock_size)
+            level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_t, gridDim_t), (gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
@@ -460,8 +464,10 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                 letSubExp "res_elem"
                   =<< eIf
                     ( toExp $
-                        le64 gtid_y .<. pe64 height_A
-                          .&&. le64 gtid_x .<. pe64 width_B
+                        le64 gtid_y
+                          .<. pe64 height_A
+                          .&&. le64 gtid_x
+                          .<. pe64 width_B
                     )
                     ( do
                         addStms code2_subs
@@ -511,7 +517,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         let grid_pexp =
               foldl (\x d -> pe64 d * x) gridxy_pexp $
                 map snd rem_outer_dims_rev
-        (grid_size, group_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
+        (grid_size, tblock_size, segthd_lvl) <- mkNewSegthdLvl tx ty grid_pexp
 
         (gid_x, gid_y, gid_flat) <- mkGidsXYF
 
@@ -539,7 +545,6 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                   segthd_lvl,
                   var_dims,
                   (gtid_x, width_B, gtid_y, height_A, common_dim),
-                  (a_loc_sz, b_loc_sz),
                   (iii, jjj),
                   (load_A, inp_A, map_t1, load_B, inp_B, map_t2),
                   (map_lam, red_lam)
@@ -577,8 +582,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             (height_A, width_B, rem_outer_dims)
             code2'
 
-        let grid = KernelGrid (Count grid_size) (Count group_size)
-            level' = SegGroup SegNoVirt (Just grid)
+        let grid = KernelGrid (Count grid_size) (Count tblock_size)
+            level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
         pure $ Let pat aux $ Op $ SegOp $ SegMap level' space' ts kbody'
@@ -608,8 +613,10 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                       letSubExp "res_elem"
                         =<< eIf
                           ( toExp $
-                              le64 gtid_y .<. pe64 height_A
-                                .&&. le64 gtid_x .<. pe64 width_B
+                              le64 gtid_y
+                                .<. pe64 height_A
+                                .&&. le64 gtid_x
+                                .<. pe64 width_B
                           )
                           ( do
                               addStms code2'
@@ -771,9 +778,9 @@ mkNewSegthdLvl ::
   Builder GPU (SubExp, SubExp, SegLevel)
 mkNewSegthdLvl tx ty grid_pexp = do
   grid_size <- letSubExp "grid_size" =<< toExp grid_pexp
-  group_size <- letSubExp "group_size" =<< toExp (pe64 ty * pe64 tx)
-  let segthd_lvl = SegThreadInGroup (SegNoVirtFull (SegSeqDims []))
-  pure (grid_size, group_size, segthd_lvl)
+  tblock_size <- letSubExp "tblock_size" =<< toExp (pe64 ty * pe64 tx)
+  let segthd_lvl = SegThreadInBlock (SegNoVirtFull (SegSeqDims []))
+  pure (grid_size, tblock_size, segthd_lvl)
 
 mkGidsXYF :: Builder GPU (VName, VName, VName)
 mkGidsXYF = do
@@ -1085,10 +1092,10 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
         let gridxyz_pexp = pe64 gridDim_z * pe64 gridDim_y * pe64 gridDim_x
         let grid_pexp = product $ gridxyz_pexp : map (pe64 . snd) rem_outer_dims_rev
         grid_size <- letSubExp "grid_size_tile3d" =<< toExp grid_pexp
-        group_size <- letSubExp "group_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
-        let segthd_lvl = SegThreadInGroup (SegNoVirtFull (SegSeqDims []))
+        tblock_size <- letSubExp "tblock_size_tile3d" =<< toExp (pe64 ty * pe64 tx)
+        let segthd_lvl = SegThreadInBlock (SegNoVirtFull (SegSeqDims []))
 
-        count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz group_size
+        count_shmem <- letSubExp "count_shmem" =<< ceilDiv rz tblock_size
 
         gid_x <- newVName "gid_x"
         gid_y <- newVName "gid_y"
@@ -1128,9 +1135,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                       forM (zip loc_arr_merge2_nms (M.toList tab_out)) $ \(loc_Y_nm, (glb_Y_nm, (ptp_Y, load_Y))) -> do
                         ltid_flat <- newVName "ltid_flat"
                         ltid <- newVName "ltid"
-                        let segspace = SegSpace ltid_flat [(ltid, group_size)]
+                        let segspace = SegSpace ltid_flat [(ltid, tblock_size)]
                         ((res_v, res_i), stms) <- runBuilder $ do
-                          offs <- letExp "offs" =<< toExp (pe64 group_size * le64 tt)
+                          offs <- letExp "offs" =<< toExp (pe64 tblock_size * le64 tt)
                           loc_ind <- letExp "loc_ind" =<< toExp (le64 ltid + le64 offs)
                           letBindNames [gtid_z] =<< toExp (le64 ii + le64 loc_ind)
                           let glb_ind = gtid_z
@@ -1153,14 +1160,14 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                           -- y_tp  <- subExpType y_elm
                           pure (y_elm, y_ind)
 
-                        let ret = WriteReturns mempty (Shape [rz]) loc_Y_nm [(Slice [DimFix res_i], res_v)]
+                        let ret = WriteReturns mempty loc_Y_nm [(Slice [DimFix res_i], res_v)]
                         let body = KernelBody () stms [ret]
+                        loc_Y_nm_t <- lookupType loc_Y_nm
 
                         res_nms <-
                           letTupExp "Y_glb2loc" <=< renameExp $
-                            Op $
-                              SegOp $
-                                SegMap segthd_lvl segspace [Prim ptp_Y] body
+                            Op . SegOp $
+                              SegMap segthd_lvl segspace [loc_Y_nm_t] body
                         let res_nm : _ = res_nms
                         pure res_nm
                     resultBodyM $ map Var loc_arr_merge2_nms'
@@ -1251,9 +1258,12 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                     letTupExp' "res_elem"
                       =<< eIf
                         ( toExp $
-                            le64 gtid_y .<. pe64 d_Ky
-                              .&&. le64 gtid_x .<. pe64 d_Kx
-                              .&&. le64 gtid_z .<. pe64 d_M
+                            le64 gtid_y
+                              .<. pe64 d_Ky
+                              .&&. le64 gtid_x
+                              .<. pe64 d_Kx
+                              .&&. le64 gtid_z
+                              .<. pe64 d_M
                         )
                         ( do
                             addStms code2'
@@ -1287,8 +1297,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
 
           pure $ map (RegTileReturns mempty regtile_ret_dims) epilogue_res'
         -- END (ret_seggroup, stms_seggroup) <- runBuilder $ do
-        let grid = KernelGrid (Count grid_size) (Count group_size)
-            level' = SegGroup SegNoVirt (Just grid)
+        let grid = KernelGrid (Count grid_size) (Count tblock_size)
+            level' = SegBlock SegNoVirt (Just grid)
             space' = SegSpace gid_flat (rem_outer_dims ++ [(gid_z, gridDim_z), (gid_y, gridDim_y), (gid_x, gridDim_x)])
             kbody' = KernelBody () stms_seggroup ret_seggroup
 

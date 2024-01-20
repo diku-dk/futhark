@@ -22,6 +22,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.DList qualified as DL
+import Data.List qualified as L
 import Data.Loc
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -37,7 +38,7 @@ import Futhark.CodeGen.Backends.GenericC.Pretty
 import Futhark.CodeGen.Backends.GenericC.Server (serverDefs)
 import Futhark.CodeGen.Backends.GenericC.Types
 import Futhark.CodeGen.ImpCode
-import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, freeListH, halfH, lockH, timingH, utilH)
+import Futhark.CodeGen.RTS.C (cacheH, contextH, contextPrototypesH, copyH, errorsH, eventListH, freeListH, halfH, lockH, timingH, utilH)
 import Futhark.IR.GPU.Sizes
 import Futhark.Manifest qualified as Manifest
 import Futhark.MonadFreshNames
@@ -61,7 +62,7 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
-lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU :: DoCopy op s
 lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname :: String
       (fname, ty) =
@@ -70,7 +71,7 @@ lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
           2 -> ("lmad_copy_2b", [C.cty|typename uint16_t|])
           4 -> ("lmad_copy_4b", [C.cty|typename uint32_t|])
           8 -> ("lmad_copy_8b", [C.cty|typename uint64_t|])
-          k -> error $ "lmadcopyCPU: " <> error (show k)
+          k -> error $ "lmadcopyCPU: " <> show k
       r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
       srcstride_inits = [[C.cinit|$exp:e|] | Count e <- srcstride]
@@ -261,15 +262,10 @@ defineMemorySpace space = do
 
   onClear [C.citem|ctx->$id:peakname = 0;|]
 
-  let peakmsg = "Peak memory usage for " ++ spacedesc ++ ": %lld bytes.\n"
+  let peakmsg = "\"" <> spacedesc <> "\": %lld"
   pure
     ( [unrefdef, allocdef, setdef],
-      -- Do not report memory usage for DefaultSpace (CPU memory),
-      -- because it would not be accurate anyway.  This whole
-      -- tracking probably needs to be rethought.
-      if space == DefaultSpace
-        then [C.citem|{}|]
-        else [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|]
+      [C.citem|str_builder(&builder, $string:peakmsg, (long long) ctx->$id:peakname);|]
     )
   where
     mty = fatMemType space
@@ -442,6 +438,7 @@ $halfH
 $timingH
 $lockH
 $freeListH
+$eventListH
 |]
 
   let early_decls = definitionsText $ DL.toList $ compEarlyDecls endstate
@@ -576,7 +573,7 @@ generateTuningParams params = do
       size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
       size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
       num_params = length params
-  earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  earlyDecl [C.cedecl|struct tuning_params { int dummy; $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
   earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
@@ -588,7 +585,6 @@ generateCommonLibFuns memreport = do
   ctx <- contextType
   cfg <- configType
   ops <- asks envOperations
-  profilereport <- gets $ DL.toList . compProfileItems
 
   publicDef_ "context_config_set_debugging" InitDecl $ \s ->
     ( [C.cedecl|void $id:s($ty:cfg* cfg, int flag);|],
@@ -640,6 +636,7 @@ generateCommonLibFuns memreport = do
     )
 
   sync <- publicName "context_sync"
+  let comma = [C.citem|str_builder_char(&builder, ',');|]
   publicDef_ "context_report" MiscDecl $ \s ->
     ( [C.cedecl|char* $id:s($ty:ctx *ctx);|],
       [C.cedecl|char* $id:s($ty:ctx *ctx) {
@@ -649,10 +646,12 @@ generateCommonLibFuns memreport = do
 
                  struct str_builder builder;
                  str_builder_init(&builder);
-                 $items:memreport
-                 if (ctx->profiling) {
-                   $items:profilereport
-                 }
+                 str_builder_char(&builder, '{');
+                 str_builder_str(&builder, "\"memory\":{");
+                 $items:(L.intersperse comma memreport)
+                 str_builder_str(&builder, "},\"events\":[");
+                 report_events_in_list(&ctx->event_list, &builder);
+                 str_builder_str(&builder, "]}");
                  return builder.str;
                }|]
     )

@@ -33,6 +33,7 @@ compileProg mode class_name prog = do
     Imp.Program
       opencl_code
       opencl_prelude
+      macros
       kernels
       types
       sizes
@@ -58,8 +59,8 @@ compileProg mode class_name prog = do
           Assign (Var "build_options") $ List [],
           Assign (Var "preferred_device") None,
           Assign (Var "default_threshold") None,
-          Assign (Var "default_group_size") None,
-          Assign (Var "default_num_groups") None,
+          Assign (Var "default_tblock_size") None,
+          Assign (Var "default_num_tblocks") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
           Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude <> opencl_code
@@ -82,14 +83,14 @@ compileProg mode class_name prog = do
             "interactive=False",
             "platform_pref=preferred_platform",
             "device_pref=preferred_device",
-            "default_group_size=default_group_size",
-            "default_num_groups=default_num_groups",
+            "default_tblock_size=default_tblock_size",
+            "default_num_tblocks=default_num_tblocks",
             "default_tile_size=default_tile_size",
             "default_reg_tile_size=default_reg_tile_size",
             "default_threshold=default_threshold",
             "sizes=sizes"
           ]
-          [Escape $ openClInit types assign sizes failures]
+          [Escape $ openClInit macros types assign sizes failures]
       options =
         [ Option
             { optionLongName = "platform",
@@ -127,14 +128,14 @@ compileProg mode class_name prog = do
               optionShortName = Nothing,
               optionArgument = RequiredArgument "int",
               optionAction =
-                [Assign (Var "default_group_size") $ Var "optarg"]
+                [Assign (Var "default_tblock_size") $ Var "optarg"]
             },
           Option
             { optionLongName = "default-num-groups",
               optionShortName = Nothing,
               optionArgument = RequiredArgument "int",
               optionAction =
-                [Assign (Var "default_num_groups") $ Var "optarg"]
+                [Assign (Var "default_num_tblocks") $ Var "optarg"]
             },
           Option
             { optionLongName = "default-tile-size",
@@ -202,37 +203,38 @@ compileProg mode class_name prog = do
 asLong :: PyExp -> PyExp
 asLong x = simpleCall "np.int64" [x]
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
 kernelConstToExp :: Imp.KernelConst -> PyExp
-kernelConstToExp (Imp.SizeConst key) =
-  Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+kernelConstToExp (Imp.SizeConst key _) =
+  getParamByKey key
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
-compileGroupDim :: Imp.GroupDim -> CompilerM op s PyExp
-compileGroupDim (Left e) = asLong <$> compileExp e
-compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+compileBlockDim :: Imp.BlockDim -> CompilerM op s PyExp
+compileBlockDim (Left e) = asLong <$> compileExp e
+compileBlockDim (Right kc) = pure $ kernelConstToExp kc
 
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do
   v' <- compileVar v
-  stm $ Assign v' $ kernelConstToExp $ Imp.SizeConst key
+  stm $ Assign v' $ getParamByKey key
 callKernel (Imp.CmpSizeLe v key x) = do
   v' <- compileVar v
   x' <- compileExp x
-  stm $
-    Assign v' $
-      BinOp "<=" (kernelConstToExp (Imp.SizeConst key)) x'
+  stm $ Assign v' $ BinOp "<=" (getParamByKey key) x'
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
-callKernel (Imp.LaunchKernel safety name local_memory args num_workgroups workgroup_size) = do
-  num_workgroups' <- mapM (fmap asLong . compileExp) num_workgroups
-  workgroup_size' <- mapM compileGroupDim workgroup_size
-  let kernel_size = zipWith mult_exp num_workgroups' workgroup_size'
+callKernel (Imp.LaunchKernel safety name shared_memory args num_threadblocks worktblock_size) = do
+  num_threadblocks' <- mapM (fmap asLong . compileExp) num_threadblocks
+  worktblock_size' <- mapM compileBlockDim worktblock_size
+  let kernel_size = zipWith mult_exp num_threadblocks' worktblock_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
-  local_memory' <- compileExp $ Imp.untyped $ Imp.unCount local_memory
-  body <- collect $ launchKernel name safety kernel_size workgroup_size' local_memory' args
+  shared_memory' <- compileExp $ Imp.untyped $ Imp.unCount shared_memory
+  body <- collect $ launchKernel name safety kernel_size worktblock_size' shared_memory' args
   stm $ If cond body []
 
   when (safety >= Imp.SafetyFull) $
@@ -250,9 +252,9 @@ launchKernel ::
   PyExp ->
   [Imp.KernelArg] ->
   CompilerM op s ()
-launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = do
+launchKernel kernel_name safety kernel_dims threadblock_dims shared_memory args = do
   let kernel_dims' = Tuple kernel_dims
-      workgroup_dims' = Tuple workgroup_dims
+      threadblock_dims' = Tuple threadblock_dims
       kernel_name' = "self." <> zEncodeText (nameToText kernel_name) <> "_var"
   args' <- mapM processKernelArg args
   let failure_args =
@@ -264,13 +266,13 @@ launchKernel kernel_name safety kernel_dims workgroup_dims local_memory args = d
           ]
   stm . Exp $
     simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-      [simpleCall "cl.LocalMemory" [simpleCall "max" [local_memory, Integer 1]]]
+      [simpleCall "cl.SharedMemory" [simpleCall "max" [shared_memory, Integer 1]]]
         ++ failure_args
         ++ args'
   stm . Exp $
     simpleCall
       "cl.enqueue_nd_range_kernel"
-      [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', workgroup_dims']
+      [Var "self.queue", Var (T.unpack kernel_name'), kernel_dims', threadblock_dims']
   finishIfSynchronous
   where
     processKernelArg :: Imp.KernelArg -> CompilerM op s PyExp
@@ -390,7 +392,7 @@ finishIfSynchronous :: CompilerM op s ()
 finishIfSynchronous =
   stm $ If (Var "synchronous") [Exp $ simpleCall "sync" [Var "self"]] []
 
-copygpu2gpu :: DoLMADCopy op s
+copygpu2gpu :: DoCopy op s
 copygpu2gpu t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   stm . Exp . simpleCall "lmad_copy_gpu2gpu" $
     [ Var "self",

@@ -7,6 +7,7 @@ module Futhark.CodeGen.RTS.C
     contextPrototypesH,
     copyH,
     freeListH,
+    eventListH,
     gpuH,
     gpuPrototypesH,
     halfH,
@@ -51,6 +52,11 @@ uniformH = $(embedStringFile "rts/c/uniform.h")
 freeListH :: T.Text
 freeListH = $(embedStringFile "rts/c/free_list.h")
 {-# NOINLINE freeListH #-}
+
+-- | @rts/c/event_list.h@
+eventListH :: T.Text
+eventListH = $(embedStringFile "rts/c/event_list.h")
+{-# NOINLINE eventListH #-}
 
 -- | @rts/c/gpu.h@
 gpuH :: T.Text

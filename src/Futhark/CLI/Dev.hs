@@ -35,7 +35,6 @@ import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Optimise.Fusion
 import Futhark.Optimise.HistAccs
-import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.MemoryBlockMerging qualified as MemoryBlockMerging
 import Futhark.Optimise.ReduceDeviceSyncs (reduceDeviceSyncs)
@@ -330,23 +329,6 @@ allocateOption short =
     long = [passLongOption pass]
     pass = Seq.explicitAllocations
 
-iplOption :: String -> FutharkOption
-iplOption short =
-  passOption (passDescription pass) (UntypedPass perform) short long
-  where
-    perform (GPU prog) config =
-      GPU
-        <$> runPipeline (onePass inPlaceLoweringGPU) config prog
-    perform (Seq prog) config =
-      Seq
-        <$> runPipeline (onePass inPlaceLoweringSeq) config prog
-    perform s _ =
-      externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
-
-    long = [passLongOption pass]
-    pass = inPlaceLoweringSeq
-
 cseOption :: String -> FutharkOption
 cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -451,6 +433,7 @@ commandLineOptions =
                 "c" -> Right $ SeqMemAction compileCAction
                 "multicore" -> Right $ MCMemAction compileMulticoreAction
                 "opencl" -> Right $ GPUMemAction compileOpenCLAction
+                "hip" -> Right $ GPUMemAction compileHIPAction
                 "cuda" -> Right $ GPUMemAction compileCUDAAction
                 "wasm" -> Right $ SeqMemAction compileCtoWASMAction
                 "wasm-multicore" -> Right $ MCMemAction compileMulticoreToWASMAction
@@ -461,7 +444,7 @@ commandLineOptions =
 
               Right $ \opts -> opts {futharkAction = action}
           )
-          "c|multicore|opencl|cuda|python|pyopencl"
+          "c|multicore|opencl|cuda|hip|python|pyopencl"
       )
       "Run this compiler backend on pipeline result.",
     Option
@@ -615,9 +598,9 @@ commandLineOptions =
     kernelsPassOption reduceDeviceSyncs [],
     typedPassOption soacsProg GPU extractKernels [],
     typedPassOption soacsProg MC extractMulticore [],
-    iplOption [],
     allocateOption "a",
     kernelsMemPassOption doubleBufferGPU [],
+    mcMemPassOption doubleBufferMC [],
     kernelsMemPassOption expandAllocations [],
     kernelsMemPassOption MemoryBlockMerging.optimise [],
     seqMemPassOption LiftAllocations.liftAllocationsSeqMem [],

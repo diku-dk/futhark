@@ -15,6 +15,8 @@ import Futhark.CodeGen.ImpCode.OpenCL
   ( ErrorMsg (..),
     ErrorMsgPart (..),
     FailureMsg (..),
+    KernelConst (..),
+    KernelConstExp,
     ParamMap,
     PrimType (..),
     errorMsgArgTypes,
@@ -28,15 +30,28 @@ import NeatInterpolation (text)
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
 
+getParamByKey :: Name -> PyExp
+getParamByKey key = Index (Var "self.sizes") (IdxExp $ String $ prettyText key)
+
+kernelConstToExp :: KernelConst -> PyExp
+kernelConstToExp (SizeConst key _) =
+  getParamByKey key
+kernelConstToExp (SizeMaxConst size_class) =
+  Var $ "self.max_" <> prettyString size_class
+
+compileConstExp :: KernelConstExp -> PyExp
+compileConstExp e = runIdentity $ Py.compilePrimExp (pure . kernelConstToExp) e
+
 -- | Python code (as a string) that calls the
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
-openClInit :: [PrimType] -> String -> ParamMap -> [FailureMsg] -> T.Text
-openClInit types assign sizes failures =
+openClInit :: [(Name, KernelConstExp)] -> [PrimType] -> String -> ParamMap -> [FailureMsg] -> T.Text
+openClInit constants types assign sizes failures =
   [text|
 size_heuristics=$size_heuristics
 self.global_failure_args_max = $max_num_args
 self.failure_msgs=$failure_msgs
+constants = $constants'
 program = initialise_opencl_object(self,
                                    program_src=fut_opencl_src,
                                    build_options=build_options,
@@ -44,15 +59,16 @@ program = initialise_opencl_object(self,
                                    interactive=interactive,
                                    platform_pref=platform_pref,
                                    device_pref=device_pref,
-                                   default_group_size=default_group_size,
-                                   default_num_groups=default_num_groups,
+                                   default_tblock_size=default_tblock_size,
+                                   default_num_tblocks=default_num_tblocks,
                                    default_tile_size=default_tile_size,
                                    default_reg_tile_size=default_reg_tile_size,
                                    default_threshold=default_threshold,
                                    size_heuristics=size_heuristics,
                                    required_types=$types',
                                    user_sizes=sizes,
-                                   all_sizes=$sizes')
+                                   all_sizes=$sizes',
+                                   constants=constants)
 $assign'
 |]
   where
@@ -62,6 +78,12 @@ $assign'
     sizes' = prettyText $ sizeClassesToPython sizes
     max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
     failure_msgs = prettyText $ List $ map formatFailure failures
+    onConstant (name, e) =
+      Tuple
+        [ String (nameToText name),
+          Lambda "" (compileConstExp e)
+        ]
+    constants' = prettyText $ List $ map onConstant constants
 
 formatFailure :: FailureMsg -> PyExp
 formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
@@ -106,8 +128,8 @@ sizeHeuristicsToPython = List . map f
 
         which' = case which of
           LockstepWidth -> String "lockstep_width"
-          NumGroups -> String "num_groups"
-          GroupSize -> String "group_size"
+          NumBlocks -> String "num_tblocks"
+          BlockSize -> String "tblock_size"
           TileSize -> String "tile_size"
           RegTileSize -> String "reg_tile_size"
           Threshold -> String "threshold"

@@ -44,8 +44,8 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
 
     which' = case which of
       LockstepWidth -> [C.cexp|ctx->lockstep_width|]
-      NumGroups -> [C.cexp|ctx->cfg->default_num_groups|]
-      GroupSize -> [C.cexp|ctx->cfg->default_group_size|]
+      NumBlocks -> [C.cexp|ctx->cfg->default_num_groups|]
+      BlockSize -> [C.cexp|ctx->cfg->default_group_size|]
       TileSize -> [C.cexp|ctx->cfg->default_tile_size|]
       RegTileSize -> [C.cexp|ctx->cfg->default_reg_tile_size|]
       Threshold -> [C.cexp|ctx->cfg->default_threshold|]
@@ -77,13 +77,15 @@ sizeHeuristicsCode (SizeHeuristic platform_name device_type which (TPrimExp what
 
 mkBoilerplate ::
   T.Text ->
+  [(Name, KernelConstExp)] ->
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM OpenCL () ()
-mkBoilerplate opencl_program kernels types failures = do
+mkBoilerplate opencl_program macros kernels types failures = do
   generateGPUBoilerplate
     opencl_program
+    macros
     backendsOpenclH
     (M.keys kernels)
     types
@@ -103,11 +105,6 @@ mkBoilerplate opencl_program kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, const char* s);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char* s);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
-  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_command_queue(struct futhark_context_config *cfg, typename cl_command_queue);|]
   GC.headerDecl GC.MiscDecl [C.cedecl|typename cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx);|]
 
@@ -169,13 +166,6 @@ cliOptions =
              optionAction = [C.cstm|futhark_context_config_add_build_option(cfg, optarg);|]
            },
          Option
-           { optionLongName = "profile",
-             optionShortName = Just 'P',
-             optionArgument = NoArgument,
-             optionDescription = "Gather profiling data while executing and print out a summary at the end.",
-             optionAction = [C.cstm|futhark_context_config_set_profiling(cfg, 1);|]
-           },
-         Option
            { optionLongName = "list-devices",
              optionShortName = Nothing,
              optionArgument = NoArgument,
@@ -194,7 +184,7 @@ openclMemoryType space = error $ "GPU backend does not support '" ++ space ++ "'
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program opencl_code opencl_prelude kernels types params failures prog'
+    Program opencl_code opencl_prelude macros kernels types params failures prog'
     ) <-
     ImpGen.compileProg prog
   (ws,)
@@ -203,7 +193,7 @@ compileProg version prog = do
       version
       params
       operations
-      (mkBoilerplate (opencl_prelude <> opencl_code) kernels types failures)
+      (mkBoilerplate (opencl_prelude <> opencl_code) macros kernels types failures)
       opencl_includes
       (Space "device", [Space "device", DefaultSpace])
       cliOptions

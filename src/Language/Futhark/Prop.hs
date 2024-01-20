@@ -89,12 +89,12 @@ module Language.Futhark.Prop
     UncheckedSlice,
     UncheckedExp,
     UncheckedModExp,
-    UncheckedSigExp,
+    UncheckedModTypeExp,
     UncheckedTypeParam,
     UncheckedPat,
     UncheckedValBind,
     UncheckedTypeBind,
-    UncheckedSigBind,
+    UncheckedModTypeBind,
     UncheckedModBind,
     UncheckedDec,
     UncheckedSpec,
@@ -110,9 +110,9 @@ module Language.Futhark.Prop
     Pat,
     ModExp,
     ModParam,
-    SigExp,
+    ModTypeExp,
     ModBind,
-    SigBind,
+    ModTypeBind,
     ValBind,
     Dec,
     Spec,
@@ -698,7 +698,15 @@ intrinsics =
         ++ zipWith
           namify
           [intrinsicStart ..]
-          ( [ ( "flatten",
+          ( [ ( "manifest",
+                IntrinsicPolyFun
+                  [tp_a]
+                  [Scalar $ t_a mempty]
+                  $ RetType []
+                  $ Scalar
+                  $ t_a mempty
+              ),
+              ( "flatten",
                 IntrinsicPolyFun
                   [tp_a, sp_n, sp_m]
                   [Array Observe (shape [n, m]) $ t_a mempty]
@@ -1209,7 +1217,7 @@ progImports = concatMap decImports . progDecs
 decImports :: DecBase f vn -> [(String, Loc)]
 decImports (OpenDec x _) = modExpImports x
 decImports (ModDec md) = modExpImports $ modExp md
-decImports SigDec {} = []
+decImports ModTypeDec {} = []
 decImports TypeDec {} = []
 decImports ValDec {} = []
 decImports (LocalDec d _) = decImports d
@@ -1236,31 +1244,31 @@ progModuleTypes prog = foldMap reach mtypes_used
       where
         onDec OpenDec {} = mempty
         onDec ModDec {} = mempty
-        onDec (SigDec sb) =
-          M.singleton (sigName sb) (onSigExp (sigExp sb))
+        onDec (ModTypeDec sb) =
+          M.singleton (modTypeName sb) (onModTypeExp (modTypeExp sb))
         onDec TypeDec {} = mempty
         onDec ValDec {} = mempty
         onDec (LocalDec d _) = onDec d
         onDec ImportDec {} = mempty
 
-        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-        onSigExp (SigParens e _) = onSigExp e
-        onSigExp (SigSpecs ss _) = foldMap onSpec ss
-        onSigExp (SigWith e _ _) = onSigExp e
-        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onModTypeExp (ModTypeVar v _ _) = S.singleton $ qualLeaf v
+        onModTypeExp (ModTypeParens e _) = onModTypeExp e
+        onModTypeExp (ModTypeSpecs ss _) = foldMap onSpec ss
+        onModTypeExp (ModTypeWith e _ _) = onModTypeExp e
+        onModTypeExp (ModTypeArrow _ e1 e2 _) = onModTypeExp e1 <> onModTypeExp e2
 
         onSpec ValSpec {} = mempty
         onSpec TypeSpec {} = mempty
         onSpec TypeAbbrSpec {} = mempty
-        onSpec (ModSpec vn e _ _) = S.singleton vn <> onSigExp e
-        onSpec (IncludeSpec e _) = onSigExp e
+        onSpec (ModSpec vn e _ _) = S.singleton vn <> onModTypeExp e
+        onSpec (IncludeSpec e _) = onModTypeExp e
 
     mtypes_used = foldMap onDec $ progDecs prog
       where
         onDec (OpenDec x _) = onModExp x
         onDec (ModDec md) =
-          maybe mempty (onSigExp . fst) (modSignature md) <> onModExp (modExp md)
-        onDec SigDec {} = mempty
+          maybe mempty (onModTypeExp . fst) (modType md) <> onModExp (modExp md)
+        onDec ModTypeDec {} = mempty
         onDec TypeDec {} = mempty
         onDec ValDec {} = mempty
         onDec LocalDec {} = mempty
@@ -1271,17 +1279,17 @@ progModuleTypes prog = foldMap reach mtypes_used
         onModExp ModImport {} = mempty
         onModExp (ModDecs ds _) = mconcat $ map onDec ds
         onModExp (ModApply me1 me2 _ _ _) = onModExp me1 <> onModExp me2
-        onModExp (ModAscript me se _ _) = onModExp me <> onSigExp se
+        onModExp (ModAscript me se _ _) = onModExp me <> onModTypeExp se
         onModExp (ModLambda p r me _) =
-          onModParam p <> maybe mempty (onSigExp . fst) r <> onModExp me
+          onModParam p <> maybe mempty (onModTypeExp . fst) r <> onModExp me
 
-        onModParam = onSigExp . modParamType
+        onModParam = onModTypeExp . modParamType
 
-        onSigExp (SigVar v _ _) = S.singleton $ qualLeaf v
-        onSigExp (SigParens e _) = onSigExp e
-        onSigExp SigSpecs {} = mempty
-        onSigExp (SigWith e _ _) = onSigExp e
-        onSigExp (SigArrow _ e1 e2 _) = onSigExp e1 <> onSigExp e2
+        onModTypeExp (ModTypeVar v _ _) = S.singleton $ qualLeaf v
+        onModTypeExp (ModTypeParens e _) = onModTypeExp e
+        onModTypeExp ModTypeSpecs {} = mempty
+        onModTypeExp (ModTypeWith e _ _) = onModTypeExp e
+        onModTypeExp (ModTypeArrow _ e1 e2 _) = onModTypeExp e1 <> onModTypeExp e2
 
 -- | Extract a leading @((name, namespace, file), remainder)@ from a
 -- documentation comment string.  These are formatted as
@@ -1321,7 +1329,7 @@ progHoles = foldMap holesInDec . progDecs
     holesInDec (OpenDec me _) = holesInModExp me
     holesInDec (LocalDec d _) = holesInDec d
     holesInDec TypeDec {} = mempty
-    holesInDec SigDec {} = mempty
+    holesInDec ModTypeDec {} = mempty
     holesInDec ImportDec {} = mempty
 
     holesInModExp (ModDecs ds _) = foldMap holesInDec ds
@@ -1455,7 +1463,7 @@ type TypeBind = TypeBindBase Info VName
 type ModBind = ModBindBase Info VName
 
 -- | A type-checked module type binding.
-type SigBind = SigBindBase Info VName
+type ModTypeBind = ModTypeBindBase Info VName
 
 -- | A type-checked module expression.
 type ModExp = ModExpBase Info VName
@@ -1464,7 +1472,7 @@ type ModExp = ModExpBase Info VName
 type ModParam = ModParamBase Info VName
 
 -- | A type-checked module type expression.
-type SigExp = SigExpBase Info VName
+type ModTypeExp = ModTypeExpBase Info VName
 
 -- | A type-checked declaration.
 type Dec = DecBase Info VName
@@ -1509,7 +1517,7 @@ type UncheckedExp = ExpBase NoInfo Name
 type UncheckedModExp = ModExpBase NoInfo Name
 
 -- | A module type expression with no type annotations.
-type UncheckedSigExp = SigExpBase NoInfo Name
+type UncheckedModTypeExp = ModTypeExpBase NoInfo Name
 
 -- | A type parameter with no type annotations.
 type UncheckedTypeParam = TypeParamBase Name
@@ -1524,7 +1532,7 @@ type UncheckedValBind = ValBindBase NoInfo Name
 type UncheckedTypeBind = TypeBindBase NoInfo Name
 
 -- | A module type binding with no type annotations.
-type UncheckedSigBind = SigBindBase NoInfo Name
+type UncheckedModTypeBind = ModTypeBindBase NoInfo Name
 
 -- | A module binding with no type annotations.
 type UncheckedModBind = ModBindBase NoInfo Name

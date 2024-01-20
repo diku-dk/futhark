@@ -85,21 +85,21 @@ Ormolu doesn't enfore the 80 character line limit, so it is up to the user to
 introduce the necessary line breaks in the code. However, Ormolu will take a
 hint. Imagine you've got the following line of code:
 
-```
+```haskell
 onKernels :: (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) -> Stms KernelsMem -> ReuseAllocsM (Stms KernelsMem)
 ```
 
 If the user introduces a newline before `ReuseAllocsM`, turning the above into
 the following:
 
-```
+```haskell
 onKernels :: (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) -> Stms KernelsMem ->
   ReuseAllocsM (Stms KernelsMem)
 ```
 
 Ormolu will pick up the hint and reformat the entire declaration to this:
 
-```
+```haskell
 onKernels ::
   (SegOp SegLevel KernelsMem -> ReuseAllocsM (SegOp SegLevel KernelsMem)) ->
   Stms KernelsMem ->
@@ -140,7 +140,7 @@ If you'd rather keep everything equally nested, consider using the `&` operator
 instead, which is like a reverse `$`. The code above is semantically identical
 to this:
 
-```
+```haskell
 someAtrociouslyLongVariableName <-
   map somethingElse
     & someThirdFunction something
@@ -257,7 +257,7 @@ Use camel case (e.g. `functionName`) when naming functions and upper
 camel case (e.g. `DataType`) when naming data types.  Use underscores
 to separate words in variables and parameters.  For compound names
 consisting of just two words, it is acceptable to not separate them at
-all, e.g. `flatarrs` instead of `flat_arrs.  If a variable or
+all, e.g. `flatarrs` instead of `flat_arrs`.  If a variable or
 parameter is also a function, use your judgement as to whether it is
 most like a function or most like a value.
 
@@ -326,13 +326,13 @@ For long comments, we (try to) use the Notes convention from GHC,
 Essentially, instead of writing very long in-line comments that break
 the flow of the code, we write
 
-```
+```haskell
 -- See Note [Foo Bar]
 ```
 
 and then somewhere else in the file (perhaps at the bottom), we put
 
-```
+```haskell
 -- Note [Foo Bar]
 --
 -- Here is how you foo the bar...

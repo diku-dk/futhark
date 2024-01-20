@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from cycler import cycler
 import sys
 import argparse
 import matplotlib.pyplot as plt  # type: ignore
@@ -650,7 +651,7 @@ def main() -> None:
             "axes.edgecolor": "black",
             "axes.axisbelow": True,
             "text.usetex": False,
-            "axes.prop_cycle": matplotlib.cycler(color=["#5f021f"]),
+            "axes.prop_cycle": cycler(color=["#5f021f"]),
         }
     )
 

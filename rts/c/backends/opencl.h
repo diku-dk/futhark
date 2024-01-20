@@ -432,13 +432,21 @@ void futhark_context_config_load_binary_from(struct futhark_context_config *cfg,
   cfg->load_binary_from = strdup(path);
 }
 
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
   cfg->default_group_size = size;
   cfg->default_group_size_changed = 1;
 }
 
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+  futhark_context_config_set_default_thread_block_size(cfg, size);
+}
+
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
   cfg->default_num_groups = num;
+}
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_grid_size(cfg, num);
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
@@ -463,11 +471,13 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
       return 0;
     }
   }
-  if (strcmp(param_name, "default_group_size") == 0) {
+  if (strcmp(param_name, "default_thread_block_size") == 0 ||
+      strcmp(param_name, "default_group_size") == 0) {
     cfg->default_group_size = new_value;
     return 0;
   }
-  if (strcmp(param_name, "default_num_groups") == 0) {
+  if (strcmp(param_name, "default_grid_size") == 0 ||
+      strcmp(param_name, "default_num_groups") == 0) {
     cfg->default_num_groups = new_value;
     return 0;
   }
@@ -486,12 +496,6 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
   return 1;
 }
 
-// A record of something that happened.
-struct profiling_record {
-  cl_event *event;
-  const char* name;
-};
-
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -505,11 +509,12 @@ struct futhark_context {
   FILE *log;
   struct constants *constants;
   struct free_list free_list;
+  struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
-
-  // Common fields above.
+  bool program_initialised;
+  // Uniform fields above.
 
   cl_mem global_failure;
   cl_mem global_failure_args;
@@ -528,22 +533,20 @@ struct futhark_context {
 
   struct free_list gpu_free_list;
 
-  size_t max_group_size;
+  size_t max_thread_block_size;
   size_t max_num_groups;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_local_memory;
+  size_t max_shared_memory;
+  size_t max_registers;
+  size_t max_cache;
 
   size_t lockstep_width;
-
-  struct profiling_record *profiling_records;
-  int profiling_records_capacity;
-  int profiling_records_used;
 
   struct builtin_kernels* kernels;
 };
 
-static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options) {
+static cl_build_status build_gpu_program(cl_program program, cl_device_id device, const char* options, char** log) {
   cl_int clBuildProgram_error = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
@@ -560,7 +563,7 @@ static cl_build_status build_gpu_program(cl_program program, cl_device_id device
                                              &build_status,
                                              NULL));
 
-  if (build_status != CL_SUCCESS) {
+  if (build_status != CL_BUILD_SUCCESS) {
     char *build_log;
     size_t ret_val_size;
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size));
@@ -568,12 +571,10 @@ static cl_build_status build_gpu_program(cl_program program, cl_device_id device
     build_log = (char*) malloc(ret_val_size+1);
     OPENCL_SUCCEED_FATAL(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL));
 
-    // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
+    // The spec technically does not say whether the build log is
+    // zero-terminated, so let's be careful.
     build_log[ret_val_size] = '\0';
-
-    fprintf(stderr, "Build log:\n%s\n", build_log);
-
-    free(build_log);
+    *log = build_log;
   }
 
   return build_status;
@@ -588,8 +589,16 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     compile_opts_size += strlen(ctx->cfg->tuning_param_names[i]) + 20;
   }
 
+  char** macro_names;
+  int64_t* macro_vals;
+  int num_macros = gpu_macros(ctx, &macro_names, &macro_vals);
+
   for (int i = 0; extra_build_opts[i] != NULL; i++) {
     compile_opts_size += strlen(extra_build_opts[i] + 1);
+  }
+
+  for (int i = 0; i < num_macros; i++) {
+    compile_opts_size += strlen(macro_names[i]) + 1 + 20;
   }
 
   char *compile_opts = (char*) malloc(compile_opts_size);
@@ -600,8 +609,18 @@ static char* mk_compile_opts(struct futhark_context *ctx,
 
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-D%s=%d ",
-                "max_group_size",
-                (int)ctx->max_group_size);
+                "max_thread_block_size",
+                (int)ctx->max_thread_block_size);
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_shared_memory",
+                (int)ctx->max_shared_memory);
+
+  w += snprintf(compile_opts+w, compile_opts_size-w,
+                "-D%s=%d ",
+                "max_registers",
+                (int)ctx->max_registers);
 
   for (int i = 0; i < ctx->cfg->num_tuning_params; i++) {
     w += snprintf(compile_opts+w, compile_opts_size-w,
@@ -615,6 +634,11 @@ static char* mk_compile_opts(struct futhark_context *ctx,
                   "%s ", extra_build_opts[i]);
   }
 
+  for (int i = 0; i < num_macros; i++) {
+    w += snprintf(compile_opts+w, compile_opts_size-w,
+                  "-D%s=%zu ", macro_names[i], macro_vals[i]);
+  }
+
   w += snprintf(compile_opts+w, compile_opts_size-w,
                 "-DTR_BLOCK_DIM=%d -DTR_TILE_DIM=%d -DTR_ELEMS_PER_THREAD=%d ",
                 TR_BLOCK_DIM, TR_TILE_DIM, TR_ELEMS_PER_THREAD);
@@ -625,64 +649,44 @@ static char* mk_compile_opts(struct futhark_context *ctx,
     w += snprintf(compile_opts+w, compile_opts_size-w, "-DEMULATE_F16 ");
   }
 
+  free(macro_names);
+  free(macro_vals);
+
   return compile_opts;
 }
 
-
-// Count up the runtime all the profiling_records that occured during execution.
-// Also clears the buffer of profiling_records.
-static void tally_profiling_records(struct futhark_context *ctx,
-                                    struct cost_centres* ccs) {
-  cl_int err;
-  for (int i = 0; i < ctx->profiling_records_used; i++) {
-    struct profiling_record record = ctx->profiling_records[i];
-
-    cl_ulong start_t, end_t;
-
-    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
-                                                 CL_PROFILING_COMMAND_START,
-                                                 sizeof(start_t),
-                                                 &start_t,
-                                                 NULL));
-
-    OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*record.event,
-                                                 CL_PROFILING_COMMAND_END,
-                                                 sizeof(end_t),
-                                                 &end_t,
-                                                 NULL));
-
-    if (ccs) {
-      // Note that OpenCL provides nanosecond resolution, but we want
-      // microseconds.
-      struct cost_centre c = {
-        .name = record.name,
-        .runs = 1,
-        .runtime = (end_t - start_t)/1000
-      };
-      cost_centres_add(ccs, c);
-    }
-
-    OPENCL_SUCCEED_FATAL(clReleaseEvent(*record.event));
-    free(record.event);
+static cl_event* opencl_event_new(struct futhark_context* ctx) {
+  if (ctx->profiling && !ctx->profiling_paused) {
+    return malloc(sizeof(cl_event));
+  } else {
+    return NULL;
   }
-
-  ctx->profiling_records_used = 0;
 }
 
-// If profiling, produce an event associated with a profiling record.
-static cl_event* opencl_get_event(struct futhark_context *ctx, const char *name) {
-  if (ctx->profiling_records_used == ctx->profiling_records_capacity) {
-    ctx->profiling_records_capacity *= 2;
-    ctx->profiling_records =
-      realloc(ctx->profiling_records,
-              ctx->profiling_records_capacity *
-              sizeof(struct profiling_record));
-  }
-  cl_event *event = malloc(sizeof(cl_event));
-  ctx->profiling_records[ctx->profiling_records_used].event = event;
-  ctx->profiling_records[ctx->profiling_records_used].name = name;
-  ctx->profiling_records_used++;
-  return event;
+static int opencl_event_report(struct str_builder* sb, cl_event* e) {
+  cl_int err;
+  cl_ulong start_t, end_t;
+
+  assert(e != NULL);
+  OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*e,
+                                               CL_PROFILING_COMMAND_START,
+                                               sizeof(start_t),
+                                               &start_t,
+                                               NULL));
+  OPENCL_SUCCEED_FATAL(clGetEventProfilingInfo(*e,
+                                               CL_PROFILING_COMMAND_END,
+                                               sizeof(end_t),
+                                               &end_t,
+                                               NULL));
+
+  // OpenCL provides nanosecond resolution, but we want microseconds.
+  str_builder(sb, ",\"duration\":%f", (end_t - start_t)/1000.0);
+
+  OPENCL_SUCCEED_FATAL(clReleaseEvent(*e));
+
+  free(e);
+
+  return 0;
 }
 
 int futhark_context_sync(struct futhark_context* ctx) {
@@ -771,18 +775,18 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     }
   }
 
-  size_t max_group_size;
+  size_t max_thread_block_size;
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
-                                       sizeof(size_t), &max_group_size, NULL));
+                                       sizeof(size_t), &max_thread_block_size, NULL));
 
-  size_t max_tile_size = sqrt(max_group_size);
+  size_t max_tile_size = sqrt(max_thread_block_size);
 
-  cl_ulong max_local_memory;
+  cl_ulong max_shared_memory;
   OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_LOCAL_MEM_SIZE,
-                                       sizeof(size_t), &max_local_memory, NULL));
+                                       sizeof(size_t), &max_shared_memory, NULL));
 
   // Futhark reserves 4 bytes for bookkeeping information.
-  max_local_memory -= 4;
+  max_shared_memory -= 4;
 
   // The OpenCL implementation may reserve some local memory bytes for
   // various purposes.  In principle, we should use
@@ -793,20 +797,20 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   // (but which might be arbitrarily wrong).  Fortunately, we rarely
   // try to really push the local memory usage.
   if (strstr(device_option.platform_name, "NVIDIA CUDA") != NULL) {
-    max_local_memory -= 12;
+    max_shared_memory -= 12;
   } else if (strstr(device_option.platform_name, "AMD") != NULL) {
-    max_local_memory -= 16;
+    max_shared_memory -= 16;
   }
 
   // Make sure this function is defined.
   post_opencl_setup(ctx, &device_option);
 
-  if (max_group_size < ctx->cfg->default_group_size) {
+  if (max_thread_block_size < ctx->cfg->default_group_size) {
     if (ctx->cfg->default_group_size_changed) {
       fprintf(stderr, "Note: Device limits default group size to %zu (down from %zu).\n",
-              max_group_size, ctx->cfg->default_group_size);
+              max_thread_block_size, ctx->cfg->default_group_size);
     }
-    ctx->cfg->default_group_size = max_group_size;
+    ctx->cfg->default_group_size = max_thread_block_size;
   }
 
   if (max_tile_size < ctx->cfg->default_tile_size) {
@@ -817,10 +821,24 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     ctx->cfg->default_tile_size = max_tile_size;
   }
 
-  ctx->max_group_size = max_group_size;
+
+  cl_ulong cache_size;
+  OPENCL_SUCCEED_FATAL(clGetDeviceInfo(device_option.device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE,
+                                       sizeof(cache_size), &cache_size, NULL));
+
+  if (cache_size == 0) {
+    // Some code assumes nonzero cache.
+    cache_size = 1024*1024;
+  }
+
+  ctx->max_cache = cache_size;
+
+  ctx->max_registers = 1<<16; // I cannot find a way to query for this.
+
+  ctx->max_thread_block_size = max_thread_block_size;
   ctx->max_tile_size = max_tile_size; // No limit.
   ctx->max_threshold = ctx->max_num_groups = 0; // No limit.
-  ctx->max_local_memory = max_local_memory;
+  ctx->max_shared_memory = max_shared_memory;
 
   // Now we go through all the sizes, clamp them to the valid range,
   // or set them to the default.
@@ -830,11 +848,11 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
     const char* size_name = ctx->cfg->tuning_param_names[i];
     int64_t max_value = 0, default_value = 0;
 
-    if (strstr(size_class, "group_size") == size_class) {
-      max_value = max_group_size;
+    if (strstr(size_class, "thread_block_size") == size_class) {
+      max_value = max_thread_block_size;
       default_value = ctx->cfg->default_group_size;
-    } else if (strstr(size_class, "num_groups") == size_class) {
-      max_value = max_group_size; // Futhark assumes this constraint.
+    } else if (strstr(size_class, "grid_size") == size_class) {
+      max_value = max_thread_block_size; // Futhark assumes this constraint.
       default_value = ctx->cfg->default_num_groups;
       // XXX: as a quick and dirty hack, use twice as many threads for
       // histograms by default.  We really should just be smarter
@@ -843,7 +861,7 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
         default_value *= 2;
       }
     } else if (strstr(size_class, "tile_size") == size_class) {
-      max_value = sqrt(max_group_size);
+      max_value = sqrt(max_thread_block_size);
       default_value = ctx->cfg->default_tile_size;
     } else if (strstr(size_class, "reg_tile_size") == size_class) {
       max_value = 0; // No limit.
@@ -869,8 +887,8 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
 
   if (ctx->cfg->logging) {
     fprintf(stderr, "Lockstep width: %d\n", (int)ctx->lockstep_width);
-    fprintf(stderr, "Default group size: %d\n", (int)ctx->cfg->default_group_size);
-    fprintf(stderr, "Default number of groups: %d\n", (int)ctx->cfg->default_num_groups);
+    fprintf(stderr, "Default thread block size: %d\n", (int)ctx->cfg->default_group_size);
+    fprintf(stderr, "Default number of thread blocks: %d\n", (int)ctx->cfg->default_num_groups);
   }
 
   char *compile_opts = mk_compile_opts(ctx, extra_build_opts, device_option);
@@ -957,9 +975,24 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   if (ctx->cfg->logging) {
     fprintf(stderr, "Building OpenCL program...\n");
   }
-  OPENCL_SUCCEED_FATAL(build_gpu_program(prog, device_option.device, compile_opts));
-
+  char* build_log;
+  cl_build_status status =
+    build_gpu_program(prog, device_option.device, compile_opts, &build_log);
   free(compile_opts);
+
+  if (status != CL_BUILD_SUCCESS) {
+    ctx->error = msgprintf("Compilation of OpenCL program failed.\nBuild log:\n%s",
+                           build_log);
+    // We are giving up on initialising this OpenCL context. That also
+    // means we need to free all the OpenCL bits we have managed to
+    // allocate thus far, as futhark_context_free() will not touch
+    // these unless initialisation was completely successful.
+    (void)clReleaseProgram(prog);
+    (void)clReleaseCommandQueue(ctx->queue);
+    (void)clReleaseContext(ctx->ctx);
+    free(build_log);
+    return;
+  }
 
   size_t binary_size = 0;
   unsigned char *binary = NULL;
@@ -991,7 +1024,8 @@ static void setup_opencl_with_command_queue(struct futhark_context *ctx,
   ctx->clprogram = prog;
 }
 
-static struct opencl_device_option get_preferred_device(const struct futhark_context_config *cfg) {
+static struct opencl_device_option get_preferred_device(struct futhark_context *ctx,
+                                                        const struct futhark_context_config *cfg) {
   struct opencl_device_option *devices;
   size_t num_devices;
 
@@ -1018,14 +1052,19 @@ static struct opencl_device_option get_preferred_device(const struct futhark_con
     }
   }
 
-  futhark_panic(1, "Could not find acceptable OpenCL device.\n");
-  exit(1); // Never reached
+  ctx->error = strdup("Could not find acceptable OpenCL device.\n");
+  struct opencl_device_option device;
+  return device;
 }
 
 static void setup_opencl(struct futhark_context *ctx,
                          const char *extra_build_opts[],
                          const char* cache_fname) {
-  struct opencl_device_option device_option = get_preferred_device(ctx->cfg);
+  struct opencl_device_option device_option = get_preferred_device(ctx, ctx->cfg);
+
+  if (ctx->error != NULL) {
+    return;
+  }
 
   if (ctx->cfg->logging) {
     fprintf(stderr, "Using platform: %s\n", device_option.platform_name);
@@ -1059,21 +1098,21 @@ void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* k
 
 int backend_context_setup(struct futhark_context* ctx) {
   ctx->lockstep_width = 0; // Real value set later.
-  ctx->profiling_records_capacity = 200;
-  ctx->profiling_records_used = 0;
-  ctx->profiling_records =
-    malloc(ctx->profiling_records_capacity *
-           sizeof(struct profiling_record));
   ctx->failure_is_an_option = 0;
   ctx->total_runs = 0;
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   if (ctx->cfg->queue_set) {
     setup_opencl_with_command_queue(ctx, ctx->cfg->queue, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
   } else {
     setup_opencl(ctx, (const char**)ctx->cfg->build_opts, ctx->cfg->cache_fname);
+  }
+
+  if (ctx->error != NULL) {
+    return 1;
   }
 
   cl_int error;
@@ -1101,15 +1140,16 @@ int backend_context_setup(struct futhark_context* ctx) {
 static int gpu_free_all(struct futhark_context *ctx);
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
-  OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
-  (void)tally_profiling_records(ctx, NULL);
-  free(ctx->profiling_records);
-  (void)gpu_free_all(ctx);
-  (void)clReleaseProgram(ctx->clprogram);
-  (void)clReleaseCommandQueue(ctx->queue);
-  (void)clReleaseContext(ctx->ctx);
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure));
+    OPENCL_SUCCEED_FATAL(clReleaseMemObject(ctx->global_failure_args));
+    (void)gpu_free_all(ctx);
+    (void)clReleaseProgram(ctx->clprogram);
+    (void)clReleaseCommandQueue(ctx->queue);
+    (void)clReleaseContext(ctx->ctx);
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 cl_command_queue futhark_context_get_command_queue(struct futhark_context* ctx) {
@@ -1143,9 +1183,13 @@ static void gpu_free_kernel(struct futhark_context *ctx,
 static int gpu_scalar_to_device(struct futhark_context* ctx,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, "copy_scalar_to_dev");
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_to_dev",
+              strdup(""),
+              event,
+              (event_report_fn)opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueWriteBuffer
@@ -1157,9 +1201,13 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
 static int gpu_scalar_from_device(struct futhark_context* ctx,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, "copy_scalar_from_dev");
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              "copy_scalar_from_dev",
+              strdup(""),
+              event,
+              (event_report_fn)opencl_event_report);
   }
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueReadBuffer
@@ -1173,9 +1221,13 @@ static int gpu_memcpy(struct futhark_context* ctx,
                       gpu_mem src, int64_t src_offset,
                       int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_dev_to_dev");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_dev_to_dev",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     // OpenCL swaps the usual order of operands for memcpy()-like
     // functions.  The order below is not a typo.
@@ -1195,9 +1247,13 @@ static int memcpy_host2gpu(struct futhark_context* ctx, bool sync,
                            const unsigned char* src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_host_to_dev");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_host_to_dev",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueWriteBuffer(ctx->queue,
@@ -1218,9 +1274,13 @@ static int memcpy_gpu2host(struct futhark_context* ctx, bool sync,
                            gpu_mem src, int64_t src_offset,
                            int64_t nbytes) {
   if (nbytes > 0) {
-    cl_event* event = NULL;
-    if (ctx->profiling && !ctx->profiling_paused) {
-      event = opencl_get_event(ctx, "copy_dev_to_host");
+    cl_event* event = opencl_event_new(ctx);
+    if (event != NULL) {
+      add_event(ctx,
+                "copy_dev_to_host",
+                strdup(""),
+                event,
+                (event_report_fn)opencl_event_report);
     }
     OPENCL_SUCCEED_OR_RETURN
       (clEnqueueReadBuffer(ctx->queue, src,
@@ -1242,31 +1302,39 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              gpu_kernel kernel, const char *name,
                              const int32_t grid[3],
                              const int32_t block[3],
-                             unsigned int local_mem_bytes,
+                             unsigned int shared_mem_bytes,
                              int num_args,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
   int64_t time_start = 0, time_end = 0;
-  if (ctx->logging) {
-    fprintf(ctx->log,
-            "Launching kernel %s with\n"
-            "  grid=(%d,%d,%d)\n"
-            "  block=(%d,%d,%d)\n"
-            "  local memory=%d\n",
-            name,
-            grid[0], grid[1], grid[2],
-            block[0], block[1], block[2],
-            local_mem_bytes);
+
+  cl_event* event = opencl_event_new(ctx);
+  if (event != NULL) {
+    add_event(ctx,
+              name,
+              msgprintf("Kernel %s with\n"
+                        "  grid=(%d,%d,%d)\n"
+                        "  block=(%d,%d,%d)\n"
+                        "  shared memory=%d",
+                        name,
+                        grid[0], grid[1], grid[2],
+                        block[0], block[1], block[2],
+                        shared_mem_bytes),
+              event,
+              (event_report_fn)opencl_event_report);
+  }
+
+  if (ctx->debugging) {
     time_start = get_wall_time();
   }
 
-  // Some implementations do not work with 0-byte local memory.
-  if (local_mem_bytes == 0) {
-    local_mem_bytes = 4;
+  // Some implementations do not work with 0-byte shared memory.
+  if (shared_mem_bytes == 0) {
+    shared_mem_bytes = 4;
   }
 
   OPENCL_SUCCEED_OR_RETURN
-    (clSetKernelArg(kernel, 0, local_mem_bytes, NULL));
+    (clSetKernelArg(kernel, 0, shared_mem_bytes, NULL));
   for (int i = 0; i < num_args; i++) {
     OPENCL_SUCCEED_OR_RETURN
       (clSetKernelArg(kernel, i+1, args_sizes[i], args[i]));
@@ -1281,11 +1349,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
      block[1],
      block[2]};
 
-  cl_event* event = NULL;
-  if (ctx->profiling && !ctx->profiling_paused) {
-    event = opencl_get_event(ctx, name);
-  }
-
   OPENCL_SUCCEED_OR_RETURN
     (clEnqueueNDRangeKernel(ctx->queue,
                             kernel,
@@ -1299,7 +1362,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     fprintf(ctx->log, "  runtime: %ldus\n", time_diff);
   }
   if (ctx->logging) {
-    printf("\n");
+    fprintf(ctx->log, "\n");
   }
 
   return FUTHARK_SUCCESS;

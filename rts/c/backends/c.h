@@ -39,9 +39,11 @@ struct futhark_context {
   FILE *log;
   struct constants *constants;
   struct free_list free_list;
+  struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
+  bool program_initialised;
 };
 
 int backend_context_setup(struct futhark_context* ctx) {

@@ -19,7 +19,6 @@ import Data.Maybe
 import Futhark.IR.GPUMem (GPUMem)
 import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Pass
@@ -51,15 +50,15 @@ optimiseFun consts_table fd =
     table = consts_table <> mkTable (bodyStms (funDefBody fd))
     -- XXX: we are assuming that a given offset and memory return is
     -- only used for a single array, and not for anything else.
-    mkSubst i (Var arr0) (MemArray _ _ _ (ReturnsNewBlock _ mem_ext ixfun0))
+    mkSubst i (Var arr0) (MemArray _ _ _ (ReturnsNewBlock _ mem_ext lmad0))
       | Just (MemArray _ _ _ (ArrayIn _ _), BasicOp (Manifest _ arr1)) <-
           varInfo arr0 table,
-        Just (MemArray _ _ _ (ArrayIn mem2 ixfun2), _) <-
+        Just (MemArray _ _ _ (ArrayIn mem2 lmad2), _) <-
           varInfo arr1 table,
         Just (TPrimExp (LeafExp (Ext offset_ext) _)) <-
-          LMAD.isDirect (IxFun.ixfunLMAD ixfun0),
+          LMAD.isDirect lmad0,
         Just offset <-
-          toSubExp =<< LMAD.isDirect (IxFun.ixfunLMAD ixfun2) =
+          toSubExp =<< LMAD.isDirect lmad2 =
           [(mem_ext, Var mem2), (offset_ext, offset), (i, Var arr1)]
     mkSubst _ _ _ = mempty
     onBody (Body dec stms res) =

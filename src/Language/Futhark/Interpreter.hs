@@ -90,14 +90,14 @@ instance Functor ExtOp where
 
 type Stack = [StackFrame]
 
-type Sizes = M.Map VName Int64
+type Exts = M.Map VName Value
 
 -- | The monad in which evaluation takes place.
 newtype EvalM a
   = EvalM
       ( ReaderT
           (Stack, M.Map ImportName Env)
-          (StateT Sizes (F ExtOp))
+          (StateT Exts (F ExtOp))
           a
       )
   deriving
@@ -106,7 +106,7 @@ newtype EvalM a
       Functor,
       MonadFree ExtOp,
       MonadReader (Stack, M.Map ImportName Env),
-      MonadState Sizes
+      MonadState Exts
     )
 
 runEvalM :: M.Map ImportName Env -> EvalM a -> F ExtOp a
@@ -129,11 +129,11 @@ stacktrace = asks $ map stackFrameLoc . fst
 lookupImport :: ImportName -> EvalM (Maybe Env)
 lookupImport f = asks $ M.lookup f . snd
 
-putExtSize :: VName -> Int64 -> EvalM ()
+putExtSize :: VName -> Value -> EvalM ()
 putExtSize v x = modify $ M.insert v x
 
-getSizes :: EvalM Sizes
-getSizes = get
+getExts :: EvalM Exts
+getExts = get
 
 -- | Disregard any existential sizes computed during this action.
 -- This is used so that existentials computed during one iteration of
@@ -145,8 +145,13 @@ localExts m = do
   put s
   pure x
 
-extSizeEnv :: EvalM Env
-extSizeEnv = i64Env <$> getSizes
+extEnv :: EvalM Env
+extEnv = valEnv . M.map f <$> getExts
+  where
+    f v =
+      ( Nothing,
+        v
+      )
 
 valueStructType :: ValueType -> StructType
 valueStructType = first $ flip sizeFromInteger mempty . toInteger
@@ -296,7 +301,8 @@ lookupType = lookupInEnv envType
 -- | An expression evaluator that embeds an environment.
 type Eval = Exp -> EvalM Value
 
--- | A TermValue with a 'Nothing' type annotation is an intrinsic.
+-- | A TermValue with a 'Nothing' type annotation is an intrinsic or
+-- an existential.
 data TermBinding
   = TermValue (Maybe T.BoundV) Value
   | -- | A polymorphic value that must be instantiated.  The
@@ -636,7 +642,7 @@ expandType env (Scalar (Sum cs)) = Scalar $ Sum $ (fmap . fmap) (expandType env)
 
 evalWithExts :: Env -> EvalM Eval
 evalWithExts env = do
-  size_env <- extSizeEnv
+  size_env <- extEnv
   pure $ eval $ size_env <> env
 
 -- | Evaluate all possible sizes, except those that contain free
@@ -750,16 +756,17 @@ evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
 evalArg env e ext = do
   v <- eval env e
   case ext of
-    Just ext' -> putExtSize ext' $ asInt64 v
-    Nothing -> pure ()
+    Just ext' -> putExtSize ext' v
+    _ -> pure ()
   pure v
 
 returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
 returned env ret retext v = do
-  mapM_ (uncurry putExtSize) . M.toList $
-    resolveExistentials retext (expandType env $ toStruct ret) $
-      valueShape v
+  mapM_ (uncurry putExtSize . second (ValuePrim . SignedValue . Int64Value))
+    . M.toList
+    $ resolveExistentials retext (expandType env $ toStruct ret)
+    $ valueShape v
   pure v
 
 evalAppExp :: Env -> AppExp -> EvalM Value
@@ -1193,7 +1200,7 @@ evalModExp env (ModApply f e (Info psubst) (Info rsubst) _) = do
 evalDec :: Env -> Dec -> EvalM Env
 evalDec env (ValDec (ValBind _ v _ (Info ret) tparams ps fbody _ _ _)) = localExts $ do
   binding <- evalFunctionBinding env tparams ps ret fbody
-  sizes <- extSizeEnv
+  sizes <- extEnv
   pure $
     env {envTerm = M.insert v binding $ envTerm env} <> sizes
 evalDec env (OpenDec me _) = do
@@ -1204,7 +1211,7 @@ evalDec env (OpenDec me _) = do
 evalDec env (ImportDec name name' loc) =
   evalDec env $ LocalDec (OpenDec (ModImport name name' loc) loc) loc
 evalDec env (LocalDec d _) = evalDec env d
-evalDec env SigDec {} = pure env
+evalDec env ModTypeDec {} = pure env
 evalDec env (TypeDec (TypeBind v l ps _ (Info (RetType dims t)) _ _)) = do
   let abbr = T.TypeAbbr l ps . RetType dims $ expandType env t
   pure env {envType = M.insert v abbr $ envType env}
@@ -1402,7 +1409,7 @@ initialCtx =
               <+> dquotes (prettyValue x)
               <+> "and"
               <+> dquotes (prettyValue y)
-                <> "."
+              <> "."
       where
         bopDef' (valf, retf, op) (x, y) = do
           x' <- valf x
@@ -1419,7 +1426,7 @@ initialCtx =
           bad noLoc mempty . docText $
             "Cannot apply function to argument"
               <+> dquotes (prettyValue x)
-                <> "."
+              <> "."
       where
         unopDef' (valf, retf, op) x = do
           x' <- valf x
@@ -1436,7 +1443,8 @@ initialCtx =
         _ ->
           bad noLoc mempty . docText $
             "Cannot apply operator to argument"
-              <+> dquotes (prettyValue v) <> "."
+              <+> dquotes (prettyValue v)
+              <> "."
 
     def "!" =
       Just $
@@ -1911,6 +1919,7 @@ initialCtx =
                 <> prettyText (asInt64 m)
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+    def "manifest" = Just $ fun1 pure
     def "vjp2" = Just $
       fun3 $
         \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."
@@ -1940,7 +1949,7 @@ interpretDecs ctx decs =
     -- We need to extract any new existential sizes and add them as
     -- ordinary bindings to the context, or we will not be able to
     -- look up their values later.
-    sizes <- extSizeEnv
+    sizes <- extEnv
     pure $ env <> sizes
 
 interpretDec :: Ctx -> Dec -> F ExtOp Ctx
@@ -1995,7 +2004,7 @@ checkEntryArgs entry args entry_t
           "Entry point "
             <> dquotes (prettyName entry)
             <> " expects input of type(s)"
-            </> indent 2 (stack (map pretty param_ts))
+              </> indent 2 (stack (map pretty param_ts))
 
 -- | Execute the named function on the given arguments; may fail
 -- horribly if these are ill-typed.

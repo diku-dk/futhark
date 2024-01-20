@@ -4,7 +4,8 @@
 -- This module is designed to be used as a qualified import, as the
 -- exported names are quite generic.
 module Futhark.IR.Mem.LMAD
-  ( Shape,
+  ( -- * Core
+    Shape,
     Indices,
     LMAD (..),
     LMADDim (..),
@@ -13,23 +14,31 @@ module Futhark.IR.Mem.LMAD
     slice,
     flatSlice,
     reshape,
+    coerce,
     permute,
     shape,
-    rank,
-    substituteInLMAD,
+    substitute,
+    iota,
+    equivalent,
+    range,
+
+    -- * Exotic
+    expand,
+    isDirect,
     disjoint,
     disjoint2,
     disjoint3,
     dynamicEqualsLMAD,
-    iota,
     mkExistential,
-    equivalent,
-    isDirect,
+    closeEnough,
+    existentialize,
+    existentialized,
   )
 where
 
 import Control.Category
 import Control.Monad
+import Control.Monad.State
 import Data.Function (on, (&))
 import Data.List (elemIndex, partition, sortBy)
 import Data.Map.Strict qualified as M
@@ -91,7 +100,7 @@ data LMADDim num = LMADDim
 -- However, we expect that the common case is when the index function is one
 -- LMAD -- we call this the "nice" representation.
 --
--- Finally, the list of LMADs is kept in an @IxFun@ together with the shape of
+-- Finally, the list of LMADs is kept in an @LMAD@ together with the shape of
 -- the original array, and a bit to indicate whether the index function is
 -- contiguous, i.e., if we instantiate all the points of the current index
 -- function, do we get a contiguous memory interval?
@@ -201,9 +210,20 @@ flatSlice (LMAD offset (dim : dims)) (FlatSlice new_offset is) =
     helper s0 (FlatDimIndex n s) = LMADDim (s0 * s) n
 flatSlice (LMAD offset []) _ = LMAD offset []
 
--- | Handle the case where a reshape operation can stay inside a
--- single LMAD.  See "Futhark.IR.Mem.IxFun.reshape" for
--- conditions.
+-- | Reshape an LMAD.
+--
+-- There are four conditions that all must hold for the result of a reshape
+-- operation to remain in the one-LMAD domain:
+--
+--   (1) the permutation of the underlying LMAD must leave unchanged
+--       the LMAD dimensions that were *not* reshape coercions.
+--   (2) the repetition of dimensions of the underlying LMAD must
+--       refer only to the coerced-dimensions of the reshape operation.
+--
+-- If any of these conditions do not hold, then the reshape operation
+-- will conservatively add a new LMAD to the list, leading to a
+-- representation that provides less opportunities for further
+-- analysis
 reshape ::
   (Eq num, IntegralExp num) => LMAD num -> Shape num -> Maybe (LMAD num)
 --
@@ -232,13 +252,22 @@ reshape lmad@(LMAD off dims) newshape = do
   Just $ iotaStrided off base_stride newshape
 {-# NOINLINE reshape #-}
 
+-- | Coerce an index function to look like it has a new shape.
+-- Dynamically the shape must be the same.
+coerce :: LMAD num -> Shape num -> LMAD num
+coerce (LMAD offset dims) new_shape =
+  LMAD offset $ zipWith onDim dims new_shape
+  where
+    onDim ld d = ld {ldShape = d}
+{-# NOINLINE coerce #-}
+
 -- | Substitute a name with a PrimExp in an LMAD.
-substituteInLMAD ::
+substitute ::
   (Ord a) =>
   M.Map a (TPrimExp t a) ->
   LMAD (TPrimExp t a) ->
   LMAD (TPrimExp t a)
-substituteInLMAD tab (LMAD offset dims) =
+substitute tab (LMAD offset dims) =
   LMAD (sub offset) $ map (\(LMADDim s n) -> LMADDim (sub s) (sub n)) dims
   where
     tab' = fmap untyped tab
@@ -247,10 +276,6 @@ substituteInLMAD tab (LMAD offset dims) =
 -- | Shape of an LMAD.
 shape :: LMAD num -> Shape num
 shape = map ldShape . dims
-
--- | Rank of an LMAD.
-rank :: LMAD num -> Int
-rank = length . shape
 
 iotaStrided ::
   (IntegralExp num) =>
@@ -276,11 +301,12 @@ iota ::
 iota off = iotaStrided off 1
 {-# NOINLINE iota #-}
 
--- | Create an LMAD that is existential in everything.
-mkExistential :: Int -> Int -> LMAD (Ext a)
-mkExistential r start = LMAD (Ext start) $ map onDim [0 .. r - 1]
+-- | Create an LMAD that is existential in everything except shape.
+mkExistential :: Shape (Ext a) -> Int -> LMAD (Ext a)
+mkExistential shp start = LMAD (Ext start) $ zipWith onDim shp [0 .. r - 1]
   where
-    onDim i = LMADDim (Ext (start + 1 + i * 2)) (Ext (start + 2 + i * 2))
+    r = length shp
+    onDim d i = LMADDim {ldStride = Ext (start + 1 + i), ldShape = d}
 
 -- | Permute dimensions.
 permute :: LMAD num -> Permutation -> LMAD num
@@ -532,8 +558,7 @@ dynamicEqualsLMAD lmad1 lmad2 =
 -- Equivalence in this case is matching in offsets and strides.
 equivalent :: (Eq num) => LMAD num -> LMAD num -> Bool
 equivalent lmad1 lmad2 =
-  length (dims lmad1) == length (dims lmad2)
-    && offset lmad1 == offset lmad2
+  offset lmad1 == offset lmad2
     && map ldStride (dims lmad1) == map ldStride (dims lmad2)
 {-# NOINLINE equivalent #-}
 
@@ -543,3 +568,69 @@ isDirect lmad = do
   guard $ lmad == iota (offset lmad) (map ldShape $ dims lmad)
   pure $ offset lmad
 {-# NOINLINE isDirect #-}
+
+-- | The largest possible linear address reachable by this LMAD, not
+-- counting the offset. If you add one to this number (and multiply it
+-- with the element size), you get the amount of bytes you need to
+-- allocate for an array with this LMAD (assuming zero offset).
+range :: (Pretty num) => LMAD (TPrimExp Int64 num) -> TPrimExp Int64 num
+range lmad =
+  -- The idea is that the largest possible offset must be the sum of
+  -- the maximum offsets reachable in each dimension, which must be at
+  -- either the minimum or maximum index.
+  sum (map dimRange $ dims lmad)
+  where
+    dimRange LMADDim {ldStride, ldShape} =
+      0 `sMax64` ((0 `sMax64` (ldShape - 1)) * ldStride)
+{-# NOINLINE range #-}
+
+-- | When comparing LMADs as part of the type check in GPUMem, we
+-- may run into problems caused by the simplifier. As index functions
+-- can be generalized over if-then-else expressions, the simplifier
+-- might hoist some of the code from inside the if-then-else
+-- (computing the offset of an array, for instance), but now the type
+-- checker cannot verify that the generalized index function is valid,
+-- because some of the existentials are computed somewhere else. To
+-- Work around this, we've had to relax the KernelsMem type-checker a
+-- bit, specifically, we've introduced this function to verify whether
+-- two index functions are "close enough" that we can assume that they
+-- match. We use this instead of `lmad1 == lmad2` and hope that it's
+-- good enough.
+closeEnough :: LMAD num -> LMAD num -> Bool
+closeEnough lmad1 lmad2 =
+  length (dims lmad1) == length (dims lmad2)
+{-# NOINLINE closeEnough #-}
+
+-- | Turn all the leaves of the LMAD into 'Ext's, except for
+--  the shape, which where the leaves are simply made 'Free'.
+existentialize ::
+  Int ->
+  LMAD (TPrimExp Int64 a) ->
+  LMAD (TPrimExp Int64 (Ext a))
+existentialize start lmad = evalState lmad' start
+  where
+    mkExt = do
+      i <- get
+      put $ i + 1
+      pure $ TPrimExp $ LeafExp (Ext i) int64
+    lmad' = LMAD <$> mkExt <*> mapM onDim (dims lmad)
+    onDim ld = LMADDim <$> mkExt <*> pure (fmap Free (ldShape ld))
+
+-- | Retrieve those elements that 'existentialize' changes. That is,
+-- everything except the shape (and in the same order as
+-- 'existentialise' existentialises them).
+existentialized :: LMAD a -> [a]
+existentialized (LMAD offset dims) =
+  offset : concatMap onDim dims
+  where
+    onDim (LMADDim ldstride _) = [ldstride]
+
+-- | Conceptually expand LMAD to be a particular slice of
+-- another by adjusting the offset and strides.  Used for memory
+-- expansion.
+expand ::
+  (IntegralExp num) => num -> num -> LMAD num -> LMAD num
+expand o p lmad =
+  LMAD (o + p * offset lmad) (map onDim (dims lmad))
+  where
+    onDim ld = ld {ldStride = p * ldStride ld}

@@ -124,7 +124,7 @@ vnameToFileMap = mconcat . map forFile
 
         forEnv env =
           mconcat (map vname' $ M.toList $ envNameMap env)
-            <> mconcat (map forMty $ M.elems $ envSigTable env)
+            <> mconcat (map forMty $ M.elems $ envModTypeTable env)
         forMod (ModEnv env) = forEnv env
         forMod ModFun {} = mempty
         forMty = forMod . mtyMod
@@ -373,7 +373,7 @@ synopsisDecs decs = do
 
 synopsisDec :: S.Set VName -> FileModule -> Dec -> Maybe (DocM Html)
 synopsisDec visible fm dec = case dec of
-  SigDec s -> synopsisModType mempty s
+  ModTypeDec s -> synopsisModType mempty s
   ModDec m -> synopsisMod fm m
   ValDec v -> synopsisValBind v
   TypeDec t -> synopsisType t
@@ -386,8 +386,8 @@ synopsisDec visible fm dec = case dec of
           pure $
             fullRow $
               keyword "open" <> fromString (" <" <> prettyString x <> ">")
-  LocalDec (SigDec s) _
-    | sigName s `S.member` visible ->
+  LocalDec (ModTypeDec s) _
+    | modTypeName s `S.member` visible ->
         synopsisModType (keyword "local" <> " ") s
   LocalDec {} -> Nothing
   ImportDec {} -> Nothing
@@ -404,7 +404,7 @@ synopsisOpened (ModImport _ (Info file) _) = Just $ do
     keyword "import "
       <> (H.a ! A.href dest) (fromString (show (includeToString file)))
 synopsisOpened (ModAscript _ se _ _) = Just $ do
-  se' <- synopsisSigExp se
+  se' <- synopsisModTypeExp se
   pure $ "... : " <> se'
 synopsisOpened _ = Nothing
 
@@ -427,18 +427,18 @@ valBindHtml name (ValBind _ _ retdecl (Info rettype) tparams params _ _ _ _) = d
       mconcat (intersperse " -> " $ params' ++ [rettype'])
     )
 
-synopsisModType :: Html -> SigBind -> Maybe (DocM Html)
+synopsisModType :: Html -> ModTypeBind -> Maybe (DocM Html)
 synopsisModType prefix sb = Just $ do
-  let name' = vnameSynopsisDef $ sigName sb
+  let name' = vnameSynopsisDef $ modTypeName sb
   fullRow <$> do
-    se' <- synopsisSigExp $ sigExp sb
+    se' <- synopsisModTypeExp $ modTypeExp sb
     pure $ prefix <> keyword "module type " <> name' <> " = " <> se'
 
 synopsisMod :: FileModule -> ModBind -> Maybe (DocM Html)
 synopsisMod fm (ModBind name ps sig _ _ _) =
   case sig of
-    Nothing -> (proceed <=< envSig) <$> M.lookup name modtable
-    Just (s, _) -> Just $ proceed =<< synopsisSigExp s
+    Nothing -> (proceed <=< envModType) <$> M.lookup name modtable
+    Just (s, _) -> Just $ proceed =<< synopsisModTypeExp s
   where
     proceed sig' = do
       let name' = vnameSynopsisDef name
@@ -446,8 +446,8 @@ synopsisMod fm (ModBind name ps sig _ _ _) =
       pure $ specRow (keyword "module " <> name') ": " (ps' <> sig')
 
     FileModule _abs Env {envModTable = modtable} _ _ = fm
-    envSig (ModEnv e) = renderEnv e
-    envSig (ModFun (FunSig _ _ (MTy _ m))) = envSig m
+    envModType (ModEnv e) = renderEnv e
+    envModType (ModFun (FunModType _ _ (MTy _ m))) = envModType m
 
 synopsisType :: TypeBind -> Maybe (DocM Html)
 synopsisType tb = Just $ do
@@ -548,7 +548,7 @@ typeArgHtml (TypeArgType t) = typeHtml $ second (const Nonunique) t
 modParamHtml :: [ModParamBase Info VName] -> DocM Html
 modParamHtml [] = pure mempty
 modParamHtml (ModParam pname psig _ _ : mps) =
-  liftM2 f (synopsisSigExp psig) (modParamHtml mps)
+  liftM2 f (synopsisModTypeExp psig) (modParamHtml mps)
   where
     f se params =
       "("
@@ -558,26 +558,26 @@ modParamHtml (ModParam pname psig _ _ : mps) =
         <> ") -> "
         <> params
 
-synopsisSigExp :: SigExpBase Info VName -> DocM Html
-synopsisSigExp e = case e of
-  SigVar v _ _ -> qualNameHtml v
-  SigParens e' _ -> parens <$> synopsisSigExp e'
-  SigSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
-  SigWith s (TypeRef v ps t _) _ -> do
-    s' <- synopsisSigExp s
+synopsisModTypeExp :: ModTypeExpBase Info VName -> DocM Html
+synopsisModTypeExp e = case e of
+  ModTypeVar v _ _ -> qualNameHtml v
+  ModTypeParens e' _ -> parens <$> synopsisModTypeExp e'
+  ModTypeSpecs ss _ -> braces . (H.table ! A.class_ "specs") . mconcat <$> mapM synopsisSpec ss
+  ModTypeWith s (TypeRef v ps t _) _ -> do
+    s' <- synopsisModTypeExp s
     t' <- typeExpHtml t
     v' <- qualNameHtml v
     let ps' = mconcat $ map ((" " <>) . typeParamHtml) ps
     pure $ s' <> keyword " with " <> v' <> ps' <> " = " <> t'
-  SigArrow Nothing e1 e2 _ ->
-    liftM2 f (synopsisSigExp e1) (synopsisSigExp e2)
+  ModTypeArrow Nothing e1 e2 _ ->
+    liftM2 f (synopsisModTypeExp e1) (synopsisModTypeExp e2)
     where
       f e1' e2' = e1' <> " -> " <> e2'
-  SigArrow (Just v) e1 e2 _ ->
+  ModTypeArrow (Just v) e1 e2 _ ->
     do
       let name = vnameHtml v
-      e1' <- synopsisSigExp e1
-      e2' <- noLink [v] $ synopsisSigExp e2
+      e1' <- synopsisModTypeExp e1
+      e2' <- noLink [v] $ synopsisModTypeExp e2
       pure $ "(" <> name <> ": " <> e1' <> ") -> " <> e2'
 
 keyword :: String -> Html
@@ -625,8 +625,8 @@ synopsisSpec spec = case spec of
         (mconcat (map (" " <>) tparams') <> ": ")
         rettype'
   ModSpec name sig _ _ ->
-    specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisSigExp sig
-  IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisSigExp e
+    specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisModTypeExp sig
+  IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisModTypeExp e
 
 typeExpHtml :: TypeExp Info VName -> DocM Html
 typeExpHtml e = case e of
@@ -802,7 +802,7 @@ describeGeneric name what doc f = do
 describeGenericMod ::
   VName ->
   IndexWhat ->
-  SigExp ->
+  ModTypeExp ->
   Maybe DocComment ->
   (Html -> DocM Html) ->
   DocM Html
@@ -812,7 +812,7 @@ describeGenericMod name what se doc f = do
   decl_type <- f name'
 
   doc' <- case se of
-    SigSpecs specs _ -> (<>) <$> docHtml doc <*> describeSpecs specs
+    ModTypeSpecs specs _ -> (<>) <$> docHtml doc <*> describeSpecs specs
     _ -> docHtml doc
 
   let decl_doc = H.dd ! A.class_ "desc_doc" $ doc'
@@ -837,14 +837,14 @@ describeDec _ (ValDec vb) = Just $
 describeDec _ (TypeDec vb) =
   Just $
     describeGeneric (typeAlias vb) IndexType (typeDoc vb) (`typeBindHtml` vb)
-describeDec _ (SigDec (SigBind name se doc _)) = Just $
+describeDec _ (ModTypeDec (ModTypeBind name se doc _)) = Just $
   describeGenericMod name IndexModuleType se doc $ \name' ->
     pure $ keyword "module type " <> name'
 describeDec _ (ModDec mb) = Just $
   describeGeneric (modName mb) IndexModule (modDoc mb) $ \name' ->
     pure $ keyword "module " <> name'
 describeDec _ OpenDec {} = Nothing
-describeDec visible (LocalDec (SigDec (SigBind name se doc _)) _)
+describeDec visible (LocalDec (ModTypeDec (ModTypeBind name se doc _)) _)
   | name `S.member` visible = Just $
       describeGenericMod name IndexModuleType se doc $ \name' ->
         pure $ keyword "local module type " <> name'
@@ -883,12 +883,12 @@ describeSpec (TypeSpec l name tparams doc _) =
 describeSpec (ModSpec name se doc _) =
   describeGenericMod name IndexModule se doc $ \name' ->
     case se of
-      SigSpecs {} -> pure $ keyword "module " <> name'
+      ModTypeSpecs {} -> pure $ keyword "module " <> name'
       _ -> do
-        se' <- synopsisSigExp se
+        se' <- synopsisModTypeExp se
         pure $ keyword "module " <> name' <> ": " <> se'
 describeSpec (IncludeSpec sig _) = do
-  sig' <- synopsisSigExp sig
+  sig' <- synopsisModTypeExp sig
   doc' <- docHtml Nothing
   let decl_header =
         (H.dt ! A.class_ "desc_header") $

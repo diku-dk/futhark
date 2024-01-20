@@ -58,7 +58,8 @@ instance Pretty BreadCrumb where
       </> indent 2 (pretty t2)
   pretty (MatchingFields fields) =
     "When matching types of record field"
-      <+> dquotes (mconcat $ punctuate "." $ map pretty fields) <> dot
+      <+> dquotes (mconcat $ punctuate "." $ map pretty fields)
+      <> dot
   pretty (MatchingConstructor c) =
     "When matching types of constructor" <+> dquotes (pretty c) <> dot
   pretty (Matching s) =
@@ -188,12 +189,14 @@ data Rigidity = Rigid RigidSource | Nonrigid
 prettySource :: SrcLoc -> SrcLoc -> RigidSource -> Doc ()
 prettySource ctx loc (RigidRet Nothing) =
   "is unknown size returned by function at"
-    <+> pretty (locStrRel ctx loc) <> "."
+    <+> pretty (locStrRel ctx loc)
+    <> "."
 prettySource ctx loc (RigidRet (Just fname)) =
   "is unknown size returned by"
     <+> dquotes (pretty fname)
     <+> "at"
-    <+> pretty (locStrRel ctx loc) <> "."
+    <+> pretty (locStrRel ctx loc)
+    <> "."
 prettySource ctx loc (RigidArg fname arg) =
   "is value of argument"
     </> indent 2 (shorten (pretty arg))
@@ -209,7 +212,7 @@ prettySource ctx loc (RigidSlice d slice) =
     </> indent 2 (shorten (pretty slice))
     </> d_desc
     <> "at"
-    <+> pretty (locStrRel ctx loc)
+      <+> pretty (locStrRel ctx loc)
     <> "."
   where
     d_desc = case d of
@@ -231,21 +234,22 @@ prettySource ctx loc (RigidOutOfScope boundloc v) =
     <> " going out of scope at "
     <> pretty (locStrRel ctx loc)
     <> "."
-    </> "Originally bound at "
+      </> "Originally bound at "
     <> pretty (locStrRel ctx boundloc)
     <> "."
 prettySource ctx loc RigidCoerce =
   "is an unknown size arising from empty dimension in coercion at"
-    <+> pretty (locStrRel ctx loc) <> "."
+    <+> pretty (locStrRel ctx loc)
+    <> "."
 prettySource _ _ RigidUnify =
   "is an artificial size invented during unification of functions with anonymous sizes."
 prettySource ctx loc (RigidCond t1 t2) =
   "is unknown due to conditional expression at "
     <> pretty (locStrRel ctx loc)
     <> "."
-    </> "One branch returns array of type: "
+      </> "One branch returns array of type: "
     <> align (pretty t1)
-    </> "The other an array of type:       "
+      </> "The other an array of type:       "
     <> align (pretty t2)
 
 -- | Retrieve notes describing the purpose or origin of the given
@@ -585,7 +589,8 @@ occursCheck usage bcs vn tp =
       "Occurs check: cannot instantiate"
         <+> prettyName vn
         <+> "with"
-        <+> pretty tp <> "."
+        <+> pretty tp
+        <> "."
 
 scopeCheck ::
   (MonadUnify m) =>
@@ -812,22 +817,6 @@ linkVarToDim usage bcs vn lvl e = do
 
   modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
   where
-    checkVar constraints dim'
-      | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
-        dim_lvl > lvl =
-          case c of
-            ParamSize {} -> do
-              notes <- dimNotes usage e
-              unifyError usage notes bcs $
-                "Cannot unify size variable"
-                  <+> dquotes (pretty e)
-                  <+> "with"
-                  <+> dquotes (prettyName vn)
-                  <+> "(scope violation)."
-                  </> "This is because"
-                  <+> dquotes (pretty $ qualName dim')
-                  <+> "is rigidly bound in a deeper scope."
-            _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ dim'
       | vn == dim' = do
           notes <- dimNotes usage e
@@ -837,6 +826,24 @@ linkVarToDim usage bcs vn lvl e = do
               <+> "with"
               <+> dquotes (pretty e)
               <+> "."
+    checkVar constraints dim'
+      | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
+        dim_lvl >= lvl =
+          case c of
+            ParamSize {} -> do
+              notes <- dimNotes usage e
+              unifyError usage notes bcs $
+                "Cannot link size"
+                  <+> dquotes (prettyName vn)
+                  <+> "to"
+                  <+> dquotes (pretty e)
+                  <+> "(scope violation)."
+                  </> "This is because"
+                  <+> dquotes (pretty $ qualName dim')
+                  <+> "is not in scope when"
+                  <+> dquotes (prettyName vn)
+                  <+> "is introduced."
+            _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.
@@ -857,7 +864,9 @@ mustBeOneOf ts usage t = do
       unifyError usage mempty noBreadCrumbs $
         "Cannot unify type"
           <+> dquotes (pretty t)
-          <+> "with any of " <> commasep (map pretty ts) <> "."
+          <+> "with any of "
+          <> commasep (map pretty ts)
+          <> "."
 
 linkVarToTypes :: (MonadUnify m) => Usage -> VName -> [PrimType] -> m ()
 linkVarToTypes usage vn ts = do
@@ -872,22 +881,23 @@ linkVarToTypes usage vn ts = do
               <+> "but also one of"
               <+> commasep (map pretty vn_ts)
               <+> "due to"
-              <+> pretty vn_usage <> "."
+              <+> pretty vn_usage
+              <> "."
         ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
     Just (_, HasConstrs _ _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
         "Type constrained to one of"
           <+> commasep (map pretty ts)
-            <> ", but also inferred to be sum type due to"
-          <+> pretty vn_usage
-            <> "."
+          <> ", but also inferred to be sum type due to"
+            <+> pretty vn_usage
+          <> "."
     Just (_, HasFields _ _ vn_usage) ->
       unifyError usage mempty noBreadCrumbs $
         "Type constrained to one of"
           <+> commasep (map pretty ts)
-            <> ", but also inferred to be record due to"
-          <+> pretty vn_usage
-            <> "."
+          <> ", but also inferred to be record due to"
+            <+> pretty vn_usage
+          <> "."
     Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
     Nothing ->
       unifyError usage mempty noBreadCrumbs $
@@ -926,8 +936,6 @@ equalityType usage t = do
           pure () -- All primtypes support equality.
         Just (_, Equality {}) ->
           pure ()
-        Just (_, HasConstrs _ cs _) ->
-          mapM_ (equalityType usage) $ concat $ M.elems cs
         _ ->
           unifyError usage mempty noBreadCrumbs $
             "Type" <+> prettyName vn <+> "does not support equality."
@@ -1118,7 +1126,8 @@ mustHaveFieldWith onDims usage bound bcs l t = do
             "Attempt to access field"
               <+> dquotes (pretty l)
               <+> " of value of type"
-              <+> pretty (toStructural t) <> "."
+              <+> pretty (toStructural t)
+              <> "."
     _ -> do
       unify usage t $ Scalar $ Record $ M.singleton l l_type
       pure l_type
@@ -1212,7 +1221,7 @@ instance MonadUnify UnifyM where
           M.insert dim (0, Size Nothing usage)
     pure dim
 
-  curLevel = pure 0
+  curLevel = pure 1
 
   unifyError loc notes bcs doc =
     throwError $ TypeError (locOf loc) notes $ doc <> pretty bcs
@@ -1234,8 +1243,8 @@ runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
     constraints =
       M.fromList $
         map nonrigid nonrigid_tparams <> map rigid rigid_tparams
-    nonrigid (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
-    nonrigid (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    nonrigid (TypeParamDim p loc) = (p, (1, Size Nothing $ Usage Nothing loc))
+    nonrigid (TypeParamType l p loc) = (p, (1, NoConstraint l $ Usage Nothing loc))
     rigid (TypeParamDim p loc) = (p, (0, ParamSize loc))
     rigid (TypeParamType l p loc) = (p, (0, ParamType l loc))
 

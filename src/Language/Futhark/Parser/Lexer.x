@@ -90,8 +90,6 @@ tokens :-
   "$"                      { tokenC DOLLAR }
   "???"                    { tokenC HOLE }
 
-  @declit                  { \s -> decToken (NATLIT (nameFromBS s)) s }
-
   @declit i8               { decToken I8LIT . BS.dropEnd 2 }
   @binlit i8               { binToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
   @hexlit i8               { hexToken I8LIT . BS.drop 2 . BS.dropEnd 2 }
@@ -132,7 +130,7 @@ tokens :-
   @hexlit u64              { hexToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
   @romlit u64              { romToken U64LIT . BS.drop 2 . BS.dropEnd 3 }
 
-  @declit                  { decToken INTLIT }
+  @declit                  { \s -> decToken (NATLIT (nameFromBS s)) s }
   @binlit                  { binToken INTLIT . BS.drop 2 }
   @hexlit                  { hexToken INTLIT . BS.drop 2 }
   @romlit                  { romToken INTLIT . BS.drop 2 }
