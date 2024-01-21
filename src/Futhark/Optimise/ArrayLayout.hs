@@ -1,4 +1,4 @@
-module Futhark.Pass.OptimiseArrayLayout (optimiseArrayLayoutGPU, optimiseArrayLayoutMC) where
+module Futhark.Optimise.ArrayLayout (optimiseArrayLayoutGPU, optimiseArrayLayoutMC) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
@@ -8,9 +8,9 @@ import Futhark.Builder
 import Futhark.IR.Aliases
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.MC (MC)
+import Futhark.Optimise.ArrayLayout.Layout
+import Futhark.Optimise.ArrayLayout.Transform
 import Futhark.Pass
-import Futhark.Pass.OptimiseArrayLayout.Layout
-import Futhark.Pass.OptimiseArrayLayout.Transform
 
 optimiseArrayLayout :: (Transform rep, BuilderOps rep) => String -> Pass rep rep
 optimiseArrayLayout s =

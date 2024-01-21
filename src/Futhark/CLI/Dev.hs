@@ -31,6 +31,7 @@ import Futhark.Internalise.FullNormalise as FullNormalise
 import Futhark.Internalise.LiftLambdas as LiftLambdas
 import Futhark.Internalise.Monomorphise as Monomorphise
 import Futhark.Internalise.ReplaceRecords as ReplaceRecords
+import Futhark.Optimise.ArrayLayout
 import Futhark.Optimise.ArrayShortCircuiting qualified as ArrayShortCircuiting
 import Futhark.Optimise.CSE
 import Futhark.Optimise.DoubleBuffer
@@ -53,7 +54,6 @@ import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
-import Futhark.Pass.OptimiseArrayLayout
 import Futhark.Pass.Simplify
 import Futhark.Passes
 import Futhark.Util.Log

@@ -323,6 +323,9 @@ library
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
       Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ArrayLayout
+      Futhark.Optimise.ArrayLayout.Transform
+      Futhark.Optimise.ArrayLayout.Layout
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
@@ -343,9 +346,6 @@ library
       Futhark.Optimise.Unstream
       Futhark.Pass
       Futhark.Pass.AD
-      Futhark.Pass.OptimiseArrayLayout
-      Futhark.Pass.OptimiseArrayLayout.Transform
-      Futhark.Pass.OptimiseArrayLayout.Layout
       Futhark.Pass.ExpandAllocations
       Futhark.Pass.ExplicitAllocations
       Futhark.Pass.ExplicitAllocations.GPU
