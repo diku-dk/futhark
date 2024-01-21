@@ -69,8 +69,6 @@ jobs:
     runs-on: hendrix
     needs: [build-linux-nix]
 
-    env:
-      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:
@@ -123,8 +121,6 @@ jobs:
     runs-on: hendrix
     needs: [build-linux-nix]
 
-    env:
-      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:
@@ -140,8 +136,6 @@ jobs:
     runs-on: hendrix
     needs: [build-linux-nix]
 
-    env:
-      TMPDIR: "/scratch"
     steps:
     - uses: actions/checkout@v3
       with:

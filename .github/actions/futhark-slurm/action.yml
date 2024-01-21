@@ -10,6 +10,8 @@ inputs:
     default: ''
 runs:
   using: "composite"
+  env:
+    TMPDIR: "/scratch"
   steps:
     - uses: actions/download-artifact@v3
       with:
