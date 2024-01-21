@@ -3,7 +3,6 @@ module Futhark.Passes
   ( standardPipeline,
     seqPipeline,
     gpuPipeline,
-    gpuPipelineDebug,
     seqmemPipeline,
     gpumemPipeline,
     mcPipeline,
@@ -103,18 +102,12 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        optimiseArrayLayout,
+        optimiseArrayLayoutGPU,
         -- Important to simplify after coalescing in order to fix up
         -- redundant manifests.
         simplifyGPU,
         performCSE True
       ]
-
--- | Extend gpuPipeline by pretty-printing the true AST
-gpuPipelineDebug :: Pipeline SOACS GPU
-gpuPipelineDebug =
-  gpuPipeline
-    >>> onePass printAST
 
 -- | The pipeline used by the sequential backends.  Turns all
 -- parallelism into sequential loops.  Includes 'standardPipeline'.
@@ -188,7 +181,7 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        optimiseArrayLayout,
+        optimiseArrayLayoutMC,
         simplifyMC,
         performCSE True
       ]

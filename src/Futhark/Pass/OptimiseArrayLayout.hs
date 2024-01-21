@@ -1,29 +1,22 @@
-module Futhark.Pass.OptimiseArrayLayout (optimiseArrayLayout, printAST) where
+module Futhark.Pass.OptimiseArrayLayout (optimiseArrayLayoutGPU, optimiseArrayLayoutMC) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
-import Debug.Pretty.Simple
 import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.AnalysePrimExp
 import Futhark.Builder
 import Futhark.IR.Aliases
+import Futhark.IR.GPU (GPU)
+import Futhark.IR.MC (MC)
 import Futhark.Pass
 import Futhark.Pass.OptimiseArrayLayout.Layout
 import Futhark.Pass.OptimiseArrayLayout.Transform
 
-printAST :: (RepTypes rep) => Pass rep rep
-printAST =
+optimiseArrayLayout :: (Transform rep, BuilderOps rep) => String -> Pass rep rep
+optimiseArrayLayout s =
   Pass
-    "pretty print ast"
-    "Pretty-print the ast at current stage in pipeline"
-    $ pure . pTraceShowId
-
--- | The pass definition.
-optimiseArrayLayout :: (Transform rep, BuilderOps rep) => Pass rep rep
-optimiseArrayLayout =
-  Pass
-    "coalesce access"
-    "Transform kernel input arrays for better performance."
+    ("optimise array layout " <> s)
+    "Transform array layout for locality optimisations."
     $ \prog -> do
       -- Analyse the program
       let index_table = analyseDimAccesss prog
@@ -37,3 +30,11 @@ optimiseArrayLayout =
     onStms layout_table scope stms = do
       let m = localScope scope $ transformStms layout_table mempty stms
       fmap fst $ modifyNameSource $ runState (runBuilderT m M.empty)
+
+-- | The optimisation performed on the GPU representation.
+optimiseArrayLayoutGPU :: Pass GPU GPU
+optimiseArrayLayoutGPU = optimiseArrayLayout "gpu"
+
+-- | The optimisation performed on the MC representation.
+optimiseArrayLayoutMC :: Pass MC MC
+optimiseArrayLayoutMC = optimiseArrayLayout "mc"

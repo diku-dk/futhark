@@ -368,21 +368,6 @@ cseOption short =
     long = [passLongOption pass]
     pass = performCSE True :: Pass SOACS.SOACS SOACS.SOACS
 
-coalesceOption :: String -> FutharkOption
-coalesceOption short =
-  passOption (passDescription pass) (UntypedPass perform) short long
-  where
-    perform (GPU prog) config =
-      GPU <$> runPipeline (onePass optimiseArrayLayout) config prog
-    perform (MC prog) config =
-      MC <$> runPipeline (onePass optimiseArrayLayout) config prog
-    perform s _ =
-      externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
-
-    long = [passLongOption pass]
-    pass = optimiseArrayLayout :: Pass GPU.GPU GPU.GPU
-
 sinkOption :: String -> FutharkOption
 sinkOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
@@ -660,6 +645,8 @@ commandLineOptions =
     soacsPassOption applyAD [],
     soacsPassOption applyADInnermost [],
     kernelsPassOption babysitKernels [],
+    kernelsPassOption optimiseArrayLayoutGPU [],
+    mcPassOption optimiseArrayLayoutMC [],
     kernelsPassOption tileLoops [],
     kernelsPassOption histAccsGPU [],
     unstreamOption [],
@@ -681,7 +668,6 @@ commandLineOptions =
     kernelsMemPassOption ArrayShortCircuiting.optimiseGPUMem [],
     cseOption [],
     simplifyOption "e",
-    coalesceOption "c",
     soacsPipelineOption
       "Run the default optimised pipeline"
       standardPipeline
@@ -695,14 +681,6 @@ commandLineOptions =
       gpuPipeline
       []
       ["gpu"],
-    pipelineOption
-      getSOACSProg
-      "GPU"
-      GPU
-      "Run the default optimised kernels pipeline and pretty-print AST"
-      gpuPipelineDebug
-      []
-      ["gpu-debug"],
     pipelineOption
       getSOACSProg
       "GPUMem"
