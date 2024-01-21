@@ -10,8 +10,6 @@ inputs:
     default: ''
 runs:
   using: "composite"
-  env:
-    TMPDIR: "/scratch"
   steps:
     - uses: actions/download-artifact@v3
       with:
@@ -38,5 +36,6 @@ runs:
         printf '#!/bin/bash
         ${{inputs.script}}' > temp.sh
         chmod +x temp.sh
+        export TMPDIR=/scratch
         srun ${{inputs.slurm-options}} temp.sh
         rm temp.sh
