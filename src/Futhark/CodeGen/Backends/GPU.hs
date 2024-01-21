@@ -78,9 +78,9 @@ kernelConstToExp (SizeMaxConst size_class) =
   where
     field = "max_" <> prettyString size_class
 
-compileGroupDim :: GroupDim -> GC.CompilerM op s C.Exp
-compileGroupDim (Left e) = GC.compileExp e
-compileGroupDim (Right kc) = pure $ kernelConstToExp kc
+compileBlockDim :: BlockDim -> GC.CompilerM op s C.Exp
+compileBlockDim (Left e) = GC.compileExp e
+compileBlockDim (Right kc) = pure $ kernelConstToExp kc
 
 genLaunchKernel ::
   KernelSafety ->
@@ -88,25 +88,25 @@ genLaunchKernel ::
   Count Bytes (TExp Int64) ->
   [KernelArg] ->
   [Exp] ->
-  [GroupDim] ->
+  [BlockDim] ->
   GC.CompilerM op s ()
-genLaunchKernel safety kernel_name local_memory args num_groups group_size = do
+genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size = do
   (arg_params, arg_params_inits, call_args) <-
     unzip3 <$> zipWithM mkArgs [(0 :: Int) ..] args
 
-  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_groups
-  (group_x, group_y, group_z) <- mkDims <$> mapM compileGroupDim group_size
+  (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_tblocks
+  (block_x, block_y, block_z) <- mkDims <$> mapM compileBlockDim tblock_size
 
   kernel_fname <- genKernelFunction kernel_name safety arg_params arg_params_inits
 
-  local_memory' <- GC.compileExp $ untyped $ unCount local_memory
+  shared_memory' <- GC.compileExp $ untyped $ unCount shared_memory
 
   GC.stm
     [C.cstm|{
            err = $id:kernel_fname(ctx,
                                   $exp:grid_x, $exp:grid_y, $exp:grid_z,
-                                  $exp:group_x, $exp:group_y, $exp:group_z,
-                                  $exp:local_memory',
+                                  $exp:block_x, $exp:block_y, $exp:block_z,
+                                  $exp:shared_memory',
                                   $args:call_args);
            if (err != FUTHARK_SUCCESS) { goto cleanup; }
            }|]
@@ -152,10 +152,10 @@ callKernel (CmpSizeLe v key x) = do
 callKernel (GetSizeMax v size_class) = do
   let e = kernelConstToExp $ SizeMaxConst size_class
   GC.stm [C.cstm|$id:v = $exp:e;|]
-callKernel (LaunchKernel safety kernel_name local_memory args num_groups group_size) =
-  genLaunchKernel safety kernel_name local_memory args num_groups group_size
+callKernel (LaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size) =
+  genLaunchKernel safety kernel_name shared_memory args num_tblocks tblock_size
 
-copygpu2gpu :: GC.DoLMADCopy op s
+copygpu2gpu :: GC.DoCopy op s
 copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname = "lmad_copy_gpu2gpu_" <> show (primByteSize t :: Int) <> "b"
       r = length shape
@@ -175,7 +175,7 @@ copygpu2gpu _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
          }
      |]
 
-copyhost2gpu :: GC.DoLMADCopy op s
+copyhost2gpu :: GC.DoCopy op s
 copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -199,7 +199,7 @@ copyhost2gpu sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       GC.CopyBarrier -> [C.cexp|true|]
       GC.CopyNoBarrier -> [C.cexp|false|]
 
-copygpu2host :: GC.DoLMADCopy op s
+copygpu2host :: GC.DoCopy op s
 copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let r = length shape
       dststride_inits = [[C.cinit|$exp:e|] | Count e <- dststride]
@@ -223,7 +223,7 @@ copygpu2host sync t shape dst (dstoffset, dststride) src (srcoffset, srcstride) 
       GC.CopyBarrier -> [C.cexp|true|]
       GC.CopyNoBarrier -> [C.cexp|false|]
 
-gpuCopies :: M.Map (Space, Space) (GC.DoLMADCopy op s)
+gpuCopies :: M.Map (Space, Space) (GC.DoCopy op s)
 gpuCopies =
   M.fromList
     [ ((Space "device", Space "device"), copygpu2gpu),
@@ -323,17 +323,31 @@ gpuOptions =
         optionAction = [C.cstm|futhark_context_config_set_device(cfg, optarg);|]
       },
     Option
+      { optionLongName = "default-thread-block-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default size of thread blocks that are launched.",
+        optionAction = [C.cstm|futhark_context_config_set_default_thread_block_size(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "default-grid-size",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "The default number of thread blocks that are launched.",
+        optionAction = [C.cstm|futhark_context_config_set_default_grid_size(cfg, atoi(optarg));|]
+      },
+    Option
       { optionLongName = "default-group-size",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default size of workgroups that are launched.",
+        optionDescription = "Alias for --default-thread-block-size.",
         optionAction = [C.cstm|futhark_context_config_set_default_group_size(cfg, atoi(optarg));|]
       },
     Option
       { optionLongName = "default-num-groups",
         optionShortName = Nothing,
         optionArgument = RequiredArgument "INT",
-        optionDescription = "The default number of workgroups that are launched.",
+        optionDescription = "Alias for --default-num-thread-blocks.",
         optionAction = [C.cstm|futhark_context_config_set_default_num_groups(cfg, atoi(optarg));|]
       },
     Option
@@ -440,3 +454,11 @@ generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   GC.generateProgramStruct
 
   GC.onClear [C.citem|if (ctx->error == NULL) { gpu_free_all(ctx); }|]
+
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]

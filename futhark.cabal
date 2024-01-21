@@ -217,7 +217,7 @@ library
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
       Futhark.CodeGen.ImpGen.GPU.Base
-      Futhark.CodeGen.ImpGen.GPU.Group
+      Futhark.CodeGen.ImpGen.GPU.Block
       Futhark.CodeGen.ImpGen.GPU.SegHist
       Futhark.CodeGen.ImpGen.GPU.SegMap
       Futhark.CodeGen.ImpGen.GPU.SegRed
@@ -256,7 +256,6 @@ library
       Futhark.IR.MCMem
       Futhark.IR.Mem
       Futhark.IR.Mem.Interval
-      Futhark.IR.Mem.IxFun
       Futhark.IR.Mem.LMAD
       Futhark.IR.Mem.Simplify
       Futhark.IR.Parse
@@ -359,7 +358,7 @@ library
       Futhark.Pass.ExtractKernels.Distribution
       Futhark.Pass.ExtractKernels.ISRWIM
       Futhark.Pass.ExtractKernels.Interchange
-      Futhark.Pass.ExtractKernels.Intragroup
+      Futhark.Pass.ExtractKernels.Intrablock
       Futhark.Pass.ExtractKernels.StreamKernel
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
@@ -458,7 +457,7 @@ library
     , free >=5.1.10
     , futhark-data >= 1.1.0.0
     , futhark-server >= 1.2.2.1
-    , futhark-manifest >= 1.2.0.1
+    , futhark-manifest >= 1.3.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline

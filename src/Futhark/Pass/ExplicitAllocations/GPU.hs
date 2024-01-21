@@ -12,7 +12,7 @@ import Control.Monad
 import Data.Set qualified as S
 import Futhark.IR.GPU
 import Futhark.IR.GPUMem
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Pass.ExplicitAllocations
 import Futhark.Pass.ExplicitAllocations.SegOp
 
@@ -25,14 +25,13 @@ allocAtLevel :: SegLevel -> AllocM GPU GPUMem a -> AllocM GPU GPUMem a
 allocAtLevel lvl = local $ \env ->
   env
     { allocSpace = space,
-      aggressiveReuse = True,
       allocInOp = handleHostOp (Just lvl)
     }
   where
     space = case lvl of
-      SegGroup {} -> Space "local"
+      SegBlock {} -> Space "shared"
       SegThread {} -> Space "device"
-      SegThreadInGroup {} -> Space "device"
+      SegThreadInBlock {} -> Space "device"
 
 handleSegOp ::
   Maybe SegLevel ->
@@ -44,7 +43,7 @@ handleSegOp outer_lvl op = do
       -- This implies we are in the intragroup parallelism situation.
       -- Just allocate for a single group; memory expansion will
       -- handle the rest later.
-      (Just (SegGroup _ (Just grid)), _) -> pure $ unCount $ gridGroupSize grid
+      (Just (SegBlock _ (Just grid)), _) -> pure $ unCount $ gridBlockSize grid
       _ ->
         letSubExp "num_threads"
           =<< case maybe_grid of
@@ -52,8 +51,8 @@ handleSegOp outer_lvl op = do
               pure . BasicOp $
                 BinOp
                   (Mul Int64 OverflowUndef)
-                  (unCount (gridNumGroups grid))
-                  (unCount (gridGroupSize grid))
+                  (unCount (gridNumBlocks grid))
+                  (unCount (gridBlockSize grid))
             Nothing ->
               foldBinOp
                 (Mul Int64 OverflowUndef)
@@ -64,9 +63,9 @@ handleSegOp outer_lvl op = do
     maybe_grid =
       case (outer_lvl, segLevel op) of
         (Just (SegThread _ (Just grid)), _) -> Just grid
-        (Just (SegGroup _ (Just grid)), _) -> Just grid
+        (Just (SegBlock _ (Just grid)), _) -> Just grid
         (_, SegThread _ (Just grid)) -> Just grid
-        (_, SegGroup _ (Just grid)) -> Just grid
+        (_, SegBlock _ (Just grid)) -> Just grid
         _ -> Nothing
     scope = scopeOfSegSpace $ segSpace op
     mapper num_threads =
@@ -79,8 +78,8 @@ handleSegOp outer_lvl op = do
         }
     f = case segLevel op of
       SegThread {} -> inThread
-      SegThreadInGroup {} -> inThread
-      SegGroup {} -> inGroup
+      SegThreadInBlock {} -> inThread
+      SegBlock {} -> inGroup
     inThread env = env {envExpHints = inThreadExpHints}
     inGroup env = env {envExpHints = inGroupExpHints}
 
@@ -102,8 +101,8 @@ kernelExpHints (BasicOp (Manifest perm v)) = do
   dims <- arrayDims <$> lookupType v
   let perm_inv = rearrangeInverse perm
       dims' = rearrangeShape perm dims
-      ixfun = IxFun.permute (IxFun.iota $ map pe64 dims') perm_inv
-  pure [Hint ixfun $ Space "device"]
+      lmad = LMAD.permute (LMAD.iota 0 $ map pe64 dims') perm_inv
+  pure [Hint lmad $ Space "device"]
 kernelExpHints (Op (Inner (SegOp (SegMap lvl@(SegThread _ _) space ts body)))) =
   zipWithM (mapResultHint lvl space) ts $ kernelBodyResult body
 kernelExpHints (Op (Inner (SegOp (SegRed lvl@(SegThread _ _) space reds ts body)))) =
@@ -133,7 +132,7 @@ mapResultHint _lvl space = hint
           pure $ Hint (innermost space_dims (arrayDims t)) $ Space "device"
     hint _ _ = pure NoHint
 
-innermost :: [SubExp] -> [SubExp] -> IxFun
+innermost :: [SubExp] -> [SubExp] -> LMAD
 innermost space_dims t_dims =
   let r = length t_dims
       dims = space_dims ++ t_dims
@@ -142,9 +141,9 @@ innermost space_dims t_dims =
           ++ [0 .. length space_dims - 1]
       perm_inv = rearrangeInverse perm
       dims_perm = rearrangeShape perm dims
-      ixfun_base = IxFun.iota $ map pe64 dims_perm
-      ixfun_rearranged = IxFun.permute ixfun_base perm_inv
-   in ixfun_rearranged
+      lmad_base = LMAD.iota 0 $ map pe64 dims_perm
+      lmad_rearranged = LMAD.permute lmad_base perm_inv
+   in lmad_rearranged
 
 semiStatic :: S.Set VName -> SubExp -> Bool
 semiStatic _ Constant {} = True
@@ -163,9 +162,8 @@ inGroupExpHints (Op (Inner (SegOp (SegMap _ space ts body))))
                   dims = seg_dims ++ map pe64 (arrayDims t)
                   nilSlice d = DimSlice 0 d 0
                in Hint
-                    ( IxFun.slice (IxFun.iota dims) $
-                        fullSliceNum dims $
-                          map nilSlice seg_dims
+                    ( LMAD.slice (LMAD.iota 0 dims) $
+                        fullSliceNum dims (map nilSlice seg_dims)
                     )
                     $ ScalarSpace (arrayDims t)
                     $ elemType t
@@ -183,8 +181,8 @@ inThreadExpHints e = do
     maybePrivate consts t
       | Just (Array pt shape _) <- hasStaticShape t,
         all (semiStatic consts) $ shapeDims shape = do
-          let ixfun = IxFun.iota $ map pe64 $ shapeDims shape
-          pure $ Hint ixfun $ ScalarSpace (shapeDims shape) pt
+          let lmad = LMAD.iota 0 $ map pe64 $ shapeDims shape
+          pure $ Hint lmad $ ScalarSpace (shapeDims shape) pt
       | otherwise =
           pure NoHint
 

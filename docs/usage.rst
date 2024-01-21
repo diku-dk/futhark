@@ -166,6 +166,15 @@ GPU backends (``opencl``, ``pyopencl``, ``hip``, and ``cuda``).
     special string ``#k``, where ``k`` is an integer, can be used to
     pick the *k*-th device, numbered from zero.
 
+  ``--default-thread-block-size INT``
+
+    The default size of GPU thread blocks that are launched. Capped to
+    the hardware limit if necessary.
+
+  ``--default-num-thread-blocks INT``
+
+    The default number of GPU thread blocks that are launched.
+
   ``-P/--profile``
 
     Measure the time taken by various GPU operations (such as kernels)
@@ -305,9 +314,7 @@ Compiling to Library
 While compiling a Futhark program to an executable is useful for
 testing, it is not suitable for production use.  Instead, a Futhark
 program should be compiled into a reusable library in some target
-language, enabling integration into a larger program.  Five of the
-Futhark compilers support this: ``futhark c``, ``futhark opencl``,
-``futhark cuda``, ``futhark py``, and ``futhark pyopencl``.
+language, enabling integration into a larger program.
 
 General Concerns
 ^^^^^^^^^^^^^^^^
@@ -321,7 +328,8 @@ below).  Extra parameters may be added to pass in context data, or
 *out*-parameters for writing the result, for target languages that do
 not support multiple return values from functions.
 
-The entry point should have a name that is also a valid C identifier.
+The entry point should have a name that is also a valid identifier in
+the target language (usually C).
 
 Not all Futhark types can be mapped cleanly to the target language.
 Arrays of tuples, for example, are a common issue.  In such cases,

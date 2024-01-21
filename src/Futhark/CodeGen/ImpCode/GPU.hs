@@ -10,7 +10,7 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelOp (..),
     Fence (..),
     AtomicOp (..),
-    GroupDim,
+    BlockDim,
     Kernel (..),
     KernelUse (..),
     module Futhark.CodeGen.ImpCode,
@@ -49,16 +49,16 @@ data HostOp
   | GetSizeMax VName SizeClass
   deriving (Show)
 
--- | The size of one dimension of a group.
-type GroupDim = Either Exp KernelConst
+-- | The size of one dimension of a block.
+type BlockDim = Either Exp KernelConst
 
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
   { kernelBody :: Code KernelOp,
     -- | The host variables referenced by the kernel.
     kernelUses :: [KernelUse],
-    kernelNumGroups :: [Exp],
-    kernelGroupSize :: [GroupDim],
+    kernelNumBlocks :: [Exp],
+    kernelBlockSize :: [BlockDim],
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
@@ -69,9 +69,9 @@ data Kernel = Kernel
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements. Set this to
+    -- when considering the shared memory requirements. Set this to
     -- false for kernels that do their own checking.
-    kernelCheckLocalMemory :: Bool
+    kernelCheckSharedMemory :: Bool
   }
   deriving (Show)
 
@@ -134,24 +134,24 @@ instance FreeIn Kernel where
   freeIn' kernel =
     freeIn'
       ( kernelBody kernel,
-        kernelNumGroups kernel,
-        kernelGroupSize kernel
+        kernelNumBlocks kernel,
+        kernelBlockSize kernel
       )
 
 instance Pretty Kernel where
   pretty kernel =
     "kernel"
       <+> brace
-        ( "groups"
-            <+> brace (pretty $ kernelNumGroups kernel)
-            </> "group_size"
-            <+> brace (list $ map (either pretty pretty) $ kernelGroupSize kernel)
+        ( "blocks"
+            <+> brace (pretty $ kernelNumBlocks kernel)
+            </> "tblock_size"
+            <+> brace (list $ map (either pretty pretty) $ kernelBlockSize kernel)
             </> "uses"
             <+> brace (commasep $ map pretty $ kernelUses kernel)
             </> "failure_tolerant"
             <+> brace (pretty $ kernelFailureTolerant kernel)
-            </> "check_local_memory"
-            <+> brace (pretty $ kernelCheckLocalMemory kernel)
+            </> "check_shared_memory"
+            <+> brace (pretty $ kernelCheckSharedMemory kernel)
             </> "body"
             <+> brace (pretty $ kernelBody kernel)
         )
@@ -163,14 +163,14 @@ data Fence = FenceLocal | FenceGlobal
 
 -- | An operation that occurs within a kernel body.
 data KernelOp
-  = GetGroupId VName Int
+  = GetBlockId VName Int
   | GetLocalId VName Int
   | GetLocalSize VName Int
   | GetLockstepWidth VName
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
-  | LocalAlloc VName (Count Bytes (TExp Int64))
+  | SharedAlloc VName (Count Bytes (TExp Int64))
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -211,10 +211,10 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 instance Pretty KernelOp where
-  pretty (GetGroupId dest i) =
+  pretty (GetBlockId dest i) =
     pretty dest
       <+> "<-"
-      <+> "get_group_id"
+      <+> "get_tblock_id"
       <> parens (pretty i)
   pretty (GetLocalId dest i) =
     pretty dest
@@ -238,8 +238,8 @@ instance Pretty KernelOp where
     "mem_fence_local()"
   pretty (MemFence FenceGlobal) =
     "mem_fence_global()"
-  pretty (LocalAlloc name size) =
-    pretty name <+> equals <+> "local_alloc" <> parens (pretty size)
+  pretty (SharedAlloc name size) =
+    pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
   pretty (ErrorSync FenceLocal) =
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =

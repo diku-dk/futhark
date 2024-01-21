@@ -406,12 +406,11 @@ checkExp (ArrayLit all_es _ loc) =
       e' <- checkExp e
       et <- expType e'
       es' <- mapM (unifies "type of first array element" et <=< checkExp) es
-      et' <- normTypeFully et
-      t <- arrayOfM loc et' (Shape [sizeFromInteger (genericLength all_es) mempty])
+      t <- arrayOfM loc et (Shape [sizeFromInteger (genericLength all_es) mempty])
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anySignedType =<< checkExp start
-  start_t <- expTypeFully start'
+  start_t <- expType start'
   maybe_step' <- case maybe_step of
     Nothing -> pure Nothing
     Just step -> do
@@ -614,9 +613,9 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   -- Not technically an ascription, but we want the pattern to have
   -- exactly the type of 'e'.
   t <- expType e'
-  incLevel . bindingSizes sizes $ \sizes' ->
-    bindingPat sizes' pat t $ \pat' -> do
-      body' <- checkExp body
+  bindingSizes sizes $ \sizes' ->
+    incLevel . bindingPat sizes' pat t $ \pat' -> do
+      body' <- incLevel $ checkExp body
       body_t <- expTypeFully body'
 
       -- If the bound expression is of type i64, then we replace the
@@ -850,12 +849,12 @@ checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
 checkExp (Constr name es NoInfo loc) = do
   t <- newTypeVar loc "t"
   es' <- mapM checkExp es
-  ets <- mapM expTypeFully es'
+  ets <- mapM expType es'
   mustHaveConstr (mkUsage loc "use of constructor") name t ets
   pure $ Constr name es' (Info t) loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
-  mt <- expTypeFully e'
+  mt <- expType e'
   (cs', t, retext) <- checkCases mt cs
   zeroOrderType
     (mkUsage loc "being returned 'match'")

@@ -334,6 +334,10 @@ SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
   return ldexp(x, y);
 }
 
+SCALAR_FUN_ATTR f16 futrts_copysign16(f16 x, f16 y) {
+  return copysign(x, y);
+}
+
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
   return mad(a, b, c);
 }
@@ -495,6 +499,10 @@ SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
   return futrts_ldexp32((float)x, y);
 }
 
+SCALAR_FUN_ATTR f16 futrts_copysign16(f16 x, f16 y) {
+  return futrts_copysign32((float)x, y);
+}
+
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
   return a * b + c;
 }
@@ -631,6 +639,10 @@ SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
 
 SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
   return futrts_ldexp32((float)x, y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_copysign16(f16 x, f16 y) {
+  return futrts_copysign32((float)x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {
@@ -837,6 +849,10 @@ SCALAR_FUN_ATTR f16 futrts_lerp16(f16 v0, f16 v1, f16 t) {
 
 SCALAR_FUN_ATTR f16 futrts_ldexp16(f16 x, int32_t y) {
   return futrts_ldexp32(x, y);
+}
+
+SCALAR_FUN_ATTR f16 futrts_copysign16(f16 x, f16 y) {
+  return futrts_copysign32((float)x, y);
 }
 
 SCALAR_FUN_ATTR f16 futrts_mad16(f16 a, f16 b, f16 c) {

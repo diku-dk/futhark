@@ -1919,6 +1919,7 @@ initialCtx =
                 <> prettyText (asInt64 m)
                 <> "]"
           else pure $ toArray shape $ map (toArray rowshape) $ chunk (asInt m) xs'
+    def "manifest" = Just $ fun1 pure
     def "vjp2" = Just $
       fun3 $
         \_ _ _ -> bad noLoc mempty "Interpreter does not support autodiff."

@@ -817,22 +817,6 @@ linkVarToDim usage bcs vn lvl e = do
 
   modifyConstraints $ M.insert vn (lvl, Size (Just e) usage)
   where
-    checkVar constraints dim'
-      | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
-        dim_lvl > lvl =
-          case c of
-            ParamSize {} -> do
-              notes <- dimNotes usage e
-              unifyError usage notes bcs $
-                "Cannot unify size variable"
-                  <+> dquotes (pretty e)
-                  <+> "with"
-                  <+> dquotes (prettyName vn)
-                  <+> "(scope violation)."
-                  </> "This is because"
-                  <+> dquotes (pretty $ qualName dim')
-                  <+> "is rigidly bound in a deeper scope."
-            _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ dim'
       | vn == dim' = do
           notes <- dimNotes usage e
@@ -842,6 +826,24 @@ linkVarToDim usage bcs vn lvl e = do
               <+> "with"
               <+> dquotes (pretty e)
               <+> "."
+    checkVar constraints dim'
+      | Just (dim_lvl, c) <- dim' `M.lookup` constraints,
+        dim_lvl >= lvl =
+          case c of
+            ParamSize {} -> do
+              notes <- dimNotes usage e
+              unifyError usage notes bcs $
+                "Cannot link size"
+                  <+> dquotes (prettyName vn)
+                  <+> "to"
+                  <+> dquotes (pretty e)
+                  <+> "(scope violation)."
+                  </> "This is because"
+                  <+> dquotes (pretty $ qualName dim')
+                  <+> "is not in scope when"
+                  <+> dquotes (prettyName vn)
+                  <+> "is introduced."
+            _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
 
 -- | Assert that this type must be one of the given primitive types.
@@ -934,8 +936,6 @@ equalityType usage t = do
           pure () -- All primtypes support equality.
         Just (_, Equality {}) ->
           pure ()
-        Just (_, HasConstrs _ cs _) ->
-          mapM_ (equalityType usage) $ concat $ M.elems cs
         _ ->
           unifyError usage mempty noBreadCrumbs $
             "Type" <+> prettyName vn <+> "does not support equality."
@@ -1221,7 +1221,7 @@ instance MonadUnify UnifyM where
           M.insert dim (0, Size Nothing usage)
     pure dim
 
-  curLevel = pure 0
+  curLevel = pure 1
 
   unifyError loc notes bcs doc =
     throwError $ TypeError (locOf loc) notes $ doc <> pretty bcs
@@ -1243,8 +1243,8 @@ runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
     constraints =
       M.fromList $
         map nonrigid nonrigid_tparams <> map rigid rigid_tparams
-    nonrigid (TypeParamDim p loc) = (p, (0, Size Nothing $ Usage Nothing loc))
-    nonrigid (TypeParamType l p loc) = (p, (0, NoConstraint l $ Usage Nothing loc))
+    nonrigid (TypeParamDim p loc) = (p, (1, Size Nothing $ Usage Nothing loc))
+    nonrigid (TypeParamType l p loc) = (p, (1, NoConstraint l $ Usage Nothing loc))
     rigid (TypeParamDim p loc) = (p, (0, ParamSize loc))
     rigid (TypeParamType l p loc) = (p, (0, ParamType l loc))
 

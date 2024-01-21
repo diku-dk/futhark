@@ -108,24 +108,24 @@ opCompiler (Pat [pe]) (Inner (SizeOp (CmpSizeLe key size_class x))) = do
     =<< toExp x
 opCompiler (Pat [pe]) (Inner (SizeOp (GetSizeMax size_class))) =
   sOp $ Imp.GetSizeMax (patElemName pe) size_class
-opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumGroups w64 max_num_groups_key group_size))) = do
+opCompiler (Pat [pe]) (Inner (SizeOp (CalcNumBlocks w64 max_num_tblocks_key tblock_size))) = do
   fname <- askFunction
-  max_num_groups :: TV Int32 <- dPrim "max_num_groups" int32
+  max_num_tblocks :: TV Int32 <- dPrim "max_num_tblocks" int32
   sOp $
-    Imp.GetSize (tvVar max_num_groups) (keyWithEntryPoint fname max_num_groups_key) $
-      sizeClassWithEntryPoint fname SizeNumGroups
+    Imp.GetSize (tvVar max_num_tblocks) (keyWithEntryPoint fname max_num_tblocks_key) $
+      sizeClassWithEntryPoint fname SizeGrid
 
-  -- If 'w' is small, we launch fewer groups than we normally would.
-  -- We don't want any idle groups.
+  -- If 'w' is small, we launch fewer blocks than we normally would.
+  -- We don't want any idle blocks.
   --
   -- The calculations are done with 64-bit integers to avoid overflow
   -- issues.
-  let num_groups_maybe_zero =
-        sMin64 (pe64 w64 `divUp` pe64 group_size) $
-          sExt64 (tvExp max_num_groups)
-  -- We also don't want zero groups.
-  let num_groups = sMax64 1 num_groups_maybe_zero
-  mkTV (patElemName pe) int32 <-- sExt32 num_groups
+  let num_tblocks_maybe_zero =
+        sMin64 (pe64 w64 `divUp` pe64 tblock_size) $
+          sExt64 (tvExp max_num_tblocks)
+  -- We also don't want zero blocks.
+  let num_tblocks = sMax64 1 num_tblocks_maybe_zero
+  mkTV (patElemName pe) int32 <-- sExt32 num_tblocks
 opCompiler dest (Inner (SegOp op)) =
   segOpCompiler dest op
 opCompiler (Pat pes) (Inner (GPUBody _ (Body _ stms res))) = do
@@ -165,13 +165,13 @@ segOpCompiler pat segop =
   compilerBugS $ "segOpCompiler: unexpected " ++ prettyString (segLevel segop) ++ " for rhs of pattern " ++ prettyString pat
 
 -- Create boolean expression that checks whether all kernels in the
--- enclosed code do not use more local memory than we have available.
+-- enclosed code do not use more shared memory than we have available.
 -- We look at *all* the kernels here, even those that might be
 -- otherwise protected by their own multi-versioning branches deeper
 -- down.  Currently the compiler will not generate multi-versioning
 -- that makes this a problem, but it might in the future.
-checkLocalMemoryReqs :: (VName -> Bool) -> Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
-checkLocalMemoryReqs in_scope code = do
+checkSharedMemoryReqs :: (VName -> Bool) -> Imp.HostCode -> CallKernelGen (Maybe (Imp.TExp Bool))
+checkSharedMemoryReqs in_scope code = do
   let alloc_sizes = map (sum . map alignedSize . localAllocSizes . Imp.kernelBody) $ getGPU code
 
   -- If any of the sizes involve a variable that is not known at this
@@ -179,21 +179,21 @@ checkLocalMemoryReqs in_scope code = do
   if not $ all in_scope $ namesToList $ freeIn alloc_sizes
     then pure Nothing
     else do
-      local_memory_capacity :: TV Int32 <- dPrim "local_memory_capacity" int32
-      sOp $ Imp.GetSizeMax (tvVar local_memory_capacity) SizeLocalMemory
+      shared_memory_capacity :: TV Int32 <- dPrim "shared_memory_capacity" int32
+      sOp $ Imp.GetSizeMax (tvVar shared_memory_capacity) SizeSharedMemory
 
-      let local_memory_capacity_64 =
-            sExt64 $ tvExp local_memory_capacity
+      let shared_memory_capacity_64 =
+            sExt64 $ tvExp shared_memory_capacity
           fits size =
-            unCount size .<=. local_memory_capacity_64
+            unCount size .<=. shared_memory_capacity_64
       pure $ Just $ foldl' (.&&.) true (map fits alloc_sizes)
   where
     getGPU = foldMap getKernel
-    getKernel (Imp.CallKernel k) | Imp.kernelCheckLocalMemory k = [k]
+    getKernel (Imp.CallKernel k) | Imp.kernelCheckSharedMemory k = [k]
     getKernel _ = []
 
     localAllocSizes = foldMap localAllocSize
-    localAllocSize (Imp.LocalAlloc _ size) = [size]
+    localAllocSize (Imp.SharedAlloc _ size) = [size]
     localAllocSize _ = []
 
     -- These allocations will actually be padded to an 8-byte aligned
@@ -237,8 +237,8 @@ expCompiler (Pat [pe]) (BasicOp (Replicate shape se))
       if shapeRank shape == 0
         then copyDWIM (patElemName pe) [] se []
         else sReplicate (patElemName pe) se
--- Allocation in the "local" space is just a placeholder.
-expCompiler _ (Op (Alloc _ (Space "local"))) =
+-- Allocation in the "shared" space is just a placeholder.
+expCompiler _ (Op (Alloc _ (Space "shared"))) =
   pure ()
 expCompiler pat (WithAcc inputs lam) =
   withAcc pat inputs lam
@@ -252,7 +252,7 @@ expCompiler dest (Match cond (first_case : cases) defbranch sort@(MatchDec _ Mat
   scope <- askScope
   tcode <- collect $ compileBody dest $ caseBody first_case
   fcode <- collect $ expCompiler dest $ Match cond cases defbranch sort
-  check <- checkLocalMemoryReqs (`M.member` scope) tcode
+  check <- checkSharedMemoryReqs (`M.member` scope) tcode
   let matches = caseMatch cond (casePat first_case)
   emit $ case check of
     Nothing -> fcode

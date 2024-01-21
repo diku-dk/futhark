@@ -606,7 +606,7 @@ analyseSizeOp :: SizeOp -> Context rep -> [VName] -> (Context rep, IndexTable re
 analyseSizeOp op ctx pats = do
   let ctx' = case op of
         (CmpSizeLe _name _class subexp) -> subexprsToContext [subexp]
-        (CalcNumGroups lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
+        (CalcNumBlocks lsubexp _name rsubexp) -> subexprsToContext [lsubexp, rsubexp]
         _ -> ctx
   -- Add sizeOp to context
   let ctx'' = foldl' extend ctx' $ map (\pat -> oneContext pat $ (varInfoZeroDeps ctx) {parents_nest = parents ctx'}) pats

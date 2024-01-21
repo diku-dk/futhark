@@ -166,14 +166,23 @@ void futhark_context_config_set_program(struct futhark_context_config *cfg, cons
   cfg->program = strdup(s);
 }
 
-void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
   cfg->default_block_size = size;
   cfg->default_block_size_changed = 1;
 }
 
-void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
   cfg->default_grid_size = num;
   cfg->default_grid_size_changed = 1;
+}
+
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_thread_block_size(cfg, num);
+}
+
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_grid_size(cfg, num);
 }
 
 void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
@@ -198,11 +207,13 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
       return 0;
     }
   }
-  if (strcmp(param_name, "default_group_size") == 0) {
+  if (strcmp(param_name, "default_thread_block_size") == 0 ||
+      strcmp(param_name, "default_group_size") == 0) {
     cfg->default_block_size = new_value;
     return 0;
   }
-  if (strcmp(param_name, "default_num_groups") == 0) {
+  if (strcmp(param_name, "default_grid_size") == 0 ||
+      strcmp(param_name, "default_num_groups") == 0) {
     cfg->default_grid_size = new_value;
     return 0;
   }
@@ -237,6 +248,7 @@ struct futhark_context {
   struct event_list event_list;
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
+  bool program_initialised;
   // Uniform fields above.
 
   void* global_failure;
@@ -257,11 +269,11 @@ struct futhark_context {
 
   struct free_list gpu_free_list;
 
-  size_t max_group_size;
+  size_t max_thread_block_size;
   size_t max_grid_size;
   size_t max_tile_size;
   size_t max_threshold;
-  size_t max_local_memory;
+  size_t max_shared_memory;
   size_t max_bespoke;
   size_t max_registers;
   size_t max_cache;
@@ -342,13 +354,13 @@ static void hip_load_code_from_cache(struct futhark_context_config *cfg,
 
 static void hip_size_setup(struct futhark_context *ctx) {
   struct futhark_context_config *cfg = ctx->cfg;
-  if (cfg->default_block_size > ctx->max_group_size) {
+  if (cfg->default_block_size > ctx->max_thread_block_size) {
     if (cfg->default_block_size_changed) {
       fprintf(stderr,
               "Note: Device limits default block size to %zu (down from %zu).\n",
-              ctx->max_group_size, cfg->default_block_size);
+              ctx->max_thread_block_size, cfg->default_block_size);
     }
-    cfg->default_block_size = ctx->max_group_size;
+    cfg->default_block_size = ctx->max_thread_block_size;
   }
   if (cfg->default_grid_size > ctx->max_grid_size) {
     if (cfg->default_grid_size_changed) {
@@ -380,10 +392,10 @@ static void hip_size_setup(struct futhark_context *ctx) {
     const char* size_name = cfg->tuning_param_names[i];
     int64_t max_value = 0, default_value = 0;
 
-    if (strstr(size_class, "group_size") == size_class) {
-      max_value = ctx->max_group_size;
+    if (strstr(size_class, "thread_block_size") == size_class) {
+      max_value = ctx->max_thread_block_size;
       default_value = cfg->default_block_size;
-    } else if (strstr(size_class, "num_groups") == size_class) {
+    } else if (strstr(size_class, "grid_size") == size_class) {
       max_value = ctx->max_grid_size;
       default_value = cfg->default_grid_size;
       // XXX: as a quick and dirty hack, use twice as many threads for
@@ -477,11 +489,11 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
     opts[i++] = strdup("-lineinfo");
   }
   opts[i++] = msgprintf("-D%s=%d",
-                        "max_group_size",
-                        (int)ctx->max_group_size);
+                        "max_thread_block_size",
+                        (int)ctx->max_thread_block_size);
   opts[i++] = msgprintf("-D%s=%d",
-                        "max_local_memory",
-                        (int)ctx->max_local_memory);
+                        "max_shared_memory",
+                        (int)ctx->max_shared_memory);
   opts[i++] = msgprintf("-D%s=%d",
                         "max_registers",
                         (int)ctx->max_registers);
@@ -495,7 +507,7 @@ static void hiprtc_mk_build_options(struct futhark_context *ctx, const char *ext
                           cfg->tuning_params[j]);
   }
   opts[i++] = msgprintf("-DLOCKSTEP_WIDTH=%zu", ctx->lockstep_width);
-  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_group_size);
+  opts[i++] = msgprintf("-DMAX_THREADS_PER_BLOCK=%zu", ctx->max_thread_block_size);
 
   for (int j = 0; extra_opts[j] != NULL; j++) {
     opts[i++] = strdup(extra_opts[j]);
@@ -665,6 +677,7 @@ int backend_context_setup(struct futhark_context* ctx) {
   ctx->total_runtime = 0;
   ctx->peak_mem_usage_device = 0;
   ctx->cur_mem_usage_device = 0;
+  ctx->kernels = NULL;
 
   HIP_SUCCEED_FATAL(hipInit(0));
   if (hip_device_setup(ctx) != 0) {
@@ -673,10 +686,10 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   free_list_init(&ctx->gpu_free_list);
 
-  ctx->max_local_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
-  ctx->max_group_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
+  ctx->max_shared_memory = device_query(ctx->dev, hipDeviceAttributeMaxSharedMemoryPerBlock);
+  ctx->max_thread_block_size = device_query(ctx->dev, hipDeviceAttributeMaxThreadsPerBlock);
   ctx->max_grid_size = device_query(ctx->dev, hipDeviceAttributeMaxGridDimX);
-  ctx->max_tile_size = sqrt(ctx->max_group_size);
+  ctx->max_tile_size = sqrt(ctx->max_thread_block_size);
   ctx->max_threshold = 0;
   ctx->max_bespoke = 0;
   ctx->max_registers = device_query(ctx->dev, hipDeviceAttributeMaxRegistersPerBlock);
@@ -713,12 +726,15 @@ int backend_context_setup(struct futhark_context* ctx) {
 }
 
 void backend_context_teardown(struct futhark_context* ctx) {
-  free_builtin_kernels(ctx, ctx->kernels);
-  hipFree(ctx->global_failure);
-  hipFree(ctx->global_failure_args);
-  HIP_SUCCEED_FATAL(gpu_free_all(ctx));
-  HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
-  HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    hipFree(ctx->global_failure);
+    hipFree(ctx->global_failure_args);
+    HIP_SUCCEED_FATAL(gpu_free_all(ctx));
+    HIP_SUCCEED_FATAL(hipStreamDestroy(ctx->stream));
+    HIP_SUCCEED_FATAL(hipModuleUnload(ctx->module));
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 // GPU ABSTRACTION LAYER
@@ -872,7 +888,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              gpu_kernel kernel, const char *name,
                              const int32_t grid[3],
                              const int32_t block[3],
-                             unsigned int local_mem_bytes,
+                             unsigned int shared_mem_bytes,
                              int num_args,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
@@ -891,11 +907,11 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
               msgprintf("Kernel %s with\n"
                         "  grid=(%d,%d,%d)\n"
                         "  block=(%d,%d,%d)\n"
-                        "  local memory=%d",
+                        "  shared memory=%d",
                         name,
                         grid[0], grid[1], grid[2],
                         block[0], block[1], block[2],
-                        local_mem_bytes),
+                        shared_mem_bytes),
               event,
               (event_report_fn)hip_event_report);
   }
@@ -904,7 +920,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
     (hipModuleLaunchKernel(kernel,
                            grid[0], grid[1], grid[2],
                            block[0], block[1], block[2],
-                           local_mem_bytes, ctx->stream,
+                           shared_mem_bytes, ctx->stream,
                            args, NULL));
 
   if (event != NULL) {

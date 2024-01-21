@@ -140,7 +140,6 @@ import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
@@ -486,6 +485,7 @@ entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueSum vts _ -> map valueTypeSign vts
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
@@ -497,6 +497,7 @@ entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueSum vts _ -> length vts
 
 compileInParam ::
   (Mem rep inner) =>
@@ -508,7 +509,7 @@ compileInParam fparam = case paramDec fparam of
   MemMem space ->
     pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem lmad) ->
-    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) lmad
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -1103,7 +1104,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
-  let location = MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+  let location = MemLoc mem (shapeDims shape) lmad
    in ArrayVar
         e
         ArrayEntry
@@ -1405,7 +1406,7 @@ lmadCopy t dstloc srcloc = do
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
-    Imp.LMADCopy
+    Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
       (dstmem, dstspace)
@@ -1582,8 +1583,8 @@ copyDWIM dest dest_slice src src_slice = do
         case dest_entry of
           ScalarVar _ _ ->
             ScalarDestination dest
-          ArrayVar _ (ArrayEntry (MemLoc mem shape ixfun) _) ->
-            ArrayDestination $ Just $ MemLoc mem shape ixfun
+          ArrayVar _ (ArrayEntry (MemLoc mem shape lmad) _) ->
+            ArrayDestination $ Just $ MemLoc mem shape lmad
           MemVar _ _ ->
             MemoryDestination dest
           AccVar {} ->
@@ -1708,9 +1709,9 @@ sAlloc name size space = do
   pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
-sArray name bt shape mem ixfun = do
+sArray name bt shape mem lmad = do
   name' <- newVName name
-  dArray name' bt shape mem ixfun
+  dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
@@ -1726,9 +1727,9 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  let iota_ixfun = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
+  let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    LMAD.permute iota_ixfun $
+    LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.

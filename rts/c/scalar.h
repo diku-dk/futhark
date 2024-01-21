@@ -17,6 +17,9 @@
 // Double-precision definitions are only included if the preprocessor
 // macro FUTHARK_F64_ENABLED is set.
 
+SCALAR_FUN_ATTR int32_t futrts_to_bits32(float x);
+SCALAR_FUN_ATTR float futrts_from_bits32(int32_t x);
+
 SCALAR_FUN_ATTR uint8_t add8(uint8_t x, uint8_t y) {
   return x + y;
 }
@@ -1890,6 +1893,10 @@ SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
   return ldexp(x, y);
 }
 
+SCALAR_FUN_ATTR float futrts_copysign32(float x, float y) {
+  return copysign(x, y);
+}
+
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
   return mad(a, b, c);
 }
@@ -2103,6 +2110,12 @@ SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
   return x * pow((double)2.0, (double)y);
 }
 
+SCALAR_FUN_ATTR float futrts_copysign32(float x, float y) {
+  int32_t xb = futrts_to_bits32(x);
+  int32_t yb = futrts_to_bits32(y);
+  return futrts_from_bits32((xb & ~(1<<31)) | (yb & (1<<31)));
+}
+
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
   return a * b + c;
 }
@@ -2241,6 +2254,10 @@ SCALAR_FUN_ATTR float futrts_ldexp32(float x, int32_t y) {
   return ldexpf(x, y);
 }
 
+SCALAR_FUN_ATTR float futrts_copysign32(float x, float y) {
+  return copysignf(x, y);
+}
+
 SCALAR_FUN_ATTR float futrts_mad32(float a, float b, float c) {
   return a * b + c;
 }
@@ -2285,6 +2302,9 @@ SCALAR_FUN_ATTR float fsignum32(float x) {
 }
 
 #ifdef FUTHARK_F64_ENABLED
+
+SCALAR_FUN_ATTR double futrts_from_bits64(int64_t x);
+SCALAR_FUN_ATTR int64_t futrts_to_bits64(double x);
 
 #if ISPC
 SCALAR_FUN_ATTR bool futrts_isinf64(float x) {
@@ -2652,8 +2672,14 @@ SCALAR_FUN_ATTR double futrts_lerp64(double v0, double v1, double t) {
   return v0 + (v1 - v0) * t;
 }
 
-SCALAR_FUN_ATTR float futrts_ldexp64(double x, int32_t y) {
+SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
   return x * pow((double)2.0, (double)y);
+}
+
+SCALAR_FUN_ATTR double futrts_copysign64(double x, double y) {
+  int64_t xb = futrts_to_bits64(x);
+  int64_t yb = futrts_to_bits64(y);
+  return futrts_from_bits64((xb & ~(((int64_t)1)<<63)) | (yb & (((int64_t)1)<<63)));
 }
 
 SCALAR_FUN_ATTR double futrts_mad64(double a, double b, double c) {
@@ -2988,6 +3014,10 @@ SCALAR_FUN_ATTR double futrts_lerp64(double v0, double v1, double t) {
 
 SCALAR_FUN_ATTR double futrts_ldexp64(double x, int32_t y) {
   return ldexp(x, y);
+}
+
+SCALAR_FUN_ATTR float futrts_copysign64(double x, double y) {
+  return copysign(x, y);
 }
 
 SCALAR_FUN_ATTR double futrts_mad64(double a, double b, double c) {

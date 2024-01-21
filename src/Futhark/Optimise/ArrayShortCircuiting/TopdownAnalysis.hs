@@ -24,13 +24,13 @@ import Futhark.Analysis.PrimExp.Convert
 import Futhark.IR.Aliases
 import Futhark.IR.GPUMem as GPU
 import Futhark.IR.MCMem as MC
-import Futhark.IR.Mem.IxFun qualified as IxFun
+import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.Optimise.ArrayShortCircuiting.DataStructs
 
-type DirAlias = IxFun -> Maybe IxFun
+type DirAlias = LMAD -> Maybe LMAD
 -- ^ A direct aliasing transformation
 
-type InvAlias = Maybe (IxFun -> IxFun)
+type InvAlias = Maybe (LMAD -> LMAD)
 -- ^ An inverse aliasing transformation
 
 type VarAliasTab = M.Map VName (VName, DirAlias, InvAlias)
@@ -72,18 +72,18 @@ getDirAliasFromExp :: Exp (Aliases rep) -> Maybe (VName, DirAlias)
 getDirAliasFromExp (BasicOp (SubExp (Var x))) = Just (x, Just)
 getDirAliasFromExp (BasicOp (Opaque _ (Var x))) = Just (x, Just)
 getDirAliasFromExp (BasicOp (Reshape ReshapeCoerce shp x)) =
-  Just (x, Just . (`IxFun.coerce` shapeDims (fmap pe64 shp)))
+  Just (x, Just . (`LMAD.coerce` shapeDims (fmap pe64 shp)))
 getDirAliasFromExp (BasicOp (Reshape ReshapeArbitrary shp x)) =
-  Just (x, (`IxFun.reshape` shapeDims (fmap pe64 shp)))
+  Just (x, (`LMAD.reshape` shapeDims (fmap pe64 shp)))
 getDirAliasFromExp (BasicOp (Rearrange _ _)) =
   Nothing
 getDirAliasFromExp (BasicOp (Index x slc)) =
-  Just (x, Just . (`IxFun.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
+  Just (x, Just . (`LMAD.slice` (Slice $ map (fmap pe64) $ unSlice slc)))
 getDirAliasFromExp (BasicOp (Update _ x _ _elm)) = Just (x, Just)
 getDirAliasFromExp (BasicOp (FlatIndex x (FlatSlice offset idxs))) =
   Just
     ( x,
-      Just . (`IxFun.flatSlice` FlatSlice (pe64 offset) (map (fmap pe64) idxs))
+      Just . (`LMAD.flatSlice` FlatSlice (pe64 offset) (map (fmap pe64) idxs))
     )
 getDirAliasFromExp (BasicOp (FlatUpdate x _ _)) = Just (x, Just)
 getDirAliasFromExp _ = Nothing
@@ -110,7 +110,7 @@ getInvAliasFromExp (BasicOp (SubExp (Var _))) = Just id
 getInvAliasFromExp (BasicOp (Opaque _ (Var _))) = Just id
 getInvAliasFromExp (BasicOp Update {}) = Just id
 getInvAliasFromExp (BasicOp (Rearrange perm _)) =
-  Just (`IxFun.permute` rearrangeInverse perm)
+  Just (`LMAD.permute` rearrangeInverse perm)
 getInvAliasFromExp _ = Nothing
 
 class TopDownHelper inner where
@@ -225,7 +225,7 @@ updateTopdownEnvLoop td_env arginis lform =
 -- | Get direct aliased index function.  Returns a triple of current memory
 -- block to be coalesced, the destination memory block and the index function of
 -- the access in the space of the destination block.
-getDirAliasedIxfn :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, LMAD)
 getDirAliasedIxfn td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x orig_ixfun) ->
@@ -241,7 +241,7 @@ getDirAliasedIxfn td_env coals_tab x =
 
 -- | Like 'getDirAliasedIxfn', but this version returns 'Nothing' if the value
 -- is not currently subject to coalescing.
-getDirAliasedIxfn' :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, IxFun)
+getDirAliasedIxfn' :: (HasMemBlock (Aliases rep)) => TopdownEnv rep -> CoalsTab -> VName -> Maybe (VName, VName, LMAD)
 getDirAliasedIxfn' td_env coals_tab x =
   case getScopeMemInfo x (scope td_env) of
     Just (MemBlock _ _ m_x _) ->

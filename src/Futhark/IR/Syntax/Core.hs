@@ -599,6 +599,15 @@ data OpaqueType
   | -- | Note that the field ordering here denote the actual
     -- representation - make sure it is preserved.
     OpaqueRecord [(Name, EntryPointType)]
+  | -- | Constructor ordering also denotes representation, in that the
+    -- index of the constructor is the identifying number.
+    --
+    -- The total values used to represent a sum values is the
+    -- 'ValueType' list. The 'Int's associated with each
+    -- 'EntryPointType' are the indexes of the values used to
+    -- represent that constructor payload. This is necessary because
+    -- we deduplicate payloads across constructors.
+    OpaqueSum [ValueType] [(Name, [(EntryPointType, [Int])])]
   deriving (Eq, Ord, Show)
 
 -- | Names of opaque types and their representation.

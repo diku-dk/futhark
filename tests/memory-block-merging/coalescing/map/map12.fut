@@ -1,6 +1,6 @@
 -- ==
 -- input { [[1,2,3,4]] }
--- auto output
+-- output { [[11, 7, 4, 2]] }
 -- structure gpu-mem { Alloc 2 }
 
 def main [n][m] (xs: [n][m]i32) =

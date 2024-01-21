@@ -19,7 +19,7 @@ module Futhark.CodeGen.Backends.GenericPython
     fromStorage,
     toStorage,
     Operations (..),
-    DoLMADCopy,
+    DoCopy,
     defaultOperations,
     unpackDim,
     CompilerM (..),
@@ -102,10 +102,10 @@ type Copy op s =
   PrimType ->
   CompilerM op s ()
 
--- | Perform an 'Imp.LMADCopy'.  It is expected that these functions
+-- | Perform an 'Imp.Copy'.  It is expected that these functions
 -- are each specialised on which spaces they operate on, so that is
 -- not part of their arguments.
-type DoLMADCopy op s =
+type DoCopy op s =
   PrimType ->
   [Count Elements PyExp] ->
   PyExp ->
@@ -142,7 +142,7 @@ data Operations op s = Operations
     opsReadScalar :: ReadScalar op s,
     opsAllocate :: Allocate op s,
     -- | @(dst,src)@-space mapping to copy functions.
-    opsCopies :: M.Map (Space, Space) (DoLMADCopy op s),
+    opsCopies :: M.Map (Space, Space) (DoCopy op s),
     opsCompiler :: OpCompiler op s,
     opsEntryOutput :: EntryOutput op s,
     opsEntryInput :: EntryInput op s
@@ -1190,9 +1190,9 @@ generateWrite dst iexp pt (Imp.Space space) elemexp = do
 generateWrite dst iexp _ DefaultSpace elemexp =
   stm $ Exp $ simpleCall "writeScalarArray" [dst, iexp, elemexp]
 
--- | Compile an 'LMADCopy' using sequential nested loops, but
+-- | Compile an 'Copy' using sequential nested loops, but
 -- parameterised over how to do the reads and writes.
-compileLMADCopyWith ::
+compileCopyWith ::
   [Count Elements (TExp Int64)] ->
   (PyExp -> PyExp -> CompilerM op s ()) ->
   ( Count Elements (TExp Int64),
@@ -1203,7 +1203,7 @@ compileLMADCopyWith ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
+compileCopyWith shape doWrite dst_lmad doRead src_lmad = do
   let (dstoffset, dststrides) = dst_lmad
       (srcoffset, srcstrides) = src_lmad
   shape' <- mapM (compileExp . untyped . unCount) shape
@@ -1225,10 +1225,10 @@ compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad = do
     loops ((i, n) : ins) body =
       [For (compileName i) (simpleCall "range" [n]) $ loops ins body]
 
--- | Compile an 'LMADCopy' using sequential nested loops and
+-- | Compile an 'Copy' using sequential nested loops and
 -- 'Imp.Read'/'Imp.Write' of individual scalars.  This always works,
 -- but can be pretty slow if those reads and writes are costly.
-compileLMADCopy ::
+compileCopy ::
   PrimType ->
   [Count Elements (TExp Int64)] ->
   (VName, Space) ->
@@ -1240,12 +1240,12 @@ compileLMADCopy ::
     [Count Elements (TExp Int64)]
   ) ->
   CompilerM op s ()
-compileLMADCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
+compileCopy t shape (dst, dstspace) dst_lmad (src, srcspace) src_lmad = do
   src' <- compileVar src
   dst' <- compileVar dst
   let doWrite dst_i = generateWrite dst' dst_i t dstspace
       doRead src_i = generateRead src' src_i t srcspace
-  compileLMADCopyWith shape doWrite dst_lmad doRead src_lmad
+  compileCopyWith shape doWrite dst_lmad doRead src_lmad
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 compileCode Imp.DebugPrint {} =
@@ -1351,11 +1351,11 @@ compileCode (Imp.Allocate name (Imp.Count (Imp.TPrimExp e)) _) = do
   stm =<< Assign <$> compileVar name <*> pure allocate'
 compileCode (Imp.Free name _) =
   stm =<< Assign <$> compileVar name <*> pure None
-compileCode (Imp.LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
+compileCode (Imp.Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
   cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
   case cp of
     Nothing ->
-      compileLMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
     Just cp' -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
       dst' <- compileVar dst
@@ -1377,7 +1377,7 @@ compileCode (Imp.Read x src (Imp.Count iexp) pt space _) = do
   stm . Assign x' =<< generateRead src' iexp' pt space
 compileCode Imp.Skip = pure ()
 
-lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU :: DoCopy op s
 lmadcopyCPU t shape dst (dstoffset, dststride) src (srcoffset, srcstride) =
   stm . Exp . simpleCall "lmad_copy" $
     [ Var (compilePrimType t),

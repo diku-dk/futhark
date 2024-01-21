@@ -58,7 +58,7 @@ transformSegOpGPU perm_table expmap stm@(Let pat aux _) op =
       let mapper =
             identitySegOpMapper
               { mapOnSegOpBody = case segLevel op of
-                  SegGroup {} -> transformSegGroupKernelBody perm_table expmap
+                  SegBlock {} -> transformSegGroupKernelBody perm_table expmap
                   _ -> transformSegThreadKernelBody perm_table patternName
               }
       op' <- mapSegOpM mapper op

@@ -8,10 +8,11 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.List (find)
+import Data.List (find, intersperse)
 import Data.Map qualified as M
 import Futhark.IR qualified as I
-import Futhark.Internalise.TypesValues (internalisedTypeSize)
+import Futhark.Internalise.TypesValues (internaliseSumTypeRep, internalisedTypeSize)
+import Futhark.Util (chunks)
 import Futhark.Util.Pretty (prettyTextOneLine)
 import Language.Futhark qualified as E hiding (TypeArg)
 import Language.Futhark.Core (Name, Uniqueness (..), VName, nameFromText)
@@ -49,15 +50,29 @@ withoutDims te = (0 :: Int, te)
 rootType :: E.TypeExp E.Info VName -> E.TypeExp E.Info VName
 rootType (E.TEApply te E.TypeArgExpSize {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
+rootType (E.TEDim _ te _) = rootType te
 rootType te = te
 
 typeExpOpaqueName :: E.TypeExp E.Info VName -> Name
-typeExpOpaqueName = f . rootType
+typeExpOpaqueName = nameFromText . f
   where
-    f (E.TEArray _ te _) =
+    f = g . rootType
+    g (E.TEArray _ te _) =
       let (d, te') = withoutDims te
-       in nameFromText (mconcat (replicate (1 + d) "[]")) <> typeExpOpaqueName te'
-    f te = nameFromText $ prettyTextOneLine te
+       in mconcat (replicate (1 + d) "[]") <> f te'
+    g (E.TETuple tes _) =
+      "(" <> mconcat (intersperse ", " (map f tes)) <> ")"
+    g (E.TERecord tes _) =
+      "{" <> mconcat (intersperse ", " (map onField tes)) <> "}"
+      where
+        onField (k, te) = E.nameToText k <> ":" <> f te
+    g (E.TESum cs _) =
+      mconcat (intersperse " | " (map onConstr cs))
+      where
+        onConstr (k, tes) =
+          E.nameToText k <> ":" <> mconcat (intersperse " " (map f tes))
+    g (E.TEParens te _) = "(" <> f te <> ")"
+    g te = prettyTextOneLine te
 
 type GenOpaque = State I.OpaqueTypes
 
@@ -105,6 +120,38 @@ opaqueRecord types ((f, t) : fs) ts = do
   where
     opaqueField e_t i_ts = snd <$> entryPointType types e_t i_ts
 
+isSum :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name [E.TypeExp E.Info VName])
+isSum _ (E.TESum cs _) = Just $ M.fromList cs
+isSum types (E.TEVar v _) = isSum types =<< findType (E.qualLeaf v) types
+isSum _ _ = Nothing
+
+sumConstrs ::
+  VisibleTypes ->
+  M.Map Name [E.StructType] ->
+  Maybe (E.TypeExp E.Info VName) ->
+  [(Name, [E.EntryType])]
+sumConstrs types cs t =
+  case isSum types . rootType =<< t of
+    Just e_cs ->
+      zipWith f (E.sortConstrs cs) (E.sortConstrs e_cs)
+      where
+        f (k, c_ts) (_, e_c_ts) = (k, zipWith E.EntryType c_ts $ map Just e_c_ts)
+    Nothing ->
+      map (fmap (map (`E.EntryType` Nothing))) $ E.sortConstrs cs
+
+opaqueSum ::
+  VisibleTypes ->
+  [(Name, ([E.EntryType], [Int]))] ->
+  [I.TypeBase I.Rank Uniqueness] ->
+  GenOpaque [(Name, [(I.EntryPointType, [Int])])]
+opaqueSum types cs ts = mapM (traverse f) cs
+  where
+    f (ets, is) = do
+      let ns = map (internalisedTypeSize . E.entryType) ets
+          is' = chunks ns is
+      ets' <- map snd <$> zipWithM (entryPointType types) ets (map (map (ts !!)) is')
+      pure $ zip ets' $ map (map (+ 1)) is' -- Adjust for tag.
+
 entryPointType ::
   VisibleTypes ->
   E.EntryType ->
@@ -129,6 +176,12 @@ entryPointType types t ts
           | not $ null fs ->
               let fs' = recordFields types fs $ E.entryAscribed t
                in addType desc . I.OpaqueRecord =<< opaqueRecord types fs' ts
+        E.Scalar (E.Sum cs) -> do
+          let (_, places) = internaliseSumTypeRep cs
+              cs' = sumConstrs types cs $ E.entryAscribed t
+              cs'' = zip (map fst cs') (zip (map snd cs') (map snd places))
+          addType desc . I.OpaqueSum (map valueType ts)
+            =<< opaqueSum types cs'' (drop 1 ts)
         _ -> addType desc $ I.OpaqueType $ map valueType ts
       pure (u, I.TypeOpaque desc)
   where
