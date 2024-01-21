@@ -1,4 +1,4 @@
-module Futhark.Pass.GALOP.AnalysePrimExpTests (tests) where
+module Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests (tests) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M

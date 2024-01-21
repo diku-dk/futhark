@@ -1,4 +1,4 @@
-module Futhark.Pass.GALOP.AnalyseTests (tests) where
+module Futhark.Pass.OptimiseArrayLayout.AnalyseTests (tests) where
 
 import Data.Map.Strict qualified as M
 import Data.Sequence.Internal qualified as S

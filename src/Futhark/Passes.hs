@@ -41,9 +41,9 @@ import Futhark.Pass.ExplicitAllocations.Seq qualified as Seq
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExtractMulticore
 import Futhark.Pass.FirstOrderTransform
-import Futhark.Pass.GALOP
 import Futhark.Pass.LiftAllocations as LiftAllocations
 import Futhark.Pass.LowerAllocations as LowerAllocations
+import Futhark.Pass.OptimiseArrayLayout
 import Futhark.Pass.Simplify
 import Futhark.Pipeline
 
@@ -103,7 +103,7 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        galop,
+        optimiseArrayLayout,
         -- Important to simplify after coalescing in order to fix up
         -- redundant manifests.
         simplifyGPU,
@@ -188,7 +188,7 @@ mcPipeline =
         performCSE True,
         simplifyMC,
         sinkMC,
-        galop,
+        optimiseArrayLayout,
         simplifyMC,
         performCSE True
       ]

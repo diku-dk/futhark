@@ -1,5 +1,5 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
-module Futhark.Pass.GALOP.Transform (Transform, transformStms) where
+module Futhark.Pass.OptimiseArrayLayout.Transform (Transform, transformStms) where
 
 import Control.Monad
 import Control.Monad.State.Strict
@@ -10,7 +10,7 @@ import Futhark.Construct
 import Futhark.IR.Aliases
 import Futhark.IR.GPU
 import Futhark.IR.MC
-import Futhark.Pass.GALOP.Layout
+import Futhark.Pass.OptimiseArrayLayout.Layout
 
 class (Layout rep) => Transform rep where
   onOp :: forall m. (Monad m) => SOACMapper rep rep m -> Op rep -> m (Op rep)

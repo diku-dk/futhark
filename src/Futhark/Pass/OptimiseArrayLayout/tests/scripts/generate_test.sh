@@ -9,7 +9,7 @@
 overwrite=false
 
 dir0="/Users/bak/Desktop/Speciale/futhark/tests_analysis"
-dir1="/Users/bak/Desktop/Speciale/futhark/src/Futhark/Pass/GALOP/tests"
+dir1="/Users/bak/Desktop/Speciale/futhark/src/Futhark/Pass/OptimizeArrayLayout/tests"
 
 # Get path of the latest build of the futhark executable
 futhark_dev=$(ls -tr $(find . -name futhark -type f ) | tail -1)
