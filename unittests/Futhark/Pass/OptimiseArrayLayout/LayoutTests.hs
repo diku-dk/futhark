@@ -6,7 +6,7 @@ import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.IR.GPU (GPU)
 import Futhark.IR.GPUTests ()
-import Futhark.Pass.OptimiseArrayLayout.Layout
+import Futhark.Optimise.ArrayLayout.Layout
 import Language.Futhark.Core
 import Test.Tasty
 import Test.Tasty.HUnit
