@@ -10,6 +10,9 @@ import Futhark.IR.SyntaxTests (parseString)
 -- There isn't anything to test in this module, but we define some
 -- convenience instances.
 
+instance IsString (Stm GPU) where
+  fromString = parseString "Stm GPU" parseStmGPU
+
 instance IsString (Body GPU) where
   fromString = parseString "Body GPU" parseBodyGPU
 

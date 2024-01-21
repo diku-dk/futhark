@@ -17,6 +17,9 @@ module Futhark.IR.Parse
     parseSubExp,
     parseSubExpRes,
     parseBodyGPU,
+    parseBodyMC,
+    parseStmGPU,
+    parseStmMC,
   )
 where
 
@@ -1170,3 +1173,12 @@ parseSubExpRes = parseFull pSubExpRes
 
 parseBodyGPU :: FilePath -> T.Text -> Either T.Text (Body GPU)
 parseBodyGPU = parseFull $ pBody prGPU
+
+parseStmGPU :: FilePath -> T.Text -> Either T.Text (Stm GPU)
+parseStmGPU = parseFull $ pStm prGPU
+
+parseBodyMC :: FilePath -> T.Text -> Either T.Text (Body MC)
+parseBodyMC = parseFull $ pBody prMC
+
+parseStmMC :: FilePath -> T.Text -> Either T.Text (Stm MC)
+parseStmMC = parseFull $ pStm prMC

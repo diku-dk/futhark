@@ -2,12 +2,12 @@ module Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests (tests) where
 
 import Control.Monad.State.Strict
 import Data.Map.Strict qualified as M
-import Data.Sequence.Internal qualified as S
 import Futhark.Analysis.AnalysePrimExp
 import Futhark.Analysis.PrimExp
 import Futhark.IR.GPU
 import Futhark.IR.GPUTests ()
 import Futhark.IR.MC
+import Futhark.IR.MCTests ()
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -39,28 +39,8 @@ stmToPrimExpsTestsGPU =
                 ("b_5210", LetName "i64"),
                 ("defunc_0_f_res_5211", LetName "i64")
               ]
-      let emptyStmAux = defAux ()
       [ testCase "BinOp" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5211",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      BasicOp
-                        ( BinOp
-                            (Add Int64 OverflowWrap)
-                            (Var "acc_5209")
-                            (Var "b_5210")
-                        )
-                  }
+          let stm = "let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210)"
           let res = execState ((stmToPrimExps @GPU) scope stm) mempty
           let expected =
                 M.fromList
@@ -75,74 +55,12 @@ stmToPrimExpsTestsGPU =
                   ]
           res @?= expected,
         testCase "Index" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "b_5210",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      BasicOp
-                        ( Index
-                            "xss_5144"
-                            ( Slice
-                                { unSlice =
-                                    [ DimFix (Var "gtid_5204"),
-                                      DimFix (Var "i_5208")
-                                    ]
-                                }
-                            )
-                        )
-                  }
+          let stm = "let {b_5210 : i64} = xss_5144[gtid_5204, i_5208]"
           let res = execState ((stmToPrimExps @GPU) scope stm) mempty
           let expected = M.fromList [("b_5210", Nothing)]
           res @?= expected,
         testCase "Loop" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5207",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Loop
-                        [ ( Param
-                              { paramAttrs = Attrs {unAttrs = mempty},
-                                paramName = "acc_5209",
-                                paramDec = Prim (IntType Int64)
-                              },
-                            Constant (IntValue (Int64Value 0))
-                          )
-                        ]
-                        ( ForLoop
-                            "i_5208"
-                            Int64
-                            (Var "m_5143")
-                        )
-                        ( Body
-                            { bodyDec = (),
-                              bodyStms = mempty,
-                              bodyResult =
-                                [ SubExpRes
-                                    { resCerts = Certs {unCerts = []},
-                                      resSubExp = Var "defunc_0_f_res_5211"
-                                    }
-                                ]
-                            }
-                        )
-                  }
+          let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { {defunc_0_f_res_5211} }"
           let res = execState ((stmToPrimExps @GPU) scope stm) mempty
           let expected =
                 M.fromList
@@ -152,90 +70,7 @@ stmToPrimExpsTestsGPU =
                   ]
           res @?= expected,
         testCase "Loop body" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5207",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Loop
-                        [ ( Param
-                              { paramAttrs = Attrs {unAttrs = mempty},
-                                paramName = "acc_5209",
-                                paramDec = Prim (IntType Int64)
-                              },
-                            Constant (IntValue (Int64Value 0))
-                          )
-                        ]
-                        ( ForLoop
-                            "i_5208"
-                            Int64
-                            (Var "m_5143")
-                        )
-                        ( Body
-                            { bodyDec = (),
-                              bodyStms =
-                                S.fromList
-                                  [ Let
-                                      { stmPat =
-                                          Pat
-                                            { patElems =
-                                                [ PatElem
-                                                    { patElemName = "b_5210",
-                                                      patElemDec = Prim (IntType Int64)
-                                                    }
-                                                ]
-                                            },
-                                        stmAux = emptyStmAux,
-                                        stmExp =
-                                          BasicOp
-                                            ( Index
-                                                "xss_5144"
-                                                ( Slice
-                                                    { unSlice =
-                                                        [ DimFix (Var "gtid_5204"),
-                                                          DimFix (Var "i_5208")
-                                                        ]
-                                                    }
-                                                )
-                                            )
-                                      },
-                                    Let
-                                      { stmPat =
-                                          Pat
-                                            { patElems =
-                                                [ PatElem
-                                                    { patElemName = "defunc_0_f_res_5211",
-                                                      patElemDec = Prim (IntType Int64)
-                                                    }
-                                                ]
-                                            },
-                                        stmAux = emptyStmAux,
-                                        stmExp =
-                                          BasicOp
-                                            ( BinOp
-                                                (Add Int64 OverflowWrap)
-                                                (Var "acc_5209")
-                                                (Var "b_5210")
-                                            )
-                                      }
-                                  ],
-                              bodyResult =
-                                [ SubExpRes
-                                    { resCerts = Certs {unCerts = []},
-                                      resSubExp = Var "defunc_0_f_res_5211"
-                                    }
-                                ]
-                            }
-                        )
-                  }
+          let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { let {b_5210 : i64} = xss_5144[gtid_5204, i_5208] let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210) in {defunc_0_f_res_5211} }"
           let res = execState ((stmToPrimExps @GPU) scope stm) mempty
           let expected =
                 M.fromList
@@ -256,59 +91,11 @@ stmToPrimExpsTestsGPU =
         testCase "SegMap" $
           do
             let stm =
-                  Let
-                    { stmPat =
-                        Pat
-                          { patElems =
-                              [ PatElem
-                                  { patElemName = "defunc_0_map_res_5125",
-                                    patElemDec =
-                                      Array
-                                        (IntType Int64)
-                                        (Shape {shapeDims = [Var "n_5142"]})
-                                        NoUniqueness
-                                  }
-                              ]
-                          },
-                      stmAux = emptyStmAux,
-                      stmExp =
-                        Op
-                          ( SegOp
-                              ( SegMap
-                                  ( SegThread
-                                      SegNoVirt
-                                      ( Just
-                                          ( KernelGrid
-                                              { gridNumBlocks = Count {unCount = Var "segmap_usable_groups_5124"},
-                                                gridBlockSize = Count {unCount = Var "segmap_group_size_5123"}
-                                              }
-                                          )
-                                      )
-                                  )
-                                  ( SegSpace
-                                      { segFlat = "phys_tid_5127",
-                                        unSegSpace =
-                                          [ ( "gtid_5126",
-                                              Var "n_5142"
-                                            )
-                                          ]
-                                      }
-                                  )
-                                  [Prim (IntType Int64)]
-                                  ( KernelBody
-                                      { kernelBodyDec = (),
-                                        kernelBodyStms = mempty,
-                                        kernelBodyResult =
-                                          [ Returns
-                                              ResultMaySimplify
-                                              (Certs {unCerts = []})
-                                              (Var "lifted_lambda_res_5129")
-                                          ]
-                                      }
-                                  )
-                              )
-                          )
-                    }
+                  "let {defunc_0_map_res_5125 : [n_5142]i64} =\
+                  \  segmap(thread; ; grid=segmap_usable_groups_5124; blocksize=segmap_group_size_5123)\
+                  \  (gtid_5126 < n_5142) (~phys_tid_5127) : {i64} {\
+                  \  return {returns lifted_lambda_res_5129} \
+                  \}"
             let res = execState ((stmToPrimExps @GPU) scope stm) mempty
             let expected =
                   M.fromList
@@ -319,101 +106,15 @@ stmToPrimExpsTestsGPU =
         testCase "SegMap body" $
           do
             let stm =
-                  Let
-                    { stmPat =
-                        Pat
-                          { patElems =
-                              [ PatElem
-                                  { patElemName = "defunc_0_map_res_5125",
-                                    patElemDec =
-                                      Array
-                                        (IntType Int64)
-                                        (Shape {shapeDims = [Var "n_5142"]})
-                                        NoUniqueness
-                                  }
-                              ]
-                          },
-                      stmAux = emptyStmAux,
-                      stmExp =
-                        Op
-                          ( SegOp
-                              ( SegMap
-                                  ( SegThread
-                                      SegNoVirt
-                                      ( Just
-                                          ( KernelGrid
-                                              { gridNumBlocks = Count {unCount = Var "segmap_usable_groups_5124"},
-                                                gridBlockSize = Count {unCount = Var "segmap_group_size_5123"}
-                                              }
-                                          )
-                                      )
-                                  )
-                                  ( SegSpace
-                                      { segFlat = "phys_tid_5127",
-                                        unSegSpace =
-                                          [ ( "gtid_5126",
-                                              Var "n_5142"
-                                            )
-                                          ]
-                                      }
-                                  )
-                                  [Prim (IntType Int64)]
-                                  ( KernelBody
-                                      { kernelBodyDec = (),
-                                        kernelBodyStms =
-                                          S.fromList
-                                            [ Let
-                                                { stmPat =
-                                                    Pat
-                                                      { patElems =
-                                                          [ PatElem
-                                                              { patElemName = "eta_p_5128",
-                                                                patElemDec = Prim (IntType Int64)
-                                                              }
-                                                          ]
-                                                      },
-                                                  stmAux = emptyStmAux,
-                                                  stmExp =
-                                                    BasicOp
-                                                      ( Index
-                                                          "xs_5093"
-                                                          ( Slice
-                                                              { unSlice = [DimFix (Var "gtid_5126")]
-                                                              }
-                                                          )
-                                                      )
-                                                },
-                                              Let
-                                                { stmPat =
-                                                    Pat
-                                                      { patElems =
-                                                          [ PatElem
-                                                              { patElemName = "lifted_lambda_res_5129",
-                                                                patElemDec = Prim (IntType Int64)
-                                                              }
-                                                          ]
-                                                      },
-                                                  stmAux = emptyStmAux,
-                                                  stmExp =
-                                                    BasicOp
-                                                      ( BinOp
-                                                          (Add Int64 OverflowWrap)
-                                                          (Constant (IntValue (Int64Value 2)))
-                                                          (Var "eta_p_5128")
-                                                      )
-                                                }
-                                            ],
-                                        kernelBodyResult =
-                                          [ Returns
-                                              ResultMaySimplify
-                                              (Certs {unCerts = []})
-                                              (Var "lifted_lambda_res_5129")
-                                          ]
-                                      }
-                                  )
-                              )
-                          )
-                    }
+                  "let {defunc_0_map_res_5125 : [n_5142]i64} =\
+                  \  segmap(thread; ; grid=segmap_usable_groups_5124; blocksize=segmap_group_size_5123)\
+                  \  (gtid_5126 < n_5142) (~phys_tid_5127) : {i64} {\
+                  \    let {eta_p_5128 : i64} =\
+                  \      xs_5093[gtid_5126]\
+                  \    let {lifted_lambda_res_5129 : i64} =\
+                  \      add64(2i64, eta_p_5128)\
+                  \    return {returns lifted_lambda_res_5129}\
+                  \  }"
             let res = execState ((stmToPrimExps @GPU) scope stm) mempty
             let expected =
                   M.fromList
@@ -439,65 +140,20 @@ stmToPrimExpsTestsMC =
     $ do
       let scope =
             M.fromList
-              [ ("n_5142", FParamName (Prim (IntType Int64))),
-                ("m_5143", FParamName (Prim (IntType Int64))),
-                ( "xss_5144",
-                  FParamName
-                    ( Array
-                        (IntType Int64)
-                        ( Shape
-                            { shapeDims =
-                                [ Var "n_5142",
-                                  Var "m_5143"
-                                ]
-                            }
-                        )
-                        Nonunique
-                    )
-                ),
-                ("segmap_group_size_5201", LetName (Prim (IntType Int64))),
-                ("segmap_usable_groups_5202", LetName (Prim (IntType Int64))),
-                ( "defunc_0_map_res_5203",
-                  LetName
-                    ( Array
-                        (IntType Int64)
-                        (Shape {shapeDims = [Var "n_5142"]})
-                        NoUniqueness
-                    )
-                ),
-                ("defunc_0_f_res_5207", LetName (Prim (IntType Int64))),
+              [ ("n_5142", FParamName "i64"),
+                ("m_5143", FParamName "i64"),
+                ("xss_5144", FParamName "[n_5142][5143]i64"),
+                ("segmap_group_size_5201", LetName "i64"),
+                ("segmap_usable_groups_5202", LetName "i64"),
+                ("defunc_0_map_res_5203", LetName "[n_5142]i64"),
+                ("defunc_0_f_res_5207", LetName "i64"),
                 ("i_5208", IndexName Int64),
-                ("acc_5209", FParamName (Prim (IntType Int64))),
-                ("b_5210", LetName (Prim (IntType Int64))),
-                ("defunc_0_f_res_5211", LetName (Prim (IntType Int64)))
+                ("acc_5209", FParamName "i64"),
+                ("b_5210", LetName "i64"),
+                ("defunc_0_f_res_5211", LetName "i64")
               ]
-      let emptyStmAux =
-            StmAux
-              { stmAuxCerts = Certs {unCerts = mempty},
-                stmAuxAttrs = Attrs {unAttrs = mempty},
-                stmAuxDec = ()
-              }
       [ testCase "BinOp" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5211",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      BasicOp
-                        ( BinOp
-                            (Add Int64 OverflowWrap)
-                            (Var "acc_5209")
-                            (Var "b_5210")
-                        )
-                  }
+          let stm = "let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210)"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected =
                 M.fromList
@@ -512,74 +168,12 @@ stmToPrimExpsTestsMC =
                   ]
           res @?= expected,
         testCase "Index" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "b_5210",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      BasicOp
-                        ( Index
-                            "xss_5144"
-                            ( Slice
-                                { unSlice =
-                                    [ DimFix (Var "gtid_5204"),
-                                      DimFix (Var "i_5208")
-                                    ]
-                                }
-                            )
-                        )
-                  }
+          let stm = "let {b_5210 : i64} = xss_5144[gtid_5204, i_5208]"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected = M.fromList [("b_5210", Nothing)]
           res @?= expected,
         testCase "Loop" $ do
-          let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5207",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Loop
-                        [ ( Param
-                              { paramAttrs = Attrs {unAttrs = mempty},
-                                paramName = "acc_5209",
-                                paramDec = Prim (IntType Int64)
-                              },
-                            Constant (IntValue (Int64Value 0))
-                          )
-                        ]
-                        ( ForLoop
-                            "i_5208"
-                            Int64
-                            (Var "m_5143")
-                        )
-                        ( Body
-                            { bodyDec = (),
-                              bodyStms = mempty,
-                              bodyResult =
-                                [ SubExpRes
-                                    { resCerts = Certs {unCerts = []},
-                                      resSubExp = Var "defunc_0_f_res_5211"
-                                    }
-                                ]
-                            }
-                        )
-                  }
+          let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { {defunc_0_f_res_5211} }"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected =
                 M.fromList
@@ -590,89 +184,16 @@ stmToPrimExpsTestsMC =
           res @?= expected,
         testCase "Loop body" $ do
           let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_f_res_5207",
-                                  patElemDec = Prim (IntType Int64)
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Loop
-                        [ ( Param
-                              { paramAttrs = Attrs {unAttrs = mempty},
-                                paramName = "acc_5209",
-                                paramDec = Prim (IntType Int64)
-                              },
-                            Constant (IntValue (Int64Value 0))
-                          )
-                        ]
-                        ( ForLoop
-                            "i_5208"
-                            Int64
-                            (Var "m_5143")
-                        )
-                        ( Body
-                            { bodyDec = (),
-                              bodyStms =
-                                S.fromList
-                                  [ Let
-                                      { stmPat =
-                                          Pat
-                                            { patElems =
-                                                [ PatElem
-                                                    { patElemName = "b_5210",
-                                                      patElemDec = Prim (IntType Int64)
-                                                    }
-                                                ]
-                                            },
-                                        stmAux = emptyStmAux,
-                                        stmExp =
-                                          BasicOp
-                                            ( Index
-                                                "xss_5144"
-                                                ( Slice
-                                                    { unSlice =
-                                                        [ DimFix (Var "gtid_5204"),
-                                                          DimFix (Var "i_5208")
-                                                        ]
-                                                    }
-                                                )
-                                            )
-                                      },
-                                    Let
-                                      { stmPat =
-                                          Pat
-                                            { patElems =
-                                                [ PatElem
-                                                    { patElemName = "defunc_0_f_res_5211",
-                                                      patElemDec = Prim (IntType Int64)
-                                                    }
-                                                ]
-                                            },
-                                        stmAux = emptyStmAux,
-                                        stmExp =
-                                          BasicOp
-                                            ( BinOp
-                                                (Add Int64 OverflowWrap)
-                                                (Var "acc_5209")
-                                                (Var "b_5210")
-                                            )
-                                      }
-                                  ],
-                              bodyResult =
-                                [ SubExpRes
-                                    { resCerts = Certs {unCerts = []},
-                                      resSubExp = Var "defunc_0_f_res_5211"
-                                    }
-                                ]
-                            }
-                        )
-                  }
+                "\
+                \let {defunc_0_f_res_5207 : i64} =\
+                \  loop {acc_5209 : i64} = {0i64}\
+                \  for i_5208:i64 < m_5143 do {\
+                \    let {b_5210 : i64} =\
+                \      xss_5144[gtid_5204, i_5208]\
+                \    let {defunc_0_f_res_5211 : i64} =\
+                \      add64(acc_5209, b_5210)\
+                \    in {defunc_0_f_res_5211}\
+                \  }"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected =
                 M.fromList
@@ -692,51 +213,11 @@ stmToPrimExpsTestsMC =
           res @?= expected,
         testCase "SegMap" $ do
           let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_map_res_5125",
-                                  patElemDec =
-                                    Array
-                                      (IntType Int64)
-                                      (Shape {shapeDims = [Var "n_5142"]})
-                                      NoUniqueness
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Op
-                        ( ParOp
-                            Nothing
-                            ( SegMap
-                                ()
-                                ( SegSpace
-                                    { segFlat = "flat_tid_5112",
-                                      unSegSpace =
-                                        [ ( "gtid_5126",
-                                            Var "n_5142"
-                                          )
-                                        ]
-                                    }
-                                )
-                                [Prim (IntType Int64)]
-                                ( KernelBody
-                                    { kernelBodyDec = (),
-                                      kernelBodyStms = mempty,
-                                      kernelBodyResult =
-                                        [ Returns
-                                            ResultMaySimplify
-                                            (Certs {unCerts = []})
-                                            (Var "lifted_lambda_res_5129")
-                                        ]
-                                    }
-                                )
-                            )
-                        )
-                  }
+                "let {defunc_0_map_res_5125 : [n_5142]i64} =\
+                \  segmap()\
+                \  (gtid_5126 < n_5142) (~flat_tid_5112) : {i64} {\
+                \    return {returns lifted_lambda_res_5129}\
+                \  }"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected =
                 M.fromList
@@ -746,90 +227,15 @@ stmToPrimExpsTestsMC =
           res @?= expected,
         testCase "SegMap body" $ do
           let stm =
-                Let
-                  { stmPat =
-                      Pat
-                        { patElems =
-                            [ PatElem
-                                { patElemName = "defunc_0_map_res_5125",
-                                  patElemDec =
-                                    Array
-                                      (IntType Int64)
-                                      (Shape {shapeDims = [Var "n_5142"]})
-                                      NoUniqueness
-                                }
-                            ]
-                        },
-                    stmAux = emptyStmAux,
-                    stmExp =
-                      Op
-                        ( ParOp
-                            Nothing
-                            ( SegMap
-                                ()
-                                ( SegSpace
-                                    { segFlat = "flat_tid_5112",
-                                      unSegSpace =
-                                        [ ( "gtid_5126",
-                                            Var "n_5142"
-                                          )
-                                        ]
-                                    }
-                                )
-                                [Prim (IntType Int64)]
-                                ( KernelBody
-                                    { kernelBodyDec = (),
-                                      kernelBodyStms =
-                                        S.fromList
-                                          [ Let
-                                              { stmPat =
-                                                  Pat
-                                                    { patElems =
-                                                        [ PatElem
-                                                            { patElemName = "eta_p_5128",
-                                                              patElemDec = Prim (IntType Int64)
-                                                            }
-                                                        ]
-                                                    },
-                                                stmAux = emptyStmAux,
-                                                stmExp =
-                                                  BasicOp
-                                                    ( Index
-                                                        "xs_5093"
-                                                        (Slice {unSlice = [DimFix (Var "gtid_5126")]})
-                                                    )
-                                              },
-                                            Let
-                                              { stmPat =
-                                                  Pat
-                                                    { patElems =
-                                                        [ PatElem
-                                                            { patElemName = "lifted_lambda_res_5129",
-                                                              patElemDec = Prim (IntType Int64)
-                                                            }
-                                                        ]
-                                                    },
-                                                stmAux = emptyStmAux,
-                                                stmExp =
-                                                  BasicOp
-                                                    ( BinOp
-                                                        (Add Int64 OverflowWrap)
-                                                        (Constant (IntValue (Int64Value 2)))
-                                                        (Var "eta_p_5128")
-                                                    )
-                                              }
-                                          ],
-                                      kernelBodyResult =
-                                        [ Returns
-                                            ResultMaySimplify
-                                            (Certs {unCerts = []})
-                                            (Var "lifted_lambda_res_5129")
-                                        ]
-                                    }
-                                )
-                            )
-                        )
-                  }
+                "let {defunc_0_map_res_5125 : [n_5142]i64} =\
+                \  segmap()\
+                \  (gtid_5126 < n_5142) (~flat_tid_5112) : {i64} {\
+                \    let {eta_p_5128 : i64} =\
+                \      xs_5093[gtid_5126]\
+                \    let {lifted_lambda_res_5129 : i64} =\
+                \      add64(2i64, eta_p_5128)\
+                \    return {returns lifted_lambda_res_5129}\
+                \  }"
           let res = execState ((stmToPrimExps @MC) scope stm) mempty
           let expected =
                 M.fromList

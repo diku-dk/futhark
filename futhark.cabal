@@ -511,6 +511,7 @@ test-suite unit
       Futhark.IR.Prop.ReshapeTests
       Futhark.IR.PropTests
       Futhark.IR.GPUTests
+      Futhark.IR.MCTests
       Futhark.IR.Syntax.CoreTests
       Futhark.IR.SyntaxTests
       Futhark.IR.Mem.IntervalTests
