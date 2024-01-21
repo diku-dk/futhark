@@ -5,6 +5,7 @@ import Futhark.Analysis.AccessPattern
 import Futhark.Analysis.PrimExp
 import Futhark.FreshNames
 import Futhark.IR.GPU (GPU)
+import Futhark.IR.GPUTests ()
 import Futhark.Pass.OptimiseArrayLayout.Layout
 import Language.Futhark.Core
 import Test.Tasty
@@ -82,23 +83,23 @@ constInLastIndexElimTests =
     [ testCase "gpu eliminates indexes with constant in last dim" $ do
         let primExpTable =
               M.fromList
-                [ (VName "gtid" 4, Just (LeafExp (VName "n" 4) (IntType Int64))),
-                  (VName "i" 5, Just (LeafExp (VName "n" 4) (IntType Int64)))
+                [ ("gtid_4", Just (LeafExp "n_4" (IntType Int64))),
+                  ("i_5", Just (LeafExp "n_4" (IntType Int64)))
                 ]
         layoutTableFromIndexTable primExpTable accessTableGPU @?= mempty,
       testCase "gpu ignores when not last" $ do
         let primExpTable =
               M.fromList
-                [ (VName "gtid" 4, Just (LeafExp (VName "n" 4) (IntType Int64))),
-                  (VName "gtid" 5, Just (LeafExp (VName "n" 4) (IntType Int64))),
-                  (VName "i" 6, Just (LeafExp (VName "n" 4) (IntType Int64)))
+                [ ("gtid_4", Just (LeafExp "n_4" (IntType Int64))),
+                  ("gtid_5", Just (LeafExp "n_4" (IntType Int64))),
+                  ("i_6", Just (LeafExp "n_4" (IntType Int64)))
                 ]
         layoutTableFromIndexTable primExpTable accessTableGPUrev
           @?= M.fromList
-            [ ( SegmentedMap $ VName "mapres" 1,
+            [ ( SegmentedMap "mapres_1",
                 M.fromList
-                  [ ( (VName "a" 2, [], [0, 1, 2, 3]),
-                      M.fromList [(VName "A" 3, [2, 3, 0, 1])]
+                  [ ( ("a_2", [], [0, 1, 2, 3]),
+                      M.fromList [("A_3", [2, 3, 0, 1])]
                     )
                   ]
               )
@@ -108,18 +109,18 @@ constInLastIndexElimTests =
     accessTableGPU :: IndexTable GPU
     accessTableGPU =
       singleAccess
-        [ singleParAccess 0 $ VName "gtid" 4,
-          singleSeqAccess 1 $ VName "i" 5,
+        [ singleParAccess 0 "gtid_4",
+          singleSeqAccess 1 "i_5",
           DimAccess mempty Nothing
         ]
 
     accessTableGPUrev :: IndexTable GPU
     accessTableGPUrev =
       singleAccess
-        [ singleParAccess 1 $ VName "gtid" 4,
-          singleParAccess 2 $ VName "gtid" 5,
+        [ singleParAccess 1 "gtid_4",
+          singleParAccess 2 "gtid_5",
           DimAccess mempty Nothing,
-          singleSeqAccess 1 $ VName "i" 6
+          singleSeqAccess 1 "i_6"
         ]
 
 singleAccess :: [DimAccess rep] -> IndexTable rep
@@ -127,9 +128,9 @@ singleAccess dims =
   M.fromList
     [ ( sgOp,
         M.fromList
-          [ ( (VName "A" 2, [], [0, 1, 2, 3]),
+          [ ( ("A_2", [], [0, 1, 2, 3]),
               M.fromList
-                [ ( VName "a" 3,
+                [ ( "a_3",
                     dims
                   )
                 ]
@@ -138,7 +139,7 @@ singleAccess dims =
       )
     ]
   where
-    sgOp = SegmentedMap {vnameFromSegOp = VName "mapres" 1}
+    sgOp = SegmentedMap {vnameFromSegOp = "mapres_1"}
 
 singleParAccess :: Int -> VName -> DimAccess rep
 singleParAccess level name =
@@ -154,7 +155,7 @@ singleSeqAccess level name =
 
 generateNames :: Int -> [VName]
 generateNames count = do
-  let (name, source) = newName blankNameSource (VName "i" 0)
+  let (name, source) = newName blankNameSource "i_0"
   fst $ foldl f ([name], source) [1 .. count - 1]
   where
     f (names, source) _ = do
