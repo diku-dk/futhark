@@ -41,7 +41,7 @@ stmToPrimExpsTestsGPU =
               ]
       [ testCase "BinOp" $ do
           let stm = "let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210)"
-          let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ( "defunc_0_f_res_5211",
@@ -56,12 +56,12 @@ stmToPrimExpsTestsGPU =
           res @?= expected,
         testCase "Index" $ do
           let stm = "let {b_5210 : i64} = xss_5144[gtid_5204, i_5208]"
-          let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected = M.fromList [("b_5210", Nothing)]
           res @?= expected,
         testCase "Loop" $ do
           let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { {defunc_0_f_res_5211} }"
-          let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
@@ -71,7 +71,7 @@ stmToPrimExpsTestsGPU =
           res @?= expected,
         testCase "Loop body" $ do
           let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { let {b_5210 : i64} = xss_5144[gtid_5204, i_5208] let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210) in {defunc_0_f_res_5211} }"
-          let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
@@ -96,7 +96,7 @@ stmToPrimExpsTestsGPU =
                   \  (gtid_5126 < n_5142) (~phys_tid_5127) : {i64} {\
                   \  return {returns lifted_lambda_res_5129} \
                   \}"
-            let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+            let res = execState (stmToPrimExps scope stm) mempty
             let expected =
                   M.fromList
                     [ ("defunc_0_map_res_5125", Nothing),
@@ -105,7 +105,8 @@ stmToPrimExpsTestsGPU =
             res @?= expected,
         testCase "SegMap body" $
           do
-            let stm =
+            let stm :: Stm GPU
+                stm =
                   "let {defunc_0_map_res_5125 : [n_5142]i64} =\
                   \  segmap(thread; ; grid=segmap_usable_groups_5124; blocksize=segmap_group_size_5123)\
                   \  (gtid_5126 < n_5142) (~phys_tid_5127) : {i64} {\
@@ -115,7 +116,7 @@ stmToPrimExpsTestsGPU =
                   \      add64(2i64, eta_p_5128)\
                   \    return {returns lifted_lambda_res_5129}\
                   \  }"
-            let res = execState ((stmToPrimExps @GPU) scope stm) mempty
+            let res = execState (stmToPrimExps scope stm) mempty
             let expected =
                   M.fromList
                     [ ("defunc_0_map_res_5125", Nothing),
@@ -154,7 +155,7 @@ stmToPrimExpsTestsMC =
               ]
       [ testCase "BinOp" $ do
           let stm = "let {defunc_0_f_res_5211 : i64} = add64(acc_5209, b_5210)"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ( "defunc_0_f_res_5211",
@@ -169,12 +170,12 @@ stmToPrimExpsTestsMC =
           res @?= expected,
         testCase "Index" $ do
           let stm = "let {b_5210 : i64} = xss_5144[gtid_5204, i_5208]"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected = M.fromList [("b_5210", Nothing)]
           res @?= expected,
         testCase "Loop" $ do
           let stm = "let {defunc_0_f_res_5207 : i64} = loop {acc_5209 : i64} = {0i64} for i_5208:i64 < m_5143 do { {defunc_0_f_res_5211} }"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
@@ -194,7 +195,7 @@ stmToPrimExpsTestsMC =
                 \      add64(acc_5209, b_5210)\
                 \    in {defunc_0_f_res_5211}\
                 \  }"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_f_res_5207", Nothing),
@@ -218,7 +219,7 @@ stmToPrimExpsTestsMC =
                 \  (gtid_5126 < n_5142) (~flat_tid_5112) : {i64} {\
                 \    return {returns lifted_lambda_res_5129}\
                 \  }"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_map_res_5125", Nothing),
@@ -226,7 +227,8 @@ stmToPrimExpsTestsMC =
                   ]
           res @?= expected,
         testCase "SegMap body" $ do
-          let stm =
+          let stm :: Stm MC
+              stm =
                 "let {defunc_0_map_res_5125 : [n_5142]i64} =\
                 \  segmap()\
                 \  (gtid_5126 < n_5142) (~flat_tid_5112) : {i64} {\
@@ -236,7 +238,7 @@ stmToPrimExpsTestsMC =
                 \      add64(2i64, eta_p_5128)\
                 \    return {returns lifted_lambda_res_5129}\
                 \  }"
-          let res = execState ((stmToPrimExps @MC) scope stm) mempty
+          let res = execState (stmToPrimExps scope stm) mempty
           let expected =
                 M.fromList
                   [ ("defunc_0_map_res_5125", Nothing),
