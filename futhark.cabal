@@ -488,7 +488,6 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
-    , pretty-simple >= 4.1
 
 executable futhark
   import: common

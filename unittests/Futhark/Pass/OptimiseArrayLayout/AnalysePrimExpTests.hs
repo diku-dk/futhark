@@ -303,8 +303,8 @@ stmToPrimExpsTestsGPU =
                                       SegNoVirt
                                       ( Just
                                           ( KernelGrid
-                                              { gridNumGroups = Count {unCount = Var (VName "segmap_usable_groups" 5124)},
-                                                gridGroupSize = Count {unCount = Var (VName "segmap_group_size" 5123)}
+                                              { gridNumBlocks = Count {unCount = Var (VName "segmap_usable_groups" 5124)},
+                                                gridBlockSize = Count {unCount = Var (VName "segmap_group_size" 5123)}
                                               }
                                           )
                                       )
@@ -366,8 +366,8 @@ stmToPrimExpsTestsGPU =
                                       SegNoVirt
                                       ( Just
                                           ( KernelGrid
-                                              { gridNumGroups = Count {unCount = Var (VName "segmap_usable_groups" 5124)},
-                                                gridGroupSize = Count {unCount = Var (VName "segmap_group_size" 5123)}
+                                              { gridNumBlocks = Count {unCount = Var (VName "segmap_usable_groups" 5124)},
+                                                gridBlockSize = Count {unCount = Var (VName "segmap_group_size" 5123)}
                                               }
                                           )
                                       )

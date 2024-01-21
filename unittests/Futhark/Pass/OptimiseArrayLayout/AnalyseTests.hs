@@ -304,7 +304,7 @@ analyseDimAccesssTests = testGroup
                                       ( SizeOp
                                           ( GetSize
                                               "segmap_group_size_5190"
-                                              SizeGroup
+                                              SizeThreadBlock
                                           )
                                       )
                                 },
@@ -364,9 +364,9 @@ analyseDimAccesssTests = testGroup
                                                   SegNoVirt
                                                   ( Just
                                                       ( KernelGrid
-                                                          { gridNumGroups =
+                                                          { gridNumBlocks =
                                                               Count {unCount = Var (VName "segmap_usable_groups" 5203)},
-                                                            gridGroupSize =
+                                                            gridBlockSize =
                                                               Count {unCount = Var (VName "segmap_group_size" 5202)}
                                                           }
                                                       )
