@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   parallelism (similar to the logic for `map`-`reduce` compositions
   that we have had for years).
 
+* `futhark script`, for running FutharkScript expressions from the
+  command line.
+
 ### Removed
 
 ### Changed

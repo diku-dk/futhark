@@ -214,7 +214,7 @@ parseExp sep =
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
 parseExpFromText f s =
-  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space) f s
+  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space <* eof) f s
 
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
