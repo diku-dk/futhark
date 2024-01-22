@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Obscure issue related to expansion of shared memory allocations (#2092).
 
+* A crash in alias checking under some rare circumstances (#2096).
+
 ## [0.25.12]
 
 ### Added
