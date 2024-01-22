@@ -390,6 +390,8 @@ combineAliases (Array als1 et1 shape1) t2 =
   Array (als1 <> aliases t2) et1 shape1
 combineAliases (Scalar (TypeVar als1 tv1 targs1)) t2 =
   Scalar $ TypeVar (als1 <> aliases t2) tv1 targs1
+combineAliases t1 (Scalar (TypeVar als2 tv2 targs2)) =
+  Scalar $ TypeVar (als2 <> aliases t1) tv2 targs2
 combineAliases (Scalar (Record ts1)) (Scalar (Record ts2))
   | length ts1 == length ts2,
     L.sort (M.keys ts1) == L.sort (M.keys ts2) =
