@@ -170,6 +170,7 @@ library
       Futhark.CLI.Query
       Futhark.CLI.REPL
       Futhark.CLI.Run
+      Futhark.CLI.Script
       Futhark.CLI.Test
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
