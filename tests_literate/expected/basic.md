@@ -19,9 +19,9 @@ let main x = x + 2
 
 **FAILED**
 ```
-Function "main" expects arguments of types:
+Function "main" expects 1 argument(s) of types:
 i32
-But called with arguments of types:
+But applied to 1 argument(s) of types:
 f32
 ```
 
