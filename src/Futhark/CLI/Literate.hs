@@ -1143,7 +1143,9 @@ prepareServer :: FilePath -> Options -> (ScriptServer -> IO a) -> IO a
 prepareServer prog opts f = do
   futhark <- maybe getExecutablePath pure $ scriptFuthark opts
 
-  unless (scriptSkipCompilation opts) $ do
+  let is_fut = takeExtension prog == ".fut"
+
+  unless (scriptSkipCompilation opts || not is_fut) $ do
     let compile_options = "--server" : scriptCompilerOptions opts
     when (scriptVerbose opts > 0) $
       T.hPutStrLn stderr $
@@ -1164,8 +1166,9 @@ prepareServer prog opts f = do
   let run_options = scriptExtraOptions opts
       onLine "call" l = T.putStrLn l
       onLine _ _ = pure ()
+      prog' = if is_fut then dropExtension prog else prog
       cfg =
-        (futharkServerCfg ("." </> dropExtension prog) run_options)
+        (futharkServerCfg ("." </> prog') run_options)
           { cfgOnLine =
               if scriptVerbose opts > 0
                 then onLine
