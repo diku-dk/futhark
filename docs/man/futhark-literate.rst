@@ -278,6 +278,11 @@ Futhark.  The following builtins are supported:
   soundfile. Most common audio-formats are supported, including mp3, ogg, wav,
   flac and opus.
 
+FutharkScript supports a form of automatic uncurrying. If a function
+taking *n* parameters is applied to a single argument that is an
+*n*-element tuple, the function is applied to the elements of the
+tuple as individual arguments.
+
 SAFETY
 ======
 

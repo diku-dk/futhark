@@ -523,20 +523,27 @@ evalExp builtin sserver top_level_e = do
                   <> " argument(s) of types:\n"
                   <> T.intercalate "\n" (map prettyTextOneLine es_types)
 
+            tryApply args = do
+              arg_types <- zipWithM (interValToVar cannotApply) in_types args
+
+              if length in_types == length arg_types
+                then do
+                  outs <- replicateM (length out_types) $ newVar "out"
+                  void $ cmdEither $ cmdCall server name outs arg_types
+                  pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                else
+                  pure . V.ValueAtom . SFun name in_types out_types $
+                    zipWith SValue in_types $
+                      map VVar arg_types
+
         -- Careful to not require saturated application, but do still
         -- check for over-saturation.
         when (length es_types > length in_types) cannotApply
-        ins <- zipWithM (interValToVar cannotApply) in_types es'
 
-        if length in_types == length ins
-          then do
-            outs <- replicateM (length out_types) $ newVar "out"
-            void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
-          else
-            pure . V.ValueAtom . SFun name in_types out_types $
-              zipWith SValue in_types $
-                map VVar ins
+        -- Allow automatic uncurrying if applicable.
+        case es' of
+          [V.ValueTuple es''] -> tryApply es''
+          _ -> tryApply es'
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->
