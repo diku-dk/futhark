@@ -542,7 +542,7 @@ evalExp builtin sserver top_level_e = do
 
         -- Allow automatic uncurrying if applicable.
         case es' of
-          [V.ValueTuple es''] -> tryApply es''
+          [V.ValueTuple es''] | length es'' == length in_types -> tryApply es''
           _ -> tryApply es'
       evalExp' _ (StringLit s) =
         case V.putValue s of
