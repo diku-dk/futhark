@@ -20,6 +20,10 @@ the result to stdout. It is essentially a simpler way to access the
 evaluation facilities of :ref:`futhark-literate(1)`, and provides the
 same FutharkScript facilities.
 
+If the provided program does not have a ``.fut`` extension, it is
+assumed to be a previously compiled server-mode program, and simply
+run directly.
+
 OPTIONS
 =======
 
