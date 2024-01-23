@@ -168,13 +168,13 @@ instance Pretty Checking where
     where
       fs' = mconcat $ punctuate "." $ map pretty fs
   pretty (CheckingRequired [expected] actual) =
-    "Expression must must have type"
+    "Expression must have type"
       <+> pretty expected
       <> "."
         </> "Actual type:"
         <+> align (pretty actual)
   pretty (CheckingRequired expected actual) =
-    "Type of expression must must be one of "
+    "Type of expression must be one of "
       <+> expected'
       <> "."
         </> "Actual type:"
