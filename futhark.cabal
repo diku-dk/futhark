@@ -502,32 +502,34 @@ test-suite unit
   hs-source-dirs: unittests
   other-modules:
       Futhark.AD.DerivativesTests
-      Futhark.BenchTests
-      Futhark.ProfileTests
-      Futhark.Pkg.SolveTests
       Futhark.Analysis.AlgSimplifyTests
-      Futhark.Internalise.TypesValuesTests
-      Futhark.IR.Prop.RearrangeTests
-      Futhark.IR.Prop.ReshapeTests
-      Futhark.IR.PropTests
+      Futhark.BenchTests
+      Futhark.IR.GPUTests
       Futhark.IR.GPUTests
       Futhark.IR.MCTests
-      Futhark.IR.Syntax.CoreTests
-      Futhark.IR.SyntaxTests
+      Futhark.IR.MCTests
       Futhark.IR.Mem.IntervalTests
       Futhark.IR.Mem.IxFun.Alg
       Futhark.IR.Mem.IxFunTests
       Futhark.IR.Mem.IxFunWrapper
-      Futhark.Pass.OptimiseArrayLayoutTests
+      Futhark.IR.Prop.RearrangeTests
+      Futhark.IR.Prop.ReshapeTests
+      Futhark.IR.PropTests
+      Futhark.IR.Syntax.CoreTests
+      Futhark.IR.SyntaxTests
+      Futhark.Internalise.TypesValuesTests
+      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests
       Futhark.Pass.OptimiseArrayLayout.AnalyseTests
       Futhark.Pass.OptimiseArrayLayout.LayoutTests
-      Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests
+      Futhark.Pass.OptimiseArrayLayoutTests
+      Futhark.Pkg.SolveTests
+      Futhark.ProfileTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
-      Language.Futhark.TypeCheckerTests
       Language.Futhark.TypeChecker.TypesTests
-      Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Language.Futhark.TypeCheckerTests
       Paths_futhark
   build-depends:
       QuickCheck >=2.8
