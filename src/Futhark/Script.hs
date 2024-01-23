@@ -514,10 +514,14 @@ evalExp builtin sserver top_level_e = do
               throwError $
                 "Function \""
                   <> name
-                  <> "\" expects arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
-                  <> "\nBut called with arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
+                  <> "\" expects "
+                  <> prettyText (length in_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine in_types)
+                  <> "\nBut applied to "
+                  <> prettyText (length es_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine es_types)
 
         -- Careful to not require saturated application, but do still
         -- check for over-saturation.
