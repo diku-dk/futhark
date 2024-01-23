@@ -26,8 +26,7 @@ main = mainWithOptions initialOptions scriptCommandLineOptions "program script" 
         Right x -> pure x
       prepareServer prog opts $ \s -> do
         r <-
-          runExceptT $
-            getExpValue s =<< evalExp (scriptBuiltin ".") s script'
+          runExceptT $ getExpValue s =<< evalExp (scriptBuiltin ".") s script'
         case r of
           Left e -> do
             T.hPutStrLn stderr e
