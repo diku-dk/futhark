@@ -32,10 +32,18 @@ OPTIONS
   The backend used when compiling Futhark programs (without leading
   ``futhark``, e.g. just ``opencl``).  Defaults to ``c``.
 
+-D, --debug
+
+  Pass ``-D`` to the executable and show debug prints.
+
 --futhark=program
 
   The program used to perform operations (eg. compilation). Defaults
   to the binary running ``futhark script`` itself.
+
+-L, --log
+
+  Pass ``-L`` to the executable and show debug prints.
 
 --pass-option=opt
 
