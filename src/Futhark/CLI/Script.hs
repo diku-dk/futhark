@@ -4,7 +4,8 @@ import Control.Monad.Except
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import Futhark.CLI.Literate
-  ( initialOptions,
+  ( Options (..),
+    initialOptions,
     prepareServer,
     scriptCommandLineOptions,
   )
@@ -14,9 +15,34 @@ import Futhark.Util.Pretty (prettyText)
 import System.Exit
 import System.IO
 
+commandLineOptions :: [FunOptDescr Options]
+commandLineOptions =
+  scriptCommandLineOptions
+    ++ [ Option
+           "D"
+           ["debug"]
+           ( NoArg $ Right $ \config ->
+               config
+                 { scriptExtraOptions = "-D" : scriptExtraOptions config,
+                   scriptVerbose = scriptVerbose config + 1
+                 }
+           )
+           "Enable debugging.",
+         Option
+           "L"
+           ["log"]
+           ( NoArg $ Right $ \config ->
+               config
+                 { scriptExtraOptions = "-L" : scriptExtraOptions config,
+                   scriptVerbose = scriptVerbose config + 1
+                 }
+           )
+           "Enable logging."
+       ]
+
 -- | Run @futhark script@.
 main :: String -> [String] -> IO ()
-main = mainWithOptions initialOptions scriptCommandLineOptions "program script" $ \args opts ->
+main = mainWithOptions initialOptions commandLineOptions "program script" $ \args opts ->
   case args of
     [prog, script] -> Just $ do
       script' <- case parseExpFromText "command line argument" $ T.pack script of
