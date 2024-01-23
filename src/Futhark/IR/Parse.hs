@@ -10,8 +10,16 @@ module Futhark.IR.Parse
     parseSeqMem,
 
     -- * Fragments
+    parseType,
     parseDeclExtType,
     parseDeclType,
+    parseVName,
+    parseSubExp,
+    parseSubExpRes,
+    parseBodyGPU,
+    parseBodyMC,
+    parseStmGPU,
+    parseStmMC,
   )
 where
 
@@ -1143,8 +1151,34 @@ parseMC = parseRep prMC
 parseMCMem :: FilePath -> T.Text -> Either T.Text (Prog MCMem)
 parseMCMem = parseRep prMCMem
 
+--- Fragment parsers
+
+parseType :: FilePath -> T.Text -> Either T.Text Type
+parseType = parseFull pType
+
 parseDeclExtType :: FilePath -> T.Text -> Either T.Text DeclExtType
 parseDeclExtType = parseFull pDeclExtType
 
 parseDeclType :: FilePath -> T.Text -> Either T.Text DeclType
 parseDeclType = parseFull pDeclType
+
+parseVName :: FilePath -> T.Text -> Either T.Text VName
+parseVName = parseFull pVName
+
+parseSubExp :: FilePath -> T.Text -> Either T.Text SubExp
+parseSubExp = parseFull pSubExp
+
+parseSubExpRes :: FilePath -> T.Text -> Either T.Text SubExpRes
+parseSubExpRes = parseFull pSubExpRes
+
+parseBodyGPU :: FilePath -> T.Text -> Either T.Text (Body GPU)
+parseBodyGPU = parseFull $ pBody prGPU
+
+parseStmGPU :: FilePath -> T.Text -> Either T.Text (Stm GPU)
+parseStmGPU = parseFull $ pStm prGPU
+
+parseBodyMC :: FilePath -> T.Text -> Either T.Text (Body MC)
+parseBodyMC = parseFull $ pBody prMC
+
+parseStmMC :: FilePath -> T.Text -> Either T.Text (Stm MC)
+parseStmMC = parseFull $ pStm prMC
