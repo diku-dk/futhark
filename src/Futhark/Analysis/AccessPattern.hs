@@ -146,7 +146,7 @@ data Context rep = Context
     -- | A list of the segMaps encountered during the analysis in the order they
     -- were encountered.
     parents :: [BodyType],
-    -- | Current level of recursion
+    -- | Current level of recursion, also just `length parents`
     currentLevel :: Int
   }
   deriving (Show, Eq)
