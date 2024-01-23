@@ -294,10 +294,17 @@ entry main n = iterate 1000000000 (map (+1)) (iota n)
 then you can run
 
 ```
-$ futhark script -D tmp/infinite.fut 'main 10i64'
+$ futhark script -D infinite.fut 'main 10i64'
 ```
 
 to run it with debug prints. You can also use `-L` instead of `-D` to
-just enable logging. The `main 10i64` is an arbitrary FutharkScript
-expression. See the manpages for `futhark script` and `futhark
-literate` for more information.
+just enable logging. The `main 10i64` can be an arbitrary FutharkScript
+expression.
+
+The above will compile `infinite.fut` using the `c` backend before
+running it. Pass a `--backend` option to `futhark script` to use a
+different backend, or pass an already compiled program instead of a
+`.fut` file (e.g., `infinite`).
+
+See the manpages for `futhark script` and `futhark literate` for more
+information.
