@@ -58,6 +58,9 @@ internaliseValBind types fb@(E.ValBind entry fname _ (Info rettype) tparams para
         first zeroExts . unzip . internaliseReturnType (map (fmap paramDeclType) all_params) rettype
           <$> mapM subExpType body_res
 
+      when (null params') $
+        bindExtSizes (E.AppRes (E.toStruct $ E.retType rettype) (E.retDims rettype)) body_res
+
       body_res' <-
         ensureResultExtShape msg loc (map I.fromDecl rettype') $ subExpsRes body_res
       let num_ctx = length (shapeContext rettype')
