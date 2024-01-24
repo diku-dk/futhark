@@ -353,7 +353,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind nvidia-opencl-dev python3-numpy
+        sudo apt-get install -y opencl-headers oclgrind python3-numpy python3-pyopencl
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
