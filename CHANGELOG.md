@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Mishandling of existential sizes for top level constants. (#2099)
 
+* Compiler crash when generating code for copying nothing at all. (#2100)
+
 ## [0.25.12]
 
 ### Added

@@ -329,9 +329,7 @@ compileCode (If cond tbranch fbranch) = do
 compileCode (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) = do
   cp <- asks $ M.lookup (dstspace, srcspace) . opsCopies . envOperations
   case cp of
-    Nothing ->
-      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
-    Just cp' -> do
+    Just cp' | t /= Unit -> do
       shape' <- traverse (traverse (compileExp . untyped)) shape
       dst' <- rawMem dst
       src' <- rawMem src
@@ -340,6 +338,8 @@ compileCode (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace
       srcoffset' <- traverse (compileExp . untyped) srcoffset
       srcstrides' <- traverse (traverse (compileExp . untyped)) srcstrides
       cp' CopyBarrier t shape' dst' (dstoffset', dststrides') src' (srcoffset', srcstrides')
+    _ ->
+      compileCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
 compileCode (Write _ _ Unit _ _ _) = pure ()
 compileCode (Write dst (Count idx) elemtype space vol elemexp) = do
   dst' <- rawMem dst
