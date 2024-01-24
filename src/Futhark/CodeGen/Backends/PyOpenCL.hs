@@ -59,8 +59,8 @@ compileProg mode class_name prog = do
           Assign (Var "build_options") $ List [],
           Assign (Var "preferred_device") None,
           Assign (Var "default_threshold") None,
-          Assign (Var "default_tblock_size") None,
-          Assign (Var "default_num_tblocks") None,
+          Assign (Var "default_group_size") None,
+          Assign (Var "default_num_groups") None,
           Assign (Var "default_tile_size") None,
           Assign (Var "default_reg_tile_size") None,
           Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude <> opencl_code
@@ -83,8 +83,8 @@ compileProg mode class_name prog = do
             "interactive=False",
             "platform_pref=preferred_platform",
             "device_pref=preferred_device",
-            "default_tblock_size=default_tblock_size",
-            "default_num_tblocks=default_num_tblocks",
+            "default_group_size=default_group_size",
+            "default_num_groups=default_num_groups",
             "default_tile_size=default_tile_size",
             "default_reg_tile_size=default_reg_tile_size",
             "default_threshold=default_threshold",
@@ -128,14 +128,14 @@ compileProg mode class_name prog = do
               optionShortName = Nothing,
               optionArgument = RequiredArgument "int",
               optionAction =
-                [Assign (Var "default_tblock_size") $ Var "optarg"]
+                [Assign (Var "default_group_size") $ Var "optarg"]
             },
           Option
             { optionLongName = "default-num-groups",
               optionShortName = Nothing,
               optionArgument = RequiredArgument "int",
               optionAction =
-                [Assign (Var "default_num_tblocks") $ Var "optarg"]
+                [Assign (Var "default_num_groups") $ Var "optarg"]
             },
           Option
             { optionLongName = "default-tile-size",
@@ -227,14 +227,14 @@ callKernel (Imp.CmpSizeLe v key x) = do
 callKernel (Imp.GetSizeMax v size_class) = do
   v' <- compileVar v
   stm $ Assign v' $ kernelConstToExp $ Imp.SizeMaxConst size_class
-callKernel (Imp.LaunchKernel safety name shared_memory args num_threadblocks worktblock_size) = do
+callKernel (Imp.LaunchKernel safety name shared_memory args num_threadblocks workgroup_size) = do
   num_threadblocks' <- mapM (fmap asLong . compileExp) num_threadblocks
-  worktblock_size' <- mapM compileBlockDim worktblock_size
-  let kernel_size = zipWith mult_exp num_threadblocks' worktblock_size'
+  workgroup_size' <- mapM compileBlockDim workgroup_size
+  let kernel_size = zipWith mult_exp num_threadblocks' workgroup_size'
       total_elements = foldl mult_exp (Integer 1) kernel_size
       cond = BinOp "!=" total_elements (Integer 0)
   shared_memory' <- compileExp $ Imp.untyped $ Imp.unCount shared_memory
-  body <- collect $ launchKernel name safety kernel_size worktblock_size' shared_memory' args
+  body <- collect $ launchKernel name safety kernel_size workgroup_size' shared_memory' args
   stm $ If cond body []
 
   when (safety >= Imp.SafetyFull) $
@@ -266,7 +266,7 @@ launchKernel kernel_name safety kernel_dims threadblock_dims shared_memory args 
           ]
   stm . Exp $
     simpleCall (T.unpack $ kernel_name' <> ".set_args") $
-      [simpleCall "cl.SharedMemory" [simpleCall "max" [shared_memory, Integer 1]]]
+      [simpleCall "cl.LocalMemory" [simpleCall "max" [shared_memory, Integer 1]]]
         ++ failure_args
         ++ args'
   stm . Exp $
