@@ -154,16 +154,23 @@ def initialise_opencl_object(
     self.max_threshold = 0
     self.max_grid_size = 0
 
-    self.max_local_memory = int(self.device.local_mem_size)
+    self.max_shared_memory = int(self.device.local_mem_size)
 
     # Futhark reserves 4 bytes of local memory for its own purposes.
-    self.max_local_memory -= 4
+    self.max_shared_memory -= 4
 
     # See comment in rts/c/opencl.h.
     if self.platform.name.find("NVIDIA CUDA") >= 0:
-        self.max_local_memory -= 12
+        self.max_shared_memory -= 12
     elif self.platform.name.find("AMD") >= 0:
-        self.max_local_memory -= 16
+        self.max_shared_memory -= 16
+
+    self.max_registers = int(2**16)  # Not sure how to query for this.
+
+    self.max_cache = self.device.get_info(cl.device_info.GLOBAL_MEM_CACHE_SIZE)
+
+    if self.max_cache == 0:
+        self.max_cache = 1024 * 1024
 
     self.free_list = {}
 
