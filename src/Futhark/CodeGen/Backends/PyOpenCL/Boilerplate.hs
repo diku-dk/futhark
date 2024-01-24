@@ -59,8 +59,8 @@ program = initialise_opencl_object(self,
                                    interactive=interactive,
                                    platform_pref=platform_pref,
                                    device_pref=device_pref,
-                                   default_tblock_size=default_tblock_size,
-                                   default_num_tblocks=default_num_tblocks,
+                                   default_group_size=default_group_size,
+                                   default_num_groups=default_num_groups,
                                    default_tile_size=default_tile_size,
                                    default_reg_tile_size=default_reg_tile_size,
                                    default_threshold=default_threshold,
@@ -128,8 +128,8 @@ sizeHeuristicsToPython = List . map f
 
         which' = case which of
           LockstepWidth -> String "lockstep_width"
-          NumBlocks -> String "num_tblocks"
-          BlockSize -> String "tblock_size"
+          NumBlocks -> String "num_groups"
+          BlockSize -> String "group_size"
           TileSize -> String "tile_size"
           RegTileSize -> String "reg_tile_size"
           Threshold -> String "threshold"
