@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A crash in alias checking under some rare circumstances (#2096).
 
+* Mishandling of existential sizes for top level constants. (#2099)
+
 ## [0.25.12]
 
 ### Added
