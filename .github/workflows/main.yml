@@ -333,7 +333,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind nvidia-cuda-dev nvidia-opencl-dev
+        sudo apt-get install -y opencl-headers oclgrind nvidia-opencl-dev
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -344,6 +344,26 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
         futhark test tests -c --no-terminal --backend=opencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
+
+  test-pyoclgrind:
+    runs-on: ubuntu-22.04
+    needs: [build-linux-nix]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y opencl-headers oclgrind nvidia-opencl-dev
+    - uses: actions/download-artifact@v3
+      with:
+        name: futhark-nightly-linux-x86_64.tar.xz
+    - name: Install from nightly tarball
+      run: |
+        tar xvf futhark-nightly-linux-x86_64.tar.xz
+        make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - run: |
+        futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   # test-opencl:
   #   runs-on: opencl
