@@ -7,6 +7,7 @@ module Futhark.Optimise.ArrayLayout.Layout
   )
 where
 
+import Control.Monad (join)
 import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -39,8 +40,8 @@ instance Layout GPU where
       let dimAccesses' = filter (isJust . originalVar) dimAccesses
       let deps = mapMaybe originalVar dimAccesses'
       let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-      let primExps = map (`M.lookup` primExpTable) deps
-      let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
+      let primExps = mapM (join . (`M.lookup` primExpTable)) deps
+      let inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
 
       -- Create a candidate permutation
       let perm = map fst $ sortGPU (zip arr_layout dimAccesses)
@@ -50,24 +51,22 @@ instance Layout GPU where
         then Nothing
         else Just perm
 
-isInscrutable :: Maybe (Maybe (PrimExp VName)) -> Bool -> Bool
-isInscrutable maybe_op@(Just (Just op@(BinOpExp {}))) counter =
+isInscrutable :: PrimExp VName -> Bool -> Bool
+isInscrutable op@(BinOpExp {}) counter =
   if counter
     then -- Calculate stride and offset for loop-counters and thread-IDs
     case reduceStrideAndOffset op of
       -- Maximum allowable stride, might need tuning.
       Just (s, _) -> s > 8
       Nothing -> True
-    else isInscrutableRec maybe_op
-isInscrutable maybe_op _ = isInscrutableRec maybe_op
+    else isInscrutableRec op
+isInscrutable op _ = isInscrutableRec op
 
-isInscrutableRec :: Maybe (Maybe (PrimExp VName)) -> Bool
-isInscrutableRec Nothing = True
-isInscrutableRec (Just Nothing) = True
-isInscrutableRec (Just (Just (LeafExp _ _))) = False
-isInscrutableRec (Just (Just (ValueExp _))) = False
-isInscrutableRec (Just (Just (BinOpExp _ a b))) =
-  isInscrutableRec (Just $ Just a) || isInscrutableRec (Just $ Just b)
+isInscrutableRec :: PrimExp VName -> Bool
+isInscrutableRec (LeafExp _ _) = False
+isInscrutableRec (ValueExp _) = False
+isInscrutableRec (BinOpExp _ a b) =
+  isInscrutableRec a || isInscrutableRec b
 -- TODO: Handle UnOpExp
 isInscrutableRec _ = True
 
@@ -109,8 +108,8 @@ multicorePermutation primExpTable _segOpName (_arr_name, nest, arr_layout) _idx_
   let dimAccesses' = filter (isJust . originalVar) dimAccesses
   let deps = mapMaybe originalVar dimAccesses'
   let counters = concatMap (map (isCounter . varType . snd) . M.toList . dependencies) dimAccesses'
-  let primExps = map (`M.lookup` primExpTable) deps
-  let inscrutable = any (uncurry isInscrutable) (zip primExps counters)
+  let primExps = mapM (join . (`M.lookup` primExpTable)) deps
+  let inscrutable = maybe True (any (uncurry isInscrutable) . flip zip counters) primExps
 
   -- Create a candidate permutation
   let perm = map fst $ sortMC (zip arr_layout dimAccesses)
