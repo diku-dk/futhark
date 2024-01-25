@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * `futhark script`, for running FutharkScript expressions from the
   command line.
 
+* `futhark repl` now prints out a message when it ignores a breakpoint
+  during initialisation. (#2098)
+
 ### Removed
 
 ### Changed
