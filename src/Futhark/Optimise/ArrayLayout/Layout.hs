@@ -71,32 +71,33 @@ isInscrutableRec (Just (Just (BinOpExp _ a b))) =
 -- TODO: Handle UnOpExp
 isInscrutableRec _ = True
 
-reduceStrideAndOffset :: PrimExp VName -> Maybe (Int, Int)
+reduceStrideAndOffset :: PrimExp l -> Maybe (Int, Int)
 reduceStrideAndOffset (LeafExp _ _) = Just (1, 0)
 reduceStrideAndOffset (BinOpExp oper a b) = case (a, b) of
   (ValueExp (IntValue v), _) -> reduce v b
   (_, ValueExp (IntValue v)) -> reduce v a
   _ -> Nothing
   where
-    reduce v op
-      | LeafExp _ _ <- op = case oper of
-          Add _ _ -> Just (1, valueIntegral v)
-          Sub _ _ -> Just (1, -valueIntegral v)
-          Mul _ _ -> Just (valueIntegral v, 0)
+    reduce v (LeafExp _ _) =
+      case oper of
+        Add _ _ -> Just (1, valueIntegral v)
+        Sub _ _ -> Just (1, -valueIntegral v)
+        Mul _ _ -> Just (valueIntegral v, 0)
+        _ -> Nothing
+    reduce v op@(BinOpExp {}) =
+      case reduceStrideAndOffset op of
+        Nothing -> Nothing
+        Just (s, o) -> case oper of
+          Add _ _ -> Just (s, o + valueIntegral v)
+          Sub _ _ -> Just (s, o - valueIntegral v)
+          Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
           _ -> Nothing
-      | BinOpExp {} <- op = case reduceStrideAndOffset op of
-          Nothing -> Nothing
-          Just (s, o) -> case oper of
-            Add _ _ -> Just (s, o + valueIntegral v)
-            Sub _ _ -> Just (s, o - valueIntegral v)
-            Mul _ _ -> Just (s * valueIntegral v, o * valueIntegral v)
-            _ -> Nothing
-      | UnOpExp Not _ <- op = Nothing
-      | UnOpExp (Complement _) _ <- op = Nothing
-      | UnOpExp (Abs _) _ <- op = Nothing
-      | UnOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
-      | ConvOpExp _ sub_op <- op = reduceStrideAndOffset sub_op
-      | otherwise = Nothing
+    reduce _ (UnOpExp Not _) = Nothing
+    reduce _ (UnOpExp (Complement _) _) = Nothing
+    reduce _ (UnOpExp (Abs _) _) = Nothing
+    reduce _ (UnOpExp _ sub_op) = reduceStrideAndOffset sub_op
+    reduce _ (ConvOpExp _ sub_op) = reduceStrideAndOffset sub_op
+    reduce _ _ = Nothing
 reduceStrideAndOffset _ = Nothing
 
 multicorePermutation :: PrimExpTable -> SegOpName -> ArrayName -> IndexExprName -> [DimAccess rep] -> Maybe Permutation
