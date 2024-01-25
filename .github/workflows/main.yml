@@ -353,7 +353,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y opencl-headers oclgrind python3-numpy python3-pyopencl
+        sudo apt-get install -y opencl-headers oclgrind virtualenv
     - uses: actions/download-artifact@v3
       with:
         name: futhark-nightly-linux-x86_64.tar.xz
@@ -363,6 +363,10 @@ jobs:
         make -C futhark-nightly-linux-x86_64/ install PREFIX=$HOME/.local
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - run: |
+        set -e
+        virtualenv virtualenv
+        source virtualenv/bin/activate
+        pip install numpy pyopencl jsonschema
         futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
   # test-opencl:
