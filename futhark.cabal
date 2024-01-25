@@ -505,8 +505,6 @@ test-suite unit
       Futhark.Analysis.AlgSimplifyTests
       Futhark.BenchTests
       Futhark.IR.GPUTests
-      Futhark.IR.GPUTests
-      Futhark.IR.MCTests
       Futhark.IR.MCTests
       Futhark.IR.Mem.IntervalTests
       Futhark.IR.Mem.IxFun.Alg
