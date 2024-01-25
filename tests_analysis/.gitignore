@@ -1,6 +1,0 @@
-*
-!*.*
-*.c
-*.fut_*
-!*.fut_gpu*
-!scripts
