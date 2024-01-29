@@ -693,16 +693,16 @@ checkValBind (ValBind entry fname maybe_tdecl NoInfo tparams params body doc att
     typeError loc mempty $
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
+  attrs' <- mapM checkAttr attrs
+
   (fname', tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
-
   case entry' of
     Just _ -> checkEntryPoint loc tparams' params' maybe_tdecl' rettype
     _ -> pure ()
 
-  attrs' <- mapM checkAttr attrs
   let vb = ValBind entry' fname' maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
   pure
     ( mempty
