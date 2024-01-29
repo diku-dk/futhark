@@ -280,7 +280,7 @@ sizeFree tloc expKiller orig_t = do
       case expKiller e' of
         Nothing -> pure e'
         Just cause -> do
-          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (srclocOf e) cause) "d"
+          vn <- lift $ lift $ newRigidDim tloc (RigidOutOfScope (locOf e) cause) "d"
           modify (vn :)
           pure $ sizeFromName (qualName vn) (srclocOf e)
 
@@ -1647,7 +1647,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
     closeOver (k, NoConstraint l usage) =
       pure $ Just $ Left $ TypeParamType l k $ srclocOf usage
     closeOver (k, ParamType l loc) =
-      pure $ Just $ Left $ TypeParamType l k loc
+      pure $ Just $ Left $ TypeParamType l k $ srclocOf loc
     closeOver (k, Size Nothing usage) =
       pure $ Just $ Left $ TypeParamDim k $ srclocOf usage
     closeOver (k, UnknownSize _ _)

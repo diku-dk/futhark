@@ -62,7 +62,7 @@ binding idents m =
     -- integers, because they may become integers later due to
     -- inference...
     forM_ idents $ \ident ->
-      constrain (identName ident) $ ParamSize $ srclocOf ident
+      constrain (identName ident) $ ParamSize $ locOf ident
     m <* checkIfUsed
   where
     bindVars = foldl bindVar
@@ -104,10 +104,10 @@ bindingTypeParams tparams =
   where
     typeParamType (TypeParamType l v loc) =
       [ Left (v, TypeAbbr l [] $ RetType [] $ Scalar (TypeVar mempty (qualName v) [])),
-        Right (v, ParamType l loc)
+        Right (v, ParamType l $ locOf loc)
       ]
     typeParamType (TypeParamDim v loc) =
-      [Right (v, ParamSize loc)]
+      [Right (v, ParamSize $ locOf loc)]
 
 typeParamIdent :: TypeParam -> Maybe (Ident StructType)
 typeParamIdent (TypeParamDim v loc) =

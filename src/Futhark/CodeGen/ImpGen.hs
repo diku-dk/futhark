@@ -400,7 +400,7 @@ warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 -- | Emit a warning about something the user should be aware of.
 warn :: (Located loc) => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
+  warnings $ singleWarning' (locOf loc) (map locOf locs) (pretty problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
