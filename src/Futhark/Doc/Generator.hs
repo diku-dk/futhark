@@ -20,7 +20,7 @@ import Futhark.Util.Pretty (Doc, docText, pretty)
 import Futhark.Version
 import Language.Futhark
 import Language.Futhark.Semantic
-import Language.Futhark.TypeChecker.Monad hiding (warn)
+import Language.Futhark.Warnings
 import System.FilePath (makeRelative, splitPath, (-<.>), (</>))
 import Text.Blaze.Html5 (AttributeValue, Html, toHtml, (!))
 import Text.Blaze.Html5 qualified as H
