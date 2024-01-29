@@ -312,7 +312,7 @@ instance MonadUnify TermTypeM where
   newDimVar usage rigidity name = do
     dim <- newTypeName name
     case rigidity of
-      Rigid rsrc -> constrain dim $ UnknownSize (srclocOf usage) rsrc
+      Rigid rsrc -> constrain dim $ UnknownSize (locOf usage) rsrc
       Nonrigid -> constrain dim $ Size Nothing usage
     pure dim
 
@@ -431,13 +431,13 @@ instance MonadTypeChecker TermTypeM where
     checker <- asks termChecker
     e' <- checker e
     let t = toStruct $ typeOf e'
-    unify (mkUsage (srclocOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+    unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
     updateTypes e'
 
   warnings ws =
     modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
 
-  warn loc problem = warnings $ singleWarning (srclocOf loc) problem
+  warn loc problem = warnings $ singleWarning (locOf loc) problem
 
   newName v = do
     s <- get

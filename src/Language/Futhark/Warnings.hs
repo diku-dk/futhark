@@ -20,7 +20,7 @@ import Prelude
 
 -- | The warnings produced by the compiler.  The 'Show' instance
 -- produces a human-readable description.
-newtype Warnings = Warnings [(SrcLoc, [SrcLoc], Doc ())]
+newtype Warnings = Warnings [(Loc, [Loc], Doc ())]
 
 instance Semigroup Warnings where
   Warnings ws1 <> Warnings ws2 = Warnings $ ws1 <> ws2
@@ -53,14 +53,14 @@ anyWarnings :: Warnings -> Bool
 anyWarnings (Warnings ws) = not $ null ws
 
 -- | A single warning at the given location.
-singleWarning :: SrcLoc -> Doc () -> Warnings
+singleWarning :: Loc -> Doc () -> Warnings
 singleWarning loc = singleWarning' loc []
 
 -- | A single warning at the given location, but also with a stack
 -- trace (sort of) to the location.
-singleWarning' :: SrcLoc -> [SrcLoc] -> Doc () -> Warnings
+singleWarning' :: Loc -> [Loc] -> Doc () -> Warnings
 singleWarning' loc locs problem = Warnings [(loc, locs, problem)]
 
 -- | Exports Warnings into a list of (location, problem).
-listWarnings :: Warnings -> [(SrcLoc, Doc ())]
+listWarnings :: Warnings -> [(Loc, Doc ())]
 listWarnings (Warnings ws) = map (\(loc, _, doc) -> (loc, doc)) ws

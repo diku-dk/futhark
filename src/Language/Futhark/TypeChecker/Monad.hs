@@ -314,7 +314,7 @@ instance MonadTypeChecker TypeM where
     modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
 
   warn loc problem =
-    warnings $ singleWarning (srclocOf loc) problem
+    warnings $ singleWarning (locOf loc) problem
 
   newName v = do
     s <- get

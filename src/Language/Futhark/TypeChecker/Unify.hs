@@ -90,17 +90,17 @@ instance Pretty BreadCrumbs where
   pretty (BreadCrumbs bcs) = line <> stack (map pretty bcs)
 
 -- | A usage that caused a type constraint.
-data Usage = Usage (Maybe T.Text) SrcLoc
+data Usage = Usage (Maybe T.Text) Loc
   deriving (Show)
 
 -- | Construct a 'Usage' from a location and a description.
 mkUsage :: (Located a) => a -> T.Text -> Usage
-mkUsage = flip (Usage . Just) . srclocOf
+mkUsage = flip (Usage . Just) . locOf
 
 -- | Construct a 'Usage' that has just a location, but no particular
 -- description.
 mkUsage' :: (Located a) => a -> Usage
-mkUsage' = Usage Nothing . srclocOf
+mkUsage' = Usage Nothing . locOf
 
 instance Pretty Usage where
   pretty (Usage Nothing loc) = "use at " <> textwrap (locText loc)
@@ -117,13 +117,13 @@ type Level = Int
 -- | A constraint on a yet-ambiguous type variable.
 data Constraint
   = NoConstraint Liftedness Usage
-  | ParamType Liftedness SrcLoc
+  | ParamType Liftedness Loc
   | Constraint StructRetType Usage
   | Overloaded [PrimType] Usage
   | HasFields Liftedness (M.Map Name StructType) Usage
   | Equality Usage
   | HasConstrs Liftedness (M.Map Name [StructType]) Usage
-  | ParamSize SrcLoc
+  | ParamSize Loc
   | -- | Is not actually a type, but a term-level size,
     -- possibly already set to something specific.
     Size (Maybe Exp) Usage
@@ -131,7 +131,7 @@ data Constraint
     -- created from the result of applying a function
     -- whose return size is existential, or otherwise
     -- hiding a size.
-    UnknownSize SrcLoc RigidSource
+    UnknownSize Loc RigidSource
   deriving (Show)
 
 instance Located Constraint where
@@ -176,7 +176,7 @@ data RigidSource
     RigidCond StructType StructType
   | -- | Invented during unification.
     RigidUnify
-  | RigidOutOfScope SrcLoc VName
+  | RigidOutOfScope Loc VName
   | -- | Blank dimension in coercion.
     RigidCoerce
   deriving (Eq, Ord, Show)
@@ -186,7 +186,7 @@ data RigidSource
 data Rigidity = Rigid RigidSource | Nonrigid
   deriving (Eq, Ord, Show)
 
-prettySource :: SrcLoc -> SrcLoc -> RigidSource -> Doc ()
+prettySource :: Loc -> Loc -> RigidSource -> Doc ()
 prettySource ctx loc (RigidRet Nothing) =
   "is unknown size returned by function at"
     <+> pretty (locStrRel ctx loc)
@@ -261,7 +261,7 @@ dimNotes ctx (Var d _ _) = do
   case c of
     Just (_, UnknownSize loc rsrc) ->
       pure . aNote $
-        dquotes (pretty d) <+> prettySource (srclocOf ctx) loc rsrc
+        dquotes (pretty d) <+> prettySource (locOf ctx) loc rsrc
     _ -> pure mempty
 dimNotes _ _ = pure mempty
 
@@ -304,7 +304,7 @@ class (Monad m) => MonadUnify m where
     x <- getConstraints
     putConstraints $ f x
 
-  newTypeVar :: (Monoid als) => SrcLoc -> Name -> m (TypeBase dim als)
+  newTypeVar :: (Monoid als, Located a) => a -> Name -> m (TypeBase dim als)
   newDimVar :: Usage -> Rigidity -> Name -> m VName
   newRigidDim :: (Located a) => a -> RigidSource -> Name -> m VName
   newRigidDim loc = newDimVar (mkUsage' loc) . Rigid
@@ -1101,7 +1101,7 @@ mustHaveFieldWith ::
   m StructType
 mustHaveFieldWith onDims usage bound bcs l t = do
   constraints <- getConstraints
-  l_type <- newTypeVar (srclocOf usage) "t"
+  l_type <- newTypeVar (locOf usage) "t"
   case t of
     Scalar (TypeVar _ (QualName _ tn) [])
       | Just (lvl, NoConstraint {}) <- M.lookup tn constraints -> do
@@ -1143,7 +1143,7 @@ mustHaveField usage = mustHaveFieldWith (unifySizes usage) usage mempty noBreadC
 
 newDimOnMismatch ::
   (MonadUnify m) =>
-  SrcLoc ->
+  Loc ->
   StructType ->
   StructType ->
   m (StructType, [VName])
@@ -1159,11 +1159,11 @@ newDimOnMismatch loc t1 t2 = do
           -- same new size.
           maybe_d <- gets $ M.lookup (d1, d2)
           case maybe_d of
-            Just d -> pure $ sizeFromName (qualName d) loc
+            Just d -> pure $ sizeFromName (qualName d) $ srclocOf loc
             Nothing -> do
               d <- lift $ newRigidDim loc r "differ"
               modify $ M.insert (d1, d2) d
-              pure $ sizeFromName (qualName d) loc
+              pure $ sizeFromName (qualName d) $ srclocOf loc
 
 -- | Like unification, but creates new size variables where mismatches
 -- occur.  Returns the new dimensions thus created.
@@ -1180,7 +1180,7 @@ unifyMostCommon usage t1 t2 = do
   unifyWith allOK usage mempty noBreadCrumbs t1 t2
   t1' <- normTypeFully t1
   t2' <- normTypeFully t2
-  newDimOnMismatch (srclocOf usage) t1' t2'
+  newDimOnMismatch (locOf usage) t1' t2'
 
 -- Simple MonadUnify implementation.
 
@@ -1207,7 +1207,7 @@ instance MonadUnify UnifyM where
 
   newTypeVar loc name = do
     v <- newVar name
-    modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing loc)
+    modifyConstraints $ M.insert v (0, NoConstraint Lifted $ Usage Nothing $ locOf loc)
     pure $ Scalar $ TypeVar mempty (qualName v) []
 
   newDimVar usage rigidity name = do
@@ -1215,7 +1215,7 @@ instance MonadUnify UnifyM where
     case rigidity of
       Rigid src ->
         modifyConstraints $
-          M.insert dim (0, UnknownSize (srclocOf usage) src)
+          M.insert dim (0, UnknownSize (locOf usage) src)
       Nonrigid ->
         modifyConstraints $
           M.insert dim (0, Size Nothing usage)
@@ -1243,10 +1243,10 @@ runUnifyM rigid_tparams nonrigid_tparams (UnifyM m) =
     constraints =
       M.fromList $
         map nonrigid nonrigid_tparams <> map rigid rigid_tparams
-    nonrigid (TypeParamDim p loc) = (p, (1, Size Nothing $ Usage Nothing loc))
-    nonrigid (TypeParamType l p loc) = (p, (1, NoConstraint l $ Usage Nothing loc))
-    rigid (TypeParamDim p loc) = (p, (0, ParamSize loc))
-    rigid (TypeParamType l p loc) = (p, (0, ParamType l loc))
+    nonrigid (TypeParamDim p loc) = (p, (1, Size Nothing $ Usage Nothing $ locOf loc))
+    nonrigid (TypeParamType l p loc) = (p, (1, NoConstraint l $ Usage Nothing $ locOf loc))
+    rigid (TypeParamDim p loc) = (p, (0, ParamSize $ locOf loc))
+    rigid (TypeParamType l p loc) = (p, (0, ParamType l $ locOf loc))
 
 -- | Perform a unification of two types outside a monadic context.
 -- The first list of type parameters are rigid but may have liftedness
@@ -1262,7 +1262,7 @@ doUnification ::
   Either TypeError StructType
 doUnification loc rigid_tparams nonrigid_tparams t1 t2 =
   runUnifyM rigid_tparams nonrigid_tparams $ do
-    unify (Usage Nothing (srclocOf loc)) t1 t2
+    unify (Usage Nothing (locOf loc)) t1 t2
     normTypeFully t2
 
 -- Note [Linking variables to sum types]

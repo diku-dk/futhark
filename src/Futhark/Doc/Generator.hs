@@ -85,7 +85,7 @@ data IndexWhat = IndexValue | IndexFunction | IndexModule | IndexModuleType | In
 -- can generate an index.
 type Documented = M.Map VName IndexWhat
 
-warn :: SrcLoc -> Doc () -> DocM ()
+warn :: Loc -> Doc () -> DocM ()
 warn loc s = lift $ lift $ tell $ singleWarning loc s
 
 document :: VName -> IndexWhat -> DocM ()
@@ -734,10 +734,10 @@ docHtml (Just (DocComment doc loc)) =
   H.preEscapedText
     . GFM.commonmarkToHtml [] [GFM.extAutolink]
     . T.pack
-    <$> identifierLinks loc (T.unpack doc)
+    <$> identifierLinks (locOf loc) (T.unpack doc)
 docHtml Nothing = pure mempty
 
-identifierLinks :: SrcLoc -> String -> DocM String
+identifierLinks :: Loc -> String -> DocM String
 identifierLinks _ [] = pure []
 identifierLinks loc s
   | Just ((name, namespace, file), s') <- identifierReference s = do
