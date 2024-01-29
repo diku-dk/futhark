@@ -567,7 +567,7 @@ patternOrderZero :: Pat (TypeBase d u) -> Bool
 patternOrderZero = orderZero . patternType
 
 -- | The set of identifiers bound in a pattern.
-patIdents :: Pat t -> [Ident t]
+patIdents :: PatBase f vn t -> [IdentBase f vn t]
 patIdents (Id v t loc) = [Ident v t loc]
 patIdents (PatParens p _) = patIdents p
 patIdents (TuplePat pats _) = foldMap patIdents pats
