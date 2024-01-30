@@ -6,6 +6,7 @@ module Language.Futhark.TypeChecker.Monad
     askEnv,
     askImportName,
     atTopLevel,
+    bindNameMap,
     enteringModule,
     bindSpaced,
     bindSpaced1,
@@ -271,6 +272,11 @@ incCounter = do
   put s {stateCounter = stateCounter s + 1}
   pure $ stateCounter s
 
+bindNameMap :: NameMap -> TypeM a -> TypeM a
+bindNameMap m = local $ \ctx ->
+  let env = contextEnv ctx
+   in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
+
 -- | Monads that support type checking.  The reason we have this
 -- internal interface is because we use distinct monads for checking
 -- expressions and declarations.
@@ -282,7 +288,6 @@ class (Monad m) => MonadTypeChecker m where
   newID :: Name -> m VName
   newTypeName :: Name -> m VName
 
-  bindNameMap :: NameMap -> m a -> m a
   bindVal :: VName -> BoundV -> m a -> m a
 
   lookupType :: QualName VName -> m ([TypeParam], StructRetType, Liftedness)
@@ -293,7 +298,7 @@ class (Monad m) => MonadTypeChecker m where
 
 -- | Map source-level names to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced :: (MonadTypeChecker m) => [(Namespace, Name)] -> ([VName] -> m a) -> m a
+bindSpaced :: [(Namespace, Name)] -> ([VName] -> TypeM a) -> TypeM a
 bindSpaced names body = do
   names' <- mapM (newID . snd) names
   let mapping = M.fromList $ zip names $ map qualName names'
@@ -301,7 +306,7 @@ bindSpaced names body = do
 
 -- | Map single source-level name to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced1 :: (MonadTypeChecker m) => Namespace -> Name -> (VName -> m a) -> m a
+bindSpaced1 :: Namespace -> Name -> (VName -> TypeM a) -> TypeM a
 bindSpaced1 ns name body = do
   name' <- newID name
   let mapping = M.singleton (ns, name) $ qualName name'
@@ -325,10 +330,6 @@ instance MonadTypeChecker TypeM where
   newTypeName name = do
     i <- incCounter
     newID $ mkTypeVarName name i
-
-  bindNameMap m = local $ \ctx ->
-    let env = contextEnv ctx
-     in ctx {contextEnv = env {envNameMap = m <> envNameMap env}}
 
   bindVal v t = local $ \ctx ->
     ctx

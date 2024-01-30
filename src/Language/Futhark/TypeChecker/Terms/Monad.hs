@@ -204,21 +204,19 @@ data TermEnv = TermEnv
 data TermScope = TermScope
   { scopeVtable :: M.Map VName ValBinding,
     scopeTypeTable :: M.Map VName TypeBinding,
-    scopeModTable :: M.Map VName Mod,
-    scopeNameMap :: NameMap
+    scopeModTable :: M.Map VName Mod
   }
   deriving (Show)
 
 instance Semigroup TermScope where
-  TermScope vt1 tt1 mt1 nt1 <> TermScope vt2 tt2 mt2 nt2 =
-    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2) (nt2 `M.union` nt1)
+  TermScope vt1 tt1 mt1 <> TermScope vt2 tt2 mt2 =
+    TermScope (vt2 `M.union` vt1) (tt2 `M.union` tt1) (mt1 `M.union` mt2)
 
 envToTermScope :: Env -> TermScope
 envToTermScope env =
   TermScope
     { scopeVtable = vtable,
       scopeTypeTable = envTypeTable env,
-      scopeNameMap = envNameMap env,
       scopeModTable = envModTable env
     }
   where
@@ -436,9 +434,6 @@ instance MonadTypeChecker TermTypeM where
     i <- incCounter
     newID $ mkTypeVarName name i
 
-  bindNameMap m = localScope $ \scope ->
-    scope {scopeNameMap = m <> scopeNameMap scope}
-
   bindVal v (TypeM.BoundV tps t) = localScope $ \scope ->
     scope {scopeVtable = M.insert v (BoundV tps t) $ scopeVtable scope}
 
@@ -625,7 +620,6 @@ initialTermScope =
   TermScope
     { scopeVtable = initialVtable,
       scopeTypeTable = mempty,
-      scopeNameMap = mempty,
       scopeModTable = mempty
     }
   where

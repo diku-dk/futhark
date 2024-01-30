@@ -276,7 +276,7 @@ checkPat sizes p t m = do
           <+> pretty size
           <+> "as it is never used as the size of a concrete (non-function) value."
     [] ->
-      bindNameMap (patNameMap p') $ m p'
+      m p'
 
 -- | Check and bind a @let@-pattern.
 bindingPat ::
@@ -290,11 +290,6 @@ bindingPat sizes p t m = do
     case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
-
-patNameMap :: Pat t -> NameMap
-patNameMap = M.fromList . map asTerm . patNames
-  where
-    asTerm v = ((Term, baseName v), qualName v)
 
 -- | Check and bind type and value parameters.
 bindingParams ::
