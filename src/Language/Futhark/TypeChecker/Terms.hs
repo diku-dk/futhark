@@ -537,17 +537,12 @@ checkExp (Parens e loc) =
 checkExp (QualParens (modname, modnameloc) e loc) = do
   mod <- lookupMod modname
   case mod of
-    ModEnv env -> local (`withEnv` qualifyEnv modname env) $ do
+    ModEnv env -> local (`withEnv` env) $ do
       e' <- checkExp e
       pure $ QualParens (modname, modnameloc) e' loc
     ModFun {} ->
       typeError loc mempty . withIndexLink "module-is-parametric" $
         "Module" <+> pretty modname <+> " is a parametric module."
-  where
-    qualifyEnv modname' env =
-      env {envNameMap = M.map (qualify' modname') $ envNameMap env}
-    qualify' modname' (QualName qs name) =
-      QualName (qualQuals modname' ++ [qualLeaf modname'] ++ qs) name
 checkExp (Var qn NoInfo loc) = do
   t <- lookupVar loc qn
   pure $ Var qn (Info t) loc
