@@ -161,6 +161,15 @@ isolateNormalisation m = do
   put prevRepl
   pure ret
 
+-- | These now have monomorphic types in the given action. This is
+-- used to handle shadowing.
+withMono :: [VName] -> MonoM a -> MonoM a
+withMono [] = id
+withMono vs = local $ \env ->
+  env {envPolyBindings = M.filterWithKey keep (envPolyBindings env)}
+  where
+    keep v _ = v `notElem` vs
+
 withArgs :: S.Set VName -> MonoM a -> MonoM a
 withArgs args = localEnv $ mempty {envScope = args}
 
@@ -457,7 +466,7 @@ transformType typ =
 
 transformRetTypeSizes :: S.Set VName -> RetTypeBase Size as -> MonoM (RetTypeBase Size as)
 transformRetTypeSizes argset (RetType dims ty) = do
-  ty' <- withArgs argset $ transformType ty
+  ty' <- withArgs argset $ withMono dims $ transformType ty
   rl <- parametrizing argset
   let dims' = dims <> map snd rl
   pure $ RetType dims' ty'
@@ -1184,7 +1193,6 @@ typeSubstsM loc orig_t1 orig_t2 =
     sub t1@(Scalar Sum {}) t2 = sub t1 t2
     sub t1 t2@(Scalar Sum {}) = sub t1 t2
     sub t1 t2 = error $ unlines ["typeSubstsM: mismatched types:", prettyString t1, prettyString t2]
-
     addSubst (QualName _ v) (RetType ext t) = do
       (ts, sizes) <- get
       unless (v `M.member` ts) $ do

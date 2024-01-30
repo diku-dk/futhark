@@ -32,6 +32,8 @@ module Language.Futhark.TypeChecker.Terms.Monad
     unifies,
     require,
     checkTypeExpNonrigid,
+    lookupVar,
+    lookupMod,
 
     -- * Sizes
     isInt64,
@@ -58,9 +60,8 @@ import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
-import Language.Futhark.Semantic (includeToFilePath)
 import Language.Futhark.Traversals
-import Language.Futhark.TypeChecker.Monad hiding (BoundV, stateNameSource)
+import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
@@ -93,7 +94,7 @@ data Checking
   | CheckingAscription StructType StructType
   | CheckingLetGeneralise Name
   | CheckingParams (Maybe Name)
-  | CheckingPat (UncheckedPat StructType) (Inferred StructType)
+  | CheckingPat (PatBase NoInfo VName StructType) (Inferred StructType)
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
@@ -195,7 +196,7 @@ data TermEnv = TermEnv
   { termScope :: TermScope,
     termChecking :: Maybe Checking,
     termLevel :: Level,
-    termChecker :: UncheckedExp -> TermTypeM Exp,
+    termChecker :: ExpBase NoInfo VName -> TermTypeM Exp,
     termOuterEnv :: Env,
     termImportName :: ImportName
   }
@@ -386,42 +387,26 @@ instantiateTypeParam qn loc tparam = do
         "instantiated size parameter of " <> dquotes (pretty qn)
       pure (v, ExpSubst $ sizeFromName (qualName v) loc)
 
-checkQualNameWithEnv :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
-checkQualNameWithEnv space qn@(QualName quals name) loc = do
+lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
+lookupQualNameEnv (QualName [q] _)
+  | baseTag q <= maxIntrinsicTag = asks termScope -- Magical intrinsic module.
+lookupQualNameEnv qn@(QualName quals _) = do
   scope <- asks termScope
   descend scope quals
   where
-    descend scope []
-      | Just name' <- M.lookup (space, name) $ scopeNameMap scope =
-          pure (scope, name')
-      | otherwise =
-          unknownVariable space qn loc
+    descend scope [] = pure scope
     descend scope (q : qs)
-      | Just (QualName _ q') <- M.lookup (Term, q) $ scopeNameMap scope,
-        Just res <- M.lookup q' $ scopeModTable scope =
-          case res of
-            -- Check if we are referring to the magical intrinsics
-            -- module.
-            _
-              | baseTag q' <= maxIntrinsicTag ->
-                  checkIntrinsic space qn loc
-            ModEnv q_scope -> do
-              (scope', QualName qs' name') <- descend (envToTermScope q_scope) qs
-              pure (scope', QualName (q' : qs') name')
-            ModFun {} -> unappliedFunctor loc
+      | Just (ModEnv q_scope) <- M.lookup q $ scopeModTable scope =
+          descend (envToTermScope q_scope) qs
       | otherwise =
-          unknownVariable space qn loc
+          error $ "lookupQualNameEnv " <> show qn
 
-checkIntrinsic :: Namespace -> QualName Name -> SrcLoc -> TermTypeM (TermScope, QualName VName)
-checkIntrinsic space qn@(QualName _ name) loc
-  | Just v <- M.lookup (space, name) intrinsicsNameMap = do
-      me <- asks termImportName
-      unless (isBuiltin (includeToFilePath me)) $
-        warn loc "Using intrinsic functions directly can easily crash the compiler or result in wrong code generation."
-      scope <- asks termScope
-      pure (scope, v)
-  | otherwise =
-      unknownVariable space qn loc
+lookupMod :: QualName VName -> TermTypeM Mod
+lookupMod qn@(QualName _ name) = do
+  scope <- lookupQualNameEnv qn
+  case M.lookup name $ scopeModTable scope of
+    Nothing -> error $ "lookupMod: " <> show qn
+    Just m -> pure m
 
 localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -451,74 +436,23 @@ instance MonadTypeChecker TermTypeM where
     i <- incCounter
     newID $ mkTypeVarName name i
 
-  checkQualName space name loc = snd <$> checkQualNameWithEnv space name loc
-
   bindNameMap m = localScope $ \scope ->
     scope {scopeNameMap = m <> scopeNameMap scope}
 
   bindVal v (TypeM.BoundV tps t) = localScope $ \scope ->
     scope {scopeVtable = M.insert v (BoundV tps t) $ scopeVtable scope}
 
-  lookupType loc qn = do
+  lookupType qn = do
     outer_env <- asks termOuterEnv
-    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Type qn loc
-    case M.lookup name $ scopeTypeTable scope of
-      Nothing -> unknownType loc qn
+    scope <- lookupQualNameEnv qn
+    case M.lookup (qualLeaf qn) $ scopeTypeTable scope of
+      Nothing -> error $ "lookupType: " <> show qn
       Just (TypeAbbr l ps (RetType dims def)) ->
         pure
-          ( qn',
-            ps,
-            RetType dims $ qualifyTypeVars outer_env (map typeParamName ps) qs def,
+          ( ps,
+            RetType dims $ qualifyTypeVars outer_env (map typeParamName ps) (qualQuals qn) def,
             l
           )
-
-  lookupMod loc qn = do
-    (scope, qn'@(QualName _ name)) <- checkQualNameWithEnv Term qn loc
-    case M.lookup name $ scopeModTable scope of
-      Nothing -> unknownVariable Term qn loc
-      Just m -> pure (qn', m)
-
-  lookupVar loc qn = do
-    (scope, qn'@(QualName qs name)) <- checkQualNameWithEnv Term qn loc
-    let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
-
-    t <- case M.lookup name $ scopeVtable scope of
-      Nothing ->
-        typeError loc mempty $
-          "Unknown variable" <+> dquotes (pretty qn) <> "."
-      Just (BoundV tparams t) -> do
-        when (null qs) . modify $ \s ->
-          s {stateUsed = S.insert (qualLeaf qn') $ stateUsed s}
-        when (T.head (nameToText (baseName name)) == '_') $
-          underscoreUse loc qn
-        if null tparams && null qs
-          then pure t
-          else do
-            (tnames, t') <- instantiateTypeScheme qn' loc tparams t
-            outer_env <- asks termOuterEnv
-            pure $ qualifyTypeVars outer_env tnames qs t'
-      Just EqualityF -> do
-        argtype <- newTypeVar loc "t"
-        equalityType usage argtype
-        pure $
-          Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-            Scalar $
-              Arrow mempty Unnamed Observe argtype $
-                RetType [] $
-                  Scalar $
-                    Prim Bool
-      Just (OverloadedF ts pts rt) -> do
-        argtype <- newTypeVar loc "t"
-        mustBeOneOf ts usage argtype
-        let (pts', rt') = instOverloaded argtype pts rt
-        pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
-
-    pure (qn', t)
-    where
-      instOverloaded argtype pts rt =
-        ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
-          maybe (toStruct argtype) (Scalar . Prim) rt
-        )
 
   typeError loc notes s = do
     checking <- asks termChecking
@@ -527,6 +461,44 @@ instance MonadTypeChecker TermTypeM where
         throwError $ TypeError (locOf loc) notes (pretty checking' <> line </> s)
       Nothing ->
         throwError $ TypeError (locOf loc) notes s
+
+lookupVar :: SrcLoc -> QualName VName -> TermTypeM StructType
+lookupVar loc qn@(QualName qs name) = do
+  scope <- lookupQualNameEnv qn
+  let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
+
+  case M.lookup name $ scopeVtable scope of
+    Nothing ->
+      error $ "lookupVar: " <> show qn
+    Just (BoundV tparams t) -> do
+      when (null qs) . modify $ \s ->
+        s {stateUsed = S.insert name $ stateUsed s}
+      if null tparams && null qs
+        then pure t
+        else do
+          (tnames, t') <- instantiateTypeScheme qn loc tparams t
+          outer_env <- asks termOuterEnv
+          pure $ qualifyTypeVars outer_env tnames qs t'
+    Just EqualityF -> do
+      argtype <- newTypeVar loc "t"
+      equalityType usage argtype
+      pure $
+        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
+          Scalar $
+            Arrow mempty Unnamed Observe argtype $
+              RetType [] $
+                Scalar $
+                  Prim Bool
+    Just (OverloadedF ts pts rt) -> do
+      argtype <- newTypeVar loc "t"
+      mustBeOneOf ts usage argtype
+      let (pts', rt') = instOverloaded argtype pts rt
+      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+  where
+    instOverloaded argtype pts rt =
+      ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
+        maybe (toStruct argtype) (Scalar . Prim) rt
+      )
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
@@ -617,7 +589,7 @@ require why ts e = do
   pure e
 
 termCheckTypeExp ::
-  TypeExp NoInfo Name ->
+  TypeExp NoInfo VName ->
   TermTypeM (TypeExp Info VName, [VName], ResRetType)
 termCheckTypeExp te = do
   (te', svars, rettype, _l) <- checkTypeExp te
@@ -630,7 +602,7 @@ termCheckTypeExp te = do
 
   pure (te', svars, RetType dims st)
 
-checkTypeExpNonrigid :: TypeExp NoInfo Name -> TermTypeM (TypeExp Info VName, ResType, [VName])
+checkTypeExpNonrigid :: TypeExp NoInfo VName -> TermTypeM (TypeExp Info VName, ResType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
@@ -679,7 +651,7 @@ initialTermScope =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: (UncheckedExp -> TermTypeM Exp) -> TermTypeM a -> TypeM a
+runTermTypeM :: (ExpBase NoInfo VName -> TermTypeM Exp) -> TermTypeM a -> TypeM a
 runTermTypeM checker (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   name <- askImportName
