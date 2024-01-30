@@ -343,7 +343,7 @@ instance MonadTypeChecker TypeM where
     outer_env <- askEnv
     scope <- lookupQualNameEnv qn
     case M.lookup (qualLeaf qn) $ envTypeTable scope of
-      Nothing -> typeError (mempty :: Loc) mempty $ "Internal lookupType: " <> pretty qn -- FIXME
+      Nothing -> error $ "lookupType: " <> show qn
       Just (TypeAbbr l ps (RetType dims def)) ->
         pure (ps, RetType dims $ qualifyTypeVars outer_env mempty (qualQuals qn) def, l)
 
