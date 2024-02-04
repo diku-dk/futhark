@@ -10,7 +10,7 @@ where
 
 import Control.Monad
 import Control.Monad.State
-import Data.Bitraversable
+import Data.Bifunctor
 import Data.Either
 import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
@@ -25,23 +25,14 @@ import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify hiding (Usage)
 import Prelude hiding (mod)
 
-nonrigidFor :: [SizeBinder VName] -> StructType -> TermTypeM StructType
-nonrigidFor [] t = pure t -- Minor optimisation.
-nonrigidFor sizes t = evalStateT (bitraverse onDim pure t) mempty
+nonrigidFor :: [(SizeBinder VName, QualName VName)] -> StructType -> StructType
+nonrigidFor [] = id -- Minor optimisation.
+nonrigidFor sizes = first onDim
   where
-    onDim (Var (QualName _ v) typ loc)
-      | Just size <- find ((== v) . sizeName) sizes = do
-          prev <- gets $ lookup v
-          case prev of
-            Nothing -> do
-              v' <- lift $ newID $ baseName v
-              lift . constrain v' . Size Nothing $
-                mkUsage size "ambiguous size of bound expression"
-              modify ((v, v') :)
-              pure $ Var (qualName v') typ loc
-            Just v' ->
-              pure $ Var (qualName v') typ loc
-    onDim d = pure d
+    onDim (Var (QualName _ v) info loc)
+      | Just (_, v') <- find ((== v) . sizeName . fst) sizes =
+          Var v' info loc
+    onDim d = d
 
 -- | Bind these identifiers locally while running the provided action.
 binding ::
@@ -143,7 +134,7 @@ patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
 checkPat' ::
-  [SizeBinder VName] ->
+  [(SizeBinder VName, QualName VName)] ->
   PatBase NoInfo VName ParamType ->
   Inferred ParamType ->
   TermTypeM (Pat ParamType)
@@ -206,7 +197,7 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
 
   case maybe_outer_t of
     Ascribed outer_t -> do
-      st_forunify <- nonrigidFor sizes $ toStruct st
+      let st_forunify = nonrigidFor sizes $ toStruct st
       unify (mkUsage loc "explicit type ascription") st_forunify (toStruct outer_t)
 
       PatAscription
@@ -257,7 +248,7 @@ checkPat' sizes (PatConstr n NoInfo ps loc) NoneInferred = do
     usage = mkUsage loc "matching against constructor"
 
 checkPat ::
-  [SizeBinder VName] ->
+  [(SizeBinder VName, QualName VName)] ->
   PatBase NoInfo VName (TypeBase Size u) ->
   Inferred StructType ->
   (Pat ParamType -> TermTypeM a) ->
@@ -269,8 +260,8 @@ checkPat sizes p t m = do
 
   let explicit = mustBeExplicitInType $ patternStructType p'
 
-  case filter ((`S.member` explicit) . sizeName) sizes of
-    size : _ ->
+  case filter ((`S.member` explicit) . sizeName . fst) sizes of
+    (size, _) : _ ->
       typeError size mempty $
         "Cannot bind"
           <+> pretty size
@@ -286,10 +277,17 @@ bindingPat ::
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
-  checkPat sizes p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
+  substs <- mapM mkSizeSubst sizes
+  checkPat substs p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
     case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
       [] -> m p'
       size : _ -> unusedSize size
+  where
+    mkSizeSubst v = do
+      v' <- newID $ baseName $ sizeName v
+      constrain v' . Size Nothing $
+        mkUsage v "ambiguous size of bound expression"
+      pure (v, qualName v')
 
 -- | Check and bind type and value parameters.
 bindingParams ::
