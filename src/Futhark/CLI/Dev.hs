@@ -465,6 +465,14 @@ commandLineOptions =
       "Translate pipeline result to ImpGPU and write it on stdout.",
     Option
       []
+      ["compile-imp-webgpu"]
+      ( NoArg $
+          Right $ \opts ->
+            opts {futharkAction = GPUMemAction $ \_ _ _ -> webgpuImpCodeGenAction}
+      )
+      "Translate pipeline result to ImpWebGPU and write it on stdout.",
+    Option
+      []
       ["compile-imp-multicore"]
       ( NoArg $
           Right $ \opts ->

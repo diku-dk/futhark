@@ -11,6 +11,7 @@ module Futhark.Actions
     impCodeGenAction,
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
+    webgpuImpCodeGenAction,
     metricsAction,
     compileCAction,
     compileCtoWASMAction,
@@ -52,6 +53,7 @@ import Futhark.CodeGen.Backends.SequentialWASM qualified as SequentialWASM
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGenGPU
 import Futhark.CodeGen.ImpGen.Multicore qualified as ImpGenMulticore
 import Futhark.CodeGen.ImpGen.Sequential qualified as ImpGenSequential
+import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGenWebGPU
 import Futhark.Compiler.CLI
 import Futhark.IR
 import Futhark.IR.GPUMem (GPUMem)
@@ -176,6 +178,15 @@ multicoreImpCodeGenAction =
     { actionName = "Compile to imperative multicore",
       actionDescription = "Translate program into imperative multicore IL and write it on standard output.",
       actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenMulticore.compileProg
+    }
+
+-- | Convert the program to WebGPU ImpCode and print it to stdout.
+webgpuImpCodeGenAction :: Action GPUMem
+webgpuImpCodeGenAction =
+  Action
+    { actionName = "Compile imperative WebGPU",
+      actionDescription = "Translate program into imperative IL with WebGPU and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenWebGPU.compileProg
     }
 
 -- Lines that we prepend (in comments) to generated code.

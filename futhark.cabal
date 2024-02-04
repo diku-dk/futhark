@@ -212,6 +212,7 @@ library
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential
+      Futhark.CodeGen.ImpCode.WebGPU
       Futhark.CodeGen.ImpGen
       Futhark.CodeGen.ImpGen.CUDA
       Futhark.CodeGen.ImpGen.GPU
@@ -233,6 +234,7 @@ library
       Futhark.CodeGen.ImpGen.Multicore.SegScan
       Futhark.CodeGen.ImpGen.OpenCL
       Futhark.CodeGen.ImpGen.Sequential
+      Futhark.CodeGen.ImpGen.WebGPU
       Futhark.CodeGen.OpenCL.Heuristics
       Futhark.Compiler
       Futhark.Compiler.CLI
