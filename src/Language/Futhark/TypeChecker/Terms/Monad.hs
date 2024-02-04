@@ -428,8 +428,6 @@ instance MonadTypeChecker TermTypeM where
     put $ s {stateNameSource = src'}
     pure v'
 
-  newID s = newName $ VName s 0
-
   newTypeName name = do
     i <- incCounter
     newID $ mkTypeVarName name i
