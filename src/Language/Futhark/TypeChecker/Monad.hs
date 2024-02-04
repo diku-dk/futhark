@@ -286,6 +286,7 @@ class (Monad m) => MonadTypeChecker m where
 
   newName :: VName -> m VName
   newID :: Name -> m VName
+  newID s = newName $ VName s 0
   newTypeName :: Name -> m VName
 
   bindVal :: VName -> BoundV -> m a -> m a
@@ -324,8 +325,6 @@ instance MonadTypeChecker TypeM where
     let (v', src') = Futhark.FreshNames.newName (stateNameSource s) v
     put $ s {stateNameSource = src'}
     pure v'
-
-  newID s = newName $ VName s 0
 
   newTypeName name = do
     i <- incCounter
