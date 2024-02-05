@@ -496,8 +496,8 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, _, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
-  (_, _, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
+  (_, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
+  (_, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
 
   pure $
     AppExp
@@ -565,10 +565,10 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
   pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
     onArg fname (i, all_exts, t) arg' = do
-      (d1, _, rt, argext, exts) <- checkApply loc (fname, i) t arg'
+      (_, rt, argext, exts) <- checkApply loc (fname, i) t arg'
       pure
         ( (i + 1, all_exts <> exts, rt),
-          (Info (d1, argext), arg')
+          (Info argext, arg')
         )
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
@@ -743,7 +743,7 @@ checkExp (OpSection op _ loc) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   ftype <- lookupVar loc op
   e' <- checkExp e
-  (_, t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
+  (t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 rettype)) ->
       pure $
@@ -762,7 +762,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
-      (_, t2', arrow', argext, _) <-
+      (t2', arrow', argext, _) <-
         checkApply
           loc
           (Just op, 1)
@@ -956,8 +956,8 @@ checkApply ::
   ApplyOp ->
   StructType ->
   Exp ->
-  TermTypeM (Diet, StructType, StructType, Maybe VName, [VName])
-checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
+  TermTypeM (StructType, StructType, Maybe VName, [VName])
+checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
     unify (mkUsage argexp "use as function argument") tp1 argtype
@@ -1000,7 +1000,7 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname d1 tp1 tp2)) argexp = do
                    in pure (Nothing, applySubst parsubst $ toStruct tp2')
         _ -> pure (Nothing, toStruct tp2')
 
-    pure (d1, tp1, tp2'', argext, ext)
+    pure (tp1, tp2'', argext, ext)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") tfun $
@@ -1130,7 +1130,7 @@ causalityCheck binding_body = do
           seqArgs known' [] = do
             void $ onExp known' f
             modify (S.fromList (appResExt res) <>)
-          seqArgs known' ((Info (_, p), x) : xs) = do
+          seqArgs known' ((Info p, x) : xs) = do
             new_known <- collectingNewKnown $ onExp known' x
             void $ seqArgs (new_known <> known') xs
             modify ((new_known <> S.fromList (maybeToList p)) <>)

@@ -669,7 +669,7 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName), ExpBase f vn))
       SrcLoc
   | Range
       (ExpBase f vn)
@@ -1292,7 +1292,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Diet, Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of
@@ -1304,7 +1304,7 @@ mkApply f args (AppRes t ext)
           AppExp (Apply f args' (srcspan f $ snd $ NE.last args')) (Info (AppRes t ext))
   | otherwise = f
   where
-    onArg (d, v, x) = (Info (d, v), x)
+    onArg (v, x) = (Info v, x)
 
 -- | Construct an 'Apply' node, without type information.
 mkApplyUT :: ExpBase NoInfo vn -> ExpBase NoInfo vn -> ExpBase NoInfo vn

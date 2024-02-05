@@ -138,7 +138,7 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
     apply f [] = f
     apply f (p : rem_ps) =
       let inner_ret = AppRes (augType rem_ps) mempty
-          inner = mkApply f [(Observe, Nothing, freeVar p)] inner_ret
+          inner = mkApply f [(Nothing, freeVar p)] inner_ret
        in apply inner rem_ps
 
 transformSubExps :: ASTMapper LiftM
