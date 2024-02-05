@@ -96,9 +96,11 @@ simplifyConcat (vtable, _) pat _ (Concat i (x :| xs) new_d)
 
 -- Removing a concatenation that involves only a single array.  This
 -- may be produced as a result of other simplification rules.
-simplifyConcat _ pat aux (Concat _ (x :| []) _) =
-  -- Still need a copy because Concat produces a fresh array.
-  Simplify $ auxing aux $ letBind pat $ BasicOp $ Replicate mempty $ Var x
+simplifyConcat (vtable, _) pat aux (Concat _ (x :| []) w)
+  | Just x_t <- ST.lookupType x vtable,
+    arraySize 0 x_t == w =
+      -- Still need a copy because Concat produces a fresh array.
+      Simplify $ auxing aux $ letBind pat $ BasicOp $ Replicate mempty $ Var x
 -- concat xs (concat ys zs) == concat xs ys zs
 simplifyConcat (vtable, _) pat (StmAux cs attrs _) (Concat i (x :| xs) new_d)
   | x' /= x || concat xs' /= xs =
