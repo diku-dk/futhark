@@ -34,6 +34,7 @@ import Language.Futhark.TypeChecker.Modules
 import Language.Futhark.TypeChecker.Monad
 import Language.Futhark.TypeChecker.Names
 import Language.Futhark.TypeChecker.Terms
+import Language.Futhark.TypeChecker.Terms2 qualified as Terms2
 import Language.Futhark.TypeChecker.Types
 import Prelude hiding (abs, mod)
 
@@ -694,6 +695,8 @@ checkValBind vb = do
       withIndexLink "nested-entry" "Entry points may not be declared inside modules."
 
   attrs' <- mapM checkAttr attrs
+
+  void $ Terms2.checkValDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   (tparams', params', maybe_tdecl', rettype, body') <-
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
