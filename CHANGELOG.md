@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Incorrect type checking of let-bound sizes occurring multiple times
   in pattern. (#2103).
 
+* A concatenation simplification would sometimes mess up sizes.
+  (#2104)
+
 ## [0.25.13]
 
 ### Added
