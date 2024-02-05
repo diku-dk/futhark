@@ -12,6 +12,7 @@ module Futhark.Util.Pretty
     prettyTextOneLine,
     docText,
     docTextForHandle,
+    docString,
 
     -- * Rendering to terminal
     putDoc,
@@ -111,6 +112,11 @@ docText = Prettyprinter.Render.Text.renderStrict . layouter
   where
     layouter =
       layoutSmart defaultLayoutOptions {layoutPageWidth = Unbounded}
+
+-- | Convert a 'Doc' to a 'String', through 'docText'. Intended for
+-- debugging.
+docString :: Doc a -> String
+docString = T.unpack . docText
 
 -- | Prettyprint a value to a 'Text' on a single line.
 prettyTextOneLine :: (Pretty a) => a -> Text
