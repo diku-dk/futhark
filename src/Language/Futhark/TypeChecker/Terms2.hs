@@ -256,23 +256,32 @@ newTyVar loc desc = do
   modify $ \s -> s {termTyVars = M.insert v TyVarFree $ termTyVars s}
   pure v
 
-newType :: (Monoid u) => a -> Name -> TermM (TypeBase dim u)
+newType :: (Located loc, Monoid u) => loc -> Name -> TermM (TypeBase dim u)
 newType loc desc = tyVarType <$> newTyVar loc desc
+
+newTypeWithField :: (Monoid u) => SrcLoc -> Name -> Name -> TypeBase dim u -> TermM (TypeBase dim u)
+newTypeWithField loc desc k t = do
+  rt <- newType loc desc
+  addCt $ CtHasField (toType rt) k (toType t)
+  pure rt
+
+newTypeWithConstr :: (Monoid u) => SrcLoc -> Name -> Name -> [Type] -> TermM (TypeBase dim u)
+newTypeWithConstr loc desc k ts = do
+  t <- newType loc desc
+  addCt $ CtHasConstr (toType t) k ts
+  pure t
+
+newTypeOverloaded :: (Monoid u) => SrcLoc -> Name -> [PrimType] -> TermM (TypeBase dim u)
+newTypeOverloaded loc name pts = do
+  t <- newType loc name
+  addCt $ CtOneOf (toType t) pts
+  pure t
 
 addCt :: Ct -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
 
 ctEq :: TypeBase d1 u1 -> TypeBase d2 u2 -> TermM ()
 ctEq t1 t2 = addCt $ CtEq (toType t1) (toType t2)
-
-ctHasConstr :: TypeBase d1 u1 -> Name -> [TypeBase d2 u2] -> TermM ()
-ctHasConstr t1 k t2 = addCt $ CtHasConstr (toType t1) k (map toType t2)
-
-ctHasField :: TypeBase d1 u1 -> Name -> TypeBase d2 u2 -> TermM ()
-ctHasField t1 k t = addCt $ CtHasField (toType t1) k (toType t)
-
-ctOneOf :: TypeBase d1 u1 -> [PrimType] -> TermM ()
-ctOneOf t ts = addCt $ CtOneOf (toType t) ts
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -344,8 +353,9 @@ instance MonadTypeChecker TermM where
 --- All the general machinery goes above.
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
-require why ts e = do
-  ctOneOf (typeOf e) ts
+require why pts e = do
+  t :: Type <- newTypeOverloaded (srclocOf e) "t" pts
+  ctEq t $ expType e
   pure e
 
 -- | Create a new type name and insert it (unconstrained) in the set
@@ -419,8 +429,7 @@ lookupVar loc qn@(QualName qs name) = do
                 Scalar $
                   Prim Bool
     Just (OverloadedF ts pts rt) -> do
-      argtype <- newType loc "t"
-      ctOneOf argtype ts
+      argtype <- newTypeOverloaded loc "t" ts
       let (pts', rt') = instOverloaded (argtype :: StructType) pts rt
       pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
   where
@@ -445,14 +454,10 @@ bind idents = localScope (`bindVars` idents)
 -- All this complexity is just so we can handle un-suffixed numeric
 -- literals in patterns.
 patLitMkType :: PatLit -> SrcLoc -> TermM ParamType
-patLitMkType (PatLitInt _) loc = do
-  t <- newType loc "t"
-  ctOneOf t anyNumberType
-  pure t
-patLitMkType (PatLitFloat _) loc = do
-  t <- newType loc "t"
-  ctOneOf t anyFloatType
-  pure t
+patLitMkType (PatLitInt _) loc =
+  newTypeOverloaded loc "t" anyNumberType
+patLitMkType (PatLitFloat _) loc =
+  newTypeOverloaded loc "t" anyFloatType
 patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
@@ -538,16 +543,15 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
       ps' <- zipWithM checkPat' ps $ map Ascribed ts
       pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
-  t' <- newType loc "t"
   ps' <- forM ps $ \p -> do
     p_t <- newType (srclocOf p) "t"
     checkPat' p $ Ascribed p_t
-  ctHasConstr (t' :: ParamType) n $ map patternStructType ps'
-  pure $ PatConstr n (Info t) ps' loc
+  t' <- newTypeWithConstr loc "t" n $ map (toType . patternType) ps'
+  ctEq t' t
+  pure $ PatConstr n (Info t') ps' loc
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
-  t <- newType loc "t"
-  ctHasConstr t n $ map patternStructType ps'
+  t <- newTypeWithConstr loc "t" n $ map (toType . patternType) ps'
   pure $ PatConstr n (Info t) ps' loc
 
 checkPat ::
@@ -640,17 +644,18 @@ isSlice DimFix {} = False
 
 -- Add constraints saying that the first type has a (potentially
 -- nested) field containing the second type.
-mustHaveFields ::
-  SrcLoc ->
-  TypeBase d1 u1 ->
-  [Name] ->
-  TypeBase d2 u2 ->
-  TermM ()
-mustHaveFields loc t [] ve_t = ctEq t ve_t
+mustHaveFields :: SrcLoc -> Type -> [Name] -> Type -> TermM ()
+mustHaveFields _ t [] ve_t =
+  -- This case is probably never reached.
+  ctEq t ve_t
+mustHaveFields loc t [f] ve_t = do
+  rt :: Type <- newTypeWithField loc "ft" f ve_t
+  ctEq t rt
 mustHaveFields loc t (f : fs) ve_t = do
-  f_t :: Type <- newType loc "ft"
-  ctHasField t f f_t
-  mustHaveFields loc f_t fs ve_t
+  ft :: Type <- newType loc "ft"
+  rt <- newTypeWithField loc "rt" f ft
+  mustHaveFields loc ft fs ve_t
+  ctEq t rt
 
 checkCase ::
   StructType ->
@@ -735,12 +740,10 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
         "Module" <+> pretty modname <+> " is a parametric module."
 --
 checkExp (IntLit x NoInfo loc) = do
-  t <- newType loc "num"
-  ctOneOf t anyNumberType
+  t <- newTypeOverloaded loc "num" anyNumberType
   pure $ IntLit x (Info t) loc
 checkExp (FloatLit x NoInfo loc) = do
-  t <- newType loc "float"
-  ctOneOf t anyFloatType
+  t <- newTypeOverloaded loc "float" anyFloatType
   pure $ FloatLit x (Info t) loc
 checkExp (Literal v loc) =
   pure $ Literal v loc
@@ -792,9 +795,8 @@ checkExp (Assert e1 e2 NoInfo loc) = do
   pure $ Assert e1' e2' (Info (prettyText e1)) loc
 --
 checkExp (Constr name es NoInfo loc) = do
-  t <- newType loc "t"
   es' <- mapM checkExp es
-  ctHasConstr t name $ map typeOf es'
+  t <- newTypeWithConstr loc "t" name $ map expType es'
   pure $ Constr name es' (Info t) loc
 --
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
@@ -866,7 +868,7 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
 checkExp (ProjectSection fields NoInfo loc) = do
   a <- newType loc "a"
   b <- newType loc "b"
-  mustHaveFields loc a fields b
+  mustHaveFields loc (toType a) fields (toType b)
   let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] b
   pure $ ProjectSection fields (Info ft) loc
 --
@@ -928,14 +930,15 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
 --
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
-  kt <- newType loc "t"
-  ctHasField (typeOf e') k kt
+  kt <- newType loc "kt"
+  t <- newTypeWithField loc "t" k kt
+  ctEq (typeOf e') t
   pure $ Project k e' (Info kt) loc
 --
 checkExp (RecordUpdate src fields ve NoInfo loc) = do
   src' <- checkExp src
   ve' <- checkExp ve
-  mustHaveFields loc (typeOf src') fields (typeOf ve')
+  mustHaveFields loc (expType src') fields (expType ve')
   pure $ RecordUpdate src' fields ve' (Info (typeOf src')) loc
 --
 checkExp (IndexSection slice NoInfo loc) = do
