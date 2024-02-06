@@ -59,7 +59,7 @@ import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify (Level, mkUsage)
+import Language.Futhark.TypeChecker.Unify (Level)
 import Prelude hiding (mod)
 
 data Inferred t
@@ -84,40 +84,36 @@ toType = bimap (const ()) (const NoUniqueness)
 expType :: Exp -> Type
 expType = toType . typeOf
 
-data Ct
-  = CtEq Type Type
-  | CtOneOf Type [PrimType]
-  | CtHasConstr Type Name [Type]
-  | CtHasField Type Name Type
+data Ct = CtEq Type Type
   deriving (Show)
 
 instance Pretty Ct where
   pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
-  pretty (CtOneOf t1 ts) = pretty t1 <+> "∈" <+> pretty ts
-  pretty (CtHasConstr t1 k ts) =
-    pretty t1 <+> "~" <+> "... | " <+> hsep ("#" <> pretty k : map pretty ts) <+> " | ..."
-  pretty (CtHasField t1 k t) =
-    pretty t1 <+> "~" <+> braces ("..." <+> pretty k <> ":" <+> pretty t <+> "...")
 
 type Constraints = [Ct]
 
--- | The substitution (or other information) known about a type
--- variable.
-data TyVarSub
-  = -- | No substitution known yet; can be substituted with anything.
+-- | Information about a type variable.
+data TyVarInfo
+  = -- | Can be substituted with anything.
     TyVarFree
-  | -- | This substitution has been found.
-    TyVarSub Type
+  | -- | Can only be substituted with these primitive types.
+    TyVarPrim [PrimType]
+  | -- | Must be a record with these fields.
+    TyVarRecord (M.Map Name Type)
+  | -- | Must be a sum type with these fields.
+    TyVarSum (M.Map Name [Type])
   deriving (Show)
 
-instance Pretty TyVarSub where
+instance Pretty TyVarInfo where
   pretty TyVarFree = "free"
-  pretty (TyVarSub t) = "=" <> pretty t
+  pretty (TyVarPrim pts) = "∈" <+> pretty pts
+  pretty (TyVarRecord fs) = pretty $ Scalar $ Record fs
+  pretty (TyVarSum cs) = pretty $ Scalar $ Sum cs
 
 type TyVar = VName
 
 -- | If a VName is not in this map, it is assumed to be rigid.
-type TyVars = M.Map TyVar TyVarSub
+type TyVars = M.Map TyVar TyVarInfo
 
 data TermScope = TermScope
   { scopeVtable :: M.Map VName ValBinding,
@@ -249,33 +245,30 @@ incCounter = do
 tyVarType :: (Monoid u) => TyVar -> TypeBase dim u
 tyVarType v = Scalar $ TypeVar mempty (qualName v) []
 
-newTyVar :: a -> Name -> TermM TyVar
-newTyVar loc desc = do
+newTyVarWith :: a -> Name -> TyVarInfo -> TermM TyVar
+newTyVarWith loc desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
-  modify $ \s -> s {termTyVars = M.insert v TyVarFree $ termTyVars s}
+  modify $ \s -> s {termTyVars = M.insert v info $ termTyVars s}
   pure v
+
+newTyVar :: a -> Name -> TermM TyVar
+newTyVar loc desc = newTyVarWith loc desc TyVarFree
 
 newType :: (Located loc, Monoid u) => loc -> Name -> TermM (TypeBase dim u)
 newType loc desc = tyVarType <$> newTyVar loc desc
 
 newTypeWithField :: (Monoid u) => SrcLoc -> Name -> Name -> TypeBase dim u -> TermM (TypeBase dim u)
-newTypeWithField loc desc k t = do
-  rt <- newType loc desc
-  addCt $ CtHasField (toType rt) k (toType t)
-  pure rt
+newTypeWithField loc desc k t =
+  tyVarType <$> newTyVarWith loc desc (TyVarRecord $ M.singleton k $ toType t)
 
 newTypeWithConstr :: (Monoid u) => SrcLoc -> Name -> Name -> [Type] -> TermM (TypeBase dim u)
-newTypeWithConstr loc desc k ts = do
-  t <- newType loc desc
-  addCt $ CtHasConstr (toType t) k ts
-  pure t
+newTypeWithConstr loc desc k ts =
+  tyVarType <$> newTyVarWith loc desc (TyVarSum $ M.singleton k ts)
 
 newTypeOverloaded :: (Monoid u) => SrcLoc -> Name -> [PrimType] -> TermM (TypeBase dim u)
-newTypeOverloaded loc name pts = do
-  t <- newType loc name
-  addCt $ CtOneOf (toType t) pts
-  pure t
+newTypeOverloaded loc name pts =
+  tyVarType <$> newTyVarWith loc name (TyVarPrim pts)
 
 addCt :: Ct -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
@@ -1041,9 +1034,6 @@ checkExp (Coerce e te NoInfo loc) = do
   ctEq (typeOf e') st
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
---
---
-
 checkValDef ::
   ( VName,
     Maybe (TypeExp NoInfo VName),
@@ -1068,8 +1058,8 @@ checkValDef (fname, maybe_retdecl, tparams, params, body, loc) = runTermM $ do
       unlines
         [ "function " <> prettyNameString fname,
           "constraints:",
-          prettyString cts,
+          unlines $ map prettyString cts,
           "tyvars:",
-          prettyString $ map (first prettyNameString) $ M.toList tyvars
+          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
         ]
     pure (undefined, params', undefined, undefined, body')
