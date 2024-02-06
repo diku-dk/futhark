@@ -38,9 +38,13 @@ addCode code =
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
-  addCode $ "add code for " <> nameToText (ImpGPU.kernelName kernel) <> "\n"
+  addCode $ "Input for " <> name <> "\n"
+  addCode $ prettyText (ImpGPU.kernelBody kernel) <> "\n\n"
+  addCode $ "Code for " <> name <> ":\n"
+  genWGSLStm (ImpGPU.kernelBody kernel)
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
+    where name = nameToText (ImpGPU.kernelName kernel)
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
@@ -85,6 +89,40 @@ kernelsToWebGPU prog =
           hostDefinitions = prog'
         }
 
--- | Compile the program to ImpCode with HIP kernels.
+-- | Compile the program to ImpCode with WebGPU kernels.
 compileProg :: (MonadFreshNames m) => F.Prog F.GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToWebGPU <$> ImpGPU.compileProgOpenCL prog
+
+primWGSLType :: PrimType -> T.Text
+primWGSLType (IntType Int32) = "i32"
+-- TODO: WGSL only has 32-bit primitive integers
+primWGSLType (IntType Int8) = "i32"
+primWGSLType (IntType Int16) = "i32"
+primWGSLType (IntType Int64) = "i32"
+primWGSLType (FloatType Float16) = "f16"
+primWGSLType (FloatType Float32) = "f32"
+primWGSLType (FloatType Float64) = error "TODO: WGSL has no f64"
+primWGSLType Bool = "bool"
+-- TODO: Do we ever get unit types all the way here?
+primWGSLType Unit = error "TODO: no unit in WGSL"
+
+genWGSLStm :: Code ImpGPU.KernelOp -> WebGPUM ()
+genWGSLStm Skip = pure ()
+genWGSLStm (s1 :>>: s2) = genWGSLStm s1 >> genWGSLStm s2
+genWGSLStm (DeclareScalar name _ typ) = addCode $
+    "var " <> mkName name <> " : " <> primWGSLType typ  <> "\n"
+genWGSLStm (If cond cThen cElse) = do
+    addCode "if "
+    genWGSLExp (untyped cond)
+    addCode "{\n"
+    genWGSLStm cThen
+    addCode "} else {\n"
+    genWGSLStm cElse
+    addCode "}\n"
+genWGSLStm _ = pure ()
+
+genWGSLExp :: Exp -> WebGPUM ()
+genWGSLExp _ = pure ()
+
+mkName :: VName -> T.Text
+mkName name = nameToText (baseName name) <> "_" <> prettyText (baseTag name)
