@@ -56,6 +56,7 @@ import Futhark.MonadFreshNames hiding (newName)
 import Futhark.Util (mapAccumLM)
 import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
@@ -76,44 +77,11 @@ data ValBinding
   | EqualityF
   deriving (Show)
 
-type Type = TypeBase () NoUniqueness
-
 toType :: TypeBase d u -> Type
 toType = bimap (const ()) (const NoUniqueness)
 
 expType :: Exp -> Type
 expType = toType . typeOf
-
-data Ct = CtEq Type Type
-  deriving (Show)
-
-instance Pretty Ct where
-  pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
-
-type Constraints = [Ct]
-
--- | Information about a type variable.
-data TyVarInfo
-  = -- | Can be substituted with anything.
-    TyVarFree
-  | -- | Can only be substituted with these primitive types.
-    TyVarPrim [PrimType]
-  | -- | Must be a record with these fields.
-    TyVarRecord (M.Map Name Type)
-  | -- | Must be a sum type with these fields.
-    TyVarSum (M.Map Name [Type])
-  deriving (Show)
-
-instance Pretty TyVarInfo where
-  pretty TyVarFree = "free"
-  pretty (TyVarPrim pts) = "∈" <+> pretty pts
-  pretty (TyVarRecord fs) = pretty $ Scalar $ Record fs
-  pretty (TyVarSum cs) = pretty $ Scalar $ Sum cs
-
-type TyVar = VName
-
--- | If a VName is not in this map, it is assumed to be rigid.
-type TyVars = M.Map TyVar TyVarInfo
 
 data TermScope = TermScope
   { scopeVtable :: M.Map VName ValBinding,
@@ -269,6 +237,18 @@ newTypeWithConstr loc desc k ts =
 newTypeOverloaded :: (Monoid u) => SrcLoc -> Name -> [PrimType] -> TermM (TypeBase dim u)
 newTypeOverloaded loc name pts =
   tyVarType <$> newTyVarWith loc name (TyVarPrim pts)
+
+asStructType :: (Monoid u) => SrcLoc -> TypeBase d u -> TermM (TypeBase Size u)
+asStructType _ (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
+asStructType _ (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
+asStructType loc (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+  t1' <- asStructType loc t1
+  t2' <- asStructType loc t2
+  pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
+asStructType loc t = do
+  t' <- newType loc "artificial"
+  ctEq t' t
+  pure t'
 
 addCt :: Ct -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
@@ -613,13 +593,16 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM TyVar
+checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM Type
+checkApply loc (fname, _) (Scalar (Arrow _ _ _ a (RetType _ b))) arg = do
+  ctEq a $ expType arg
+  pure $ toType b
 checkApply loc (fname, _) ftype arg = do
-  a <- newType loc "a"
-  b <- newTyVar loc "b"
+  a <- newType loc "arg"
+  b <- newTyVar loc "res"
   ctEq ftype $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] (tyVarType b)
   ctEq a (expType arg)
-  pure b
+  pure $ tyVarType b
 
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
@@ -794,9 +777,9 @@ checkExp (Constr name es NoInfo loc) = do
 --
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
   fe' <- checkExp fe
-  ((_, rt), args') <- mapAccumLM onArg (0, typeOf fe') args
-
-  pure $ AppExp (Apply fe' args' loc) $ Info $ AppRes rt []
+  ((_, rt), args') <- mapAccumLM onArg (0, expType fe') args
+  rt' <- asStructType loc rt
+  pure $ AppExp (Apply fe' args' loc) $ Info $ AppRes rt' []
   where
     fname =
       case fe of
@@ -807,7 +790,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
       arg' <- checkExp arg
       rt <- checkApply loc (fname, i) (toType f_t) arg'
       pure
-        ( (i + 1, tyVarType rt),
+        ( (i + 1, rt),
           (Info Nothing, arg')
         )
 --
@@ -817,17 +800,19 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   e2' <- checkExp e2
 
   rt1 <- checkApply loc (Just op, 0) (toType ftype) e1'
-  rt2 <- checkApply loc (Just op, 1) (tyVarType rt1) e2'
+  rt2 <- checkApply loc (Just op, 1) rt1 e2'
+  rt2' <- asStructType loc rt2
 
   pure $
     AppExp
       (BinOp (op, oploc) (Info ftype) (e1', Info Nothing) (e2', Info Nothing) loc)
-      (Info (AppRes (tyVarType rt2) []))
+      (Info (AppRes rt2' []))
 --
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
   rt <- checkApply loc (Just op, 0) (toType optype) e'
+  rt' <- asStructType loc rt
   pure $
     OpSectionLeft
       op
@@ -837,7 +822,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
       ( Info (Unnamed, Scalar $ Prim Bool, Nothing),
         Info (Unnamed, Scalar $ Prim Bool)
       )
-      (Info (RetType [] (tyVarType rt)), Info [])
+      (Info (RetType [] $ toRes Nonunique rt'), Info [])
       loc
 --
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
@@ -1056,10 +1041,12 @@ checkValDef (fname, maybe_retdecl, tparams, params, body, loc) = runTermM $ do
     tyvars <- gets termTyVars
     traceM $
       unlines
-        [ "function " <> prettyNameString fname,
-          "constraints:",
+        [ "# function " <> prettyNameString fname,
+          "## constraints:",
           unlines $ map prettyString cts,
-          "tyvars:",
-          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
+          "## tyvars:",
+          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
+          "## solution:",
+          either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) $ solve cts tyvars
         ]
     pure (undefined, params', undefined, undefined, body')
