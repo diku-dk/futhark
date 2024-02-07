@@ -17,7 +17,15 @@ import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
 
-type Type = TypeBase () NoUniqueness
+-- | A shape component is currently just unit. The rank of an array is
+-- then just the number of shape components it contains in its shape
+-- list. When we add AUTOMAP, these components will also allow shape
+-- variables. The list of components should then be understood as
+-- concatenation of shapes (meaning you can't just take the length to
+-- determine the rank of the array).
+type SComp = ()
+
+type Type = TypeBase SComp NoUniqueness
 
 data Ct = CtEq Type Type
   deriving (Show)
