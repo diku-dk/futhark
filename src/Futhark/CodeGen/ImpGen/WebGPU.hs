@@ -11,6 +11,7 @@ import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
+import Futhark.CodeGen.ImpGen.WGSL qualified as WGSL
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
@@ -41,7 +42,8 @@ onKernel kernel = do
   addCode $ "Input for " <> name <> "\n"
   addCode $ prettyText (ImpGPU.kernelBody kernel) <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
-  genWGSLStm (ImpGPU.kernelBody kernel)
+  let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
+  addCode $ prettyText wgslBody
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
     where name = nameToText (ImpGPU.kernelName kernel)
@@ -93,36 +95,30 @@ kernelsToWebGPU prog =
 compileProg :: (MonadFreshNames m) => F.Prog F.GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToWebGPU <$> ImpGPU.compileProgOpenCL prog
 
-primWGSLType :: PrimType -> T.Text
-primWGSLType (IntType Int32) = "i32"
+primWGSLType :: PrimType -> WGSL.PrimType
+primWGSLType (IntType Int32) = WGSL.Int32
 -- TODO: WGSL only has 32-bit primitive integers
-primWGSLType (IntType Int8) = "i32"
-primWGSLType (IntType Int16) = "i32"
-primWGSLType (IntType Int64) = "i32"
-primWGSLType (FloatType Float16) = "f16"
-primWGSLType (FloatType Float32) = "f32"
+primWGSLType (IntType Int8) = WGSL.Int32
+primWGSLType (IntType Int16) = WGSL.Int32
+primWGSLType (IntType Int64) = WGSL.Int32
+primWGSLType (FloatType Float16) = WGSL.Float16
+primWGSLType (FloatType Float32) = WGSL.Float32
 primWGSLType (FloatType Float64) = error "TODO: WGSL has no f64"
-primWGSLType Bool = "bool"
+primWGSLType Bool = WGSL.Bool
 -- TODO: Do we ever get unit types all the way here?
 primWGSLType Unit = error "TODO: no unit in WGSL"
 
-genWGSLStm :: Code ImpGPU.KernelOp -> WebGPUM ()
-genWGSLStm Skip = pure ()
-genWGSLStm (s1 :>>: s2) = genWGSLStm s1 >> genWGSLStm s2
-genWGSLStm (DeclareScalar name _ typ) = addCode $
-    "var " <> mkName name <> " : " <> primWGSLType typ  <> "\n"
-genWGSLStm (If cond cThen cElse) = do
-    addCode "if "
-    genWGSLExp (untyped cond)
-    addCode "{\n"
-    genWGSLStm cThen
-    addCode "} else {\n"
-    genWGSLStm cElse
-    addCode "}\n"
-genWGSLStm _ = pure ()
+genWGSLStm :: Code ImpGPU.KernelOp -> WGSL.Stmt
+genWGSLStm Skip = WGSL.Skip
+genWGSLStm (s1 :>>: s2) = WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
+genWGSLStm (DeclareScalar name _ typ) =
+  WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
+genWGSLStm (If cond cThen cElse) = 
+  WGSL.If (genWGSLExp $ untyped cond) [genWGSLStm cThen] [genWGSLStm cElse]
+genWGSLStm _ = WGSL.Skip
 
-genWGSLExp :: Exp -> WebGPUM ()
-genWGSLExp _ = pure ()
+genWGSLExp :: Exp -> WGSL.Exp
+genWGSLExp _ = WGSL.BoolExp False
 
-mkName :: VName -> T.Text
-mkName name = nameToText (baseName name) <> "_" <> prettyText (baseTag name)
+nameToIdent :: VName -> WGSL.Ident
+nameToIdent = prettyText
