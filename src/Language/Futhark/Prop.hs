@@ -310,7 +310,7 @@ arrayOf = arrayOfWithAliases mempty
 arrayOfWithAliases ::
   u ->
   Shape dim ->
-  TypeBase dim u ->
+  TypeBase dim u' ->
   TypeBase dim u
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
