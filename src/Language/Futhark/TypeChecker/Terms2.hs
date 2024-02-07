@@ -77,9 +77,6 @@ data ValBinding
   | EqualityF
   deriving (Show)
 
-toType :: TypeBase d u -> Type
-toType = bimap (const ()) (const NoUniqueness)
-
 expType :: Exp -> Type
 expType = toType . typeOf
 
@@ -254,7 +251,13 @@ addCt :: Ct -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
 
 ctEq :: TypeBase d1 u1 -> TypeBase d2 u2 -> TermM ()
-ctEq t1 t2 = addCt $ CtEq (toType t1) (toType t2)
+ctEq t1 t2 =
+  -- As a minor optimisation, do not add constraint if the types are
+  -- equal.
+  unless (t1' == t2') $ addCt $ CtEq t1' t2'
+  where
+    t1' = toType t1
+    t2' = toType t2
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -287,7 +290,7 @@ instance MonadError TypeError TermM where
       f' (_, e) = let TermM m' = f e in m'
 
 instance MonadTypeChecker TermM where
-  checkExpForSize = checkExp
+  checkExpForSize = require "use as size" [Signed Int64] <=< checkExp
 
   warnings ws = modify $ \s -> s {termWarnings = termWarnings s <> ws}
 
@@ -324,6 +327,10 @@ instance MonadTypeChecker TermM where
     throwError $ TypeError (locOf loc) notes s
 
 --- All the general machinery goes above.
+
+arrayOfRank :: Int -> Type -> Type
+arrayOfRank 0 t = t
+arrayOfRank n t = arrayOf (Shape $ replicate n ()) t
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
 require why pts e = do
@@ -365,8 +372,8 @@ instTypeScheme qn loc tparams t = do
       TypeParamType x _ _ -> do
         i <- incCounter
         let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
-        v <- newID $ mkTypeVarName name i
-        pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v) []))
+        v <- newTyVar loc name
+        pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v))
       TypeParamDim {} ->
         pure Nothing
   let t' = applySubst (`lookup` substs) t
@@ -394,13 +401,7 @@ lookupVar loc qn@(QualName qs name) = do
           pure $ qualifyTypeVars outer_env tnames qs t'
     Just EqualityF -> do
       argtype <- newType loc "t"
-      pure $
-        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-          Scalar $
-            Arrow mempty Unnamed Observe argtype $
-              RetType [] $
-                Scalar $
-                  Prim Bool
+      pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
     Just (OverloadedF ts pts rt) -> do
       argtype <- newTypeOverloaded loc "t" ts
       let (pts', rt') = instOverloaded (argtype :: StructType) pts rt
@@ -811,34 +812,37 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
-  rt <- checkApply loc (Just op, 0) (toType optype) e'
-  rt' <- asStructType loc rt
+  void $ checkApply loc (Just op, 0) (toType optype) e'
+  let t1 = typeOf e'
+  t2 <- newType loc "t2"
+  rt <- newType loc "rt"
+  ctEq optype $ foldFunType [toParam Observe t1, t2] $ RetType [] rt
   pure $
     OpSectionLeft
       op
       (Info optype)
       e'
-      -- Dummy types.
-      ( Info (Unnamed, Scalar $ Prim Bool, Nothing),
-        Info (Unnamed, Scalar $ Prim Bool)
+      ( Info (Unnamed, toParam Observe t1, Nothing),
+        Info (Unnamed, t2)
       )
-      (Info (RetType [] $ toRes Nonunique rt'), Info [])
+      (Info (RetType [] rt), Info [])
       loc
 --
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
   t1 <- newType loc "t"
+  let t2 = typeOf e'
   rt <- newType loc "rt"
-  ctEq optype $ foldFunType [t1, toParam Observe $ typeOf e'] $ RetType [] rt
+  ctEq optype $ foldFunType [t1, toParam Observe t2] $ RetType [] rt
   pure $
     OpSectionRight
       op
       (Info optype)
       e'
       -- Dummy types.
-      ( Info (Unnamed, Scalar $ Prim Bool),
-        Info (Unnamed, Scalar $ Prim Bool, Nothing)
+      ( Info (Unnamed, toParam Observe t1),
+        Info (Unnamed, toParam Observe t2, Nothing)
       )
       (Info $ RetType [] rt)
       loc
@@ -901,7 +905,7 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
   maybe_step' <- traverse checkExp' maybe_step
   end' <- traverse checkExp' end
   range_t <- newType loc "range"
-  ctEq range_t $ arrayOf (Shape [()]) (toType (typeOf start'))
+  ctEq range_t $ arrayOfRank 1 (toType (typeOf start'))
   pure $ AppExp (Range start' maybe_step' end' loc) $ Info $ AppRes range_t []
   where
     checkExp' = require "use in range expression" anyIntType <=< checkExp
@@ -925,8 +929,8 @@ checkExp (IndexSection slice NoInfo loc) = do
   index_elem_t <- newType loc "index_elem"
   index_res_t <- newType loc "index_res"
   let num_slices = length $ filter isSlice slice
-  ctEq index_arg_t $ arrayOf (Shape (replicate num_slices ())) index_elem_t
-  ctEq index_res_t $ arrayOf (Shape (replicate (length slice) ())) index_elem_t
+  ctEq index_arg_t $ arrayOfRank num_slices index_elem_t
+  ctEq index_res_t $ arrayOfRank (length slice) index_elem_t
   let ft = Scalar $ Arrow mempty Unnamed Observe index_arg_t $ RetType [] index_res_t
   pure $ IndexSection slice' (Info ft) loc
 --
@@ -936,8 +940,8 @@ checkExp (AppExp (Index e slice loc) _) = do
   index_t <- newType loc "index"
   index_elem_t <- newType loc "index_elem"
   let num_slices = length $ filter isSlice slice
-  ctEq index_t $ arrayOf (Shape (replicate num_slices ())) index_elem_t
-  ctEq (typeOf e') $ arrayOf (Shape (replicate (length slice) ())) index_elem_t
+  ctEq index_t $ arrayOfRank num_slices index_elem_t
+  ctEq (typeOf e') $ arrayOfRank (length slice) index_elem_t
   pure $ AppExp (Index e' slice' loc) (Info $ AppRes index_t [])
 --
 checkExp (Update src slice ve loc) = do
@@ -946,8 +950,8 @@ checkExp (Update src slice ve loc) = do
   ve' <- checkExp ve
   let num_slices = length $ filter isSlice slice
   update_elem_t <- newType loc "update_elem"
-  ctEq (typeOf src') $ arrayOf (Shape (replicate (length slice) ())) update_elem_t
-  ctEq (typeOf ve') $ arrayOf (Shape (replicate num_slices ())) update_elem_t
+  ctEq (typeOf src') $ arrayOfRank (length slice) update_elem_t
+  ctEq (typeOf ve') $ arrayOfRank num_slices update_elem_t
   pure $ Update src' slice' ve' loc
 --
 checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
@@ -958,8 +962,8 @@ checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   ve' <- checkExp ve
   let num_slices = length $ filter isSlice slice
   update_elem_t <- newType loc "update_elem"
-  ctEq src_t $ arrayOf (Shape (replicate (length slice) ())) update_elem_t
-  ctEq (typeOf ve') $ arrayOf (Shape (replicate num_slices ())) update_elem_t
+  ctEq src_t $ arrayOfRank (length slice) update_elem_t
+  ctEq (typeOf ve') $ arrayOfRank num_slices update_elem_t
   bind [dest'] $ do
     body' <- checkExp body
     pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes (typeOf body') [])
@@ -972,7 +976,7 @@ checkExp (AppExp (If e1 e2 e3 loc) _) = do
   ctEq (typeOf e1') (Scalar (Prim Bool) :: Type)
   ctEq (typeOf e2') (typeOf e3')
 
-  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes (typeOf e1') [])
+  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes (typeOf e2') [])
 --
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
@@ -999,7 +1003,7 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
         ForIn elemp arr -> do
           arr' <- checkExp arr
           elem_t <- newType elemp "elem"
-          ctEq (typeOf arr') $ arrayOf (Shape [()]) (toType elem_t)
+          ctEq (typeOf arr') $ arrayOfRank 1 (toType elem_t)
           bindLetPat elemp elem_t $ \elemp' -> do
             body' <- checkExp body
             pure (ForIn (toStruct <$> elemp') arr', body')

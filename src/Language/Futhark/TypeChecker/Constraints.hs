@@ -1,5 +1,6 @@
 module Language.Futhark.TypeChecker.Constraints
   ( Type,
+    toType,
     Ct (..),
     Constraints,
     TyVarInfo (..),
@@ -25,7 +26,12 @@ import Language.Futhark
 -- determine the rank of the array).
 type SComp = ()
 
+-- | The type representation used by the constraint solver. Agnostic
+-- to sizes.
 type Type = TypeBase SComp NoUniqueness
+
+toType :: TypeBase d u -> Type
+toType = bimap (const ()) (const NoUniqueness)
 
 data Ct = CtEq Type Type
   deriving (Show)
@@ -106,9 +112,26 @@ linkTyVar :: VName -> VName -> SolveM ()
 linkTyVar v t =
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
 
+-- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Maybe [(Type, Type)]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Just []
+unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
+  Just [(t1a, t2a), (toType t1r, toType t2r)]
+unify (Scalar (Record fs1)) (Scalar (Record fs2))
+  | M.keys fs1 == M.keys fs2 =
+      Just $ M.elems $ M.intersectionWith (,) fs1 fs2
+unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
+  | M.keys cs1 == M.keys cs2 = do
+      fmap concat
+        . forM (M.elems $ M.intersectionWith (,) cs1 cs2)
+        $ \(ts1, ts2) -> do
+          guard $ length ts1 == length ts2
+          Just $ zip ts1 ts2
+unify t1 t2
+  | Just t1' <- peelArray 1 t1,
+    Just t2' <- peelArray 1 t2 =
+      Just [(t1', t2')]
 unify _ _ = Nothing
 
 solveCt :: Ct -> SolveM ()
@@ -124,20 +147,28 @@ solveCt ct = do
             Just (TyVarUnsol _) -> True
             Just (TyVarSol _) -> False
             Nothing -> False
-      case (t1, t2) of
-        ( Scalar (TypeVar _ (QualName [] v1) []),
-          Scalar (TypeVar _ (QualName [] v2) [])
-          ) ->
-            case (flexible v1, flexible v2) of
-              (False, False) -> bad
-              (True, False) -> subTyVar v1 t2
-              (False, True) -> subTyVar v2 t1
-              (True, True) -> linkTyVar v1 v2
-        (Scalar (TypeVar _ (QualName [] v1) []), _) ->
-          if flexible v1 then subTyVar v1 t2 else bad
-        (_, Scalar (TypeVar _ (QualName [] v2) [])) ->
-          if flexible v2 then subTyVar v2 t1 else bad
-        _ -> case unify t1 t2 of
+          sub t@(Scalar (TypeVar u (QualName [] v) [])) =
+            case M.lookup v tyvars of
+              Just (TyVarLink v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
+              Just (TyVarSol t') -> sub t'
+              _ -> t
+          sub t = t
+      case (sub t1, sub t2) of
+        ( t1'@(Scalar (TypeVar _ (QualName [] v1) [])),
+          t2'@(Scalar (TypeVar _ (QualName [] v2) []))
+          )
+            | v1 == v2 -> pure ()
+            | otherwise ->
+                case (flexible v1, flexible v2) of
+                  (False, False) -> bad
+                  (True, False) -> subTyVar v1 t2'
+                  (False, True) -> subTyVar v2 t1'
+                  (True, True) -> linkTyVar v1 v2
+        (Scalar (TypeVar _ (QualName [] v1) []), t2') ->
+          if flexible v1 then subTyVar v1 t2' else bad
+        (t1', Scalar (TypeVar _ (QualName [] v2) [])) ->
+          if flexible v2 then subTyVar v2 t1' else bad
+        (t1', t2') -> case unify t1' t2' of
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs
 

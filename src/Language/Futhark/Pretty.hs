@@ -7,6 +7,7 @@ module Language.Futhark.Pretty
     prettyTuple,
     leadingOperator,
     IsName (..),
+    prettyNameText,
     prettyNameString,
     Annot (..),
   )
@@ -55,9 +56,13 @@ instance IsName Name where
   prettyName = pretty
   toName = id
 
+-- | Prettyprint name as text.
+prettyNameText :: (IsName v) => v -> T.Text
+prettyNameText = docText . prettyName
+
 -- | Prettyprint name as string.  Only use this for debugging.
 prettyNameString :: (IsName v) => v -> String
-prettyNameString = T.unpack . docText . prettyName
+prettyNameString = T.unpack . prettyNameText
 
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
