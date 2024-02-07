@@ -472,7 +472,7 @@ substTypesRet lookupSubst ot =
 
     onType (Array u shape et) =
       arrayOfWithAliases u (applySubst lookupSubst' shape)
-        <$> onType (second (const mempty) $ Scalar et)
+        <$> onType (Scalar et)
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar u v targs)) = do
       targs' <- mapM subsTypeArg targs
