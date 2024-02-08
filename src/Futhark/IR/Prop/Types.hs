@@ -61,7 +61,6 @@ module Futhark.IR.Prop.Types
     DeclTyped (..),
     ExtTyped (..),
     DeclExtTyped (..),
-    SetType (..),
     FixExt (..),
   )
 where
@@ -598,20 +597,6 @@ class (FixExt t) => DeclExtTyped t where
 
 instance DeclExtTyped DeclExtType where
   declExtTypeOf = id
-
--- | Typeclass for things whose type can be changed.
-class (Typed a) => SetType a where
-  setType :: a -> Type -> a
-
-instance SetType Type where
-  setType _ t = t
-
-instance (SetType b) => SetType (a, b) where
-  setType (a, b) t = (a, setType b t)
-
-instance (SetType dec) => SetType (PatElem dec) where
-  setType (PatElem name dec) t =
-    PatElem name $ setType dec t
 
 -- | Something with an existential context that can be (partially)
 -- fixed.

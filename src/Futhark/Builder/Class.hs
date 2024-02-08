@@ -36,8 +36,7 @@ class
     FParamInfo rep ~ DeclType,
     LParamInfo rep ~ Type,
     RetType rep ~ DeclExtType,
-    BranchType rep ~ ExtType,
-    SetType (LetDec rep)
+    BranchType rep ~ ExtType
   ) =>
   Buildable rep
   where
