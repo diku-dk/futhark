@@ -1,5 +1,3 @@
-{-# LANGUAGE Strict #-}
-
 -- |
 --
 -- This module implements a transformation from source to core
