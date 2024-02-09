@@ -370,7 +370,6 @@ instTypeScheme qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $ forM tparams $ \tparam -> do
     case tparam of
       TypeParamType x _ _ -> do
-        i <- incCounter
         let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
         v <- newTyVar loc name
         pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v))
@@ -686,6 +685,13 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
 
+checkRetDecl :: Exp -> Maybe (TypeExp NoInfo VName) -> TermM (Maybe (TypeExp Info VName))
+checkRetDecl _ Nothing = pure Nothing
+checkRetDecl body (Just te) = do
+  (te', _, RetType _ st, _) <- checkTypeExp te
+  ctEq (typeOf body) st
+  pure $ Just te'
+
 checkExp :: ExpBase NoInfo VName -> TermM (ExpBase Info VName)
 --
 checkExp (Var qn _ loc) = do
@@ -854,17 +860,12 @@ checkExp (ProjectSection fields NoInfo loc) = do
   let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] b
   pure $ ProjectSection fields (Info ft) loc
 --
-checkExp (Lambda params body rettype NoInfo loc) = do
+checkExp (Lambda params body retdecl NoInfo loc) = do
   bindParams [] params $ \params' -> do
     body' <- checkExp body
-    rettype_te' <- case rettype of
-      Just rettype_te -> do
-        (rettype_te', _, RetType _ st, _) <- checkTypeExp rettype_te
-        ctEq (typeOf body') st
-        pure $ Just rettype_te'
-      Nothing -> pure Nothing
+    retdecl' <- checkRetDecl body' retdecl
     let ret = RetType [] $ toRes Nonunique $ typeOf body'
-    pure $ Lambda params' body' rettype_te' (Info ret) loc
+    pure $ Lambda params' body' retdecl' (Info ret) loc
 --
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
@@ -876,12 +877,13 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
         (LetPat sizes (fmap toStruct pat') e' body' loc)
         (Info $ AppRes (typeOf body') [])
 --
-checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) = do
-  (tparams', params', maybe_retdecl', rettype, e') <-
+checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _) = do
+  (tparams', params', retdecl', rettype, e') <-
     bindParams tparams params $ \params' -> do
       e' <- checkExp e
       let ret = RetType [] $ toRes Nonunique $ typeOf e'
-      pure (tparams, params', undefined, ret, e')
+      retdecl' <- checkRetDecl e' retdecl
+      pure (tparams, params', retdecl', ret, e')
 
   let entry = BoundV tparams' $ funType params' rettype
       bindF scope =
@@ -894,7 +896,7 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
     AppExp
       ( LetFun
           name
-          (tparams', params', maybe_retdecl', Info rettype, e')
+          (tparams', params', retdecl', Info rettype, e')
           body'
           loc
       )
@@ -1035,14 +1037,19 @@ checkValDef ::
     ( [TypeParam],
       [Pat ParamType],
       Maybe (TypeExp Info VName),
-      ResRetType,
       Exp
     )
-checkValDef (fname, maybe_retdecl, tparams, params, body, loc) = runTermM $ do
+checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   bindParams tparams params $ \params' -> do
     body' <- checkExp body
+
+    retdecl' <- checkRetDecl body' retdecl
+
     cts <- gets termConstraints
     tyvars <- gets termTyVars
+
+    let solution = solve cts tyvars
+
     traceM $
       unlines
         [ "# function " <> prettyNameString fname,
@@ -1053,4 +1060,4 @@ checkValDef (fname, maybe_retdecl, tparams, params, body, loc) = runTermM $ do
           "## solution:",
           either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) $ solve cts tyvars
         ]
-    pure (undefined, params', undefined, undefined, body')
+    pure (undefined, params', retdecl', body')
