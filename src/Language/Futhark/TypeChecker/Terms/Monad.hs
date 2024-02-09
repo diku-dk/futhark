@@ -581,25 +581,17 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-termCheckTypeExp ::
-  TypeExp (ExpBase NoInfo VName) VName ->
-  TermTypeM (TypeExp Exp VName, [VName], ResRetType)
-termCheckTypeExp te = do
-  (te', svars, rettype, _l) <- checkTypeExp te
-
-  -- No guarantee that the locally bound sizes in rettype are globally
-  -- unique, but we want to turn them into size variables, so let's
-  -- give them some unique names.  Maybe this should be done below,
-  -- where we actually turn these into size variables?
-  RetType dims st <- renameRetType rettype
-
-  pure (te', svars, RetType dims st)
-
 checkTypeExpNonrigid ::
   TypeExp (ExpBase NoInfo VName) VName ->
   TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
-  (te', svars, RetType dims st) <- termCheckTypeExp te
+  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize te
+
+  -- No guarantee that the locally bound sizes in rettype are globally
+  -- unique, but we want to turn them into size variables, so let's
+  -- give them some unique names.
+  RetType dims st <- renameRetType rettype
+
   forM_ (svars ++ dims) $ \v ->
     constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
