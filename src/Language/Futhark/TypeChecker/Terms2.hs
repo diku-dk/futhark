@@ -290,8 +290,6 @@ instance MonadError TypeError TermM where
       f' (_, e) = let TermM m' = f e in m'
 
 instance MonadTypeChecker TermM where
-  checkExpForSize = require "use as size" [Signed Int64] <=< checkExp
-
   warnings ws = modify $ \s -> s {termWarnings = termWarnings s <> ws}
 
   warn loc problem = warnings $ singleWarning (locOf loc) problem
@@ -414,6 +412,9 @@ patLitMkType (PatLitFloat _) loc =
 patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
+checkSizeExp :: ExpBase NoInfo VName -> TermM Exp
+checkSizeExp = require "use as size" [Signed Int64] <=< checkExp
+
 checkPat' ::
   PatBase NoInfo VName ParamType ->
   Inferred ParamType ->
@@ -461,7 +462,7 @@ checkPat' (RecordPat fs loc) NoneInferred =
     <$> traverse (`checkPat'` NoneInferred) (M.fromList fs)
     <*> pure loc
 checkPat' (PatAscription p t loc) maybe_outer_t = do
-  (t', _, RetType _ st, _) <- checkTypeExp t
+  (t', _, RetType _ st, _) <- checkTypeExp checkSizeExp t
 
   case maybe_outer_t of
     Ascribed outer_t -> do
@@ -671,7 +672,7 @@ checkRetDecl ::
   TermM (Maybe (TypeExp Exp VName))
 checkRetDecl _ Nothing = pure Nothing
 checkRetDecl body (Just te) = do
-  (te', _, RetType _ st, _) <- checkTypeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
   ctEq (typeOf body) st
   pure $ Just te'
 
@@ -999,12 +1000,12 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
 --
 checkExp (Ascript e te loc) = do
   e' <- checkExp e
-  (te', _, RetType _ st, _) <- checkTypeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
   ctEq (typeOf e') st
   pure $ Ascript e' te' loc
 checkExp (Coerce e te NoInfo loc) = do
   e' <- checkExp e
-  (te', _, RetType _ st, _) <- checkTypeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
   ctEq (typeOf e') st
   pure $ Coerce e' te' (Info (toStruct st)) loc
 

@@ -410,13 +410,6 @@ localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
-  checkExpForSize e = do
-    checker <- asks termChecker
-    e' <- checker e
-    let t = toStruct $ typeOf e'
-    unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
-    updateTypes e'
-
   warnings ws =
     modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
 
@@ -581,9 +574,17 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
+checkExpForSize :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForSize e = do
+  checker <- asks termChecker
+  e' <- checker e
+  let t = toStruct $ typeOf e'
+  unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  updateTypes e'
+
 checkTypeExpNonrigid :: TypeExp Exp VName -> TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
-  (te', svars, rettype, _l) <- checkTypeExp $ undefined te
+  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize $ undefined te
 
   -- No guarantee that the locally bound sizes in rettype are globally
   -- unique, but we want to turn them into size variables, so let's
