@@ -51,7 +51,7 @@ checkProg ::
   UncheckedProg ->
   (Warnings, Either TypeError (FileModule, VNameSource))
 checkProg files src name prog =
-  runTypeM initialEnv files' name src checkSizeExp $ checkProgM prog
+  runTypeM initialEnv files' name src $ checkProgM prog
   where
     files' = M.map fileEnv $ M.fromList files
 
@@ -73,7 +73,6 @@ checkExp files src env e =
       files'
       (mkInitialImport "")
       src
-      checkSizeExp
       (checkOneExp =<< resolveExp e)
   where
     files' = M.map fileEnv $ M.fromList files
@@ -91,7 +90,7 @@ checkDec ::
   (Warnings, Either TypeError (Env, Dec, VNameSource))
 checkDec files src env name d =
   second (fmap massage) $
-    runTypeM env files' name src checkSizeExp $ do
+    runTypeM env files' name src $ do
       (_, env', d') <- checkOneDec d
       pure (env' <> env, d')
   where
@@ -110,7 +109,7 @@ checkModExp ::
   ModExpBase NoInfo Name ->
   (Warnings, Either TypeError (MTy, ModExpBase Info VName))
 checkModExp files src env me =
-  second (fmap fst) . runTypeM env files' (mkInitialImport "") src checkSizeExp $ do
+  second (fmap fst) . runTypeM env files' (mkInitialImport "") src $ do
     (_abs, mty, me') <- checkOneModExp me
     pure (mty, me')
   where
@@ -215,7 +214,7 @@ checkTypeDecl ::
   UncheckedTypeExp ->
   TypeM ([VName], TypeExp Exp VName, StructType, Liftedness)
 checkTypeDecl te = do
-  (te', svars, RetType dims st, l) <- checkTypeExp checkExpForSize =<< resolveTypeExp te
+  (te', svars, RetType dims st, l) <- checkTypeExp checkSizeExp =<< resolveTypeExp te
   pure (svars ++ dims, te', toStruct st, l)
 
 -- In this function, after the recursion, we add the Env of the
@@ -554,7 +553,7 @@ checkTypeBind ::
 checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
   resolveTypeParams tps $ \tps' -> do
     (te', svars, RetType dims t, l') <-
-      bindingTypeParams tps' $ checkTypeExp checkExpForSize =<< resolveTypeExp te
+      bindingTypeParams tps' $ checkTypeExp checkSizeExp =<< resolveTypeExp te
 
     let (witnessed, _) = determineSizeWitnesses $ toStruct t
     case L.find (`S.notMember` witnessed) svars of

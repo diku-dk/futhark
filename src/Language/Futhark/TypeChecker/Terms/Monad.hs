@@ -410,13 +410,6 @@ localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
-  checkExpForSize e = do
-    checker <- asks termChecker
-    e' <- checker e
-    let t = toStruct $ typeOf e'
-    unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
-    updateTypes e'
-
   warnings ws =
     modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
 
@@ -580,6 +573,14 @@ require :: T.Text -> [PrimType] -> Exp -> TermTypeM Exp
 require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
+
+checkExpForSize :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForSize e = do
+  checker <- asks termChecker
+  e' <- checker e
+  let t = toStruct $ typeOf e'
+  unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  updateTypes e'
 
 checkTypeExpNonrigid ::
   TypeExp (ExpBase NoInfo VName) VName ->
