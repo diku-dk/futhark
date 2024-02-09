@@ -430,6 +430,15 @@ data TypeArgExp d vn
   | TypeArgExpType (TypeExp d vn)
   deriving (Eq, Ord, Show)
 
+instance Functor (TypeArgExp d) where
+  fmap = fmapDefault
+
+instance Foldable (TypeArgExp d) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeArgExp d) where
+  traverse = bitraverse pure
+
 instance Bifunctor TypeArgExp where
   bimap = bimapDefault
 
