@@ -217,7 +217,7 @@ newTyVarWith loc desc info = do
   modify $ \s -> s {termTyVars = M.insert v info $ termTyVars s}
   pure v
 
-newTyVar :: a -> Name -> TermM TyVar
+newTyVar :: (Located loc) => loc -> Name -> TermM TyVar
 newTyVar loc desc = newTyVarWith loc desc TyVarFree
 
 newType :: (Located loc, Monoid u) => loc -> Name -> TermM (TypeBase dim u)
@@ -337,25 +337,6 @@ require why pts e = do
   t :: Type <- newTypeOverloaded (srclocOf e) "t" pts
   ctEq t $ expType e
   pure e
-
--- | Create a new type name and insert it (unconstrained) in the set
--- of type variables.
-instTypeParam ::
-  (Monoid as) =>
-  QualName VName ->
-  SrcLoc ->
-  TypeParam ->
-  TermM (VName, Subst (RetTypeBase dim as))
-instTypeParam qn loc tparam = do
-  i <- incCounter
-  let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
-  v <- newID $ mkTypeVarName name i
-  case tparam of
-    TypeParamType {} -> do
-      modify $ \s -> s {termTyVars = M.insert v TyVarFree $ termTyVars s}
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v) [])
-    TypeParamDim {} ->
-      pure (v, ExpSubst $ sizeFromName (qualName v) loc)
 
 -- | Instantiate a type scheme with fresh type variables for its type
 -- parameters. Returns the names of the fresh type variables, the
@@ -481,7 +462,7 @@ checkPat' (RecordPat fs loc) NoneInferred =
     <$> traverse (`checkPat'` NoneInferred) (M.fromList fs)
     <*> pure loc
 checkPat' (PatAscription p t loc) maybe_outer_t = do
-  (t', _, RetType dims st, _) <- checkTypeExp t
+  (t', _, RetType _ st, _) <- checkTypeExp t
 
   case maybe_outer_t of
     Ascribed outer_t -> do
@@ -1058,6 +1039,6 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           "## tyvars:",
           unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
           "## solution:",
-          either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) $ solve cts tyvars
+          either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) solution
         ]
     pure (undefined, params', retdecl', body')
