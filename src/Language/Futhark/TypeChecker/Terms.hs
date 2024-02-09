@@ -182,9 +182,9 @@ sliceShape _ _ t = pure (t, [])
 
 checkAscript ::
   SrcLoc ->
-  TypeExp NoInfo VName ->
+  TypeExp (ExpBase NoInfo VName) VName ->
   ExpBase NoInfo VName ->
-  TermTypeM (TypeExp Info VName, Exp)
+  TermTypeM (TypeExp Exp VName, Exp)
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -197,9 +197,9 @@ checkAscript loc te e = do
 
 checkCoerce ::
   SrcLoc ->
-  TypeExp NoInfo VName ->
+  TypeExp (ExpBase NoInfo VName) VName ->
   ExpBase NoInfo VName ->
-  TermTypeM (TypeExp Info VName, StructType, Exp)
+  TermTypeM (TypeExp Exp VName, StructType, Exp)
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -1291,7 +1291,7 @@ localChecks = void . check
 -- definitions, by treating them as 0-ary functions.
 checkFunDef ::
   ( VName,
-    Maybe (TypeExp NoInfo VName),
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
     [TypeParam],
     [PatBase NoInfo VName ParamType],
     ExpBase NoInfo VName,
@@ -1300,7 +1300,7 @@ checkFunDef ::
   TypeM
     ( [TypeParam],
       [Pat ParamType],
-      Maybe (TypeExp Info VName),
+      Maybe (TypeExp Exp VName),
       ResRetType,
       Exp
     )
@@ -1418,7 +1418,7 @@ inferredReturnType loc params t = do
 
 checkBinding ::
   ( VName,
-    Maybe (TypeExp NoInfo VName),
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
     [TypeParam],
     [PatBase NoInfo VName ParamType],
     ExpBase NoInfo VName,
@@ -1427,7 +1427,7 @@ checkBinding ::
   TermTypeM
     ( [TypeParam],
       [Pat ParamType],
-      Maybe (TypeExp Info VName),
+      Maybe (TypeExp Exp VName),
       ResRetType,
       Exp
     )

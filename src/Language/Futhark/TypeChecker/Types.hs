@@ -84,8 +84,8 @@ renameRetType (RetType dims st)
 
 evalTypeExp ::
   (MonadTypeChecker m) =>
-  TypeExp NoInfo VName ->
-  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
+  TypeExp (ExpBase NoInfo VName) VName ->
+  m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
 evalTypeExp (TEVar name loc) = do
   (ps, t, l) <- lookupType name
   t' <- renameRetType $ toResRet Nonunique t
@@ -315,8 +315,8 @@ evalTypeExp ote@TEApply {} = do
 -- * The liftedness of the type.
 checkTypeExp ::
   (MonadTypeChecker m) =>
-  TypeExp NoInfo VName ->
-  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
+  TypeExp (ExpBase NoInfo VName) VName ->
+  m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
 checkTypeExp = evalTypeExp
 
 -- | Construct a type argument corresponding to a type parameter.

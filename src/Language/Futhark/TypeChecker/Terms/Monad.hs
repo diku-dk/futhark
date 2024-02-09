@@ -582,8 +582,8 @@ require why ts e = do
   pure e
 
 termCheckTypeExp ::
-  TypeExp NoInfo VName ->
-  TermTypeM (TypeExp Info VName, [VName], ResRetType)
+  TypeExp (ExpBase NoInfo VName) VName ->
+  TermTypeM (TypeExp Exp VName, [VName], ResRetType)
 termCheckTypeExp te = do
   (te', svars, rettype, _l) <- checkTypeExp te
 
@@ -595,7 +595,9 @@ termCheckTypeExp te = do
 
   pure (te', svars, RetType dims st)
 
-checkTypeExpNonrigid :: TypeExp NoInfo VName -> TermTypeM (TypeExp Info VName, ResType, [VName])
+checkTypeExpNonrigid ::
+  TypeExp (ExpBase NoInfo VName) VName ->
+  TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
   (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
