@@ -38,6 +38,7 @@ import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Terms.Loop
 import Language.Futhark.TypeChecker.Terms.Monad
 import Language.Futhark.TypeChecker.Terms.Pat
+import Language.Futhark.TypeChecker.Terms2 qualified as Terms2
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify
 import Prelude hiding (mod)
@@ -182,8 +183,8 @@ sliceShape _ _ t = pure (t, [])
 
 checkAscript ::
   SrcLoc ->
-  TypeExp (ExpBase NoInfo VName) VName ->
-  ExpBase NoInfo VName ->
+  TypeExp Exp VName ->
+  Exp ->
   TermTypeM (TypeExp Exp VName, Exp)
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
@@ -197,8 +198,8 @@ checkAscript loc te e = do
 
 checkCoerce ::
   SrcLoc ->
-  TypeExp (ExpBase NoInfo VName) VName ->
-  ExpBase NoInfo VName ->
+  TypeExp Exp VName ->
+  Exp ->
   TermTypeM (TypeExp Exp VName, StructType, Exp)
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpNonrigid te
@@ -347,48 +348,26 @@ unscopeType ::
 unscopeType tloc unscoped =
   sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
 
-checkExp :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExp :: Exp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
-checkExp (Hole _ loc) = do
-  t <- newTypeVar loc "t"
-  pure $ Hole (Info t) loc
+checkExp (Hole info loc) =
+  pure $ Hole info loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
-checkExp (IntLit val NoInfo loc) = do
-  t <- newTypeVar loc "t"
-  mustBeOneOf anyNumberType (mkUsage loc "integer literal") t
-  pure $ IntLit val (Info t) loc
-checkExp (FloatLit val NoInfo loc) = do
-  t <- newTypeVar loc "t"
-  mustBeOneOf anyFloatType (mkUsage loc "float literal") t
-  pure $ FloatLit val (Info t) loc
+checkExp (IntLit val info loc) =
+  pure $ IntLit val info loc
+checkExp (FloatLit val info loc) =
+  pure $ FloatLit val info loc
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 checkExp (RecordLit fs loc) =
-  RecordLit <$> evalStateT (mapM checkField fs) mempty <*> pure loc
+  RecordLit <$> mapM checkField fs <*> pure loc
   where
-    checkField (RecordFieldExplicit f e rloc) = do
-      errIfAlreadySet f rloc
-      modify $ M.insert f rloc
-      RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
-    checkField (RecordFieldImplicit name NoInfo rloc) = do
-      errIfAlreadySet (baseName name) rloc
-      t <- lift $ lookupVar rloc $ qualName name
-      modify $ M.insert (baseName name) rloc
-      pure $ RecordFieldImplicit name (Info t) rloc
-
-    errIfAlreadySet f rloc = do
-      maybe_sloc <- gets $ M.lookup f
-      case maybe_sloc of
-        Just sloc ->
-          lift . typeError rloc mempty $
-            "Field"
-              <+> dquotes (pretty f)
-              <+> "previously defined at"
-              <+> pretty (locStrRel rloc sloc)
-              <> "."
-        Nothing -> pure ()
+    checkField (RecordFieldExplicit f e rloc) =
+      RecordFieldExplicit f <$> checkExp e <*> pure rloc
+    checkField (RecordFieldImplicit name info rloc) =
+      pure $ RecordFieldImplicit name info rloc
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use
@@ -484,12 +463,12 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
 checkExp (Ascript e te loc) = do
   (te', e') <- checkAscript loc te e
   pure $ Ascript e' te' loc
-checkExp (Coerce e te NoInfo loc) = do
+checkExp (Coerce e te _ loc) = do
   (te', te_t, e') <- checkCoerce loc te e
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
-checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
+checkExp (AppExp (BinOp (op, oploc) _ (e1, _) (e2, _) loc) _) = do
   ftype <- lookupVar oploc op
   e1' <- checkExp e1
   e2' <- checkExp e2
@@ -509,7 +488,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
           loc
       )
       (Info (AppRes rt' retext))
-checkExp (Project k e NoInfo loc) = do
+checkExp (Project k e _ loc) = do
   e' <- checkExp e
   t <- expType e'
   kt <- mustHaveField (mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)) k t
@@ -543,7 +522,7 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
     ModFun {} ->
       typeError loc mempty . withIndexLink "module-is-parametric" $
         "Module" <+> pretty modname <+> " is a parametric module."
-checkExp (Var qn NoInfo loc) = do
+checkExp (Var qn _ loc) = do
   t <- lookupVar loc qn
   pure $ Var qn (Info t) loc
 checkExp (Negate arg loc) = do
@@ -552,7 +531,7 @@ checkExp (Negate arg loc) = do
 checkExp (Not arg loc) = do
   arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
   pure $ Not arg' loc
-checkExp (AppExp (Apply fe args loc) NoInfo) = do
+checkExp (AppExp (Apply fe args loc) _) = do
   fe' <- checkExp fe
   args' <- mapM (checkExp . snd) args
   t <- expType fe'
@@ -598,7 +577,7 @@ checkExp (AppExp (LetPat sizes pat e body loc) _) = do
       AppExp
         (LetPat sizes (fmap toStruct pat') e' body' loc)
         (Info $ AppRes body_t' retext)
-checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body loc) _) = do
+checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _) = do
   (tparams', params', maybe_retdecl', rettype, e') <-
     checkBinding (name, maybe_retdecl, tparams, params, e, loc)
 
@@ -621,19 +600,18 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, NoInfo, e) body l
       )
       (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
-  src' <- checkIdent src
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
+  unify (mkUsage loc "type of target array") t $ unInfo $ identType src
 
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
   ve' <- unifies "type of target array" elemt =<< checkExp ve
 
-  bindingIdent dest (unInfo (identType src')) $ \dest' -> do
+  bindingIdent dest $ do
     body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
+    (body_t, ext) <- unscopeType loc [identName dest] =<< expTypeFully body'
+    pure $ AppExp (LetWith dest src slice' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
@@ -645,11 +623,9 @@ checkExp (Update src slice ve loc) = do
 -- Record updates are a bit hacky, because we do not have row typing
 -- (yet?).  For now, we only permit record updates where we know the
 -- full type up to the field we are updating.
-checkExp (RecordUpdate src fields ve NoInfo loc) = do
+checkExp (RecordUpdate src fields ve _ loc) = do
   src' <- checkExp src
   ve' <- checkExp ve
-  a <- expTypeFully src'
-  foldM_ (flip $ mustHaveField usage) a fields
   ve_t <- expType ve'
   updated_t <- updateField fields ve_t =<< expTypeFully src'
   pure $ RecordUpdate src' fields ve' (Info updated_t) loc
@@ -681,11 +657,11 @@ checkExp (AppExp (Index e slice loc) _) = do
       =<< expTypeFully e'
 
   pure $ AppExp (Index e' slice' loc) (Info $ AppRes t' retext)
-checkExp (Assert e1 e2 NoInfo loc) = do
+checkExp (Assert e1 e2 _ loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
   pure $ Assert e1' e2' (Info (prettyText e1)) loc
-checkExp (Lambda params body rettype_te NoInfo loc) = do
+checkExp (Lambda params body rettype_te _ loc) = do
   (params', body', rettype', RetType dims ty) <-
     incLevel . bindingParams [] params $ \params' -> do
       rettype_checked <- traverse checkTypeExpNonrigid rettype_te
@@ -757,7 +733,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (OpSectionRight op _ e _ NoInfo loc) = do
+checkExp (OpSectionRight op _ e _ _ loc) = do
   ftype <- lookupVar loc op
   e' <- checkExp e
   case ftype of
@@ -782,13 +758,13 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (ProjectSection fields NoInfo loc) = do
+checkExp (ProjectSection fields _ loc) = do
   a <- newTypeVar loc "a"
   let usage = mkUsage loc "projection at"
   b <- foldM (flip $ mustHaveField usage) a fields
   let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ toRes Nonunique b
   pure $ ProjectSection fields (Info ft) loc
-checkExp (IndexSection slice NoInfo loc) = do
+checkExp (IndexSection slice _ loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
   (t', retext) <- sliceShape Nothing slice' t
@@ -801,11 +777,9 @@ checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
     AppExp
       (Loop sparams mergepat' mergeexp' form' loopbody' loc)
       (Info appres)
-checkExp (Constr name es NoInfo loc) = do
+checkExp (Constr name es _ loc) = do
   t <- newTypeVar loc "t"
   es' <- mapM checkExp es
-  ets <- mapM expType es'
-  mustHaveConstr (mkUsage loc "use of constructor") name t ets
   pure $ Constr name es' (Info t) loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
@@ -819,9 +793,20 @@ checkExp (AppExp (Match e cs loc) _) = do
 checkExp (Attr info e loc) =
   Attr <$> checkAttr info <*> checkExp e <*> pure loc
 
+checkCase ::
+  StructType ->
+  CaseBase Info VName ->
+  TermTypeM (CaseBase Info VName, StructType, [VName])
+checkCase mt (CasePat p e loc) =
+  bindingPat [] p mt $ \p' -> do
+    e' <- checkExp e
+    e_t <- expTypeFully e'
+    (e_t', retext) <- unscopeType loc (patNames p') e_t
+    pure (CasePat (fmap toStruct p') e' loc, e_t', retext)
+
 checkCases ::
   StructType ->
-  NE.NonEmpty (CaseBase NoInfo VName) ->
+  NE.NonEmpty (CaseBase Info VName) ->
   TermTypeM (NE.NonEmpty (CaseBase Info VName), StructType, [VName])
 checkCases mt rest_cs =
   case NE.uncons rest_cs of
@@ -833,17 +818,6 @@ checkCases mt rest_cs =
         (,) <$> checkCase mt c <*> checkCases mt cs
       (brancht, retext) <- unifyBranchTypes (srclocOf c) c_t cs_t
       pure (NE.cons c' cs', brancht, retext)
-
-checkCase ::
-  StructType ->
-  CaseBase NoInfo VName ->
-  TermTypeM (CaseBase Info VName, StructType, [VName])
-checkCase mt (CasePat p e loc) =
-  bindingPat [] p mt $ \p' -> do
-    e' <- checkExp e
-    e_t <- expTypeFully e'
-    (e_t', retext) <- unscopeType loc (patNames p') e_t
-    pure (CasePat (fmap toStruct p') e' loc, e_t', retext)
 
 -- | An unmatched pattern. Used in in the generation of
 -- unmatched pattern warnings by the type checker.
@@ -873,12 +847,7 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
 
-checkIdent :: IdentBase NoInfo VName StructType -> TermTypeM (Ident StructType)
-checkIdent (Ident name _ loc) = do
-  vt <- lookupVar loc $ qualName name
-  pure $ Ident name (Info vt) loc
-
-checkSlice :: SliceBase NoInfo VName -> TermTypeM [DimIndex]
+checkSlice :: SliceBase Info VName -> TermTypeM [DimIndex]
 checkSlice = mapM checkDimIndex
   where
     checkDimIndex (DimFix i) = do
@@ -1039,8 +1008,8 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 -- turn out to be polymorphic, in which case the list of type
 -- parameters will be non-empty.
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
-checkOneExp e = runTermTypeM checkExp $ do
-  e' <- checkExp e
+checkOneExp e = runTermTypeM (checkExp . undefined) $ do
+  e' <- checkExp $ undefined e
   let t = typeOf e'
   (tparams, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
@@ -1053,8 +1022,8 @@ checkOneExp e = runTermTypeM checkExp $ do
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
-checkSizeExp e = runTermTypeM checkExp $ do
-  e' <- checkExp e
+checkSizeExp e = runTermTypeM (checkExp . undefined) $ do
+  e' <- checkExp $ undefined e
   let t = typeOf e'
   when (hasBinding e') $
     typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
@@ -1286,61 +1255,6 @@ localChecks = void . check
             <> pretty ty
             <> "."
 
--- | Type-check a top-level (or module-level) function definition.
--- Despite the name, this is also used for checking constant
--- definitions, by treating them as 0-ary functions.
-checkFunDef ::
-  ( VName,
-    Maybe (TypeExp (ExpBase NoInfo VName) VName),
-    [TypeParam],
-    [PatBase NoInfo VName ParamType],
-    ExpBase NoInfo VName,
-    SrcLoc
-  ) ->
-  TypeM
-    ( [TypeParam],
-      [Pat ParamType],
-      Maybe (TypeExp Exp VName),
-      ResRetType,
-      Exp
-    )
-checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
-  runTermTypeM checkExp $ do
-    (tparams', params', maybe_retdecl', RetType dims rettype', body') <-
-      checkBinding (fname, maybe_retdecl, tparams, params, body, loc)
-
-    -- Since this is a top-level function, we also resolve overloaded
-    -- types, using either defaults or complaining about ambiguities.
-    fixOverloadedTypes $
-      typeVars rettype' <> foldMap (typeVars . patternType) params'
-
-    -- Then replace all inferred types in the body and parameters.
-    body'' <- updateTypes body'
-    params'' <- updateTypes params'
-    maybe_retdecl'' <- traverse updateTypes maybe_retdecl'
-    rettype'' <- normTypeFully rettype'
-
-    -- Check if the function body can actually be evaluated.
-    causalityCheck body''
-
-    -- Check for various problems.
-    mapM_ (mustBeIrrefutable . fmap toStruct) params'
-    localChecks body''
-
-    let ((body''', updated_ret), errors) =
-          Consumption.checkValDef
-            ( fname,
-              params'',
-              body'',
-              RetType dims rettype'',
-              maybe_retdecl'',
-              loc
-            )
-
-    mapM_ throwError errors
-
-    pure (tparams', params'', maybe_retdecl'', updated_ret, body''')
-
 -- | This is "fixing" as in "setting them", not "correcting them".  We
 -- only make very conservative fixing.
 fixOverloadedTypes :: Names -> TermTypeM ()
@@ -1418,10 +1332,10 @@ inferredReturnType loc params t = do
 
 checkBinding ::
   ( VName,
-    Maybe (TypeExp (ExpBase NoInfo VName) VName),
+    Maybe (TypeExp Exp VName),
     [TypeParam],
-    [PatBase NoInfo VName ParamType],
-    ExpBase NoInfo VName,
+    [PatBase Info VName ParamType],
+    ExpBase Info VName,
     SrcLoc
   ) ->
   TermTypeM
@@ -1670,7 +1584,7 @@ letGeneralise defname defloc tparams params restype =
 
 checkFunBody ::
   [Pat ParamType] ->
-  ExpBase NoInfo VName ->
+  Exp ->
   Maybe ResType ->
   SrcLoc ->
   TermTypeM Exp
@@ -1705,3 +1619,73 @@ arrayOfM ::
 arrayOfM loc t shape = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
   pure $ arrayOf shape t
+
+addInitialConstraints :: M.Map VName (TypeBase () NoUniqueness) -> TermTypeM ()
+addInitialConstraints = mapM_ f . M.toList
+  where
+    addConstraint v c = modifyConstraints $ M.insert v (0, c)
+    usage = mkUsage (mempty :: Loc) "trust me bro"
+    f (v, t) = do
+      (t', _) <- allDimsFreshInType usage Nonrigid "dv" t
+      addConstraint v $ Constraint (RetType [] t') usage
+
+-- | Type-check a top-level (or module-level) function definition.
+-- Despite the name, this is also used for checking constant
+-- definitions, by treating them as 0-ary functions.
+checkFunDef ::
+  ( VName,
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
+    [TypeParam],
+    [PatBase NoInfo VName ParamType],
+    ExpBase NoInfo VName,
+    SrcLoc
+  ) ->
+  TypeM
+    ( [TypeParam],
+      [Pat ParamType],
+      Maybe (TypeExp Exp VName),
+      ResRetType,
+      Exp
+    )
+checkFunDef (fname, retdecl, tparams, params, body, loc) = do
+  (maybe_tysubsts, params', retdecl', body') <-
+    Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
+  case maybe_tysubsts of
+    Left err -> typeError loc mempty $ pretty err
+    Right tysubsts -> runTermTypeM (checkExp . undefined) $ do
+      addInitialConstraints tysubsts
+
+      (tparams', params'', retdecl'', RetType dims rettype', body'') <-
+        checkBinding (fname, retdecl', tparams, params', body', loc)
+
+      -- Since this is a top-level function, we also resolve overloaded
+      -- types, using either defaults or complaining about ambiguities.
+      fixOverloadedTypes $
+        typeVars rettype' <> foldMap (typeVars . patternType) params''
+
+      -- Then replace all inferred types in the body and parameters.
+      body''' <- updateTypes body''
+      params''' <- updateTypes params''
+      retdecl''' <- traverse updateTypes retdecl''
+      rettype'' <- normTypeFully rettype'
+
+      -- Check if the function body can actually be evaluated.
+      causalityCheck body'''
+
+      -- Check for various problems.
+      mapM_ (mustBeIrrefutable . fmap toStruct) params''
+      localChecks body'''
+
+      let ((body'''', updated_ret), errors) =
+            Consumption.checkValDef
+              ( fname,
+                params''',
+                body''',
+                RetType dims rettype'',
+                retdecl''',
+                loc
+              )
+
+      mapM_ throwError errors
+
+      pure (tparams', params''', retdecl''', updated_ret, body'''')

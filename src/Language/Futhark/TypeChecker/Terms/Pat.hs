@@ -110,47 +110,21 @@ bindingSizes sizes m = binding (map sizeWithType sizes) m
       Ident (sizeName size) (Info (Scalar (Prim (Signed Int64)))) (srclocOf size)
 
 -- | Bind a single term-level identifier.
-bindingIdent ::
-  IdentBase NoInfo VName StructType ->
-  StructType ->
-  (Ident StructType -> TermTypeM a) ->
-  TermTypeM a
-bindingIdent (Ident v NoInfo vloc) t m = do
-  let ident = Ident v (Info t) vloc
-  binding [ident] $ m ident
-
--- All this complexity is just so we can handle un-suffixed numeric
--- literals in patterns.
-patLitMkType :: PatLit -> SrcLoc -> TermTypeM ParamType
-patLitMkType (PatLitInt _) loc = do
-  t <- newTypeVar loc "t"
-  mustBeOneOf anyNumberType (mkUsage loc "integer literal") (toStruct t)
-  pure t
-patLitMkType (PatLitFloat _) loc = do
-  t <- newTypeVar loc "t"
-  mustBeOneOf anyFloatType (mkUsage loc "float literal") (toStruct t)
-  pure t
-patLitMkType (PatLitPrim v) _ =
-  pure $ Scalar $ Prim $ primValueType v
+bindingIdent :: Ident StructType -> TermTypeM a -> TermTypeM a
+bindingIdent ident = binding [ident]
 
 checkPat' ::
   [(SizeBinder VName, QualName VName)] ->
-  PatBase NoInfo VName ParamType ->
+  Pat ParamType ->
   Inferred ParamType ->
   TermTypeM (Pat ParamType)
 checkPat' sizes (PatParens p loc) t =
   PatParens <$> checkPat' sizes p t <*> pure loc
 checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
-checkPat' _ (Id name NoInfo loc) (Ascribed t) =
+checkPat' _ (Id name (Info t) loc) _ =
   pure $ Id name (Info t) loc
-checkPat' _ (Id name NoInfo loc) NoneInferred = do
-  t <- newTypeVar loc "t"
-  pure $ Id name (Info t) loc
-checkPat' _ (Wildcard _ loc) (Ascribed t) =
-  pure $ Wildcard (Info t) loc
-checkPat' _ (Wildcard NoInfo loc) NoneInferred = do
-  t <- newTypeVar loc "t"
+checkPat' _ (Wildcard (Info t) loc) _ =
   pure $ Wildcard (Info t) loc
 checkPat' sizes p@(TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
@@ -192,6 +166,9 @@ checkPat' sizes (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (\p -> checkPat' sizes p NoneInferred) (M.fromList fs)
     <*> pure loc
+checkPat' sizes (PatAscription p t loc) _ =
+  -- FIXME
+  PatAscription <$> checkPat' sizes p NoneInferred <*> pure t <*> pure loc
 checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
   (t', st, _) <- checkTypeExpNonrigid t
 
@@ -209,47 +186,15 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
         <$> checkPat' sizes p (Ascribed (resToParam st))
         <*> pure t'
         <*> pure loc
-checkPat' _ (PatLit l NoInfo loc) (Ascribed t) = do
-  t' <- patLitMkType l loc
-  unify (mkUsage loc "matching against literal") (toStruct t') (toStruct t)
-  pure $ PatLit l (Info t') loc
-checkPat' _ (PatLit l NoInfo loc) NoneInferred = do
-  t' <- patLitMkType l loc
-  pure $ PatLit l (Info t') loc
-checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
-  | Just ts <- M.lookup n cs = do
-      when (length ps /= length ts) $
-        typeError loc mempty $
-          "Pattern #"
-            <> pretty n
-            <> " expects"
-              <+> pretty (length ps)
-              <+> "constructor arguments, but type provides"
-              <+> pretty (length ts)
-              <+> "arguments."
-      ps' <- zipWithM (checkPat' sizes) ps $ map Ascribed ts
-      pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
-checkPat' sizes (PatConstr n NoInfo ps loc) (Ascribed t) = do
-  t' <- newTypeVar loc "t"
-  ps' <- forM ps $ \p -> do
-    p_t <- newTypeVar (srclocOf p) "t"
-    checkPat' sizes p $ Ascribed p_t
-  mustHaveConstr usage n (toStruct t') (patternStructType <$> ps')
-  unify usage t' (toStruct t)
-  pure $ PatConstr n (Info t) ps' loc
-  where
-    usage = mkUsage loc "matching against constructor"
-checkPat' sizes (PatConstr n NoInfo ps loc) NoneInferred = do
+checkPat' _ (PatLit l info loc) _ =
+  pure $ PatLit l info loc
+checkPat' sizes (PatConstr n info ps loc) _ = do
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
-  t <- newTypeVar loc "t"
-  mustHaveConstr usage n (toStruct t) (patternStructType <$> ps')
-  pure $ PatConstr n (Info t) ps' loc
-  where
-    usage = mkUsage loc "matching against constructor"
+  pure $ PatConstr n info ps' loc
 
 checkPat ::
   [(SizeBinder VName, QualName VName)] ->
-  PatBase NoInfo VName (TypeBase Size u) ->
+  Pat (TypeBase Size u) ->
   Inferred StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
@@ -272,7 +217,7 @@ checkPat sizes p t m = do
 -- | Check and bind a @let@-pattern.
 bindingPat ::
   [SizeBinder VName] ->
-  PatBase NoInfo VName (TypeBase Size u) ->
+  Pat (TypeBase Size u) ->
   StructType ->
   (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
@@ -292,7 +237,7 @@ bindingPat sizes p t m = do
 -- | Check and bind type and value parameters.
 bindingParams ::
   [TypeParam] ->
-  [PatBase NoInfo VName ParamType] ->
+  [Pat ParamType] ->
   ([Pat ParamType] -> TermTypeM a) ->
   TermTypeM a
 bindingParams tps orig_ps m = bindingTypeParams tps $ do

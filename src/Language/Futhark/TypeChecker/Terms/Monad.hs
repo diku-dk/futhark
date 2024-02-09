@@ -94,7 +94,7 @@ data Checking
   | CheckingAscription StructType StructType
   | CheckingLetGeneralise Name
   | CheckingParams (Maybe Name)
-  | CheckingPat (PatBase NoInfo VName StructType) (Inferred StructType)
+  | CheckingPat (PatBase Info VName StructType) (Inferred StructType)
   | CheckingLoopBody StructType StructType
   | CheckingLoopInitial StructType StructType
   | CheckingRecordUpdate [Name] StructType StructType
@@ -544,8 +544,8 @@ allDimsFreshInType ::
   Usage ->
   Rigidity ->
   Name ->
-  TypeBase Size als ->
-  TermTypeM (TypeBase Size als, M.Map VName Size)
+  TypeBase d als ->
+  TermTypeM (TypeBase Size als, M.Map VName d)
 allDimsFreshInType usage r desc t =
   runStateT (bitraverse onDim pure t) mempty
   where
@@ -581,25 +581,15 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-termCheckTypeExp ::
-  TypeExp (ExpBase NoInfo VName) VName ->
-  TermTypeM (TypeExp Exp VName, [VName], ResRetType)
-termCheckTypeExp te = do
-  (te', svars, rettype, _l) <- checkTypeExp te
+checkTypeExpNonrigid :: TypeExp Exp VName -> TermTypeM (TypeExp Exp VName, ResType, [VName])
+checkTypeExpNonrigid te = do
+  (te', svars, rettype, _l) <- checkTypeExp $ undefined te
 
   -- No guarantee that the locally bound sizes in rettype are globally
   -- unique, but we want to turn them into size variables, so let's
-  -- give them some unique names.  Maybe this should be done below,
-  -- where we actually turn these into size variables?
+  -- give them some unique names.
   RetType dims st <- renameRetType rettype
 
-  pure (te', svars, RetType dims st)
-
-checkTypeExpNonrigid ::
-  TypeExp (ExpBase NoInfo VName) VName ->
-  TermTypeM (TypeExp Exp VName, ResType, [VName])
-checkTypeExpNonrigid te = do
-  (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
     constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)

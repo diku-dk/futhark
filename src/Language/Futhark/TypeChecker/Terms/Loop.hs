@@ -102,7 +102,7 @@ wellTypedLoopArg src sparams pat arg = do
 
 -- | An un-checked loop.
 type UncheckedLoop =
-  (PatBase NoInfo VName ParamType, ExpBase NoInfo VName, LoopFormBase NoInfo VName, ExpBase NoInfo VName)
+  (Pat ParamType, Exp, LoopFormBase Info VName, Exp)
 
 -- | A loop that has been type-checked.
 type CheckedLoop =
@@ -111,7 +111,7 @@ type CheckedLoop =
 -- | Type-check a @loop@ expression, passing in a function for
 -- type-checking subexpressions.
 checkLoop ::
-  (ExpBase NoInfo VName -> TermTypeM Exp) ->
+  (Exp -> TermTypeM Exp) ->
   UncheckedLoop ->
   SrcLoc ->
   TermTypeM (CheckedLoop, AppRes)
@@ -223,18 +223,16 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
         uboundexp' <-
           require "being the bound in a 'for' loop" anySignedType
             =<< checkExp uboundexp
-        bound_t <- expTypeFully uboundexp'
-        bindingIdent i bound_t $ \i' ->
-          bindingPat [] mergepat merge_t $
-            \mergepat' -> incLevel $ do
-              loopbody' <- checkExp loopbody
-              (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
-              pure
-                ( sparams,
-                  mergepat'',
-                  For i' uboundexp',
-                  loopbody'
-                )
+        bindingIdent i . bindingPat [] mergepat merge_t $
+          \mergepat' -> incLevel $ do
+            loopbody' <- checkExp loopbody
+            (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
+            pure
+              ( sparams,
+                mergepat'',
+                For i uboundexp',
+                loopbody'
+              )
       ForIn xpat e -> do
         (arr_t, _) <- newArrayType (mkUsage' (srclocOf e)) "e" 1
         e' <- unifies "being iterated in a 'for-in' loop" arr_t =<< checkExp e

@@ -665,7 +665,10 @@ instance Pretty (Unmatched (Pat StructType)) where
       pretty' (PatLit e _ _) = pretty e
       pretty' (PatConstr n _ ps _) = "#" <> pretty n <+> sep (map pretty' ps)
 
-checkRetDecl :: Exp -> Maybe (TypeExp NoInfo VName) -> TermM (Maybe (TypeExp Info VName))
+checkRetDecl ::
+  Exp ->
+  Maybe (TypeExp (ExpBase NoInfo VName) VName) ->
+  TermM (Maybe (TypeExp Exp VName))
 checkRetDecl _ Nothing = pure Nothing
 checkRetDecl body (Just te) = do
   (te', _, RetType _ st, _) <- checkTypeExp te
@@ -1007,16 +1010,16 @@ checkExp (Coerce e te NoInfo loc) = do
 
 checkValDef ::
   ( VName,
-    Maybe (TypeExp NoInfo VName),
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
     [TypeParam],
     [PatBase NoInfo VName ParamType],
     ExpBase NoInfo VName,
     SrcLoc
   ) ->
   TypeM
-    ( [TypeParam],
+    ( Either T.Text (M.Map TyVar Type),
       [Pat ParamType],
-      Maybe (TypeExp Info VName),
+      Maybe (TypeExp Exp VName),
       Exp
     )
 checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
@@ -1040,4 +1043,4 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
           "## solution:",
           either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) solution
         ]
-    pure (undefined, params', retdecl', body')
+    pure (solution, params', retdecl', body')
