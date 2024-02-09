@@ -628,7 +628,7 @@ synopsisSpec spec = case spec of
     specRow (keyword "module " <> vnameSynopsisDef name) ": " <$> synopsisModTypeExp sig
   IncludeSpec e _ -> fullRow . (keyword "include " <>) <$> synopsisModTypeExp e
 
-typeExpHtml :: TypeExp Info VName -> DocM Html
+typeExpHtml :: TypeExp Exp VName -> DocM Html
 typeExpHtml e = case e of
   TEUnique t _ -> ("*" <>) <$> typeExpHtml t
   TEArray d at _ -> do
@@ -709,11 +709,11 @@ relativise dest src =
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml = pure . brackets . toHtml . prettyString
 
-dimExpHtml :: SizeExp Info VName -> DocM Html
+dimExpHtml :: SizeExp Exp VName -> DocM Html
 dimExpHtml (SizeExpAny _) = pure $ brackets mempty
 dimExpHtml (SizeExp e _) = pure $ brackets $ toHtml $ prettyString e
 
-typeArgExpHtml :: TypeArgExp Info VName -> DocM Html
+typeArgExpHtml :: TypeArgExp Exp VName -> DocM Html
 typeArgExpHtml (TypeArgExpSize d) = dimExpHtml d
 typeArgExpHtml (TypeArgExpType d) = typeExpHtml d
 
