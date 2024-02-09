@@ -402,7 +402,7 @@ type ResRetType = RetTypeBase Size Uniqueness
 
 -- | A dimension declaration expression for use in a 'TypeExp'.
 -- Syntactically includes the brackets.
-data SizeExp d vn
+data SizeExp d
   = -- | The size of the dimension is this expression (or whatever),
     -- all of which free variables must be in scope.
     SizeExp d SrcLoc
@@ -410,9 +410,39 @@ data SizeExp d vn
     SizeExpAny SrcLoc
   deriving (Eq, Ord, Show)
 
-instance Located (SizeExp d vn) where
+instance Functor SizeExp where
+  fmap = fmapDefault
+
+instance Foldable SizeExp where
+  foldMap = foldMapDefault
+
+instance Traversable SizeExp where
+  traverse _ (SizeExpAny loc) = pure (SizeExpAny loc)
+  traverse f (SizeExp d loc) = SizeExp <$> f d <*> pure loc
+
+instance Located (SizeExp d) where
   locOf (SizeExp _ loc) = locOf loc
   locOf (SizeExpAny loc) = locOf loc
+
+-- | A type argument expression passed to a type constructor.
+data TypeArgExp d vn
+  = TypeArgExpSize (SizeExp d)
+  | TypeArgExpType (TypeExp d vn)
+  deriving (Eq, Ord, Show)
+
+instance Bifunctor TypeArgExp where
+  bimap = bimapDefault
+
+instance Bifoldable TypeArgExp where
+  bifoldMap = bifoldMapDefault
+
+instance Bitraversable TypeArgExp where
+  bitraverse f _ (TypeArgExpSize d) = TypeArgExpSize <$> traverse f d
+  bitraverse f g (TypeArgExpType te) = TypeArgExpType <$> bitraverse f g te
+
+instance Located (TypeArgExp f vn) where
+  locOf (TypeArgExpSize e) = locOf e
+  locOf (TypeArgExpType t) = locOf t
 
 -- | An unstructured syntactic type with type variables and possibly
 -- shape declarations - this is what the user types in the source
@@ -423,13 +453,50 @@ data TypeExp d vn
   | TEParens (TypeExp d vn) SrcLoc
   | TETuple [TypeExp d vn] SrcLoc
   | TERecord [(Name, TypeExp d vn)] SrcLoc
-  | TEArray (SizeExp d vn) (TypeExp d vn) SrcLoc
+  | TEArray (SizeExp d) (TypeExp d vn) SrcLoc
   | TEUnique (TypeExp d vn) SrcLoc
   | TEApply (TypeExp d vn) (TypeArgExp d vn) SrcLoc
   | TEArrow (Maybe vn) (TypeExp d vn) (TypeExp d vn) SrcLoc
   | TESum [(Name, [TypeExp d vn])] SrcLoc
   | TEDim [vn] (TypeExp d vn) SrcLoc
   deriving (Eq, Ord, Show)
+
+instance Bitraversable TypeExp where
+  bitraverse _ g (TEVar v loc) =
+    TEVar <$> traverse g v <*> pure loc
+  bitraverse f g (TEParens te loc) =
+    TEParens <$> bitraverse f g te <*> pure loc
+  bitraverse f g (TETuple tes loc) =
+    TETuple <$> traverse (bitraverse f g) tes <*> pure loc
+  bitraverse f g (TERecord fs loc) =
+    TERecord <$> traverse (traverse (bitraverse f g)) fs <*> pure loc
+  bitraverse f g (TESum cs loc) =
+    TESum <$> traverse (traverse (traverse (bitraverse f g))) cs <*> pure loc
+  bitraverse f g (TEArray d te loc) =
+    TEArray <$> traverse f d <*> bitraverse f g te <*> pure loc
+  bitraverse f g (TEUnique te loc) =
+    TEUnique <$> bitraverse f g te <*> pure loc
+  bitraverse f g (TEApply te arg loc) =
+    TEApply <$> bitraverse f g te <*> bitraverse f g arg <*> pure loc
+  bitraverse f g (TEArrow pn te1 te2 loc) =
+    TEArrow <$> traverse g pn <*> bitraverse f g te1 <*> bitraverse f g te2 <*> pure loc
+  bitraverse f g (TEDim dims te loc) =
+    TEDim <$> traverse g dims <*> bitraverse f g te <*> pure loc
+
+instance Functor (TypeExp d) where
+  fmap = fmapDefault
+
+instance Foldable (TypeExp dim) where
+  foldMap = foldMapDefault
+
+instance Traversable (TypeExp dim) where
+  traverse = bitraverse pure
+
+instance Bifunctor TypeExp where
+  bimap = bimapDefault
+
+instance Bifoldable TypeExp where
+  bifoldMap = bifoldMapDefault
 
 instance Located (TypeExp f vn) where
   locOf (TEArray _ _ loc) = locOf loc
@@ -442,16 +509,6 @@ instance Located (TypeExp f vn) where
   locOf (TEArrow _ _ _ loc) = locOf loc
   locOf (TESum _ loc) = locOf loc
   locOf (TEDim _ _ loc) = locOf loc
-
--- | A type argument expression passed to a type constructor.
-data TypeArgExp d vn
-  = TypeArgExpSize (SizeExp d vn)
-  | TypeArgExpType (TypeExp d vn)
-  deriving (Eq, Ord, Show)
-
-instance Located (TypeArgExp f vn) where
-  locOf (TypeArgExpSize e) = locOf e
-  locOf (TypeArgExpType t) = locOf t
 
 -- | Information about which parts of a parameter are consumed.  This
 -- can be considered kind of an effect on the function.

@@ -522,7 +522,7 @@ TupleTypes :: { [UncheckedTypeExp] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
 
-SizeExp :: { SizeExp UncheckedExp Name }
+SizeExp :: { SizeExp UncheckedExp }
          : '[' Exp ']'    { SizeExp $2 (srcspan $1 $>) }
          | '['     ']'    { SizeExpAny (srcspan $1 $>) }
          | '...[' Exp ']' { SizeExp $2 (srcspan $1 $>) }
