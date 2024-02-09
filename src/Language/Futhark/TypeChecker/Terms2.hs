@@ -210,8 +210,8 @@ incCounter = do
 tyVarType :: (Monoid u) => TyVar -> TypeBase dim u
 tyVarType v = Scalar $ TypeVar mempty (qualName v) []
 
-newTyVarWith :: a -> Name -> TyVarInfo -> TermM TyVar
-newTyVarWith loc desc info = do
+newTyVarWith :: (Located loc) => loc -> Name -> TyVarInfo -> TermM TyVar
+newTyVarWith _loc desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
   modify $ \s -> s {termTyVars = M.insert v info $ termTyVars s}
@@ -333,7 +333,7 @@ arrayOfRank 0 t = t
 arrayOfRank n t = arrayOf (Shape $ replicate n ()) t
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
-require why pts e = do
+require _why pts e = do
   t :: Type <- newTypeOverloaded (srclocOf e) "t" pts
   ctEq t $ expType e
   pure e
@@ -347,13 +347,12 @@ instTypeScheme ::
   [TypeParam] ->
   StructType ->
   TermM ([VName], StructType)
-instTypeScheme qn loc tparams t = do
+instTypeScheme _qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $ forM tparams $ \tparam -> do
     case tparam of
-      TypeParamType x _ _ -> do
-        let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
-        v <- newTyVar loc name
-        pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v))
+      TypeParamType _ v _ -> do
+        v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v
+        pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v'))
       TypeParamDim {} ->
         pure Nothing
   let t' = applySubst (`lookup` substs) t
@@ -575,10 +574,10 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
   incLevel $ descend [] orig_ps
 
 checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM Type
-checkApply loc (fname, _) (Scalar (Arrow _ _ _ a (RetType _ b))) arg = do
+checkApply _ _ (Scalar (Arrow _ _ _ a (RetType _ b))) arg = do
   ctEq a $ expType arg
   pure $ toType b
-checkApply loc (fname, _) ftype arg = do
+checkApply loc _ ftype arg = do
   a <- newType loc "arg"
   b <- newTyVar loc "res"
   ctEq ftype $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] (tyVarType b)
@@ -1020,7 +1019,7 @@ checkValDef ::
       Maybe (TypeExp Info VName),
       Exp
     )
-checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
+checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
   bindParams tparams params $ \params' -> do
     body' <- checkExp body
 
