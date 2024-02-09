@@ -32,7 +32,7 @@ visibleTypes = VisibleTypes . foldMap (modTypes . snd)
     decTypes (E.TypeDec tb) = [tb]
     decTypes _ = []
 
-findType :: VName -> VisibleTypes -> Maybe (E.TypeExp E.Info VName)
+findType :: VName -> VisibleTypes -> Maybe (E.TypeExp E.Exp VName)
 findType v (VisibleTypes ts) = E.typeExp <$> find ((== v) . E.typeAlias) ts
 
 valueType :: I.TypeBase I.Rank Uniqueness -> I.ValueType
@@ -41,19 +41,19 @@ valueType (I.Array pt rank _) = I.ValueType I.Signed rank pt
 valueType I.Acc {} = error "valueType Acc"
 valueType I.Mem {} = error "valueType Mem"
 
-withoutDims :: E.TypeExp E.Info VName -> (Int, E.TypeExp E.Info VName)
+withoutDims :: E.TypeExp E.Exp VName -> (Int, E.TypeExp E.Exp VName)
 withoutDims (E.TEArray _ te _) =
   let (d, te') = withoutDims te
    in (d + 1, te')
 withoutDims te = (0 :: Int, te)
 
-rootType :: E.TypeExp E.Info VName -> E.TypeExp E.Info VName
+rootType :: E.TypeExp E.Exp VName -> E.TypeExp E.Exp VName
 rootType (E.TEApply te E.TypeArgExpSize {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
 rootType (E.TEDim _ te _) = rootType te
 rootType te = te
 
-typeExpOpaqueName :: E.TypeExp E.Info VName -> Name
+typeExpOpaqueName :: E.TypeExp E.Exp VName -> Name
 typeExpOpaqueName = nameFromText . f
   where
     f = g . rootType
@@ -87,7 +87,10 @@ addType name t = modify $ \(I.OpaqueTypes ts) ->
           error $ "Duplicate definition of entry point type " <> E.prettyString name
     _ -> I.OpaqueTypes ts <> I.OpaqueTypes [(name, t)]
 
-isRecord :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name (E.TypeExp E.Info VName))
+isRecord ::
+  VisibleTypes ->
+  E.TypeExp E.Exp VName ->
+  Maybe (M.Map Name (E.TypeExp E.Exp VName))
 isRecord _ (E.TERecord fs _) = Just $ M.fromList fs
 isRecord _ (E.TETuple fs _) = Just $ E.tupleFields fs
 isRecord types (E.TEVar v _) = isRecord types =<< findType (E.qualLeaf v) types
@@ -96,7 +99,7 @@ isRecord _ _ = Nothing
 recordFields ::
   VisibleTypes ->
   M.Map Name E.StructType ->
-  Maybe (E.TypeExp E.Info VName) ->
+  Maybe (E.TypeExp E.Exp VName) ->
   [(Name, E.EntryType)]
 recordFields types fs t =
   case isRecord types . rootType =<< t of
@@ -120,7 +123,10 @@ opaqueRecord types ((f, t) : fs) ts = do
   where
     opaqueField e_t i_ts = snd <$> entryPointType types e_t i_ts
 
-isSum :: VisibleTypes -> E.TypeExp E.Info VName -> Maybe (M.Map Name [E.TypeExp E.Info VName])
+isSum ::
+  VisibleTypes ->
+  E.TypeExp E.Exp VName ->
+  Maybe (M.Map Name [E.TypeExp E.Exp VName])
 isSum _ (E.TESum cs _) = Just $ M.fromList cs
 isSum types (E.TEVar v _) = isSum types =<< findType (E.qualLeaf v) types
 isSum _ _ = Nothing
@@ -128,7 +134,7 @@ isSum _ _ = Nothing
 sumConstrs ::
   VisibleTypes ->
   M.Map Name [E.StructType] ->
-  Maybe (E.TypeExp E.Info VName) ->
+  Maybe (E.TypeExp E.Exp VName) ->
   [(Name, [E.EntryType])]
 sumConstrs types cs t =
   case isSum types . rootType =<< t of

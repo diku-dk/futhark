@@ -1499,7 +1499,7 @@ type Case = CaseBase Info VName
 type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An unchecked type expression.
-type UncheckedTypeExp = TypeExp NoInfo Name
+type UncheckedTypeExp = TypeExp UncheckedExp Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

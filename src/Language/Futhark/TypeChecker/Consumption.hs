@@ -975,7 +975,7 @@ checkGlobalAliases loc params body_t = do
 -- | Type-check a value definition.  This also infers a new return
 -- type that may be more unique than previously.
 checkValDef ::
-  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Info VName), SrcLoc) ->
+  (VName, [Pat ParamType], Exp, ResRetType, Maybe (TypeExp Exp VName), SrcLoc) ->
   ((Exp, ResRetType), [TypeError])
 checkValDef (_fname, params, body, RetType ext ret, retdecl, loc) = runCheckM (locOf loc) $ do
   fmap fst . bindingParams params $ do

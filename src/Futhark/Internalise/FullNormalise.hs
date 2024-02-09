@@ -43,7 +43,7 @@ applyModifiers =
 -- A binding that occurs in the calculation flow
 data Binding
   = PatBind [SizeBinder VName] (Pat StructType) Exp
-  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Info VName), Info ResRetType, Exp)
+  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Exp VName), Info ResRetType, Exp)
 
 type NormState = (([Binding], [BindModifier]), VNameSource)
 

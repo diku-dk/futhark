@@ -204,7 +204,7 @@ contains a pos =
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
-atPosInTypeExp :: TypeExp Info VName -> Pos -> Maybe RawAtPos
+atPosInTypeExp :: TypeExp Exp VName -> Pos -> Maybe RawAtPos
 atPosInTypeExp te pos =
   case te of
     TEVar qn loc -> do
