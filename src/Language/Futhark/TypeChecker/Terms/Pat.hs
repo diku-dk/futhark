@@ -166,9 +166,6 @@ checkPat' sizes (RecordPat fs loc) NoneInferred =
   RecordPat . M.toList
     <$> traverse (\p -> checkPat' sizes p NoneInferred) (M.fromList fs)
     <*> pure loc
-checkPat' sizes (PatAscription p t loc) _ =
-  -- FIXME
-  PatAscription <$> checkPat' sizes p NoneInferred <*> pure t <*> pure loc
 checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
   (t', st, _) <- checkTypeExpNonrigid t
 

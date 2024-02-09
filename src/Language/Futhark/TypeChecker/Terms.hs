@@ -1008,7 +1008,7 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 -- turn out to be polymorphic, in which case the list of type
 -- parameters will be non-empty.
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
-checkOneExp e = runTermTypeM (checkExp . undefined) $ do
+checkOneExp e = runTermTypeM checkExp $ do
   e' <- checkExp $ undefined e
   let t = typeOf e'
   (tparams, _, _) <-
@@ -1022,7 +1022,7 @@ checkOneExp e = runTermTypeM (checkExp . undefined) $ do
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
-checkSizeExp e = runTermTypeM (checkExp . undefined) $ do
+checkSizeExp e = runTermTypeM checkExp $ do
   e' <- checkExp $ undefined e
   let t = typeOf e'
   when (hasBinding e') $
@@ -1652,7 +1652,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
-    Right tysubsts -> runTermTypeM (checkExp . undefined) $ do
+    Right tysubsts -> runTermTypeM checkExp $ do
       addInitialConstraints tysubsts
 
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-

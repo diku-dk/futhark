@@ -196,7 +196,7 @@ data TermEnv = TermEnv
   { termScope :: TermScope,
     termChecking :: Maybe Checking,
     termLevel :: Level,
-    termChecker :: ExpBase NoInfo VName -> TermTypeM Exp,
+    termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
     termOuterEnv :: Env,
     termImportName :: ImportName
   }
@@ -574,9 +574,9 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-checkExpForSize :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForSize :: ExpBase Info VName -> TermTypeM Exp
 checkExpForSize e = do
-  checker <- asks termChecker
+  checker <- asks termCheckExp
   e' <- checker e
   let t = toStruct $ typeOf e'
   unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
@@ -584,7 +584,7 @@ checkExpForSize e = do
 
 checkTypeExpNonrigid :: TypeExp Exp VName -> TermTypeM (TypeExp Exp VName, ResType, [VName])
 checkTypeExpNonrigid te = do
-  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize $ undefined te
+  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize te
 
   -- No guarantee that the locally bound sizes in rettype are globally
   -- unique, but we want to turn them into size variables, so let's
@@ -636,7 +636,7 @@ initialTermScope =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: (ExpBase NoInfo VName -> TermTypeM Exp) -> TermTypeM a -> TypeM a
+runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> TermTypeM a -> TypeM a
 runTermTypeM checker (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   name <- askImportName
@@ -647,7 +647,7 @@ runTermTypeM checker (TermTypeM m) = do
           { termScope = initial_scope,
             termChecking = Nothing,
             termLevel = 0,
-            termChecker = checker,
+            termCheckExp = checker,
             termImportName = name,
             termOuterEnv = outer_env
           }
