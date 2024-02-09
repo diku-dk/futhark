@@ -251,7 +251,7 @@ instance ASTMappable (TypeArgExp (ExpBase Info VName) VName) where
   astMap tv (TypeArgExpSize dim) = TypeArgExpSize <$> astMap tv dim
   astMap tv (TypeArgExpType te) = TypeArgExpType <$> astMap tv te
 
-instance ASTMappable (SizeExp (ExpBase Info VName) VName) where
+instance ASTMappable (SizeExp (ExpBase Info VName)) where
   astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
@@ -416,7 +416,7 @@ bareLoopForm (While e) = While (bareExp e)
 bareCase :: CaseBase Info VName -> CaseBase NoInfo VName
 bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 
-bareSizeExp :: SizeExp (ExpBase Info VName) VName -> SizeExp (ExpBase NoInfo VName) VName
+bareSizeExp :: SizeExp (ExpBase Info VName) -> SizeExp (ExpBase NoInfo VName)
 bareSizeExp (SizeExp e loc) = SizeExp (bareExp e) loc
 bareSizeExp (SizeExpAny loc) = SizeExpAny loc
 
