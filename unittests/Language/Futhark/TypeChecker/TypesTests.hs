@@ -17,10 +17,10 @@ import Language.Futhark.TypeChecker.Types
 import Test.Tasty
 import Test.Tasty.HUnit
 
-evalTest :: TypeExp NoInfo Name -> Either String ([VName], ResRetType) -> TestTree
+evalTest :: TypeExp (ExpBase NoInfo Name) Name -> Either String ([VName], ResRetType) -> TestTree
 evalTest te expected =
   testCase (prettyString te) $
-    case (fmap (extract . fst) (run (checkTypeExp =<< resolveTypeExp te)), expected) of
+    case (fmap (extract . fst) (run (checkTypeExp checkSizeExp =<< resolveTypeExp te)), expected) of
       (Left got_e, Left expected_e) ->
         let got_e_s = T.unpack $ docText $ prettyTypeError got_e
          in (expected_e `isInfixOf` got_e_s) @? got_e_s
@@ -33,7 +33,7 @@ evalTest te expected =
         assertFailure $ "Expected error, got: " <> show actual_t
   where
     extract (_, svars, t, _) = (svars, t)
-    run = snd . runTypeM env mempty (mkInitialImport "") (newNameSource 100) checkSizeExp
+    run = snd . runTypeM env mempty (mkInitialImport "") (newNameSource 100)
     -- We hack up an environment with some predefined type
     -- abbreviations for testing.  This is all pretty sensitive to the
     -- specific unique names, so we have to be careful!
