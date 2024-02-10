@@ -261,17 +261,17 @@ stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
 
-data AutoMap u = AutoMap
-  { autoRep :: Shape u,
-    autoMap :: Shape u,
-    autoFrame :: Shape u
+data AutoMap = AutoMap
+  { autoRep :: Shape Size,
+    autoMap :: Shape Size,
+    autoFrame :: Shape Size
   }
   deriving (Eq, Show, Ord)
 
-instance Semigroup (AutoMap u) where
+instance Semigroup AutoMap where
   (AutoMap r1 m1 f1) <> (AutoMap r2 m2 f2) = AutoMap (r1 <> r2) (m1 <> m2) (f1 <> f2)
 
-instance Monoid (AutoMap u) where
+instance Monoid AutoMap where
   mempty = AutoMap mempty mempty mempty
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
@@ -710,7 +710,7 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Maybe VName, AutoMap Size), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName, AutoMap), ExpBase f vn))
       SrcLoc
   | Range
       (ExpBase f vn)
@@ -1338,7 +1338,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap Size, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of

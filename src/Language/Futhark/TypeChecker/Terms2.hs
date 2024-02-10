@@ -585,17 +585,22 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM (Type, AutoMap SComp)
+checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM (Type, AutoMap)
 checkApply loc _ ftype arg = do
   (a, b) <- split ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
-  let s_r = Shape $ pure $ SVar r
-      s_m = Shape $ pure $ SVar m
+  let unit_info = Info $ Scalar $ Prim Bool
+      r_var = Var (QualName [] r) unit_info mempty
+      m_var = Var (QualName [] r) unit_info mempty
   ctAM r m
-  ctEq (arrayOf s_r $ toType $ typeOf arg) (arrayOf s_m a)
-  pure (arrayOf s_m b, AutoMap {autoRep = s_r, autoMap = s_m, autoFrame = mempty})
+  ctEq (arrayOf (toShape $ SVar r) $ toType $ typeOf arg) (arrayOf (toShape $ SVar m) a)
+  pure
+    ( arrayOf (toShape $ SVar m) b,
+      AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = mempty}
+    )
   where
+    toShape = Shape . pure
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, toType b)
     split ftype' = do
