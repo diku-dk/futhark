@@ -370,6 +370,10 @@ library
       Futhark.Pkg.Types
       Futhark.Profile
       Futhark.Script
+      Futhark.Solve.LP
+      Futhark.Solve.Matrix
+      Futhark.Solve.Simplex
+      Futhark.Solve.BranchAndBound
       Futhark.Test
       Futhark.Test.Spec
       Futhark.Test.Values
