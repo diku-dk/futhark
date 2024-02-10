@@ -36,7 +36,6 @@ import Data.Foldable
 import Data.List (partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe
 import Data.Sequence qualified as Seq
 import Data.Set qualified as S
 import Futhark.MonadFreshNames
@@ -1061,7 +1060,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
         substs' = M.map (Subst []) substs
         substStructType =
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
-        params' = map (substPat entry substStructType) params
+        params' = map (substPat substStructType) params
     params'' <- withArgs shape_names $ mapM transformPat params'
     exp_naming <- paramGetClean shape_names
 
@@ -1212,19 +1211,17 @@ typeSubstsM loc orig_t1 orig_t2 =
     onDim MonoAnon = pure anySize
 
 -- Perform a given substitution on the types in a pattern.
-substPat :: Bool -> (t -> t) -> Pat t -> Pat t
-substPat entry f pat = case pat of
-  TuplePat pats loc -> TuplePat (map (substPat entry f) pats) loc
+substPat :: (t -> t) -> Pat t -> Pat t
+substPat f pat = case pat of
+  TuplePat pats loc -> TuplePat (map (substPat f) pats) loc
   RecordPat fs loc -> RecordPat (map substField fs) loc
     where
-      substField (n, p) = (n, substPat entry f p)
-  PatParens p loc -> PatParens (substPat entry f p) loc
-  PatAttr attr p loc -> PatAttr attr (substPat entry f p) loc
+      substField (n, p) = (n, substPat f p)
+  PatParens p loc -> PatParens (substPat f p) loc
+  PatAttr attr p loc -> PatAttr attr (substPat f p) loc
   Id vn (Info tp) loc -> Id vn (Info $ f tp) loc
   Wildcard (Info tp) loc -> Wildcard (Info $ f tp) loc
-  PatAscription p td loc
-    | entry -> PatAscription (substPat False f p) td loc
-    | otherwise -> substPat False f p
+  PatAscription p _ _ -> substPat f p
   PatLit e (Info tp) loc -> PatLit e (Info $ f tp) loc
   PatConstr n (Info tp) ps loc -> PatConstr n (Info $ f tp) ps loc
 
@@ -1233,8 +1230,8 @@ toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) 
   PolyBinding (name, tparams, params, rettype, body, attrs, loc)
 
 -- Remove all type variables and type abbreviations from a value binding.
-removeTypeVariables :: Bool -> ValBind -> MonoM ValBind
-removeTypeVariables entry valbind = do
+removeTypeVariables :: ValBind -> MonoM ValBind
+removeTypeVariables valbind = do
   let (ValBind _ _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
   subs <- asks $ M.map substFromAbbr . envTypeBindings
   let mapper =
@@ -1253,7 +1250,7 @@ removeTypeVariables entry valbind = do
   pure
     valbind
       { valBindRetType = Info (applySubst (`M.lookup` subs) $ RetType dims rettype),
-        valBindParams = map (substPat entry $ applySubst (`M.lookup` subs)) pats,
+        valBindParams = map (substPat $ applySubst (`M.lookup` subs)) pats,
         valBindBody = body'
       }
 
@@ -1273,9 +1270,7 @@ transformEntryPoint (EntryPoint params ret) =
 
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <-
-    toPolyBinding
-      <$> removeTypeVariables (isJust (valBindEntryPoint valbind)) valbind
+  valbind' <- toPolyBinding <$> removeTypeVariables valbind
 
   case valBindEntryPoint valbind of
     Nothing -> pure ()
