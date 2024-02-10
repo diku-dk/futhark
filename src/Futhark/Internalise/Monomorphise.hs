@@ -143,11 +143,6 @@ instance Monoid Env where
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)
 
-extendEnv :: VName -> PolyBinding -> MonoM a -> MonoM a
-extendEnv vn binding =
-  localEnv
-    mempty {envPolyBindings = M.singleton vn binding}
-
 isolateNormalisation :: MonoM a -> MonoM a
 isolateNormalisation m = do
   prevRepl <- get
@@ -501,30 +496,8 @@ transformAppExp (LetPat sizes pat e body loc) res = do
   body' <- withParams params $ scoping argset $ transformExp body
   res' <- transformAppRes res
   pure $ AppExp (LetPat sizes' pat' e' body' loc) (Info res')
-transformAppExp (LetFun fname (tparams, params, retdecl, Info ret, body) e loc) res
-  | not $ null tparams = do
-      -- Retrieve the lifted monomorphic function bindings that are
-      -- produced, filter those that are monomorphic versions of the
-      -- current let-bound function and insert them at this point, and
-      -- propagate the rest.
-      let funbind = PolyBinding (fname, tparams, params, ret, body, mempty, loc)
-      pass $ do
-        (e', bs) <- listen $ extendEnv fname funbind $ scoping (S.singleton fname) $ transformExp e
-        -- Do not remember this one for next time we monomorphise this
-        -- function.
-        modifyLifts $ filter ((/= fname) . fst . fst)
-        let (bs_local, bs_prop) = Seq.partition ((== fname) . fst) bs
-        pure (unfoldLetFuns (map snd $ toList bs_local) e', const bs_prop)
-  | otherwise = do
-      params' <- mapM transformPat params
-      body' <- scoping (S.fromList (foldMap patNames params')) $ transformExp body
-      ret' <- transformRetTypeSizes (S.fromList (foldMap patNames params')) ret
-      AppExp
-        <$> ( LetFun fname (tparams, params', retdecl, Info ret', body')
-                <$> scoping (S.singleton fname) (transformExp e)
-                <*> pure loc
-            )
-        <*> (Info <$> transformAppRes res)
+transformAppExp LetFun {} _ =
+  error "transformAppExp: LetFun is not supposed to occur"
 transformAppExp (If e1 e2 e3 loc) res =
   AppExp <$> (If <$> transformExp e1 <*> transformExp e2 <*> transformExp e3 <*> pure loc) <*> (Info <$> transformAppRes res)
 transformAppExp (Apply fe args _) res =
@@ -608,17 +581,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, d1) (e2, d2) loc) res = do
         ( Var (qualName x) (Info argtype) mempty,
           Id x (Info argtype) mempty
         )
-transformAppExp (LetWith id1 id2 idxs e1 body loc) res = do
-  id1' <- transformIdent id1
-  id2' <- transformIdent id2
-  idxs' <- mapM transformDimIndex idxs
-  e1' <- transformExp e1
-  body' <- scoping (S.singleton $ identName id1') $ transformExp body
-  res' <- transformAppRes res
-  pure $ AppExp (LetWith id1' id2' idxs' e1' body' loc) (Info res')
-  where
-    transformIdent (Ident v t vloc) =
-      Ident v <$> traverse transformType t <*> pure vloc
+transformAppExp LetWith {} _ =
+  error "transformAppExp: LetWith is not supposed to occur"
 transformAppExp (Index e0 idxs loc) res =
   AppExp
     <$> (Index <$> transformExp e0 <*> mapM transformDimIndex idxs <*> pure loc)
@@ -855,16 +819,6 @@ desugarIndexSection idxs (Scalar (Arrow _ _ _ t1 (RetType dims t2))) loc = do
       (Info (RetType dims t2'))
       loc
 desugarIndexSection _ t _ = error $ "desugarIndexSection: not a function type: " ++ prettyString t
-
--- Convert a collection of 'ValBind's to a nested sequence of let-bound,
--- monomorphic functions with the given expression at the bottom.
-unfoldLetFuns :: [ValBind] -> Exp -> Exp
-unfoldLetFuns [] e = e
-unfoldLetFuns (ValBind _ fname _ (Info rettype) dim_params params body _ _ loc : rest) e =
-  AppExp (LetFun fname (dim_params, params, Nothing, Info rettype, body) e' loc) (Info $ AppRes e_t mempty)
-  where
-    e' = unfoldLetFuns rest e
-    e_t = typeOf e'
 
 transformPat :: Pat (TypeBase Size u) -> MonoM (Pat (TypeBase Size u))
 transformPat = traverse transformType
