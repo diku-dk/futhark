@@ -27,6 +27,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
@@ -522,9 +523,10 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
     ModFun {} ->
       typeError loc mempty . withIndexLink "module-is-parametric" $
         "Module" <+> pretty modname <+> " is a parametric module."
-checkExp (Var qn _ loc) = do
-  t <- lookupVar loc qn
-  pure $ Var qn (Info t) loc
+checkExp (Var qn (Info t) loc) = do
+  t' <- lookupVar loc qn
+  unify (mkUsage loc "inferred rank type") t t'
+  pure $ Var qn (Info t') loc
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
   pure $ Negate arg' loc
@@ -1620,14 +1622,15 @@ arrayOfM loc t shape = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
   pure $ arrayOf shape t
 
-addInitialConstraints :: M.Map VName (TypeBase () NoUniqueness) -> TermTypeM ()
+addInitialConstraints :: M.Map (TypeBase () NoUniqueness) [VName] -> TermTypeM ()
 addInitialConstraints = mapM_ f . M.toList
   where
     addConstraint v c = modifyConstraints $ M.insert v (0, c)
-    usage = mkUsage (mempty :: Loc) "trust me bro"
-    f (v, t) = do
-      (t', _) <- allDimsFreshInType usage Nonrigid "dv" t
-      addConstraint v $ Constraint (RetType [] t') usage
+    usage = mkUsage (mempty :: Loc)
+    f (t, vs) = do
+      (t', _) <- allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
+      forM_ vs $ \v ->
+        addConstraint v $ Constraint (RetType [] t') $ usage $ prettyNameText v
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant

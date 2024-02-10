@@ -6,6 +6,7 @@ module Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVar,
     TyVars,
+    Solution,
     solve,
   )
 where
@@ -94,12 +95,31 @@ substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
 substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
-solution :: SolverState -> M.Map TyVar Type
-solution s = M.mapMaybe f $ solverTyVars s
+-- | A solution maps types to the set of type variables that must be
+-- substituted with this type. This slightly odd representation is
+-- needed to encode when two type variables are actually the same
+-- type.  This matters when we start instanting the sizes of the type.
+type Solution = M.Map Type [TyVar]
+
+solution :: SolverState -> Solution
+solution s =
+  M.fromList $
+    map adjust $
+      M.toList $
+        foldl addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
+          M.toList $
+            solverTyVars s
   where
-    f (TyVarSol t) = Just $ substTyVars (solverTyVars s) t
-    f (TyVarLink v) = f =<< M.lookup v (solverTyVars s)
-    f (TyVarUnsol _) = Nothing
+    mkSubst (TyVarSol t) = Just (t, [])
+    mkSubst _ = Nothing
+    addLinks m (v1, TyVarLink v2) =
+      case M.lookup v2 $ solverTyVars s of
+        Just (TyVarLink v3) -> addLinks m (v1, TyVarLink v3)
+        _ -> case M.lookup v2 m of
+          Nothing -> m
+          Just (t, vs) -> M.insert v2 (t, v1 : vs) m
+    addLinks m _ = m
+    adjust (v, (t, vs)) = (t, v : vs)
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
@@ -172,7 +192,7 @@ solveCt ct = do
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs
 
-solve :: Constraints -> TyVars -> Either T.Text (M.Map TyVar Type)
+solve :: Constraints -> TyVars -> Either T.Text Solution
 solve constraints tyvars =
   second solution
     . runExcept

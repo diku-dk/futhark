@@ -366,23 +366,24 @@ lookupMod qn@(QualName _ name) = do
 lookupVar :: SrcLoc -> QualName VName -> TermM StructType
 lookupVar loc qn@(QualName qs name) = do
   scope <- lookupQualNameEnv qn
-  case M.lookup name $ scopeVtable scope of
-    Nothing ->
-      error $ "lookupVar: " <> show qn
-    Just (BoundV tparams t) -> do
-      if null tparams && null qs
-        then pure t
-        else do
-          (tnames, t') <- instTypeScheme qn loc tparams t
-          outer_env <- asks termOuterEnv
-          pure $ qualifyTypeVars outer_env tnames qs t'
-    Just EqualityF -> do
-      argtype <- newType loc "t"
-      pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
-    Just (OverloadedF ts pts rt) -> do
-      argtype <- newTypeOverloaded loc "t" ts
-      let (pts', rt') = instOverloaded (argtype :: StructType) pts rt
-      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+  asStructType loc
+    =<< case M.lookup name $ scopeVtable scope of
+      Nothing ->
+        error $ "lookupVar: " <> show qn
+      Just (BoundV tparams t) -> do
+        if null tparams && null qs
+          then pure t
+          else do
+            (tnames, t') <- instTypeScheme qn loc tparams t
+            outer_env <- asks termOuterEnv
+            pure $ qualifyTypeVars outer_env tnames qs t'
+      Just EqualityF -> do
+        argtype <- newType loc "t"
+        pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
+      Just (OverloadedF ts pts rt) -> do
+        argtype <- newTypeOverloaded loc "t" ts
+        let (pts', rt') = instOverloaded (argtype :: StructType) pts rt
+        pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
   where
     instOverloaded argtype pts rt =
       ( map (maybe argtype (Scalar . Prim)) pts,
@@ -1018,7 +1019,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( Either T.Text (M.Map TyVar Type),
+    ( Either T.Text Solution,
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
       Exp
@@ -1042,6 +1043,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
           "## tyvars:",
           unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
           "## solution:",
-          either T.unpack (unlines . map (prettyString . first prettyNameString) . M.toList) solution
+          let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
+           in either T.unpack (unlines . map p . M.toList) solution
         ]
     pure (solution, params', retdecl', body')

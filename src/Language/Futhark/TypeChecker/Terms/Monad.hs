@@ -347,22 +347,6 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
--- | Instantiate a type scheme with fresh type variables for its type
--- parameters. Returns the names of the fresh type variables, the
--- instance list, and the instantiated type.
-instantiateTypeScheme ::
-  QualName VName ->
-  SrcLoc ->
-  [TypeParam] ->
-  StructType ->
-  TermTypeM ([VName], StructType)
-instantiateTypeScheme qn loc tparams t = do
-  let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
-  let substs = M.fromList $ zip tnames tparam_substs
-      t' = applySubst (`M.lookup` substs) t
-  pure (tparam_names, t')
-
 -- | Create a new type name and insert it (unconstrained) in the
 -- substitution map.
 instantiateTypeParam ::
@@ -384,6 +368,22 @@ instantiateTypeParam qn loc tparam = do
       constrain v . Size Nothing . mkUsage loc . docText $
         "instantiated size parameter of " <> dquotes (pretty qn)
       pure (v, ExpSubst $ sizeFromName (qualName v) loc)
+
+-- | Instantiate a type scheme with fresh type variables for its type
+-- parameters. Returns the names of the fresh type variables, the
+-- instance list, and the instantiated type.
+instantiateTypeScheme ::
+  QualName VName ->
+  SrcLoc ->
+  [TypeParam] ->
+  StructType ->
+  TermTypeM ([VName], StructType)
+instantiateTypeScheme qn loc tparams t = do
+  let tnames = map typeParamName tparams
+  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
+  let substs = M.fromList $ zip tnames tparam_substs
+      t' = applySubst (`M.lookup` substs) t
+  pure (tparam_names, t')
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
