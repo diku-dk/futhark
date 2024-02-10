@@ -139,7 +139,7 @@ resolveAttrInfo (AttrAtom atom loc) =
 resolveAttrInfo (AttrComp name infos loc) =
   AttrComp name <$> mapM resolveAttrInfo infos <*> pure loc
 
-resolveSizeExp :: SizeExp (ExpBase NoInfo Name) Name -> TypeM (SizeExp (ExpBase NoInfo VName) VName)
+resolveSizeExp :: SizeExp (ExpBase NoInfo Name) -> TypeM (SizeExp (ExpBase NoInfo VName))
 resolveSizeExp (SizeExpAny loc) = pure $ SizeExpAny loc
 resolveSizeExp (SizeExp e loc) = SizeExp <$> resolveExp e <*> pure loc
 

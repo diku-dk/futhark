@@ -709,7 +709,7 @@ relativise dest src =
 dimDeclHtml :: Size -> DocM Html
 dimDeclHtml = pure . brackets . toHtml . prettyString
 
-dimExpHtml :: SizeExp Exp VName -> DocM Html
+dimExpHtml :: SizeExp Exp -> DocM Html
 dimExpHtml (SizeExpAny _) = pure $ brackets mempty
 dimExpHtml (SizeExp e _) = pure $ brackets $ toHtml $ prettyString e
 
