@@ -13,8 +13,6 @@
 --   is a side effect of the monomorphisation algorithm, which uses
 --   the entry points as roots).
 --
--- * Turns implicit record fields into explicit record fields.
---
 -- * Rewrite BinOp nodes to Apply nodes.
 --
 -- * Replace all size expressions by constants or variables,
@@ -42,7 +40,6 @@ import Futhark.MonadFreshNames
 import Futhark.Util (nubOrd, topologicalSort)
 import Futhark.Util.Pretty
 import Language.Futhark
-import Language.Futhark.Semantic (TypeBinding (..))
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
@@ -132,17 +129,16 @@ entryAssert (x : xs) body =
 -- to a representation of their corresponding function bindings.
 data Env = Env
   { envPolyBindings :: M.Map VName PolyBinding,
-    envTypeBindings :: M.Map VName TypeBinding,
     envScope :: S.Set VName,
     envGlobalScope :: S.Set VName,
     envParametrized :: ExpReplacements
   }
 
 instance Semigroup Env where
-  Env tb1 pb1 sc1 gs1 pr1 <> Env tb2 pb2 sc2 gs2 pr2 = Env (tb1 <> tb2) (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
+  Env pb1 sc1 gs1 pr1 <> Env pb2 sc2 gs2 pr2 = Env (pb1 <> pb2) (sc1 <> sc2) (gs1 <> gs2) (pr1 <> pr2)
 
 instance Monoid Env where
-  mempty = Env mempty mempty mempty mempty mempty
+  mempty = Env mempty mempty mempty mempty
 
 localEnv :: Env -> MonoM a -> MonoM a
 localEnv env = local (env <>)
@@ -386,46 +382,45 @@ replaceExp e =
     maybeNormalisedSize _ = Nothing
 
 transformFName :: SrcLoc -> QualName VName -> StructType -> MonoM Exp
-transformFName loc fname t = do
-  t' <- removeTypeVariablesInType t
-  t'' <- transformType t'
-  let mono_t = monoType t'
+transformFName loc fname ft = do
+  t' <- transformType ft
+  let mono_t = monoType ft
   if baseTag (qualLeaf fname) <= maxIntrinsicTag
-    then pure $ var fname t''
+    then pure $ var fname t'
     else do
       maybe_fname <- lookupLifted (qualLeaf fname) mono_t
       maybe_funbind <- lookupFun $ qualLeaf fname
       case (maybe_fname, maybe_funbind) of
         -- The function has already been monomorphised.
         (Just (fname', infer), _) ->
-          applySizeArgs fname' (toRes Nonunique t'') <$> infer t''
+          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
         -- An intrinsic function.
-        (Nothing, Nothing) -> pure $ var fname t''
+        (Nothing, Nothing) -> pure $ var fname t'
         -- A polymorphic function.
         (Nothing, Just funbind) -> do
           (fname', infer, funbind') <- monomorphiseBinding False funbind mono_t
           tell $ Seq.singleton (qualLeaf fname, funbind')
           addLifted (qualLeaf fname) mono_t (fname', infer)
-          applySizeArgs fname' (toRes Nonunique t'') <$> infer t''
+          applySizeArgs fname' (toRes Nonunique t') <$> infer t'
   where
-    var fname' t'' = Var fname' (Info t'') loc
+    var fname' t' = Var fname' (Info t') loc
 
-    applySizeArg t' (i, f) size_arg =
+    applySizeArg t (i, f) size_arg =
       ( i - 1,
         mkApply
           f
           [(Nothing, size_arg)]
-          (AppRes (foldFunType (replicate i i64) (RetType [] t')) [])
+          (AppRes (foldFunType (replicate i i64) (RetType [] t)) [])
       )
 
-    applySizeArgs fname' t' size_args =
+    applySizeArgs fname' t size_args =
       snd $
         foldl'
-          (applySizeArg t')
+          (applySizeArg t)
           ( length size_args - 1,
             Var
               (qualName fname')
-              (Info (foldFunType (map (const i64) size_args) (RetType [] t')))
+              (Info (foldFunType (map (const i64) size_args) (RetType [] t)))
               loc
           )
           size_args
@@ -1229,60 +1224,19 @@ toPolyBinding :: ValBind -> PolyBinding
 toPolyBinding (ValBind _ name _ (Info rettype) tparams params body _ attrs loc) =
   PolyBinding (name, tparams, params, rettype, body, attrs, loc)
 
--- Remove all type variables and type abbreviations from a value binding.
-removeTypeVariables :: ValBind -> MonoM ValBind
-removeTypeVariables valbind = do
-  let (ValBind _ _ _ (Info (RetType dims rettype)) _ pats body _ _ _) = valbind
-  subs <- asks $ M.map substFromAbbr . envTypeBindings
-  let mapper =
-        ASTMapper
-          { mapOnExp = onExp,
-            mapOnName = pure,
-            mapOnStructType = pure . applySubst (`M.lookup` subs),
-            mapOnParamType = pure . applySubst (`M.lookup` subs),
-            mapOnResRetType = pure . applySubst (`M.lookup` subs)
-          }
-
-      onExp = astMap mapper
-
-  body' <- onExp body
-
-  pure
-    valbind
-      { valBindRetType = Info (applySubst (`M.lookup` subs) $ RetType dims rettype),
-        valBindParams = map (substPat $ applySubst (`M.lookup` subs)) pats,
-        valBindBody = body'
-      }
-
-removeTypeVariablesInType :: StructType -> MonoM StructType
-removeTypeVariablesInType t = do
-  subs <- asks $ M.map substFromAbbr . envTypeBindings
-  pure $ applySubst (`M.lookup` subs) t
-
-transformEntryPoint :: EntryPoint -> MonoM EntryPoint
-transformEntryPoint (EntryPoint params ret) =
-  EntryPoint <$> mapM onEntryParam params <*> onEntryType ret
-  where
-    onEntryParam (EntryParam v t) =
-      EntryParam v <$> onEntryType t
-    onEntryType (EntryType t te) =
-      EntryType <$> removeTypeVariablesInType t <*> pure te
-
 transformValBind :: ValBind -> MonoM Env
 transformValBind valbind = do
-  valbind' <- toPolyBinding <$> removeTypeVariables valbind
+  let valbind' = toPolyBinding valbind
 
   case valBindEntryPoint valbind of
     Nothing -> pure ()
-    Just (Info entry) -> do
-      t <-
-        removeTypeVariablesInType $
-          funType (valBindParams valbind) $
-            unInfo $
-              valBindRetType valbind
+    Just entry -> do
+      let t =
+            funType (valBindParams valbind) $
+              unInfo $
+                valBindRetType valbind
       (name, infer, valbind'') <- monomorphiseBinding True valbind' $ monoType t
-      entry' <- transformEntryPoint entry
-      tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just $ Info entry'})
+      tell $ Seq.singleton (name, valbind'' {valBindEntryPoint = Just entry})
       addLifted (valBindName valbind) (monoType t) (name, infer)
 
   pure
@@ -1294,30 +1248,15 @@ transformValBind valbind = do
             else mempty
       }
 
-transformTypeBind :: TypeBind -> MonoM Env
-transformTypeBind (TypeBind name l tparams _ (Info (RetType dims t)) _ _) = do
-  subs <- asks $ M.map substFromAbbr . envTypeBindings
-  let tbinding = TypeAbbr l tparams $ RetType dims $ applySubst (`M.lookup` subs) t
-  pure mempty {envTypeBindings = M.singleton name tbinding}
-
-transformDecs :: [Dec] -> MonoM ()
-transformDecs [] = pure ()
-transformDecs (ValDec valbind : ds) = do
+transformValBinds :: [ValBind] -> MonoM ()
+transformValBinds [] = pure ()
+transformValBinds (valbind : ds) = do
   env <- transformValBind valbind
-  localEnv env $ transformDecs ds
-transformDecs (TypeDec typebind : ds) = do
-  env <- transformTypeBind typebind
-  localEnv env $ transformDecs ds
-transformDecs (dec : _) =
-  error $
-    "The monomorphization module expects a module-free "
-      ++ "input program, but received: "
-      ++ prettyString dec
+  localEnv env $ transformValBinds ds
 
--- | Monomorphise a list of top-level declarations. A module-free input program
--- is expected, so only value declarations and type declaration are accepted.
-transformProg :: (MonadFreshNames m) => [Dec] -> m [ValBind]
+-- | Monomorphise a list of top-level value bindings.
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg decs =
   fmap (toList . fmap snd . snd) $
     modifyNameSource $ \namesrc ->
-      runMonoM namesrc $ transformDecs decs
+      runMonoM namesrc $ transformValBinds decs

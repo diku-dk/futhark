@@ -24,6 +24,7 @@ import Futhark.IR.SOACS qualified as SOACS
 import Futhark.IR.Seq qualified as Seq
 import Futhark.IR.SeqMem qualified as SeqMem
 import Futhark.IR.TypeCheck (Checkable, checkProg)
+import Futhark.Internalise.ApplyTypeAbbrs as ApplyTypeAbbrs
 import Futhark.Internalise.Defunctionalise as Defunctionalise
 import Futhark.Internalise.Defunctorise as Defunctorise
 import Futhark.Internalise.FullNormalise as FullNormalise
@@ -723,42 +724,49 @@ main = mainWithOptions newConfig commandLineOptions "options... program" compile
                   else prettyString $ fileProg fm
         Defunctorise -> do
           (_, imports, src) <- readProgram'
-          liftIO $ p $ evalState (Defunctorise.transformProg imports) src
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
         FullNormalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-        Monomorphise -> do
-          (_, imports, src) <- readProgram'
-          liftIO $
-            p $
-              flip evalState src $
-                Defunctorise.transformProg imports
-                  >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
         LiftLambdas -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
-                  >>= Monomorphise.transformProg
-                  >>= ReplaceRecords.transformProg
                   >>= LiftLambdas.transformProg
+        Monomorphise -> do
+          (_, imports, src) <- readProgram'
+          liftIO $
+            p $
+              flip evalState src $
+                Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
+                  >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
+                  >>= Monomorphise.transformProg
         Defunctionalise -> do
           (_, imports, src) <- readProgram'
           liftIO $
             p $
               flip evalState src $
                 Defunctorise.transformProg imports
+                  >>= ApplyTypeAbbrs.transformProg
                   >>= FullNormalise.transformProg
+                  >>= LiftLambdas.transformProg
                   >>= Monomorphise.transformProg
                   >>= ReplaceRecords.transformProg
-                  >>= LiftLambdas.transformProg
                   >>= Defunctionalise.transformProg
         Pipeline {} -> do
           let (base, ext) = splitExtension file
