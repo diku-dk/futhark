@@ -418,6 +418,7 @@ library
       Language.Futhark.TypeChecker.Match
       Language.Futhark.TypeChecker.Modules
       Language.Futhark.TypeChecker.Monad
+      Language.Futhark.TypeChecker.Rank
       Language.Futhark.TypeChecker.Terms
       Language.Futhark.TypeChecker.Terms2
       Language.Futhark.TypeChecker.Terms.Loop

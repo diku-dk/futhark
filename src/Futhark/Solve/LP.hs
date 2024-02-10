@@ -20,9 +20,9 @@ module Futhark.Solve.LP
     LinearProg (..),
     OptType (..),
     Constraint (..),
-    (==),
-    (<=),
-    (>=),
+    (~==~),
+    (~<=~),
+    (~>=~),
     rowEchelonLPE,
   )
 where
@@ -143,47 +143,47 @@ instance (Show v, Show a) => Show (LinearProg v a) where
 bigM :: (Num a) => a
 bigM = 10 ^ 3
 
-oneIsZero :: (Eq a, Num a, Ord v) => v -> v -> v -> v -> [Constraint v a]
-oneIsZero b1 b2 x1 x2 =
+oneIsZero :: (Eq a, Num a, Ord v) => (v, v) -> (v, v) -> [Constraint v a]
+oneIsZero (b1, x1) (b2, x2) =
   mkC b1 x1
     <> mkC b2 x2
-    <> [(var b1 ~+~ var b2) <= constant 1]
+    <> [(var b1 ~+~ var b2) ~<=~ constant 1]
   where
     mkC b x =
-      [ var x <= bigM ~*~ var b
+      [ var x ~<=~ bigM ~*~ var b
       ]
 
 or :: (Eq a, Num a, Ord v) => v -> v -> Constraint v a -> Constraint v a -> [Constraint v a]
 or b1 b2 c1 c2 =
   mkC b1 c1
     <> mkC b2 c2
-    <> [var b1 ~+~ var b2 <= constant 1]
+    <> [var b1 ~+~ var b2 ~<=~ constant 1]
   where
     mkC b (Constraint Equal l r) =
-      [ l <= r ~+~ bigM ~*~ (constant 1 ~-~ var b),
-        l >= r ~-~ bigM ~*~ (constant 1 ~-~ var b)
+      [ l ~<=~ r ~+~ bigM ~*~ (constant 1 ~-~ var b),
+        l ~>=~ r ~-~ bigM ~*~ (constant 1 ~-~ var b)
       ]
     mkC b (Constraint LessEq l r) =
-      [ l <= r ~+~ bigM ~*~ (constant 1 ~-~ var b)
+      [ l ~<=~ r ~+~ bigM ~*~ (constant 1 ~-~ var b)
       ]
 
 bin :: (Num a, Ord v) => v -> Constraint v a
 bin v = Constraint LessEq (var v) (constant 1)
 
-(==) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
-l == r = Constraint Equal l r
+(~==~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+l ~==~ r = Constraint Equal l r
 
-infix 4 ==
+infix 4 ~==~
 
-(<=) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
-l <= r = Constraint LessEq l r
+(~<=~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+l ~<=~ r = Constraint LessEq l r
 
-infix 4 <=
+infix 4 ~<=~
 
-(>=) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
-l >= r = Constraint LessEq (neg l) (neg r)
+(~>=~) :: (Num a, Ord v) => LSum v a -> LSum v a -> Constraint v a
+l ~>=~ r = Constraint LessEq (neg l) (neg r)
 
-infix 4 >=
+infix 4 ~>=~
 
 normalize :: (Eq a, Num a) => LSum v a -> LSum v a
 normalize = LSum . Map.filter (/= 0) . lsum
