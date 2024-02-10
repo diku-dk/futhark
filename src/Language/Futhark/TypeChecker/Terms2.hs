@@ -782,7 +782,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
       rt <- checkApply loc (fname, i) (toType f_t) arg'
       pure
         ( (i + 1, rt),
-          (Info Nothing, arg')
+          (Info (Nothing, mempty), arg')
         )
 --
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do

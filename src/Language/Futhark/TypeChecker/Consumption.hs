@@ -710,12 +710,13 @@ checkExp (AppExp (Apply f args loc) appres) = do
   res_als <- checkFuncall loc (fname f) f_als args_als
   pure (AppExp (Apply f' args' loc) appres, res_als)
   where
+    -- neUnzip3 xs = ((\(x, _, _) -> x) <$> xs, (\(_, y, _) -> y) <$> xs, (\(_, _, z) -> z) <$> xs)
     fname (Var v _ _) = Just v
     fname (AppExp (Apply e _ _) _) = fname e
     fname _ = Nothing
-    checkArg' prev d (Info p, e) = do
+    checkArg' prev d (Info (p, am), e) = do
       (e', e_als) <- checkArg prev (second (const d) (typeOf e)) e
-      pure ((Info p, e'), e_als)
+      pure ((Info (p, am), e'), e_als)
 
     checkArgs (Scalar (Arrow _ _ d _ (RetType _ rt))) (x NE.:| args') = do
       -- Note Futhark uses right-to-left evaluation of applications.

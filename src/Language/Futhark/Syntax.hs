@@ -23,6 +23,7 @@ module Language.Futhark.Syntax
     Shape (..),
     shapeRank,
     stripDims,
+    AutoMap (..),
     TypeBase (..),
     TypeArg (..),
     SizeExp (..),
@@ -230,7 +231,10 @@ sizeFromInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-newtype Shape dim = Shape {shapeDims :: [dim]}
+data Shape dim
+  = Shape {shapeDims :: [dim]}
+  | SVar VName
+  | SConcat (Shape dim) (Shape dim)
   deriving (Eq, Ord, Show)
 
 instance Foldable Shape where
@@ -244,6 +248,9 @@ instance Functor Shape where
 
 instance Semigroup (Shape dim) where
   Shape l1 <> Shape l2 = Shape $ l1 ++ l2
+  Shape [] <> s = s
+  s <> Shape [] = s
+  s1 <> s2 = s1 `SConcat` s2
 
 instance Monoid (Shape dim) where
   mempty = Shape []
@@ -259,6 +266,19 @@ stripDims :: Int -> Shape dim -> Maybe (Shape dim)
 stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
+
+data AutoMap = AutoMap
+  { autoRep :: Shape Size,
+    autoMap :: Shape Size,
+    autoFrame :: Shape Size
+  }
+  deriving (Eq, Show, Ord)
+
+instance Semigroup AutoMap where
+  (AutoMap r1 m1 f1) <> (AutoMap r2 m2 f2) = AutoMap (r1 <> r2) (m1 <> m2) (f1 <> f2)
+
+instance Monoid AutoMap where
+  mempty = AutoMap mempty mempty mempty
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
 -- instances always compare values of this type equal.
@@ -630,7 +650,7 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Maybe VName), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName, AutoMap), ExpBase f vn))
       SrcLoc
   | Range
       (ExpBase f vn)
@@ -1258,7 +1278,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Maybe VName, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of
@@ -1270,7 +1290,7 @@ mkApply f args (AppRes t ext)
           AppExp (Apply f args' (srcspan f $ snd $ NE.last args')) (Info (AppRes t ext))
   | otherwise = f
   where
-    onArg (v, x) = (Info v, x)
+    onArg (v, am, x) = (Info (v, am), x)
 
 -- | Construct an 'Apply' node, without type information.
 mkApplyUT :: ExpBase NoInfo vn -> ExpBase NoInfo vn -> ExpBase NoInfo vn
