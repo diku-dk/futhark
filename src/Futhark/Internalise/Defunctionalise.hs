@@ -910,7 +910,7 @@ liftedName _ _ = "defunc"
 defuncApplyArg ::
   String ->
   (Exp, StaticVal) ->
-  (((Maybe VName, AutoMap), Exp), [ParamType]) ->
+  (((Maybe VName, AutoMap Size), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
 defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
@@ -991,7 +991,7 @@ updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
 
-defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
+defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap Size), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
   (f', f_sv) <- defuncApplyFunction f (length args)
   case f_sv of

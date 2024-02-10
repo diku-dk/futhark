@@ -1656,7 +1656,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
     Right tysubsts -> runTermTypeM checkExp $ do
-      addInitialConstraints tysubsts
+      addInitialConstraints $ M.mapKeys (first $ const ()) tysubsts
 
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
         checkBinding (fname, retdecl', tparams, params', body', loc)

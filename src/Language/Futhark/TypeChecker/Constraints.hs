@@ -1,5 +1,7 @@
 module Language.Futhark.TypeChecker.Constraints
-  ( Type,
+  ( SVar,
+    SComp (..),
+    Type,
     toType,
     Ct (..),
     Constraints,
@@ -16,29 +18,43 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Map qualified as M
 import Data.Text qualified as T
+import Futhark.IR.Pretty
 import Futhark.Util.Pretty
 import Language.Futhark
 
--- | A shape component is currently just unit. The rank of an array is
--- then just the number of shape components it contains in its shape
--- list. When we add AUTOMAP, these components will also allow shape
--- variables. The list of components should then be understood as
--- concatenation of shapes (meaning you can't just take the length to
--- determine the rank of the array).
-type SComp = ()
+type SVar = VName
+
+-- | A shape component. `SDim` is a single dimension of unspecified
+-- size, `SVar` is a shape variable. A list of shape components should
+-- then be understood as concatenation of shapes (meaning you can't
+-- just take the length to determine the rank of the array).
+data SComp
+  = SDim
+  | SVar SVar
+  deriving (Eq, Ord, Show)
+
+instance Pretty SComp where
+  pretty (SDim) = "[]"
+  pretty (SVar x) = pretty x
+
+instance Pretty (Shape SComp) where
+  pretty = mconcat . map (brackets . pretty) . shapeDims
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes.
 type Type = TypeBase SComp NoUniqueness
 
 toType :: TypeBase d u -> Type
-toType = bimap (const ()) (const NoUniqueness)
+toType = bimap (const SDim) (const NoUniqueness)
 
-data Ct = CtEq Type Type
+data Ct
+  = CtEq Type Type
+  | CtAM SVar SVar
   deriving (Show)
 
 instance Pretty Ct where
   pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
+  pretty (CtAM r m) = pretty r <+> "=" <+> "•" <+> "∨" <+> pretty m <+> "=" <+> "•"
 
 type Constraints = [Ct]
 

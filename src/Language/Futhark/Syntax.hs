@@ -231,10 +231,7 @@ sizeFromInteger x = IntLit x (Info <$> Scalar $ Prim $ Signed Int64)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-data Shape dim
-  = Shape {shapeDims :: [dim]}
-  | SVar VName
-  | SConcat (Shape dim) (Shape dim)
+newtype Shape dim = Shape {shapeDims :: [dim]}
   deriving (Eq, Ord, Show)
 
 instance Foldable Shape where
@@ -248,9 +245,6 @@ instance Functor Shape where
 
 instance Semigroup (Shape dim) where
   Shape l1 <> Shape l2 = Shape $ l1 ++ l2
-  Shape [] <> s = s
-  s <> Shape [] = s
-  s1 <> s2 = s1 `SConcat` s2
 
 instance Monoid (Shape dim) where
   mempty = Shape []
@@ -267,17 +261,17 @@ stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
 
-data AutoMap = AutoMap
-  { autoRep :: Shape Size,
-    autoMap :: Shape Size,
-    autoFrame :: Shape Size
+data AutoMap u = AutoMap
+  { autoRep :: Shape u,
+    autoMap :: Shape u,
+    autoFrame :: Shape u
   }
   deriving (Eq, Show, Ord)
 
-instance Semigroup AutoMap where
+instance Semigroup (AutoMap u) where
   (AutoMap r1 m1 f1) <> (AutoMap r2 m2 f2) = AutoMap (r1 <> r2) (m1 <> m2) (f1 <> f2)
 
-instance Monoid AutoMap where
+instance Monoid (AutoMap u) where
   mempty = AutoMap mempty mempty mempty
 
 -- | The name (if any) of a function parameter.  The 'Eq' and 'Ord'
@@ -716,7 +710,7 @@ data AppExpBase f vn
     -- identical).
     Apply
       (ExpBase f vn)
-      (NE.NonEmpty (f (Maybe VName, AutoMap), ExpBase f vn))
+      (NE.NonEmpty (f (Maybe VName, AutoMap Size), ExpBase f vn))
       SrcLoc
   | Range
       (ExpBase f vn)
@@ -1344,7 +1338,7 @@ deriving instance Show (ProgBase Info VName)
 deriving instance Show (ProgBase NoInfo Name)
 
 -- | Construct an 'Apply' node, with type information.
-mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
+mkApply :: ExpBase Info vn -> [(Maybe VName, AutoMap Size, ExpBase Info vn)] -> AppRes -> ExpBase Info vn
 mkApply f args (AppRes t ext)
   | Just args' <- NE.nonEmpty $ map onArg args =
       case f of

@@ -235,6 +235,12 @@ newTypeOverloaded :: (Monoid u) => SrcLoc -> Name -> [PrimType] -> TermM (TypeBa
 newTypeOverloaded loc name pts =
   tyVarType <$> newTyVarWith loc name (TyVarPrim pts)
 
+newSVar :: (Located loc) => loc -> Name -> TermM SVar
+newSVar _loc desc = do
+  i <- incCounter
+  v <- newID $ mkTypeVarName desc i
+  pure v
+
 asStructType :: (Monoid u) => SrcLoc -> TypeBase d u -> TermM (TypeBase Size u)
 asStructType _ (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
 asStructType _ (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
@@ -258,6 +264,9 @@ ctEq t1 t2 =
   where
     t1' = toType t1
     t2' = toType t2
+
+ctAM :: SVar -> SVar -> TermM ()
+ctAM r m = addCt $ CtAM r m
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -328,7 +337,7 @@ instance MonadTypeChecker TermM where
 
 arrayOfRank :: Int -> Type -> Type
 arrayOfRank 0 t = t
-arrayOfRank n t = arrayOf (Shape $ replicate n ()) t
+arrayOfRank n t = arrayOf (Shape $ replicate n SDim) t
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
 require _why pts e = do
@@ -346,13 +355,14 @@ instTypeScheme ::
   StructType ->
   TermM ([VName], StructType)
 instTypeScheme _qn loc tparams t = do
-  (names, substs) <- fmap (unzip . catMaybes) $ forM tparams $ \tparam -> do
-    case tparam of
-      TypeParamType _ v _ -> do
-        v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v
-        pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v'))
-      TypeParamDim {} ->
-        pure Nothing
+  (names, substs) <- fmap (unzip . catMaybes) $
+    forM tparams $ \tparam -> do
+      case tparam of
+        TypeParamType _ v _ -> do
+          v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v
+          pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType v'))
+        TypeParamDim {} ->
+          pure Nothing
   let t' = applySubst (`lookup` substs) t
   pure (names, t')
 
@@ -575,16 +585,24 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM Type
-checkApply _ _ (Scalar (Arrow _ _ _ a (RetType _ b))) arg = do
-  ctEq a $ expType arg
-  pure $ toType b
+checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM (Type, AutoMap SComp)
 checkApply loc _ ftype arg = do
-  a <- newType loc "arg"
-  b <- newTyVar loc "res"
-  ctEq ftype $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] (tyVarType b)
-  ctEq a (expType arg)
-  pure $ tyVarType b
+  (a, b) <- split ftype
+  r <- newSVar loc "R"
+  m <- newSVar loc "M"
+  let s_r = Shape $ pure $ SVar r
+      s_m = Shape $ pure $ SVar m
+  ctAM r m
+  ctEq (arrayOf s_r $ toType $ typeOf arg) (arrayOf s_m a)
+  pure (arrayOf s_m b, AutoMap {autoRep = s_r, autoMap = s_m, autoFrame = mempty})
+  where
+    split (Scalar (Arrow _ _ _ a (RetType _ b))) =
+      pure (a, toType b)
+    split ftype' = do
+      a <- newType loc "arg"
+      b <- newTyVar loc "res"
+      ctEq ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] (tyVarType b)
+      pure (a, tyVarType b)
 
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
@@ -780,7 +798,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
 
     onArg (i, f_t) (_, arg) = do
       arg' <- checkExp arg
-      rt <- checkApply loc (fname, i) (toType f_t) arg'
+      (rt, am) <- checkApply loc (fname, i) (toType f_t) arg'
       pure
         ( (i + 1, rt),
           (Info (Nothing, mempty), arg')
@@ -791,8 +809,8 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   e1' <- checkExp e1
   e2' <- checkExp e2
 
-  rt1 <- checkApply loc (Just op, 0) (toType ftype) e1'
-  rt2 <- checkApply loc (Just op, 1) rt1 e2'
+  (rt1, am1) <- checkApply loc (Just op, 0) (toType ftype) e1'
+  (rt2, am2) <- checkApply loc (Just op, 1) rt1 e2'
   rt2' <- asStructType loc rt2
 
   pure $
