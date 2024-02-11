@@ -35,10 +35,10 @@ data SComp
 
 instance Pretty SComp where
   pretty SDim = "[]"
-  pretty (SVar x) = pretty x
+  pretty (SVar x) = brackets $ pretty x
 
 instance Pretty (Shape SComp) where
-  pretty = mconcat . map (brackets . pretty) . shapeDims
+  pretty = mconcat . map pretty . shapeDims
 
 -- | The type representation used by the constraint solver. Agnostic
 -- to sizes.
