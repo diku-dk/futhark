@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * A concatenation simplification would sometimes mess up sizes.
   (#2104)
 
+* But related to monomorphisation of polymorphic local functions
+  (#2106).
+
 ## [0.25.13]
 
 ### Added

@@ -18,7 +18,7 @@ import Language.Futhark
 import Language.Futhark.Traversals
 
 data Env = Env
-  { envReplace :: M.Map VName Exp,
+  { envReplace :: M.Map VName (StructType -> Exp),
     envVtable :: M.Map VName StructType
   }
 
@@ -53,7 +53,7 @@ addValBind vb = modify $ \s ->
       stateGlobal = foldl' (flip S.insert) (stateGlobal s) (valBindBound vb)
     }
 
-replacing :: VName -> Exp -> LiftM a -> LiftM a
+replacing :: VName -> (StructType -> Exp) -> LiftM a -> LiftM a
 replacing v e = local $ \env ->
   env {envReplace = M.insert v e $ envReplace env}
 
@@ -85,7 +85,7 @@ bindingForm While {} = id
 toRet :: TypeBase Size u -> TypeBase Size Uniqueness
 toRet = second (const Nonunique)
 
-liftFunction :: VName -> [TypeParam] -> [Pat ParamType] -> ResRetType -> Exp -> LiftM Exp
+liftFunction :: VName -> [TypeParam] -> [Pat ParamType] -> ResRetType -> Exp -> LiftM (StructType -> Exp)
 liftFunction fname tparams params (RetType dims ret) funbody = do
   -- Find free variables
   vtable <- asks envVtable
@@ -124,22 +124,22 @@ liftFunction fname tparams params (RetType dims ret) funbody = do
         valBindEntryPoint = Nothing
       }
 
-  pure
-    $ apply
-      (Var (qualName fname) (Info (augType free_ts)) mempty)
-    $ free_dims ++ free_nondims
+  pure $ \orig_type ->
+    apply
+      orig_type
+      (Var (qualName fname) (Info (augType free_ts orig_type)) mempty)
+      $ free_dims ++ free_nondims
   where
-    orig_type = funType params $ RetType dims ret
     mkParam (v, t) = Id v (Info (toParam Observe t)) mempty
     freeVar (v, t) = Var (qualName v) (Info t) mempty
-    augType rem_free = funType (map mkParam rem_free) $ RetType [] $ toRet orig_type
+    augType rem_free orig_type = funType (map mkParam rem_free) $ RetType [] $ toRet orig_type
 
-    apply :: Exp -> [(VName, StructType)] -> Exp
-    apply f [] = f
-    apply f (p : rem_ps) =
-      let inner_ret = AppRes (augType rem_ps) mempty
+    apply :: StructType -> Exp -> [(VName, StructType)] -> Exp
+    apply _ f [] = f
+    apply orig_type f (p : rem_ps) =
+      let inner_ret = AppRes (augType rem_ps orig_type) mempty
           inner = mkApply f [(Nothing, mempty, freeVar p)] inner_ret
-       in apply inner rem_ps
+       in apply orig_type inner rem_ps
 
 transformSubExps :: ASTMapper LiftM
 transformSubExps = identityMapper {mapOnExp = transformExp}
@@ -150,10 +150,10 @@ transformExp (AppExp (LetFun fname (tparams, params, _, Info ret, funbody) body 
   fname' <- newVName $ "lifted_" ++ baseString fname
   lifted_call <- liftFunction fname' tparams params ret funbody'
   replacing fname lifted_call $ transformExp body
-transformExp (Lambda params body _ (Info ret) _) = do
+transformExp e@(Lambda params body _ (Info ret) _) = do
   body' <- bindingParams [] params $ transformExp body
   fname <- newVName "lifted_lambda"
-  liftFunction fname [] params ret body'
+  liftFunction fname [] params ret body' <*> pure (typeOf e)
 transformExp (AppExp (LetPat sizes pat e body loc) appres) = do
   e' <- transformExp e
   body' <- bindingLetPat (map sizeName sizes) pat $ transformExp body
@@ -173,10 +173,10 @@ transformExp (AppExp (Loop sizes pat args form body loc) appres) = do
     form' <- astMap transformSubExps form
     body' <- bindingForm form' $ transformExp body
     pure $ AppExp (Loop sizes pat args' form' body' loc) appres
-transformExp e@(Var v _ _) =
+transformExp e@(Var v (Info t) _) =
   -- Note that function-typed variables can only occur in expressions,
   -- not in other places where VNames/QualNames can occur.
-  asks (fromMaybe e . M.lookup (qualLeaf v) . envReplace)
+  asks $ maybe e ($ t) . M.lookup (qualLeaf v) . envReplace
 transformExp e = astMap transformSubExps e
 
 transformValBind :: ValBind -> LiftM ()
