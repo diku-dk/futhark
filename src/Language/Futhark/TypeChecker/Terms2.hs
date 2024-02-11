@@ -59,6 +59,7 @@ import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
+import Language.Futhark.TypeChecker.Rank
 import Language.Futhark.TypeChecker.Types
 import Language.Futhark.TypeChecker.Unify (Level)
 import Prelude hiding (mod)
@@ -1070,3 +1071,35 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
            in either T.unpack (unlines . map p . M.toList) solution
         ]
     pure (solution, params', retdecl', body')
+
+-- checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
+--  bindParams tparams params $ \params' -> do
+--    body' <- checkExp body
+--
+--    retdecl' <- checkRetDecl body' retdecl
+--
+--    cts <- gets termConstraints
+--
+--    counter <- gets termCounter
+--
+--    traceM $ unlines $ map prettyString cts
+--
+--    case rankAnalysis counter cts of
+--      Nothing -> error ""
+--      Just rank_map -> do
+--        tyvars <- gets termTyVars
+--
+--        let solution = solve cts tyvars
+--
+--        traceM $
+--          unlines
+--            [ "# function " <> prettyNameString fname,
+--              "## constraints:",
+--              unlines $ map prettyString cts,
+--              "## tyvars:",
+--              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
+--              "## solution:",
+--              let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
+--               in either T.unpack (unlines . map p . M.toList) solution
+--            ]
+--        pure (solution, params', retdecl', body')

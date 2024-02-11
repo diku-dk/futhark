@@ -36,7 +36,9 @@ import Data.Vector.Unboxed qualified as V
 import Debug.Trace
 import Futhark.Solve.Matrix (Matrix (..))
 import Futhark.Solve.Matrix qualified as M
-import Prelude hiding (or, (<=), (==), (>=))
+import Futhark.Util.Pretty
+import Language.Futhark.Pretty
+import Prelude hiding (or)
 import Prelude qualified
 
 -- | A linear program. 'LP c a d' represents the program
@@ -86,17 +88,16 @@ convert (LP c a d) = LPE c' a' d
 
 -- | Linear sum of variables.
 newtype LSum v a = LSum {lsum :: (Map (Maybe v) a)}
-  deriving (Eq)
+  deriving (Show, Eq)
 
-instance (Show v, Show a) => Show (LSum v a) where
-  show (LSum m) =
-    L.intercalate
-      " + "
+instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
+  pretty (LSum m) =
+    concatWith (surround " + ")
       $ map
         ( \(k, a) ->
             case k of
-              Nothing -> show a
-              Just k' -> show a <> "*" <> show k'
+              Nothing -> pretty a
+              Just k' -> (if a == 1 then mempty else pretty a <> "·") <> prettyName k'
         )
       $ Map.toList m
 
@@ -105,23 +106,27 @@ instance Functor (LSum v) where
 
 -- | Type of constraint
 data CType = Equal | LessEq
-  deriving (Eq)
+  deriving (Show, Eq)
 
-instance Show CType where
-  show (Equal) = "="
-  show (LessEq) = "<="
+instance Pretty CType where
+  pretty Equal = "="
+  pretty LessEq = "<="
 
 -- | A constraint for a linear program.
 data Constraint v a
   = Constraint CType (LSum v a) (LSum v a)
-  deriving (Eq)
+  deriving (Show, Eq)
 
-instance (Show a, Show v) => Show (Constraint v a) where
-  show (Constraint t l r) =
-    show l <> " " <> show t <> " " <> show r
+instance (IsName v, Pretty a, Eq a, Num a) => Pretty (Constraint v a) where
+  pretty (Constraint t l r) =
+    pretty l <+> pretty t <+> pretty r
 
 data OptType = Maximize | Minimize
   deriving (Show, Eq)
+
+instance Pretty OptType where
+  pretty Maximize = "maximize"
+  pretty Minimize = "minimize"
 
 -- | A linear program.
 data LinearProg v a = LinearProg
@@ -129,16 +134,16 @@ data LinearProg v a = LinearProg
     objective :: LSum v a,
     constraints :: [Constraint v a]
   }
-  deriving (Eq)
+  deriving (Show, Eq)
 
-instance (Show v, Show a) => Show (LinearProg v a) where
-  show (LinearProg opt obj cs) =
-    unlines $
-      [ show opt,
-        show obj,
-        "subject to:"
+instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LinearProg v a) where
+  pretty (LinearProg opt obj cs) =
+    vcat $
+      [ pretty opt,
+        indent 2 $ pretty obj,
+        "subject to",
+        indent 2 $ vcat $ map pretty cs
       ]
-        ++ map show cs
 
 bigM :: (Num a) => a
 bigM = 10 ^ 3

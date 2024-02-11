@@ -3,10 +3,13 @@ module Language.Futhark.TypeChecker.Rank (rankAnalysis) where
 import Control.Monad.State
 import Data.Map (Map)
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Vector.Unboxed qualified as V
+import Debug.Trace
 import Futhark.Solve.BranchAndBound
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
+import Futhark.Solve.Simplex
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.TypeChecker.Constraints
 
@@ -37,6 +40,20 @@ instance Rank ScalarType where
 instance Rank Type where
   rank (Scalar t) = rank t
   rank (Array _ shape t) = rank shape ~+~ rank t
+
+class Distribute a where
+  distribute :: a -> a
+
+instance Distribute Type where
+  distribute = distributeOne
+    where
+      distributeOne (Array _ s (Arrow _ _ _ ta (RetType rd tr))) =
+        Scalar $ Arrow NoUniqueness Unnamed mempty (arrayOf s ta) (RetType rd $ arrayOfWithAliases Nonunique s $ tr)
+      distributeOne t = t
+
+instance Distribute Ct where
+  distribute (CtEq t1 t2) = distribute t1 `CtEq` distribute t2
+  distribute c = c
 
 data RankState = RankState
   { rankBinVars :: Map VName VName,
@@ -101,8 +118,19 @@ mkLinearProg counter cs =
 
 rankAnalysis :: Int -> [Ct] -> Maybe (Map VName Int)
 rankAnalysis counter cs = do
+  traceM $ unlines $ concat $ map (\c -> [prettyString c, show c]) cs'
+  traceM $ prettyString prog
   (_size, ranks) <- branchAndBound lp
-  pure $ (ranks V.!) <$> inv_var_map
+  pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
   where
-    (lp, var_map) = linearProgToLP $ mkLinearProg counter cs
+    splitFuncs
+      ( CtEq
+          (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
+          (Scalar (Arrow _ _ _ t2a (RetType _ t2r)))
+        ) =
+        splitFuncs (CtEq t1a t2a) ++ splitFuncs (CtEq (toType t1r) (toType t2r))
+    splitFuncs c = [c]
+    cs' = foldMap (splitFuncs . distribute) cs
+    prog = mkLinearProg counter cs'
+    (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
