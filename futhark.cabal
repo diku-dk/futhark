@@ -523,6 +523,8 @@ test-suite unit
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
+      Futhark.Solve.BranchAndBoundTests
+      Futhark.Solve.SimplexTests
       Language.Futhark.CoreTests
       Language.Futhark.PrimitiveTests
       Language.Futhark.SyntaxTests
@@ -540,3 +542,4 @@ test-suite unit
     , tasty-hunit
     , tasty-quickcheck
     , text
+    , vector >=0.12
