@@ -158,7 +158,7 @@ instance (Pretty (Shape dim), Pretty u) => Pretty (ScalarTypeBase dim u) where
 
 prettyType :: (Pretty (Shape dim), Pretty u) => Int -> TypeBase dim u -> Doc a
 prettyType _ (Array u shape at) =
-  pretty u <> pretty shape <> align (prettyScalarType 1 at)
+  pretty u <> pretty shape <> align (prettyScalarType 2 at)
 prettyType p (Scalar t) =
   prettyScalarType p t
 
