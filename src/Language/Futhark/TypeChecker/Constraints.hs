@@ -44,8 +44,10 @@ instance Pretty (Shape SComp) where
 -- to sizes.
 type Type = TypeBase SComp NoUniqueness
 
-toType :: TypeBase d u -> Type
-toType = bimap (const SDim) (const NoUniqueness)
+-- | Careful when using this on something that already has an SComp
+-- size: it will throw away information by converting them to SDim.
+toType :: TypeBase Size u -> TypeBase SComp u
+toType = first (const SDim)
 
 data Ct
   = CtEq Type Type
@@ -153,7 +155,10 @@ unify :: Type -> Type -> Maybe [(Type, Type)]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Just []
 unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
-  Just [(t1a, t2a), (toType t1r, toType t2r)]
+  Just [(t1a, t2a), (t1r', t2r')]
+  where
+    t1r' = t1r `setUniqueness` NoUniqueness
+    t2r' = t2r `setUniqueness` NoUniqueness
 unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | M.keys fs1 == M.keys fs2 =
       Just $ M.elems $ M.intersectionWith (,) fs1 fs2

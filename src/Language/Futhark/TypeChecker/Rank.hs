@@ -128,7 +128,10 @@ rankAnalysis counter cs = do
           (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
           (Scalar (Arrow _ _ _ t2a (RetType _ t2r)))
         ) =
-        splitFuncs (CtEq t1a t2a) ++ splitFuncs (CtEq (toType t1r) (toType t2r))
+        splitFuncs (CtEq t1a t2a) ++ splitFuncs (CtEq t1r' t2r')
+        where
+          t1r' = t1r `setUniqueness` NoUniqueness
+          t2r' = t2r `setUniqueness` NoUniqueness
     splitFuncs c = [c]
     cs' = foldMap (splitFuncs . distribute) cs
     prog = mkLinearProg counter cs'
