@@ -171,9 +171,10 @@ unify t1 t2
 unify _ _ = Nothing
 
 solveCt :: Ct -> SolveM ()
-solveCt ct = do
-  let CtEq t1 t2 = ct
-  solveCt' (t1, t2)
+solveCt ct =
+  case ct of
+    CtEq t1 t2 -> solveCt' (t1, t2)
+    CtAM _ _ -> pure () -- Good vibes only.
   where
     bad = throwError $ "Unsolvable: " <> prettyText ct
     solveCt' (t1, t2) = do
