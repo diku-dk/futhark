@@ -612,15 +612,8 @@ defuncExp (Project vn e0 tp@(Info tp') loc) = do
     Dynamic _ -> pure (Project vn e0' tp loc, Dynamic $ toParam Observe tp')
     HoleSV _ hloc -> pure (Project vn e0' tp loc, HoleSV tp' hloc)
     _ -> error $ "Projection of an expression with static value " ++ show sv0
-defuncExp (AppExp (LetWith id1 id2 idxs e1 body loc) res) = do
-  e1' <- defuncExp' e1
-  idxs' <- mapM defuncDimIndex idxs
-  let id1_binding =
-        Binding Nothing $ Dynamic $ toParam Observe $ unInfo $ identType id1
-  (body', sv) <-
-    localEnv (M.singleton (identName id1) id1_binding) $
-      defuncExp body
-  pure (AppExp (LetWith id1 id2 idxs' e1' body' loc) res, sv)
+defuncExp (AppExp LetWith {} _) =
+  error "defuncExp: unexpected LetWith"
 defuncExp expr@(AppExp (Index e0 idxs loc) res) = do
   e0' <- defuncExp' e0
   idxs' <- mapM defuncDimIndex idxs
