@@ -18,6 +18,7 @@ import Futhark.Util.Pretty
 type Ident = T.Text
 
 data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
+              | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
 
 data Typ = Prim PrimType | Named Ident
 
@@ -26,7 +27,7 @@ type UnOp = T.Text
 
 data Exp
   = BoolExp Bool
-  | IntExp Integer
+  | IntExp Int
   | FloatExp Double
   | StringExp T.Text
   | VarExp Ident
@@ -61,6 +62,9 @@ instance Pretty PrimType where
   pretty UInt32 = "u32"
   pretty Float16 = "f16"
   pretty Float32 = "f32"
+  pretty (Vec2 t) = "vec2<" <> pretty t <> ">"
+  pretty (Vec3 t) = "vec3<" <> pretty t <> ">"
+  pretty (Vec4 t) = "vec4<" <> pretty t <> ">"
 
 instance Pretty Typ where
   pretty (Prim t) = pretty t

@@ -38,8 +38,10 @@ addCode code =
 
 entryParams :: [WGSL.Param]
 entryParams =
-  [ WGSL.Param "global_id" (WGSL.Prim WGSL.Int32)
-      [WGSL.Attrib "builtin" [WGSL.VarExp "global_invocation_id"]]
+  [ WGSL.Param "workgroup_id" (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+      [WGSL.Attrib "builtin" [WGSL.VarExp "workgroup_id"]],
+    WGSL.Param "local_id" (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
+      [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
@@ -129,6 +131,14 @@ genWGSLStm (DeclareScalar name _ typ) =
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
 genWGSLStm (If cond cThen cElse) = 
   WGSL.If (genWGSLExp $ untyped cond) [genWGSLStm cThen] [genWGSLStm cElse]
+genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = 
+  WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
+genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = 
+  WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "local_id" (WGSL.IntExp i))
+genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) = 
+  WGSL.Assign (nameToIdent dest) (WGSL.StringExp "TODO: Deal with block size")
+genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = 
+  WGSL.Assign (nameToIdent dest) (WGSL.StringExp "TODO: Can't get lockstep width")
 genWGSLStm _ = WGSL.Skip
 
 genWGSLExp :: Exp -> WGSL.Exp
