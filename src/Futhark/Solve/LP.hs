@@ -24,9 +24,11 @@ module Futhark.Solve.LP
     (~<=~),
     (~>=~),
     rowEchelonLPE,
+    linearProgToPulp,
   )
 where
 
+import Data.Char (isAscii)
 import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -97,7 +99,7 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
         ( \(k, a) ->
             case k of
               Nothing -> pretty a
-              Just k' -> (if a == 1 then mempty else pretty a <> "·") <> prettyName k'
+              Just k' -> (if a == 1 then mempty else pretty a <> "*") <> prettyName k'
         )
       $ Map.toList m
 
@@ -109,7 +111,7 @@ data CType = Equal | LessEq
   deriving (Show, Eq)
 
 instance Pretty CType where
-  pretty Equal = "="
+  pretty Equal = "=="
   pretty LessEq = "<="
 
 -- | A constraint for a linear program.
@@ -144,6 +146,38 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LinearProg v a) where
         "subject to",
         indent 2 $ vcat $ map pretty cs
       ]
+
+-- For debugging
+linearProgToPulp :: (Unbox a, IsName v, Ord v, Pretty a, Eq a, Num a) => LinearProg v a -> String
+linearProgToPulp prog =
+  map rm_subscript $
+    unlines
+      [ "from pulp import *",
+        "prob = LpProblem('', " <> lptype <> ")",
+        unlines vars,
+        unlines $ map (("prob += " <>) . prettyString) $ constraints prog,
+        "status = prob.solve()",
+        "print(f'status: {status}')",
+        unlines res
+      ]
+  where
+    lptype =
+      case optType prog of
+        Maximize -> "LpMaximize"
+        Minimize -> "LpMinimize"
+    prog_vars = Map.elems $ snd $ linearProgToLP prog
+    vars =
+      map
+        ( \v ->
+            show (prettyName v)
+              <> " = "
+              <> "LpVariable("
+              <> show (show (prettyName v))
+              <> ", lowBound = 0, cat = 'Integer')"
+        )
+        prog_vars
+    res = map (\v -> "print(f'" <> show (prettyName v) <> ": {value(" <> show (prettyName v) <> ")}')") prog_vars
+    rm_subscript x = fromMaybe x $ lookup x $ zip "₀₁₂₃₄₅₆₇₈₉" "0123456789"
 
 bigM :: (Num a) => a
 bigM = 10 ^ 3
