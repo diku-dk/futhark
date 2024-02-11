@@ -6,6 +6,9 @@ module Futhark.CodeGen.ImpGen.WGSL
     UnOp,
     Exp (..),
     Stmt (..),
+    Attrib (..),
+    Param (..),
+    Function (..)
   )
 where
 
@@ -41,6 +44,16 @@ data Stmt
   | If Exp [Stmt] [Stmt]
   | For Ident Exp Exp Stmt [Stmt]
   | While Exp [Stmt]
+
+data Attrib = Attrib Ident [Exp]
+data Param = Param Ident Typ [Attrib]
+
+data Function = Function
+  { funName :: Ident,
+    funAttribs :: [Attrib],
+    funParams :: [Param],
+    funBody :: [Stmt]
+  }
 
 instance Pretty PrimType where
   pretty Bool = "bool"
@@ -95,4 +108,27 @@ instance Pretty Stmt where
   pretty (While cond body) =
     "while" <+> pretty cond <+> "{"
     </> indent 2 (semistack (map pretty body))
-    <> "}"
+    </> "}"
+
+instance Pretty Attrib where
+  pretty (Attrib name []) = "@" <> pretty name
+  pretty (Attrib name args) =
+    "@" <> pretty name <> parens (commasep $ map pretty args)
+
+instance Pretty Param where
+  pretty (Param name typ attribs) = stack
+    [ hsep (map pretty attribs),
+      pretty name <+> ":" <+> pretty typ
+    ]
+
+prettyParams :: [Param] -> Doc a
+prettyParams [] = "()"
+prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
+
+instance Pretty Function where
+  pretty fun = stack
+    [ hsep (map pretty (funAttribs fun)),
+      "fn" <+> pretty (funName fun) <> prettyParams (funParams fun) <+> "{",
+      indent 2 (semistack (map pretty (funBody fun))),
+      "}"
+    ]

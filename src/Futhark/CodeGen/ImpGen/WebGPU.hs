@@ -36,6 +36,12 @@ addCode :: T.Text -> WebGPUM ()
 addCode code =
   modify $ \s -> s {wsCode = wsCode s <> code}
 
+entryParams :: [WGSL.Param]
+entryParams =
+  [ WGSL.Param "global_id" (WGSL.Prim WGSL.Int32)
+      [WGSL.Attrib "builtin" [WGSL.VarExp "global_invocation_id"]]
+  ]
+
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -43,7 +49,15 @@ onKernel kernel = do
   addCode $ prettyText (ImpGPU.kernelBody kernel) <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
   let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
-  addCode $ prettyText wgslBody
+  let attribs = [WGSL.Attrib "compute" [],
+                 WGSL.Attrib "workgroup_size" [WGSL.VarExp "todo"]]
+  let wgslFun = WGSL.Function
+                  { WGSL.funName = name,
+                    WGSL.funAttribs = attribs,
+                    WGSL.funParams = entryParams,
+                    WGSL.funBody = [wgslBody]
+                  }
+  addCode $ prettyText wgslFun
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
     where name = nameToText (ImpGPU.kernelName kernel)
@@ -105,7 +119,7 @@ primWGSLType (FloatType Float16) = WGSL.Float16
 primWGSLType (FloatType Float32) = WGSL.Float32
 primWGSLType (FloatType Float64) = error "TODO: WGSL has no f64"
 primWGSLType Bool = WGSL.Bool
--- TODO: Do we ever get unit types all the way here?
+-- TODO: Make sure we do not ever codegen statements involving Unit variables
 primWGSLType Unit = error "TODO: no unit in WGSL"
 
 genWGSLStm :: Code ImpGPU.KernelOp -> WGSL.Stmt
