@@ -34,7 +34,7 @@ data SComp
   deriving (Eq, Ord, Show)
 
 instance Pretty SComp where
-  pretty (SDim) = "[]"
+  pretty SDim = "[]"
   pretty (SVar x) = pretty x
 
 instance Pretty (Shape SComp) where
@@ -158,7 +158,7 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
   | M.keys fs1 == M.keys fs2 =
       Just $ M.elems $ M.intersectionWith (,) fs1 fs2
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
-  | M.keys cs1 == M.keys cs2 = do
+  | M.keys cs1 == M.keys cs2 =
       fmap concat
         . forM (M.elems $ M.intersectionWith (,) cs1 cs2)
         $ \(ts1, ts2) -> do
