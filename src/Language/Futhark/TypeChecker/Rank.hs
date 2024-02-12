@@ -136,7 +136,7 @@ mkLinearProg counter cs tyVars =
 
 rankAnalysis :: Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars)
 rankAnalysis counter cs tyVars = do
-  traceM $ unlines ["rankAnalysis prog:", prettyString prog]
+  traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   (_size, ranks) <- branchAndBound lp
   let rank_map = (fromJust . (ranks V.!?)) <$> inv_var_map
   let (cs', SubstState tyVars') =

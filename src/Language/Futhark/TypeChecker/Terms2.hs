@@ -1074,6 +1074,8 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     tyvars <- gets termTyVars
 
+    traceM $ "# function " <> prettyNameString fname
+
     case rankAnalysis counter cts tyvars of
       Nothing -> error ""
       Just (cts', tyvars') -> do
@@ -1081,8 +1083,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
         traceM $
           unlines
-            [ "# function " <> prettyNameString fname,
-              "## constraints:",
+            [ "## constraints:",
               unlines $ map prettyString cts',
               "## tyvars:",
               unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
