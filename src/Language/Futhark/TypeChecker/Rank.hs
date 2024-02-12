@@ -231,25 +231,20 @@ rankToShape x = do
   rs <- asks envRanks
   pure $ Shape $ replicate (rs M.! x) SDim
 
-addRankInfo :: TyVar -> SubstM TyVar
+addRankInfo :: TyVar -> SubstM ()
 addRankInfo t = do
   rs <- asks envRanks
-  if rs M.! t == 0
-    then pure t
-    else do
-      new_vars <- gets substNewVars
-      maybe new_var pure $ new_vars M.!? t
+  unless (rs M.! t == 0) $ do
+    new_vars <- gets substNewVars
+    maybe new_var (const $ pure ()) $ new_vars M.!? t
   where
     lvl = 0 -- FIXME
     new_var = do
       t' <- newTyVar t
       old_tyvars <- asks envTyVars
-      case old_tyvars M.!? t of
-        Nothing -> pure t'
-        Just info -> do
-          modify $ \s -> s {substTyVars = M.insert t' info $ substTyVars s}
-          modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree) $ substTyVars s}
-          pure t'
+      let info = old_tyvars M.! t
+      modify $ \s -> s {substTyVars = M.insert t' info $ substTyVars s}
+      modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree) $ substTyVars s}
 
 class SubstRanks a where
   substRanks :: a -> SubstM a
@@ -264,9 +259,8 @@ instance SubstRanks (Shape SComp) where
       instDim (SVar x) = rankToShape x
 
 instance SubstRanks (TypeBase SComp u) where
-  substRanks t@(Scalar (TypeVar u (QualName [] x) [])) = do
-    x' <- addRankInfo x
-    pure $ (Scalar (TypeVar u (QualName [] x') []))
+  substRanks t@(Scalar (TypeVar u (QualName [] x) [])) =
+    addRankInfo x >> pure t
   substRanks (Scalar (Arrow u p d ta (RetType retdims tr))) = do
     ta' <- substRanks ta
     tr' <- substRanks tr
@@ -280,64 +274,3 @@ instance SubstRanks (TypeBase SComp u) where
 instance SubstRanks Ct where
   substRanks (CtEq t1 t2) = CtEq <$> substRanks t1 <*> substRanks t2
   substRanks _ = error ""
-
--- data SubstState = SubstState
---  { substTyVars :: Map TyVar TyVarSol,
---    substNameSource :: VNameSource,
---    substCounter :: !Int
---  }
---
--- newtype SubstM a = SubstM {runSubstM :: State SubstState a}
---  deriving (Functor, Applicative, Monad, MonadState SubstState)
---
--- substIncCounter :: SubstM Int
--- substIncCounter = do
---  s <- get
---  put s {substCounter = substCounter s + 1}
---  pure $ substCounter s
---
--- newTyVar :: Name -> SubstM TyVar
--- newTyVar desc = do
---  i <- substIncCounter
---  newID $ mkTypeVarName desc i
---  where
---    newID x = do
---      s <- get
---      let (v', src') = FreshNames.newName (substNameSource s) $ VName x 0
---      put $ s {substNameSource = src'}
---      pure v'
---
--- addTyVarSol :: TyVar -> Shape SComp -> SubstM TyVar
--- addTyVarSol t shape = do
---  m <- subsTyVars gets
---  case m M.!? t of
---    Nothing -> do
---      t' <- newTyVar $ baseName t
---      modify $ \s -> s {substTyVars = M.insert t () $ substTyVars s}
---    Just t' -> pure t'
---
--- rankToShape :: Map VName Int -> VName -> Shape SComp
--- rankToShape rs x = Shape $ replicate (rs M.! x) SDim
---
--- class SubstRanks a where
---  substRanks :: Map VName Int -> a -> SubstM a
---
--- instance SubstRanks (Shape SComp) where
---  substRanks rs = pure . foldMap instDim
---    where
---      instDim (SDim) = Shape $ pure SDim
---      instDim (SVar x) = rankToShape rs x
---
--- instance SubstRanks (TypeBase SComp u) where
---  substRanks rs t@(Scalar (TypeVar u (QualName [] x) []))
---    | rs M.! x > 0 = do
---        t' <- newTyVar $ baseName t
---        t' <- addTyVarSol
---        arrayOfWithAliases u (rankToShape rs x) t
---  substRanks rs (Scalar (Arrow u p d ta (RetType retdims tr))) =
---    Scalar (Arrow u p d (substRanks rs ta) (RetType retdims (substRanks rs tr)))
---  substRanks _ t = t
---
--- instance SubstRanks Ct where
---  substRanks rs (CtEq t1 t2) = CtEq <$> substRanks rs t1 <*> substRanks rs t2
---  substRanks _ _ = error ""
