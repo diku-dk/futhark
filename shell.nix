@@ -2,6 +2,20 @@
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {};
+  pps = ps: with ps; [
+    (
+      buildPythonPackage rec {
+        pname = "PuLP";
+        version = "2.7.0";
+        src = fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-5z7msy1jnJuM9LSt7TNLoVi+X4MTVE4Fb3lqzgoQrmM=";
+        };
+        doCheck = false;
+      }
+    )
+  ];
+  python = pkgs.python3.withPackages pps;
 in
 pkgs.stdenv.mkDerivation {
   name = "futhark";
@@ -38,6 +52,10 @@ pkgs.stdenv.mkDerivation {
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
+      # remove (needed for PuLP)
+      python
+      cbc
+      glpk
     ]
     ++ lib.optionals (stdenv.isLinux)
       [ opencl-headers
