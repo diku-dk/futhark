@@ -115,9 +115,9 @@ bindingIdent ident = binding [ident]
 
 checkPat' ::
   [(SizeBinder VName, QualName VName)] ->
-  Pat ParamType ->
+  Pat (TypeBase Size u) ->
   Inferred ParamType ->
-  TermTypeM (Pat ParamType)
+  TermTypeM (Pat (TypeBase Size u))
 checkPat' sizes (PatParens p loc) t =
   PatParens <$> checkPat' sizes p t <*> pure loc
 checkPat' sizes (PatAttr attr p loc) t =
@@ -151,11 +151,6 @@ checkPat' sizes p@(RecordPat p_fs loc) (Ascribed t)
       RecordPat . M.toList <$> check t_fs <*> pure loc
   | otherwise = do
       p_fs' <- traverse (const $ newTypeVar loc "t") $ M.fromList p_fs
-
-      when (sort (M.keys p_fs') /= sort (map fst p_fs)) $
-        typeError loc mempty $
-          "Duplicate fields in record pattern" <+> pretty p <> "."
-
       unify (mkUsage loc "matching a record pattern") (Scalar (Record p_fs')) (toStruct t)
       checkPat' sizes p $ Ascribed $ toParam Observe $ Scalar (Record p_fs')
   where
@@ -193,12 +188,12 @@ checkPat ::
   [(SizeBinder VName, QualName VName)] ->
   Pat (TypeBase Size u) ->
   Inferred StructType ->
-  (Pat ParamType -> TermTypeM a) ->
+  (Pat (TypeBase Size u) -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
   p' <-
     onFailure (CheckingPat (fmap toStruct p) t) $
-      checkPat' sizes (fmap (toParam Observe) p) (fmap (toParam Observe) t)
+      checkPat' sizes p (fmap (toParam Observe) t)
 
   let explicit = mustBeExplicitInType $ patternStructType p'
 
@@ -216,7 +211,7 @@ bindingPat ::
   [SizeBinder VName] ->
   Pat (TypeBase Size u) ->
   StructType ->
-  (Pat ParamType -> TermTypeM a) ->
+  (Pat (TypeBase Size u) -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
   substs <- mapM mkSizeSubst sizes
@@ -240,7 +235,9 @@ bindingParams ::
 bindingParams tps orig_ps m = bindingTypeParams tps $ do
   let descend ps' (p : ps) =
         checkPat [] p NoneInferred $ \p' ->
-          binding (patIdents $ fmap toStruct p') $ incLevel $ descend (p' : ps') ps
+          binding (patIdents $ fmap toStruct p') $
+            incLevel $
+              descend (p' : ps') ps
       descend ps' [] = m $ reverse ps'
 
   incLevel $ descend [] orig_ps

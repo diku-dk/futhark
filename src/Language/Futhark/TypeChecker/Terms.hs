@@ -1662,7 +1662,6 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
     Right tysubsts -> runTermTypeM checkExp $ do
       addInitialConstraints tysubsts
 
-      traceM $ unlines $ map prettyString params
       traceM $ prettyString body'
 
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
