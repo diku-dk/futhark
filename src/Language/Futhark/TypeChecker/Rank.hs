@@ -2,6 +2,7 @@ module Language.Futhark.TypeChecker.Rank (rankAnalysis) where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
@@ -16,6 +17,8 @@ import Futhark.Solve.Simplex
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad (mkTypeVarName)
+import System.IO.Unsafe
+import System.Process
 
 type LSum = LP.LSum VName Double
 
@@ -135,11 +138,16 @@ mkLinearProg counter cs tyVars =
     finalState = flip execState initState $ runRankM buildLP
 
 rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
-rankAnalysis debug_zero_ranks vns counter cs tyVars = do
+rankAnalysis use_python vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   rank_map <-
-    if debug_zero_ranks
-      then pure $ fmap (const 0) inv_var_map
+    if use_python
+      then do
+        -- traceM $ linearProgToPulp prog
+        parseRes $
+          unsafePerformIO $
+            readProcess "python" [] $
+              linearProgToPulp prog
       else do
         (_size, ranks) <- branchAndBound lp
         pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
@@ -180,6 +188,29 @@ rankAnalysis debug_zero_ranks vns counter cs tyVars = do
     prog = mkLinearProg counter cs' tyVars
     (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
+
+    rm_subscript x = fromMaybe x $ lookup x $ zip "₀₁₂₃₄₅₆₇₈₉" "0123456789"
+    vname_to_pulp_var = M.mapWithKey (\k _ -> map rm_subscript $ show $ prettyName k) inv_var_map
+    pulp_var_to_vname =
+      M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList vname_to_pulp_var]
+
+    parseRes :: String -> Maybe (Map VName Int)
+    parseRes s = do
+      (status : vars) <- trimToStart $ lines s
+      if not (success status)
+        then Nothing
+        else do
+          pure $ M.fromList $ catMaybes $ map readVar vars
+      where
+        trimToStart [] = Nothing
+        trimToStart (l : ls)
+          | "status" `L.isPrefixOf` l = Just (l : ls)
+          | otherwise = trimToStart ls
+        success l =
+          (read $ drop (length ("status: " :: [Char])) l) == (1 :: Int)
+        readVar xs =
+          let (v, _ : value) = L.span (/= ':') xs
+           in Just (fromJust $ pulp_var_to_vname M.!? v, read value)
 
 newtype SubstM a = SubstM (StateT SubstState (Reader SubstEnv) a)
   deriving (Functor, Applicative, Monad, MonadState SubstState, MonadReader SubstEnv)
@@ -233,19 +264,20 @@ newTyVar t = do
 rankToShape :: VName -> SubstM (Shape SComp)
 rankToShape x = do
   rs <- asks envRanks
-  pure $ Shape $ replicate (rs M.! x) SDim
+  pure $ Shape $ replicate (fromJust $ rs M.!? x) SDim
 
 addRankInfo :: TyVar -> SubstM ()
 addRankInfo t = do
   rs <- asks envRanks
-  unless (rs M.! t == 0) $ do
+  -- unless (fromMaybe (error $ prettyString t) (rs M.!? t) == 0) $ do
+  unless (fromMaybe 0 (rs M.!? t) == 0) $ do
     new_vars <- gets substNewVars
     maybe new_var (const $ pure ()) $ new_vars M.!? t
   where
     new_var = do
       t' <- newTyVar t
       old_tyvars <- asks envTyVars
-      let info = old_tyvars M.! t
+      let info = fromJust $ old_tyvars M.!? t
       modify $ \s -> s {substTyVars = M.insert t' info $ substTyVars s}
       modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree) $ substTyVars s}
 

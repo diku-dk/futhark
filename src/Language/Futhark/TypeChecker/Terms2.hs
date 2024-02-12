@@ -1078,9 +1078,15 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     vns <- gets termNameSource
 
-    let debug_zero_ranks = True
+    let use_python = True
 
-    case rankAnalysis debug_zero_ranks vns counter cts tyvars of
+    traceM $
+      unlines
+        [ "## cts:",
+          unlines $ map prettyString cts
+        ]
+
+    case rankAnalysis use_python vns counter cts tyvars of
       Nothing -> error ""
       Just (cts', tyvars', vns', counter') -> do
         modify $ \s -> s {termCounter = counter', termNameSource = vns'}

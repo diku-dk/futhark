@@ -172,7 +172,9 @@ linearProgToPulp prog =
             show (prettyName v)
               <> " = "
               <> "LpVariable("
-              <> show (show (prettyName v))
+              <> "'"
+              <> show (prettyName v)
+              <> "_'"
               <> ", lowBound = 0, cat = 'Integer')"
         )
         prog_vars
