@@ -1622,13 +1622,18 @@ arrayOfM loc t shape = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
   pure $ arrayOf shape t
 
+-- A hack we need to create size variables for types at the right
+-- level.
+atLevel :: Int -> TermTypeM a -> TermTypeM a
+atLevel lvl = local $ \env -> env {termLevel = lvl}
+
 addInitialConstraints :: M.Map (TypeBase () NoUniqueness) (Int, [VName]) -> TermTypeM ()
 addInitialConstraints = mapM_ f . M.toList
   where
     addConstraint v lvl c = modifyConstraints $ M.insert v (lvl, c)
     usage = mkUsage (mempty :: Loc)
     f (t, (lvl, vs)) = do
-      (t', _) <- allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
+      (t', _) <- atLevel lvl $ allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
       forM_ vs $ \v ->
         addConstraint v lvl $ Constraint (RetType [] t') $ usage $ prettyNameText v
 
