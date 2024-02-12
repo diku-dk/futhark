@@ -105,9 +105,9 @@ addCt (CtAM r m) = do
   b_m <- binVar m
   addConstraints $ oneIsZero (b_r, r) (b_m, m)
 
-addTyVarInfo :: TyVar -> TyVarInfo -> RankM ()
-addTyVarInfo tv (TyVarFree) = pure ()
-addTyVarInfo tv (TyVarPrim _) =
+addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
+addTyVarInfo tv (_, TyVarFree) = pure ()
+addTyVarInfo tv (_, TyVarPrim _) =
   addConstraint $ rank tv ~==~ constant 0
 addTyVarInfo _ _ = error "Unhandled"
 
@@ -173,7 +173,9 @@ rankToShape rs x = Shape $ replicate (rs M.! x) SDim
 
 addRankInfo :: Map VName Int -> TyVar -> SubstM ()
 addRankInfo rs t =
-  modify $ \s -> s {substTyVars = M.insert t (TyVarRank $ rs M.! t) $ substTyVars s}
+  modify $ \s -> s {substTyVars = M.insert t (lvl, TyVarRank $ rs M.! t) $ substTyVars s}
+  where
+    lvl = 0 -- FIXME
 
 class SubstRanks a where
   substRanks :: Map VName Int -> a -> SubstM a

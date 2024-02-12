@@ -1622,15 +1622,15 @@ arrayOfM loc t shape = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
   pure $ arrayOf shape t
 
-addInitialConstraints :: M.Map (TypeBase () NoUniqueness) [VName] -> TermTypeM ()
+addInitialConstraints :: M.Map (TypeBase () NoUniqueness) (Int, [VName]) -> TermTypeM ()
 addInitialConstraints = mapM_ f . M.toList
   where
-    addConstraint v c = modifyConstraints $ M.insert v (0, c)
+    addConstraint v lvl c = modifyConstraints $ M.insert v (lvl, c)
     usage = mkUsage (mempty :: Loc)
-    f (t, vs) = do
+    f (t, (lvl, vs)) = do
       (t', _) <- allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
       forM_ vs $ \v ->
-        addConstraint v $ Constraint (RetType [] t') $ usage $ prettyNameText v
+        addConstraint v lvl $ Constraint (RetType [] t') $ usage $ prettyNameText v
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant

@@ -18,6 +18,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Text qualified as T
 import Futhark.IR.Pretty
 import Futhark.Util.Pretty
@@ -84,30 +85,31 @@ instance Pretty TyVarInfo where
 
 type TyVar = VName
 
--- | If a VName is not in this map, it is assumed to be rigid.
-type TyVars = M.Map TyVar TyVarInfo
+-- | If a VName is not in this map, it is assumed to be rigid. The
+-- integer is the level.
+type TyVars = M.Map TyVar (Int, TyVarInfo)
 
 data TyVarSol
   = -- | Has been substituted with this.
-    TyVarSol Type
+    TyVarSol Int Type
   | -- | Replaced by this other type variable.
     TyVarLink VName
   | -- | Not substituted yet; has this constraint.
-    TyVarUnsol TyVarInfo
+    TyVarUnsol Int TyVarInfo
   deriving (Show)
 
 newtype SolverState = SolverState {solverTyVars :: M.Map TyVar TyVarSol}
 
 initialState :: TyVars -> SolverState
-initialState tyvars = SolverState $ M.map TyVarUnsol tyvars
+initialState tyvars = SolverState $ M.map (uncurry TyVarUnsol) tyvars
 
 substTyVars :: (Monoid u) => M.Map TyVar TyVarSol -> TypeBase SComp u -> TypeBase SComp u
 substTyVars m t@(Scalar (TypeVar u (QualName qs v) args)) =
   case M.lookup v m of
     Just (TyVarLink v') ->
       substTyVars m $ Scalar $ TypeVar u (QualName qs v') args
-    Just (TyVarSol t') -> second (const mempty) t'
-    Just (TyVarUnsol _) -> t
+    Just (TyVarSol _ t') -> second (const mempty) t'
+    Just (TyVarUnsol {}) -> t
     Nothing -> t
 substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
 substTyVars m (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars m) fs
@@ -118,10 +120,11 @@ substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
 -- | A solution maps types to the set of type variables that must be
--- substituted with this type. This slightly odd representation is
--- needed to encode when two type variables are actually the same
--- type.  This matters when we start instanting the sizes of the type.
-type Solution = M.Map Type [TyVar]
+-- substituted with this type, as well as its binding level. This
+-- slightly odd representation is needed to encode when two type
+-- variables are actually the same type. This matters when we start
+-- instanting the sizes of the type.
+type Solution = M.Map Type (Int, [TyVar])
 
 solution :: SolverState -> Solution
 solution s =
@@ -132,23 +135,23 @@ solution s =
           M.toList $
             solverTyVars s
   where
-    mkSubst (TyVarSol t) = Just (t, [])
+    mkSubst (TyVarSol lvl t) = Just (lvl, (t, []))
     mkSubst _ = Nothing
     addLinks m (v1, TyVarLink v2) =
       case M.lookup v2 $ solverTyVars s of
         Just (TyVarLink v3) -> addLinks m (v1, TyVarLink v3)
         _ -> case M.lookup v2 m of
           Nothing -> m
-          Just (t, vs) -> M.insert v2 (t, v1 : vs) m
+          Just (t, (lvl, vs)) -> M.insert v2 (t, (lvl, v1 : vs)) m
     addLinks m _ = m
-    adjust (v, (t, vs)) = (t, v : vs)
+    adjust (v, (lvl, (t, vs))) = (t, (lvl, v : vs))
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
 
-subTyVar :: VName -> Type -> SolveM ()
-subTyVar v t =
-  modify $ \s -> s {solverTyVars = M.insert v (TyVarSol t) $ solverTyVars s}
+subTyVar :: VName -> Int -> Type -> SolveM ()
+subTyVar v lvl t =
+  modify $ \s -> s {solverTyVars = M.insert v (TyVarSol lvl t) $ solverTyVars s}
 
 linkTyVar :: VName -> VName -> SolveM ()
 linkTyVar v t =
@@ -190,13 +193,13 @@ solveCt ct =
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
             Just (TyVarLink v') -> flexible v'
-            Just (TyVarUnsol _) -> True
-            Just (TyVarSol _) -> False
-            Nothing -> False
+            Just (TyVarUnsol lvl _) -> Just lvl
+            Just (TyVarSol _ _) -> Nothing
+            Nothing -> Nothing
           sub t@(Scalar (TypeVar u (QualName [] v) [])) =
             case M.lookup v tyvars of
               Just (TyVarLink v') -> sub $ Scalar (TypeVar u (QualName [] v') [])
-              Just (TyVarSol t') -> sub t'
+              Just (TyVarSol _ t') -> sub t'
               _ -> t
           sub t = t
       case (sub t1, sub t2) of
@@ -206,14 +209,22 @@ solveCt ct =
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (False, False) -> bad
-                  (True, False) -> subTyVar v1 t2'
-                  (False, True) -> subTyVar v2 t1'
-                  (True, True) -> linkTyVar v1 v2
-        (Scalar (TypeVar _ (QualName [] v1) []), t2') ->
-          if flexible v1 then subTyVar v1 t2' else bad
-        (t1', Scalar (TypeVar _ (QualName [] v2) [])) ->
-          if flexible v2 then subTyVar v2 t1' else bad
+                  (Nothing, Nothing) -> bad
+                  (Just lvl, Nothing) -> subTyVar v1 lvl t2'
+                  (Nothing, Just lvl) -> subTyVar v2 lvl t1'
+                  (Just lvl1, Just lvl2)
+                    | lvl1 <= lvl2 -> linkTyVar v1 v2
+                    | otherwise -> linkTyVar v2 v1
+        (Scalar (TypeVar _ (QualName [] v1) []), t2')
+          | Just lvl <- flexible v1 ->
+              subTyVar v1 lvl t2'
+          | otherwise ->
+              bad
+        (t1', Scalar (TypeVar _ (QualName [] v2) []))
+          | Just lvl <- flexible v2 ->
+              subTyVar v2 lvl t1'
+          | otherwise ->
+              bad
         (t1', t2') -> case unify t1' t2' of
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs

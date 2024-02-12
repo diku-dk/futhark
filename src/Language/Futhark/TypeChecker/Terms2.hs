@@ -202,6 +202,9 @@ runTermM (TermM m) = do
 incLevel :: TermM a -> TermM a
 incLevel = local $ \env -> env {termLevel = termLevel env + 1}
 
+curLevel :: TermM Int
+curLevel = asks termLevel
+
 incCounter :: TermM Int
 incCounter = do
   s <- get
@@ -215,7 +218,8 @@ newTyVarWith :: (Located loc) => loc -> Name -> TyVarInfo -> TermM TyVar
 newTyVarWith _loc desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
-  modify $ \s -> s {termTyVars = M.insert v info $ termTyVars s}
+  lvl <- curLevel
+  modify $ \s -> s {termTyVars = M.insert v (lvl, info) $ termTyVars s}
   pure v
 
 newTyVar :: (Located loc) => loc -> Name -> TermM TyVar
@@ -1083,7 +1087,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
               "## tyvars:",
               unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
               "## solution:",
-              let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
+              let p (t, (lvl, vs)) = unwords (show [lvl] : map prettyNameString vs) <> " => " <> prettyString t
                in either T.unpack (unlines . map p . M.toList) solution
             ]
         pure (solution, params', retdecl', body')
