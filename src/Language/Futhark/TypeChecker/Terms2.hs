@@ -1076,9 +1076,12 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     traceM $ "# function " <> prettyNameString fname
 
-    case rankAnalysis counter cts tyvars of
+    vns <- gets termNameSource
+
+    case rankAnalysis vns counter cts tyvars of
       Nothing -> error ""
-      Just (cts', tyvars') -> do
+      Just (cts', tyvars', vns', counter') -> do
+        modify $ \s -> s {termCounter = counter', termNameSource = vns'}
         let solution = solve cts' tyvars'
 
         traceM $
