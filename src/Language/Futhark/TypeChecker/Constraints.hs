@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Constraints
     TyVarInfo (..),
     TyVar,
     TyVars,
+    TyVarSol (..),
     Solution,
     solve,
   )
@@ -70,6 +71,8 @@ data TyVarInfo
     TyVarRecord (M.Map Name Type)
   | -- | Must be a sum type with these fields.
     TyVarSum (M.Map Name [Type])
+  | -- | Must have at least this rank.
+    TyVarRank Int
   deriving (Show)
 
 instance Pretty TyVarInfo where
@@ -77,6 +80,7 @@ instance Pretty TyVarInfo where
   pretty (TyVarPrim pts) = "∈" <+> pretty pts
   pretty (TyVarRecord fs) = pretty $ Scalar $ Record fs
   pretty (TyVarSum cs) = pretty $ Scalar $ Sum cs
+  pretty (TyVarRank x) = "rank ≥" <+> pretty x
 
 type TyVar = VName
 

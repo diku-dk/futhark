@@ -6,12 +6,16 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Vector.Unboxed qualified as V
 import Debug.Trace
+-- import Futhark.FreshNames qualified as FreshNames
+-- import Futhark.MonadFreshNames hiding (newName)
 import Futhark.Solve.BranchAndBound
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
 import Futhark.Solve.Simplex
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.TypeChecker.Constraints
+
+-- import Language.Futhark.TypeChecker.Monad (mkTypeVarName)
 
 type LSum = LP.LSum VName Double
 
@@ -128,12 +132,20 @@ mkLinearProg counter cs tyVars =
       mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
     finalState = flip execState initState $ runRankM buildLP
 
-rankAnalysis :: Int -> [Ct] -> TyVars -> Maybe (Map VName Int)
+rankAnalysis :: Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars)
 rankAnalysis counter cs tyVars = do
   traceM $ unlines ["rankAnalysis prog:", prettyString prog]
   (_size, ranks) <- branchAndBound lp
-  pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
+  let rank_map = (fromJust . (ranks V.!?)) <$> inv_var_map
+  let (cs', SubstState tyVars') =
+        flip runState (SubstState mempty) $
+          runSubstM $
+            substRanks rank_map $
+              filter (not . isCtAM) cs
+  pure (cs', tyVars <> tyVars')
   where
+    isCtAM (CtAM {}) = True
+    isCtAM _ = False
     splitFuncs
       ( CtEq
           (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
@@ -148,3 +160,51 @@ rankAnalysis counter cs tyVars = do
     prog = mkLinearProg counter cs' tyVars
     (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
+
+newtype SubstM a = SubstM {runSubstM :: State SubstState a}
+  deriving (Functor, Applicative, Monad, MonadState SubstState)
+
+data SubstState = SubstState
+  { substTyVars :: TyVars
+  }
+
+rankToShape :: Map VName Int -> VName -> Shape SComp
+rankToShape rs x = Shape $ replicate (rs M.! x) SDim
+
+addRankInfo :: Map VName Int -> TyVar -> SubstM ()
+addRankInfo rs t =
+  modify $ \s -> s {substTyVars = M.insert t (TyVarRank $ rs M.! t) $ substTyVars s}
+
+class SubstRanks a where
+  substRanks :: Map VName Int -> a -> SubstM a
+
+instance (SubstRanks a) => SubstRanks [a] where
+  substRanks rs = mapM (substRanks rs)
+
+instance SubstRanks (Shape SComp) where
+  substRanks rs = pure . foldMap instDim
+    where
+      instDim (SDim) = Shape $ pure SDim
+      instDim (SVar x) = rankToShape rs x
+
+instance SubstRanks (TypeBase SComp u) where
+  substRanks rs t@(Scalar (TypeVar u (QualName [] x) []))
+    | rs M.! x > 0 = do
+        addRankInfo rs x
+        pure t
+  substRanks rs (Scalar (Arrow u p d ta (RetType retdims tr))) = do
+    ta' <- substRanks rs ta
+    tr' <- substRanks rs tr
+    pure $ Scalar (Arrow u p d ta' (RetType retdims tr'))
+  substRanks rs (Array u shape t) = do
+    shape' <- substRanks rs shape
+    t' <- substRanks rs (Scalar t)
+    pure $ Array u (shape' <> arrayShape t') (scalarType t')
+    where
+      scalarType (Array _ _ t) = t
+      scalarType (Scalar t) = t
+  substRanks _ t = pure t
+
+instance SubstRanks Ct where
+  substRanks rs (CtEq t1 t2) = CtEq <$> substRanks rs t1 <*> substRanks rs t2
+  substRanks _ _ = error ""

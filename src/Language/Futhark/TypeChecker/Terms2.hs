@@ -1072,18 +1072,16 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     case rankAnalysis counter cts tyvars of
       Nothing -> error ""
-      Just rank_map -> do
-        traceM $ prettyString $ M.toList rank_map
-
-        let solution = solve cts tyvars
+      Just (cts', tyvars') -> do
+        let solution = solve cts' tyvars'
 
         traceM $
           unlines
             [ "# function " <> prettyNameString fname,
               "## constraints:",
-              unlines $ map prettyString cts,
+              unlines $ map prettyString cts',
               "## tyvars:",
-              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
+              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
               "## solution:",
               let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
                in either T.unpack (unlines . map p . M.toList) solution
