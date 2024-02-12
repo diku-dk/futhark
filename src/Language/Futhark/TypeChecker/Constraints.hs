@@ -117,33 +117,28 @@ substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
 substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
--- | A solution maps types to the set of type variables that must be
--- substituted with this type, as well as its binding level. This
--- slightly odd representation is needed to encode when two type
+-- | A solution maps a type variable to its substitution, binding
+-- level, and additional type variables that are linked to this type.
+-- This slightly odd representation is needed to encode when two type
 -- variables are actually the same type. This matters when we start
 -- instanting the sizes of the type.
-type Solution = M.Map Type (Int, [TyVar])
+type Solution = M.Map TyVar (Type, Int, [TyVar])
 
 solution :: SolverState -> Solution
 solution s =
-  L.foldl' byType mempty $
+  L.foldl' addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
     M.toList $
-      L.foldl' addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
-        M.toList $
-          solverTyVars s
+      solverTyVars s
   where
-    mkSubst (TyVarSol lvl t) = Just (lvl, (t, []))
+    mkSubst (TyVarSol lvl t) = Just (t, lvl, [])
     mkSubst _ = Nothing
     addLinks m (v1, TyVarLink v2) =
       case M.lookup v2 $ solverTyVars s of
         Just (TyVarLink v3) -> addLinks m (v1, TyVarLink v3)
         _ -> case M.lookup v2 m of
           Nothing -> m
-          Just (t, (lvl, vs)) -> M.insert v2 (t, (lvl, v1 : vs)) m
+          Just (t, lvl, vs) -> M.insert v2 (t, lvl, v1 : vs) m
     addLinks m _ = m
-    byType m (v, (lvl, (t, vs))) = M.insertWith comb t (lvl, v : vs) m
-      where
-        comb (lvl1, ts1) (lvl2, ts2) = (min lvl1 lvl2, ts1 <> ts2)
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)

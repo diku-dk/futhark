@@ -37,6 +37,7 @@
 -- inference, perhaps we can do it in a post-inference check.
 module Language.Futhark.TypeChecker.Terms2
   ( checkValDef,
+    Solution,
   )
 where
 
@@ -1099,7 +1100,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
               "## tyvars:",
               unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
               "## solution:",
-              let p (t, (lvl, vs)) = unwords (show [lvl] : map prettyNameString vs) <> " => " <> prettyString t
+              let p (v, (t, lvl, vs)) = unwords (show [lvl] : map prettyNameString (v : vs)) <> " => " <> prettyString t
                in either T.unpack (unlines . map p . M.toList) solution
             ]
         pure (solution, params', retdecl', body')

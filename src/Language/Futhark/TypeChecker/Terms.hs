@@ -1626,15 +1626,15 @@ arrayOfM loc t shape = do
 atLevel :: Int -> TermTypeM a -> TermTypeM a
 atLevel lvl = local $ \env -> env {termLevel = lvl}
 
-addInitialConstraints :: M.Map (TypeBase () NoUniqueness) (Int, [VName]) -> TermTypeM ()
+addInitialConstraints :: Terms2.Solution -> TermTypeM ()
 addInitialConstraints = mapM_ f . M.toList
   where
     addConstraint v lvl c = modifyConstraints $ M.insert v (lvl, c)
     usage = mkUsage (mempty :: Loc)
-    f (t, (lvl, vs)) = do
+    f (v, (t, lvl, vs)) = do
       (t', _) <- atLevel lvl $ allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
-      forM_ vs $ \v ->
-        addConstraint v lvl $ Constraint (RetType [] t') $ usage $ prettyNameText v
+      forM_ (v : vs) $ \v' ->
+        addConstraint v' lvl $ Constraint (RetType [] t') $ usage $ prettyNameText v'
 
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
@@ -1660,7 +1660,10 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
     Right tysubsts -> runTermTypeM checkExp $ do
-      addInitialConstraints $ M.mapKeys (first $ const ()) tysubsts
+      addInitialConstraints tysubsts
+
+      traceM $ unlines $ map prettyString params
+      traceM $ prettyString body'
 
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
         checkBinding (fname, retdecl', tparams, params', body', loc)
