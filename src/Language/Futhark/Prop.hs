@@ -32,6 +32,7 @@ module Language.Futhark.Prop
     funType,
     stripExp,
     similarExps,
+    frameOf,
 
     -- * Queries on patterns and params
     patIdents,
@@ -1434,6 +1435,11 @@ similarExps (ProjectSection names1 _ _) (ProjectSection names2 _ _)
 similarExps (IndexSection slice1 _ _) (IndexSection slice2 _ _) =
   similarSlices slice1 slice2
 similarExps _ _ = Nothing
+
+frameOf :: Exp -> Shape Size
+frameOf (AppExp (Apply _ args _) _) =
+  ((\(_, am) -> autoFrame am) . unInfo . fst) $ NE.last args
+frameOf _ = mempty
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName

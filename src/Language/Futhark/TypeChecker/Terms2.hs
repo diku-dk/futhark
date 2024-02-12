@@ -590,21 +590,25 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Exp -> TermM (Type, AutoMap)
-checkApply loc _ ftype arg = do
+checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Shape Size -> Exp -> TermM (Type, AutoMap)
+checkApply loc _ ftype fframe arg = do
   (a, b) <- split ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
   let unit_info = Info $ Scalar $ Prim Bool
       r_var = Var (QualName [] r) unit_info mempty
       m_var = Var (QualName [] r) unit_info mempty
+      lhs = arrayOf (toShape (SVar r) <> (toSComp <$> frameOf arg)) $ toType $ typeOf arg
+      rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
   ctAM r m
-  ctEq (arrayOf (toShape $ SVar r) $ toType $ typeOf arg) (arrayOf (toShape $ SVar m) a)
+  ctEq lhs rhs
   pure
-    ( arrayOf (toShape $ SVar m) b,
-      AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = mempty}
+    ( b,
+      AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
     )
   where
+    toSComp (Var (QualName [] x) _ _) = SVar x
+    toSComp _ = error ""
     toShape = Shape . pure
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, b `setUniqueness` NoUniqueness)
@@ -797,7 +801,7 @@ checkExp (Constr name es NoInfo loc) = do
 --
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
   fe' <- checkExp fe
-  ((_, rt), args') <- mapAccumLM onArg (0, expType fe') args
+  ((_, rt, _), args') <- mapAccumLM onArg (0, expType fe', frameOf fe') args
   rt' <- asStructType loc rt
   pure $ AppExp (Apply fe' args' loc) $ Info $ AppRes rt' []
   where
@@ -806,11 +810,11 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
         Var v _ _ -> Just v
         _ -> Nothing
 
-    onArg (i, f_t) (_, arg) = do
+    onArg (i, f_t, f_f) (_, arg) = do
       arg' <- checkExp arg
-      (rt, am) <- checkApply loc (fname, i) f_t arg'
+      (rt, am) <- checkApply loc (fname, i) f_t f_f arg'
       pure
-        ( (i + 1, rt),
+        ( (i + 1, rt, autoFrame am),
           (Info (Nothing, am), arg')
         )
 --
@@ -819,8 +823,8 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   e1' <- checkExp e1
   e2' <- checkExp e2
 
-  (rt1, am1) <- checkApply loc (Just op, 0) (toType ftype) e1'
-  (rt2, am2) <- checkApply loc (Just op, 1) rt1 e2'
+  (rt1, am1) <- checkApply loc (Just op, 0) (toType ftype) mempty e1'
+  (rt2, am2) <- checkApply loc (Just op, 1) rt1 mempty e2'
   rt2' <- asStructType loc rt2
 
   pure $
@@ -831,7 +835,7 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
-  void $ checkApply loc (Just op, 0) (toType optype) e'
+  void $ checkApply loc (Just op, 0) (toType optype) mempty e'
   let t1 = typeOf e'
   t2 <- newType loc "t2"
   rt <- newType loc "rt"
@@ -1088,11 +1092,10 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 --
 --    counter <- gets termCounter
 --
---    traceM $ unlines $ map prettyString cts
---
 --    case rankAnalysis counter cts of
 --      Nothing -> error ""
 --      Just rank_map -> do
+--        traceM $ prettyString $ M.toList rank_map
 --        tyvars <- gets termTyVars
 --
 --        let solution = solve cts tyvars

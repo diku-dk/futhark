@@ -118,8 +118,7 @@ mkLinearProg counter cs =
 
 rankAnalysis :: Int -> [Ct] -> Maybe (Map VName Int)
 rankAnalysis counter cs = do
-  traceM $ unlines $ concat $ map (\c -> [prettyString c, show c]) cs'
-  traceM $ prettyString prog
+  traceM $ unlines ["rankAnalysis prog:", prettyString prog]
   (_size, ranks) <- branchAndBound lp
   pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
   where
@@ -133,7 +132,7 @@ rankAnalysis counter cs = do
           t1r' = t1r `setUniqueness` NoUniqueness
           t2r' = t2r `setUniqueness` NoUniqueness
     splitFuncs c = [c]
-    cs' = foldMap (splitFuncs . distribute) cs
+    cs' = foldMap splitFuncs cs
     prog = mkLinearProg counter cs'
     (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
