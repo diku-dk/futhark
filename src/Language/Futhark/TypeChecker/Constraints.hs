@@ -17,6 +17,7 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
+import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text qualified as T
@@ -128,12 +129,11 @@ type Solution = M.Map Type (Int, [TyVar])
 
 solution :: SolverState -> Solution
 solution s =
-  M.fromList $
-    map adjust $
-      M.toList $
-        foldl addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
-          M.toList $
-            solverTyVars s
+  L.foldl' byType mempty $
+    M.toList $
+      L.foldl' addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
+        M.toList $
+          solverTyVars s
   where
     mkSubst (TyVarSol lvl t) = Just (lvl, (t, []))
     mkSubst _ = Nothing
@@ -144,7 +144,9 @@ solution s =
           Nothing -> m
           Just (t, (lvl, vs)) -> M.insert v2 (t, (lvl, v1 : vs)) m
     addLinks m _ = m
-    adjust (v, (lvl, (t, vs))) = (t, (lvl, v : vs))
+    byType m (v, (lvl, (t, vs))) = M.insertWith comb t (lvl, v : vs) m
+      where
+        comb (lvl1, ts1) (lvl2, ts2) = (min lvl1 lvl2, ts1 <> ts2)
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
