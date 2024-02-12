@@ -139,7 +139,8 @@ rankAnalysis vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   (_size, ranks) <- branchAndBound lp
   let rank_map = (fromJust . (ranks V.!?)) <$> inv_var_map
-      initEnv =
+  traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
+  let initEnv =
         SubstEnv
           { envTyVars = tyVars,
             envRanks = rank_map
