@@ -238,7 +238,6 @@ addRankInfo t = do
     new_vars <- gets substNewVars
     maybe new_var (const $ pure ()) $ new_vars M.!? t
   where
-    lvl = 0 -- FIXME
     new_var = do
       t' <- newTyVar t
       old_tyvars <- asks envTyVars
