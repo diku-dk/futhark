@@ -525,7 +525,7 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
         "Module" <+> pretty modname <+> " is a parametric module."
 checkExp (Var qn (Info t) loc) = do
   t' <- lookupVar loc qn
-  unify (mkUsage loc "inferred rank type") t t'
+  unify (mkUsage loc "inferred rank type") t' t
   pure $ Var qn (Info t') loc
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
