@@ -342,8 +342,7 @@ instance MonadTypeChecker TermM where
 --- All the general machinery goes above.
 
 arrayOfRank :: Int -> Type -> Type
-arrayOfRank 0 t = t
-arrayOfRank n t = arrayOf (Shape $ replicate n SDim) t
+arrayOfRank n = arrayOf $ Shape $ replicate n SDim
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
 require _why pts e = do
@@ -449,17 +448,16 @@ checkPat' (Wildcard _ loc) (Ascribed t) =
 checkPat' (Wildcard NoInfo loc) NoneInferred = do
   t <- newType loc "t"
   pure $ Wildcard (Info t) loc
-checkPat' p@(TuplePat ps loc) (Ascribed t)
+checkPat' (TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
       TuplePat
         <$> zipWithM checkPat' ps (map Ascribed ts)
         <*> pure loc
   | otherwise = do
-      ps_t :: [Type] <- replicateM (length ps) (newType loc "t")
-      ctEq (Scalar (tupleRecord ps_t)) (toType t)
-      st <- asStructType loc $ Scalar $ tupleRecord ps_t
-      checkPat' p $ Ascribed $ toParam Observe st
+      ps_t :: [ParamType] <- replicateM (length ps) (newType loc "t")
+      ctEq (toType (Scalar (tupleRecord ps_t))) (toType t)
+      TuplePat <$> zipWithM checkPat' ps (map Ascribed ps_t) <*> pure loc
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
 checkPat' p@(RecordPat p_fs loc) (Ascribed t)
@@ -924,14 +922,16 @@ checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _)
       (Info $ AppRes (typeOf body') [])
 --
 checkExp (AppExp (Range start maybe_step end loc) _) = do
-  start' <- checkExp' start
-  maybe_step' <- traverse checkExp' maybe_step
-  end' <- traverse checkExp' end
-  range_t <- newType loc "range"
-  ctEq (toType range_t) (arrayOfRank 1 (expType start'))
-  pure $ AppExp (Range start' maybe_step' end' loc) $ Info $ AppRes range_t []
-  where
-    checkExp' = require "use in range expression" anyIntType <=< checkExp
+  start' <- require "use in range expression" anyIntType =<< checkExp start
+  let check e = do
+        e' <- checkExp e
+        ctEq (expType start') (expType e')
+        pure e'
+  maybe_step' <- traverse check maybe_step
+  end' <- traverse check end
+  range_t <- newTyVar loc "range"
+  ctEq (tyVarType range_t :: Type) (arrayOfRank 1 (expType start'))
+  pure $ AppExp (Range start' maybe_step' end' loc) $ Info $ AppRes (tyVarType range_t) []
 --
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
@@ -1074,7 +1074,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     tyvars <- gets termTyVars
 
-    traceM $ "# function " <> prettyNameString fname
+    traceM $ "\n# function " <> prettyNameString fname <> "\n"
 
     vns <- gets termNameSource
 
