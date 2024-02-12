@@ -387,7 +387,7 @@ lookupVar loc qn@(QualName qs name) = do
         else do
           (tnames, t') <- instTypeScheme qn loc tparams t
           outer_env <- asks termOuterEnv
-          pure $ qualifyTypeVars outer_env tnames qs t'
+          asStructType loc $ first (const SDim) $ qualifyTypeVars outer_env tnames qs t'
     Just EqualityF -> do
       argtype <- newType loc "t"
       pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
