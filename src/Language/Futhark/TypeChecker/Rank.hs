@@ -24,6 +24,9 @@ type ScalarType = ScalarTypeBase SComp NoUniqueness
 class Rank a where
   rank :: a -> LSum
 
+instance Rank VName where
+  rank = var
+
 instance Rank SComp where
   rank SDim = constant 1
   rank (SVar v) = var v
@@ -98,8 +101,14 @@ addCt (CtAM r m) = do
   b_m <- binVar m
   addConstraints $ oneIsZero (b_r, r) (b_m, m)
 
-mkLinearProg :: Int -> [Ct] -> LinearProg
-mkLinearProg counter cs =
+addTyVarInfo :: TyVar -> TyVarInfo -> RankM ()
+addTyVarInfo tv (TyVarFree) = pure ()
+addTyVarInfo tv (TyVarPrim _) =
+  addConstraint $ rank tv ~==~ constant 0
+addTyVarInfo _ _ = error "Unhandled"
+
+mkLinearProg :: Int -> [Ct] -> TyVars -> LinearProg
+mkLinearProg counter cs tyVars =
   LP.LinearProg
     { optType = Minimize,
       objective =
@@ -114,10 +123,13 @@ mkLinearProg counter cs =
           rankCounter = counter,
           rankConstraints = mempty
         }
-    finalState = flip execState initState $ runRankM $ mapM_ addCt cs
+    buildLP = do
+      mapM_ addCt cs
+      mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
+    finalState = flip execState initState $ runRankM buildLP
 
-rankAnalysis :: Int -> [Ct] -> Maybe (Map VName Int)
-rankAnalysis counter cs = do
+rankAnalysis :: Int -> [Ct] -> TyVars -> Maybe (Map VName Int)
+rankAnalysis counter cs tyVars = do
   traceM $ unlines ["rankAnalysis prog:", prettyString prog]
   (_size, ranks) <- branchAndBound lp
   pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
@@ -133,6 +145,6 @@ rankAnalysis counter cs = do
           t2r' = t2r `setUniqueness` NoUniqueness
     splitFuncs c = [c]
     cs' = foldMap splitFuncs cs
-    prog = mkLinearProg counter cs'
+    prog = mkLinearProg counter cs' tyVars
     (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]

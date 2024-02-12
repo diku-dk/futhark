@@ -1065,50 +1065,27 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
     retdecl' <- checkRetDecl body' retdecl
 
     cts <- gets termConstraints
+
+    counter <- gets termCounter
+
     tyvars <- gets termTyVars
 
-    let solution = solve cts tyvars
+    case rankAnalysis counter cts tyvars of
+      Nothing -> error ""
+      Just rank_map -> do
+        traceM $ prettyString $ M.toList rank_map
 
-    traceM $
-      unlines
-        [ "# function " <> prettyNameString fname,
-          "## constraints:",
-          unlines $ map prettyString cts,
-          "## tyvars:",
-          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
-          "## solution:",
-          let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
-           in either T.unpack (unlines . map p . M.toList) solution
-        ]
-    pure (solution, params', retdecl', body')
+        let solution = solve cts tyvars
 
--- checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
---  bindParams tparams params $ \params' -> do
---    body' <- checkExp body
---
---    retdecl' <- checkRetDecl body' retdecl
---
---    cts <- gets termConstraints
---
---    counter <- gets termCounter
---
---    case rankAnalysis counter cts of
---      Nothing -> error ""
---      Just rank_map -> do
---        traceM $ prettyString $ M.toList rank_map
---        tyvars <- gets termTyVars
---
---        let solution = solve cts tyvars
---
---        traceM $
---          unlines
---            [ "# function " <> prettyNameString fname,
---              "## constraints:",
---              unlines $ map prettyString cts,
---              "## tyvars:",
---              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
---              "## solution:",
---              let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
---               in either T.unpack (unlines . map p . M.toList) solution
---            ]
---        pure (solution, params', retdecl', body')
+        traceM $
+          unlines
+            [ "# function " <> prettyNameString fname,
+              "## constraints:",
+              unlines $ map prettyString cts,
+              "## tyvars:",
+              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
+              "## solution:",
+              let p (t, vs) = unwords (map prettyNameString vs) <> " => " <> prettyString t
+               in either T.unpack (unlines . map p . M.toList) solution
+            ]
+        pure (solution, params', retdecl', body')
