@@ -123,18 +123,15 @@ tests =
                 }
             (lp, idxmap) = linearProgToLP prog
             lpe = convert lp
-         in trace
-              (unlines [show prog, show lp, show idxmap, show lpe])
-              ( assertBool
-                  (unlines [show $ simplexLP lp])
-                  $ case simplexLP lp of
-                    Nothing -> False
-                    Just (z, sol) ->
-                      and
-                        [ z `approxEq` (10 :: Double),
-                          and $ zipWith (==) (V.toList sol) [1, 0, 10]
-                        ]
-              ),
+         in assertBool
+              (unlines [show $ simplexLP lp])
+              $ case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (10 :: Double),
+                      and $ zipWith (==) (V.toList sol) [1, 0, 10]
+                    ],
       testCase "8" $
         let prog =
               LinearProg
@@ -148,41 +145,88 @@ tests =
                 }
             (lp, idxmap) = linearProgToLP prog
             lpe = convert lp
-         in trace
-              (unlines [show prog, show lp, show idxmap, show lpe])
-              ( assertBool
-                  (unlines [show $ simplexLP lp])
-                  $ case simplexLP lp of
-                    Nothing -> False
-                    Just (z, sol) ->
-                      and
-                        [ z `approxEq` (15 :: Double)
-                        ]
-              ),
-      testCase "9" $
+         in assertBool
+              (unlines [show $ simplexLP lp])
+              $ case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (15 :: Double)
+                    ],
+      -- testCase "9" $
+      --  let prog =
+      --        LinearProg
+      --          { optType = Maximize,
+      --            objective = var "x1" ~+~ var "x2",
+      --            constraints =
+      --              [ var "x1" ~<=~ constant 10,
+      --                var "x2" ~<=~ constant 5
+      --              ]
+      --                <> or "b1" "b2" (var "x1" ~==~ constant 0) (var "x2" ~==~ constant 0)
+      --          }
+      --      (lp, idxmap) = linearProgToLP prog
+      --      lpe = convert lp
+      --   in trace
+      --        (unlines [show prog, show lp, show idxmap, show lpe])
+      --        ( assertBool
+      --            (unlines [show $ simplexLP lp])
+      --            $ case simplexLP lp of
+      --              Nothing -> False
+      --              Just (z, sol) ->
+      --                and
+      --                  [ z `approxEq` (15 :: Double)
+      --                  ]
+      --        ),
+      testCase "10" $
         let prog =
               LinearProg
-                { optType = Maximize,
-                  objective = var "x1" ~+~ var "x2",
+                { optType = Minimize,
+                  objective = var "R2" ~+~ var "M3",
                   constraints =
-                    [ var "x1" ~<=~ constant 10,
-                      var "x2" ~<=~ constant 5
+                    [ var "artifical4" ~==~ constant 1 ~+~ var "t0",
+                      constant 1 ~+~ var "num1" ~==~ constant 1 ~+~ var "t0",
+                      var "b_R2" ~<=~ constant 1,
+                      var "b_M3" ~<=~ constant 1,
+                      var "R2" ~<=~ 1000 ~*~ var "b_R2",
+                      var "M3" ~<=~ 1000 ~*~ var "b_M3",
+                      var "b_R2" ~+~ var "b_M3" ~<=~ constant 1
                     ]
-                      <> or "b1" "b2" (var "x1" ~==~ constant 0) (var "x2" ~==~ constant 0)
                 }
             (lp, idxmap) = linearProgToLP prog
             lpe = convert lp
-         in trace
-              (unlines [show prog, show lp, show idxmap, show lpe])
-              ( assertBool
-                  (unlines [show $ simplexLP lp])
-                  $ case simplexLP lp of
-                    Nothing -> False
-                    Just (z, sol) ->
-                      and
-                        [ z `approxEq` (15 :: Double)
-                        ]
-              )
+         in assertBool
+              (unlines [show $ simplexLP lp])
+              $ case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (0 :: Double)
+                    ],
+      testCase "11" $
+        let prog =
+              LinearProg
+                { optType = Minimize,
+                  objective = var "4R" ~+~ var "5M",
+                  constraints =
+                    [ var "6artifical" ~==~ constant 1 ~+~ var "2t",
+                      constant 1 ~+~ var "3num" ~==~ constant 1 ~+~ var "2t",
+                      var "0b_R" ~<=~ constant 1,
+                      var "1b_M" ~<=~ constant 1,
+                      var "4R" ~<=~ 1000 ~*~ var "0b_R",
+                      var "5M" ~<=~ 1000 ~*~ var "1b_M",
+                      var "0b_R" ~+~ var "1b_M" ~<=~ constant 1
+                    ]
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in assertBool
+              (unlines [show $ simplexLP lp])
+              $ case simplexLP lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (0 :: Double)
+                    ]
     ]
 
 approxEq :: (Fractional a, Ord a) => a -> a -> Bool

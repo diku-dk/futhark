@@ -92,28 +92,54 @@ tests =
                 Just (z, sol) ->
                   and
                     [ z `approxEq` (10 :: Double)
+                    ],
+      -- testCase "6" $
+      --  let prog =
+      --        LinearProg
+      --          { optType = Maximize,
+      --            objective = var "x1" ~+~ var "x2",
+      --            constraints =
+      --              [ var "x1" ~<=~ constant 10,
+      --                var "x2" ~<=~ constant 5
+      --              ]
+      --                <> or "b1" "b2" (var "x1" ~==~ constant 0) (var "x2" ~==~ constant 0)
+      --          }
+      --      (lp, idxmap) = linearProgToLP prog
+      --      lpe = convert lp
+      --   in assertBool
+      --        (unlines [show $ branchAndBound lp])
+      --        $ case branchAndBound lp of
+      --          Nothing -> False
+      --          Just (z, sol) ->
+      --            and
+      --              [ z `approxEq` (10 :: Double)
+      --              ]
+
+      testCase "10" $
+        let prog =
+              LinearProg
+                { optType = Minimize,
+                  objective = var "R2" ~+~ var "M3",
+                  constraints =
+                    [ var "artifical4" ~==~ constant 1 ~+~ var "t0",
+                      constant 1 ~+~ var "num1" ~==~ constant 1 ~+~ var "t0",
+                      var "b_R2" ~<=~ constant 1,
+                      var "b_M3" ~<=~ constant 1,
+                      var "R2" ~<=~ 1000 ~*~ var "b_R2",
+                      var "M3" ~<=~ 1000 ~*~ var "b_M3",
+                      var "b_R2" ~+~ var "b_M3" ~<=~ constant 1
                     ]
-                    -- testCase "6" $
-                    --  let prog =
-                    --        LinearProg
-                    --          { optType = Maximize,
-                    --            objective = var "x1" ~+~ var "x2",
-                    --            constraints =
-                    --              [ var "x1" ~<=~ constant 10,
-                    --                var "x2" ~<=~ constant 5
-                    --              ]
-                    --                <> or "b1" "b2" (var "x1" ~==~ constant 0) (var "x2" ~==~ constant 0)
-                    --          }
-                    --      (lp, idxmap) = linearProgToLP prog
-                    --      lpe = convert lp
-                    --   in assertBool
-                    --        (unlines [show $ branchAndBound lp])
-                    --        $ case branchAndBound lp of
-                    --          Nothing -> False
-                    --          Just (z, sol) ->
-                    --            and
-                    --              [ z `approxEq` (10 :: Double)
-                    --              ]
+                }
+            (lp, idxmap) = linearProgToLP prog
+            lpe = convert lp
+         in assertBool
+              (unlines [show $ branchAndBound lp])
+              $ case branchAndBound lp of
+                Nothing -> False
+                Just (z, sol) ->
+                  and
+                    [ z `approxEq` (0 :: Double)
+                    ]
     ]
 
 approxEq :: (Fractional a, Ord a) => a -> a -> Bool
