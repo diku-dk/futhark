@@ -134,11 +134,15 @@ mkLinearProg counter cs tyVars =
       mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
     finalState = flip execState initState $ runRankM buildLP
 
-rankAnalysis :: VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
-rankAnalysis vns counter cs tyVars = do
+rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
+rankAnalysis debug_zero_ranks vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
-  (_size, ranks) <- branchAndBound lp
-  let rank_map = (fromJust . (ranks V.!?)) <$> inv_var_map
+  rank_map <-
+    if debug_zero_ranks
+      then pure $ fmap (const 0) inv_var_map
+      else do
+        (_size, ranks) <- branchAndBound lp
+        pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
   traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
   let initEnv =
         SubstEnv

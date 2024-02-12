@@ -1078,7 +1078,9 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     vns <- gets termNameSource
 
-    case rankAnalysis vns counter cts tyvars of
+    let debug_zero_ranks = True
+
+    case rankAnalysis debug_zero_ranks vns counter cts tyvars of
       Nothing -> error ""
       Just (cts', tyvars', vns', counter') -> do
         modify $ \s -> s {termCounter = counter', termNameSource = vns'}
