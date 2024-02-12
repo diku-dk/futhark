@@ -469,8 +469,8 @@ checkExp (Coerce e te _ loc) = do
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
-checkExp (AppExp (BinOp (op, oploc) _ (e1, _) (e2, _) loc) _) = do
-  ftype <- lookupVar oploc op
+checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
+  ftype <- lookupVar oploc op op_t
   e1' <- checkExp e1
   e2' <- checkExp e2
 
@@ -524,8 +524,7 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
       typeError loc mempty . withIndexLink "module-is-parametric" $
         "Module" <+> pretty modname <+> " is a parametric module."
 checkExp (Var qn (Info t) loc) = do
-  t' <- lookupVar loc qn
-  unify (mkUsage loc "inferred rank type") t' t
+  t' <- lookupVar loc qn t
   pure $ Var qn (Info t') loc
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
@@ -715,11 +714,11 @@ checkExp (Lambda params body rettype_te _ loc) = do
           onDim _ = mempty
 
       pure $ RetType (S.toList $ foldMap onDim $ fvVars $ freeInType ret) ret
-checkExp (OpSection op _ loc) = do
-  ftype <- lookupVar loc op
+checkExp (OpSection op (Info op_t) loc) = do
+  ftype <- lookupVar loc op op_t
   pure $ OpSection op (Info ftype) loc
-checkExp (OpSectionLeft op _ e _ _ loc) = do
-  ftype <- lookupVar loc op
+checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
+  ftype <- lookupVar loc op op_t
   e' <- checkExp e
   (t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
@@ -735,8 +734,8 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (OpSectionRight op _ e _ _ loc) = do
-  ftype <- lookupVar loc op
+checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
+  ftype <- lookupVar loc op op_t
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do

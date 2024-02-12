@@ -448,38 +448,41 @@ instance MonadTypeChecker TermTypeM where
       Nothing ->
         throwError $ TypeError (locOf loc) notes s
 
-lookupVar :: SrcLoc -> QualName VName -> TermTypeM StructType
-lookupVar loc qn@(QualName qs name) = do
+lookupVar :: SrcLoc -> QualName VName -> StructType -> TermTypeM StructType
+lookupVar loc qn@(QualName qs name) t = do
   scope <- lookupQualNameEnv qn
   let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
-  case M.lookup name $ scopeVtable scope of
-    Nothing ->
-      error $ "lookupVar: " <> show qn
-    Just (BoundV tparams t) -> do
-      when (null qs) . modify $ \s ->
-        s {stateUsed = S.insert name $ stateUsed s}
-      if null tparams && null qs
-        then pure t
-        else do
-          (tnames, t') <- instantiateTypeScheme qn loc tparams t
-          outer_env <- asks termOuterEnv
-          pure $ qualifyTypeVars outer_env tnames qs t'
-    Just EqualityF -> do
-      argtype <- newTypeVar loc "t"
-      equalityType usage argtype
-      pure $
-        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-          Scalar $
-            Arrow mempty Unnamed Observe argtype $
-              RetType [] $
-                Scalar $
-                  Prim Bool
-    Just (OverloadedF ts pts rt) -> do
-      argtype <- newTypeVar loc "t"
-      mustBeOneOf ts usage argtype
-      let (pts', rt') = instOverloaded argtype pts rt
-      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+  t' <-
+    case M.lookup name $ scopeVtable scope of
+      Nothing ->
+        error $ "lookupVar: " <> show qn
+      Just (BoundV tparams bound_t) -> do
+        when (null qs) . modify $ \s ->
+          s {stateUsed = S.insert name $ stateUsed s}
+        if null tparams && null qs
+          then pure t
+          else do
+            (tnames, t') <- instantiateTypeScheme qn loc tparams bound_t
+            outer_env <- asks termOuterEnv
+            pure $ qualifyTypeVars outer_env tnames qs t'
+      Just EqualityF -> do
+        argtype <- newTypeVar loc "t"
+        equalityType usage argtype
+        pure $
+          Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
+            Scalar $
+              Arrow mempty Unnamed Observe argtype $
+                RetType [] $
+                  Scalar $
+                    Prim Bool
+      Just (OverloadedF ts pts rt) -> do
+        argtype <- newTypeVar loc "t"
+        mustBeOneOf ts usage argtype
+        let (pts', rt') = instOverloaded argtype pts rt
+        pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+  unify (mkUsage loc "inferred rank type") t' t
+  pure t'
   where
     instOverloaded argtype pts rt =
       ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
