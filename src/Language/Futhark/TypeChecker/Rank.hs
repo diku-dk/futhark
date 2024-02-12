@@ -151,13 +151,14 @@ rankAnalysis vns counter cs tyVars = do
           { substTyVars = mempty,
             substNewVars = mempty,
             substNameSource = vns,
-            substCounter = counter
+            substCounter = counter,
+            substNewCts = mempty
           }
       (cs', state') =
         runSubstM initEnv initState $
           substRanks $
             filter (not . isCtAM) cs
-  pure (cs', substTyVars state' <> tyVars, substNameSource state', substCounter state')
+  pure (cs' <> substNewCts state', substTyVars state' <> tyVars, substNameSource state', substCounter state')
   where
     isCtAM (CtAM {}) = True
     isCtAM _ = False
@@ -192,7 +193,8 @@ data SubstState = SubstState
   { substTyVars :: TyVars,
     substNewVars :: Map TyVar TyVar,
     substNameSource :: VNameSource,
-    substCounter :: !Int
+    substCounter :: !Int,
+    substNewCts :: [Ct]
   }
 
 substIncCounter :: SubstM Int
@@ -205,7 +207,17 @@ newTyVar :: TyVar -> SubstM TyVar
 newTyVar t = do
   i <- substIncCounter
   t' <- newID $ mkTypeVarName (baseName t) i
-  modify $ \s -> s {substNewVars = M.insert t t' $ substNewVars s}
+  shape <- rankToShape t
+  modify $ \s ->
+    s
+      { substNewVars = M.insert t t' $ substNewVars s,
+        substNewCts =
+          substNewCts s
+            ++ [ CtEq
+                   (Scalar (TypeVar mempty (QualName [] t) []))
+                   (arrayOf shape (Scalar (TypeVar mempty (QualName [] t') [])))
+               ]
+      }
   pure t'
   where
     newID x = do
