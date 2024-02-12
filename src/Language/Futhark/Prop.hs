@@ -316,7 +316,9 @@ arrayOfWithAliases ::
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
 arrayOfWithAliases u shape (Scalar t) =
-  Array u shape (second (const mempty) t)
+  if shapeRank shape == 0
+    then Scalar t `setUniqueness` u
+    else Array u shape (second (const mempty) t)
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with

@@ -199,10 +199,7 @@ instance SubstRanks (TypeBase SComp u) where
   substRanks rs (Array u shape t) = do
     shape' <- substRanks rs shape
     t' <- substRanks rs (Scalar t)
-    pure $ Array u (shape' <> arrayShape t') (scalarType t')
-    where
-      scalarType (Array _ _ t) = t
-      scalarType (Scalar t) = t
+    pure $ arrayOfWithAliases u shape' t'
   substRanks _ t = pure t
 
 instance SubstRanks Ct where
