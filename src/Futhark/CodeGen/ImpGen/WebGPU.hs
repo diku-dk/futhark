@@ -15,6 +15,7 @@ import Futhark.CodeGen.ImpGen.WGSL qualified as WGSL
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
+import Futhark.Util (convFloat)
 import Language.Futhark.Warnings (Warnings)
 
 -- State carried during WebGPU translation.
@@ -131,6 +132,7 @@ genWGSLStm (DeclareScalar name _ typ) =
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
 genWGSLStm (If cond cThen cElse) = 
   WGSL.If (genWGSLExp $ untyped cond) [genWGSLStm cThen] [genWGSLStm cElse]
+genWGSLStm (SetScalar name e) = WGSL.Assign (nameToIdent name) (genWGSLExp e)
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = 
   WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = 
@@ -141,8 +143,51 @@ genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) =
   WGSL.Assign (nameToIdent dest) (WGSL.StringExp "TODO: Can't get lockstep width")
 genWGSLStm _ = WGSL.Skip
 
+-- TODO: This does not respect the indicated sizes and signedness currently, so
+-- we will always perform operations according to the declared types of the
+-- involved variables.
+wgslBinOp :: BinOp -> WGSL.BinOp
+wgslBinOp (Add _ _) = "+"
+wgslBinOp (FAdd _) = "+"
+wgslBinOp (Sub _ _) = "-"
+wgslBinOp (FSub _) = "-"
+wgslBinOp (Mul _ _) = "*"
+wgslBinOp (FMul _) = "*"
+wgslBinOp _ = "???"
+
+-- TODO: Similar to above, this does not respect signedness properly right now.
+wgslCmpOp :: CmpOp -> WGSL.BinOp
+wgslCmpOp (CmpEq _) = "=="
+wgslCmpOp (CmpUlt _) = "<"
+wgslCmpOp (CmpUle _) = "<="
+wgslCmpOp (CmpSlt _) = "<"
+wgslCmpOp (CmpSle _) = "<="
+wgslCmpOp (FCmpLt _) = "<"
+wgslCmpOp (FCmpLe _) = "<="
+wgslCmpOp CmpLlt = "<" -- TODO: This does not actually work for bools.
+wgslCmpOp CmpLle = "=="
+
+valueFloat :: FloatValue -> Double
+valueFloat (Float16Value v) = convFloat v
+valueFloat (Float32Value v) = convFloat v
+valueFloat (Float64Value v) = v
+
 genWGSLExp :: Exp -> WGSL.Exp
-genWGSLExp _ = WGSL.BoolExp False
+genWGSLExp (LeafExp name _) = WGSL.VarExp $ nameToIdent name
+genWGSLExp (ValueExp (IntValue v)) = WGSL.IntExp (valueIntegral v)
+genWGSLExp (ValueExp (FloatValue v)) = WGSL.FloatExp (valueFloat v)
+genWGSLExp (ValueExp (BoolValue v)) = WGSL.BoolExp v
+genWGSLExp (ValueExp UnitValue) =
+  error "should not attempt to generate unit expressions"
+genWGSLExp (BinOpExp op e1 e2) =
+  WGSL.BinOpExp (wgslBinOp op) (genWGSLExp e1) (genWGSLExp e2)
+genWGSLExp (CmpOpExp op e1 e2) =
+  WGSL.BinOpExp (wgslCmpOp op) (genWGSLExp e1) (genWGSLExp e2)
+-- don't support different integer types currently
+genWGSLExp (ConvOpExp (ZExt _ _) e) = genWGSLExp e
+-- don't support different integer types currently
+genWGSLExp (ConvOpExp (SExt _ _) e) = genWGSLExp e
+genWGSLExp _ = WGSL.StringExp "<not implemented>"
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = prettyText

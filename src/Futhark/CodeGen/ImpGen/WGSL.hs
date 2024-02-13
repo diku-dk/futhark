@@ -39,7 +39,7 @@ data Exp
 data Stmt
   = Skip
   | Seq Stmt Stmt
-  | DeclareVar Ident Typ 
+  | DeclareVar Ident Typ
   | Assign Ident Exp
   | AssignIndex Ident Exp Exp
   | If Exp [Stmt] [Stmt]
@@ -89,11 +89,11 @@ instance Pretty Stmt where
   pretty (AssignIndex x i e) =
     pretty x <> brackets (pretty i) <+> "=" <+> pretty e
   pretty (If cond [] []) = "if" <+> pretty cond <+> "{ }"
-  pretty (If cond th []) = 
+  pretty (If cond th []) =
     "if" <+> pretty cond <+> "{"
     </> indent 2 (semistack (map pretty th))
     </> "}"
-  pretty (If cond [] el) = 
+  pretty (If cond [] el) =
     "if" <+> pretty cond <+> "{ }"
     </> "else {"
     </> indent 2 (semistack (map pretty el))
@@ -130,9 +130,9 @@ prettyParams [] = "()"
 prettyParams params = "(" </> indent 2 (commastack (map pretty params)) </> ")"
 
 instance Pretty Function where
-  pretty fun = stack
-    [ hsep (map pretty (funAttribs fun)),
-      "fn" <+> pretty (funName fun) <> prettyParams (funParams fun) <+> "{",
-      indent 2 (semistack (map pretty (funBody fun))),
+  pretty (Function name attribs params body) = stack
+    [ hsep (map pretty attribs),
+      "fn" <+> pretty name <> prettyParams params <+> "{",
+      indent 2 (semistack (map pretty body)),
       "}"
     ]
