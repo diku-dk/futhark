@@ -14,7 +14,7 @@ runs:
       shell: bash
       run: |
         printf '#!/bin/bash
-        if ! srun --version &> /dev/null; then
+        if ! srun --version &> /dev/null && $(hostname) != hendrixfut02fl.unicph.domain; then
             echo "is-slurm=false"
         else
             echo "is-slurm=true"

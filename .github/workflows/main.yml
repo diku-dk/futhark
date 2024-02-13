@@ -388,46 +388,46 @@ jobs:
         pip install numpy pyopencl jsonschema
         futhark test tests -c --no-terminal --backend=pyopencl --exclude=compiled --cache-extension=cache --pass-option=--build-option=-O0 --runner=tools/oclgrindrunner.sh
 
-  # test-opencl:
-  #   runs-on: opencl
-  #   needs: [build-linux-nix]
-  #   if: github.repository == 'diku-dk/futhark'
-  #   steps:
-  #   - uses: actions/checkout@v3
+  test-opencl:
+    runs-on: opencl
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
 
-  #   - uses: ./.github/actions/futhark-slurm
-  #     with:
-  #       script: |
-  #         set -e
-  #         virtualenv virtualenv
-  #         source virtualenv/bin/activate
-  #         pip install jsonschema
-  #         module unload cuda
-  #         module load cuda/11.8
-  #         futhark test tests \
-  #           --backend=opencl \
-  #           --cache-extension=cache
-  #         FUTHARK_BACKEND=opencl make -C tests_lib/c -j
-  #       slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          set -e
+          virtualenv virtualenv
+          source virtualenv/bin/activate
+          pip install jsonschema
+          module unload cuda
+          module load cuda/11.8
+          futhark test tests \
+            --backend=opencl \
+            --cache-extension=cache
+          FUTHARK_BACKEND=opencl make -C tests_lib/c -j
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-opencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
-  # test-pyopencl:
-  #   runs-on: opencl
-  #   needs: [build-linux-nix]
-  #   if: github.repository == 'diku-dk/futhark'
-  #   steps:
-  #   - uses: actions/checkout@v3
+  test-pyopencl:
+    runs-on: opencl
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
 
-  #   - uses: ./.github/actions/futhark-slurm
-  #     with:
-  #       script: |
-  #         set -e
-  #         virtualenv virtualenv
-  #         source virtualenv/bin/activate
-  #         pip install numpy pyopencl jsonschema
-  #         module unload cuda
-  #         module load cuda/11.8
-  #         futhark test tests --no-terminal --backend=pyopencl
-  #       slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          set -e
+          virtualenv virtualenv
+          source virtualenv/bin/activate
+          pip install numpy pyopencl jsonschema
+          module unload cuda
+          module load cuda/11.8
+          futhark test tests --no-terminal --backend=pyopencl
+        slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:1 --job-name=fut-pyopencl-test --exclude=hendrixgpu05fl,hendrixgpu06fl
 
   test-cuda:
     runs-on: cuda
