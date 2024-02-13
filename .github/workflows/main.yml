@@ -453,25 +453,25 @@ jobs:
           FUTHARK_BACKEND=cuda make -C tests_lib/c -j
         slurm-options: -p gpu --time=0-01:00:00 --gres=gpu:a100:1 --job-name=fut-cuda-test
 
-  # test-hip:
-  #   runs-on: MI100
-  #   needs: [build-linux-nix]
-  #   if: github.repository == 'diku-dk/futhark'
-  #   steps:
-  #   - uses: actions/checkout@v3
+  test-hip:
+    runs-on: MI100
+    needs: [build-linux-nix]
+    if: github.repository == 'diku-dk/futhark'
+    steps:
+    - uses: actions/checkout@v3
 
-  #   - run: |
-  #       virtualenv virtualenv
-  #       source virtualenv/bin/activate
-  #       pip install jsonschema
+    - run: |
+        virtualenv virtualenv
+        source virtualenv/bin/activate
+        pip install jsonschema
 
-  #   - uses: ./.github/actions/futhark-slurm
-  #     with:
-  #       script: |
-  #         set -e
-  #         futhark test tests --no-terminal --backend=hip --concurrency=8
-  #         source virtualenv/bin/activate
-  #         FUTHARK_BACKEND=hip make -C tests_lib/c -j
+    - uses: ./.github/actions/futhark-slurm
+      with:
+        script: |
+          set -e
+          futhark test tests --no-terminal --backend=hip --concurrency=8
+          source virtualenv/bin/activate
+          FUTHARK_BACKEND=hip make -C tests_lib/c -j
 
   test-wasm:
     runs-on: ubuntu-22.04
