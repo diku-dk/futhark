@@ -51,6 +51,11 @@ onKernel kernel = do
   addCode $ "Input for " <> name <> "\n"
   addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
+
+  let scalarStruct = genScalarStructDef kernel
+  addCode $ prettyText scalarStruct
+  addCode $ "\n\n"
+
   let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
                  WGSL.Attrib "workgroup_size" [WGSL.VarExp "todo"]]
@@ -61,6 +66,7 @@ onKernel kernel = do
                     WGSL.funBody = wgslBody
                   }
   addCode $ prettyText wgslFun
+  addCode "\n"
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
     where name = nameToText (ImpGPU.kernelName kernel)
@@ -188,6 +194,16 @@ genWGSLExp (ConvOpExp (ZExt _ _) e) = genWGSLExp e
 -- don't support different integer types currently
 genWGSLExp (ConvOpExp (SExt _ _) e) = genWGSLExp e
 genWGSLExp _ = WGSL.StringExp "<not implemented>"
+
+genScalarStructDef :: ImpGPU.Kernel -> WGSL.Struct
+genScalarStructDef kernel = 
+  WGSL.Struct (T.append (nameToText $ ImpGPU.kernelName kernel) "_scalars")
+              (fields $ ImpGPU.kernelUses kernel)
+  where
+    fields [] = []
+    fields ((ImpGPU.ScalarUse name typ):fs) =
+      WGSL.Field (nameToIdent name) (WGSL.Prim $ primWGSLType typ) : fields fs
+    fields (_:fs) = fields fs
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = prettyText

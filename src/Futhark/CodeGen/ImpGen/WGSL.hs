@@ -8,7 +8,10 @@ module Futhark.CodeGen.ImpGen.WGSL
     Stmt (..),
     Attrib (..),
     Param (..),
-    Function (..)
+    Function (..),
+    Field (..),
+    Struct (..),
+    Declaration (..),
   )
 where
 
@@ -55,6 +58,11 @@ data Function = Function
     funParams :: [Param],
     funBody :: Stmt
   }
+
+data Field = Field Ident Typ
+data Struct = Struct Ident [Field]
+
+data Declaration = FunDecl Function | StructDecl Struct
 
 instance Pretty PrimType where
   pretty Bool = "bool"
@@ -136,3 +144,16 @@ instance Pretty Function where
       indent 2 (pretty body),
       "}"
     ]
+
+instance Pretty Field where
+  pretty (Field name typ) = pretty name <+> ":" <+> pretty typ
+
+instance Pretty Struct where
+  pretty (Struct name fields) =
+    "struct" <+> pretty name <+> "{"
+    </> indent 2 (commastack (map pretty fields))
+    </> "}"
+
+instance Pretty Declaration where
+  pretty (FunDecl fun) = pretty fun
+  pretty (StructDecl struct) = pretty struct
