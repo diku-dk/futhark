@@ -50,17 +50,20 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State.Strict
+import Data.Bifunctor
 import Data.Bitraversable
-import Data.Char (isAscii)
+import Data.Foldable
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
+import Language.Futhark.TypeChecker.Constraints (TyVar)
 import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod, stateNameSource)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Types
@@ -198,6 +201,7 @@ data TermEnv = TermEnv
     termLevel :: Level,
     termCheckExp :: ExpBase Info VName -> TermTypeM Exp,
     termOuterEnv :: Env,
+    termTyVars :: M.Map TyVar (TypeBase () NoUniqueness),
     termImportName :: ImportName
   }
 
@@ -347,43 +351,59 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
--- | Create a new type name and insert it (unconstrained) in the
--- substitution map.
-instantiateTypeParam ::
-  (Monoid as) =>
-  QualName VName ->
-  SrcLoc ->
-  TypeParam ->
-  TermTypeM (VName, Subst (RetTypeBase dim as))
-instantiateTypeParam qn loc tparam = do
-  i <- incCounter
-  let name = nameFromString (takeWhile isAscii (baseString (typeParamName tparam)))
-  v <- newID $ mkTypeVarName name i
-  case tparam of
-    TypeParamType x _ _ -> do
-      constrain v . NoConstraint x . mkUsage loc . docText $
-        "instantiated type parameter of " <> dquotes (pretty qn)
-      pure (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v) [])
-    TypeParamDim {} -> do
-      constrain v . Size Nothing . mkUsage loc . docText $
-        "instantiated size parameter of " <> dquotes (pretty qn)
-      pure (v, ExpSubst $ sizeFromName (qualName v) loc)
+replaceTyVars :: SrcLoc -> TypeBase () NoUniqueness -> StructType -> TermTypeM StructType
+replaceTyVars loc orig_t1 orig_t2 = do
+  tyvars <- asks termTyVars
+  let f :: (Monoid u) => TypeBase () u' -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+      f
+        (Scalar (TypeVar _ (QualName [] v1) []))
+        t2
+          | Just t <- M.lookup v1 tyvars =
+              f t t2
+          | otherwise =
+              pure $ Scalar (TypeVar (fold t2) (QualName [] v1) [])
+      f (Scalar (Record fs1)) (Scalar (Record fs2)) =
+        Scalar . Record <$> sequence (M.intersectionWith f fs1 fs2)
+      f (Scalar (Sum fs1)) (Scalar (Sum fs2)) =
+        Scalar . Sum <$> sequence (M.intersectionWith (zipWithM f) fs1 fs2)
+      f
+        (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
+        (Scalar (Arrow u pname d t2a (RetType ext t2r))) = do
+          ta <- f t1a t2a
+          tr <- f t1r t2r
+          pure $ Scalar $ Arrow u pname d ta $ RetType ext tr
+      f
+        (Array _ (Shape (() : ds1)) t1)
+        (Array u (Shape (d : ds2)) t2) =
+          arrayOfWithAliases u (Shape [d])
+            <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
+      f _ t2 = pure t2
+  f orig_t1 orig_t2
 
--- | Instantiate a type scheme with fresh type variables for its type
--- parameters. Returns the names of the fresh type variables, the
--- instance list, and the instantiated type.
-instantiateTypeScheme ::
+-- | Instantiate a type scheme with fresh size variables for its size
+-- parameters. Replaces type parameters with their known
+-- instantiations. Returns the names of the fresh size variables and
+-- the instantiated type.
+instTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   StructType ->
+  TypeBase () NoUniqueness ->
   TermTypeM ([VName], StructType)
-instantiateTypeScheme qn loc tparams t = do
-  let tnames = map typeParamName tparams
-  (tparam_names, tparam_substs) <- mapAndUnzipM (instantiateTypeParam qn loc) tparams
-  let substs = M.fromList $ zip tnames tparam_substs
-      t' = applySubst (`M.lookup` substs) t
-  pure (tparam_names, t')
+instTypeScheme qn loc tparams scheme_t inferred = do
+  (names, substs) <- fmap (unzip . catMaybes) $
+    forM tparams $ \tparam -> do
+      case tparam of
+        TypeParamType {} -> pure Nothing
+        TypeParamDim v _ -> do
+          constrain v . Size Nothing . mkUsage loc . docText $
+            "instantiated size parameter of " <> dquotes (pretty qn)
+          pure $ Just (v, (v, ExpSubst $ sizeFromName (qualName v) loc))
+
+  t' <- replaceTyVars loc inferred $ applySubst (`lookup` substs) scheme_t
+
+  pure (names, t')
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
@@ -453,36 +473,33 @@ lookupVar loc qn@(QualName qs name) t = do
   scope <- lookupQualNameEnv qn
   let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
-  t' <-
-    case M.lookup name $ scopeVtable scope of
-      Nothing ->
-        error $ "lookupVar: " <> show qn
-      Just (BoundV tparams bound_t) -> do
-        when (null qs) . modify $ \s ->
-          s {stateUsed = S.insert name $ stateUsed s}
-        if null tparams && null qs
-          then pure t
-          else do
-            (tnames, t') <- instantiateTypeScheme qn loc tparams bound_t
-            outer_env <- asks termOuterEnv
-            pure $ qualifyTypeVars outer_env tnames qs t'
-      Just EqualityF -> do
-        argtype <- newTypeVar loc "t"
-        equalityType usage argtype
-        pure $
-          Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-            Scalar $
-              Arrow mempty Unnamed Observe argtype $
-                RetType [] $
-                  Scalar $
-                    Prim Bool
-      Just (OverloadedF ts pts rt) -> do
-        argtype <- newTypeVar loc "t"
-        mustBeOneOf ts usage argtype
-        let (pts', rt') = instOverloaded argtype pts rt
-        pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
-  unify (mkUsage loc "inferred rank type") t' t
-  pure t'
+  case M.lookup name $ scopeVtable scope of
+    Nothing ->
+      error $ "lookupVar: " <> show qn
+    Just (BoundV tparams bound_t) -> do
+      when (null qs) . modify $ \s ->
+        s {stateUsed = S.insert name $ stateUsed s}
+      if null tparams && null qs
+        then pure t
+        else do
+          (tnames, t') <- instTypeScheme qn loc tparams bound_t $ first (const ()) t
+          outer_env <- asks termOuterEnv
+          pure $ qualifyTypeVars outer_env tnames qs t'
+    Just EqualityF -> do
+      argtype <- newTypeVar loc "t"
+      equalityType usage argtype
+      pure $
+        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
+          Scalar $
+            Arrow mempty Unnamed Observe argtype $
+              RetType [] $
+                Scalar $
+                  Prim Bool
+    Just (OverloadedF ts pts rt) -> do
+      argtype <- newTypeVar loc "t"
+      mustBeOneOf ts usage argtype
+      let (pts', rt') = instOverloaded argtype pts rt
+      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
   where
     instOverloaded argtype pts rt =
       ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
@@ -639,8 +656,8 @@ initialTermScope =
       Just (name, EqualityF)
     addIntrinsicF _ = Nothing
 
-runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> TermTypeM a -> TypeM a
-runTermTypeM checker (TermTypeM m) = do
+runTermTypeM :: (ExpBase Info VName -> TermTypeM Exp) -> M.Map TyVar (TypeBase () NoUniqueness) -> TermTypeM a -> TypeM a
+runTermTypeM checker tyvars (TermTypeM m) = do
   initial_scope <- (initialTermScope <>) . envToTermScope <$> askEnv
   name <- askImportName
   outer_env <- askEnv
@@ -652,7 +669,8 @@ runTermTypeM checker (TermTypeM m) = do
             termLevel = 0,
             termCheckExp = checker,
             termImportName = name,
-            termOuterEnv = outer_env
+            termOuterEnv = outer_env,
+            termTyVars = tyvars
           }
       initial_state =
         TermTypeState

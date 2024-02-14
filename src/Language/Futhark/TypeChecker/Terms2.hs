@@ -362,7 +362,7 @@ instTypeScheme ::
   TermM ([VName], StructType)
 instTypeScheme _qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $
-    forM tparams $ \tparam -> do
+    forM tparams $ \tparam ->
       case tparam of
         TypeParamType _ v _ -> do
           v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v

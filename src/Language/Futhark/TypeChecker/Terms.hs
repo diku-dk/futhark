@@ -1009,7 +1009,7 @@ checkApply loc (fname, prev_applied) ftype argexp = do
 -- turn out to be polymorphic, in which case the list of type
 -- parameters will be non-empty.
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
-checkOneExp e = runTermTypeM checkExp $ do
+checkOneExp e = runTermTypeM checkExp mempty $ do
   e' <- checkExp $ undefined e
   let t = typeOf e'
   (tparams, _, _) <-
@@ -1023,7 +1023,7 @@ checkOneExp e = runTermTypeM checkExp $ do
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
-checkSizeExp e = runTermTypeM checkExp $ do
+checkSizeExp e = runTermTypeM checkExp mempty $ do
   e' <- checkExp $ undefined e
   let t = typeOf e'
   when (hasBinding e') $
@@ -1621,21 +1621,6 @@ arrayOfM loc t shape = do
   arrayElemType (mkUsage loc "use as array element") "type used in array" t
   pure $ arrayOf shape t
 
--- A hack we need to create size variables for types at the right
--- level.
-atLevel :: Int -> TermTypeM a -> TermTypeM a
-atLevel lvl = local $ \env -> env {termLevel = lvl}
-
-addInitialConstraints :: Terms2.Solution -> TermTypeM ()
-addInitialConstraints = mapM_ f . M.toList
-  where
-    addConstraint v lvl c = modifyConstraints $ M.insert v (lvl, c)
-    usage = mkUsage (mempty :: Loc)
-    f (v, (t, lvl, vs)) = do
-      (t', _) <- atLevel lvl $ allDimsFreshInType (usage (prettyText t)) Nonrigid "dv" t
-      forM_ (v : vs) $ \v' ->
-        addConstraint v' lvl $ Constraint (RetType [] t') $ usage $ prettyNameText v'
-
 -- | Type-check a top-level (or module-level) function definition.
 -- Despite the name, this is also used for checking constant
 -- definitions, by treating them as 0-ary functions.
@@ -1657,11 +1642,12 @@ checkFunDef ::
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   (maybe_tysubsts, params', retdecl', body') <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
+  let adjust = M.fromList . concatMap f . M.toList
+        where
+          f (v, (t, _, vs)) = map (,first (const ()) t) (v : vs)
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
-    Right tysubsts -> runTermTypeM checkExp $ do
-      addInitialConstraints tysubsts
-
+    Right tysubsts -> runTermTypeM checkExp (adjust tysubsts) $ do
       traceM $ prettyString body'
 
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
