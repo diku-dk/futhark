@@ -49,7 +49,7 @@ entryParams =
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
   addCode $ "Input for " <> name <> "\n"
-  addCode $ prettyText (ImpGPU.kernelBody kernel) <> "\n\n"
+  addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
   let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
@@ -58,7 +58,7 @@ onKernel kernel = do
                   { WGSL.funName = name,
                     WGSL.funAttribs = attribs,
                     WGSL.funParams = entryParams,
-                    WGSL.funBody = [wgslBody]
+                    WGSL.funBody = wgslBody
                   }
   addCode $ prettyText wgslFun
   -- TODO: return something sensible.
@@ -131,7 +131,7 @@ genWGSLStm (s1 :>>: s2) = WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
 genWGSLStm (DeclareScalar name _ typ) =
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
 genWGSLStm (If cond cThen cElse) = 
-  WGSL.If (genWGSLExp $ untyped cond) [genWGSLStm cThen] [genWGSLStm cElse]
+  WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
 genWGSLStm (SetScalar name e) = WGSL.Assign (nameToIdent name) (genWGSLExp e)
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = 
   WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))

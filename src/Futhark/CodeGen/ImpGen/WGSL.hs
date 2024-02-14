@@ -42,9 +42,9 @@ data Stmt
   | DeclareVar Ident Typ
   | Assign Ident Exp
   | AssignIndex Ident Exp Exp
-  | If Exp [Stmt] [Stmt]
-  | For Ident Exp Exp Stmt [Stmt]
-  | While Exp [Stmt]
+  | If Exp Stmt Stmt
+  | For Ident Exp Exp Stmt Stmt
+  | While Exp Stmt
 
 data Attrib = Attrib Ident [Exp]
 data Param = Param Ident Typ [Attrib]
@@ -53,7 +53,7 @@ data Function = Function
   { funName :: Ident,
     funAttribs :: [Attrib],
     funParams :: [Param],
-    funBody :: [Stmt]
+    funBody :: Stmt
   }
 
 instance Pretty PrimType where
@@ -88,30 +88,30 @@ instance Pretty Stmt where
   pretty (Assign x e) = pretty x <+> "=" <+> pretty e
   pretty (AssignIndex x i e) =
     pretty x <> brackets (pretty i) <+> "=" <+> pretty e
-  pretty (If cond [] []) = "if" <+> pretty cond <+> "{ }"
-  pretty (If cond th []) =
+  pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
+  pretty (If cond th Skip) =
     "if" <+> pretty cond <+> "{"
-    </> indent 2 (semistack (map pretty th))
+    </> indent 2 (pretty th)
     </> "}"
-  pretty (If cond [] el) =
+  pretty (If cond Skip el) =
     "if" <+> pretty cond <+> "{ }"
     </> "else {"
-    </> indent 2 (semistack (map pretty el))
+    </> indent 2 (pretty el)
     </> "}"
   pretty (If cond th el) =
     "if" <+> pretty cond <+> "{"
-    </> indent 2 (semistack (map pretty th))
+    </> indent 2 (pretty th)
     </> "} else {"
-    </> indent 2 (semistack (map pretty el))
+    </> indent 2 (pretty el)
     </> "}"
   pretty (For x initializer cond upd body) =
     "for" <+> parens ("var" <+> pretty x <+> "=" <+> pretty initializer <> ";"
                      <+> pretty cond <> ";" <+> pretty upd) <+> "{"
-    </> indent 2 (semistack (map pretty body))
+    </> indent 2 (pretty body)
     </> "}"
   pretty (While cond body) =
     "while" <+> pretty cond <+> "{"
-    </> indent 2 (semistack (map pretty body))
+    </> indent 2 (pretty body)
     </> "}"
 
 instance Pretty Attrib where
@@ -133,6 +133,6 @@ instance Pretty Function where
   pretty (Function name attribs params body) = stack
     [ hsep (map pretty attribs),
       "fn" <+> pretty name <> prettyParams params <+> "{",
-      indent 2 (semistack (map pretty body)),
+      indent 2 (pretty body),
       "}"
     ]
