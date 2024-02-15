@@ -174,8 +174,7 @@ library
       Futhark.Analysis.PrimExp.Convert
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
-      Futhark.Analysis.IdxRefinement
-      Futhark.Analysis.IndexFn
+      Futhark.Analysis.View
       Futhark.Analysis.Refinement
       Futhark.Analysis.Refinement.CNF
       Futhark.Analysis.Refinement.Forward
@@ -217,8 +216,7 @@ library
       Futhark.CLI.Python
       Futhark.CLI.Query
       Futhark.CLI.Refinement
-      Futhark.CLI.IdxRefinement
-      Futhark.CLI.IndexFn
+      Futhark.CLI.View
       Futhark.CLI.REPL
       Futhark.CLI.Run
       Futhark.CLI.Test

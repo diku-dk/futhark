@@ -1,37 +1,38 @@
-module Futhark.Analysis.IndexFn (mkIndexFnProg) where
+module Futhark.Analysis.View (mkViewProg) where
 
 import Data.Map.Strict qualified as M
-import Futhark.Analysis.Refinement.Monad
+-- import Futhark.Analysis.Refinement.Monad
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Language.Futhark qualified as E
 import Language.Futhark.Semantic
 
-import Debug.Trace (trace, traceM)
+-- import Debug.Trace (trace, traceM)
+import Debug.Trace (trace)
 
-type IndexFn = Int
+type View = Int
 
-mkIndexFnProg :: VNameSource -> Imports -> M.Map E.VName IndexFn
-mkIndexFnProg _vnsource = mkIndexFnImports
+mkViewProg :: VNameSource -> Imports -> M.Map E.VName View
+mkViewProg _vnsource = mkViewImports
 
-mkIndexFnImports :: [(ImportName, FileModule)] -> M.Map E.VName IndexFn
-mkIndexFnImports = mconcat . map (mkIndexFnDecs . E.progDecs . fileProg . snd)
+mkViewImports :: [(ImportName, FileModule)] -> M.Map E.VName View
+mkViewImports = mconcat . map (mkViewDecs . E.progDecs . fileProg . snd)
 -- A program is a list of declarations (DecBase); functions are value bindings
 -- (ValBind).
 
-mkIndexFnDecs :: [E.Dec] -> M.Map E.VName IndexFn
-mkIndexFnDecs [] = M.empty
-mkIndexFnDecs (E.ValDec vb : rest) =
-  mkIndexFnValBind vb `M.union` mkIndexFnDecs rest
-mkIndexFnDecs (_ : ds) = mkIndexFnDecs ds
+mkViewDecs :: [E.Dec] -> M.Map E.VName View
+mkViewDecs [] = M.empty
+mkViewDecs (E.ValDec vb : rest) =
+  mkViewValBind vb `M.union` mkViewDecs rest
+mkViewDecs (_ : ds) = mkViewDecs ds
 
-mkIndexFnValBind :: E.ValBind -> M.Map E.VName IndexFn
-mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
+mkViewValBind :: E.ValBind -> M.Map E.VName View
+mkViewValBind (E.ValBind _ vn ret _ _ _params body _ _ _) =
   -- mapM_ paramRefs params
   -- forwards body
   case ret of
     Just (E.TERefine t p _) -> do
-      trace ("\n====\nmkIndexFnValBind: "
+      trace ("\n====\nmkViewValBind: "
              <> prettyString vn
              <> "\n\nTo prove\n--------\n"
              <> prettyString ret)
@@ -55,8 +56,12 @@ mkIndexFnValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       concatMap getRes es
     getRes e = [e]
 
+-- -- | Analyse an expression forwards.
+-- forwards :: M.Map E.VName View -> E.Exp -> M.Map E.VName View
+-- forwards dict (E.AppExp (E.LetPat _ p e body _) _)
+
 -- | Analyse an expression backwards.
-backwards :: M.Map E.VName IndexFn -> E.Exp -> M.Map E.VName IndexFn
+backwards :: M.Map E.VName View -> E.Exp -> M.Map E.VName View
 backwards dict (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam $ fixTuple p =
     trace ("backwards: " <> prettyString p) $
