@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 -- | Code generation for ImpCode with WebGPU.
 module Futhark.CodeGen.ImpGen.WebGPU
   ( compileProg,
@@ -49,6 +47,10 @@ entryParams =
       [WGSL.Attrib "builtin" [WGSL.VarExp "local_invocation_id"]]
   ]
 
+builtinLockstepWidth, builtinBlockSize :: WGSL.Ident
+builtinLockstepWidth = "_lockstep_width"
+builtinBlockSize = "_block_size"
+
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
@@ -56,18 +58,18 @@ onKernel kernel = do
   addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
 
+  let overrideDecls = genConstAndBuiltinDecls kernel
+  addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
+
   let (scalarDecls, copies) = genScalarCopies kernel
-  addCode $ docText (WGSL.prettyDecls scalarDecls)
-  addCode "\n"
+  addCode $ docText (WGSL.prettyDecls scalarDecls <> "\n\n")
 
   let memDecls = genMemoryDecls kernel
-  addCode $ docText (WGSL.prettyDecls memDecls)
-
-  addCode "\n\n"
+  addCode $ docText (WGSL.prettyDecls memDecls <> "\n\n")
 
   let wgslBody = WGSL.Seq copies $ genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
-                 WGSL.Attrib "workgroup_size" [WGSL.VarExp "todo"]]
+                 WGSL.Attrib "workgroup_size" [WGSL.VarExp builtinBlockSize]]
   let wgslFun = WGSL.Function
                   { WGSL.funName = name,
                     WGSL.funAttribs = attribs,
@@ -153,9 +155,9 @@ genWGSLStm (Op (ImpGPU.GetBlockId dest i)) =
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = 
   WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "local_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) = 
-  WGSL.Assign (nameToIdent dest) (WGSL.StringExp "TODO: Deal with block size")
+  WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinBlockSize)
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = 
-  WGSL.Assign (nameToIdent dest) (WGSL.StringExp "TODO: Can't get lockstep width")
+  WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinLockstepWidth)
 genWGSLStm _ = WGSL.Skip
 
 -- TODO: This does not respect the indicated sizes and signedness currently, so
@@ -254,6 +256,18 @@ genMemoryDecls kernel = do
                     (WGSL.Array $ primWGSLType t)
     _more ->
       error "Accessing buffer at multiple type not supported in WebGPU backend"
+
+-- | Generate `override` declarations for kernel 'ConstUse's and
+-- backend-provided values (like block size and lockstep width).
+genConstAndBuiltinDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
+genConstAndBuiltinDecls kernel = constDecls ++ builtinDecls
+  where 
+    constDecls = do
+      ImpGPU.ConstUse name _ <- ImpGPU.kernelUses kernel
+      pure $ WGSL.OverrideDecl (nameToIdent name) (WGSL.Prim WGSL.Int32)
+    builtinDecls =
+      [WGSL.OverrideDecl builtinLockstepWidth (WGSL.Prim WGSL.Int32),
+       WGSL.OverrideDecl builtinBlockSize (WGSL.Prim WGSL.Int32)]
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText
