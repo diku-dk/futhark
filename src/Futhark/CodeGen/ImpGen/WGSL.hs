@@ -12,6 +12,9 @@ module Futhark.CodeGen.ImpGen.WGSL
     Field (..),
     Struct (..),
     Declaration (..),
+    AddressSpace (..),
+    stmts,
+    prettyDecls
   )
 where
 
@@ -38,6 +41,7 @@ data Exp
   | UnOpExp UnOp Exp
   | CallExp Ident [Exp]
   | IndexExp Ident Exp
+  | FieldExp Ident Ident
 
 data Stmt
   = Skip
@@ -62,7 +66,16 @@ data Function = Function
 data Field = Field Ident Typ
 data Struct = Struct Ident [Field]
 
-data Declaration = FunDecl Function | StructDecl Struct
+data AddressSpace = Storage | Uniform
+
+data Declaration = FunDecl Function
+                 | StructDecl Struct
+                 | VarDecl AddressSpace Ident Typ
+
+stmts :: [Stmt] -> Stmt
+stmts [] = Skip
+stmts [s] = s
+stmts (s:ss) = Seq s (stmts ss)
 
 instance Pretty PrimType where
   pretty Bool = "bool"
@@ -88,6 +101,7 @@ instance Pretty Exp where
   pretty (BinOpExp op e1 e2) = parens (pretty e1 <+> pretty op <+> pretty e2)
   pretty (CallExp f args) = pretty f <> parens (commasep $ map pretty args)
   pretty (IndexExp x i) = pretty x <> brackets (pretty i)
+  pretty (FieldExp x y) = pretty x <> "." <> pretty y
 
 instance Pretty Stmt where
   pretty Skip = ";"
@@ -154,6 +168,15 @@ instance Pretty Struct where
     </> indent 2 (commastack (map pretty fields))
     </> "}"
 
+instance Pretty AddressSpace where
+  pretty Storage = "storage"
+  pretty Uniform = "uniform"
+
 instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun
-  pretty (StructDecl struct) = pretty struct
+  pretty (StructDecl struct) = pretty struct <> ";"
+  pretty (VarDecl as name typ) =
+    "var<" <> pretty as <> ">" <+> pretty name <+> ":" <+> pretty typ <> ";"
+
+prettyDecls :: [Declaration] -> Doc a
+prettyDecls decls = stack (map pretty decls) 

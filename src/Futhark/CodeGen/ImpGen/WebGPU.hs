@@ -15,7 +15,8 @@ import Futhark.CodeGen.ImpGen.WGSL qualified as WGSL
 import Futhark.CodeGen.ImpGen.GPU qualified as ImpGPU
 import Futhark.IR.GPUMem qualified as F
 import Futhark.MonadFreshNames
-import Futhark.Util (convFloat)
+import Futhark.Util (convFloat, zEncodeText)
+import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 
 -- State carried during WebGPU translation.
@@ -52,11 +53,11 @@ onKernel kernel = do
   addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
 
-  let scalarStruct = genScalarStructDef kernel
-  addCode $ prettyText scalarStruct
-  addCode $ "\n\n"
+  let (decls, copies) = genScalarCopies kernel
+  addCode $ docText (WGSL.prettyDecls decls)
+  addCode "\n\n"
 
-  let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
+  let wgslBody = WGSL.Seq copies $ genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
                  WGSL.Attrib "workgroup_size" [WGSL.VarExp "todo"]]
   let wgslFun = WGSL.Function
@@ -69,7 +70,7 @@ onKernel kernel = do
   addCode "\n"
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
-    where name = nameToText (ImpGPU.kernelName kernel)
+    where name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
@@ -195,15 +196,30 @@ genWGSLExp (ConvOpExp (ZExt _ _) e) = genWGSLExp e
 genWGSLExp (ConvOpExp (SExt _ _) e) = genWGSLExp e
 genWGSLExp _ = WGSL.StringExp "<not implemented>"
 
-genScalarStructDef :: ImpGPU.Kernel -> WGSL.Struct
-genScalarStructDef kernel = 
-  WGSL.Struct (T.append (nameToText $ ImpGPU.kernelName kernel) "_scalars")
-              (fields $ ImpGPU.kernelUses kernel)
+scalarUses :: [ImpGPU.KernelUse] -> [(WGSL.Ident, WGSL.Typ)]
+scalarUses [] = []
+scalarUses ((ImpGPU.ScalarUse name typ):us) =
+  (nameToIdent name, WGSL.Prim (primWGSLType typ)) : scalarUses us
+scalarUses (_:us) = scalarUses us
+
+genScalarCopies :: ImpGPU.Kernel -> ([WGSL.Declaration], WGSL.Stmt)
+genScalarCopies kernel = ([structDecl, bufferDecl], copies)
   where
-    fields [] = []
-    fields ((ImpGPU.ScalarUse name typ):fs) =
-      WGSL.Field (nameToIdent name) (WGSL.Prim $ primWGSLType typ) : fields fs
-    fields (_:fs) = fields fs
+    structName = textToIdent $
+      "Scalars_" <> nameToText (ImpGPU.kernelName kernel)
+    bufferName = textToIdent $
+      "scalars_" <> nameToText (ImpGPU.kernelName kernel)
+    scalars = scalarUses (ImpGPU.kernelUses kernel)
+    structDecl = WGSL.StructDecl $
+      WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
+    bufferDecl = WGSL.VarDecl WGSL.Uniform bufferName (WGSL.Named structName)
+    copies = WGSL.stmts $ concatMap copy scalars 
+    copy (name, typ) =
+      [WGSL.DeclareVar name typ,
+       WGSL.Assign name (WGSL.FieldExp bufferName name)]
 
 nameToIdent :: VName -> WGSL.Ident
-nameToIdent = prettyText
+nameToIdent = zEncodeText . prettyText
+
+textToIdent :: T.Text -> WGSL.Ident
+textToIdent = zEncodeText
