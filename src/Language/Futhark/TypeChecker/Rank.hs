@@ -138,6 +138,7 @@ mkLinearProg counter cs tyVars =
     finalState = flip execState initState $ runRankM buildLP
 
 rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
+rankAnalysis _ vns counter [] tyVars = Just ([], tyVars, vns, counter)
 rankAnalysis use_python vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   rank_map <-

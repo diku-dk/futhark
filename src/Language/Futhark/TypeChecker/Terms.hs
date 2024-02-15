@@ -352,14 +352,17 @@ unscopeType tloc unscoped =
 checkExp :: Exp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
-checkExp (Hole info loc) =
-  pure $ Hole info loc
+checkExp (Hole (Info t) loc) = do
+  t' <- replaceTyVars loc t t
+  pure $ Hole (Info t') loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
-checkExp (IntLit val info loc) =
-  pure $ IntLit val info loc
-checkExp (FloatLit val info loc) =
-  pure $ FloatLit val info loc
+checkExp (IntLit val (Info t) loc) = do
+  t' <- replaceTyVars loc t t
+  pure $ IntLit val (Info t') loc
+checkExp (FloatLit val (Info t) loc) = do
+  t' <- replaceTyVars loc t t
+  pure $ FloatLit val (Info t') loc
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
 checkExp (RecordLit fs loc) =
@@ -662,14 +665,14 @@ checkExp (Assert e1 e2 _ loc) = do
   e1' <- require "being asserted" [Bool] =<< checkExp e1
   e2' <- checkExp e2
   pure $ Assert e1' e2' (Info (prettyText e1)) loc
-checkExp (Lambda params body rettype_te _ loc) = do
+checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
   (params', body', rettype', RetType dims ty) <-
     incLevel . bindingParams [] params $ \params' -> do
       rettype_checked <- traverse checkTypeExpNonrigid rettype_te
-      let declared_rettype =
-            case rettype_checked of
-              Just (_, st, _) -> Just st
-              Nothing -> Nothing
+      declared_rettype <-
+        case rettype_checked of
+          Just (_, st, _) -> Just <$> replaceTyVars loc rt st
+          Nothing -> pure Nothing
       body' <- checkFunBody params' body declared_rettype loc
       body_t <- expTypeFully body'
 
@@ -677,11 +680,13 @@ checkExp (Lambda params body rettype_te _ loc) = do
 
       (rettype', rettype_st) <-
         case rettype_checked of
-          Just (te, st, ext) ->
-            pure (Just te, RetType ext st)
+          Just (te, st, ext) -> do
+            st' <- replaceTyVars loc rt st
+            pure (Just te, RetType ext st')
           Nothing -> do
-            ret <- inferReturnSizes params'' $ toRes Nonunique body_t
-            pure (Nothing, ret)
+            RetType ext ret <- inferReturnSizes params'' $ toRes Nonunique body_t
+            ret' <- replaceTyVars loc rt ret
+            pure (Nothing, RetType ext ret')
 
       pure (params'', body', rettype', rettype_st)
 
@@ -851,14 +856,10 @@ instance Pretty (Unmatched (Pat StructType)) where
 checkSlice :: SliceBase Info VName -> TermTypeM [DimIndex]
 checkSlice = mapM checkDimIndex
   where
-    checkDimIndex (DimFix i) = do
-      DimFix <$> (require "use as index" anySignedType =<< checkExp i)
+    checkDimIndex (DimFix i) =
+      DimFix <$> checkExp i
     checkDimIndex (DimSlice i j s) =
-      DimSlice <$> check i <*> check j <*> check s
-
-    check =
-      maybe (pure Nothing) $
-        fmap Just . unifies "use as index" (Scalar $ Prim $ Signed Int64) <=< checkExp
+      DimSlice <$> traverse checkExp i <*> traverse checkExp j <*> traverse checkExp s
 
 -- The number of dimensions affected by this slice (so the minimum
 -- rank of the array we are slicing).
@@ -1023,14 +1024,18 @@ checkOneExp e = runTermTypeM checkExp mempty $ do
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
-checkSizeExp e = runTermTypeM checkExp mempty $ do
-  e' <- checkExp $ undefined e
-  let t = typeOf e'
-  when (hasBinding e') $
-    typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
-      "Size expression with binding is forbidden."
-  unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
-  updateTypes e'
+checkSizeExp e = do
+  (maybe_tysubsts, e') <- Terms2.checkSingleExp e
+  case maybe_tysubsts of
+    Left err -> typeError e' mempty $ pretty err
+    Right tysubsts -> runTermTypeM checkExp tysubsts $ do
+      e'' <- checkExp e'
+      let t = typeOf e''
+      when (hasBinding e'') $
+        typeError (srclocOf e'') mempty . withIndexLink "size-expression-bind" $
+          "Size expression with binding is forbidden."
+      unify (mkUsage e'' "Size expression") t (Scalar (Prim (Signed Int64)))
+      updateTypes e''
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1642,14 +1647,9 @@ checkFunDef ::
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   (maybe_tysubsts, params', retdecl', body') <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
-  let adjust = M.fromList . concatMap f . M.toList
-        where
-          f (v, (t, _, vs)) = map (,first (const ()) t) (v : vs)
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
-    Right tysubsts -> runTermTypeM checkExp (adjust tysubsts) $ do
-      traceM $ prettyString body'
-
+    Right tysubsts -> runTermTypeM checkExp tysubsts $ do
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
         checkBinding (fname, retdecl', tparams, params', body', loc)
 

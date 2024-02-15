@@ -106,7 +106,7 @@ substTyVars m t@(Scalar (TypeVar u (QualName qs v) args)) =
   case M.lookup v m of
     Just (TyVarLink v') ->
       substTyVars m $ Scalar $ TypeVar u (QualName qs v') args
-    Just (TyVarSol _ t') -> second (const mempty) t'
+    Just (TyVarSol _ t') -> second (const mempty) $ substTyVars m t'
     Just (TyVarUnsol {}) -> t
     Nothing -> t
 substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
@@ -117,28 +117,20 @@ substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
 substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
--- | A solution maps a type variable to its substitution, binding
--- level, and additional type variables that are linked to this type.
--- This slightly odd representation is needed to encode when two type
--- variables are actually the same type. This matters when we start
--- instanting the sizes of the type.
-type Solution = M.Map TyVar (Type, Int, [TyVar])
+-- | A solution maps a type variable to its substitution.  This substitution is complete, in the sense there are no right-hand sides that contain a type variable.
+type Solution = M.Map TyVar (TypeBase () NoUniqueness)
 
 solution :: SolverState -> Solution
 solution s =
-  L.foldl' addLinks (M.mapMaybe mkSubst $ solverTyVars s) $
-    M.toList $
-      solverTyVars s
+  M.mapMaybe mkSubst $
+    solverTyVars s
   where
-    mkSubst (TyVarSol lvl t) = Just (t, lvl, [])
+    mkSubst (TyVarSol _lvl t) = Just $ first (const ()) $ substTyVars (solverTyVars s) t
+    mkSubst (TyVarLink v') = mkSubst =<< M.lookup v' (solverTyVars s)
+    mkSubst (TyVarUnsol _ (TyVarPrim pts))
+      | Signed Int32 `elem` pts =
+          Just (Scalar (Prim (Signed Int32))) -- XXX - we need warnings and things!
     mkSubst _ = Nothing
-    addLinks m (v1, TyVarLink v2) =
-      case M.lookup v2 $ solverTyVars s of
-        Just (TyVarLink v3) -> addLinks m (v1, TyVarLink v3)
-        _ -> case M.lookup v2 m of
-          Nothing -> m
-          Just (t, lvl, vs) -> M.insert v2 (t, lvl, v1 : vs) m
-    addLinks m _ = m
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)

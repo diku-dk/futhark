@@ -37,6 +37,7 @@
 -- inference, perhaps we can do it in a post-inference check.
 module Language.Futhark.TypeChecker.Terms2
   ( checkValDef,
+    checkSingleExp,
     Solution,
   )
 where
@@ -1063,7 +1064,7 @@ checkValDef ::
       Maybe (TypeExp Exp VName),
       Exp
     )
-checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
+checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   bindParams tparams params $ \params' -> do
     body' <- checkExp body
 
@@ -1075,7 +1076,7 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
 
     tyvars <- gets termTyVars
 
-    traceM $ "\n# function " <> prettyNameString fname <> "\n"
+    traceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
     vns <- gets termNameSource
 
@@ -1100,7 +1101,15 @@ checkValDef (fname, retdecl, tparams, params, body, _loc) = runTermM $ do
               "## tyvars:",
               unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
               "## solution:",
-              let p (v, (t, lvl, vs)) = unwords (show [lvl] : map prettyNameString (v : vs)) <> " => " <> prettyString t
+              let p (v, t) = prettyNameString v <> " => " <> prettyString t
                in either T.unpack (unlines . map p . M.toList) solution
             ]
         pure (solution, params', retdecl', body')
+
+checkSingleExp :: ExpBase NoInfo VName -> TypeM (Either T.Text Solution, Exp)
+checkSingleExp e = runTermM $ do
+  e' <- checkExp e
+  cts <- gets termConstraints
+  tyvars <- gets termTyVars
+  let solution = solve cts tyvars
+  pure (solution, e')

@@ -25,6 +25,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     constrain,
     newArrayType,
     allDimsFreshInType,
+    replaceTyVars,
     updateTypes,
     Names,
 
@@ -351,33 +352,37 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
-replaceTyVars :: SrcLoc -> TypeBase () NoUniqueness -> StructType -> TermTypeM StructType
+replaceTyVars ::
+  SrcLoc ->
+  TypeBase d u1 ->
+  TypeBase Size u2 ->
+  TermTypeM (TypeBase Size u1)
 replaceTyVars loc orig_t1 orig_t2 = do
   tyvars <- asks termTyVars
-  let f :: (Monoid u) => TypeBase () u' -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+  let f :: TypeBase d u1 -> TypeBase Size u2 -> TermTypeM (TypeBase Size u1)
       f
-        (Scalar (TypeVar _ (QualName [] v1) []))
+        (Scalar (TypeVar u (QualName [] v1) []))
         t2
           | Just t <- M.lookup v1 tyvars =
-              f t t2
-          | otherwise =
-              pure $ Scalar (TypeVar (fold t2) (QualName [] v1) [])
+              f (second (const u) t) t2
       f (Scalar (Record fs1)) (Scalar (Record fs2)) =
         Scalar . Record <$> sequence (M.intersectionWith f fs1 fs2)
       f (Scalar (Sum fs1)) (Scalar (Sum fs2)) =
         Scalar . Sum <$> sequence (M.intersectionWith (zipWithM f) fs1 fs2)
       f
-        (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
-        (Scalar (Arrow u pname d t2a (RetType ext t2r))) = do
+        (Scalar (Arrow u _ _ t1a (RetType _ t1r)))
+        (Scalar (Arrow _ pname d t2a (RetType ext t2r))) = do
           ta <- f t1a t2a
           tr <- f t1r t2r
           pure $ Scalar $ Arrow u pname d ta $ RetType ext tr
       f
-        (Array _ (Shape (() : ds1)) t1)
-        (Array u (Shape (d : ds2)) t2) =
+        (Array u (Shape (_ : ds1)) t1)
+        (Array _ (Shape (d : ds2)) t2) =
           arrayOfWithAliases u (Shape [d])
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
-      f _ t2 = pure t2
+      f t1 _ =
+        fst <$> allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1
+
   f orig_t1 orig_t2
 
 -- | Instantiate a type scheme with fresh size variables for its size
@@ -469,7 +474,7 @@ instance MonadTypeChecker TermTypeM where
         throwError $ TypeError (locOf loc) notes s
 
 lookupVar :: SrcLoc -> QualName VName -> StructType -> TermTypeM StructType
-lookupVar loc qn@(QualName qs name) t = do
+lookupVar loc qn@(QualName qs name) inst_t = do
   scope <- lookupQualNameEnv qn
   let usage = mkUsage loc $ docText $ "use of " <> dquotes (pretty qn)
 
@@ -480,11 +485,11 @@ lookupVar loc qn@(QualName qs name) t = do
       when (null qs) . modify $ \s ->
         s {stateUsed = S.insert name $ stateUsed s}
       if null tparams && null qs
-        then pure t
+        then pure bound_t
         else do
-          (tnames, t') <- instTypeScheme qn loc tparams bound_t $ first (const ()) t
+          (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
           outer_env <- asks termOuterEnv
-          pure $ qualifyTypeVars outer_env tnames qs t'
+          pure $ qualifyTypeVars outer_env tnames qs t
     Just EqualityF -> do
       argtype <- newTypeVar loc "t"
       equalityType usage argtype
