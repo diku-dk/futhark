@@ -20,6 +20,8 @@ module Futhark.Solve.LP
     LinearProg (..),
     OptType (..),
     Constraint (..),
+    Vars (..),
+    CType (..),
     (~==~),
     (~<=~),
     (~>=~),
@@ -28,11 +30,14 @@ module Futhark.Solve.LP
   )
 where
 
+import Control.Monad.LPMonad
 import Data.Char (isAscii)
 import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe
+import Data.Set (Set)
+import Data.Set qualified as S
 import Data.Vector.Unboxed (Unbox, Vector)
 import Data.Vector.Unboxed qualified as V
 import Debug.Trace
@@ -106,6 +111,12 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
 instance Functor (LSum v) where
   fmap f (LSum m) = LSum $ fmap f m
 
+class Vars a v where
+  vars :: a -> Set v
+
+instance (Ord v) => Vars (LSum v a) v where
+  vars = S.fromList . catMaybes . Map.keys . lsum
+
 -- | Type of constraint
 data CType = Equal | LessEq
   deriving (Show, Eq)
@@ -122,6 +133,9 @@ data Constraint v a
 instance (IsName v, Pretty a, Eq a, Num a) => Pretty (Constraint v a) where
   pretty (Constraint t l r) =
     pretty l <+> pretty t <+> pretty r
+
+instance (Ord v) => Vars (Constraint v a) v where
+  vars (Constraint _ l r) = vars l <> vars r
 
 data OptType = Maximize | Minimize
   deriving (Show, Eq)
@@ -146,6 +160,11 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LinearProg v a) where
         "subject to",
         indent 2 $ vcat $ map pretty cs
       ]
+
+instance (Ord v) => Vars (LinearProg v a) v where
+  vars lp =
+    vars (objective lp)
+      <> foldMap vars (constraints lp)
 
 -- For debugging
 linearProgToPulp :: (Unbox a, IsName v, Ord v, Pretty a, Eq a, Num a) => LinearProg v a -> String

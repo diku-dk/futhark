@@ -1087,7 +1087,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
     vns <- gets termNameSource
 
-    let use_python = True
+    let use_glpk = True
 
     traceM $
       unlines
@@ -1095,7 +1095,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           unlines $ map prettyString cts
         ]
 
-    case rankAnalysis use_python vns counter cts tyvars of
+    case rankAnalysis use_glpk vns counter cts tyvars of
       Nothing -> error ""
       Just (cts', tyvars', vns', counter') -> do
         modify $ \s -> s {termCounter = counter', termNameSource = vns'}

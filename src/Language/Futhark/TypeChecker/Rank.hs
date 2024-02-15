@@ -11,6 +11,7 @@ import Debug.Trace
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames hiding (newName)
 import Futhark.Solve.BranchAndBound
+import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
 import Futhark.Solve.Simplex
@@ -139,16 +140,11 @@ mkLinearProg counter cs tyVars =
 
 rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
 rankAnalysis _ vns counter [] tyVars = Just ([], tyVars, vns, counter)
-rankAnalysis use_python vns counter cs tyVars = do
+rankAnalysis use_glpk vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   rank_map <-
-    if use_python
-      then do
-        -- traceM $ linearProgToPulp prog
-        parseRes $
-          unsafePerformIO $
-            readProcess "python" [] $
-              linearProgToPulp prog
+    if use_glpk
+      then snd <$> (unsafePerformIO $ glpk prog)
       else do
         (_size, ranks) <- branchAndBound lp
         pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
@@ -194,24 +190,6 @@ rankAnalysis use_python vns counter cs tyVars = do
     vname_to_pulp_var = M.mapWithKey (\k _ -> map rm_subscript $ show $ prettyName k) inv_var_map
     pulp_var_to_vname =
       M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList vname_to_pulp_var]
-
-    parseRes :: String -> Maybe (Map VName Int)
-    parseRes s = do
-      (status : vars) <- trimToStart $ lines s
-      if not (success status)
-        then Nothing
-        else do
-          pure $ M.fromList $ catMaybes $ map readVar vars
-      where
-        trimToStart [] = Nothing
-        trimToStart (l : ls)
-          | "status" `L.isPrefixOf` l = Just (l : ls)
-          | otherwise = trimToStart ls
-        success l =
-          (read $ drop (length ("status: " :: [Char])) l) == (1 :: Int)
-        readVar xs =
-          let (v, _ : value) = L.span (/= ':') xs
-           in Just (fromJust $ pulp_var_to_vname M.!? v, read value)
 
 newtype SubstM a = SubstM (StateT SubstState (Reader SubstEnv) a)
   deriving (Functor, Applicative, Monad, MonadState SubstState, MonadReader SubstEnv)
