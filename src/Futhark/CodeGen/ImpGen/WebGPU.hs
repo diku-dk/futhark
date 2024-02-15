@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Code generation for ImpCode with WebGPU.
 module Futhark.CodeGen.ImpGen.WebGPU
   ( compileProg,
@@ -8,6 +10,7 @@ where
 import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.Map qualified as M
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.GPU qualified as ImpGPU
 import Futhark.CodeGen.ImpCode.WebGPU
@@ -53,8 +56,13 @@ onKernel kernel = do
   addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
 
-  let (decls, copies) = genScalarCopies kernel
-  addCode $ docText (WGSL.prettyDecls decls)
+  let (scalarDecls, copies) = genScalarCopies kernel
+  addCode $ docText (WGSL.prettyDecls scalarDecls)
+  addCode "\n"
+
+  let memDecls = genMemoryDecls kernel
+  addCode $ docText (WGSL.prettyDecls memDecls)
+
   addCode "\n\n"
 
   let wgslBody = WGSL.Seq copies $ genWGSLStm (ImpGPU.kernelBody kernel)
@@ -83,7 +91,7 @@ onHostOp (ImpGPU.CmpSizeLe v key size_class x) = do
 onHostOp (ImpGPU.GetSizeMax v size_class) =
   pure $ GetSizeMax v size_class
 
--- | Generate HIP host and device code.
+-- | Generate WebGPU host and device code.
 kernelsToWebGPU :: ImpGPU.Program -> Program
 kernelsToWebGPU prog =
   let ImpGPU.Definitions
@@ -202,6 +210,10 @@ scalarUses ((ImpGPU.ScalarUse name typ):us) =
   (nameToIdent name, WGSL.Prim (primWGSLType typ)) : scalarUses us
 scalarUses (_:us) = scalarUses us
 
+-- | Generate a struct declaration and corresponding uniform binding declaration
+-- for all the scalar 'KernelUse's. Also generate a block of statements that
+-- copies the struct fields into local variables so the kernel body can access
+-- them unmodified.
 genScalarCopies :: ImpGPU.Kernel -> ([WGSL.Declaration], WGSL.Stmt)
 genScalarCopies kernel = ([structDecl, bufferDecl], copies)
   where
@@ -217,6 +229,31 @@ genScalarCopies kernel = ([structDecl, bufferDecl], copies)
     copy (name, typ) =
       [WGSL.DeclareVar name typ,
        WGSL.Assign name (WGSL.FieldExp bufferName name)]
+
+-- | Internally, memory buffers are untyped but WGSL requires us to annotate the
+-- binding with a type. Search the kernel body for any reads and writes to the
+-- given buffer and return all types it is accessed at.
+findMemoryTypes :: ImpGPU.Kernel -> VName -> [ImpGPU.PrimType]
+findMemoryTypes kernel name = S.elems $ find (ImpGPU.kernelBody kernel)
+  where
+    find (ImpGPU.Write n _ t _ _ _) | n == name = S.singleton t
+    find (ImpGPU.Read _ n _ t _ _) | n == name = S.singleton t
+    find (s1 :>>: s2) = find s1 <> find s2
+    find (For _ _ body) = find body
+    find (While _ body) = find body
+    find (If _ s1 s2) = find s1 <> find s2
+    find _ = S.empty
+
+genMemoryDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
+genMemoryDecls kernel = do
+  ImpGPU.MemoryUse name <- ImpGPU.kernelUses kernel
+  let types = findMemoryTypes kernel name
+  case types of
+    [] -> [] -- Do not need to generate declarations for unused buffers
+    [t] -> pure $ WGSL.VarDecl (WGSL.Storage WGSL.ReadWrite) (nameToIdent name)
+                    (WGSL.Array $ primWGSLType t)
+    _more ->
+      error "Accessing buffer at multiple type not supported in WebGPU backend"
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText

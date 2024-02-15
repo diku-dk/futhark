@@ -12,6 +12,7 @@ module Futhark.CodeGen.ImpGen.WGSL
     Field (..),
     Struct (..),
     Declaration (..),
+    AccessMode (..),
     AddressSpace (..),
     stmts,
     prettyDecls
@@ -26,7 +27,7 @@ type Ident = T.Text
 data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
               | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
 
-data Typ = Prim PrimType | Named Ident
+data Typ = Prim PrimType | Array PrimType | Named Ident
 
 type BinOp = T.Text
 type UnOp = T.Text
@@ -66,7 +67,9 @@ data Function = Function
 data Field = Field Ident Typ
 data Struct = Struct Ident [Field]
 
-data AddressSpace = Storage | Uniform
+data AccessMode = ReadOnly | ReadWrite
+-- Uniform buffers are always read-only.
+data AddressSpace = Storage AccessMode | Uniform
 
 data Declaration = FunDecl Function
                  | StructDecl Struct
@@ -89,6 +92,7 @@ instance Pretty PrimType where
 
 instance Pretty Typ where
   pretty (Prim t) = pretty t
+  pretty (Array t) = "array<" <> pretty t <> ">"
   pretty (Named t) = pretty t
 
 instance Pretty Exp where
@@ -168,8 +172,12 @@ instance Pretty Struct where
     </> indent 2 (commastack (map pretty fields))
     </> "}"
 
+instance Pretty AccessMode where
+  pretty ReadOnly = "read"
+  pretty ReadWrite = "read_write"
+
 instance Pretty AddressSpace where
-  pretty Storage = "storage"
+  pretty (Storage am) = "storage" <> "," <> pretty am
   pretty Uniform = "uniform"
 
 instance Pretty Declaration where
