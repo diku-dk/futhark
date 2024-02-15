@@ -153,7 +153,11 @@ genWGSLStm (DeclareScalar name _ typ) =
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
 genWGSLStm (If cond cThen cElse) = 
   WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
+genWGSLStm (Write mem i _ _ _ v) =
+  WGSL.AssignIndex (nameToIdent mem) (countExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) = WGSL.Assign (nameToIdent name) (genWGSLExp e)
+genWGSLStm (Read tgt mem i _ _ _) =
+  WGSL.Assign (nameToIdent tgt) (WGSL.IndexExp (nameToIdent mem) (countExp i))
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = 
   WGSL.Assign (nameToIdent dest) $
     WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
@@ -211,6 +215,9 @@ genWGSLExp (ConvOpExp (ZExt _ _) e) = genWGSLExp e
 -- don't support different integer types currently
 genWGSLExp (ConvOpExp (SExt _ _) e) = genWGSLExp e
 genWGSLExp _ = WGSL.StringExp "<not implemented>"
+
+countExp :: Count Elements (TExp Int64) -> WGSL.Exp
+countExp = genWGSLExp . untyped . unCount
 
 scalarUses :: [ImpGPU.KernelUse] -> [(WGSL.Ident, WGSL.Typ)]
 scalarUses [] = []
