@@ -596,7 +596,7 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
 checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Shape Size -> Exp -> TermM (Type, AutoMap)
 checkApply loc _ ftype fframe arg = do
-  (a, b) <- split ftype
+  (a, b) <- split $ stripFrame fframe ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
   let unit_info = Info $ Scalar $ Prim Bool
@@ -607,10 +607,17 @@ checkApply loc _ ftype fframe arg = do
   ctAM r m
   ctEq lhs rhs
   pure
-    ( b,
+    ( arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) b,
       AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
     )
   where
+    stripFrame :: Shape Size -> Type -> Type
+    stripFrame frame (Array u ds t) =
+      let mnew_shape = Shape <$> L.stripPrefix (toSComp <$> shapeDims frame) (shapeDims ds)
+       in case mnew_shape of
+            Nothing -> Scalar t
+            Just new_shape -> arrayOfWithAliases u new_shape $ Scalar t
+    stripFrame _ t = t
     toSComp (Var (QualName [] x) _ _) = SVar x
     toSComp _ = error ""
     toShape = Shape . pure
