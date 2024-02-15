@@ -57,6 +57,7 @@ onKernel kernel = do
   addCode $ "Input for " <> name <> "\n"
   addCode $ prettyText kernel <> "\n\n"
   addCode $ "Code for " <> name <> ":\n"
+  addCode "== SHADER START ==\n"
 
   let overrideDecls = genConstAndBuiltinDecls kernel
   addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
@@ -78,6 +79,9 @@ onKernel kernel = do
                   }
   addCode $ prettyText wgslFun
   addCode "\n"
+
+  addCode "== SHADER END ==\n"
+
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
     where name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
