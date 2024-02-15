@@ -239,7 +239,8 @@ cval :: (Num a, Ord v) => LSum v a -> a
 cval = (! Nothing)
 
 (~+~) :: (Eq a, Num a, Ord v) => LSum v a -> LSum v a -> LSum v a
-(LSum x) ~+~ (LSum y) = normalize $ LSum $ Map.unionWith (+) x y
+-- (LSum x) ~+~ (LSum y) = normalize $ LSum $ Map.unionWith (+) x y
+(LSum x) ~+~ (LSum y) = LSum $ Map.unionWith (+) x y
 
 infixl 6 ~+~
 
@@ -249,7 +250,8 @@ x ~-~ y = x ~+~ (neg y)
 infixl 6 ~-~
 
 (~*~) :: (Eq a, Num a, Ord v) => a -> LSum v a -> LSum v a
-a ~*~ s = normalize $ fmap (a *) s
+-- a ~*~ s = normalize $ fmap (a *) s
+a ~*~ s = fmap (a *) s
 
 infixl 7 ~*~
 
