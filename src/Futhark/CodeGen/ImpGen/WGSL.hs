@@ -127,27 +127,27 @@ instance Pretty Stmt where
   pretty (If cond Skip Skip) = "if" <+> pretty cond <+> "{ }"
   pretty (If cond th Skip) =
     "if" <+> pretty cond <+> "{"
-    </> indent 2 (pretty th)
+    </> indent 2 (pretty th) <> ";"
     </> "}"
   pretty (If cond Skip el) =
     "if" <+> pretty cond <+> "{ }"
     </> "else {"
-    </> indent 2 (pretty el)
+    </> indent 2 (pretty el) <> ";"
     </> "}"
   pretty (If cond th el) =
     "if" <+> pretty cond <+> "{"
-    </> indent 2 (pretty th)
+    </> indent 2 (pretty th) <> ";"
     </> "} else {"
-    </> indent 2 (pretty el)
+    </> indent 2 (pretty el) <> ";"
     </> "}"
   pretty (For x initializer cond upd body) =
     "for" <+> parens ("var" <+> pretty x <+> "=" <+> pretty initializer <> ";"
                      <+> pretty cond <> ";" <+> pretty upd) <+> "{"
-    </> indent 2 (pretty body)
+    </> indent 2 (pretty body) <> ";"
     </> "}"
   pretty (While cond body) =
     "while" <+> pretty cond <+> "{"
-    </> indent 2 (pretty body)
+    </> indent 2 (pretty body) <> ";"
     </> "}"
 
 instance Pretty Attrib where
