@@ -113,7 +113,7 @@ substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
 substTyVars m (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars m) fs
 substTyVars m (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map $ substTyVars m) cs
 substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
-  Scalar $ Arrow u pname d (substTyVars m t1) $ RetType ext $ substTyVars m t2
+  Scalar $ Arrow u pname d (substTyVars m t1) $ RetType ext $ substTyVars m t2 `setUniqueness` uniqueness t2
 substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
