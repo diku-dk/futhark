@@ -15,6 +15,8 @@ module Futhark.CodeGen.ImpGen.WGSL
     AccessMode (..),
     AddressSpace (..),
     stmts,
+    bindingAttribs,
+    to_i32,
     prettyDecls
   )
 where
@@ -73,13 +75,20 @@ data AddressSpace = Storage AccessMode | Uniform
 
 data Declaration = FunDecl Function
                  | StructDecl Struct
-                 | VarDecl AddressSpace Ident Typ
+                 | VarDecl [Attrib] AddressSpace Ident Typ
                  | OverrideDecl Ident Typ
 
 stmts :: [Stmt] -> Stmt
 stmts [] = Skip
 stmts [s] = s
 stmts (s:ss) = Seq s (stmts ss)
+
+bindingAttribs :: Int -> Int -> [Attrib]
+bindingAttribs grp binding =
+  [Attrib "group" [IntExp grp], Attrib "binding" [IntExp binding]]
+
+to_i32 :: Exp -> Exp
+to_i32 e = CallExp "bitcast<i32>" [e]
 
 instance Pretty PrimType where
   pretty Bool = "bool"
@@ -184,7 +193,8 @@ instance Pretty AddressSpace where
 instance Pretty Declaration where
   pretty (FunDecl fun) = pretty fun
   pretty (StructDecl struct) = pretty struct <> ";"
-  pretty (VarDecl as name typ) =
+  pretty (VarDecl attribs as name typ) =
+    hsep (map pretty attribs) </>
     "var<" <> pretty as <> ">" <+> pretty name <+> ":" <+> pretty typ <> ";"
   pretty (OverrideDecl name typ) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"

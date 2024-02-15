@@ -151,9 +151,11 @@ genWGSLStm (If cond cThen cElse) =
   WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
 genWGSLStm (SetScalar name e) = WGSL.Assign (nameToIdent name) (genWGSLExp e)
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = 
-  WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
+  WGSL.Assign (nameToIdent dest) $
+    WGSL.to_i32 (WGSL.IndexExp "workgroup_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalId dest i)) = 
-  WGSL.Assign (nameToIdent dest) (WGSL.IndexExp "local_id" (WGSL.IntExp i))
+  WGSL.Assign (nameToIdent dest) $
+    WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) = 
   WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinBlockSize)
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = 
@@ -226,7 +228,9 @@ genScalarCopies kernel = ([structDecl, bufferDecl], copies)
     scalars = scalarUses (ImpGPU.kernelUses kernel)
     structDecl = WGSL.StructDecl $
       WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
-    bufferDecl = WGSL.VarDecl WGSL.Uniform bufferName (WGSL.Named structName)
+    bufferAttribs = WGSL.bindingAttribs 0 0
+    bufferDecl =
+      WGSL.VarDecl bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
     copies = WGSL.stmts $ concatMap copy scalars 
     copy (name, typ) =
       [WGSL.DeclareVar name typ,
@@ -247,15 +251,19 @@ findMemoryTypes kernel name = S.elems $ find (ImpGPU.kernelBody kernel)
     find _ = S.empty
 
 genMemoryDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
-genMemoryDecls kernel = do
-  ImpGPU.MemoryUse name <- ImpGPU.kernelUses kernel
-  let types = findMemoryTypes kernel name
-  case types of
-    [] -> [] -- Do not need to generate declarations for unused buffers
-    [t] -> pure $ WGSL.VarDecl (WGSL.Storage WGSL.ReadWrite) (nameToIdent name)
-                    (WGSL.Array $ primWGSLType t)
-    _more ->
-      error "Accessing buffer at multiple type not supported in WebGPU backend"
+genMemoryDecls kernel = zipWith memDecl [1..] uses
+  where
+    uses = do
+      ImpGPU.MemoryUse name <- ImpGPU.kernelUses kernel
+      let types = findMemoryTypes kernel name
+      case types of
+        [] -> [] -- Do not need to generate declarations for unused buffers
+        [t] -> pure (name, t)
+        _more ->
+          error "Using buffer at multiple type not supported in WebGPU backend"
+    memDecl i (name, typ) =
+      WGSL.VarDecl (WGSL.bindingAttribs 0 i) (WGSL.Storage WGSL.ReadWrite)
+                   (nameToIdent name) (WGSL.Array $ primWGSLType typ)
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
 -- backend-provided values (like block size and lockstep width).
