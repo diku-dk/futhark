@@ -397,14 +397,15 @@ instTypeScheme ::
   TypeBase () NoUniqueness ->
   TermTypeM ([VName], StructType)
 instTypeScheme qn loc tparams scheme_t inferred = do
-  (names, substs) <- fmap (unzip . catMaybes) $
-    forM tparams $ \tparam -> do
-      case tparam of
-        TypeParamType {} -> pure Nothing
-        TypeParamDim v _ -> do
-          constrain v . Size Nothing . mkUsage loc . docText $
-            "instantiated size parameter of " <> dquotes (pretty qn)
-          pure $ Just (v, (v, ExpSubst $ sizeFromName (qualName v) loc))
+  (names, substs) <- fmap (unzip . catMaybes) . forM tparams $ \tparam -> do
+    case tparam of
+      TypeParamType {} -> pure Nothing
+      TypeParamDim v _ -> do
+        i <- incCounter
+        v' <- newID $ mkTypeVarName (baseName v) i
+        constrain v' . Size Nothing . mkUsage loc . docText $
+          "instantiated size parameter of " <> dquotes (pretty qn)
+        pure $ Just (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
 
   t' <- replaceTyVars loc inferred $ applySubst (`lookup` substs) scheme_t
 
