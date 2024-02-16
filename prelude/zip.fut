@@ -11,7 +11,7 @@
 -- depended upon by soacs.fut.  So we just define a quick-and-dirty
 -- internal one here that uses the intrinsic version.
 local def internal_map 'a [n] 'x (f: a -> x) (as: [n]a): *[n]x =
-  intrinsics.map f as
+  f as
 
 -- | Construct an array of pairs from two arrays.
 def zip [n] 'a 'b (as: [n]a) (bs: [n]b): *[n](a,b) =

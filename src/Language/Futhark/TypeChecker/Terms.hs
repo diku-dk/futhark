@@ -479,8 +479,8 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, rt, p1_ext, _) <- checkApply loc (Just op, 0) ftype e1'
-  (_, rt', p2_ext, retext) <- checkApply loc (Just op, 1) rt e2'
+  (_, rt, p1_ext, _, _) <- checkApply loc (Just op, 0) ftype e1'
+  (_, rt', p2_ext, retext, _) <- checkApply loc (Just op, 1) rt e2'
 
   pure $
     AppExp
@@ -548,10 +548,10 @@ checkExp (AppExp (Apply fe args loc) _) = do
   pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
     onArg fname (i, all_exts, t) arg' = do
-      (_, rt, argext, exts) <- checkApply loc (fname, i) t arg'
+      (_, rt, argext, exts, am) <- checkApply loc (fname, i) t arg'
       pure
-        ( (i + 1, all_exts <> exts, rt),
-          (Info (argext, mempty), arg')
+        ( (i + 1, all_exts <> exts, arrayOf (autoFrame am) rt),
+          (Info (argext, am), arg')
         )
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
@@ -726,7 +726,7 @@ checkExp (OpSection op (Info op_t) loc) = do
 checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
-  (t1, rt, argext, retext) <- checkApply loc (Just op, 0) ftype e'
+  (t1, rt, argext, retext, _) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 rettype)) ->
       pure $
@@ -745,7 +745,7 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
-      (t2', arrow', argext, _) <-
+      (t2', arrow', argext, _, _) <-
         checkApply
           loc
           (Just op, 1)
@@ -923,16 +923,27 @@ dimUses = flip execState mempty . traverseDims f
       where
         fv = freeInExp e `freeWithout` bound
 
+-- | Try to find out how many dimensions of the argument we are
+-- mapping. Returns the shape mapped and the remaining type.
+stripToMatch :: StructType -> StructType -> (Shape Size, StructType)
+stripToMatch paramt argt | toStructural paramt == toStructural argt = (mempty, argt)
+stripToMatch paramt (Array _ (Shape (d : ds)) argt) =
+  first (Shape [d] <>) $ stripToMatch paramt $ arrayOf (Shape ds) (Scalar argt)
+stripToMatch _ argt = (mempty, argt)
+
 checkApply ::
   SrcLoc ->
   ApplyOp ->
   StructType ->
   Exp ->
-  TermTypeM (StructType, StructType, Maybe VName, [VName])
+  TermTypeM (StructType, StructType, Maybe VName, [VName], AutoMap)
 checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
-    unify (mkUsage argexp "use as function argument") tp1 argtype
+    (am_map_shape, argtype_automap) <-
+      stripToMatch <$> normTypeFully tp1 <*> normTypeFully argtype
+
+    unify (mkUsage argexp "use as function argument") tp1 argtype_automap
 
     -- Perform substitutions of instantiated variables in the types.
     (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
@@ -972,7 +983,14 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
                    in pure (Nothing, applySubst parsubst $ toStruct tp2')
         _ -> pure (Nothing, toStruct tp2')
 
-    pure (tp1, tp2'', argext, ext)
+    let am =
+          AutoMap
+            { autoMap = am_map_shape,
+              autoRep = mempty,
+              autoFrame = am_map_shape
+            }
+
+    pure (tp1, tp2'', argext, ext, am)
 checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
   tv <- newTypeVar loc "b"
   unify (mkUsage loc "use as function") tfun $
