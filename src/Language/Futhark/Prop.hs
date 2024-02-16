@@ -682,8 +682,8 @@ mkBinOp op t x y =
     ( BinOp
         (qualName (intrinsicVar op), mempty)
         (Info t)
-        (x, Info Nothing)
-        (y, Info Nothing)
+        (x, Info (Nothing, mempty))
+        (y, Info (Nothing, mempty))
         mempty
     )
     (Info $ AppRes t [])

@@ -170,8 +170,8 @@ sliceShape r slice t@(Array u (Shape orig_dims) et) =
         ( BinOp
             (qualName (intrinsicVar "-"), mempty)
             sizeBinOpInfo
-            (j, Info Nothing)
-            (i, Info Nothing)
+            (j, Info (Nothing, mempty))
+            (i, Info (Nothing, mempty))
             mempty
         )
         $ Info
@@ -454,8 +454,8 @@ checkExp (AppExp (Range start maybe_step end loc) _) = do
         ( BinOp
             (qualName (intrinsicVar op), mempty)
             sizeBinOpInfo
-            (x, Info Nothing)
-            (y, Info Nothing)
+            (x, Info (Nothing, mempty))
+            (y, Info (Nothing, mempty))
             mempty
         )
         (Info $ AppRes t [])
@@ -479,16 +479,16 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
 
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, rt, p1_ext, _, _) <- checkApply loc (Just op, 0) ftype e1'
-  (_, rt', p2_ext, retext, _) <- checkApply loc (Just op, 1) rt e2'
+  (_, rt, p1_ext, _, am1) <- checkApply loc (Just op, 0) ftype e1'
+  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) rt e2'
 
   pure $
     AppExp
       ( BinOp
           (op, oploc)
           (Info ftype)
-          (e1', Info p1_ext)
-          (e2', Info p2_ext)
+          (e1', Info (p1_ext, am1))
+          (e2', Info (p2_ext, am2))
           loc
       )
       (Info (AppRes rt' retext))
@@ -1143,7 +1143,7 @@ causalityCheck binding_body = do
             modify (new_known <>)
       onExp
         known
-        e@(AppExp (BinOp (f, floc) ft (x, Info xp) (y, Info yp) _) (Info res)) = do
+        e@(AppExp (BinOp (f, floc) ft (x, Info (xp, _)) (y, Info (yp, _)) _) (Info res)) = do
           args_known <-
             collectingNewKnown $ sequencePoint known x y $ catMaybes [xp, yp]
           void $ onExp (args_known <> known) (Var f ft floc)

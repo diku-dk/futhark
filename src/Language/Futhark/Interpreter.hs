@@ -828,7 +828,7 @@ evalAppExp env (LetPat sizes p e body _) = do
 evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp env (BinOp (op, _) op_t (x, Info xext) (y, Info yext) loc)
+evalAppExp env (BinOp (op, _) op_t (x, Info (xext, xam)) (y, Info (yext, yam)) loc)
   | baseString (qualLeaf op) == "&&" = do
       x' <- asBool <$> eval env x
       if x'

@@ -835,12 +835,12 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   e2' <- checkExp e2
 
   (rt1, am1) <- checkApply loc (Just op, 0) (toType ftype) mempty e1'
-  (rt2, am2) <- checkApply loc (Just op, 1) rt1 mempty e2'
+  (rt2, am2) <- checkApply loc (Just op, 1) rt1 (autoFrame am1) e2'
   rt2' <- asStructType loc rt2
 
   pure $
     AppExp
-      (BinOp (op, oploc) (Info ftype) (e1', Info Nothing) (e2', Info Nothing) loc)
+      (BinOp (op, oploc) (Info ftype) (e1', Info (Nothing, am1)) (e2', Info (Nothing, am2)) loc)
       (Info (AppRes rt2' []))
 --
 checkExp (OpSectionLeft op _ e _ _ loc) = do
