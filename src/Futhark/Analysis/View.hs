@@ -1,50 +1,60 @@
 module Futhark.Analysis.View (mkViewProg) where
 
 import Data.List qualified as L
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.Map.Strict qualified as M
+import Data.List.NonEmpty()
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (mapMaybe, fromMaybe)
+import Futhark.Analysis.View.Representation
 -- import Futhark.Analysis.Refinement.Monad
+-- import Futhark.Analysis.Refinement.CNF
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
-import Futhark.IR.Pretty() -- To import VName Pretty instance.
-import Language.Futhark qualified as E
+-- import Futhark.IR.Pretty() -- To import VName Pretty instance.
+import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark.Semantic
+import Language.Futhark (VName (VName))
+import Language.Futhark qualified as E
 
--- import Debug.Trace (trace, traceM)
-import Debug.Trace (trace)
 
-tracePretty a = trace (prettyString a) a
+--------------------------------------------------------------
+import Debug.Trace (trace, traceM)
+tracePretty :: Pretty a => a -> a
+tracePretty a = trace (prettyString a <> "\n") a
+--------------------------------------------------------------
 
-mkViewProg :: VNameSource -> Imports -> M.Map E.VName View
-mkViewProg _vnsource = mkViewImports
+mkViewProg :: VNameSource -> Imports -> ViewMap
+mkViewProg vns prog = tracePretty $ execViewM (mkViewImports prog) vns
 
-mkViewImports :: [(ImportName, FileModule)] -> M.Map E.VName View
-mkViewImports = mconcat . map (mkViewDecs . E.progDecs . fileProg . snd)
+mkViewImports :: [(ImportName, FileModule)] -> ViewM ()
+mkViewImports = mapM_ (mkViewDecs . E.progDecs . fileProg . snd)
 -- A program is a list of declarations (DecBase); functions are value bindings
 -- (ValBind). Everything is in an AppExp.
 
-mkViewDecs :: [E.Dec] -> M.Map E.VName View
-mkViewDecs [] = M.empty
-mkViewDecs (E.ValDec vb : rest) =
-  mkViewValBind vb `M.union` mkViewDecs rest
+mkViewDecs :: [E.Dec] -> ViewM ()
+mkViewDecs [] = pure ()
+mkViewDecs (E.ValDec vb : rest) = do
+  mkViewValBind vb
+  mkViewDecs rest
 mkViewDecs (_ : ds) = mkViewDecs ds
 
-mkViewValBind :: E.ValBind -> M.Map E.VName View
+mkViewValBind :: E.ValBind -> ViewM ()
 mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
   -- mapM_ paramRefs params
   -- forwards body
   case ret of
-    Just (E.TERefine _t _goal _) ->
+    Just (E.TERefine _t _goal _) -> do
       -- We don't really care about the goal right now, as
       -- we just want to express the value binding as an index function.
-      let res = forwards M.empty body
-      in trace ("\n====\nmkViewValBind: " <> prettyString vn)
-         $ trace ("\nTo prove:\n--------\n" <> prettyString ret)
-         $ trace ("\nWith params\n-----------\n" <> prettyString params)
-         $ trace ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
-         $ tracePretty
-         res
-    _ -> M.empty
+      traceM ("\n====\nmkViewValBind: " <> prettyString vn)
+      traceM ("\nTo prove:\n--------\n" <> prettyString ret)
+      traceM ("\nWith params\n-----------\n" <> prettyString params)
+      traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
+      -- s <- get
+      forwards body
+      -- tracePretty
+         -- res
+      pure ()
+    _ -> pure ()
   -- where
   --   getRes :: E.Exp -> [E.Exp]
   --   getRes (E.AppExp (E.LetPat _ _p _e body' _) _) =
@@ -53,78 +63,31 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
   --     concatMap getRes es
   --   getRes e = [e]
 
-data Exp =
-    Var E.VName
-  | Array [Exp]
-  | If Exp Exp Exp
-  | Range Exp Exp        -- from ... to
-  | Sum Exp Exp Exp Exp  -- index lower_bound upper_bound indexed_expression
-  | Idx Exp Exp          -- array index
-  -- | SoP (SoP Exp)
-  deriving (Show, Eq, Ord)
 
-instance Pretty Exp where
-  pretty (Var x) = pretty x
-  pretty (Array ts) = pretty ts
-  pretty (Idx arr i) = parens (pretty arr) <> "[" <> pretty i <> "]"
-  pretty (Sum i lb ub e) =
-    "Σ_"
-      <> pretty i
-      <> "="
-      <+> pretty lb
-      <> "^"
-      <+> pretty ub
-      <+> parens (pretty e)
-  pretty (If c t f) =
-    "If"
-      <+> parens (pretty c)
-      <+> "then"
-      <+> parens (pretty t)
-      <+> "else"
-      <+> parens (pretty f)
-  pretty (Range from to) =
-    parens (mconcat $ punctuate comma $ map pretty [from, to]) 
+dummyVName :: E.Name -> VName
+dummyVName name = VName name 0
 
--- toExp (E.Var (E.QualName qs x) _ _) =
---   pure $ Just $ Var x
+getFun :: E.Exp -> Maybe String
+getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
+getFun _ = Nothing
 
-newtype Domain = Iota Exp -- [0, ..., n-1]
-            -- | Union ...
-  deriving (Show, Eq, Ord)
+getVarVName :: E.Exp -> Maybe VName
+getVarVName (E.Var (E.QualName [] vn) _ _) = Just vn
+getVarVName _ = Nothing
 
-instance Pretty Domain where
-  pretty (Iota e) = "iota" <+> pretty e
+stripExp :: E.Exp -> E.Exp
+stripExp x = fromMaybe x (E.stripExp x)
 
-data View = Forall
-  { iterator :: E.VName,
-    domain :: Domain,
-    -- shape :: Maybe Shape, -- Might make sense to use this.
-    value :: Int
-  }
-  deriving (Show, Eq)
 
-instance Pretty View where
-  pretty (Forall i dom e) =
-    "∀" <> pretty i <+> "∈" <+> pretty dom <+> "." <+> pretty e
-
-type ViewEnv = M.Map E.VName View
-
-instance Pretty ViewEnv where
-  pretty env =
-    stack $ map (\(a, b) -> pretty a <+> ":" <+> pretty b) $ M.toList env
-
-dummyVName name = E.VName name 0
-
-forwards :: ViewEnv -> E.Exp -> ViewEnv
-forwards env (E.AppExp (E.LetPat _ p e body _) _)
-  | (E.Named x, _, _) <- E.patternParam p =
-    let res = trace ("p: " <> prettyString p) $
-              trace ("e: " <> prettyString e) $
-              forward e
-        env' = trace ("env:" <> show (M.mapKeys prettyString env) <> "\n") $
-               M.insert x res env
-    in forwards env' body
-forwards env _ = env
+forwards :: E.Exp -> ViewM ()
+forwards (E.AppExp (E.LetPat _ p e body _) _)
+  | (E.Named x, _, _) <- E.patternParam p = do
+    traceM (prettyString p <> " = " <> prettyString e)
+    let res = tracePretty $ forward e
+    insertView x res
+    -- in  forwards (M.insert x res env) body
+    pure ()
+forwards _ = pure ()
 
 -- TODO Build view for `map`.
 -- Apply
@@ -139,35 +102,58 @@ forwards env _ = env
 --     ExpBase Info VName)
 --  the first of which will be the map lambda (or function)
 --  and the rest are the arrays being mapped over
+--
+-- TODO 1. Convert lambda in maps to expression representation here.
+--         - Add SoP to Exp
+--         - Define to toExp
+-- TODO 2. Substitute bound args "c" for "Idx conds i" etc.
+--         - See Substitute and astMappable and astMap in Robert's code
+-- TODO I think this work can be rebased on top of master?
+--      Just don't include the part that actually refines types or annotates
+--      types in the source.
+-- TODO use VNameSource for fresh names
+-- TODO make this monadic once we have a MWE
 forward :: E.Exp -> View
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
-    "map" `L.isPrefixOf` fname =
+    "map" `L.isPrefixOf` fname,
+    E.Lambda params body _ _ _ : args' <- map (stripExp . snd) $ NE.toList args,
+    Just e <- toExp body =
     let i = dummyVName "i"
-    in  trace (show args) $
-        Forall i (Iota $ Var i) 0
+        arrs = mapMaybe getVarVName args'
+    in  trace (show arrs) $
+        trace (show (map E.patNames params)) $
+        Forall i (Iota $ Var i) e
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname =
     let i = dummyVName "i"
-    in  Forall i (Iota $ Var i) 1
-  -- E.Lambda params body _ _ _ : args' <- map ((\x -> fromMaybe x (E.stripExp x)) . snd) $ NE.toList args -> do
+    in  Forall i (Iota $ Var i) (Var i)
 forward (E.AppExp (E.If cond e1 e2 _srcLoc) _) =
     let i = dummyVName "i"
-    in  Forall i (Iota $ Var i) 2
+    in  Forall i (Iota $ Var i) (Var i)
 forward e =
     let i = dummyVName "i"
     in  trace ("Unhandled exp:" <> prettyString e) $
         trace ("Repr:" <> show e) $
-        Forall i (Iota $ Var i) 1337
+        Forall i (Iota $ Var i) (Var i)
 
-getFun :: E.Exp -> Maybe String
-getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
-getFun _ = Nothing
-
--- getArrayVNames :: NonEmpty a -> [E.VName]
--- getArrayVNames (_ :| args) =
---   mapMaybe (getFun . snd) (toList args)
+toExp :: E.Exp -> Maybe Exp
+toExp (E.Var (E.QualName _ x) _ _) =
+  Just $ Var x
+toExp (E.ArrayLit es _ _) =
+  let es' = map toExp es
+  in  Array <$> sequence es'
+toExp (E.AppExp (E.If c t f _) _) =
+  let c' = toExp c -- TODO Convert to CNF.
+      t' = toExp t
+      f' = toExp f
+  in  If <$> c' <*> t' <*> f'
+-- toExp (E.AppExp (E.Apply f args _) _) =
+toExp (E.Parens e _) = toExp e
+toExp (E.Attr _ e _) = toExp e
+toExp (E.IntLit x _ _) = Just $ SoP $ SoP.int2SoP x
+toExp e = error ("toExp not implemented for: " <> show e)
 
 
 -- args:

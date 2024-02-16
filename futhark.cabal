@@ -175,6 +175,7 @@ library
       Futhark.Analysis.PrimExp.Parse
       Futhark.Analysis.PrimExp.Simplify
       Futhark.Analysis.View
+      Futhark.Analysis.View.Representation
       Futhark.Analysis.Refinement
       Futhark.Analysis.Refinement.CNF
       Futhark.Analysis.Refinement.Forward
