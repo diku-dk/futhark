@@ -601,7 +601,7 @@ checkApply loc _ ftype fframe arg = do
   m <- newSVar loc "M"
   let unit_info = Info $ Scalar $ Prim Bool
       r_var = Var (QualName [] r) unit_info mempty
-      m_var = Var (QualName [] r) unit_info mempty
+      m_var = Var (QualName [] m) unit_info mempty
       lhs = arrayOf (toShape (SVar r) <> (toSComp <$> frameOf arg)) $ toType $ typeOf arg
       rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
   ctAM r m
