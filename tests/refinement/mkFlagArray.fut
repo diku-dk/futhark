@@ -7,7 +7,7 @@ let mkFlagArray 't [m]
   let aoa_len = shp_scn[m-1] + aoa_shp[m-1] -- if m > 0 cond
   let shp_ind =
         map2 (\ shp ind ->
-                if shp == 0 then -1 else ind 
+                if shp == 0 then -1 else ind
              ) aoa_shp shp_scn
   let zeros = replicate aoa_len zero
   in  scatter zeros shp_ind aoa_val

@@ -50,7 +50,7 @@ instance Pretty Exp where
       <+> "else"
       <+> parens (pretty f)
   -- pretty (Range from to) =
-  --   parens (mconcat $ punctuate comma $ map pretty [from, to]) 
+  --   parens (mconcat $ punctuate comma $ map pretty [from, to])
   pretty (SoP sop) = pretty sop
 
 newtype Domain = Iota Exp -- [0, ..., n-1]
