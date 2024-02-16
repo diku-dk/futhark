@@ -20,6 +20,9 @@ import Language.Futhark qualified as E
 import Debug.Trace (trace, traceM)
 tracePretty :: Pretty a => a -> a
 tracePretty a = trace (prettyString a <> "\n") a
+
+tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
+tracePrettyM a = traceM (prettyString a <> "\n")
 --------------------------------------------------------------
 
 mkViewProg :: VNameSource -> Imports -> ViewMap
@@ -49,10 +52,7 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       traceM ("\nTo prove:\n--------\n" <> prettyString ret)
       traceM ("\nWith params\n-----------\n" <> prettyString params)
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
-      -- s <- get
-      forwards body
-      -- tracePretty
-         -- res
+      -- forwards body -- XXX
       pure ()
     _ -> pure ()
   -- where
@@ -63,9 +63,6 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
   --     concatMap getRes es
   --   getRes e = [e]
 
-
-dummyVName :: E.Name -> VName
-dummyVName name = VName name 0
 
 getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
@@ -83,9 +80,10 @@ forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
-    let res = tracePretty $ forward e
+    res <- forward e
+    tracePrettyM res
     insertView x res
-    -- in  forwards (M.insert x res env) body
+    forwards body
     pure ()
 forwards _ = pure ()
 
@@ -113,30 +111,28 @@ forwards _ = pure ()
 --      types in the source.
 -- TODO use VNameSource for fresh names
 -- TODO make this monadic once we have a MWE
-forward :: E.Exp -> View
+forward :: E.Exp -> ViewM View
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- map (stripExp . snd) $ NE.toList args,
-    Just e <- toExp body =
-    let i = dummyVName "i"
-        arrs = mapMaybe getVarVName args'
-    in  trace (show arrs) $
-        trace (show (map E.patNames params)) $
-        Forall i (Iota $ Var i) e
+    Just e <- toExp body = do
+    i <- newNameFromString "i"
+    let arrs = mapMaybe getVarVName args'
+    traceM (show arrs)
+    traceM (show (map E.patNames params))
+    pure $ Forall i (Iota $ Var i) e
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
-    "scan" `L.isPrefixOf` fname =
-    let i = dummyVName "i"
-    in  Forall i (Iota $ Var i) (Var i)
-forward (E.AppExp (E.If cond e1 e2 _srcLoc) _) =
-    let i = dummyVName "i"
-    in  Forall i (Iota $ Var i) (Var i)
-forward e =
-    let i = dummyVName "i"
-    in  trace ("Unhandled exp:" <> prettyString e) $
-        trace ("Repr:" <> show e) $
-        Forall i (Iota $ Var i) (Var i)
+    "scan" `L.isPrefixOf` fname = do
+    i <- newNameFromString "i"
+    pure $ Forall i (Iota $ Var i) (Var i)
+forward (E.AppExp (E.If cond e1 e2 _srcLoc) _) = do
+    i <- newNameFromString "i"
+    pure $ Forall i (Iota $ Var i) (Var i)
+forward e = do
+    traceM ("Unhandled exp:" <> prettyString e)
+    error (show e)
 
 toExp :: E.Exp -> Maybe Exp
 toExp (E.Var (E.QualName _ x) _ _) =
