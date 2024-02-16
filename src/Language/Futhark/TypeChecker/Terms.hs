@@ -353,15 +353,15 @@ checkExp :: Exp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole (Info t) loc) = do
-  t' <- replaceTyVars loc t t
+  t' <- replaceTyVars loc t
   pure $ Hole (Info t') loc
 checkExp (StringLit vs loc) =
   pure $ StringLit vs loc
 checkExp (IntLit val (Info t) loc) = do
-  t' <- replaceTyVars loc t t
+  t' <- replaceTyVars loc t
   pure $ IntLit val (Info t') loc
 checkExp (FloatLit val (Info t) loc) = do
-  t' <- replaceTyVars loc t t
+  t' <- replaceTyVars loc t
   pure $ FloatLit val (Info t') loc
 checkExp (TupLit es loc) =
   TupLit <$> mapM checkExp es <*> pure loc
@@ -668,10 +668,13 @@ checkExp (Assert e1 e2 _ loc) = do
 checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
   (params', body', rettype', RetType dims ty) <-
     incLevel . bindingParams [] params $ \params' -> do
+      rt' <- replaceTyVars loc rt
       rettype_checked <- traverse checkTypeExpNonrigid rettype_te
       declared_rettype <-
         case rettype_checked of
-          Just (_, st, _) -> Just <$> replaceTyVars loc rt st
+          Just (_, st, _) -> do
+            unify (mkUsage body "lambda return type ascription") (toStruct rt') (toStruct st)
+            pure $ Just st
           Nothing -> pure Nothing
       body' <- checkFunBody params' body declared_rettype loc
       body_t <- expTypeFully body'
@@ -680,13 +683,11 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
 
       (rettype', rettype_st) <-
         case rettype_checked of
-          Just (te, st, ext) -> do
-            st' <- replaceTyVars loc rt st
-            pure (Just te, RetType ext st')
+          Just (te, _, ext) ->
+            pure (Just te, RetType ext rt')
           Nothing -> do
             RetType ext ret <- inferReturnSizes params'' $ toRes Nonunique body_t
-            ret' <- replaceTyVars loc rt ret
-            pure (Nothing, RetType ext ret')
+            pure (Nothing, RetType ext ret)
 
       pure (params'', body', rettype', rettype_st)
 

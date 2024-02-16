@@ -123,16 +123,18 @@ checkPat' sizes (PatParens p loc) t =
 checkPat' sizes (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' sizes p t <*> pure loc
 checkPat' _ (Id name (Info t) loc) NoneInferred = do
-  t' <- replaceTyVars loc (first (const ()) t) t
+  t' <- replaceTyVars loc t
   pure $ Id name (Info t') loc
 checkPat' _ (Id name (Info t1) loc) (Ascribed t2) = do
-  t <- replaceTyVars loc (first (const ()) t1) t2
+  t <- replaceTyVars loc t1
+  unify (mkUsage loc "wildcard") (toStruct t) (toStruct t2)
   pure $ Id name (Info t) loc
 checkPat' _ (Wildcard (Info t) loc) NoneInferred = do
-  t' <- replaceTyVars loc (first (const ()) t) t
+  t' <- replaceTyVars loc t
   pure $ Wildcard (Info t') loc
 checkPat' _ (Wildcard (Info t1) loc) (Ascribed t2) = do
-  t <- replaceTyVars loc (first (const ()) t1) t2
+  t <- replaceTyVars loc t1
+  unify (mkUsage loc "wildcard") (toStruct t) (toStruct t2)
   pure $ Wildcard (Info t) loc
 checkPat' sizes p@(TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,

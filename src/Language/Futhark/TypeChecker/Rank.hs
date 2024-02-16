@@ -115,7 +115,10 @@ addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
 addTyVarInfo tv (_, TyVarFree) = pure ()
 addTyVarInfo tv (_, TyVarPrim _) =
   addConstraint $ rank tv ~==~ constant 0
-addTyVarInfo _ _ = error "Unhandled"
+addTyVarInfo tv (_, TyVarRecord _) =
+  addConstraint $ rank tv ~==~ constant 0
+addTyVarInfo tv (_, TyVarSum _) =
+  addConstraint $ rank tv ~==~ constant 0
 
 mkLinearProg :: Int -> [Ct] -> TyVars -> LinearProg
 mkLinearProg counter cs tyVars =

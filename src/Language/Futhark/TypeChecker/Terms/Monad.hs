@@ -58,7 +58,6 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
 import Futhark.Util.Pretty hiding (space)
@@ -352,14 +351,47 @@ instance MonadUnify TermTypeM where
           </> indent 2 (pretty t2)
           </> "do not match."
 
-replaceTyVars ::
-  SrcLoc ->
-  TypeBase d u1 ->
-  TypeBase Size u2 ->
-  TermTypeM (TypeBase Size u1)
-replaceTyVars loc orig_t1 orig_t2 = do
+replaceTyVars :: SrcLoc -> TypeBase Size u -> TermTypeM (TypeBase Size u)
+replaceTyVars loc orig_t = do
   tyvars <- asks termTyVars
-  let f :: TypeBase d u1 -> TypeBase Size u2 -> TermTypeM (TypeBase Size u1)
+  let f :: TypeBase Size u -> TermTypeM (TypeBase Size u)
+      f (Scalar (Prim t)) = pure $ Scalar $ Prim t
+      f
+        (Scalar (TypeVar u (QualName [] v) []))
+          | Just t <- M.lookup v tyvars =
+              fst <$> allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" (second (const u) t)
+          | otherwise =
+              pure $ Scalar (TypeVar u (QualName [] v) [])
+      f (Scalar (TypeVar u qn targs)) =
+        Scalar . TypeVar u qn <$> mapM onTyArg targs
+        where
+          onTyArg (TypeArgDim e) = pure $ TypeArgDim e
+          onTyArg (TypeArgType t) = TypeArgType <$> f t
+      f (Scalar (Record fs)) =
+        Scalar . Record <$> traverse f fs
+      f (Scalar (Sum fs)) =
+        Scalar . Sum <$> traverse (mapM f) fs
+      f (Scalar (Arrow u pname d ta (RetType ext tr))) = do
+        ta' <- f ta
+        tr' <- f tr
+        pure $ Scalar $ Arrow u pname d ta' $ RetType ext tr'
+      f (Array u shape t) =
+        arrayOfWithAliases u shape <$> f (Scalar t)
+
+  f orig_t
+
+instTyVars ::
+  SrcLoc ->
+  [VName] ->
+  TypeBase () u ->
+  TypeBase Size u ->
+  TermTypeM (TypeBase Size u)
+instTyVars loc names orig_t1 orig_t2 = do
+  tyvars <- asks termTyVars
+  let f ::
+        TypeBase d u ->
+        TypeBase Size u ->
+        StateT (M.Map VName (TypeBase Size NoUniqueness)) TermTypeM (TypeBase Size u)
       f
         (Scalar (TypeVar u (QualName [] v1) []))
         t2
@@ -380,10 +412,23 @@ replaceTyVars loc orig_t1 orig_t2 = do
         (Array _ (Shape (d : ds2)) t2) =
           arrayOfWithAliases u (Shape [d])
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
-      f t1 _ =
-        fst <$> allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1
+      f t1 t2 = do
+        let mkNew =
+              fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1)
+        case t2 of
+          Scalar (TypeVar u (QualName [] v2) [])
+            | v2 `elem` names -> do
+                seen <- get
+                case M.lookup v2 seen of
+                  Nothing -> do
+                    t <- mkNew
+                    modify $ M.insert v2 $ second (const NoUniqueness) t
+                    pure t
+                  Just t ->
+                    pure $ second (const u) t
+          _ -> mkNew
 
-  f orig_t1 orig_t2
+  evalStateT (f orig_t1 orig_t2) mempty
 
 -- | Instantiate a type scheme with fresh size variables for its size
 -- parameters. Replaces type parameters with their known
@@ -407,7 +452,8 @@ instTypeScheme qn loc tparams scheme_t inferred = do
           "instantiated size parameter of " <> dquotes (pretty qn)
         pure $ Just (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
 
-  t' <- replaceTyVars loc inferred $ applySubst (`lookup` substs) scheme_t
+  let tp_names = map typeParamName $ filter isTypeParam tparams
+  t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
 
   pure (names, t')
 
