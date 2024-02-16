@@ -117,19 +117,19 @@ forward (E.AppExp (E.Apply f args _) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- map (stripExp . snd) $ NE.toList args,
     Just e <- toExp body = do
-    i <- newNameFromString "i"
-    let arrs = mapMaybe getVarVName args'
-    traceM (show arrs)
-    traceM (show (map E.patNames params))
-    pure $ Forall i (Iota $ Var i) e
+      i <- newNameFromString "i"
+      let arrs = mapMaybe getVarVName args'
+      traceM (show arrs)
+      traceM (show (map E.patNames params))
+      pure $ Forall i (Iota $ Var i) e
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname = do
-    i <- newNameFromString "i"
-    pure $ Forall i (Iota $ Var i) (Var i)
+      i <- newNameFromString "i"
+      pure $ Forall i (Iota $ Var i) (Var i)
 forward (E.AppExp (E.If cond e1 e2 _srcLoc) _) = do
-    i <- newNameFromString "i"
-    pure $ Forall i (Iota $ Var i) (Var i)
+      i <- newNameFromString "i"
+      pure $ Forall i (Iota $ Var i) (Var i)
 forward e = do
     traceM ("Unhandled exp:" <> prettyString e)
     error (show e)
