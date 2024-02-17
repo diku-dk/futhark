@@ -56,12 +56,6 @@ hasBinding e = isNothing $ astMap m e
     m =
       identityMapper {mapOnExp = \e' -> if hasBinding e' then Nothing else Just e'}
 
-overloadedTypeVars :: Constraints -> Names
-overloadedTypeVars = mconcat . map f . M.elems
-  where
-    f (_, HasFields _ fs _) = mconcat $ map typeVars $ M.elems fs
-    f _ = mempty
-
 --- Basic checking
 
 -- | Determine if the two types are identical, ignoring uniqueness.
@@ -495,8 +489,11 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
 checkExp (Project k e _ loc) = do
   e' <- checkExp e
   t <- expType e'
-  kt <- mustHaveField (mkUsage loc $ docText $ "projection of field " <> dquotes (pretty k)) k t
-  pure $ Project k e' (Info kt) loc
+  case t of
+    Scalar (Record fs)
+      | Just kt <- M.lookup k fs ->
+          pure $ Project k e' (Info kt) loc
+    _ -> error $ "checkExp Project: " <> show t
 checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e1' <- checkExp e1
   e2' <- checkExp e2
@@ -765,12 +762,9 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (ProjectSection fields _ loc) = do
-  a <- newTypeVar loc "a"
-  let usage = mkUsage loc "projection at"
-  b <- foldM (flip $ mustHaveField usage) a fields
-  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ toRes Nonunique b
-  pure $ ProjectSection fields (Info ft) loc
+checkExp (ProjectSection fields (Info t) loc) = do
+  t' <- replaceTyVars loc t
+  pure $ ProjectSection fields (Info t') loc
 checkExp (IndexSection slice _ loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' loc) "e" $ sliceDims slice'
@@ -1292,23 +1286,6 @@ fixOverloadedTypes tyvars_at_toplevel =
         Scalar (tupleRecord [])
       when (v `S.member` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to ()."
-    fixOverloaded (_, Equality usage) =
-      typeError usage mempty . withIndexLink "ambiguous-type" $
-        "Type is ambiguous (must be equality type)."
-          </> "Add a type annotation to disambiguate the type."
-    fixOverloaded (_, HasFields _ fs usage) =
-      typeError usage mempty . withIndexLink "ambiguous-type" $
-        "Type is ambiguous.  Must be record with fields:"
-          </> indent 2 (stack $ map field $ M.toList fs)
-          </> "Add a type annotation to disambiguate the type."
-      where
-        field (l, t) = pretty l <> colon <+> align (pretty t)
-    fixOverloaded (_, HasConstrs _ cs usage) =
-      typeError usage mempty . withIndexLink "ambiguous-type" $
-        "Type is ambiguous (must be a sum type with constructors:"
-          <+> pretty (Sum cs)
-          <> ")."
-            </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, Size Nothing (Usage Nothing loc)) =
       typeError loc mempty . withIndexLink "ambiguous-size" $
         "Ambiguous size" <+> dquotes (prettyName v) <> "."
@@ -1552,18 +1529,12 @@ letGeneralise defname defloc tparams params restype =
     --
     -- (2) are not used in the (new) definition of any type variables
     -- known before we checked this function.
-    --
-    -- (3) are not referenced from an overloaded type (for example,
-    -- are the element types of an incompletely resolved record type).
-    -- This is a bit more restrictive than I'd like, and SML for
-    -- example does not have this restriction.
-    --
+
     -- Criteria (1) and (2) is implemented by looking at the binding
     -- level of the type variables.
-    let keep_type_vars = overloadedTypeVars now_substs
 
     cur_lvl <- curLevel
-    let candidate k (lvl, _) = (k `S.notMember` keep_type_vars) && lvl >= (cur_lvl - length params)
+    let candidate k (lvl, _) = lvl >= (cur_lvl - length params)
         new_substs = M.filterWithKey candidate now_substs
 
     (tparams', RetType ret_dims restype') <-
