@@ -118,18 +118,16 @@ substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
 -- | A solution maps a type variable to its substitution.  This substitution is complete, in the sense there are no right-hand sides that contain a type variable.
-type Solution = M.Map TyVar (TypeBase () NoUniqueness)
+type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 
 solution :: SolverState -> Solution
 solution s =
   M.mapMaybe mkSubst $
     solverTyVars s
   where
-    mkSubst (TyVarSol _lvl t) = Just $ first (const ()) $ substTyVars (solverTyVars s) t
+    mkSubst (TyVarSol _lvl t) = Just $ Right $ first (const ()) $ substTyVars (solverTyVars s) t
     mkSubst (TyVarLink v') = mkSubst =<< M.lookup v' (solverTyVars s)
-    mkSubst (TyVarUnsol _ (TyVarPrim pts))
-      | Signed Int32 `elem` pts =
-          Just (Scalar (Prim (Signed Int32))) -- XXX - we need warnings and things!
+    mkSubst (TyVarUnsol _ (TyVarPrim pts)) = Just $ Left pts
     mkSubst _ = Nothing
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}

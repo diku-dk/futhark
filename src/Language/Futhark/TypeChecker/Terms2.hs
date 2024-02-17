@@ -49,8 +49,10 @@ import Data.Bifunctor
 import Data.Char (isAscii)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
+import Data.Loc (Loc (NoLoc))
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Debug.Trace
 import Futhark.FreshNames qualified as FreshNames
@@ -63,7 +65,7 @@ import Language.Futhark.TypeChecker.Monad hiding (BoundV, lookupMod)
 import Language.Futhark.TypeChecker.Monad qualified as TypeM
 import Language.Futhark.TypeChecker.Rank
 import Language.Futhark.TypeChecker.Types
-import Language.Futhark.TypeChecker.Unify (Level)
+import Language.Futhark.TypeChecker.Unify (Level, mkUsage)
 import Prelude hiding (mod)
 
 data Inferred t
@@ -430,7 +432,10 @@ patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
 checkSizeExp :: ExpBase NoInfo VName -> TermM Exp
-checkSizeExp = require "use as size" [Signed Int64] <=< checkExp
+checkSizeExp e = do
+  e' <- checkExp e
+  ctEq (expType e') (Scalar (Prim (Signed Int64)))
+  pure e'
 
 checkPat' ::
   PatBase NoInfo VName ParamType ->
@@ -1057,6 +1062,30 @@ checkExp (Coerce e te NoInfo loc) = do
   ctEq (expType e') (toType st)
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
+doDefaults ::
+  S.Set VName ->
+  VName ->
+  Either [PrimType] (TypeBase () NoUniqueness) ->
+  TermM (TypeBase () NoUniqueness)
+doDefaults tyvars_at_toplevel v (Left pts)
+  | Signed Int32 `elem` pts = do
+      when (v `S.member` tyvars_at_toplevel) $
+        warn usage "Defaulting ambiguous type to i32."
+      pure $ Scalar $ Prim $ Signed Int32
+  | FloatType Float64 `elem` pts = do
+      when (v `S.member` tyvars_at_toplevel) $
+        warn usage "Defaulting ambiguous type to f64."
+      pure $ Scalar $ Prim $ FloatType Float64
+  | otherwise =
+      typeError usage mempty . withIndexLink "ambiguous-type" $
+        "Type is ambiguous (could be one of"
+          <+> commasep (map pretty pts)
+          <> ")."
+            </> "Add a type annotation to disambiguate the type."
+  where
+    usage = mkUsage NoLoc "overload"
+doDefaults _ _ (Right t) = pure t
+
 checkValDef ::
   ( VName,
     Maybe (TypeExp (ExpBase NoInfo VName) VName),
@@ -1066,7 +1095,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( Either T.Text Solution,
+    ( Either T.Text (M.Map TyVar (TypeBase () NoUniqueness)),
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
       Exp
@@ -1099,7 +1128,8 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       Nothing -> error ""
       Just (cts', tyvars', vns', counter') -> do
         modify $ \s -> s {termCounter = counter', termNameSource = vns'}
-        let solution = solve cts' tyvars'
+
+        solution <- traverse (M.traverseWithKey (doDefaults mempty)) $ solve cts' tyvars'
 
         traceM $
           unlines
@@ -1111,12 +1141,15 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
               let p (v, t) = prettyNameString v <> " => " <> prettyString t
                in either T.unpack (unlines . map p . M.toList) solution
             ]
+
         pure (solution, params', retdecl', body')
 
-checkSingleExp :: ExpBase NoInfo VName -> TypeM (Either T.Text Solution, Exp)
+checkSingleExp ::
+  ExpBase NoInfo VName ->
+  TypeM (Either T.Text (M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
-  let solution = solve cts tyvars
+  solution <- traverse (M.traverseWithKey (doDefaults mempty)) $ solve cts tyvars
   pure (solution, e')

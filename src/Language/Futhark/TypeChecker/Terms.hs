@@ -1666,6 +1666,7 @@ checkFunDef ::
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   (maybe_tysubsts, params', retdecl', body') <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
+
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
     Right tysubsts -> runTermTypeM checkExp tysubsts $ do
