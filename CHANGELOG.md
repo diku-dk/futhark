@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The prelude definition of `filter` is now more memory efficient,
+  particularly when the output is much smaller than the input. (#2109)
+
 ### Removed
 
 ### Changed
