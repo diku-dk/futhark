@@ -31,7 +31,6 @@ module Language.Futhark.TypeChecker.Terms.Monad
 
     -- * Primitive checking
     unifies,
-    require,
     checkTypeExpNonrigid,
     lookupVar,
     lookupMod,
@@ -537,21 +536,10 @@ lookupVar loc qn@(QualName qs name) inst_t = do
           (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
           outer_env <- asks termOuterEnv
           pure $ qualifyTypeVars outer_env tnames qs t
-    Just EqualityF -> do
-      argtype <- newTypeVar loc "t"
-      equalityType usage argtype
-      pure $
-        Scalar . Arrow mempty Unnamed Observe argtype . RetType [] $
-          Scalar $
-            Arrow mempty Unnamed Observe argtype $
-              RetType [] $
-                Scalar $
-                  Prim Bool
-    Just (OverloadedF ts pts rt) -> do
-      argtype <- newTypeVar loc "t"
-      mustBeOneOf ts usage argtype
-      let (pts', rt') = instOverloaded argtype pts rt
-      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+    Just EqualityF ->
+      replaceTyVars loc inst_t
+    Just OverloadedF {} ->
+      replaceTyVars loc inst_t
   where
     instOverloaded argtype pts rt =
       ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
@@ -637,13 +625,6 @@ updateTypes = astMap tv
 unifies :: T.Text -> StructType -> Exp -> TermTypeM Exp
 unifies why t e = do
   unify (mkUsage (srclocOf e) why) t . toStruct =<< expType e
-  pure e
-
--- | @require ts e@ causes a 'TypeError' if @expType e@ is not one of
--- the types in @ts@.  Otherwise, simply returns @e@.
-require :: T.Text -> [PrimType] -> Exp -> TermTypeM Exp
-require why ts e = do
-  mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
 checkExpForSize :: ExpBase Info VName -> TermTypeM Exp

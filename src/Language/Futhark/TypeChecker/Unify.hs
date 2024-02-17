@@ -18,7 +18,6 @@ module Language.Futhark.TypeChecker.Unify
     arrayElemType,
     mustHaveConstr,
     mustHaveField,
-    mustBeOneOf,
     equalityType,
     normType,
     normTypeFully,
@@ -119,7 +118,6 @@ data Constraint
   = NoConstraint Liftedness Usage
   | ParamType Liftedness Loc
   | Constraint StructRetType Usage
-  | Overloaded [PrimType] Usage
   | HasFields Liftedness (M.Map Name StructType) Usage
   | Equality Usage
   | HasConstrs Liftedness (M.Map Name [StructType]) Usage
@@ -138,7 +136,6 @@ instance Located Constraint where
   locOf (NoConstraint _ usage) = locOf usage
   locOf (ParamType _ usage) = locOf usage
   locOf (Constraint _ usage) = locOf usage
-  locOf (Overloaded _ usage) = locOf usage
   locOf (HasFields _ _ usage) = locOf usage
   locOf (Equality usage) = locOf usage
   locOf (HasConstrs _ _ usage) = locOf usage
@@ -282,8 +279,6 @@ typeVarNotes v = maybe mempty (note . snd) . M.lookup v <$> getConstraints
           <+> "="
           <+> hsep (map ppConstr (M.toList cs))
           <+> "..."
-    note (Overloaded ts _) =
-      aNote $ prettyName v <+> "must be one of" <+> mconcat (punctuate ", " (map pretty ts))
     note (HasFields _ fs _) =
       aNote $
         prettyName v
@@ -685,26 +680,6 @@ linkVarToType onDims usage bound bcs vn lvl tp_unnorm = do
     Just (Equality _) -> do
       link
       equalityType usage tp
-    Just (Overloaded ts old_usage)
-      | tp `notElem` map (Scalar . Prim) ts -> do
-          link
-          case tp of
-            Scalar (TypeVar _ (QualName [] v) [])
-              | not $ isRigid v constraints ->
-                  linkVarToTypes usage v ts
-            _ ->
-              unifyError usage mempty bcs $
-                "Cannot instantiate"
-                  <+> dquotes (prettyName vn)
-                  <+> "with type"
-                  </> indent 2 (pretty tp)
-                  </> "as"
-                  <+> dquotes (prettyName vn)
-                  <+> "must be one of"
-                  <+> commasep (map pretty ts)
-                  </> "due to"
-                  <+> pretty old_usage
-                  <> "."
     Just (HasFields l required_fields old_usage) -> do
       when (l == Unlifted) $ arrayElemTypeWith usage (unliftedBcs old_usage) tp
       case tp of
@@ -846,63 +821,6 @@ linkVarToDim usage bcs vn lvl e = do
             _ -> modifyConstraints $ M.insert dim' (lvl, c)
     checkVar _ _ = pure ()
 
--- | Assert that this type must be one of the given primitive types.
-mustBeOneOf :: (MonadUnify m) => [PrimType] -> Usage -> StructType -> m ()
-mustBeOneOf [req_t] usage t = unify usage (Scalar (Prim req_t)) t
-mustBeOneOf ts usage t = do
-  t' <- normType t
-  constraints <- getConstraints
-  let isRigid' v = isRigid v constraints
-
-  case t' of
-    Scalar (TypeVar _ (QualName [] v) [])
-      | not $ isRigid' v -> linkVarToTypes usage v ts
-    Scalar (Prim pt) | pt `elem` ts -> pure ()
-    _ -> failure
-  where
-    failure =
-      unifyError usage mempty noBreadCrumbs $
-        "Cannot unify type"
-          <+> dquotes (pretty t)
-          <+> "with any of "
-          <> commasep (map pretty ts)
-          <> "."
-
-linkVarToTypes :: (MonadUnify m) => Usage -> VName -> [PrimType] -> m ()
-linkVarToTypes usage vn ts = do
-  vn_constraint <- M.lookup vn <$> getConstraints
-  case vn_constraint of
-    Just (lvl, Overloaded vn_ts vn_usage) ->
-      case ts `intersect` vn_ts of
-        [] ->
-          unifyError usage mempty noBreadCrumbs $
-            "Type constrained to one of"
-              <+> commasep (map pretty ts)
-              <+> "but also one of"
-              <+> commasep (map pretty vn_ts)
-              <+> "due to"
-              <+> pretty vn_usage
-              <> "."
-        ts' -> modifyConstraints $ M.insert vn (lvl, Overloaded ts' usage)
-    Just (_, HasConstrs _ _ vn_usage) ->
-      unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of"
-          <+> commasep (map pretty ts)
-          <> ", but also inferred to be sum type due to"
-            <+> pretty vn_usage
-          <> "."
-    Just (_, HasFields _ _ vn_usage) ->
-      unifyError usage mempty noBreadCrumbs $
-        "Type constrained to one of"
-          <+> commasep (map pretty ts)
-          <> ", but also inferred to be record due to"
-            <+> pretty vn_usage
-          <> "."
-    Just (lvl, _) -> modifyConstraints $ M.insert vn (lvl, Overloaded ts usage)
-    Nothing ->
-      unifyError usage mempty noBreadCrumbs $
-        "Cannot constrain type to one of" <+> commasep (map pretty ts)
-
 -- | Assert that this type must support equality.
 equalityType ::
   (MonadUnify m, Pretty (Shape dim), Pretty u) =>
@@ -932,8 +850,6 @@ equalityType usage t = do
           | otherwise -> pure ()
         Just (lvl, NoConstraint _ _) ->
           modifyConstraints $ M.insert vn (lvl, Equality usage)
-        Just (_, Overloaded _ _) ->
-          pure () -- All primtypes support equality.
         Just (_, Equality {}) ->
           pure ()
         _ ->

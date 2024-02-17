@@ -220,9 +220,7 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
   (sparams, mergepat', form', loopbody') <-
     case form of
       For i uboundexp -> do
-        uboundexp' <-
-          require "being the bound in a 'for' loop" anySignedType
-            =<< checkExp uboundexp
+        uboundexp' <- checkExp uboundexp
         bindingIdent i . bindingPat [] mergepat merge_t $
           \mergepat' -> incLevel $ do
             loopbody' <- checkExp loopbody

@@ -390,7 +390,7 @@ checkExp (ArrayLit all_es _ loc) =
       t <- arrayOfM loc et (Shape [sizeFromInteger (genericLength all_es) mempty])
       pure $ ArrayLit (e' : es') (Info t) loc
 checkExp (AppExp (Range start maybe_step end loc) _) = do
-  start' <- require "use in range expression" anySignedType =<< checkExp start
+  start' <- checkExp start
   start_t <- expType start'
   maybe_step' <- case maybe_step of
     Nothing -> pure Nothing
@@ -530,10 +530,10 @@ checkExp (Var qn (Info t) loc) = do
   t' <- lookupVar loc qn t
   pure $ Var qn (Info t') loc
 checkExp (Negate arg loc) = do
-  arg' <- require "numeric negation" anyNumberType =<< checkExp arg
+  arg' <- checkExp arg
   pure $ Negate arg' loc
 checkExp (Not arg loc) = do
-  arg' <- require "logical negation" (Bool : anyIntType) =<< checkExp arg
+  arg' <- checkExp arg
   pure $ Not arg' loc
 checkExp (AppExp (Apply fe args loc) _) = do
   fe' <- checkExp fe
@@ -662,7 +662,7 @@ checkExp (AppExp (Index e slice loc) _) = do
 
   pure $ AppExp (Index e' slice' loc) (Info $ AppRes t' retext)
 checkExp (Assert e1 e2 _ loc) = do
-  e1' <- require "being asserted" [Bool] =<< checkExp e1
+  e1' <- checkExp e1
   e2' <- checkExp e2
   pure $ Assert e1' e2' (Info (prettyText e1)) loc
 checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
@@ -1286,23 +1286,6 @@ fixOverloadedTypes :: Names -> TermTypeM ()
 fixOverloadedTypes tyvars_at_toplevel =
   getConstraints >>= mapM_ fixOverloaded . M.toList . M.map snd
   where
-    fixOverloaded (v, Overloaded ots usage)
-      | Signed Int32 `elem` ots = do
-          unify usage (Scalar (TypeVar mempty (qualName v) [])) $
-            Scalar (Prim $ Signed Int32)
-          when (v `S.member` tyvars_at_toplevel) $
-            warn usage "Defaulting ambiguous type to i32."
-      | FloatType Float64 `elem` ots = do
-          unify usage (Scalar (TypeVar mempty (qualName v) [])) $
-            Scalar (Prim $ FloatType Float64)
-          when (v `S.member` tyvars_at_toplevel) $
-            warn usage "Defaulting ambiguous type to f64."
-      | otherwise =
-          typeError usage mempty . withIndexLink "ambiguous-type" $
-            "Type is ambiguous (could be one of"
-              <+> commasep (map pretty ots)
-              <> ")."
-                </> "Add a type annotation to disambiguate the type."
     fixOverloaded (v, NoConstraint _ usage) = do
       -- See #1552.
       unify usage (Scalar (TypeVar mempty (qualName v) [])) $
