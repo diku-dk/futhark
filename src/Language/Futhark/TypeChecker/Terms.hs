@@ -676,6 +676,8 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
       body' <- checkFunBody params' body declared_rettype loc
       body_t <- expTypeFully body'
 
+      unify (mkUsage body "inferred return type") (toStruct rt') body_t
+
       params'' <- mapM updateTypes params'
 
       (rettype', rettype_st) <-
@@ -1534,8 +1536,8 @@ letGeneralise defname defloc tparams params restype =
     -- level of the type variables.
 
     cur_lvl <- curLevel
-    let candidate k (lvl, _) = lvl >= (cur_lvl - length params)
-        new_substs = M.filterWithKey candidate now_substs
+    let candidate (lvl, _) = lvl >= (cur_lvl - length params)
+        new_substs = M.filter candidate now_substs
 
     (tparams', RetType ret_dims restype') <-
       closeOverTypes
