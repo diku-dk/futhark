@@ -162,16 +162,6 @@ def reduce_by_index_3d 'a [k] [n] [m] [l] (dest : *[k][m][l]a) (f : a -> a -> a)
 def scan [n] 'a (op: a -> a -> a) (ne: a) (as: [n]a): *[n]a =
   intrinsics.scan op ne as
 
--- | Remove all those elements of `as` that do not satisfy the
--- predicate `p`.
---
--- **Work:** *O(n ✕ W(p))*
---
--- **Span:** *O(log(n) ✕ W(p))*
-def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
-  let (as', is) = intrinsics.partition 1 (\x -> if p x then 0 else 1) as
-  in as'[:is[0]]
-
 -- | Split an array into those elements that satisfy the given
 -- predicate, and those that do not.
 --
@@ -253,3 +243,17 @@ def scatter_2d 't [k] [n] [l] (dest: *[k][n]t) (is: [l](i64, i64)) (vs: [l]t): *
 -- **Span:** *O(1)*
 def scatter_3d 't [k] [n] [o] [l] (dest: *[k][n][o]t) (is: [l](i64, i64, i64)) (vs: [l]t): *[k][n][o]t =
   intrinsics.scatter_3d dest is vs
+
+-- | Remove all those elements of `as` that do not satisfy the
+-- predicate `p`.
+--
+-- **Work:** *O(n ✕ W(p))*
+--
+-- **Span:** *O(log(n) ✕ W(p))*
+def filter [n] 'a (p: a -> bool) (as: [n]a): *[]a =
+  let flags = map (\x -> if p x then 1 else 0) as
+  let offsets = scan (+) 0 flags
+  let m = if n == 0 then 0 else offsets[n-1]
+  in scatter (map (\x -> x) as[:m])
+             (map2 (\f o -> if f==1 then o-1 else -1) flags offsets)
+             as
