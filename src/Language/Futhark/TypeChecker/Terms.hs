@@ -466,6 +466,24 @@ checkExp (Coerce e te _ loc) = do
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
+checkExp (AppExp (Apply fe args loc) _) = do
+  fe' <- checkExp fe
+  args' <- mapM (checkExp . snd) args
+  t <- expType fe'
+  let fname =
+        case fe' of
+          Var v _ _ -> Just v
+          _ -> Nothing
+  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
+
+  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
+  where
+    onArg fname (i, all_exts, t) arg' = do
+      (_, rt, argext, exts, am) <- checkApply loc (fname, i) t arg'
+      pure
+        ( (i + 1, all_exts <> exts, arrayOf (autoFrame am) rt),
+          (Info (argext, am), arg')
+        )
 checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
   ftype <- lookupVar oploc op op_t
   e1' <- checkExp e1
@@ -532,24 +550,6 @@ checkExp (Negate arg loc) = do
 checkExp (Not arg loc) = do
   arg' <- checkExp arg
   pure $ Not arg' loc
-checkExp (AppExp (Apply fe args loc) _) = do
-  fe' <- checkExp fe
-  args' <- mapM (checkExp . snd) args
-  t <- expType fe'
-  let fname =
-        case fe' of
-          Var v _ _ -> Just v
-          _ -> Nothing
-  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
-
-  pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
-  where
-    onArg fname (i, all_exts, t) arg' = do
-      (_, rt, argext, exts, am) <- checkApply loc (fname, i) t arg'
-      pure
-        ( (i + 1, all_exts <> exts, arrayOf (autoFrame am) rt),
-          (Info (argext, am), arg')
-        )
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
 
