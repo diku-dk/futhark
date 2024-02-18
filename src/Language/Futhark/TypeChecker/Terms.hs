@@ -503,7 +503,7 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
           (e2', Info (p2_ext, am2))
           loc
       )
-      (Info (AppRes rt' retext))
+      (Info (AppRes (arrayOf (autoFrame am2) rt') retext))
 checkExp (Project k e _ loc) = do
   e' <- checkExp e
   t <- expType e'
