@@ -1112,17 +1112,17 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
     tyvars <- gets termTyVars
 
-    traceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
+    -- traceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
     vns <- gets termNameSource
 
     let use_glpk = True
 
-    traceM $
-      unlines
-        [ "## cts:",
-          unlines $ map prettyString cts
-        ]
+    -- traceM $
+    --  unlines
+    --    [ "## cts:",
+    --      unlines $ map prettyString cts
+    --    ]
 
     case rankAnalysis use_glpk vns counter cts tyvars of
       Nothing -> error ""
@@ -1131,16 +1131,16 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
         solution <- traverse (M.traverseWithKey (doDefaults mempty)) $ solve cts' tyvars'
 
-        traceM $
-          unlines
-            [ "## constraints:",
-              unlines $ map prettyString cts',
-              "## tyvars:",
-              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-              "## solution:",
-              let p (v, t) = prettyNameString v <> " => " <> prettyString t
-               in either T.unpack (unlines . map p . M.toList) solution
-            ]
+        -- traceM $
+        --  unlines
+        --    [ "## constraints:",
+        --      unlines $ map prettyString cts',
+        --      "## tyvars:",
+        --      unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
+        --      "## solution:",
+        --      let p (v, t) = prettyNameString v <> " => " <> prettyString t
+        --       in either T.unpack (unlines . map p . M.toList) solution
+        --    ]
 
         pure (solution, params', retdecl', body')
 

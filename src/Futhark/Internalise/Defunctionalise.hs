@@ -14,6 +14,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Debug.Trace
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
 import Futhark.Util (mapAccumLM, nubOrd)
@@ -905,7 +906,7 @@ defuncApplyArg ::
   (Exp, StaticVal) ->
   (((Maybe VName, AutoMap), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
+defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, am), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
   let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
@@ -955,20 +956,29 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
   callret <- unRetType lifted_rettype
 
+  traceM $
+    unlines
+      [ "sv",
+        show sv,
+        "ret sv",
+        show $ autoMapSV (autoMap am) sv
+      ]
+
   pure
-    ( mkApply fname' [(Nothing, mempty, f'), (argext, mempty, arg')] callret,
-      sv
+    ( mkApply fname' [(Nothing, mempty, f'), (argext, am, arg')] callret,
+      autoMapSV (autoMap am) sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) (((argext, _), arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) (((argext, am), arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(argext, mempty, arg')] callret
-  pure (apply_e, sv)
+      apply_e = mkApply f' [(argext, am, arg')] callret
+  -- pure (apply_e, autoMapSV (autoRep am) sv)
+  pure (apply_e, autoMapSV (autoMap am) sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
   error $
@@ -983,6 +993,11 @@ updateReturn :: AppRes -> Exp -> Exp
 updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
+
+autoMapSV :: Shape Size -> StaticVal -> StaticVal
+autoMapSV shape (Dynamic t) =
+  Dynamic $ arrayOfWithAliases (diet t) shape t
+autoMapSV _ sv = sv
 
 defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
@@ -999,10 +1014,39 @@ defuncApply f args appres loc = do
     _ -> do
       let fname = liftedName 0 f
           (argtypes, _) = unfoldFunType $ typeOf f
-      fmap (first $ updateReturn appres) $
-        foldM (defuncApplyArg fname) (f', f_sv) $
-          NE.zip args $
-            NE.tails argtypes
+      (app, app_sv) <-
+        fmap (first $ updateReturn appres) $
+          foldM (defuncApplyArg fname) (f', f_sv) $
+            NE.zip args $
+              NE.tails argtypes
+
+      let (p_ts, _) = unfoldFunType $ typeOf f
+          arg_ts = typeOf . snd <$> args
+          -- am_dims = zipWith typeShapePrefix (NE.toList arg_ts) p_ts
+          -- ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) am_dims
+          ams = NE.toList $ autoMap . snd . fst <$> args
+          ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) ams
+      traceM $
+        unlines
+          [ "## defuncApply",
+            "## f",
+            prettyString f,
+            "## args",
+            prettyString $ snd <$> args,
+            "## appres",
+            show appres,
+            "## app",
+            prettyString app,
+            "## app_sv",
+            show app_sv,
+            "## f type",
+            prettyString $ typeOf f,
+            "## arg types",
+            prettyString $ (typeOf . snd) <$> args,
+            "## ret_am",
+            prettyString ret_am
+          ]
+      pure (app, autoMapSV ret_am $ app_sv)
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.

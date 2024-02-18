@@ -33,6 +33,8 @@ module Language.Futhark.Prop
     stripExp,
     similarExps,
     frameOf,
+    shapePrefix,
+    typeShapePrefix,
 
     -- * Queries on patterns and params
     patIdents,
@@ -1442,6 +1444,18 @@ frameOf :: Exp -> Shape Size
 frameOf (AppExp (Apply _ args _) _) =
   ((\(_, am) -> autoFrame am) . unInfo . fst) $ NE.last args
 frameOf _ = mempty
+
+-- | @s1 `shapePrefix` s2@ assumes @s1 = prefix <> s2@ and
+-- returns @prefix@.
+shapePrefix :: Shape dim -> Shape dim -> Shape dim
+shapePrefix (Shape ss1) (Shape ss2) =
+  Shape $ take (length ss1 - length ss2) ss1
+
+typeShapePrefix :: TypeBase dim as1 -> TypeBase dim as2 -> Shape dim
+typeShapePrefix (Array _ s _) Scalar {} = s
+typeShapePrefix (Array _ s1 _) (Array _ s2 _) =
+  s1 `shapePrefix` s2
+typeShapePrefix _ _ = mempty
 
 -- | An identifier with type- and aliasing information.
 type Ident = IdentBase Info VName

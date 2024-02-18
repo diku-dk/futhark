@@ -144,14 +144,14 @@ mkLinearProg counter cs tyVars =
 rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
 rankAnalysis _ vns counter [] tyVars = Just ([], tyVars, vns, counter)
 rankAnalysis use_glpk vns counter cs tyVars = do
-  traceM $ unlines ["## rankAnalysis prog", prettyString prog]
+  -- traceM $ unlines ["## rankAnalysis prog", prettyString prog]
   rank_map <-
     if use_glpk
       then snd <$> (unsafePerformIO $ glpk prog)
       else do
         (_size, ranks) <- branchAndBound lp
         pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
-  traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
+  -- traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
   let initEnv =
         SubstEnv
           { envTyVars = tyVars,
