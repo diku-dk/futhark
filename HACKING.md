@@ -147,14 +147,21 @@ allows you to tailor your own compilation pipeline using command line
 options. It is also useful for seeing what the AST looks like after
 specific passes.
 
-You may wish to set the environment variable
-`FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
+### `FUTHARK_COMPILER_DEBUGGING` environment variable
 
-- The frontend prints internal names. (This may affect code
-  generation in some cases, so turn it off when actually
-  generating code.)
-- Tools that talk to server-mode executables will print the messages
-  sent back and forth on the standard error stream.
+You can set the level of debug verbosity via the environment variable
+`FUTHARK_COMPILER_DEBUGGING`. It has the following effects:
+
+- `FUTHARK_COMPILER_DEBUGGING=1`:
+  + The frontend prints internal names. (This may affect code
+    generation in some cases, so turn it off when actually
+    generating code.)
+  + Tools that talk to server-mode executables will print the messages
+    sent back and forth on the standard error stream.
+
+- `FUTHARK_COMPILER_DEBUGGING=2`:
+  + All of the effects of `FUTHARK_COMPILER_DEBUGGING=1`.
+  + The frontend prints explicit type annotations.
 
 ## Running compiler pipelines
 
