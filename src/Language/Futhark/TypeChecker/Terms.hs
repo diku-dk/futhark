@@ -987,39 +987,11 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
             }
 
     pure (tp1, tp2'', argext, ext, am)
-checkApply loc fname tfun@(Scalar TypeVar {}) arg = do
-  tv <- newTypeVar loc "b"
-  unify (mkUsage loc "use as function") tfun $
-    Scalar (Arrow mempty Unnamed Observe (typeOf arg) $ RetType [] $ paramToRes tv)
-  tfun' <- normType tfun
-  checkApply loc fname tfun' arg
-checkApply loc (fname, prev_applied) ftype argexp = do
-  let fname' = maybe "expression" (dquotes . pretty) fname
-
-  typeError loc mempty $
-    if prev_applied == 0
-      then
-        "Cannot apply"
-          <+> fname'
-          <+> "as function, as it has type:"
-          </> indent 2 (pretty ftype)
-      else
-        "Cannot apply"
-          <+> fname'
-          <+> "to argument #"
-          <> pretty (prev_applied + 1)
-            <+> dquotes (shorten $ group $ pretty argexp)
-          <> ","
-            </> "as"
-            <+> fname'
-            <+> "only takes"
-            <+> pretty prev_applied
-            <+> arguments
-          <> "."
-  where
-    arguments
-      | prev_applied == 1 = "argument"
-      | otherwise = "arguments"
+checkApply loc fname (Array _ _ t) arg =
+  -- This implies the function is the result of an automap.
+  checkApply loc fname (Scalar t) arg
+checkApply _ _ _ _ =
+  error "checkApply: impossible case"
 
 -- | Type-check a single expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case the list of type
