@@ -599,8 +599,59 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Shape Size -> Exp -> TermM (Type, AutoMap)
-checkApply loc _ ftype fframe arg = do
+checkApply :: SrcLoc -> Maybe (QualName VName) -> (Shape Size, Type) -> [(Shape Size, Type)] -> TermM (StructType, [AutoMap])
+checkApply loc fname (fframe, ftype) args = do
+  ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
+  rt' <- asStructType loc rt
+  pure (rt', argts)
+  where
+    -- pure (asStructType loc rt, argts)
+
+    onArg (i, f_f, f_t) (argframe, argtype) = do
+      (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) (argframe, argtype)
+      pure
+        ( (i + 1, autoFrame am, rt),
+          am
+        )
+
+checkApplyOne :: SrcLoc -> (Maybe (QualName VName), Int) -> (Shape Size, Type) -> (Shape Size, Type) -> TermM (Type, AutoMap)
+checkApplyOne loc _ (fframe, ftype) (argframe, argtype) = do
+  (a, b) <- split $ stripFrame fframe ftype
+  r <- newSVar loc "R"
+  m <- newSVar loc "M"
+  let unit_info = Info $ Scalar $ Prim Bool
+      r_var = Var (QualName [] r) unit_info mempty
+      m_var = Var (QualName [] m) unit_info mempty
+      lhs = arrayOf (toShape (SVar r) <> (toSComp <$> argframe)) argtype
+      rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
+  ctAM r m
+  ctEq lhs rhs
+  pure
+    ( arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) b,
+      AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
+    )
+  where
+    stripFrame :: Shape Size -> Type -> Type
+    stripFrame frame (Array u ds t) =
+      let mnew_shape = Shape <$> L.stripPrefix (toSComp <$> shapeDims frame) (shapeDims ds)
+       in case mnew_shape of
+            Nothing -> Scalar t
+            Just new_shape -> arrayOfWithAliases u new_shape $ Scalar t
+    stripFrame _ t = t
+    toSComp (Var (QualName [] x) _ _) = SVar x
+    toSComp _ = error ""
+    toShape = Shape . pure
+    split (Scalar (Arrow _ _ _ a (RetType _ b))) =
+      pure (a, b `setUniqueness` NoUniqueness)
+    split ftype' = do
+      a <- newType loc "arg"
+      b <- newTyVar loc "res"
+      ctEq ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] $ tyVarType b
+      pure (a, tyVarType b)
+
+-- To be removed (probably)
+checkApply_ :: SrcLoc -> (Maybe (QualName VName), Int) -> Type -> Shape Size -> Exp -> TermM (Type, AutoMap)
+checkApply_ loc _ ftype fframe arg = do
   (a, b) <- split $ stripFrame fframe ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
@@ -828,7 +879,7 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
 
     onArg (i, f_t, f_f) (_, arg) = do
       arg' <- checkExp arg
-      (rt, am) <- checkApply loc (fname, i) f_t f_f arg'
+      (rt, am) <- checkApply_ loc (fname, i) f_t f_f arg'
       pure
         ( (i + 1, rt, autoFrame am),
           (Info (Nothing, am), arg')
@@ -838,52 +889,55 @@ checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   ftype <- lookupVar oploc op
   e1' <- checkExp e1
   e2' <- checkExp e2
-
-  (rt1, am1) <- checkApply loc (Just op, 0) (toType ftype) mempty e1'
-  (rt2, am2) <- checkApply loc (Just op, 1) rt1 (autoFrame am1) e2'
-  rt2' <- asStructType loc rt2
+  (rt, ams) <-
+    checkApply
+      loc
+      (Just op)
+      (mempty, toType ftype)
+      [(frameOf e1', toType $ typeOf e1'), (frameOf e2', toType $ typeOf e2')]
+  let [am1, am2] = ams
 
   pure $
     AppExp
       (BinOp (op, oploc) (Info ftype) (e1', Info (Nothing, am1)) (e2', Info (Nothing, am2)) loc)
-      (Info (AppRes rt2' []))
+      (Info (AppRes rt []))
 --
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
-  void $ checkApply loc (Just op, 0) (toType optype) mempty e'
+  t2 <- newType loc "t"
+  t2' <- asStructType loc t2
   let t1 = typeOf e'
-  t2 <- newType loc "t2"
-  rt <- newType loc "rt"
-  ctEq (toType optype) $ toType $ foldFunType [toParam Observe t1, t2] $ RetType [] $ rt `setUniqueness` Nonunique
+      f1 = frameOf e'
+  (rt, ams) <- checkApply loc (Just op) (mempty, toType optype) [(f1, toType t1), (mempty, t2)]
   pure $
     OpSectionLeft
       op
       (Info optype)
       e'
-      ( Info (Unnamed, toParam Observe t1, Nothing),
-        Info (Unnamed, t2)
+      ( Info (Unnamed, toParam Observe t1, Nothing, ams !! 0), -- fix
+        Info (Unnamed, toParam Observe t2')
       )
-      (Info (RetType [] rt), Info [])
+      (Info (RetType [] (rt `setUniqueness` Nonunique)), Info [])
       loc
---
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
   t1 <- newType loc "t"
+  t1' <- asStructType loc t1
   let t2 = typeOf e'
-  rt <- newType loc "rt"
-  ctEq (toType optype) $ toType $ foldFunType [t1, toParam Observe t2] $ RetType [] $ rt `setUniqueness` Nonunique
+      f2 = frameOf e'
+  (rt, ams) <- checkApply loc (Just op) (mempty, toType optype) [(mempty, t1), (f2, toType t2)]
   pure $
     OpSectionRight
       op
       (Info optype)
       e'
       -- Dummy types.
-      ( Info (Unnamed, toParam Observe t1),
-        Info (Unnamed, toParam Observe t2, Nothing)
+      ( Info (Unnamed, toParam Observe t1'),
+        Info (Unnamed, toParam Observe t2, Nothing, ams !! 1) -- fix
       )
-      (Info $ RetType [] rt)
+      (Info $ RetType [] (rt `setUniqueness` Nonunique))
       loc
 --
 checkExp (ProjectSection fields NoInfo loc) = do

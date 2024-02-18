@@ -725,16 +725,16 @@ checkExp (OpSection op (Info op_t) loc) = do
 checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
-  (t1, rt, argext, retext, _) <- checkApply loc (Just op, 0) ftype e'
+  (t1, rt, argext, retext, am) <- checkApply loc (Just op, 0) ftype e'
   case (ftype, rt) of
-    (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 rettype)) ->
+    (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 (RetType ds rt2))) ->
       pure $
         OpSectionLeft
           op
           (Info ftype)
           e'
-          (Info (m1, toParam d1 t1, argext), Info (m2, toParam d2 t2))
-          (Info rettype, Info retext)
+          (Info (m1, toParam d1 t1, argext, am), Info (m2, toParam d2 t2))
+          (Info $ RetType ds $ arrayOfWithAliases (uniqueness rt2) (autoFrame am) rt2, Info retext)
           loc
     _ ->
       typeError loc mempty $
@@ -744,7 +744,7 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
-      (t2', arrow', argext, _, _) <-
+      (t2', arrow', argext, _, am) <-
         checkApply
           loc
           (Just op, 1)
@@ -757,8 +757,8 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
               op
               (Info ftype)
               e'
-              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext))
-              (Info $ RetType dims2' ret')
+              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext, am))
+              (Info $ RetType dims2' $ arrayOfWithAliases (uniqueness ret') (autoFrame am) ret')
               loc
         _ -> error $ "OpSectionRight: impossible type\n" <> prettyString arrow'
     _ ->

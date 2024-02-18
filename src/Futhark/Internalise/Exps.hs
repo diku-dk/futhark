@@ -381,17 +381,28 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc -> do
-              let prepareArg (arg, _) =
-                    (E.toStruct (E.typeOf arg),) <$> internaliseExp "arg" arg
-              internalise =<< mapM prepareArg args
+              -- let prepareArg (arg, _) =
+              --      (E.toStruct (E.typeOf arg),) <$> internaliseExp "arg" arg
+              -- internalise =<< mapM prepareArg args
+              --
+              withAutoMap_ ams arg_desc res_t args $ \args' -> do
+                let prepareArg (arg, _, am) arg' =
+                      (E.toStruct $ E.stripArray (E.shapeRank $ autoMap am) (E.typeOf arg), arg')
+                internalise $ zipWith prepareArg argsam args'
           | Just internalise <- isIntrinsicFunction qfname (map fst args) loc ->
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
-              let tag ses = [(se, I.Observe) | se <- ses]
-              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              let args'' = concatMap tag args'
-              letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
+            -- Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+            --  let tag ses = [(se, I.Observe) | se <- ses]
+            --  args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+            --  let args'' = concatMap tag args'
+            --  letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
+            --
+            Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
+              withAutoMap_ ams arg_desc res_t args $ \args' -> do
+                let tag ses = [(se, I.Observe) | se <- ses]
+                let args'' = concatMap tag args'
+                letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
           | otherwise -> do
               traceM $
                 unlines

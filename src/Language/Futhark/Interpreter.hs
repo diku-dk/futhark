@@ -1047,11 +1047,11 @@ eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, _, argext), _) (Info (RetType _ t), _) loc) = do
+eval env (OpSectionLeft qv _ e (Info (_, _, argext, _), _) (Info (RetType _ t), _) loc) = do
   v <- evalArg env e argext
   f <- evalTermVar env qv (toStruct t)
   apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext)) (Info (RetType _ t)) loc) = do
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext, _)) (Info (RetType _ t)) loc) = do
   y <- evalArg env e argext
   pure $
     ValueFun $ \x -> do

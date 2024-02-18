@@ -184,25 +184,25 @@ instance ASTMappable (ExpBase Info VName) where
       <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> pure loc
-  astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext), Info (pb, t1b)) (ret, retext) loc) =
+  astMap tv (OpSectionLeft name t arg (Info (pa, t1a, argext, am), Info (pb, t1b)) (ret, retext) loc) =
     OpSectionLeft
       <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
-              <$> (Info <$> ((pa,,) <$> mapOnParamType tv t1a <*> pure argext))
+              <$> (Info <$> ((pa,,,) <$> mapOnParamType tv t1a <*> pure argext <*> pure am))
               <*> (Info <$> ((pb,) <$> mapOnParamType tv t1b))
           )
       <*> ((,) <$> traverse (mapOnResRetType tv) ret <*> pure retext)
       <*> pure loc
-  astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext)) t2 loc) =
+  astMap tv (OpSectionRight name t arg (Info (pa, t1a), Info (pb, t1b, argext, am)) t2 loc) =
     OpSectionRight
       <$> mapOnName tv name
       <*> traverse (mapOnStructType tv) t
       <*> mapOnExp tv arg
       <*> ( (,)
               <$> (Info <$> ((pa,) <$> mapOnParamType tv t1a))
-              <*> (Info <$> ((pb,,) <$> mapOnParamType tv t1b <*> pure argext))
+              <*> (Info <$> ((pb,,,) <$> mapOnParamType tv t1b <*> pure argext <*> pure am))
           )
       <*> traverse (mapOnResRetType tv) t2
       <*> pure loc

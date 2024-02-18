@@ -848,7 +848,7 @@ data ExpBase f vn
       (QualName vn)
       (f StructType)
       (ExpBase f vn)
-      (f (PName, ParamType, Maybe VName), f (PName, ParamType))
+      (f (PName, ParamType, Maybe VName, AutoMap), f (PName, ParamType))
       (f ResRetType, f [VName])
       SrcLoc
   | -- | @+2@; first type is operand, second is result.
@@ -856,7 +856,7 @@ data ExpBase f vn
       (QualName vn)
       (f StructType)
       (ExpBase f vn)
-      (f (PName, ParamType), f (PName, ParamType, Maybe VName))
+      (f (PName, ParamType), f (PName, ParamType, Maybe VName, AutoMap))
       (f ResRetType)
       SrcLoc
   | -- | Field projection as a section: @(.x.y.z)@.

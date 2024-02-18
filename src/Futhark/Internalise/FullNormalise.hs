@@ -203,13 +203,13 @@ getOrdering final (Lambda params body mte ret loc) = do
   nameExp final $ Lambda params body' mte ret loc
 getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
-getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
+getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, xam), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
   yn <- newNameFromString "y"
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
-        mkApply (Var op ty mempty) [(xext, mempty, x), (Nothing, mempty, y)] $
+        mkApply (Var op ty mempty) [(xext, xam, x), (Nothing, mempty, y)] $
           AppRes (toStruct ret') exts
   nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
@@ -217,12 +217,12 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (I
       | Named p <- xp, p == vn = Just $ ExpSubst x
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
-getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (Info (RetType dims ret)) loc) = do
+getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, yam)) (Info (RetType dims ret)) loc) = do
   xn <- newNameFromString "x"
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Nothing, mempty, x), (yext, mempty, y)] $ AppRes (toStruct ret') []
+      body = mkApply (Var op ty mempty) [(Nothing, mempty, x), (yext, yam, y)] $ AppRes (toStruct ret') []
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
