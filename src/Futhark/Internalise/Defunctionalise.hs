@@ -958,15 +958,23 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, a
 
   traceM $
     unlines
-      [ "sv",
+      [ "##defuncApplyArg LambdaSV",
+        "## fname",
+        fname_s,
+        "## f'",
+        prettyString f',
+        "## arg",
+        prettyString arg,
+        "## sv",
         show sv,
-        "ret sv",
+        "## ret sv",
         show $ autoMapSV (autoMap am) sv
       ]
 
   pure
     ( mkApply fname' [(Nothing, mempty, f'), (argext, am, arg')] callret,
       autoMapSV (autoMap am) sv
+      -- sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
@@ -977,8 +985,20 @@ defuncApplyArg _ (f', DynamicFun _ sv) (((argext, am), arg), argtypes) = do
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
       apply_e = mkApply f' [(argext, am, arg')] callret
-  -- pure (apply_e, autoMapSV (autoRep am) sv)
+  traceM $
+    unlines
+      [ "##defuncApplyArg DynamicFun",
+        "## f'",
+        prettyString f',
+        "## arg",
+        prettyString arg,
+        "## sv",
+        show sv,
+        "## ret sv",
+        show $ autoMapSV (autoMap am) sv
+      ]
   pure (apply_e, autoMapSV (autoMap am) sv)
+-- pure (apply_e, sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
   error $
@@ -1046,7 +1066,7 @@ defuncApply f args appres loc = do
             "## ret_am",
             prettyString ret_am
           ]
-      pure (app, autoMapSV ret_am $ app_sv)
+      pure (app, app_sv)
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.
