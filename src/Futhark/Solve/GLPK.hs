@@ -43,5 +43,7 @@ glpk ::
   F.LinearProg v a ->
   IO (Maybe (Int, M.Map v Int))
 glpk lp = do
-  (_, mres) <- glpSolveVars mipDefaults $ linearProgToGLPK lp
+  (_, mres) <- glpSolveVars opts $ linearProgToGLPK lp
   pure $ (\(opt, vs) -> (truncate opt, fmap truncate vs)) <$> mres
+  where
+    opts = mipDefaults {msgLev = MsgOff}
