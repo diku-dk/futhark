@@ -1594,10 +1594,12 @@ genCoalStmtInfo _ _ _ _ = pure Nothing
 
 sameSpace :: (Coalesceable rep inner) => TopdownEnv rep -> VName -> VName -> Bool
 sameSpace td_env m_x m_b
-  | MemMem pat_space <- runReader (lookupMemInfo m_x) $ removeScopeAliases $ scope td_env,
-    MemMem return_space <- runReader (lookupMemInfo m_b) $ removeScopeAliases $ scope td_env =
+  | Just (MemMem pat_space) <- nameInfoToMemInfo <$> M.lookup m_x scope',
+    Just (MemMem return_space) <- nameInfoToMemInfo <$> M.lookup m_b scope' =
       pat_space == return_space
   | otherwise = False
+  where
+    scope' = removeScopeAliases $ scope td_env
 
 data MemBodyResult = MemBodyResult
   { patMem :: VName,
