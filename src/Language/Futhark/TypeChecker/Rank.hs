@@ -146,6 +146,7 @@ ambigCheckLinearProg prog (opt, ranks) =
   prog
     { constraints =
         constraints prog
+          -- https://yetanothermathprogrammingconsultant.blogspot.com/2011/10/integer-cuts.html
           ++ [ lsum (var <$> M.keys one_bins)
                  ~-~ lsum (var <$> M.keys zero_bins)
                  ~<=~ constant (fromIntegral $ length one_bins)
