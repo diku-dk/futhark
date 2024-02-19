@@ -124,11 +124,11 @@ forward (E.AppExp (E.Apply f args _) _)
       traceM (show arrs)
       traceM (show params')
       traceM (show e)
-      let subst = M.fromList (zip params' arrs)
-      e' <- SoP.substituteOne (head params', head arrs) <$> e
+      -- let subst = M.fromList (zip params' arrs)
+      -- e' <- SoP.substituteOne (head params', head arrs) <$> e
       -- XXX substitute `Idx conds i` for `c` in `e` using something
       -- like transformNames below (copied from src/Futhark/Internalise/Defunctorise.hs).
-      pure $ Forall i (Iota $ Var i) e'
+      pure $ Forall i (Iota $ Var i) e
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname = do

@@ -114,60 +114,60 @@ insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
 -- Copy code from Futhark.Traversals
-newtype ASTMapper m = ASTMapper { mapOnExp :: Exp -> m Exp }
+-- newtype ASTMapper m = ASTMapper { mapOnExp :: Exp -> m Exp }
 
-class ASTMappable a where
-  astMap :: (Monad m) => ASTMapper m -> a -> m a
+-- class ASTMappable a where
+--   astMap :: (Monad m) => ASTMapper m -> a -> m a
 
--- Mapping over AST for substitutions.
-instance ASTMappable Exp where
-  astMap m (Var x) = mapOnExp m $ Var x
-  astMap m (SoP sop) = do
-    sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
-    case SoP.justSym sop' of
-      Just x -> pure x
-      Nothing -> pure $ SoP sop'
-    where
-      g (ts, n) = do
-        ts' <- traverse (mapOnExp m) ts
-        pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
-  astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
-  astMap m (Idx arr i) = Idx <$> astMap m arr <*> astMap m i
-  astMap m (Sum i lb ub e) = Sum <$> astMap m i <*> astMap m lb <*> astMap m ub <*> astMap m e
-  astMap m (If c t f) = If <$> astMap m c <*> astMap m t <*> astMap m f
+-- -- Mapping over AST for substitutions.
+-- instance ASTMappable Exp where
+--   astMap m (Var x) = mapOnExp m $ Var x
+--   astMap m (SoP sop) = do
+--     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
+--     case SoP.justSym sop' of
+--       Just x -> pure x
+--       Nothing -> pure $ SoP sop'
+--     where
+--       g (ts, n) = do
+--         ts' <- traverse (mapOnExp m) ts
+--         pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
+--   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
+--   astMap m (Idx arr i) = Idx <$> astMap m arr <*> astMap m i
+--   astMap m (Sum i lb ub e) = Sum <$> astMap m i <*> astMap m lb <*> astMap m ub <*> astMap m e
+--   astMap m (If c t f) = If <$> astMap m c <*> astMap m t <*> astMap m f
 
-idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
-idMap m = runIdentity . astMap m
+-- idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
+-- idMap m = runIdentity . astMap m
 
-instance (ASTMappable a) => Substitute VName Exp a where
-  substitute subst = idMap m
-    where
-      m =
-        ASTMapper
-          { mapOnExp =
-              \e ->
-                case e of
-                  (Var x)
-                    | Just x' <- M.lookup x subst -> pure x'
-                    | otherwise -> pure $ Var x
-                  _ -> astMap m e
-          }
+-- instance (ASTMappable a) => Substitute VName Exp a where
+--   substitute subst = idMap m
+--     where
+--       m =
+--         ASTMapper
+--           { mapOnExp =
+--               \e ->
+--                 case e of
+--                   (Var x)
+--                     | Just x' <- M.lookup x subst -> pure x'
+--                     | otherwise -> pure $ Var x
+--                   _ -> astMap m e
+--           }
 
-flatten :: (ASTMappable a) => a -> a
-flatten = idMap m
-  where
-    m =
-      ASTMapper
-        { mapOnExp =
-            \e ->
-              case e of
-                Var x -> pure $ Var x
-                _ -> astMap m e
-        }
+-- flatten :: (ASTMappable a) => a -> a
+-- flatten = idMap m
+--   where
+--     m =
+--       ASTMapper
+--         { mapOnExp =
+--             \e ->
+--               case e of
+--                 Var x -> pure $ Var x
+--                 _ -> astMap m e
+--         }
 
 
-expToSoP :: Exp -> SoP Exp
-expToSoP e =
-  case flatten e of
-    SoP sop -> sop
-    e' -> SoP.sym2SoP e'
+-- expToSoP :: Exp -> SoP Exp
+-- expToSoP e =
+--   case flatten e of
+--     SoP sop -> sop
+--     e' -> SoP.sym2SoP e'
