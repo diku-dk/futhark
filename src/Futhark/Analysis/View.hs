@@ -15,10 +15,13 @@ import Language.Futhark.Semantic
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.Map as M
+-- import Language.Futhark.Traversals
+import Control.Monad.Identity
+import Debug.Trace (trace, traceM)
+import qualified Data.Set as S
 
 
 --------------------------------------------------------------
-import Debug.Trace (trace, traceM)
 tracePretty :: Pretty a => a -> a
 tracePretty a = trace (prettyString a <> "\n") a
 
@@ -119,16 +122,22 @@ forward (E.AppExp (E.Apply f args _) _)
     E.Lambda params body _ _ _ : args' <- map (stripExp . snd) $ NE.toList args,
     Just e <- toExp body = do
       i <- newNameFromString "i"
+      traceM (show $ map toExp args')
       let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
+      -- TODO params' is a [Set], I assume because we might have
+      --   map (\(x, y) -> ...) xys
+      -- meaning x needs to be substituted by x[i].0
+      let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
+      -- traceM (show args')
       traceM (show arrs)
       traceM (show params')
       traceM (show e)
-      -- let subst = M.fromList (zip params' arrs)
-      -- e' <- SoP.substituteOne (head params', head arrs) <$> e
+      let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
+      e' <- useArrayIndexing subst e
       -- XXX substitute `Idx conds i` for `c` in `e` using something
       -- like transformNames below (copied from src/Futhark/Internalise/Defunctorise.hs).
-      pure $ Forall i (Iota $ Var i) e
+      pure $ Forall i (Iota $ Var i) e'
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname = do
@@ -143,7 +152,7 @@ forward e = do
 
 toExp :: E.Exp -> Maybe Exp
 toExp (E.Var (E.QualName _ x) _ _) =
-  Just $ Var x
+  pure $ Var x
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
@@ -153,10 +162,36 @@ toExp (E.AppExp (E.If c t f _) _) =
       f' = toExp f
   in  If <$> c' <*> t' <*> f'
 -- toExp (E.AppExp (E.Apply f args _) _) =
+toExp e@(E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+  | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
+    name <- E.baseString $ E.qualLeaf op,
+    Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
+      x <- toExp e_x
+      y <- toExp e_y
+      case bop of
+        E.Plus -> pure $ x ~+~ y
+        E.Times -> pure $ x ~*~ y
+        E.Minus -> pure $ x ~-~ y
+        _ -> error $ show bop
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = Just $ SoP $ SoP.int2SoP x
 toExp e = error ("toExp not implemented for: " <> show e)
+
+useArrayIndexing :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+useArrayIndexing subst x = do
+  pure $ runIdentity $ astMap (substituter subst) x
+  where
+    substituter subst =
+      ASTMapper
+        { mapOnExp =
+            \e ->
+              case e of
+                (Var x)
+                  | Just x' <- M.lookup x subst -> pure x'
+                  | otherwise -> pure $ Var x
+                _ -> astMap (substituter subst) e
+        }
 
 -- -- | A general-purpose substitution of names.
 -- transformNames :: ASTMappable x => x -> ViewM x
