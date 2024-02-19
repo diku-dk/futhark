@@ -1015,7 +1015,7 @@ checkSizeExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSingleExp e
   case maybe_tysubsts of
     Left err -> typeError e' mempty $ pretty err
-    Right tysubsts -> runTermTypeM checkExp tysubsts $ do
+    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
       when (hasBinding e'') $
@@ -1216,14 +1216,6 @@ localChecks = void . check
       e <$ case ty of
         Info (Scalar (Prim t)) -> errorBounds (inBoundsI (-x) t) (-x) t (loc1 <> loc2)
         _ -> error "Inferred type of int literal is not a number"
-    check e@(AppExp (BinOp (QualName [] v, _) _ (x, _) _ loc) _)
-      | baseName v == "==",
-        Array {} <- typeOf x,
-        baseTag v <= maxIntrinsicTag = do
-          warn loc $
-            textwrap
-              "Comparing arrays with \"==\" is deprecated and will stop working in a future revision of the language."
-          recurse e
     check e = recurse e
     recurse = astMap identityMapper {mapOnExp = check}
 
@@ -1597,9 +1589,10 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
 
   case maybe_tysubsts of
     Left err -> typeError loc mempty $ pretty err
-    Right tysubsts -> runTermTypeM checkExp tysubsts $ do
+    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+      let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
       (tparams', params'', retdecl'', RetType dims rettype', body'') <-
-        checkBinding (fname, retdecl', tparams, params', body', loc)
+        checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)
 
       -- Since this is a top-level function, we also resolve overloaded
       -- types, using either defaults or complaining about ambiguities.

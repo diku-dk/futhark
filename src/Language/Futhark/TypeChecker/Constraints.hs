@@ -117,18 +117,27 @@ substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
 substTyVars m (Array u shape elemt) =
   arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
 
--- | A solution maps a type variable to its substitution.  This substitution is complete, in the sense there are no right-hand sides that contain a type variable.
+-- | A solution maps a type variable to its substitution. This
+-- substitution is complete, in the sense there are no right-hand
+-- sides that contain a type variable.
 type Solution = M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness))
 
-solution :: SolverState -> Solution
+solution :: SolverState -> ([VName], Solution)
 solution s =
-  M.mapMaybe mkSubst $
-    solverTyVars s
+  ( mapMaybe unconstrained $ M.toList $ solverTyVars s,
+    M.mapMaybe mkSubst $ solverTyVars s
+  )
   where
-    mkSubst (TyVarSol _lvl t) = Just $ Right $ first (const ()) $ substTyVars (solverTyVars s) t
-    mkSubst (TyVarLink v') = mkSubst =<< M.lookup v' (solverTyVars s)
+    mkSubst (TyVarSol _lvl t) =
+      Just $ Right $ first (const ()) $ substTyVars (solverTyVars s) t
+    mkSubst (TyVarLink v') =
+      Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
+        mkSubst =<< M.lookup v' (solverTyVars s)
     mkSubst (TyVarUnsol _ (TyVarPrim pts)) = Just $ Left pts
     mkSubst _ = Nothing
+
+    unconstrained (v, TyVarUnsol _ TyVarFree) = Just v
+    unconstrained _ = Nothing
 
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
@@ -213,7 +222,7 @@ solveCt ct =
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs
 
-solve :: Constraints -> TyVars -> Either T.Text Solution
+solve :: Constraints -> TyVars -> Either T.Text ([VName], Solution)
 solve constraints tyvars =
   second solution
     . runExcept

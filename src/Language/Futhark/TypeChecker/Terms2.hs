@@ -46,6 +46,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
+import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
@@ -396,7 +397,7 @@ lookupVar loc qn@(QualName qs name) = do
           outer_env <- asks termOuterEnv
           asStructType loc $ first (const SDim) $ qualifyTypeVars outer_env tnames qs t'
     Just EqualityF -> do
-      argtype <- newType loc "t"
+      argtype <- newTypeOverloaded loc "t" anyPrimType
       pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
     Just (OverloadedF ts pts rt) -> do
       argtype <- newTypeOverloaded loc "t" ts
@@ -915,7 +916,7 @@ checkExp (OpSectionLeft op _ e _ _ loc) = do
       op
       (Info optype)
       e'
-      ( Info (Unnamed, toParam Observe t1, Nothing, ams !! 0), -- fix
+      ( Info (Unnamed, toParam Observe t1, Nothing, head ams), -- fix
         Info (Unnamed, toParam Observe t2')
       )
       (Info (RetType [] (rt `setUniqueness` Nonunique)), Info [])
@@ -1149,7 +1150,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( Either T.Text (M.Map TyVar (TypeBase () NoUniqueness)),
+    ( Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)),
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
       Exp
@@ -1183,7 +1184,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       Just (cts', tyvars', vns', counter') -> do
         modify $ \s -> s {termCounter = counter', termNameSource = vns'}
 
-        solution <- traverse (M.traverseWithKey (doDefaults mempty)) $ solve cts' tyvars'
+        solution <-
+          bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
+            solve cts' tyvars'
 
         traceM $
           unlines
@@ -1193,17 +1196,20 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
               unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
               "## solution:",
               let p (v, t) = prettyNameString v <> " => " <> prettyString t
-               in either T.unpack (unlines . map p . M.toList) solution
+               in either T.unpack (unlines . map p . M.toList . snd) solution,
+              either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
             ]
 
         pure (solution, params', retdecl', body')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either T.Text (M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
-  solution <- traverse (M.traverseWithKey (doDefaults mempty)) $ solve cts tyvars
+  solution <-
+    bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
+      solve cts tyvars
   pure (solution, e')
