@@ -492,7 +492,7 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
   (_, rt, p1_ext, _, am1) <- checkApply loc (Just op, 0) ftype e1'
-  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) rt e2'
+  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) (arrayOf (autoFrame am1) rt) e2'
 
   pure $
     AppExp
@@ -987,9 +987,15 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
             }
 
     pure (tp1, tp2'', argext, ext, am)
-checkApply loc fname (Array _ _ t) arg =
+checkApply loc fname (Array _ shape t) arg = do
   -- This implies the function is the result of an automap.
-  checkApply loc fname (Scalar t) arg
+  (t1, rt, argext, retext, am) <- checkApply loc fname (Scalar t) arg
+  let am' =
+        am
+          { autoRep = shape <> autoRep am,
+            autoFrame = shape <> autoFrame am
+          }
+  pure (t1, rt, argext, retext, am')
 checkApply _ _ _ _ =
   error "checkApply: impossible case"
 
