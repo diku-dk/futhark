@@ -262,7 +262,8 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
         TypeAbbrSpec tdec' : specs'
       )
 checkSpecs (TypeSpec l name ps doc loc : specs) =
-  resolveTypeParams ps $ \ps' -> bindSpaced1 Type name $ \name' -> do
+  bindSpaced1 Type name $ \name' -> do
+    ps' <- resolveTypeParams ps pure
     let tenv =
           mempty
             { envNameMap =
