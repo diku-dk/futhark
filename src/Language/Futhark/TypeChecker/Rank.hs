@@ -92,7 +92,7 @@ binVar sv = do
       modify $ \s ->
         s
           { rankBinVars = M.insert sv bv $ rankBinVars s,
-            rankConstraints = rankConstraints s ++ [bin bv]
+            rankConstraints = rankConstraints s ++ [bin bv, var bv ~<=~ var sv]
           }
       pure bv
     Just bv -> pure bv
@@ -141,36 +141,66 @@ mkLinearProg counter cs tyVars =
       mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
     finalState = flip execState initState $ runRankM buildLP
 
+ambigCheckLinearProg :: LinearProg -> (Double, Map VName Int) -> LinearProg
+ambigCheckLinearProg prog (opt, ranks) =
+  prog
+    { constraints =
+        constraints prog
+          ++ [ lsum (var <$> M.keys one_bins)
+                 ~-~ lsum (var <$> M.keys zero_bins)
+                 ~<=~ constant (fromIntegral $ length one_bins)
+                 ~-~ constant 1,
+               objective prog ~==~ constant opt
+             ]
+    }
+  where
+    -- We really need to track which variables are binary in the LinearProg
+    is_bin_var = ("b_" `L.isPrefixOf`) . baseString
+    one_bins = M.filterWithKey (\k v -> is_bin_var k && v == 1) ranks
+    zero_bins = M.filterWithKey (\k v -> is_bin_var k && v == 0) ranks
+    lsum = foldr (~+~) (constant 0)
+
 rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
 rankAnalysis _ vns counter [] tyVars = Just ([], tyVars, vns, counter)
 rankAnalysis use_glpk vns counter cs tyVars = do
   traceM $ unlines ["## rankAnalysis prog", prettyString prog]
-  rank_map <-
-    if use_glpk
-      then snd <$> (unsafePerformIO $ glpk prog)
-      else do
-        (_size, ranks) <- branchAndBound lp
-        pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
-  traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
-  let initEnv =
-        SubstEnv
-          { envTyVars = tyVars,
-            envRanks = rank_map
-          }
+  -- rank_map <-
+  --  if use_glpk
+  --    then snd <$> (unsafePerformIO $ glpk prog)
+  --    else do
+  --      (_size, ranks) <- branchAndBound lp
+  --      pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
+  (size, rank_map) <- unsafePerformIO $ glpk prog
+  case unsafePerformIO $ glpk $ ambigCheckLinearProg prog (fromIntegral size, rank_map) of
+    Just (size', rank_map') -> do
+      traceM $
+        unlines $
+          "## rank map"
+            : map prettyString (M.toList rank_map)
+            ++ "## ambig rank map"
+            : map prettyString (M.toList rank_map')
+      error "ambiguous"
+    Nothing -> do
+      traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
+      let initEnv =
+            SubstEnv
+              { envTyVars = tyVars,
+                envRanks = rank_map
+              }
 
-      initState =
-        SubstState
-          { substTyVars = mempty,
-            substNewVars = mempty,
-            substNameSource = vns,
-            substCounter = counter,
-            substNewCts = mempty
-          }
-      (cs', state') =
-        runSubstM initEnv initState $
-          substRanks $
-            filter (not . isCtAM) cs
-  pure (cs' <> substNewCts state', substTyVars state' <> tyVars, substNameSource state', substCounter state')
+          initState =
+            SubstState
+              { substTyVars = mempty,
+                substNewVars = mempty,
+                substNameSource = vns,
+                substCounter = counter,
+                substNewCts = mempty
+              }
+          (cs', state') =
+            runSubstM initEnv initState $
+              substRanks $
+                filter (not . isCtAM) cs
+      pure (cs' <> substNewCts state', substTyVars state' <> tyVars, substNameSource state', substCounter state')
   where
     isCtAM (CtAM {}) = True
     isCtAM _ = False
@@ -188,11 +218,6 @@ rankAnalysis use_glpk vns counter cs tyVars = do
     prog = mkLinearProg counter cs' tyVars
     (lp, var_map) = linearProgToLP prog
     inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
-
-    rm_subscript x = fromMaybe x $ lookup x $ zip "₀₁₂₃₄₅₆₇₈₉" "0123456789"
-    vname_to_pulp_var = M.mapWithKey (\k _ -> map rm_subscript $ show $ prettyName k) inv_var_map
-    pulp_var_to_vname =
-      M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList vname_to_pulp_var]
 
 newtype SubstM a = SubstM (StateT SubstState (Reader SubstEnv) a)
   deriving (Functor, Applicative, Monad, MonadState SubstState, MonadReader SubstEnv)
