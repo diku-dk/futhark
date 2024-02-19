@@ -4,6 +4,7 @@
 -- requires a giant amount of memory.  Oh well.
 --
 -- ==
+-- tags { no_ispc }
 -- compiled input { 300i64 }
 -- output { [[220i32, 284i32]] }
 
