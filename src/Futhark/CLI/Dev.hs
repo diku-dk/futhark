@@ -204,41 +204,41 @@ kernelsMemProg _ (GPUMem prog) =
   pure prog
 kernelsMemProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects GPUMem representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects GPUMem representation, but got "
+      <> representation rep
 
 soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
   pure prog
 soacsProg name rep =
   externalErrorS $
-    "Pass "
-      ++ name
-      ++ " expects SOACS representation, but got "
-      ++ representation rep
+    "Pass '"
+      <> name
+      <> "' expects SOACS representation, but got "
+      <> representation rep
 
 kernelsProg :: String -> UntypedPassState -> FutharkM (Prog GPU.GPU)
 kernelsProg _ (GPU prog) =
   pure prog
 kernelsProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects GPU representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects GPU representation, but got " <> representation rep
 
 seqMemProg :: String -> UntypedPassState -> FutharkM (Prog SeqMem.SeqMem)
 seqMemProg _ (SeqMem prog) =
   pure prog
 seqMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects SeqMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects SeqMem representation, but got " <> representation rep
 
 mcMemProg :: String -> UntypedPassState -> FutharkM (Prog MCMem.MCMem)
 mcMemProg _ (MCMem prog) =
   pure prog
 mcMemProg name rep =
   externalErrorS $
-    "Pass " ++ name ++ " expects MCMem representation, but got " ++ representation rep
+    "Pass '" <> name <> "' expects MCMem representation, but got " <> representation rep
 
 typedPassOption ::
   (Checkable torep) =>
@@ -325,7 +325,7 @@ allocateOption short =
         <$> runPipeline (onePass MC.explicitAllocations) config prog
     perform s _ =
       externalErrorS $
-        "Pass '" ++ passDescription pass ++ "' cannot operate on " ++ representation s
+        "Pass '" <> passDescription pass <> "' cannot operate on " <> representation s
 
     long = [passLongOption pass]
     pass = Seq.explicitAllocations
