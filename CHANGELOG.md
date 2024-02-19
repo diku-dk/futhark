@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Rare crash in short circuiting.
 
+* Referencing an unbound type parameter could crash the type checker
+  (#2113).
+
 ## [0.25.13]
 
 ### Added
