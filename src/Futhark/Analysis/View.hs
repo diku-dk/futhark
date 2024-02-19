@@ -12,8 +12,9 @@ import Futhark.Util.Pretty
 -- import Futhark.IR.Pretty() -- To import VName Pretty instance.
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark.Semantic
-import Language.Futhark (VName (VName))
+import Language.Futhark (VName)
 import Language.Futhark qualified as E
+import qualified Data.Map as M
 
 
 --------------------------------------------------------------
@@ -25,7 +26,7 @@ tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
 tracePrettyM a = traceM (prettyString a <> "\n")
 --------------------------------------------------------------
 
-mkViewProg :: VNameSource -> Imports -> ViewMap
+mkViewProg :: VNameSource -> Imports -> Views
 mkViewProg vns prog = tracePretty $ execViewM (mkViewImports prog) vns
 
 mkViewImports :: [(ImportName, FileModule)] -> ViewM ()
@@ -52,7 +53,7 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       traceM ("\nTo prove:\n--------\n" <> prettyString ret)
       traceM ("\nWith params\n-----------\n" <> prettyString params)
       traceM ("\nFor body\n--------\n" <> prettyString body <> "\n====\n")
-      -- forwards body -- XXX
+      forwards body
       pure ()
     _ -> pure ()
   -- where
@@ -119,9 +120,15 @@ forward (E.AppExp (E.Apply f args _) _)
     Just e <- toExp body = do
       i <- newNameFromString "i"
       let arrs = mapMaybe getVarVName args'
+      let params' = map E.patNames params
       traceM (show arrs)
-      traceM (show (map E.patNames params))
-      pure $ Forall i (Iota $ Var i) e
+      traceM (show params')
+      traceM (show e)
+      let subst = M.fromList (zip params' arrs)
+      e' <- SoP.substituteOne (head params', head arrs) <$> e
+      -- XXX substitute `Idx conds i` for `c` in `e` using something
+      -- like transformNames below (copied from src/Futhark/Internalise/Defunctorise.hs).
+      pure $ Forall i (Iota $ Var i) e'
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname = do
@@ -151,6 +158,31 @@ toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = Just $ SoP $ SoP.int2SoP x
 toExp e = error ("toExp not implemented for: " <> show e)
 
+-- -- | A general-purpose substitution of names.
+-- transformNames :: ASTMappable x => x -> ViewM x
+-- transformNames x = do
+--   scope <- gets views
+--   pure $ runIdentity $ astMap (substituter scope) x
+--   where
+--     substituter scope =
+--       ASTMapper
+--         { mapOnExp = onExp scope,
+--           mapOnName = \v ->
+--             pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
+--           mapOnStructType = astMap (substituter scope),
+--           mapOnPatType = astMap (substituter scope),
+--           mapOnStructRetType = astMap (substituter scope),
+--           mapOnPatRetType = astMap (substituter scope)
+--         }
+--     onExp scope e =
+--       -- One expression is tricky, because it interacts with scoping rules.
+--       case e of
+--         QualParens (mn, _) e' _ ->
+--           case lookupMod' mn scope of
+--             Left err -> error err
+--             Right mod ->
+--               astMap (substituter $ modScope mod <> scope) e'
+--         _ -> astMap (substituter scope) e
 
 -- args:
 

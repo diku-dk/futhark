@@ -72,16 +72,16 @@ instance Pretty View where
   pretty (Forall i dom e) =
     "∀" <> prettyName i <+> "∈" <+> pretty dom <+> "." <+> pretty e
 
-type ViewMap = M.Map VName View
+type Views = M.Map VName View
 
-instance Pretty ViewMap where
+instance Pretty Views where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
     -- algenv :: AlgEnv Exp E.Exp,
-    views :: ViewMap
+    views :: Views
   }
 
 -- The View monad keeps a source of fresh names and writes views.
@@ -104,7 +104,7 @@ instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
 --   getEquivs = gets (equivs . algenv)
 --   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
-execViewM :: ViewM a -> VNameSource -> ViewMap
+execViewM :: ViewM a -> VNameSource -> Views
 execViewM (ViewM m) vns = views . fst $ execRWS m () s
   where
     s = VEnv vns mempty
@@ -113,6 +113,11 @@ insertView :: VName -> View -> ViewM ()
 insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
+-- Copy code from Futhark.Traversals
+newtype ASTMapper m = ASTMapper { mapOnExp :: Exp -> m Exp }
+
+class ASTMappable a where
+  astMap :: (Monad m) => ASTMapper m -> a -> m a
 
 -- Mapping over AST for substitutions.
 instance ASTMappable Exp where
@@ -131,10 +136,8 @@ instance ASTMappable Exp where
   astMap m (Sum i lb ub e) = Sum <$> astMap m i <*> astMap m lb <*> astMap m ub <*> astMap m e
   astMap m (If c t f) = If <$> astMap m c <*> astMap m t <*> astMap m f
 
-class ASTMappable a where
-  astMap :: (Monad m) => ASTMapper m -> a -> m a
-
-newtype ASTMapper m = ASTMapper { mapOnExp :: Exp -> m Exp }
+idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
+idMap m = runIdentity . astMap m
 
 instance (ASTMappable a) => Substitute VName Exp a where
   substitute subst = idMap m
@@ -145,13 +148,10 @@ instance (ASTMappable a) => Substitute VName Exp a where
               \e ->
                 case e of
                   (Var x)
-                    | Just x' <- subst M.!? x -> pure x'
+                    | Just x' <- M.lookup x subst -> pure x'
                     | otherwise -> pure $ Var x
                   _ -> astMap m e
           }
-
-idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
-idMap m = runIdentity . astMap m
 
 flatten :: (ASTMappable a) => a -> a
 flatten = idMap m
