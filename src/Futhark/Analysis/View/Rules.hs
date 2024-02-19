@@ -23,6 +23,11 @@ substituteViews view = do
         -- XXX check that domains are compatible
         -- XXX use index i (for starts, just support simple indexing only?)
         -- XXX merge cases (add cases first, lol)
+        -- TODO turn
+        --   ∀i₆₁₆₉ ∈ iota i₆₁₆₉ . If ((conds₆₀₇₀)[i₆₁₆₉]) then (1) else (0)
+        -- into
+        --   ∀i₆₁₆₉ ∈ iota i₆₁₆₉ . | ((conds₆₀₇₀)[i₆₁₆₉]) => (1)
+        --                         | otherwise => (0)
         Just (Forall j d2 e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
           pure e2
