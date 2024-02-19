@@ -125,18 +125,28 @@ insertView x v =
 
 -- Copy code from Futhark.Traversals
 -- (Copying Robert's code)
-newtype ASTMapper m = ASTMapper { mapOnExp :: Exp -> m Exp }
+data ASTMapper m = ASTMapper
+  { mapOnExp :: Exp -> m Exp,
+    mapOnView :: View -> m View
+  }
 
 class ASTMappable a where
   astMap :: (Monad m) => ASTMapper m -> a -> m a
 
 -- Mapping over AST for substitutions.
+instance ASTMappable View where
+  astMap m (Forall i dom e) = Forall i dom <$> astMap m e
+  astMap m (Empty e) = Empty <$> astMap m e
+
+-- TODO shouldn't many of these astMaps should be mapOnExp? if I want
+-- to be able to target them using mapOnExp (usually define
+-- mapOneExp catch all to be `astMap m`)
 instance ASTMappable Exp where
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
   astMap m (If c t f) = If <$> astMap m c <*> astMap m t <*> astMap m f
   astMap m (Sum i lb ub e) = Sum <$> astMap m i <*> astMap m lb <*> astMap m ub <*> astMap m e
-  astMap m (Idx arr i) = Idx <$> astMap m arr <*> astMap m i
+  astMap m (Idx xs i) = Idx <$> astMap m xs <*> astMap m i
   astMap m (SoP sop) = do
     sop' <- foldl (SoP..+.) (SoP.int2SoP 0) <$> mapM g (SoP.sopToLists sop)
     case SoP.justSym sop' of
@@ -168,7 +178,8 @@ flatten = idMap m
             \e ->
               case e of
                 Var x -> pure $ Var x
-                _ -> astMap m e
+                _ -> astMap m e,
+          mapOnView = astMap m
         }
 
 expToSoP :: Exp -> SoP Exp

@@ -15,6 +15,7 @@ import qualified Data.Map as M
 import Control.Monad.Identity
 import Debug.Trace (trace, traceM)
 import qualified Data.Set as S
+import Futhark.Analysis.View.Rules
 
 
 --------------------------------------------------------------
@@ -22,7 +23,7 @@ tracePretty :: Pretty a => a -> a
 tracePretty a = trace (prettyString a <> "\n") a
 
 tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
-tracePrettyM a = traceM (prettyString a <> "\n")
+tracePrettyM = traceM . prettyString
 --------------------------------------------------------------
 
 mkViewProg :: VNameSource -> Imports -> Views
@@ -72,9 +73,12 @@ forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
-    res <- forward e
-    tracePrettyM res
-    insertView x res
+    newView' <- forward e
+    tracePrettyM newView'
+    newView <- substituteViews newView'
+    tracePrettyM newView
+    traceM "\n"
+    insertView x newView
     forwards body
     pure ()
 forwards _ = pure ()
@@ -109,7 +113,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      e' <- substitute subst e
+      e' <- substituteName subst e
       pure $ Forall i (Iota $ Var i) e'
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
@@ -169,17 +173,17 @@ toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
 toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
 toExp e = error ("toExp not implemented for: " <> show e)
 
-substitute :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
-substitute substitutions x = do
+substituteName :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+substituteName substitutions x = do
   pure $ runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
       ASTMapper
-        { mapOnExp =
-            \e ->
-              case e of
-                (Var x')
-                  | Just x'' <- M.lookup x' subst -> pure x''
-                  | otherwise -> pure $ Var x'
-                _ -> astMap (substituter subst) e
+        { mapOnExp = onExp subst,
+          mapOnView = astMap (substituter subst)
         }
+    onExp subst e@(Var x') =
+      case M.lookup x' subst of
+        Just x'' -> pure x''
+        Nothing -> pure e
+    onExp subst e = astMap (substituter subst) e
