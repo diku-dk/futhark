@@ -76,6 +76,7 @@ module Futhark.IR.Mem
     varReturns,
     expReturns,
     extReturns,
+    nameInfoToMemInfo,
     lookupMemInfo,
     subExpMemInfo,
     lookupArraySummary,
@@ -852,6 +853,7 @@ varMemInfo name = do
     LParamName summary -> pure summary
     IndexName it -> pure $ MemPrim $ IntType it
 
+-- | Turn info into memory information.
 nameInfoToMemInfo :: (Mem rep inner) => NameInfo rep -> MemBound NoUniqueness
 nameInfoToMemInfo info =
   case info of
@@ -860,6 +862,7 @@ nameInfoToMemInfo info =
     LetName summary -> letDecMem summary
     IndexName it -> MemPrim $ IntType it
 
+-- | Look up information about the memory block with this name.
 lookupMemInfo ::
   (HasScope rep m, Mem rep inner) =>
   VName ->
