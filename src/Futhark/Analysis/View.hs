@@ -5,17 +5,13 @@ import Data.List.NonEmpty()
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe, fromMaybe)
 import Futhark.Analysis.View.Representation
--- import Futhark.Analysis.Refinement.Monad
--- import Futhark.Analysis.Refinement.CNF
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
--- import Futhark.IR.Pretty() -- To import VName Pretty instance.
 import Futhark.SoP.SoP qualified as SoP
 import Language.Futhark.Semantic
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.Map as M
--- import Language.Futhark.Traversals
 import Control.Monad.Identity
 import Debug.Trace (trace, traceM)
 import qualified Data.Set as S
@@ -59,13 +55,6 @@ mkViewValBind (E.ValBind _ vn ret _ _ params body _ _ _) =
       forwards body
       pure ()
     _ -> pure ()
-  -- where
-  --   getRes :: E.Exp -> [E.Exp]
-  --   getRes (E.AppExp (E.LetPat _ _p _e body' _) _) =
-  --     getRes body'
-  --   getRes (E.TupLit es _) =
-  --     concatMap getRes es
-  --   getRes e = [e]
 
 
 getFun :: E.Exp -> Maybe String
@@ -79,7 +68,6 @@ getVarVName _ = Nothing
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
-
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
@@ -91,7 +79,6 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     pure ()
 forwards _ = pure ()
 
--- TODO Build view for `map`.
 -- Apply
 --   (ExpBase f vn)
 --   (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
@@ -105,50 +92,46 @@ forwards _ = pure ()
 --  the first of which will be the map lambda (or function)
 --  and the rest are the arrays being mapped over
 --
--- TODO 1. Convert lambda in maps to expression representation here.
---         - Add SoP to Exp
---         - Define to toExp
--- TODO 2. Substitute bound args "c" for "Idx conds i" etc.
---         - See Substitute and astMappable and astMap in Robert's code
 -- TODO I think this work can be rebased on top of master?
 --      Just don't include the part that actually refines types or annotates
 --      types in the source.
--- TODO use VNameSource for fresh names
--- TODO make this monadic once we have a MWE
 forward :: E.Exp -> ViewM View
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
-    E.Lambda params body _ _ _ : args' <- map (stripExp . snd) $ NE.toList args,
+    E.Lambda params body _ _ _ : args' <- getArgs args,
     Just e <- toExp body = do
       i <- newNameFromString "i"
-      traceM (show $ map toExp args')
       let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
-      -- traceM (show args')
-      traceM (show arrs)
-      traceM (show params')
-      traceM (show e)
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      e' <- useArrayIndexing subst e
-      -- XXX substitute `Idx conds i` for `c` in `e` using something
-      -- like transformNames below (copied from src/Futhark/Internalise/Defunctorise.hs).
+      e' <- substitute subst e
       pure $ Forall i (Iota $ Var i) e'
-forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
-    "scan" `L.isPrefixOf` fname = do
+    "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
+    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
+    Just xs <- toExp xs' = do
       i <- newNameFromString "i"
-      pure $ Forall i (Iota $ Var i) (Var i)
-forward (E.AppExp (E.If cond e1 e2 _srcLoc) _) = do
-      i <- newNameFromString "i"
-      pure $ Forall i (Iota $ Var i) (Var i)
+      e <-
+        case E.baseString vn of
+          "+" -> pure $ Recurrence ~+~ Idx xs (Var i)
+          "-" -> pure $ Recurrence ~-~ Idx xs (Var i)
+          "*" -> pure $ Recurrence ~*~ Idx xs (Var i)
+          _ -> error ("toExp not implemented for bin op: " <> show vn)
+      pure $ Forall i (Iota $ Var i) e
+forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
+  | Just e' <- toExp e =
+    pure $ Empty e'
 forward e = do
-    traceM ("Unhandled exp:" <> prettyString e)
-    error (show e)
+    error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)
+
+-- Strip unused information.
+getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
+getArgs = map (stripExp . snd) . NE.toList
 
 toExp :: E.Exp -> Maybe Exp
 toExp (E.Var (E.QualName _ x) _ _) =
@@ -161,8 +144,7 @@ toExp (E.AppExp (E.If c t f _) _) =
       t' = toExp t
       f' = toExp f
   in  If <$> c' <*> t' <*> f'
--- toExp (E.AppExp (E.Apply f args _) _) =
-toExp e@(E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
     Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
@@ -172,76 +154,32 @@ toExp e@(E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Plus -> pure $ x ~+~ y
         E.Times -> pure $ x ~*~ y
         E.Minus -> pure $ x ~-~ y
-        _ -> error $ show bop
+        E.Equal -> pure $ BoolExp (x :== y)
+        E.Less -> pure $ BoolExp (x :< y)
+        E.Greater -> pure $ BoolExp (x :> y)
+        _ -> error ("toExp not implemented for bin op: " <> show bop)
+toExp (E.AppExp (E.Index xs slice _) _)
+  | [E.DimFix i] <- slice = -- XXX support only simple indexing for now
+  let i' = toExp i
+      xs' = toExp xs
+  in  Idx <$> xs' <*> i'
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
-toExp (E.IntLit x _ _) = Just $ SoP $ SoP.int2SoP x
+toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
+toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
 toExp e = error ("toExp not implemented for: " <> show e)
 
-useArrayIndexing :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
-useArrayIndexing subst x = do
-  pure $ runIdentity $ astMap (substituter subst) x
+substitute :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+substitute substitutions x = do
+  pure $ runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
       ASTMapper
         { mapOnExp =
             \e ->
               case e of
-                (Var x)
-                  | Just x' <- M.lookup x subst -> pure x'
-                  | otherwise -> pure $ Var x
+                (Var x')
+                  | Just x'' <- M.lookup x' subst -> pure x''
+                  | otherwise -> pure $ Var x'
                 _ -> astMap (substituter subst) e
         }
-
--- -- | A general-purpose substitution of names.
--- transformNames :: ASTMappable x => x -> ViewM x
--- transformNames x = do
---   scope <- gets views
---   pure $ runIdentity $ astMap (substituter scope) x
---   where
---     substituter scope =
---       ASTMapper
---         { mapOnExp = onExp scope,
---           mapOnName = \v ->
---             pure $ qualLeaf $ fst $ lookupSubstInScope (qualName v) scope,
---           mapOnStructType = astMap (substituter scope),
---           mapOnPatType = astMap (substituter scope),
---           mapOnStructRetType = astMap (substituter scope),
---           mapOnPatRetType = astMap (substituter scope)
---         }
---     onExp scope e =
---       -- One expression is tricky, because it interacts with scoping rules.
---       case e of
---         QualParens (mn, _) e' _ ->
---           case lookupMod' mn scope of
---             Left err -> error err
---             Right mod ->
---               astMap (substituter $ modScope mod <> scope) e'
---         _ -> astMap (substituter scope) e
-
--- args:
-
--- (Info {unInfo = (Observe,Nothing)},
---  Parens (
---    Lambda
---    [Id (VName (Name "c") 6086) (Info {unInfo = Scalar (Prim Bool)}) noLoc]
---    (AppExp (Apply (Var (QualName {qualQuals = [VName (Name "i64") 2794], qualLeaf = VName (Name "bool") 2752}) (Info {unInfo = Scalar (Arrow (fromList []) Unnamed Observe (Scalar (Prim Bool)) (RetType {retDims = [], retType = Scalar (Prim (Signed Int64))}))}) noLoc) ((Info {unInfo = (Observe,Nothing)},Var (QualName {qualQuals = [], qualLeaf = VName (Name "c") 6086}) (Info {unInfo = Scalar (Prim Bool)}) noLoc) :| []) noLoc) (Info {unInfo = AppRes {appResType = Scalar (Prim (Signed Int64)), appResExt = []}}))
---   Nothing
---   (Info {unInfo = (fromList [AliasBound {aliasVar = VName (Name "bool") 2752}],RetType {retDims = [], retType = Scalar (Prim (Signed Int64))})})
---   noLoc
---  )
---  noLoc
--- )
-
--- :|
--- [(
---   Info {unInfo = (Observe,Nothing)},
---   Var
---     (QualName {qualQuals = [], qualLeaf = VName (Name "conds") 6070})
---     (Info {unInfo = Array (fromList [AliasBound {aliasVar = VName (Name "conds") 6070}]) Nonunique (Shape {shapeDims = [Var (QualName {qualQuals = [], qualLeaf = VName (Name "n") 6068}) (Info {unInfo = Scalar (Prim (Signed Int64))}) noLoc]}) (Prim Bool)})
---     noLoc
--- )]
-
-
--- :| is cons for non empty lists,
--- so we have head :| [...]
