@@ -327,14 +327,6 @@ analyseGPU' lumap stms =
     helper stm =
       inScopeOf stm $ pure mempty
 
-nameInfoToMemInfo :: (Mem rep inner) => NameInfo rep -> MemBound NoUniqueness
-nameInfoToMemInfo info =
-  case info of
-    FParamName summary -> noUniquenessReturns summary
-    LParamName summary -> summary
-    LetName summary -> letDecMem summary
-    IndexName it -> MemPrim $ IntType it
-
 memInfo :: (LocalScope GPUMem m) => VName -> m (Maybe VName)
 memInfo vname = do
   summary <- asksScope (fmap nameInfoToMemInfo . M.lookup vname)

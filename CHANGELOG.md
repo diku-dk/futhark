@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * But related to monomorphisation of polymorphic local functions
   (#2106).
 
+* Rare crash in short circuiting.
+
 ## [0.25.13]
 
 ### Added
