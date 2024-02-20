@@ -1165,6 +1165,7 @@ prepareServer prog opts f = do
 
   let run_options = scriptExtraOptions opts
       onLine "call" l = T.putStrLn l
+      onLine "startup" l = T.putStrLn l
       onLine _ _ = pure ()
       prog' = if is_fut then dropExtension prog else prog
       cfg =
