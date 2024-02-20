@@ -837,6 +837,14 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   ctx->use_managed_memory = device_query(ctx->dev, MANAGED_MEMORY);
 
+  if (ctx->cfg->logging) {
+    if (ctx->use_managed_memory) {
+      fprintf(ctx->log, "Using managed memory\n");
+    } else {
+      fprintf(ctx->log, "Using unmanaged memory\n");
+    }
+  }
+
   // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
   // for backwards compatibility.  Add _OPTIN and you seem to get the
   // right number.

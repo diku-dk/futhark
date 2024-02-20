@@ -697,7 +697,7 @@ int backend_context_setup(struct futhark_context* ctx) {
     if (ctx->use_managed_memory) {
       fprintf(ctx->log, "Using managed memory\n");
     } else {
-      fprintf(ctx->log, "Using unmanaged memory %d\n", device_query(ctx->dev, hipDeviceAttributeManagedMemory));
+      fprintf(ctx->log, "Using unmanaged memory\n");
     }
   }
 
