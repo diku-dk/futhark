@@ -1590,44 +1590,52 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
-  (maybe_tysubsts, params', retdecl', body') <-
+  (maybe_tysubstss, params', retdecl', body') <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
+  case maybe_tysubstss of
+    [] -> error "impossible"
+    [maybe_tysubsts] -> doChecks (maybe_tysubsts, params', retdecl', body')
+    _ -> typeError loc mempty "Rank ILP is ambiguous"
+  where
+    -- TODO: Print out the possibilities. (And also potentially eliminate
+    --- some of the possibilities to disambiguate).
 
-  case maybe_tysubsts of
-    Left err -> typeError loc mempty $ pretty err
-    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
-      let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
-      (tparams', params'', retdecl'', RetType dims rettype', body'') <-
-        checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)
+    doChecks (maybe_tysubsts, params', retdecl', body') =
+      case maybe_tysubsts of
+        Left err -> typeError loc mempty $ pretty err
+        Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+          let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
+          (tparams', params'', retdecl'', RetType dims rettype', body'') <-
+            checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)
 
-      -- Since this is a top-level function, we also resolve overloaded
-      -- types, using either defaults or complaining about ambiguities.
-      fixOverloadedTypes $
-        typeVars rettype' <> foldMap (typeVars . patternType) params''
+          -- Since this is a top-level function, we also resolve overloaded
+          -- types, using either defaults or complaining about ambiguities.
+          fixOverloadedTypes $
+            typeVars rettype' <> foldMap (typeVars . patternType) params''
 
-      -- Then replace all inferred types in the body and parameters.
-      body''' <- updateTypes body''
-      params''' <- updateTypes params''
-      retdecl''' <- traverse updateTypes retdecl''
-      rettype'' <- normTypeFully rettype'
+          -- Then replace all inferred types in the body and parameters.
+          body''' <- updateTypes body''
+          params''' <- updateTypes params''
+          retdecl''' <- traverse updateTypes retdecl''
+          rettype'' <- normTypeFully rettype'
 
-      -- Check if the function body can actually be evaluated.
-      causalityCheck body'''
+          -- Check if the function body can actually be evaluated.
+          causalityCheck body'''
 
-      -- Check for various problems.
-      mapM_ (mustBeIrrefutable . fmap toStruct) params''
-      localChecks body'''
+          -- Check for various problems.
+          mapM_ (mustBeIrrefutable . fmap toStruct) params''
+          localChecks body'''
 
-      let ((body'''', updated_ret), errors) =
-            Consumption.checkValDef
-              ( fname,
-                params''',
-                body''',
-                RetType dims rettype'',
-                retdecl''',
-                loc
-              )
+          let ((body'''', updated_ret), errors) =
+                Consumption.checkValDef
+                  ( fname,
+                    params''',
+                    body''',
+                    RetType dims rettype'',
+                    retdecl''',
+                    loc
+                  )
 
-      mapM_ throwError errors
+          mapM_ throwError errors
 
-      pure (tparams', params''', retdecl''', updated_ret, body'''')
+          pure (tparams', params''', retdecl''', updated_ret, body'''')

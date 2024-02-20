@@ -1150,7 +1150,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)),
+    ( [Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness))],
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
       Exp
@@ -1173,25 +1173,27 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           unlines $ map prettyString cts
         ]
 
-    (cts', tyvars') <- rankAnalysis loc cts tyvars
+    cts_tyvars' <- rankAnalysis loc cts tyvars
 
-    solution <-
-      bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
-        solve cts' tyvars'
+    solutions <-
+      forM cts_tyvars' $
+        bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty)))
+          . uncurry solve
 
-    traceM $
-      unlines
-        [ "## constraints:",
-          unlines $ map prettyString cts',
-          "## tyvars:",
-          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-          "## solution:",
-          let p (v, t) = prettyNameString v <> " => " <> prettyString t
-           in either T.unpack (unlines . map p . M.toList . snd) solution,
-          either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
-        ]
+    forM (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
+      traceM $
+        unlines
+          [ "## constraints:",
+            unlines $ map prettyString cts',
+            "## tyvars:",
+            unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
+            "## solution:",
+            let p (v, t) = prettyNameString v <> " => " <> prettyString t
+             in either T.unpack (unlines . map p . M.toList . snd) solution,
+            either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
+          ]
 
-    pure (solution, params', retdecl', body')
+    pure (solutions, params', retdecl', body')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->

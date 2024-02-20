@@ -135,7 +135,7 @@ mkLinearProg cs tyVars =
       mapM_ (uncurry addTyVarInfo) $ M.toList tyVars
     finalState = flip execState initState $ runRankM buildLP
 
-ambigCheckLinearProg :: LinearProg -> (Double, Map VName Int) -> LinearProg
+ambigCheckLinearProg :: LinearProg -> (Int, Map VName Int) -> LinearProg
 ambigCheckLinearProg prog (opt, ranks) =
   prog
     { constraints =
@@ -145,7 +145,7 @@ ambigCheckLinearProg prog (opt, ranks) =
                  ~-~ lsum (var <$> M.keys zero_bins)
                  ~<=~ constant (fromIntegral $ length one_bins)
                  ~-~ constant 1,
-               objective prog ~==~ constant opt
+               objective prog ~==~ constant (fromIntegral opt)
              ]
     }
   where
@@ -155,40 +155,39 @@ ambigCheckLinearProg prog (opt, ranks) =
     zero_bins = M.filterWithKey (\k v -> is_bin_var k && v == 0) ranks
     lsum = foldr (~+~) (constant 0)
 
-checkProg :: (MonadTypeChecker m, Located loc) => loc -> LinearProg -> m (Map VName Int)
-checkProg loc prog = do
-  traceM $
-    unlines
-      [ "## checkProg",
-        prettyString prog
-      ]
-  case run_glpk prog of
-    Nothing -> typeError loc mempty "Rank ILP cannot be solved."
-    Just sol@(_size, rank_map) ->
-      case check_ambig sol of
-        Nothing -> do
-          traceM $
-            unlines $
-              "## rank map" : map prettyString (M.toList rank_map)
-          pure rank_map
-        Just (_, rank_map') -> do
-          traceM $
-            unlines $
-              "## rank map"
-                : map prettyString (M.toList rank_map)
-                ++ "## ambig rank map"
-                : map prettyString (M.toList rank_map')
-          typeError loc mempty "Rank ILP is ambiguous."
+-- We should probably cap the iteration on this
+enumerateRankSols :: LinearProg -> [Map VName Int]
+enumerateRankSols prog =
+  takeSolns $
+    iterate next_sol $
+      (prog,) <$> run_glpk prog
   where
     run_glpk = unsafePerformIO . glpk
-    check_ambig (size, rank_map) =
-      run_glpk $ ambigCheckLinearProg prog (fromIntegral size, rank_map)
+    next_sol m = do
+      (prog', sol') <- m
+      let prog'' = ambigCheckLinearProg prog' sol'
+      sol'' <- run_glpk prog''
+      pure (prog'', sol'')
+    takeSolns [] = []
+    takeSolns (Nothing : _) = []
+    takeSolns (Just (_, (_, r)) : xs) = r : takeSolns xs
 
-rankAnalysis :: (MonadTypeChecker m, Located loc) => loc -> [Ct] -> TyVars -> m ([Ct], TyVars)
-rankAnalysis _ [] tyVars = pure ([], tyVars)
+solveRankILP :: (MonadTypeChecker m) => SrcLoc -> LinearProg -> m [Map VName Int]
+solveRankILP loc prog = do
+  traceM $
+    unlines
+      [ "## solveRankILP",
+        prettyString prog
+      ]
+  case enumerateRankSols prog of
+    [] -> typeError loc mempty "Rank ILP cannot be solved."
+    rs -> pure rs
+
+rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> m [([Ct], TyVars)]
+rankAnalysis _ [] tyVars = pure [([], tyVars)]
 rankAnalysis loc cs tyVars = do
-  checkProg loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
-    >>= substRankInfo cs tyVars
+  solveRankILP loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
+    >>= mapM (substRankInfo cs tyVars)
   where
     splitFuncs
       ( CtEq
