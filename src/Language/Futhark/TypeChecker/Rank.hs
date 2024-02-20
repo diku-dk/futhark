@@ -15,11 +15,11 @@ import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad
 import System.IO.Unsafe
 
-type LSum = LP.LSum VName Double
+type LSum = LP.LSum VName Int
 
-type Constraint = LP.Constraint VName Double
+type Constraint = LP.Constraint VName Int
 
-type LinearProg = LP.LinearProg VName Double
+type LinearProg = LP.LinearProg VName Int
 
 type ScalarType = ScalarTypeBase SComp NoUniqueness
 
@@ -181,7 +181,14 @@ solveRankILP loc prog = do
       ]
   case enumerateRankSols prog of
     [] -> typeError loc mempty "Rank ILP cannot be solved."
-    rs -> pure rs
+    rs -> do
+      traceM "## rank maps"
+      forM (zip [0 :: Int ..] rs) $ \(i, r) ->
+        traceM $
+          unlines $
+            "\n## rank map " <> prettyString i
+              : map prettyString (M.toList r)
+      pure rs
 
 rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> m [([Ct], TyVars)]
 rankAnalysis _ [] tyVars = pure [([], tyVars)]
