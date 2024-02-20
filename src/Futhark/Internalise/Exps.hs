@@ -938,8 +938,24 @@ withAutoMap ams arg_desc res_t args_e innerM = do
               ts
       | otherwise = pure $ Right $ zip ses ts
 
+    internaliseShape =
+      fmap I.Shape . mapM (internaliseExp1 "") . E.shapeDims
+
+    addReplicates =
+      zipWithM
+        ( \am arg -> do
+            rep_shape <-
+              internaliseShape $
+                autoRep am `E.shapePrefix` autoFrame am
+            if I.shapeRank rep_shape > 0
+              then concat <$> mapM (letValExp' "autoRep" . BasicOp . Replicate rep_shape) arg
+              else pure arg
+        )
+
     expand args stms argts ams' level
-      | level <= 0 = innerM $ zip args stms
+      | level <= 0 = do
+          args' <- addReplicates ams' args
+          innerM $ zip args' stms
       | otherwise = do
           let ds' = map autoMapRank ams'
           arg_params <- mapM (mkLambdaParams level) $ zip4 args argts stms ds'
