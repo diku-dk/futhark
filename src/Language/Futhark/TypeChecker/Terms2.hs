@@ -1163,15 +1163,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
     cts <- gets termConstraints
 
-    counter <- gets termCounter
-
     tyvars <- gets termTyVars
 
     traceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
-
-    vns <- gets termNameSource
-
-    let use_glpk = True
 
     traceM $
       unlines
@@ -1179,28 +1173,25 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           unlines $ map prettyString cts
         ]
 
-    case rankAnalysis use_glpk vns counter cts tyvars of
-      Nothing -> error ""
-      Just (cts', tyvars', vns', counter') -> do
-        modify $ \s -> s {termCounter = counter', termNameSource = vns'}
+    (cts', tyvars') <- rankAnalysis loc cts tyvars
 
-        solution <-
-          bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
-            solve cts' tyvars'
+    solution <-
+      bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
+        solve cts' tyvars'
 
-        traceM $
-          unlines
-            [ "## constraints:",
-              unlines $ map prettyString cts',
-              "## tyvars:",
-              unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-              "## solution:",
-              let p (v, t) = prettyNameString v <> " => " <> prettyString t
-               in either T.unpack (unlines . map p . M.toList . snd) solution,
-              either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
-            ]
+    traceM $
+      unlines
+        [ "## constraints:",
+          unlines $ map prettyString cts',
+          "## tyvars:",
+          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
+          "## solution:",
+          let p (v, t) = prettyNameString v <> " => " <> prettyString t
+           in either T.unpack (unlines . map p . M.toList . snd) solution,
+          either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
+        ]
 
-        pure (solution, params', retdecl', body')
+    pure (solution, params', retdecl', body')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->

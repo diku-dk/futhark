@@ -6,20 +6,14 @@ import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Vector.Unboxed qualified as V
 import Debug.Trace
-import Futhark.FreshNames qualified as FreshNames
-import Futhark.MonadFreshNames hiding (newName)
-import Futhark.Solve.BranchAndBound
 import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
-import Futhark.Solve.Simplex
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.TypeChecker.Constraints
-import Language.Futhark.TypeChecker.Monad (mkTypeVarName)
+import Language.Futhark.TypeChecker.Monad
 import System.IO.Unsafe
-import System.Process
 
 type LSum = LP.LSum VName Double
 
@@ -61,7 +55,7 @@ instance Distribute Type where
   distribute = distributeOne
     where
       distributeOne (Array _ s (Arrow _ _ _ ta (RetType rd tr))) =
-        Scalar $ Arrow NoUniqueness Unnamed mempty (arrayOf s ta) (RetType rd $ arrayOfWithAliases Nonunique s $ tr)
+        Scalar $ Arrow NoUniqueness Unnamed mempty (arrayOf s ta) (RetType rd $ arrayOfWithAliases Nonunique s tr)
       distributeOne t = t
 
 instance Distribute Ct where
@@ -83,9 +77,9 @@ incCounter = do
   put s {rankCounter = rankCounter s + 1}
   pure $ rankCounter s
 
-binVar :: VName -> RankM (VName)
+binVar :: VName -> RankM VName
 binVar sv = do
-  mbv <- (M.!? sv) <$> gets rankBinVars
+  mbv <- gets ((M.!? sv) . rankBinVars)
   case mbv of
     Nothing -> do
       bv <- VName ("b_" <> baseName sv) <$> incCounter
@@ -112,7 +106,7 @@ addCt (CtAM r m) = do
   addConstraints $ oneIsZero (b_r, r) (b_m, m)
 
 addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
-addTyVarInfo tv (_, TyVarFree) = pure ()
+addTyVarInfo _ (_, TyVarFree) = pure ()
 addTyVarInfo tv (_, TyVarPrim _) =
   addConstraint $ rank tv ~==~ constant 0
 addTyVarInfo tv (_, TyVarRecord _) =
@@ -120,8 +114,8 @@ addTyVarInfo tv (_, TyVarRecord _) =
 addTyVarInfo tv (_, TyVarSum _) =
   addConstraint $ rank tv ~==~ constant 0
 
-mkLinearProg :: Int -> [Ct] -> TyVars -> LinearProg
-mkLinearProg counter cs tyVars =
+mkLinearProg :: [Ct] -> TyVars -> LinearProg
+mkLinearProg cs tyVars =
   LP.LinearProg
     { optType = Minimize,
       objective =
@@ -133,7 +127,7 @@ mkLinearProg counter cs tyVars =
     initState =
       RankState
         { rankBinVars = mempty,
-          rankCounter = counter,
+          rankCounter = 0,
           rankConstraints = mempty
         }
     buildLP = do
@@ -161,50 +155,41 @@ ambigCheckLinearProg prog (opt, ranks) =
     zero_bins = M.filterWithKey (\k v -> is_bin_var k && v == 0) ranks
     lsum = foldr (~+~) (constant 0)
 
-rankAnalysis :: Bool -> VNameSource -> Int -> [Ct] -> TyVars -> Maybe ([Ct], TyVars, VNameSource, Int)
-rankAnalysis _ vns counter [] tyVars = Just ([], tyVars, vns, counter)
-rankAnalysis use_glpk vns counter cs tyVars = do
-  traceM $ unlines ["## rankAnalysis prog", prettyString prog]
-  -- rank_map <-
-  --  if use_glpk
-  --    then snd <$> (unsafePerformIO $ glpk prog)
-  --    else do
-  --      (_size, ranks) <- branchAndBound lp
-  --      pure $ (fromJust . (ranks V.!?)) <$> inv_var_map
-  (size, rank_map) <- unsafePerformIO $ glpk prog
-  case unsafePerformIO $ glpk $ ambigCheckLinearProg prog (fromIntegral size, rank_map) of
-    Just (size', rank_map') -> do
-      traceM $
-        unlines $
-          "## rank map"
-            : map prettyString (M.toList rank_map)
-            ++ "## ambig rank map"
-            : map prettyString (M.toList rank_map')
-      error "ambiguous"
-    Nothing -> do
-      traceM $ unlines $ "## rank map" : map prettyString (M.toList rank_map)
-      let initEnv =
-            SubstEnv
-              { envTyVars = tyVars,
-                envRanks = rank_map
-              }
-
-          initState =
-            SubstState
-              { substTyVars = mempty,
-                substNewVars = mempty,
-                substNameSource = vns,
-                substCounter = counter,
-                substNewCts = mempty
-              }
-          (cs', state') =
-            runSubstM initEnv initState $
-              substRanks $
-                filter (not . isCtAM) cs
-      pure (cs' <> substNewCts state', substTyVars state' <> tyVars, substNameSource state', substCounter state')
+checkProg :: (MonadTypeChecker m, Located loc) => loc -> LinearProg -> m (Map VName Int)
+checkProg loc prog = do
+  traceM $
+    unlines
+      [ "## checkProg",
+        prettyString prog
+      ]
+  case run_glpk prog of
+    Nothing -> typeError loc mempty "Rank ILP cannot be solved."
+    Just sol@(_size, rank_map) ->
+      case check_ambig sol of
+        Nothing -> do
+          traceM $
+            unlines $
+              "## rank map" : map prettyString (M.toList rank_map)
+          pure rank_map
+        Just (_, rank_map') -> do
+          traceM $
+            unlines $
+              "## rank map"
+                : map prettyString (M.toList rank_map)
+                ++ "## ambig rank map"
+                : map prettyString (M.toList rank_map')
+          typeError loc mempty "Rank ILP is ambiguous."
   where
-    isCtAM (CtAM {}) = True
-    isCtAM _ = False
+    run_glpk = unsafePerformIO . glpk
+    check_ambig (size, rank_map) =
+      run_glpk $ ambigCheckLinearProg prog (fromIntegral size, rank_map)
+
+rankAnalysis :: (MonadTypeChecker m, Located loc) => loc -> [Ct] -> TyVars -> m ([Ct], TyVars)
+rankAnalysis _ [] tyVars = pure ([], tyVars)
+rankAnalysis loc cs tyVars = do
+  checkProg loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
+    >>= substRankInfo cs tyVars
+  where
     splitFuncs
       ( CtEq
           (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
@@ -215,17 +200,43 @@ rankAnalysis use_glpk vns counter cs tyVars = do
           t1r' = t1r `setUniqueness` NoUniqueness
           t2r' = t2r `setUniqueness` NoUniqueness
     splitFuncs c = [c]
-    cs' = foldMap splitFuncs cs
-    prog = mkLinearProg counter cs' tyVars
-    (lp, var_map) = linearProgToLP prog
-    inv_var_map = M.fromListWith (error "oh no!") [(v, k) | (k, v) <- M.toList var_map]
 
-newtype SubstM a = SubstM (StateT SubstState (Reader SubstEnv) a)
-  deriving (Functor, Applicative, Monad, MonadState SubstState, MonadReader SubstEnv)
+substRankInfo :: (MonadTypeChecker m) => [Ct] -> TyVars -> Map VName Int -> m ([Ct], TyVars)
+substRankInfo cs tyVars rankmap = do
+  (cs', new_cs, new_tyVars) <-
+    runSubstT tyVars rankmap $
+      substRanks $
+        filter (not . isCtAM) cs
+  pure (cs' <> new_cs, new_tyVars <> tyVars)
+  where
+    isCtAM (CtAM {}) = True
+    isCtAM _ = False
 
-runSubstM :: SubstEnv -> SubstState -> SubstM a -> (a, SubstState)
-runSubstM initEnv initState (SubstM m) =
-  runReader (runStateT m initState) initEnv
+runSubstT :: (MonadTypeChecker m) => TyVars -> Map VName Int -> SubstT m a -> m (a, [Ct], TyVars)
+runSubstT tyVars rankmap (SubstT m) = do
+  let env =
+        SubstEnv
+          { envTyVars = tyVars,
+            envRanks = rankmap
+          }
+
+      s =
+        SubstState
+          { substTyVars = mempty,
+            substNewVars = mempty,
+            substNewCts = mempty
+          }
+  (a, s') <- runReaderT (runStateT m s) env
+  pure (a, substNewCts s', substTyVars s')
+
+newtype SubstT m a = SubstT (StateT SubstState (ReaderT SubstEnv m) a)
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState SubstState,
+      MonadReader SubstEnv
+    )
 
 data SubstEnv = SubstEnv
   { envTyVars :: TyVars,
@@ -235,21 +246,15 @@ data SubstEnv = SubstEnv
 data SubstState = SubstState
   { substTyVars :: TyVars,
     substNewVars :: Map TyVar TyVar,
-    substNameSource :: VNameSource,
-    substCounter :: !Int,
     substNewCts :: [Ct]
   }
 
-substIncCounter :: SubstM Int
-substIncCounter = do
-  s <- get
-  put s {substCounter = substCounter s + 1}
-  pure $ substCounter s
+instance MonadTrans SubstT where
+  lift = SubstT . lift . lift
 
-newTyVar :: TyVar -> SubstM TyVar
+newTyVar :: (MonadTypeChecker m) => TyVar -> SubstT m TyVar
 newTyVar t = do
-  i <- substIncCounter
-  t' <- newID $ mkTypeVarName (baseName t) i
+  t' <- lift $ newTypeName (baseName t)
   shape <- rankToShape t
   modify $ \s ->
     s
@@ -262,22 +267,15 @@ newTyVar t = do
                ]
       }
   pure t'
-  where
-    newID x = do
-      s <- get
-      let (v', src') = FreshNames.newName (substNameSource s) $ VName x 0
-      put $ s {substNameSource = src'}
-      pure v'
 
-rankToShape :: VName -> SubstM (Shape SComp)
+rankToShape :: (Monad m) => VName -> SubstT m (Shape SComp)
 rankToShape x = do
   rs <- asks envRanks
   pure $ Shape $ replicate (fromJust $ rs M.!? x) SDim
 
-addRankInfo :: TyVar -> SubstM ()
+addRankInfo :: (MonadTypeChecker m) => TyVar -> SubstT m ()
 addRankInfo t = do
   rs <- asks envRanks
-  -- unless (fromMaybe (error $ prettyString t) (rs M.!? t) == 0) $ do
   unless (fromMaybe 0 (rs M.!? t) == 0) $ do
     new_vars <- gets substNewVars
     maybe new_var (const $ pure ()) $ new_vars M.!? t
@@ -290,7 +288,7 @@ addRankInfo t = do
       modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree) $ substTyVars s}
 
 class SubstRanks a where
-  substRanks :: a -> SubstM a
+  substRanks :: (MonadTypeChecker m) => a -> SubstT m a
 
 instance (SubstRanks a) => SubstRanks [a] where
   substRanks = mapM substRanks
@@ -298,11 +296,11 @@ instance (SubstRanks a) => SubstRanks [a] where
 instance SubstRanks (Shape SComp) where
   substRanks = foldM (\s d -> (s <>) <$> instDim d) mempty
     where
-      instDim (SDim) = pure $ Shape $ pure SDim
+      instDim SDim = pure $ Shape $ pure SDim
       instDim (SVar x) = rankToShape x
 
 instance SubstRanks (TypeBase SComp u) where
-  substRanks t@(Scalar (TypeVar u (QualName [] x) [])) =
+  substRanks t@(Scalar (TypeVar _ (QualName [] x) [])) =
     addRankInfo x >> pure t
   substRanks (Scalar (Arrow u p d ta (RetType retdims tr))) = do
     ta' <- substRanks ta
