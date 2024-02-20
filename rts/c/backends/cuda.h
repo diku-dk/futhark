@@ -294,6 +294,11 @@ struct futhark_context {
 
   struct free_list gpu_free_list;
 
+  // If true, use managed memory for Futhark-level allocations. We may
+  // still use unmanaged memory for our own book-keeping arrays
+  // (global_failure etc).
+  bool use_managed_memory;
+
   size_t max_thread_block_size;
   size_t max_grid_size;
   size_t max_tile_size;
@@ -830,6 +835,8 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   free_list_init(&ctx->gpu_free_list);
 
+  ctx->use_managed_memory = device_query(ctx->dev, MANAGED_MEMORY);
+
   // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
   // for backwards compatibility.  Add _OPTIN and you seem to get the
   // right number.
@@ -1082,10 +1089,17 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 }
 
 static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
-  CUresult res = cuMemAlloc(mem_out, size);
+  CUresult res;
+  if (ctx->use_managed_memory) {
+    res = cuMemAllocManaged(mem_out, size, CU_MEM_ATTACH_GLOBAL);
+  } else {
+    res = cuMemAlloc(mem_out, size);
+  }
+
   if (res == CUDA_ERROR_OUT_OF_MEMORY) {
     return FUTHARK_OUT_OF_MEMORY;
   }
+
   CUDA_SUCCEED_OR_RETURN(res);
   return FUTHARK_SUCCESS;
 }
