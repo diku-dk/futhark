@@ -363,28 +363,26 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
         ()
           -- Short-circuiting operators are magical.
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "&&",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x y (E.Literal (E.BoolValue False) mempty) mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+            baseString (qualLeaf qfname) == "&&" ->
+              withAutoMap ams arg_desc res_t args $ \[([x], x_stms), ([y], y_stms)] -> do
+                letValExp' desc
+                  =<< eIf
+                    (addStms x_stms >> pure (BasicOp $ SubExp x))
+                    (addStms y_stms >> eBody [pure $ BasicOp $ SubExp y])
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue False])
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            baseString (qualLeaf qfname) == "||",
-            [(x, _), (y, _)] <- args ->
-              internaliseExp desc $
-                E.AppExp
-                  (E.If x (E.Literal (E.BoolValue True) mempty) y mempty)
-                  (Info $ AppRes (E.Scalar $ E.Prim E.Bool) [])
+            baseString (qualLeaf qfname) == "||" ->
+              withAutoMap ams arg_desc res_t args $ \[([x], x_stms), ([y], y_stms)] -> do
+                letValExp' desc
+                  =<< eIf
+                    (addStms x_stms >> pure (BasicOp $ SubExp x))
+                    (eBody [pure $ BasicOp $ SubExp $ Constant $ I.BoolValue True])
+                    (addStms y_stms >> eBody [pure $ BasicOp $ SubExp y])
           -- Overloaded and intrinsic functions never take array
           -- arguments (except equality, but those cannot be
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc -> do
-              -- let prepareArg (arg, _) =
-              --      (E.toStruct (E.typeOf arg),) <$> internaliseExp "arg" arg
-              -- internalise =<< mapM prepareArg args
-              --
               withAutoMap_ ams arg_desc res_t args $ \args' -> do
                 let prepareArg (arg, _, am) arg' =
                       (E.toStruct $ E.stripArray (E.shapeRank $ autoMap am) (E.typeOf arg), arg')
@@ -392,26 +390,12 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
           | Just internalise <- isIntrinsicFunction qfname (map fst args) loc ->
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            -- Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
-            --  let tag ses = [(se, I.Observe) | se <- ses]
-            --  args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-            --  let args'' = concatMap tag args'
-            --  letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
-            --
             Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
               withAutoMap_ ams arg_desc res_t args $ \args' -> do
                 let tag ses = [(se, I.Observe) | se <- ses]
                 let args'' = concatMap tag args'
                 letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
           | otherwise -> do
-              traceM $
-                unlines
-                  [ "## qfname",
-                    prettyString qfname
-                  ]
-              -- args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
-              -- funcall desc qfname args' loc
-
               withAutoMap_ ams arg_desc res_t args $ \args' ->
                 funcall desc qfname (concat args') loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
