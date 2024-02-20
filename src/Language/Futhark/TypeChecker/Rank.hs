@@ -155,12 +155,12 @@ ambigCheckLinearProg prog (opt, ranks) =
     zero_bins = M.filterWithKey (\k v -> is_bin_var k && v == 0) ranks
     lsum = foldr (~+~) (constant 0)
 
--- We should probably cap the iteration on this
 enumerateRankSols :: LinearProg -> [Map VName Int]
 enumerateRankSols prog =
-  takeSolns $
-    iterate next_sol $
-      (prog,) <$> run_glpk prog
+  take 5 $
+    takeSolns $
+      iterate next_sol $
+        (prog,) <$> run_glpk prog
   where
     run_glpk = unsafePerformIO . glpk
     next_sol m = do
