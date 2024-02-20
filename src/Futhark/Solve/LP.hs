@@ -201,7 +201,7 @@ linearProgToPulp prog =
     rm_subscript x = fromMaybe x $ lookup x $ zip "₀₁₂₃₄₅₆₇₈₉" "0123456789"
 
 bigM :: (Num a) => a
-bigM = 10 ^ 3
+bigM = 10 ^ 6
 
 oneIsZero :: (Eq a, Num a, Ord v) => (v, v) -> (v, v) -> [Constraint v a]
 oneIsZero (b1, x1) (b2, x2) =
