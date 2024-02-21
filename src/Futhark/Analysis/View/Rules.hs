@@ -3,7 +3,7 @@ module Futhark.Analysis.View.Rules where
 import Futhark.Analysis.View.Representation
 import Control.Monad.RWS.Strict hiding (Sum)
 import qualified Data.Map as M
-import Debug.Trace (trace)
+import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty (prettyString)
 import Data.List.NonEmpty qualified as NE
 
@@ -34,10 +34,14 @@ substituteViews view = do
 -- 1. seems like a fold where the accumulator is the new Exp
 --    that always maintains an outermost Case "invariant"
 hoistCases :: View -> ViewM View
-hoistCases = pure
--- hoistCases (Forall i dom e) = do
---   let cases = hoistCases' e
---   pure $ Forall i dom (Cases $ NE.fromList $ map (Bool True,) cases)
+-- hoistCases = pure
+hoistCases (Forall i dom e) = do
+  traceM ("🎭 hoisting ifs")
+  let cases = hoistCases' e
+  pure $ Forall i dom (Cases $ NE.fromList $ g cases)
+  where
+    g [] = []
+    g (x:y:xs) = (x,y) : g xs
 
 -- hoistCases' :: [Exp] -> Exp -> [Exp]
 -- hoistCases' acc (Var x) = $ Var x
@@ -86,22 +90,21 @@ hoistCases' :: Exp -> [Exp]
 hoistCases' e = do
   astMap (m (Bool True)) e
   where
-    m predicate = ASTMapper { mapOnExp = pure, mapOnIf = pure }
+    m predicate = ASTMapper { mapOnExp = pure, mapOnIf = onIf predicate }
     -- Want
     --   onExp pred :: Exp -> m Exp
     -- where m is the list monad, so
     --   onExp pred :: Exp -> [Exp]
     -- Hoping to get an expression tree for every predicate.
-    onExp :: Exp -> Exp -> [Exp]
-    onExp _ (Var x) = pure (Var x)
-    onExp p (If c t f) = do
-      t' <- onExp p t
-      f' <- onExp p f
-      [t', f']
-    -- onExp p (Cases cases) = do
+    onIf :: Exp -> Exp -> [Exp]
+    onIf p (If c t f) = do
+      t' <- onIf p t
+      f' <- onIf p f
+      [c, t', Not c, f']
+    -- onIf p (Cases cases) = do
     --   mconcat $
     --     mapM (\(p', e') -> astMap (m (p :&& p')) e') (NE.toList cases)
     --   -- XXX types check if we mconcat here, figure out what we actually
     --   -- want to do instead. Wait, do we want mconcat?
     --   -- The problem is that we are discarding the predicates!
-    onExp p v = astMap (m p) v
+    onIf p v = astMap (m p) v
