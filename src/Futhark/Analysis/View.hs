@@ -73,12 +73,14 @@ forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
-    newView' <- forward e
-    tracePrettyM newView'
-    newView <- substituteViews newView'
+    newView <- forward e
     tracePrettyM newView
+    newView' <- substituteViews newView
+    tracePrettyM newView'
+    newView'' <- hoistCases newView'
+    tracePrettyM newView''
     traceM "\n"
-    insertView x newView
+    insertView x newView''
     forwards body
     pure ()
 forwards _ = pure ()
@@ -128,8 +130,9 @@ forward (E.AppExp (E.Apply f args _) _)
           _ -> error ("toExp not implemented for bin op: " <> show vn)
       pure $ Forall i (Iota $ Var i) e
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
-  | Just e' <- toExp e =
-    pure $ Empty e'
+  | Just e' <- toExp e = do
+    i <- newNameFromString "i"
+    pure $ Forall i Empty e'
 forward e = do
     error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)
 
@@ -143,11 +146,16 @@ toExp (E.Var (E.QualName _ x) _ _) =
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
-toExp (E.AppExp (E.If c t f _) _) =
-  let c' = toExp c -- TODO Convert to CNF.
-      t' = toExp t
-      f' = toExp f
-  in  If <$> c' <*> t' <*> f'
+-- toExp (E.AppExp (E.If c t f _) _)
+--   | Just c' <- toExp c,
+--     Just t' <- toExp t,
+--     Just f' <- toExp f =
+--   pure $ Cases (NE.fromList [(c', t'), (Not c', f')])
+toExp (E.AppExp (E.If c t f _) _) = do
+  c' <- toExp c
+  t' <- toExp t
+  f' <- toExp f
+  pure $ If c' t' f'
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -158,9 +166,9 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Plus -> pure $ x ~+~ y
         E.Times -> pure $ x ~*~ y
         E.Minus -> pure $ x ~-~ y
-        E.Equal -> pure $ BoolExp (x :== y)
-        E.Less -> pure $ BoolExp (x :< y)
-        E.Greater -> pure $ BoolExp (x :> y)
+        E.Equal -> pure $ x :== y
+        E.Less -> pure $ x :< y
+        E.Greater -> pure $ x :> y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
 toExp (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix i] <- slice = -- XXX support only simple indexing for now
@@ -180,7 +188,7 @@ substituteName substitutions x = do
     substituter subst =
       ASTMapper
         { mapOnExp = onExp subst,
-          mapOnView = astMap (substituter subst)
+          mapOnIf = pure
         }
     onExp subst e@(Var x') =
       case M.lookup x' subst of
