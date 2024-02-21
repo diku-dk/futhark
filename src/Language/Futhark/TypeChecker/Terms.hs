@@ -343,10 +343,6 @@ unscopeType ::
 unscopeType tloc unscoped =
   sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
 
-checkIdent :: Ident StructType -> TermTypeM (Ident StructType)
-checkIdent (Ident v t loc) =
-  Ident v <$> traverse (replaceTyVars loc) t <*> pure loc
-
 checkExp :: Exp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
@@ -605,8 +601,9 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _
       )
       (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
-  dest' <- checkIdent dest
-  src' <- checkIdent src
+  src_t <- lookupVar loc (qualName (identName src)) (unInfo (identType src))
+  let src' = src {identType = Info src_t}
+      dest' = dest {identType = Info src_t}
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage src' "type of source array") "src" $ sliceDims slice'
   unify (mkUsage loc "type of target array") t $ unInfo $ identType src'

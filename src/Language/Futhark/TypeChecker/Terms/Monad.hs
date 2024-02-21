@@ -358,7 +358,7 @@ replaceTyVars loc orig_t = do
       f
         (Scalar (TypeVar u (QualName [] v) []))
           | Just t <- M.lookup v tyvars =
-              fst <$> allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" (second (const u) t)
+              fst <$> allDimsFreshInType (mkUsage loc "replaceTyVars") Nonrigid "dv" (second (const u) t)
           | otherwise =
               pure $ Scalar (TypeVar u (QualName [] v) [])
       f (Scalar (TypeVar u qn targs)) =
