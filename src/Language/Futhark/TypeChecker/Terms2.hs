@@ -488,16 +488,20 @@ checkPat' (RecordPat fs loc) NoneInferred =
 checkPat' (PatAscription p t loc) maybe_outer_t = do
   (t', _, RetType _ st, _) <- checkTypeExp checkSizeExp t
 
+  -- Uniqueness kung fu to make the Monoid(mempty) instance give what
+  -- we expect.  We should perhaps stop being so implicit.
+  st' <- asStructType loc $ toType $ resToParam st
+
   case maybe_outer_t of
     Ascribed outer_t -> do
-      ctEq (toType st) (toType outer_t)
+      ctEq (toType st') (toType outer_t)
       PatAscription
-        <$> checkPat' p (Ascribed (resToParam st))
+        <$> checkPat' p (Ascribed st')
         <*> pure t'
         <*> pure loc
     NoneInferred ->
       PatAscription
-        <$> checkPat' p (Ascribed (resToParam st))
+        <$> checkPat' p (Ascribed st')
         <*> pure t'
         <*> pure loc
 checkPat' (PatLit l NoInfo loc) (Ascribed t) = do
@@ -1180,7 +1184,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty)))
           . uncurry solve
 
-    forM (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
+    forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
       traceM $
         unlines
           [ "## constraints:",

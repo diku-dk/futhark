@@ -127,7 +127,7 @@ checkPat' _ (Id name (Info t) loc) NoneInferred = do
   pure $ Id name (Info t') loc
 checkPat' _ (Id name (Info t1) loc) (Ascribed t2) = do
   t <- replaceTyVars loc t1
-  unify (mkUsage loc "wildcard") (toStruct t) (toStruct t2)
+  unify (mkUsage loc "id") (toStruct t) (toStruct t2)
   pure $ Id name (Info t) loc
 checkPat' _ (Wildcard (Info t) loc) NoneInferred = do
   t' <- replaceTyVars loc t

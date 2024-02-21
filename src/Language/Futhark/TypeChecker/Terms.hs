@@ -1333,7 +1333,8 @@ checkBinding (fname, maybe_retdecl, tparams, params, body, loc) =
     verifyFunctionParams (Just fname) params''
 
     (tparams', params''', rettype') <-
-      letGeneralise (baseName fname) loc tparams params'' =<< unscopeUnknown rettype
+      letGeneralise (baseName fname) loc tparams params''
+        =<< unscopeUnknown rettype
 
     when
       ( null params
@@ -1449,6 +1450,7 @@ closeOverTypes defname defloc tparams paramts ret substs = do
         case M.lookup v substs of
           Just (_, UnknownSize {}) -> Just v
           _ -> Nothing
+
   pure
     ( tparams ++ more_tparams,
       injectExt (nubOrd $ retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
