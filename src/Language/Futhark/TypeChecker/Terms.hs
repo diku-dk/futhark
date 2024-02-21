@@ -343,6 +343,10 @@ unscopeType ::
 unscopeType tloc unscoped =
   sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
 
+checkIdent :: Ident StructType -> TermTypeM (Ident StructType)
+checkIdent (Ident v t loc) =
+  Ident v <$> traverse (replaceTyVars loc) t <*> pure loc
+
 checkExp :: Exp -> TermTypeM Exp
 checkExp (Literal val loc) =
   pure $ Literal val loc
@@ -601,18 +605,20 @@ checkExp (AppExp (LetFun name (tparams, params, maybe_retdecl, _, e) body loc) _
       )
       (Info $ AppRes body_t ext)
 checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
+  dest' <- checkIdent dest
+  src' <- checkIdent src
   slice' <- checkSlice slice
-  (t, _) <- newArrayType (mkUsage src "type of source array") "src" $ sliceDims slice'
-  unify (mkUsage loc "type of target array") t $ unInfo $ identType src
+  (t, _) <- newArrayType (mkUsage src' "type of source array") "src" $ sliceDims slice'
+  unify (mkUsage loc "type of target array") t $ unInfo $ identType src'
 
   (elemt, _) <- sliceShape (Just (loc, Nonrigid)) slice' =<< normTypeFully t
 
   ve' <- unifies "type of target array" elemt =<< checkExp ve
 
-  bindingIdent dest $ do
+  bindingIdent dest' $ do
     body' <- checkExp body
-    (body_t, ext) <- unscopeType loc [identName dest] =<< expTypeFully body'
-    pure $ AppExp (LetWith dest src slice' ve' body' loc) (Info $ AppRes body_t ext)
+    (body_t, ext) <- unscopeType loc [identName dest'] =<< expTypeFully body'
+    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t ext)
 checkExp (Update src slice ve loc) = do
   slice' <- checkSlice slice
   (t, _) <- newArrayType (mkUsage' src) "src" $ sliceDims slice'
