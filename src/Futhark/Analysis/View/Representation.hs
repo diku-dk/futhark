@@ -157,7 +157,6 @@ instance ASTMappable Exp where
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
   -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
-  -- astMap m (If c t f) = mapOnIf m <*> (If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f)
   astMap m (If c t f) = do
     c' <- mapOnExp m c 
     t' <- mapOnExp m t 

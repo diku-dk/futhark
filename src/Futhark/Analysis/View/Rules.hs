@@ -6,6 +6,9 @@ import qualified Data.Map as M
 import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty (prettyString)
 import Data.List.NonEmpty qualified as NE
+-- import Control.Monad.Trans.State.Lazy qualified as S
+import Control.Monad.State qualified as S
+import Control.Monad.Identity
 
 substituteViews :: View -> ViewM View
 substituteViews view = do
@@ -38,10 +41,11 @@ hoistCases :: View -> ViewM View
 hoistCases (Forall i dom e) = do
   traceM ("🎭 hoisting ifs")
   let cases = hoistCases' e
-  pure $ Forall i dom (Cases $ NE.fromList $ g cases)
-  where
-    g [] = []
-    g (x:y:xs) = (x,y) : g xs
+  pure $ Forall i dom (Cases $ NE.fromList $ cases)
+  -- pure $ Forall i dom (Cases $ NE.fromList $ g cases)
+  -- where
+  --   g [] = []
+  --   g (x:y:xs) = (x,y) : g xs
 
 -- hoistCases' :: [Exp] -> Exp -> [Exp]
 -- hoistCases' acc (Var x) = $ Var x
@@ -86,25 +90,44 @@ hoistCases (Forall i dom e) = do
 --     --   -- want to do instead. Wait, do we want mconcat?
 --     --   -- The problem is that we are discarding the predicates!
 --     onExp p v = astMap (m p) v
-hoistCases' :: Exp -> [Exp]
+
+-- newtype Lol a = Lol (S.StateT [a] Identity a)
+-- newtype Lol a = Lol (S.State [(a,a)] a)
+-- ^ I don't get why this doesn't work in place of spelling
+-- out the monad in the type signature of onIf.
+
+-- XXX maybe make it just [Exp] and add Case to Exp,
+-- then we end up accumulating [Case p e]?
+-- let ts = onIf t
+-- let fs = onIf t
+-- mconcat [ts, fs]
+-- ...still no way to backpropagate conditons then.
+
+hoistCases' :: Exp -> [(Exp, Exp)]
 hoistCases' e = do
-  astMap (m (Bool True)) e
+  snd $ S.runState (astMap m e) [] -- XXX why does it need Identity here?
   where
-    m predicate = ASTMapper { mapOnExp = pure, mapOnIf = onIf predicate }
+    m = ASTMapper { mapOnExp = pure, mapOnIf = onIf }
     -- Want
     --   onExp pred :: Exp -> m Exp
     -- where m is the list monad, so
     --   onExp pred :: Exp -> [Exp]
     -- Hoping to get an expression tree for every predicate.
-    onIf :: Exp -> Exp -> [Exp]
-    onIf p (If c t f) = do
-      t' <- onIf p t
-      f' <- onIf p f
-      [c, t', Not c, f']
+    onIf :: Exp -> S.StateT [(Exp, Exp)] [] Exp
+    onIf (Var x) = pure $ Var x
+    onIf (If c t f) = do
+      t' <- onIf t
+      modify (\s -> (c,t'):s)
+      ts <- get
+      traceM ("AAY " <> prettyString ts)
+      -- let fs = onIf f
+      -- traceM $ "t', f' = " <> prettyString ts <> ", " <> prettyString fs
+      pure t'
+      -- [ts, fs]
     -- onIf p (Cases cases) = do
     --   mconcat $
     --     mapM (\(p', e') -> astMap (m (p :&& p')) e') (NE.toList cases)
     --   -- XXX types check if we mconcat here, figure out what we actually
     --   -- want to do instead. Wait, do we want mconcat?
     --   -- The problem is that we are discarding the predicates!
-    onIf p v = astMap (m p) v
+    onIf v = astMap m v

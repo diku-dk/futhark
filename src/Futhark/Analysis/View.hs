@@ -169,6 +169,7 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Equal -> pure $ x :== y
         E.Less -> pure $ x :< y
         E.Greater -> pure $ x :> y
+        E.LogAnd -> pure $ x :&& y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
 toExp (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix i] <- slice = -- XXX support only simple indexing for now
@@ -179,6 +180,7 @@ toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
 toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
+toExp (E.Literal (E.BoolValue x) _) = pure $ Bool x
 toExp e = error ("toExp not implemented for: " <> show e)
 
 substituteName :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
