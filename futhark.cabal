@@ -497,6 +497,7 @@ library
      -- remove me later
     , process
     , glpk-hs
+    , silently
 
 executable futhark
   import: common

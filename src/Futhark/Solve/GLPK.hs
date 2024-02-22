@@ -1,12 +1,14 @@
 module Futhark.Solve.GLPK (glpk) where
 
+import Control.Monad
 import Data.LinearProgram
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Futhark.Solve.LP qualified as F
+import System.IO.Silently
 
-linearProgToGLPK :: (Show v, Ord v, Eq a, Num a, Group a) => F.LinearProg v a -> (LP v a)
+linearProgToGLPK :: (Ord v, Eq a, Num a) => F.LinearProg v a -> (LP v a)
 linearProgToGLPK prog =
   LP
     { direction = cOptType $ F.optType prog,
@@ -38,12 +40,16 @@ linearProgToGLPK prog =
 
     varList = S.toList $ F.vars prog
 
-glpk ::
-  (Show v, Ord v, Show a, Eq a, Real a, Group a) =>
-  F.LinearProg v a ->
-  IO (Maybe (Int, M.Map v Int))
+glpk :: (Ord v, Real a) => F.LinearProg v a -> IO (Maybe (Int, M.Map v Int))
 glpk lp = do
+  (output, res) <- capture $ glpk' lp
+  pure $ do
+    guard $ "PROBLEM HAS NO INTEGER FEASIBLE SOLUTION" `notElem` lines output
+    res
+
+glpk' :: (Ord v, Real a) => F.LinearProg v a -> IO (Maybe (Int, M.Map v Int))
+glpk' lp = do
   (_, mres) <- glpSolveVars opts $ linearProgToGLPK lp
   pure $ (\(opt, vs) -> (truncate opt, fmap truncate vs)) <$> mres
   where
-    opts = mipDefaults {msgLev = MsgOff}
+    opts = mipDefaults {msgLev = MsgAll}
