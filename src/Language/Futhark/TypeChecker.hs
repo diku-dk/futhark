@@ -707,7 +707,7 @@ checkValBind vb = do
 
   let vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
 
-  traceM $ unlines ["Inferred:", prettyString vb']
+  traceM $ unlines ["# Inferred:", prettyString vb']
 
   pure
     ( mempty
