@@ -264,26 +264,21 @@ stripDims i (Shape l)
   | i < length l = Just $ Shape $ drop i l
   | otherwise = Nothing
 
-data AutoMap
-  = AutoMap
-      { autoRep :: Shape Size,
-        autoMap :: Shape Size,
-        autoFrame :: Shape Size
-      }
-  | AutoMapRank Int Int Int
+data AutoMap = AutoMap
+  { autoRep :: Shape Size,
+    autoMap :: Shape Size,
+    autoFrame :: Shape Size
+  }
   deriving (Eq, Show, Ord)
 
 autoRepRank :: AutoMap -> Int
-autoRepRank (AutoMapRank r _ _) = r
-autoRepRank _ = 0
+autoRepRank = shapeRank . autoRep
 
 autoMapRank :: AutoMap -> Int
-autoMapRank (AutoMapRank _ m _) = m
-autoMapRank _ = 0
+autoMapRank = shapeRank . autoMap
 
 autoFrameRank :: AutoMap -> Int
-autoFrameRank (AutoMapRank _ _ f) = f
-autoFrameRank _ = 0
+autoFrameRank = shapeRank . autoFrame
 
 instance Semigroup AutoMap where
   (AutoMap r1 m1 f1) <> (AutoMap r2 m2 f2) = AutoMap (r1 <> r2) (m1 <> m2) (f1 <> f2)

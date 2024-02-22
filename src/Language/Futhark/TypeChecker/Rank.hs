@@ -344,11 +344,12 @@ updAM rank_map e =
       AppExp (BinOp op t (updAM rank_map x, Info (xv, upd xam)) (updAM rank_map y, Info (yv, upd yam)) loc) res
     _ -> runIdentity $ astMap m e
   where
-    dimToRank (Var (QualName [] x) _ _) = rank_map M.! x
+    dimToRank (Var (QualName [] x) _ _) =
+      replicate (rank_map M.! x) (TupLit mempty mempty)
     dimToRank e = error $ prettyString e
-    shapeToRank = sum . fmap dimToRank
+    shapeToRank = Shape . foldMap dimToRank
     upd (AutoMap r m f) =
-      AutoMapRank (shapeToRank r) (shapeToRank m) (shapeToRank f)
+      AutoMap (shapeToRank r) (shapeToRank m) (shapeToRank f)
     m =
       identityMapper
         { mapOnExp = pure . updAM rank_map
