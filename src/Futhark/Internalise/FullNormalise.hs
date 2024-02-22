@@ -299,16 +299,22 @@ getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
   body' <- transformBody body
   nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, elam)) (er, Info (erp, eram)) loc) (Info resT)) = do
+  -- Rewrite short-circuiting boolean operators on scalars to explicit
+  -- if-then-else.
   expr' <- case (isOr, isAnd) of
-    (True, _) -> do
-      el' <- naming "or_lhs" $ getOrdering True el
-      er' <- naming "or_rhs" $ transformBody er
-      pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
-    (_, True) -> do
-      el' <- naming "and_lhs" $ getOrdering True el
-      er' <- naming "and_rhs" $ transformBody er
-      pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
-    (False, False) -> do
+    (True, _)
+      | elam == mempty,
+        eram == mempty -> do
+          el' <- naming "or_lhs" $ getOrdering True el
+          er' <- naming "or_rhs" $ transformBody er
+          pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
+    (_, True)
+      | elam == mempty,
+        eram == mempty -> do
+          el' <- naming "and_lhs" $ getOrdering True el
+          er' <- naming "and_rhs" $ transformBody er
+          pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
+    _ -> do
       el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
       er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, elam, el'), (erp, eram, er')] resT
