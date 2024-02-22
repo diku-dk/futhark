@@ -1680,11 +1680,14 @@ isOverloadedFunction qname desc loc = do
     handle name
       | Just bop <- find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] =
           Just $ \[(x_t, [x']), (y_t, [y'])] ->
-            case (x_t, y_t) of
+            case (arrayElem x_t, arrayElem y_t) of
               (E.Scalar (E.Prim t1), E.Scalar (E.Prim t2)) ->
                 internaliseBinOp loc desc bop x' y' t1 t2
               _ -> error "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
     handle _ = Nothing
+
+    arrayElem (E.Array _ _ t) = E.Scalar t
+    arrayElem t = t
 
 -- | Handle intrinsic functions.  These are only allowed to be called
 -- in the prelude, and their internalisation may involve inspecting

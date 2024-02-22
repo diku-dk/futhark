@@ -300,7 +300,8 @@ getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
   nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
 getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, elam)) (er, Info (erp, eram)) loc) (Info resT)) = do
   -- Rewrite short-circuiting boolean operators on scalars to explicit
-  -- if-then-else.
+  -- if-then-else. Automapped cases are turned into applications of
+  -- intrinsic functions.
   expr' <- case (isOr, isAnd) of
     (True, _)
       | elam == mempty,
@@ -308,18 +309,30 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, elam)) (er, Info
           el' <- naming "or_lhs" $ getOrdering True el
           er' <- naming "or_rhs" $ transformBody er
           pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
+      | otherwise -> do
+          el' <- naming "or_lhs" $ getOrdering False el
+          er' <- naming "or_rhs" $ getOrdering False er
+          pure $ mkApply orop [(elp, elam, el'), (erp, eram, er')] resT
     (_, True)
       | elam == mempty,
         eram == mempty -> do
           el' <- naming "and_lhs" $ getOrdering True el
           er' <- naming "and_rhs" $ transformBody er
           pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
+      | otherwise -> do
+          el' <- naming "and_lhs" $ getOrdering False el
+          er' <- naming "and_rhs" $ getOrdering False er
+          pure $ mkApply andop [(elp, elam, el'), (erp, eram, er')] resT
     _ -> do
       el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
       er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
       pure $ mkApply (Var op opT oloc) [(elp, elam, el'), (erp, eram, er')] resT
   nameExp final expr'
   where
+    bool = Scalar $ Prim Bool
+    opt = foldFunType [bool, bool] $ RetType [] bool
+    andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
+    orop = Var (qualName (intrinsicVar "||")) (Info opt) mempty
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
