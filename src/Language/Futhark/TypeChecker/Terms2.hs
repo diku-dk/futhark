@@ -1157,7 +1157,7 @@ checkValDef ::
     ( [Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness))],
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
-      Exp
+      [Exp]
     )
 checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   bindParams tparams params $ \params' -> do
@@ -1177,7 +1177,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           unlines $ map prettyString cts
         ]
 
-    cts_tyvars' <- rankAnalysis loc cts tyvars
+    (cts_tyvars', bodys') <- unzip <$> rankAnalysis loc cts tyvars body'
 
     solutions <-
       forM cts_tyvars' $
@@ -1197,7 +1197,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
             either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
           ]
 
-    pure (solutions, params', retdecl', body')
+    pure (solutions, params', retdecl', bodys')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->

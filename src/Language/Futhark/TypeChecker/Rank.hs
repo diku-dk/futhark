@@ -2,6 +2,8 @@ module Language.Futhark.TypeChecker.Rank (rankAnalysis) where
 
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Bifunctor
+import Data.Functor.Identity
 import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -11,6 +13,7 @@ import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
 import Language.Futhark hiding (ScalarType)
+import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints
 import Language.Futhark.TypeChecker.Monad
 import System.IO.Unsafe
@@ -190,11 +193,13 @@ solveRankILP loc prog = do
               : map prettyString (M.toList r)
       pure rs
 
-rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> m [([Ct], TyVars)]
-rankAnalysis _ [] tyVars = pure [([], tyVars)]
-rankAnalysis loc cs tyVars = do
-  solveRankILP loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
-    >>= mapM (substRankInfo cs tyVars)
+rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> Exp -> m [(([Ct], TyVars), Exp)]
+rankAnalysis _ [] tyVars body = pure [(([], tyVars), body)]
+rankAnalysis loc cs tyVars body = do
+  rank_maps <- solveRankILP loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
+  cts_tyvars' <- mapM (substRankInfo cs tyVars) rank_maps
+  let bodys = map (flip updAM body) rank_maps
+  pure $ zip cts_tyvars' bodys
   where
     splitFuncs
       ( CtEq
@@ -321,3 +326,30 @@ instance SubstRanks (TypeBase SComp u) where
 instance SubstRanks Ct where
   substRanks (CtEq t1 t2) = CtEq <$> substRanks t1 <*> substRanks t2
   substRanks _ = error ""
+
+updAM :: Map VName Int -> Exp -> Exp
+updAM rank_map e =
+  case e of
+    AppExp (Apply f args loc) res ->
+      let f' = updAM rank_map f
+          args' =
+            fmap
+              ( bimap
+                  (fmap $ bimap id upd)
+                  (updAM rank_map)
+              )
+              args
+       in AppExp (Apply f' args' loc) res
+    AppExp (BinOp op t (x, Info (xv, xam)) (y, Info (yv, yam)) loc) res ->
+      AppExp (BinOp op t (updAM rank_map x, Info (xv, upd xam)) (updAM rank_map y, Info (yv, upd yam)) loc) res
+    _ -> runIdentity $ astMap m e
+  where
+    dimToRank (Var (QualName [] x) _ _) = rank_map M.! x
+    dimToRank e = error $ prettyString e
+    shapeToRank = sum . fmap dimToRank
+    upd (AutoMap r m f) =
+      AutoMapRank (shapeToRank r) (shapeToRank m) (shapeToRank f)
+    m =
+      identityMapper
+        { mapOnExp = pure . updAM rank_map
+        }

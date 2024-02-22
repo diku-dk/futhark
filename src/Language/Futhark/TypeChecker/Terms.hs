@@ -466,33 +466,33 @@ checkExp (Coerce e te _ loc) = do
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
-checkExp (AppExp (Apply fe args loc) _) = do
+checkExp e@(AppExp (Apply fe args loc) _) = do
   fe' <- checkExp fe
+  let ams = fmap (snd . unInfo . fst) args
   args' <- mapM (checkExp . snd) args
   t <- expType fe'
   let fname =
         case fe' of
           Var v _ _ -> Just v
           _ -> Nothing
-  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) args'
+  ((_, exts, rt), args'') <- mapAccumLM (onArg fname) (0, [], t) (NE.zip args' ams)
 
   pure $ AppExp (Apply fe' args'' loc) $ Info $ AppRes rt exts
   where
-    onArg fname (i, all_exts, t) arg' = do
-      (_, rt, argext, exts, am) <- checkApply loc (fname, i) t arg'
+    onArg fname (i, all_exts, t) (arg', am) = do
+      (_, rt, argext, exts, am') <- checkApply loc (fname, i) t arg' am
       pure
-        ( (i + 1, all_exts <> exts, arrayOf (autoFrame am) rt),
-          (Info (argext, am), arg')
+        ( (i + 1, all_exts <> exts, rt),
+          (Info (argext, am'), arg')
         )
-checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
+checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, Info (_, xam)) (e2, Info (_, yam)) loc) _) = do
   ftype <- lookupVar oploc op op_t
   e1' <- checkExp e1
   e2' <- checkExp e2
-
   -- Note that the application to the first operand cannot fix any
   -- existential sizes, because it must by necessity be a function.
-  (_, rt, p1_ext, _, am1) <- checkApply loc (Just op, 0) ftype e1'
-  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) (arrayOf (autoFrame am1) rt) e2'
+  (_, rt, p1_ext, _, am1) <- checkApply loc (Just op, 0) ftype e1' xam
+  (_, rt', p2_ext, retext, am2) <- checkApply loc (Just op, 1) rt e2' yam
 
   pure $
     AppExp
@@ -503,7 +503,7 @@ checkExp (AppExp (BinOp (op, oploc) (Info op_t) (e1, _) (e2, _) loc) _) = do
           (e2', Info (p2_ext, am2))
           loc
       )
-      (Info (AppRes (arrayOf (autoFrame am2) rt') retext))
+      (Info (AppRes rt' retext))
 checkExp (Project k e _ loc) = do
   e' <- checkExp e
   t <- expType e'
@@ -725,10 +725,10 @@ checkExp (Lambda params body rettype_te (Info (RetType _ rt)) loc) = do
 checkExp (OpSection op (Info op_t) loc) = do
   ftype <- lookupVar loc op op_t
   pure $ OpSection op (Info ftype) loc
-checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
+checkExp (OpSectionLeft op (Info op_t) e (Info (_, _, _, am), _) _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
-  (t1, rt, argext, retext, am) <- checkApply loc (Just op, 0) ftype e'
+  (t1, rt, argext, retext, am) <- checkApply loc (Just op, 0) ftype e' am
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 (RetType ds rt2))) ->
       pure $
@@ -742,7 +742,7 @@ checkExp (OpSectionLeft op (Info op_t) e _ _ loc) = do
     _ ->
       typeError loc mempty $
         "Operator section with invalid operator of type" <+> pretty ftype
-checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
+checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
   case ftype of
@@ -753,6 +753,7 @@ checkExp (OpSectionRight op (Info op_t) e _ _ loc) = do
           (Just op, 1)
           (Scalar $ Arrow mempty m2 d2 t2 $ RetType [] $ Scalar $ Arrow Nonunique m1 d1 t1 $ RetType dims2 ret)
           e'
+          am
       case arrow' of
         Scalar (Arrow _ _ _ t1' (RetType dims2' ret')) ->
           pure $
@@ -930,19 +931,25 @@ stripToMatch paramt (Array _ (Shape (d : ds)) argt) =
   first (Shape [d] <>) $ stripToMatch paramt $ arrayOf (Shape ds) (Scalar argt)
 stripToMatch _ argt = (mempty, argt)
 
+splitArrayAt :: Int -> StructType -> (Shape Size, StructType)
+splitArrayAt x t =
+  (Shape $ take x $ shapeDims $ arrayShape t, stripArray x t)
+
 checkApply ::
   SrcLoc ->
   ApplyOp ->
   StructType ->
   Exp ->
+  AutoMap ->
   TermTypeM (StructType, StructType, Maybe VName, [VName], AutoMap)
-checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
+checkApply loc (fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
-    (am_map_shape, argtype_automap) <-
-      stripToMatch <$> normTypeFully tp1 <*> normTypeFully argtype
+    (am_map_shape, argtype_with_frame) <- splitArrayAt (autoMapRank am) <$> normTypeFully argtype
+    (am_rep_shape, tp1_with_frame) <- splitArrayAt (autoRepRank am) <$> normTypeFully tp1
+    let (am_frame_shape, argtype_automap) = splitArrayAt (autoFrameRank am) argtype_with_frame
 
-    unify (mkUsage argexp "use as function argument") tp1 argtype_automap
+    unify (mkUsage argexp "use as function argument") tp1_with_frame argtype_with_frame
 
     -- Perform substitutions of instantiated variables in the types.
     (tp2', ext) <- instantiateDimsInReturnType loc fname =<< normTypeFully tp2
@@ -986,21 +993,16 @@ checkApply loc (fname, _) (Scalar (Arrow _ pname _ tp1 tp2)) argexp = do
           AutoMap
             { autoMap = am_map_shape,
               autoRep = mempty,
-              autoFrame = am_map_shape
+              autoFrame = am_map_shape <> am_frame_shape
             }
 
-    pure (tp1, tp2'', argext, ext, am)
-checkApply loc fname (Array _ shape t) arg = do
-  -- This implies the function is the result of an automap.
-  (t1, rt, argext, retext, am) <- checkApply loc fname (Scalar t) arg
-  let am' =
-        am
-          { autoRep = shape <> autoRep am,
-            autoFrame = shape <> autoFrame am
-          }
-  pure (t1, rt, argext, retext, am')
-checkApply _ _ _ _ =
-  error "checkApply: impossible case"
+    pure (tp1, distributeFrame (autoMap am) tp2'', argext, ext, am)
+  where
+    distributeFrame frame (Scalar (Arrow u p d a (RetType ds b))) =
+      Scalar $ Arrow u p d (arrayOf frame a) (RetType ds (arrayOfWithAliases (uniqueness b) frame b))
+    distributeFrame frame t = arrayOf frame t
+checkApply _ _ _ _ _ =
+  error "checkApply: array"
 
 -- | Type-check a single expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case the list of type
@@ -1595,11 +1597,11 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
-  (maybe_tysubstss, params', retdecl', body') <-
+  (maybe_tysubstss, params', retdecl', bodys') <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
-  case maybe_tysubstss of
-    [] -> error "impossible"
-    [maybe_tysubsts] -> doChecks (maybe_tysubsts, params', retdecl', body')
+  case (maybe_tysubstss, bodys') of
+    ([], _) -> error "impossible"
+    ([maybe_tysubsts], [body']) -> doChecks (maybe_tysubsts, params', retdecl', body')
     _ -> typeError loc mempty "Rank ILP is ambiguous"
   where
     -- TODO: Print out the possibilities. (And also potentially eliminate
