@@ -26,8 +26,8 @@ import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Ord
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.FreshNames hiding (newName)
+import Futhark.Util (debugTraceM)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Semantic
@@ -715,7 +715,7 @@ checkValBind vb = do
 
   let vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
 
-  traceM $ unlines ["# Inferred:", prettyString vb']
+  debugTraceM $ unlines ["# Inferred:", prettyString vb']
 
   pure
     ( mempty

@@ -51,6 +51,7 @@ module Futhark.Util
     fixPoint,
     concatMapM,
     topologicalSort,
+    debugTraceM,
   )
 where
 
@@ -77,6 +78,7 @@ import Data.Text.Encoding qualified as T
 import Data.Text.Encoding.Error qualified as T
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Tuple (swap)
+import Debug.Trace
 import Numeric
 import System.Directory.Tree qualified as Dir
 import System.Environment
@@ -507,3 +509,9 @@ topologicalSort dep nodes =
         modify $ second $ IM.insert i True
         mapM_ sorting $ mapMaybe (depends_of node) nodes_idx
         modify $ bimap (node :) (IM.insert i False)
+
+-- | 'traceM', but only if @FUTHARK_COMPILER_DEBUGGING@ is set to at least 1.
+debugTraceM :: (Monad m) => String -> m ()
+debugTraceM
+  | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 = traceM
+  | otherwise = const $ pure ()

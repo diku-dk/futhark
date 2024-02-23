@@ -8,11 +8,11 @@ import Data.List qualified as L
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
-import Debug.Trace
 import Futhark.IR.Pretty ()
 import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
+import Futhark.Util (debugTraceM)
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints
@@ -178,7 +178,7 @@ enumerateRankSols prog =
 
 solveRankILP :: (MonadTypeChecker m) => SrcLoc -> LinearProg -> m [Map VName Int]
 solveRankILP loc prog = do
-  traceM $
+  debugTraceM $
     unlines
       [ "## solveRankILP",
         prettyString prog
@@ -186,9 +186,9 @@ solveRankILP loc prog = do
   case enumerateRankSols prog of
     [] -> typeError loc mempty "Rank ILP cannot be solved."
     rs -> do
-      traceM "## rank maps"
+      debugTraceM "## rank maps"
       forM_ (zip [0 :: Int ..] rs) $ \(i, r) ->
-        traceM $
+        debugTraceM $
           unlines $
             "\n## rank map " <> prettyString i
               : map prettyString (M.toList r)

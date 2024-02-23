@@ -14,10 +14,9 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM, nubOrd)
+import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
@@ -956,7 +955,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, a
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
   callret <- unRetType lifted_rettype
 
-  traceM $
+  debugTraceM $
     unlines
       [ "##defuncApplyArg LambdaSV",
         "## fname",
@@ -985,7 +984,7 @@ defuncApplyArg _ (f', DynamicFun _ sv) (((argext, am), arg), argtypes) = do
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
       apply_e = mkApply f' [(argext, am, arg')] callret
-  traceM $
+  debugTraceM $
     unlines
       [ "##defuncApplyArg DynamicFun",
         "## f'",
@@ -1046,7 +1045,7 @@ defuncApply f args appres loc = do
           -- ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) am_dims
           ams = NE.toList $ autoMap . snd . fst <$> args
           ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) ams
-      traceM $
+      debugTraceM $
         unlines
           [ "## defuncApply",
             "## f",
@@ -1062,7 +1061,7 @@ defuncApply f args appres loc = do
             "## f type",
             prettyString $ typeOf f,
             "## arg types",
-            prettyString $ (typeOf . snd) <$> args,
+            prettyString $ typeOf . snd <$> args,
             "## ret_am",
             prettyString ret_am
           ]

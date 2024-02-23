@@ -16,7 +16,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings

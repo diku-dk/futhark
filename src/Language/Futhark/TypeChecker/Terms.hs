@@ -27,7 +27,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Debug.Trace
 import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark

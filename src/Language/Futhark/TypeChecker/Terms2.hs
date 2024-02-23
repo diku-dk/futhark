@@ -55,10 +55,9 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
-import Debug.Trace
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames hiding (newName)
-import Futhark.Util (mapAccumLM)
+import Futhark.Util (debugTraceM, mapAccumLM)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
@@ -1180,9 +1179,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
     tyvars <- gets termTyVars
 
-    traceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
+    debugTraceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
-    traceM $
+    debugTraceM $
       unlines
         [ "## cts:",
           unlines $ map prettyString cts
@@ -1196,7 +1195,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
           . uncurry solve
 
     forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
-      traceM $
+      debugTraceM $
         unlines
           [ "## constraints:",
             unlines $ map prettyString cts',
