@@ -56,16 +56,19 @@ data Exp =
   | (:<) Exp Exp
   | (:>) Exp Exp
   | (:&&) Exp Exp
-  | Cases (NE.NonEmpty (Exp, Exp)) -- [predicate => value]
   deriving (Show, Eq, Ord)
 
 -- Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
 -- | A case in a match expression.
 -- data CaseBase f vn = CasePat (PatBase f vn StructType) (ExpBase f vn) SrcLoc
 
-data Domain = Iota Exp -- [0, ..., n-1]
-            | Empty    -- Promoted variable.
+newtype Domain = Iota Exp -- [0, ..., n-1]
             -- | Union ...
+  deriving (Show, Eq, Ord)
+
+data Iterator = Forall VName Domain
+              | Empty    -- Promoted variable. -- XXX Is this nicer than Iota 0?
+              -- | Union VName Iterator
   deriving (Show, Eq, Ord)
 
 -- Case statement evaluated from left to right to ensure no two
@@ -80,15 +83,17 @@ data Domain = Iota Exp -- [0, ..., n-1]
 --
 -- but this makes it more convoluted to merge the "otherwise" cases
 -- when substituting views into views.
--- newtype Cases = Cases (NE.NonEmpty (PredExp, Exp)) -- [predicate => value]
---   deriving (Show, Eq, Ord)
+newtype Cases a = Cases (NE.NonEmpty (a, a)) -- [predicate => value]
+  deriving (Show, Eq, Ord)
 
--- TODO add "bottom" for failure
-data View = Forall
-  { iterator :: VName,
-    domain :: Domain,
-    -- shape :: Maybe Shape, -- Might make sense to use this.
-    value :: Exp
+mkCases :: [(a,a)] -> Cases a
+mkCases xs = Cases (NE.fromList xs)
+
+-- TODO add "bottom" for failure?
+data View = View
+  { iterator :: Iterator,
+    value :: Cases Exp
+    -- shape :: Maybe Shape -- Might make sense to use this.
   }
   deriving (Show, Eq)
 
@@ -139,10 +144,11 @@ instance ASTMappable a => ASTMappable [a] where
 
 -- Mapping over AST for substitutions.
 instance ASTMappable View where
-  astMap m (Forall i dom e) = Forall i dom <$> astMap m e
+  astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
+  astMap m (View Empty e) = View Empty <$> astMap m e
 
--- instance ASTMappable Cases where
---   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
+instance ASTMappable a => ASTMappable (Cases a) where
+  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 -- instance ASTMappable Case where
 --   astMap m (Case p e) = Case <$> astMap m p <*> astMap m e
@@ -172,16 +178,6 @@ instance ASTMappable Exp where
   astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
-  -- XXX Cases is wrong. Remove it from Exp and have it only on views.
-  -- Then hoist/fold if-statements and convert them to view cases.
-
--- instance ASTMappable PredExp where
---   astMap _ x@(Bool {}) = pure x
---   astMap m (Not x) = Not <$> astMap m x
---   astMap m (x :== y) = (:==) <$> astMap m x <*> astMap m y
---   astMap m (x :< y) = (:<) <$> astMap m x <*> astMap m y
---   astMap m (x :> y) = (:>) <$> astMap m x <*> astMap m y
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 idMap m = runIdentity . astMap m
@@ -240,13 +236,6 @@ prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
   where
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
--- instance Pretty PredExp where
---   pretty (Bool x) = pretty x
---   pretty (Not x) = "¬" <> parens (pretty x)
---   pretty (x :< y) = pretty x <+> "<" <+> pretty y
---   pretty (x :> y) = pretty x <+> ">" <+> pretty y
---   pretty (x :== y) = pretty x <+> "==" <+> pretty y
-
 instance Pretty Exp where
   pretty (Var x) = prettyName x
   pretty (Array ts) = pretty ts
@@ -274,22 +263,20 @@ instance Pretty Exp where
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
+
+instance Pretty Domain where
+  pretty (Iota e) = "iota" <+> pretty e
+
+instance Pretty a => Pretty (Cases a) where
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
 
-instance Pretty Domain where
-  pretty (Iota e) = "iota" <+> pretty e
-  pretty Empty = "[]"
-
--- instance Pretty Cases where
---   pretty (Cases cases) = nestedBlock comma (pretty cases) comma
---     -- "|" <+> pretty p <+> "=>" <+> pretty e
-
 instance Pretty View where
-  pretty (Forall i dom e) =
+  pretty (View (Forall i dom) e) =
     "∀" <> prettyName i <+> "∈" <+> pretty dom <+> "." <+> pretty e
+  pretty (View Empty e) = pretty e
 
 instance Pretty Views where
   pretty env =

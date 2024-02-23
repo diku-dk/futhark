@@ -21,9 +21,9 @@ substituteViews view = do
         -- XXX check that domains are compatible
         -- XXX use index i (for starts, just support simple indexing only?)
         -- XXX merge cases (add cases first, lol)
-        Just (Forall j d2 e2) ->
+        Just (View (Forall j d2) e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-          pure e2
+          undefined
         _ -> pure e
     onExp vs v = astMap (m vs) v
 

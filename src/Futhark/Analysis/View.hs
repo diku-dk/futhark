@@ -69,6 +69,9 @@ getVarVName _ = Nothing
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
+toCases :: Exp -> Cases Exp
+toCases e = Cases (NE.fromList [(Bool True, e)])
+
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
@@ -100,6 +103,8 @@ forwards _ = pure ()
 --      Just don't include the part that actually refines types or annotates
 --      types in the source.
 forward :: E.Exp -> ViewM View
+-- forward (E.Var (E.QualName _ x) _ _) =
+--   pure $ Forall
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -114,7 +119,7 @@ forward (E.AppExp (E.Apply f args _) _)
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
       e' <- substituteName subst e
-      pure $ Forall i (Iota $ Var i) e'
+      pure $ View (Forall i (Iota $ Var i)) (toCases e')
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
@@ -126,11 +131,11 @@ forward (E.AppExp (E.Apply f args _) _)
           "-" -> pure $ Recurrence ~-~ Idx xs (Var i)
           "*" -> pure $ Recurrence ~*~ Idx xs (Var i)
           _ -> error ("toExp not implemented for bin op: " <> show vn)
-      pure $ Forall i (Iota $ Var i) e
+      pure $ View (Forall i (Iota $ Var i)) (toCases e)
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
     i <- newNameFromString "i"
-    pure $ Forall i Empty e'
+    pure $ View Empty (toCases e')
 forward e = do
     error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)
 
