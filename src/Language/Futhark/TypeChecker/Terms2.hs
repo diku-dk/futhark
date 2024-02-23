@@ -637,8 +637,9 @@ checkApplyOne loc _ (fframe, ftype) (argframe, argtype) = do
   let unit_info = Info $ Scalar $ Prim Bool
       r_var = Var (QualName [] r) unit_info mempty
       m_var = Var (QualName [] m) unit_info mempty
-      lhs = arrayOf (toShape (SVar r) <> (toSComp <$> argframe)) argtype
+      lhs = arrayOf (toShape (SVar r)) argtype
       rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
+
   ctAM r m
   ctEq lhs rhs
   pure
@@ -673,7 +674,7 @@ checkApply_ loc _ ftype fframe arg = do
   let unit_info = Info $ Scalar $ Prim Bool
       r_var = Var (QualName [] r) unit_info mempty
       m_var = Var (QualName [] m) unit_info mempty
-      lhs = arrayOf (toShape (SVar r) <> (toSComp <$> frameOf arg)) $ toType $ typeOf arg
+      lhs = arrayOf (toShape (SVar r)) $ toType $ typeOf arg
       rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
   ctAM r m
   ctEq lhs rhs
