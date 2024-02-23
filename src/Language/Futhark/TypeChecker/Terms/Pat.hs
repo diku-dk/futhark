@@ -9,14 +9,12 @@ module Language.Futhark.TypeChecker.Terms.Pat
 where
 
 import Control.Monad
-import Control.Monad.State
 import Data.Bifunctor
 import Data.Either
 import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Data.Text qualified as T
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -49,7 +47,7 @@ binding idents m =
     -- inference...
     forM_ idents $ \ident ->
       constrain (identName ident) $ ParamSize $ locOf ident
-    m <* checkIfUsed
+    m
   where
     bindVars = foldl bindVar
 
@@ -58,15 +56,6 @@ binding idents m =
         { scopeVtable =
             M.insert name (BoundV [] tp) $ scopeVtable scope
         }
-
-    checkIfUsed = do
-      used <- gets stateUsed
-      forM_ (filter ((`S.notMember` used) . identName) idents) $ \ident ->
-        unless ("_" `T.isPrefixOf` nameToText (baseName (identName ident))) $
-          warn ident $
-            "Unused variable "
-              <> dquotes (prettyName (identName ident))
-              <> "."
 
 bindingTypes ::
   [Either (VName, TypeBinding) (VName, Constraint)] ->

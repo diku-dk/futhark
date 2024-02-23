@@ -226,7 +226,8 @@ checkTypeDecl te = do
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 checkSpecs [] = pure (mempty, mempty, [])
 checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
-  bindSpaced1 Term name $ \name' -> do
+  bindSpaced1 Term name loc $ \name' -> do
+    usedName name'
     (tparams', vtype', vtype_t) <-
       resolveTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
         (ext, vtype', vtype_t, _) <- checkTypeDecl vtype
@@ -253,7 +254,8 @@ checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
         ValSpec name' tparams' vtype' (Info vtype_t) doc loc : specs'
       )
 checkSpecs (TypeAbbrSpec tdec : specs) =
-  bindSpaced1 Type (typeAlias tdec) $ \_ -> do
+  bindSpaced1 Type (typeAlias tdec) (srclocOf tdec) $ \name' -> do
+    usedName name'
     (tenv, tdec') <- checkTypeBind tdec
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     pure
@@ -262,7 +264,8 @@ checkSpecs (TypeAbbrSpec tdec : specs) =
         TypeAbbrSpec tdec' : specs'
       )
 checkSpecs (TypeSpec l name ps doc loc : specs) =
-  bindSpaced1 Type name $ \name' -> do
+  bindSpaced1 Type name loc $ \name' -> do
+    usedName name'
     ps' <- resolveTypeParams ps pure
     let tenv =
           mempty
@@ -281,7 +284,8 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
         TypeSpec l name' ps' doc loc : specs'
       )
 checkSpecs (ModSpec name sig doc loc : specs) =
-  bindSpaced1 Term name $ \name' -> do
+  bindSpaced1 Term name loc $ \name' -> do
+    usedName name'
     (_sig_abs, mty, sig') <- checkModTypeExp sig
     let senv =
           mempty
@@ -336,7 +340,7 @@ checkModTypeExp (ModTypeArrow maybe_pname e1 e2 loc) = do
   (e1_abs, MTy s_abs e1_mod, e1') <- checkModTypeExp e1
   (env_for_e2, maybe_pname') <-
     case maybe_pname of
-      Just pname -> bindSpaced1 Term pname $ \pname' ->
+      Just pname -> bindSpaced1 Term pname loc $ \pname' ->
         pure
           ( mempty
               { envNameMap = M.singleton (Term, pname) $ qualName pname',
@@ -365,7 +369,8 @@ checkModTypeExpToEnv e = do
 checkModTypeBind :: ModTypeBindBase NoInfo Name -> TypeM (TySet, Env, ModTypeBindBase Info VName)
 checkModTypeBind (ModTypeBind name e doc loc) = do
   (abs, env, e') <- checkModTypeExp e
-  bindSpaced1 Signature name $ \name' ->
+  bindSpaced1 Signature name loc $ \name' -> do
+    usedName name'
     pure
       ( abs,
         mempty
@@ -445,7 +450,7 @@ withModParam ::
   TypeM a
 withModParam (ModParam pname psig_e NoInfo loc) m = do
   (_abs, MTy p_abs p_mod, psig_e') <- checkModTypeExp psig_e
-  bindSpaced1 Term pname $ \pname' -> do
+  bindSpaced1 Term pname loc $ \pname' -> do
     let in_body_env = mempty {envModTable = M.singleton pname' p_mod}
     localEnv in_body_env $
       m (ModParam pname' psig_e' (Info $ map qualLeaf $ M.keys p_abs) loc) p_abs p_mod
@@ -492,7 +497,8 @@ checkModBody maybe_fsig_e body_e loc = enteringModule $ do
 checkModBind :: ModBindBase NoInfo Name -> TypeM (TySet, Env, ModBindBase Info VName)
 checkModBind (ModBind name [] maybe_fsig_e e doc loc) = do
   (e_abs, maybe_fsig_e', e', mty) <- checkModBody (fst <$> maybe_fsig_e) e loc
-  bindSpaced1 Term name $ \name' ->
+  bindSpaced1 Term name loc $ \name' -> do
+    usedName name'
     pure
       ( e_abs,
         mempty
@@ -515,7 +521,8 @@ checkModBind (ModBind name (p : ps) maybe_fsig_e body_e doc loc) = do
             body_e',
             FunModType p_abs p_mod $ foldr addParam mty $ zip ps_abs ps_mod
           )
-  bindSpaced1 Term name $ \name' ->
+  bindSpaced1 Term name loc $ \name' -> do
+    usedName name'
     pure
       ( abs,
         mempty
@@ -594,7 +601,8 @@ checkTypeBind (TypeBind name l tps te NoInfo doc loc) =
                 <> "."
       _ -> pure ()
 
-    bindSpaced1 Type name $ \name' ->
+    bindSpaced1 Type name loc $ \name' -> do
+      usedName name'
       pure
         ( mempty
             { envTypeTable =
