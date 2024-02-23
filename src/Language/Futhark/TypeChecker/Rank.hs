@@ -186,7 +186,7 @@ solveRankILP loc prog = do
     [] -> typeError loc mempty "Rank ILP cannot be solved."
     rs -> do
       traceM "## rank maps"
-      forM (zip [0 :: Int ..] rs) $ \(i, r) ->
+      forM_ (zip [0 :: Int ..] rs) $ \(i, r) ->
         traceM $
           unlines $
             "\n## rank map " <> prettyString i
@@ -198,7 +198,7 @@ rankAnalysis _ [] tyVars body = pure [(([], tyVars), body)]
 rankAnalysis loc cs tyVars body = do
   rank_maps <- solveRankILP loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
   cts_tyvars' <- mapM (substRankInfo cs tyVars) rank_maps
-  let bodys = map (flip updAM body) rank_maps
+  let bodys = map (`updAM` body) rank_maps
   pure $ zip cts_tyvars' bodys
   where
     splitFuncs
@@ -335,7 +335,7 @@ updAM rank_map e =
           args' =
             fmap
               ( bimap
-                  (fmap $ bimap id upd)
+                  (fmap $ second upd)
                   (updAM rank_map)
               )
               args
