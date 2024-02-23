@@ -258,7 +258,6 @@ data SizeSource
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
-    stateUsed :: S.Set VName,
     stateWarnings :: Warnings,
     stateNameSource :: VNameSource
   }
@@ -527,9 +526,7 @@ lookupVar loc qn@(QualName qs name) inst_t = do
   case M.lookup name $ scopeVtable scope of
     Nothing ->
       error $ "lookupVar: " <> show qn
-    Just (BoundV tparams bound_t) -> do
-      when (null qs) . modify $ \s ->
-        s {stateUsed = S.insert name $ stateUsed s}
+    Just (BoundV tparams bound_t) ->
       if null tparams && null qs
         then pure bound_t
         else do
@@ -709,7 +706,6 @@ runTermTypeM checker tyvars (TermTypeM m) = do
         TermTypeState
           { stateConstraints = mempty,
             stateCounter = 0,
-            stateUsed = mempty,
             stateWarnings = mempty,
             stateNameSource = src
           }
