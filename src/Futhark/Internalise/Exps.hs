@@ -975,11 +975,41 @@ withAutoMap_ ams arg_desc res_t args_e innerM =
 --
 -- Application | True level
 -- ---------------------------
--- (1)         | |[][]| = 2
--- (2)         | |[][]| - |[]| = 1
--- (3)         | |[][][]| = 3
+-- (1)         | |[][]|                = 2
+-- (2)         | |[][]| - |[]|         = 1
+-- (3)         | |[][][]|              = 3
 -- (4)         | |[][][]| - |[][][][]| = -1
--- (5)         | |[][][]| - |[]| = 2
+-- (5)         | |[][][]| - |[]|       = 2
+--
+-- We start at level 0.
+-- * Any argument with a negative true level of @-n@ will be replicated @n@ times;
+--   the exact shapes can be found by removing the @F@ postfix from @R@,
+--   i.e. @R = shapes_to_rep_by <> F@.
+-- * Any argument with a 0 true level will be included.
+-- * For any argument @arg@ with a positive true level, we construct a new parameter
+--   whose type is @arg@ with the leading @n@ dimensions (where @n@ is the true level)
+--   removed.
+--
+-- Following the rules above, @w@ will be replicated once. For the remaining arguments,
+-- we create new parameters @x : a, y : a, z : a , v : a@. Hence, level 0 becomes
+--
+-- > f x y z (replicate w) v
+--
+-- At level l > 0:
+-- * There are no replicates.
+-- * Any argument with l true level will be included verbatim.
+-- * Any argument with true level > l will have a new parameter constructed for it,
+--   whose type has the leading @n - l@ dimensions (where @n@ is the true level) removed.
+-- * We surround the previous level with a map that binds that levels' new parameters
+--   and is passed the current levels' arguments.
+--
+-- Following the above recipe for level 1, we create parameters
+-- @xs : []a, zs : []a, vs :[]a@ and obtain
+--
+-- > map (\x y z v -> f x y z (replicate w) v) xs ys zs vs
+--
+-- This process continues until the level is greater than the maximum
+-- true level of any application, at which we terminate.
 withAutoMap :: [AutoMap] -> String -> StructType -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
 withAutoMap ams arg_desc res_t args_e innerM = do
   (args, stms) <-
