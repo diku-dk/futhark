@@ -864,24 +864,6 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
       case fe of
         Var v _ _ -> Just v
         _ -> Nothing
--- fe' <- checkExp fe
--- ((_, rt, _), args') <- mapAccumLM onArg (0, expType fe', frameOf fe') args
--- rt' <- asStructType loc rt
--- pure $ AppExp (Apply fe' args' loc) $ Info $ AppRes rt' []
--- where
---  fname =
---    case fe of
---      Var v _ _ -> Just v
---      _ -> Nothing
-
---  onArg (i, f_t, f_f) (_, arg) = do
---    arg' <- checkExp arg
---    (rt, am) <- checkApply_ loc (fname, i) f_t f_f arg'
---    pure
---      ( (i + 1, rt, autoFrame am),
---        (Info (Nothing, am), arg')
---      )
---
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   ftype <- lookupVar oploc op
   e1' <- checkExp e1
