@@ -1007,16 +1007,20 @@ checkApply _ _ _ _ _ =
 -- turn out to be polymorphic, in which case the list of type
 -- parameters will be non-empty.
 checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
-checkOneExp e = runTermTypeM checkExp mempty $ do
-  e' <- checkExp $ undefined e
-  let t = typeOf e'
-  (tparams, _, _) <-
-    letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
-  fixOverloadedTypes $ typeVars t
-  e'' <- updateTypes e'
-  localChecks e''
-  causalityCheck e''
-  pure (tparams, e'')
+checkOneExp e = do
+  (maybe_tysubsts, e') <- Terms2.checkSingleExp e
+  case maybe_tysubsts of
+    Left err -> typeError e' mempty $ pretty err
+    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+      e'' <- checkExp e'
+      let t = typeOf e''
+      (tparams, _, _) <-
+        letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
+      fixOverloadedTypes $ typeVars t
+      e''' <- updateTypes e''
+      localChecks e'''
+      causalityCheck e'''
+      pure (tparams, e''')
 
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
