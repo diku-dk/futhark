@@ -77,10 +77,8 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     tracePrettyM newView
     newView' <- substituteViews newView
     tracePrettyM newView'
-    newView'' <- hoistCases newView'
-    tracePrettyM newView''
     traceM "\n"
-    insertView x newView''
+    insertView x newView'
     forwards body
     pure ()
 forwards _ = pure ()
@@ -189,9 +187,7 @@ substituteName substitutions x = do
   where
     substituter subst =
       ASTMapper
-        { mapOnExp = onExp subst,
-          mapOnIf = pure
-        }
+        { mapOnExp = onExp subst }
     onExp subst e@(Var x') =
       case M.lookup x' subst of
         Just x'' -> pure x''

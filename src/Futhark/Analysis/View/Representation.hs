@@ -125,11 +125,8 @@ insertView x v =
 
 -- Copy code from Futhark.Traversals
 -- (Copying Robert's code)
-data ASTMapper m = ASTMapper
-  { mapOnExp :: Exp -> m Exp,
-    -- mapOnView :: View -> m View
-    mapOnIf :: Exp -> m Exp
-  }
+newtype ASTMapper m = ASTMapper
+  { mapOnExp :: Exp -> m Exp }
 
 class ASTMappable a where
   astMap :: (Monad m) => ASTMapper m -> a -> m a
@@ -156,12 +153,7 @@ instance ASTMappable View where
 instance ASTMappable Exp where
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
-  -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
-  astMap m (If c t f) = do
-    c' <- mapOnExp m c 
-    t' <- mapOnExp m t 
-    f' <- mapOnExp m f
-    mapOnIf m (If c' t' f')
+  astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
@@ -203,8 +195,7 @@ flatten = idMap m
             \e ->
               case e of
                 Var x -> pure $ Var x
-                _ -> astMap m e,
-          mapOnIf = pure
+                _ -> astMap m e
         }
 
 expToSoP :: Exp -> SoP Exp
