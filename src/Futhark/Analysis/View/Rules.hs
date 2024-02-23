@@ -15,7 +15,7 @@ substituteViews view = do
     m vs =
       ASTMapper
         { mapOnExp = onExp vs }
-    onExp _ e@(Var {}) = pure e
+    onExp _ (Var x) = pure $ Var x
     onExp vs e@(Idx (Var xs) i) =
       case M.lookup xs vs of
         -- XXX check that domains are compatible
@@ -37,3 +37,15 @@ substituteViews view = do
 --   traceM ("🎭 hoisting ifs")
 --   let cases = hoistCases' e
 --   pure $ Forall i dom (Cases $ NE.fromList $ cases)
+
+simplifyPredicates :: View -> ViewM View
+simplifyPredicates view =
+  pure $ idMap m view
+  where
+    m =
+      ASTMapper
+        { mapOnExp = onExp }
+    onExp (Var x) = pure $ Var x
+    onExp (x :&& Bool True) = onExp x
+    onExp (Bool True :&& y) = onExp y
+    onExp v = astMap m v

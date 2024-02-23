@@ -26,6 +26,8 @@ tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
 tracePrettyM = traceM . prettyString
 --------------------------------------------------------------
 
+-- mkViewProg :: VNameSource -> [E.Dec] -> Views
+-- mkViewProg vns prog = tracePretty $ execViewM (mkViewDecs prog) vns
 mkViewProg :: VNameSource -> Imports -> Views
 mkViewProg vns prog = tracePretty $ execViewM (mkViewImports prog) vns
 
@@ -66,6 +68,38 @@ getVarVName :: E.Exp -> Maybe VName
 getVarVName (E.Var (E.QualName [] vn) _ _) = Just vn
 getVarVName _ = Nothing
 
+-- (QualName {qualQuals = [], qualLeaf = VName (Name "conds") 6070})
+-- (Info {unInfo =
+--   Array (fromList [AliasBound {aliasVar = VName (Name "conds") 6070}])
+--   Nonunique
+--   (Shape {shapeDims = [Var (QualName {qualQuals = [], qualLeaf = VName (Name "n") 6068}) (Info {unInfo = Scalar (Prim (Signed Int64))}) noLoc]})
+--   (Prim Bool)})
+-- noLoc
+
+getSize :: E.Exp -> Exp
+getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
+  | dim:_ <- E.shapeDims shape,
+    Just sz <- toExp dim =
+  sz
+getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
+  | dim:_ <- E.shapeDims shape,
+    Just sz <- toExp dim =
+  sz
+getSize _ = error "donk"
+
+-- ArrayLit [ExpBase f vn] (f PatType) SrcLoc
+-- type PatType = TypeBase Size Aliasing
+
+-- -- | An expanded Futhark type is either an array, or something that
+-- -- can be an element of an array.  When comparing types for equality,
+-- -- function parameter names are ignored.  This representation permits
+-- -- some malformed types (arrays of functions), but importantly rules
+-- -- out arrays-of-arrays.
+-- data TypeBase dim as
+--   = Scalar (ScalarTypeBase dim as)
+--   | Array as Uniqueness (Shape dim) (ScalarTypeBase dim ())
+--   deriving (Eq, Ord, Show)
+
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
@@ -103,33 +137,69 @@ forwards _ = pure ()
 --      Just don't include the part that actually refines types or annotates
 --      types in the source.
 forward :: E.Exp -> ViewM View
--- forward (E.Var (E.QualName _ x) _ _) =
---   pure $ Forall
+forward (E.Var (E.QualName _ x) _ _) =
+  pure $ View Empty (toCases $ Var x)
+forward (E.ArrayLit [] _ _) =
+  pure $ View Empty (Cases $ NE.singleton (Bool True, Array []))
+forward (E.ArrayLit es _ _) = do
+  vs <- mapM forward es
+  simplifyPredicates $ foldl1 combine vs
+  where
+    combine (View i (Cases xs)) (View j (Cases ys))
+      | i == j =
+      let zs = [(px :&& py, Array [vx, vy]) | (px, vx) <- NE.toList xs,
+                                              (py, vy) <- NE.toList ys]
+      in  View i (Cases $ NE.fromList zs)
+    combine _ _ = error "incompatible views"
+forward (E.AppExp (E.If c t f _) _) = do
+  -- Maintain invariant that subexpressions are converted to Views (cases).
+  -- No if-statement in Exp.
+  vc <- forward c
+  vt <- forward t
+  vf <- forward f
+  let cs = collect vc
+  let vct = combine cs vt
+  let vcf = combine (map Not cs) vf
+  simplifyPredicates $ vct <> vcf
+  where
+    combine conds (View it (Cases cases)) =
+      let zs = [(p1 :&& p2, e) | p1 <- conds, (p2, e) <- NE.toList cases]
+      in View it (Cases $ NE.fromList zs)
+    -- TODO what about non-Empty iterator here?
+    collect (View Empty (Cases xs)) = [a :&& b | (a, b) <- NE.toList xs]
+    collect e = error ("collect on non-empty iterator: " <> prettyString e)
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
-    E.Lambda params body _ _ _ : args' <- getArgs args,
-    Just e <- toExp body = do
+    E.Lambda params body _ _ _ : args' <- getArgs args = do
       i <- newNameFromString "i"
       let arrs = mapMaybe getVarVName args'
+      let sz = getSize (head args')
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      e' <- substituteName subst e
-      pure $ View (Forall i (Iota $ Var i)) (toCases e')
+      ---
+      view <- forward body
+      case view of
+        View Empty xs -> substituteName subst (View (Forall i (Iota sz)) xs)
+        _ -> undefined
+      -- pure $ view'
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
-    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
-    Just xs <- toExp xs' = do
+    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+      view <- forward xs'
+      xs <- newNameFromString "scan_xs"
+      insertView xs view
+
       i <- newNameFromString "i"
       e <-
         case E.baseString vn of
-          "+" -> pure $ Recurrence ~+~ Idx xs (Var i)
-          "-" -> pure $ Recurrence ~-~ Idx xs (Var i)
-          "*" -> pure $ Recurrence ~*~ Idx xs (Var i)
+          "+" -> pure $ Recurrence ~+~ Idx (Var xs) (Var i)
+          "-" -> pure $ Recurrence ~-~ Idx (Var xs) (Var i)
+          "*" -> pure $ Recurrence ~*~ Idx (Var xs) (Var i)
           _ -> error ("toExp not implemented for bin op: " <> show vn)
       pure $ View (Forall i (Iota $ Var i)) (toCases e)
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
@@ -154,11 +224,11 @@ toExp (E.ArrayLit es _ _) =
 --     Just t' <- toExp t,
 --     Just f' <- toExp f =
 --   pure $ Cases (NE.fromList [(c', t'), (Not c', f')])
-toExp (E.AppExp (E.If c t f _) _) = do
-  c' <- toExp c
-  t' <- toExp t
-  f' <- toExp f
-  pure $ If c' t' f'
+-- toExp (E.AppExp (E.If c t f _) _) = do
+--   c' <- toExp c
+--   t' <- toExp t
+--   f' <- toExp f
+--   pure $ If c' t' f'
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,

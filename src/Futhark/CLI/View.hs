@@ -9,6 +9,11 @@ import Futhark.Util.Pretty (hPutDoc)
 import Language.Futhark.Warnings
 import System.IO
 
+import Futhark.Internalise.Defunctionalise as Defunctionalise
+import Futhark.Internalise.Defunctorise as Defunctorise
+import Futhark.Internalise.FullNormalise as FullNormalise
+import Control.Monad.State
+
 newtype RefineConfig = RefineConfig
   { checkWarn :: Bool }
 
@@ -24,13 +29,17 @@ main :: String -> [String] -> IO ()
 main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
   case args of
     [file] -> Just $ do
-      (warnings, imps, vns) <- readProgramOrDie file
+      (warnings, imports, src) <- readProgramOrDie file
       when (checkWarn cfg && anyWarnings warnings) $
         liftIO $
           hPutDoc stderr $
             prettyWarnings warnings
       -- putStrLn $ "Proved: " <> take 100 (show (mkViewProg vns imps)) <> "..."
-      let res = mkViewProg vns imps
+      -- let valbinds = flip evalState src $
+      --                  Defunctorise.transformProg imports
+      --                  >>= FullNormalise.transformProg
+      -- let res = mkViewProg src valbinds
+      let res = mkViewProg src imports
       putStrLn $ "\nIndex function:\n---------------\n" <> show res
       -- pure ()
     _ -> Nothing
