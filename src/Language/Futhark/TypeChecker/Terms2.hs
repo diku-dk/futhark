@@ -358,6 +358,9 @@ arrayOfRank :: Int -> Type -> Type
 arrayOfRank n = arrayOf $ Shape $ replicate n SDim
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
+require _why [pt] e = do
+  ctEq (Scalar $ Prim pt) (expType e)
+  pure e
 require _why pts e = do
   t :: Type <- newTypeOverloaded (srclocOf e) "t" pts
   ctEq t $ expType e
@@ -702,11 +705,11 @@ checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
   where
     checkDimIndex (DimFix i) =
-      DimFix <$> check i
+      DimFix <$> (require "use as index" anySignedType =<< checkExp i)
     checkDimIndex (DimSlice i j s) =
       DimSlice <$> traverse check i <*> traverse check j <*> traverse check s
 
-    check = require "use as index" anySignedType <=< checkExp
+    check = require "use in slice" [Signed Int64] <=< checkExp
 
 isSlice :: DimIndexBase f vn -> Bool
 isSlice DimSlice {} = True
