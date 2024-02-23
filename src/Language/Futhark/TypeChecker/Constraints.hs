@@ -236,10 +236,9 @@ solveCt ct =
 
 solve :: Constraints -> TyVars -> Either T.Text ([VName], Solution)
 solve constraints tyvars =
-  trace (unlines (map prettyString constraints))
-    $ second solution
-      . runExcept
-      . flip execStateT (initialState tyvars)
-      . runSolveM
+  second solution
+    . runExcept
+    . flip execStateT (initialState tyvars)
+    . runSolveM
     $ mapM solveCt constraints
 {-# NOINLINE solve #-}
