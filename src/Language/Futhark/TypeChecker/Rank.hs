@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
 import Debug.Trace
+import Futhark.IR.Pretty ()
 import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP

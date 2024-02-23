@@ -16,12 +16,11 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
-import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Text qualified as T
 import Debug.Trace
-import Futhark.IR.Pretty
 import Futhark.Util.Pretty
 import Language.Futhark
 
@@ -38,7 +37,7 @@ data SComp
 
 instance Pretty SComp where
   pretty SDim = "[]"
-  pretty (SVar x) = brackets $ pretty x
+  pretty (SVar x) = brackets $ prettyName x
 
 instance Pretty (Shape SComp) where
   pretty = mconcat . map pretty . shapeDims
@@ -59,7 +58,7 @@ data Ct
 
 instance Pretty Ct where
   pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
-  pretty (CtAM r m) = pretty r <+> "=" <+> "•" <+> "∨" <+> pretty m <+> "=" <+> "•"
+  pretty (CtAM r m) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
 
 type Constraints = [Ct]
 
@@ -142,12 +141,25 @@ solution s =
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
 
+occursCheck :: VName -> Type -> SolveM ()
+occursCheck v tp = do
+  vars <- gets solverTyVars
+  let tp' = substTyVars vars tp
+  when (v `S.member` typeVars tp') . throwError . docText $
+    "Occurs check: cannot instantiate"
+      <+> prettyName v
+      <+> "with"
+      <+> pretty tp
+      <> "."
+
 subTyVar :: VName -> Int -> Type -> SolveM ()
-subTyVar v lvl t =
+subTyVar v lvl t = do
+  occursCheck v t
   modify $ \s -> s {solverTyVars = M.insert v (TyVarSol lvl t) $ solverTyVars s}
 
 linkTyVar :: VName -> VName -> SolveM ()
-linkTyVar v t =
+linkTyVar v t = do
+  occursCheck v $ Scalar $ TypeVar NoUniqueness (qualName t) []
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
 
 -- Unify at the root, emitting new equalities that must hold.
@@ -164,11 +176,11 @@ unify (Scalar (Record fs1)) (Scalar (Record fs2))
       Just $ M.elems $ M.intersectionWith (,) fs1 fs2
 unify (Scalar (Sum cs1)) (Scalar (Sum cs2))
   | M.keys cs1 == M.keys cs2 =
-      fmap concat
-        . forM (M.elems $ M.intersectionWith (,) cs1 cs2)
-        $ \(ts1, ts2) -> do
-          guard $ length ts1 == length ts2
-          Just $ zip ts1 ts2
+      fmap concat . forM cs' $ \(ts1, ts2) -> do
+        guard $ length ts1 == length ts2
+        Just $ zip ts1 ts2
+  where
+    cs' = M.elems $ M.intersectionWith (,) cs1 cs2
 unify t1 t2
   | Just t1' <- peelArray 1 t1,
     Just t2' <- peelArray 1 t2 =
@@ -224,9 +236,10 @@ solveCt ct =
 
 solve :: Constraints -> TyVars -> Either T.Text ([VName], Solution)
 solve constraints tyvars =
-  second solution
-    . runExcept
-    . flip execStateT (initialState tyvars)
-    . runSolveM
+  trace (unlines (map prettyString constraints))
+    $ second solution
+      . runExcept
+      . flip execStateT (initialState tyvars)
+      . runSolveM
     $ mapM solveCt constraints
 {-# NOINLINE solve #-}

@@ -1,3 +1,4 @@
+-- Simple instance of an occurs check.
 -- ==
 -- error: Occurs
 
