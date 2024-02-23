@@ -6,10 +6,10 @@ module Language.Futhark.TypeChecker.Monad
     askEnv,
     askImportName,
     atTopLevel,
-    bindNameMap,
     enteringModule,
     bindSpaced,
     bindSpaced1,
+    bindIdents,
     qualifyTypeVars,
     lookupMTy,
     lookupImport,
@@ -26,6 +26,7 @@ module Language.Futhark.TypeChecker.Monad
     aNote,
     MonadTypeChecker (..),
     TypeState (stateNameSource),
+    usedName,
     checkName,
     checkAttr,
     checkQualName,
@@ -65,6 +66,7 @@ import Data.List (find)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text qualified as T
 import Data.Version qualified as Version
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
@@ -171,6 +173,8 @@ data Context = Context
 data TypeState = TypeState
   { stateNameSource :: VNameSource,
     stateWarnings :: Warnings,
+    -- | Which names have been used.
+    stateUsed :: S.Set VName,
     stateCounter :: Int
   }
 
@@ -212,10 +216,10 @@ runTypeM ::
   (Warnings, Either TypeError (a, VNameSource))
 runTypeM env imports fpath src (TypeM m) = do
   let ctx = Context env imports fpath True
-      s = TypeState src mempty 0
+      s = TypeState src mempty mempty 0
   case runExcept $ runStateT (runReaderT m ctx) s of
     Left (ws, e) -> (ws, Left e)
-    Right (x, TypeState src' ws _) -> (ws, Right (x, src'))
+    Right (x, s') -> (stateWarnings s', Right (x, stateNameSource s'))
 
 -- | Retrieve the current 'Env'.
 askEnv :: TypeM Env
@@ -293,21 +297,47 @@ class (Monad m) => MonadTypeChecker m where
 
   typeError :: (Located loc) => loc -> Notes -> Doc () -> m a
 
+warnIfUnused :: (Namespace, VName, SrcLoc) -> TypeM ()
+warnIfUnused (ns, name, loc) = do
+  used <- gets stateUsed
+  unless (name `S.member` used || "_" `T.isPrefixOf` nameToText (baseName name)) $
+    warn loc $
+      "Unused" <+> pretty ns <+> dquotes (prettyName name) <> "."
+
 -- | Map source-level names to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced :: [(Namespace, Name)] -> ([VName] -> TypeM a) -> TypeM a
+bindSpaced :: [(Namespace, Name, SrcLoc)] -> ([VName] -> TypeM a) -> TypeM a
 bindSpaced names body = do
-  names' <- mapM (newID . snd) names
-  let mapping = M.fromList $ zip names $ map qualName names'
-  bindNameMap mapping $ body names'
+  names' <- mapM (\(_, v, _) -> newID v) names
+  let mapping = M.fromList $ zip (map (\(ns, v, _) -> (ns, v)) names) $ map qualName names'
+  bindNameMap mapping (body names')
+    <* mapM_ warnIfUnused [(ns, v, loc) | ((ns, _, loc), v) <- zip names names']
 
 -- | Map single source-level name to fresh unique internal names, and
 -- evaluate a type checker context with the mapping active.
-bindSpaced1 :: Namespace -> Name -> (VName -> TypeM a) -> TypeM a
-bindSpaced1 ns name body = do
+bindSpaced1 :: Namespace -> Name -> SrcLoc -> (VName -> TypeM a) -> TypeM a
+bindSpaced1 ns name loc body = do
   name' <- newID name
   let mapping = M.singleton (ns, name) $ qualName name'
-  bindNameMap mapping $ body name'
+  bindNameMap mapping (body name') <* warnIfUnused (ns, name', loc)
+
+-- | Bind these identifiers in the name map and also check whether
+-- they have been used.
+bindIdents :: [IdentBase NoInfo VName t] -> TypeM a -> TypeM a
+bindIdents idents body = do
+  let mapping =
+        M.fromList $
+          zip
+            (map ((Term,) . (baseName . identName)) idents)
+            (map (qualName . identName) idents)
+  bindNameMap mapping body <* mapM_ warnIfUnused [(Term, v, loc) | Ident v _ loc <- idents]
+
+-- | Indicate that this name has been used. This is usually done
+-- implicitly by other operations, but sometimes we want to make a
+-- "fake" use to avoid things like top level functions being
+-- considered unused.
+usedName :: VName -> TypeM ()
+usedName name = modify $ \s -> s {stateUsed = S.insert name $ stateUsed s}
 
 instance MonadTypeChecker TypeM where
   warnings ws =
@@ -362,13 +392,15 @@ checkQualNameWithEnv space qn@(QualName quals name) loc = do
   descend env quals
   where
     descend scope []
-      | Just name' <- M.lookup (space, name) $ envNameMap scope =
+      | Just name' <- M.lookup (space, name) $ envNameMap scope = do
+          usedName $ qualLeaf name'
           pure (scope, name')
       | otherwise =
           unknownVariable space qn loc
     descend scope (q : qs)
       | Just (QualName _ q') <- M.lookup (Term, q) $ envNameMap scope,
-        Just res <- M.lookup q' $ envModTable scope =
+        Just res <- M.lookup q' $ envModTable scope = do
+          usedName q'
           case res of
             ModEnv q_scope -> do
               (scope', QualName qs' name') <- descend q_scope qs
