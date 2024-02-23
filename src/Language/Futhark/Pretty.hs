@@ -311,10 +311,20 @@ prettyAppExp _ (If c t f _) =
 prettyAppExp p (Apply f args _) =
   parensIf (p >= 10) $
     prettyExp 0 f
-      <+> hsep (map (prettyExp 10 . snd) $ NE.toList args)
+      <+> hsep (map prettyArg $ NE.toList args)
+  where
+    prettyArg (i, e) =
+      case unAnnot i of
+        Just (_, am)
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 ->
+              parens (prettyExp 10 e <+> "Δ" <+> pretty am)
+        _ -> prettyExp 10 e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (AppExpBase f vn) where
   pretty = prettyAppExp (-1)
+
+instance Pretty AutoMap where
+  pretty (AutoMap r m f) = encloseSep lparen rparen comma $ map pretty [r, m, f]
 
 prettyInst :: (Annot f, Pretty t) => f t -> Doc a
 prettyInst t =
