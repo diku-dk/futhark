@@ -888,6 +888,98 @@ withAutoMap_ ams arg_desc res_t args_e innerM =
     mapM_ addStms $ reverse stms
     innerM args
 
+-- | Internalization of 'AutoMap'-annotated applications.
+--
+-- Each application @f x@ has an annotation with @AutoMap R M F@ where
+-- @R, M, F@ are the autorep, automap, and frame shapes,
+-- respectively.
+--
+-- The application @f x@ will have type @F t@ for some @t@, i.e. @(f
+-- x) : F t@. The frame @F@ is a prefix of the type of @f x@; namely
+-- it is the total accumulated shape that is due to implicit maps.
+-- Another way of thinking about that is that @|F|@ is is the level
+-- of the automap-nest that @f x@ is in. For example, if @|F| = 2@
+-- then we know that @f x@ implicitly stands for
+--
+-- > map (\x' -> map (\x'' -> f x'') x') x
+--
+-- For an application with a non-empty autorep annotation, the frame
+-- tells about how many dimensions of the replicate can be eliminated.
+-- For example, @[[1,2],[3,4]] + 5@ will yield the following annotations:
+--
+-- > ([[1,2],[3,4]] +)     -- AutoMap {R = mempty, M = [2][2], F = [2][2]}
+-- > (([[1,2],[3,4]] +) 5) -- AutoMap {R = [2][2], M = mempty, F = [2][2]}
+--
+-- All replicated arguments are pushed down the auto-map nest. Each
+-- time a replicated argument is pushed down a level of an
+-- automap-nest, one fewer replicates is needed (i.e., the outermost
+-- dimension of @R@ can be dropped). Replicated arguments are pushed
+-- down the nest until either 1) the bottom of the nest is encountered
+-- or 2) no replicate dimensions remain. For example, in the second
+-- application above @R@ = @F@, so we can push the replicated argument
+-- down two levels. Since each level effectively removes a dimension
+-- of the replicate, no replicates will be required:
+--
+-- > map (\xs -> map (\x -> f x'' 5) xs) [[1,2],[3,4]]
+--
+-- The number of replicates that are actually required is given by
+-- max(|R| - |F|, 0).
+--
+-- An expression's "true level" is the level at which that expression
+-- will appear in the automap-nest. The bottom of a mapnest is level 0.
+--
+-- * For annotations with @R = mempty@, the true level is @|F|@.
+-- * For annotations with @M = mempty@, the true level is @|F| - |R|@.
+--
+-- If @|R| > |F|@ then actual replicates (namely @|R| - |F|@ of them)
+-- will be required at the bottom of the mapnest.
+--
+-- Note that replicates can only appear at the bottom of a mapnest; any
+-- expression of the form
+--
+-- > map (\ls x' rs -> e) (replicate x)
+--
+-- can always be written as
+--
+-- > map (\ls rs -> e[x' -> x])
+--
+-- Let's look at another example. Consider (with exact sizes omitted for brevity)
+--
+-- > f    : a -> a -> a -> []a -> [][][]a -> a
+-- > xss  : [][]a
+-- > ys   : []a
+-- > zsss : [][][]a
+-- > w    : a
+-- > vss  : [][]a
+--
+-- and the application
+--
+-- > f xss ys zsss w vss
+--
+-- which will have the following annotations
+--
+-- > (f xss)                          -- AutoMap {R = mempty,    M = [][],   F = [][]}    (1)
+-- > ((f xss) ys)                     -- AutoMap {R = [],        M = mempty, F = [][]}    (2)
+-- > (((f xss) ys) zsss)              -- AutoMap {R = mempty,    M = [],     F = [][][]}  (3)
+-- > ((((f xss) ys) zsss) w)          -- AutoMap {R = [][][][],  M = mempty, F = [][][]}  (4)
+-- > (((((f xss) ys) zsss) w) vss)    -- AutoMap {R = [],        M = mempty, F = [][][]}  (5)
+--
+-- This will yield the following mapnest.
+--
+-- >   map (\zss ->
+-- >    map (\xs zs vs ->
+-- >      map (\x y z v -> f x y z (replicate w) v) xs ys zs v) xss zss vss) zsss
+--
+-- Let's see how we'd construct this mapnest from the annotations. We construct
+-- the nest bottom-up. We have:
+--
+-- Application | True level
+-- ---------------------------
+-- (1)         | |[][]| = 2
+-- (2)         | |[][]| - |[]| = 1
+-- (3)         | |[][][]| = 3
+-- (4)         | |[][][]| - |[][][][]| = -1
+-- (5)         | |[][][]| - |[]| = 2
 withAutoMap :: [AutoMap] -> String -> StructType -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
 withAutoMap ams arg_desc res_t args_e innerM = do
   (args, stms) <-
