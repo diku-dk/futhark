@@ -73,7 +73,8 @@ instance Distribute Ct where
 data RankState = RankState
   { rankBinVars :: Map VName VName,
     rankCounter :: !Int,
-    rankConstraints :: [Constraint]
+    rankConstraints :: [Constraint],
+    rankObj :: LSum
   }
 
 newtype RankM a = RankM {runRankM :: State RankState a}
@@ -106,12 +107,22 @@ addConstraints cs =
 addConstraint :: Constraint -> RankM ()
 addConstraint = addConstraints . pure
 
+addObj :: SVar -> RankM ()
+addObj sv =
+  modify $ \s -> s {rankObj = rankObj s ~+~ var sv}
+
 addCt :: Ct -> RankM ()
 addCt (CtEq t1 t2) = addConstraint $ rank t1 ~==~ rank t2
-addCt (CtAM r m) = do
+addCt (CtAM r m f) = do
   b_r <- binVar r
   b_m <- binVar m
+  b_max <- VName "b_max" <$> incCounter
+  tr <- VName ("T_" <> baseName r) <$> incCounter
+  addConstraints $ [bin b_max, var b_max ~<=~ var tr]
   addConstraints $ oneIsZero (b_r, r) (b_m, m)
+  addConstraints $ LP.max b_max (constant 0) (rank r ~-~ rank f) (var tr)
+  addObj m
+  addObj tr
 
 addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
 addTyVarInfo _ (_, TyVarFree) = pure ()
@@ -126,9 +137,9 @@ mkLinearProg :: [Ct] -> TyVars -> LinearProg
 mkLinearProg cs tyVars =
   LP.LinearProg
     { optType = Minimize,
-      objective =
-        let shape_vars = M.keys $ rankBinVars finalState
-         in foldr (\sv s -> var sv ~+~ s) (constant 0) shape_vars,
+      objective = rankObj finalState,
+      -- let shape_vars = M.keys $ rankBinVars finalState
+      -- in foldr (\sv s -> var sv ~+~ s) (constant 0) shape_vars,
       constraints = rankConstraints finalState
     }
   where
@@ -136,7 +147,8 @@ mkLinearProg cs tyVars =
       RankState
         { rankBinVars = mempty,
           rankCounter = 0,
-          rankConstraints = mempty
+          rankConstraints = mempty,
+          rankObj = constant 0
         }
     buildLP = do
       mapM_ addCt cs

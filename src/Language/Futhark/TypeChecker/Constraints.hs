@@ -52,12 +52,12 @@ toType = first (const SDim)
 
 data Ct
   = CtEq Type Type
-  | CtAM SVar SVar
+  | CtAM SVar SVar (Shape SComp)
   deriving (Show)
 
 instance Pretty Ct where
   pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
-  pretty (CtAM r m) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
+  pretty (CtAM r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
 
 type Constraints = [Ct]
 
@@ -190,7 +190,7 @@ solveCt :: Ct -> SolveM ()
 solveCt ct =
   case ct of
     CtEq t1 t2 -> solveCt' (t1, t2)
-    CtAM _ _ -> pure () -- Good vibes only.
+    CtAM _ _ _ -> pure () -- Good vibes only.
   where
     bad = throwError $ "Unsolvable: " <> prettyText ct
     solveCt' (t1, t2) = do

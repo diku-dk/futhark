@@ -8,6 +8,8 @@ module Futhark.Solve.LP
     cval,
     bin,
     or,
+    min,
+    max,
     oneIsZero,
     (~+~),
     (~-~),
@@ -45,7 +47,7 @@ import Futhark.Solve.Matrix (Matrix (..))
 import Futhark.Solve.Matrix qualified as M
 import Futhark.Util.Pretty
 import Language.Futhark.Pretty
-import Prelude hiding (or)
+import Prelude hiding (max, min, or)
 import Prelude qualified
 
 -- | A linear program. 'LP c a d' represents the program
@@ -202,6 +204,24 @@ linearProgToPulp prog =
 
 bigM :: (Num a) => a
 bigM = 2 ^ 10
+
+-- max{x, y} = z
+max :: (Eq a, Num a, Ord v) => v -> LSum v a -> LSum v a -> LSum v a -> [Constraint v a]
+max b x y z =
+  [ z ~>=~ x,
+    z ~>=~ y,
+    z ~<=~ x ~+~ bigM ~*~ var b,
+    z ~<=~ y ~+~ bigM ~*~ (constant 1 ~-~ var b)
+  ]
+
+-- min{x, y} = z
+min :: (Eq a, Num a, Ord v) => v -> v -> v -> v -> [Constraint v a]
+min b x y z =
+  [ var z ~<=~ var x,
+    var z ~<=~ var y,
+    var z ~>=~ var x ~-~ bigM ~*~ (constant 1 ~-~ var b),
+    var z ~>=~ var y ~-~ bigM ~*~ var b
+  ]
 
 oneIsZero :: (Eq a, Num a, Ord v) => (v, v) -> (v, v) -> [Constraint v a]
 oneIsZero (b1, x1) (b2, x2) =

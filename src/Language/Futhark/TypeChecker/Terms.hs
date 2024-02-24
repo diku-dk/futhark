@@ -1620,7 +1620,13 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
   case (maybe_tysubstss, bodys') of
     ([], _) -> error "impossible"
     ([maybe_tysubsts], [body']) -> doChecks (maybe_tysubsts, params', retdecl', body')
-    _ -> typeError loc mempty "Rank ILP is ambiguous"
+    (substs, bodies') ->
+      typeError loc mempty $
+        stack $
+          [ "Rank ILP is ambiguous.",
+            "Choices:"
+          ]
+            ++ map pretty bodies'
   where
     -- TODO: Print out the possibilities. (And also potentially eliminate
     --- some of the possibilities to disambiguate).

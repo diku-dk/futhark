@@ -283,8 +283,8 @@ ctEq t1 t2 =
     t1' = t1 `setUniqueness` NoUniqueness
     t2' = t2 `setUniqueness` NoUniqueness
 
-ctAM :: SVar -> SVar -> TermM ()
-ctAM r m = addCt $ CtAM r m
+ctAM :: SVar -> SVar -> Shape SComp -> TermM ()
+ctAM r m f = addCt $ CtAM r m f
 
 localScope :: (TermScope -> TermScope) -> TermM a -> TermM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
@@ -637,7 +637,7 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       m_var = Var (QualName [] m) unit_info mempty
       lhs = arrayOf (toShape (SVar r)) argtype
       rhs = arrayOf (toShape (SVar m)) a
-  ctAM r m
+  ctAM r m $ fmap toSComp (toShape m_var <> fframe)
   ctEq lhs rhs
   debugTraceM $
     unlines $
