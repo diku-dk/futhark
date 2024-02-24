@@ -628,40 +628,76 @@ checkApply loc fname (fframe, ftype) args = do
         )
 
 checkApplyOne :: SrcLoc -> (Maybe (QualName VName), Int) -> (Shape Size, Type) -> (Shape Size, Type) -> TermM (Type, AutoMap)
-checkApplyOne loc _ (fframe, ftype) (argframe, argtype) = do
-  (a, b) <- split $ stripFrame fframe ftype
+checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
+  (a, b) <- split ftype
   r <- newSVar loc "R"
   m <- newSVar loc "M"
   let unit_info = Info $ Scalar $ Prim Bool
       r_var = Var (QualName [] r) unit_info mempty
       m_var = Var (QualName [] m) unit_info mempty
       lhs = arrayOf (toShape (SVar r)) argtype
-      rhs = arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) a
-
+      rhs = arrayOf (toShape (SVar m)) a
   ctAM r m
   ctEq lhs rhs
+  debugTraceM $
+    unlines $
+      [ "## checkApplyOne",
+        "## fname",
+        prettyString fname,
+        "## (fframe, ftype)",
+        prettyString (fframe, ftype),
+        "## (argframe, argtype)",
+        prettyString (argframe, argtype),
+        "## r",
+        prettyString r,
+        "## m",
+        prettyString m,
+        "## lhs",
+        prettyString lhs,
+        "## rhs",
+        prettyString rhs,
+        "## ret",
+        prettyString $ arrayOf (toShape (SVar m)) b
+      ]
   pure
-    ( arrayOf (toShape (SVar m) <> (toSComp <$> fframe)) b,
+    ( arrayOf (toShape (SVar m)) b,
       AutoMap {autoRep = toShape r_var, autoMap = toShape m_var, autoFrame = toShape m_var <> fframe}
     )
   where
-    stripFrame :: Shape Size -> Type -> Type
-    stripFrame frame (Array u ds t) =
-      let mnew_shape = Shape <$> L.stripPrefix (toSComp <$> shapeDims frame) (shapeDims ds)
-       in case mnew_shape of
-            Nothing -> Scalar t
-            Just new_shape -> arrayOfWithAliases u new_shape $ Scalar t
-    stripFrame _ t = t
+    -- stripFrame :: Shape Size -> Type -> Type
+    -- stripFrame frame (Array u ds t) =
+    --  let mnew_shape = Shape <$> L.stripPrefix (toSComp <$> shapeDims frame) (shapeDims ds)
+    --   in case mnew_shape of
+    --        Nothing -> Scalar t
+    --        Just new_shape -> arrayOfWithAliases u new_shape $ Scalar t
+    -- stripFrame _ t = t
+
+    isFunType (Scalar Arrow {}) = True
+    isFunType _ = False -- (fix)
     toSComp (Var (QualName [] x) _ _) = SVar x
     toSComp _ = error ""
     toShape = Shape . pure
     split (Scalar (Arrow _ _ _ a (RetType _ b))) =
       pure (a, b `setUniqueness` NoUniqueness)
+    split (Array u s t) = do
+      (a, b) <- split $ Scalar t
+      pure (arrayOf s a, arrayOf s b)
     split ftype' = do
       a <- newType loc "arg" NoUniqueness
       b <- newType loc "res" Nonunique
       ctEq ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
+
+distribute :: TypeBase dim u -> TypeBase dim u
+distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
+  Scalar $
+    Arrow
+      u
+      Unnamed
+      mempty
+      (arrayOf s ta)
+      (RetType rd $ distribute (arrayOfWithAliases (uniqueness tr) s tr))
+distribute t = t
 
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
@@ -1151,7 +1187,11 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
     debugTraceM $
       unlines
         [ "## cts:",
-          unlines $ map prettyString cts
+          unlines $ map prettyString cts,
+          "## body:",
+          prettyString body',
+          "## tyvars:",
+          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
         ]
 
     (cts_tyvars', bodys') <- unzip <$> rankAnalysis loc cts tyvars body'
@@ -1166,7 +1206,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines
           [ "## constraints:",
             unlines $ map prettyString cts',
-            "## tyvars:",
+            "## tyvars':",
             unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
             "## solution:",
             let p (v, t) = prettyNameString v <> " => " <> prettyString t

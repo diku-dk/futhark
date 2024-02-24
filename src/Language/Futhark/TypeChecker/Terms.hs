@@ -27,7 +27,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util (mapAccumLM, nubOrd, topologicalSort)
+import Futhark.Util (debugTraceM, mapAccumLM, nubOrd, topologicalSort)
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Primitive (intByteSize)
@@ -941,12 +941,27 @@ checkApply ::
   Exp ->
   AutoMap ->
   TermTypeM (StructType, StructType, Maybe VName, [VName], AutoMap)
-checkApply loc (fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
+checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
     (am_map_shape, argtype_with_frame) <- splitArrayAt (autoMapRank am) <$> normTypeFully argtype
     (am_rep_shape, tp1_with_frame) <- splitArrayAt (autoRepRank am) <$> normTypeFully tp1
     let (am_frame_shape, argtype_automap) = splitArrayAt (autoFrameRank am) argtype_with_frame
+
+    debugTraceM $
+      unlines
+        [ "## checkApply",
+          "## fn",
+          prettyString fn,
+          "## ft",
+          prettyString ft,
+          "## tp1_with_frame",
+          prettyString tp1_with_frame,
+          "## argtype_with_frame",
+          prettyString argtype_with_frame,
+          "## am",
+          show am
+        ]
 
     unify (mkUsage argexp "use as function argument") tp1_with_frame argtype_with_frame
 
@@ -990,8 +1005,8 @@ checkApply loc (fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
 
     let am =
           AutoMap
-            { autoMap = am_map_shape,
-              autoRep = mempty,
+            { autoRep = mempty,
+              autoMap = am_map_shape,
               autoFrame = am_map_shape <> am_frame_shape
             }
 
