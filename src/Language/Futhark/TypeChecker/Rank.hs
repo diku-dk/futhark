@@ -116,7 +116,7 @@ addCt (CtEq t1 t2) = addConstraint $ rank t1 ~==~ rank t2
 addCt (CtAM r m f) = do
   b_r <- binVar r
   b_m <- binVar m
-  b_max <- VName "b_max" <$> incCounter
+  b_max <- VName "c_max" <$> incCounter
   tr <- VName ("T_" <> baseName r) <$> incCounter
   addConstraints $ [bin b_max, var b_max ~<=~ var tr]
   addConstraints $ oneIsZero (b_r, r) (b_m, m)
