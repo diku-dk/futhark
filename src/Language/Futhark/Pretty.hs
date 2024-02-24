@@ -239,7 +239,7 @@ prettyAppExp p (BinOp (bop, _) _ (x, xi) (y, yi) _) =
     (Just (_, xam), Just (_, yam))
       | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 ->
           -- fix
-          parens (prettyBinOp p bop x y <+> "Δ" <+> pretty xam <+> "Δ" <+> pretty yam)
+          parens $ align $ prettyBinOp p bop x y </> "Δ" <+> pretty xam </> "Δ" <+> pretty yam
     _ -> prettyBinOp p bop x y
 prettyAppExp _ (Match e cs _) = "match" <+> pretty e </> (stack . map pretty) (NE.toList cs)
 prettyAppExp _ (Loop sizeparams pat initexp form loopbody _) =
