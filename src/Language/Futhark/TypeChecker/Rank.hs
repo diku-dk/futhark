@@ -55,12 +55,16 @@ instance Rank Type where
 class Distribute a where
   distribute :: a -> a
 
-instance Distribute Type where
-  distribute = distributeOne
-    where
-      distributeOne (Array _ s (Arrow _ _ _ ta (RetType rd tr))) =
-        Scalar $ Arrow NoUniqueness Unnamed mempty (arrayOf s ta) (RetType rd $ arrayOfWithAliases Nonunique s tr)
-      distributeOne t = t
+instance Distribute (TypeBase dim u) where
+  distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
+    Scalar $
+      Arrow
+        u
+        Unnamed
+        mempty
+        (arrayOf s ta)
+        (RetType rd $ distribute (arrayOfWithAliases Nonunique s tr))
+  distribute t = t
 
 instance Distribute Ct where
   distribute (CtEq t1 t2) = distribute t1 `CtEq` distribute t2
@@ -169,6 +173,7 @@ enumerateRankSols prog =
     run_glpk = unsafePerformIO . glpk
     next_sol m = do
       (prog', sol') <- m
+      guard (fst sol' /= 0)
       let prog'' = ambigCheckLinearProg prog' sol'
       sol'' <- run_glpk prog''
       pure (prog'', sol'')
@@ -197,11 +202,12 @@ solveRankILP loc prog = do
 rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> Exp -> m [(([Ct], TyVars), Exp)]
 rankAnalysis _ [] tyVars body = pure [(([], tyVars), body)]
 rankAnalysis loc cs tyVars body = do
-  rank_maps <- solveRankILP loc (mkLinearProg (foldMap splitFuncs cs) tyVars)
+  rank_maps <- solveRankILP loc (mkLinearProg cs' tyVars)
   cts_tyvars' <- mapM (substRankInfo cs tyVars) rank_maps
   let bodys = map (`updAM` body) rank_maps
   pure $ zip cts_tyvars' bodys
   where
+    cs' = foldMap (splitFuncs . distribute) cs
     splitFuncs
       ( CtEq
           (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
@@ -288,9 +294,20 @@ rankToShape x = do
 addRankInfo :: (MonadTypeChecker m) => TyVar -> SubstT m ()
 addRankInfo t = do
   rs <- asks envRanks
-  unless (fromMaybe 0 (rs M.!? t) == 0) $ do
-    new_vars <- gets substNewVars
-    maybe new_var (const $ pure ()) $ new_vars M.!? t
+  if (fromMaybe 0 (rs M.!? t) == 0)
+    then do
+      old_tyvars <- asks envTyVars
+      case old_tyvars M.!? t of
+        -- Probably not needed
+        -- Just (lvl, TyVarFree) ->
+        --  -- is anyPrimType right here?
+        --  modify $
+        --    \s -> s {substTyVars = M.insert t (lvl, TyVarPrim anyPrimType) $ substTyVars s}
+        _ -> do
+          pure ()
+    else do
+      new_vars <- gets substNewVars
+      maybe new_var (const $ pure ()) $ new_vars M.!? t
   where
     new_var = do
       t' <- newTyVar t
@@ -336,7 +353,7 @@ updAM rank_map e =
           args' =
             fmap
               ( bimap
-                  (fmap $ second upd)
+                  (fmap $ bimap id upd)
                   (updAM rank_map)
               )
               args

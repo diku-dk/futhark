@@ -71,7 +71,7 @@ data TyVarInfo
     TyVarRecord (M.Map Name Type)
   | -- | Must be a sum type with these fields.
     TyVarSum (M.Map Name [Type])
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Pretty TyVarInfo where
   pretty TyVarFree = "free"
