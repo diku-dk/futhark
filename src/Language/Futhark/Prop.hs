@@ -840,16 +840,6 @@ intrinsics =
                   $ array_a Unique
                   $ shape [m, k, l]
               ),
-              ( "map",
-                IntrinsicPolyFun
-                  [tp_a, tp_b, sp_n]
-                  [ Scalar (t_a mempty) `arr` Scalar (t_b Nonunique),
-                    array_a Observe $ shape [n]
-                  ]
-                  $ RetType []
-                  $ array_b Unique
-                  $ shape [n]
-              ),
               ( "reduce",
                 IntrinsicPolyFun
                   [tp_a, sp_n]

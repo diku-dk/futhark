@@ -1577,22 +1577,6 @@ initialCtx =
           Just $ fun2 stream
     def s | "reduce_stream" `isPrefixOf` s =
       Just $ fun3 $ \_ f arg -> stream f arg
-    def "map" = Just $
-      TermPoly Nothing $ \t eval' -> do
-        t' <- evalType eval' mempty t
-        pure $ ValueFun $ \f -> pure . ValueFun $ \xs ->
-          case unfoldFunType t' of
-            ([_, _], ret_t)
-              | Just rowshape <- typeRowShape ret_t ->
-                  toArray' rowshape <$> mapM (apply noLoc mempty f) (snd $ fromArray xs)
-              | otherwise ->
-                  error $ "Bad return type: " <> prettyString ret_t
-            _ ->
-              error $
-                "Invalid arguments to map intrinsic:\n"
-                  ++ unlines [prettyString t, show f, show xs]
-      where
-        typeRowShape = sequenceA . structTypeShape . stripArray 1
     def s | "reduce" `isPrefixOf` s = Just $
       fun3 $ \f ne xs ->
         foldM (apply2 noLoc mempty f) ne $ snd $ fromArray xs

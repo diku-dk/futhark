@@ -1024,7 +1024,6 @@ withAutoMap ams arg_desc res_t args_e innerM = do
   where
     stripAutoMapDims i am =
       am {autoMap = E.Shape $ drop i $ E.shapeDims $ autoMap am}
-    autoMapRank = E.shapeRank . autoMap
     max_am = maximumBy (\x y -> E.shapeRank x `compare` E.shapeRank y) $ fmap autoMap ams
     inner_t = E.stripArray (E.shapeRank max_am) res_t
     ds = map autoMapRank ams
@@ -1701,7 +1700,7 @@ findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName, AutoMap)])
 findFuncall (E.Apply f args _)
   | E.Var fname _ _ <- f =
       (FunctionName fname, map onArg $ NE.toList args)
-  | E.Hole (Info t) loc <- f =
+  | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
     onArg (Info (argext, am), e) = (e, argext, am)
@@ -1859,12 +1858,6 @@ isIntrinsicFunction qname args loc = do
           fmap pure $ letSubExp desc $ I.BasicOp $ I.ConvOp conv x'
     handleOps _ _ = Nothing
 
-    handleSOACs [lam, arr] "map" = Just $ \desc -> do
-      arr' <- internaliseExpToVars "map_arr" arr
-      arr_ts <- mapM lookupType arr'
-      lam' <- internaliseLambdaCoerce lam $ map rowType arr_ts
-      let w = arraysSize 0 arr_ts
-      letTupExp' desc $ I.Op $ I.Screma w arr' (I.mapSOAC lam')
     handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k
       Just $ \_desc -> do
