@@ -20,7 +20,9 @@ module Language.Futhark.Interpreter.Values
     prettyEmptyArray,
     toArray,
     toArray',
+    toArrayR,
     toTuple,
+    repArray,
 
     -- * Conversion
     fromDataValue,
@@ -28,7 +30,7 @@ module Language.Futhark.Interpreter.Values
 where
 
 import Data.Array
-import Data.List (genericLength)
+import Data.List (genericLength, genericReplicate)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Monoid hiding (Sum)
@@ -206,6 +208,15 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
   where
     shape = ShapeDim (genericLength vs) rowshape
 
+-- | Produce multidimensional array from a flat list of values.
+toArrayR :: [Int64] -> ValueShape -> [Value m] -> Value m
+toArrayR [] _ = error "toArrayR: empty shape"
+toArrayR [_] elemshape = toArray' elemshape
+toArrayR (n : ns) elemshape =
+  toArray (foldr ShapeDim elemshape (n : ns))
+    . map (toArrayR ns elemshape)
+    . chunk (fromIntegral (product ns))
+
 arrayLength :: (Integral int) => Array Int (Value m) -> int
 arrayLength = fromIntegral . (+ 1) . snd . bounds
 
@@ -236,6 +247,13 @@ fromDataValueWith f shape vector
         $ chunk (SVec.product shape') (SVec.toList vector)
   where
     shape' = SVec.tail shape
+
+repArray :: [Int64] -> Value m -> Value m
+repArray [] v = v
+repArray (n : ns) v =
+  toArray' (valueShape v') (genericReplicate n v')
+  where
+    v' = repArray ns v
 
 -- | Convert a Futhark value in the externally observable data format
 -- to an interpreter value.

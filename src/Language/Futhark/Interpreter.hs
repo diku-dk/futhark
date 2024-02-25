@@ -414,6 +414,11 @@ fromArray :: Value -> (ValueShape, [Value])
 fromArray (ValueArray shape as) = (shape, elems as)
 fromArray v = error $ "Expected array value, but found: " <> show v
 
+fromArrayR :: Int -> Value -> [Value]
+fromArrayR 0 v = [v]
+fromArrayR 1 v = snd $ fromArray v
+fromArrayR n v = concatMap (fromArrayR (n - 1)) $ snd $ fromArray v
+
 apply :: SrcLoc -> Env -> Value -> Value -> EvalM Value
 apply loc env (ValueFun f) v = stacking loc env (f v)
 apply _ _ f _ = error $ "Cannot apply non-function: " <> show f
@@ -422,6 +427,54 @@ apply2 :: SrcLoc -> Env -> Value -> Value -> Value -> EvalM Value
 apply2 loc env f x y = stacking loc env $ do
   f' <- apply noLoc mempty f x
   apply noLoc mempty f' y
+
+data AutoMapArg
+  = -- | Map function across argument of this shape.
+    AutoMapMap [Int64]
+  | -- | Replicate argument to array of this shape.
+    AutoMapRep [Int64]
+  | AutoMapNone
+  deriving (Eq, Ord, Show)
+
+applyAM ::
+  SrcLoc ->
+  Env ->
+  (Value, StructType) ->
+  AutoMapArg ->
+  Value ->
+  EvalM Value
+applyAM loc env (ValueArray _ xs, ft) AutoMapNone v = do
+  t' <- evalType (eval env) mempty ft
+  undefined
+applyAM loc env (f, _) AutoMapNone v =
+  apply loc env f v
+applyAM loc env (f, _) (AutoMapMap []) v =
+  apply loc env f v
+applyAM loc env (f, _) (AutoMapRep []) v =
+  apply loc env f v
+applyAM loc env (f, _) (AutoMapRep shape) v =
+  apply noLoc mempty f $ repArray shape v
+-- The next case essentially implements the "map" primitive.
+applyAM loc env (f, ft) (AutoMapMap shape) v = do
+  t' <- evalType (eval env) mempty ft
+  let rank = length shape
+      vs = fromArrayR rank v
+  case t' of
+    Scalar (Arrow _ _ _ _ (RetType _ ret_t@(Scalar Arrow {})))
+      | Just rowshape <- sequenceA $ structTypeShape $ toStruct ret_t -> do
+          fs <- mapM (apply noLoc mempty f) vs
+          pure $ ValueFun $ \v' ->
+            toArrayR shape rowshape
+              <$> zipWithM (apply loc env) fs (fromArrayR rank v')
+    Scalar (Arrow _ _ _ _ (RetType _ ret_t))
+      | Just rowshape <- sequenceA $ structTypeShape $ toStruct ret_t ->
+          toArrayR shape rowshape <$> mapM (apply noLoc mempty f) vs
+      | otherwise ->
+          error $ "Bad return type: " <> prettyString ret_t
+    _ ->
+      error $
+        "Invalid automap arguments:\n"
+          ++ unlines [prettyString ft, show f, show v]
 
 matchPat :: Env -> Pat (TypeBase Size u) -> Value -> EvalM Env
 matchPat env p v = do
@@ -752,13 +805,21 @@ evalFunctionBinding env tparams ps ret fbody = do
             returned env (retType ret) retext
               =<< evalFunction env' missing_sizes ps fbody (retType ret)
 
-evalArg :: Env -> Exp -> Maybe VName -> EvalM Value
-evalArg env e ext = do
+evalArg :: Env -> Exp -> Maybe VName -> AutoMap -> EvalM (Value, AutoMapArg)
+evalArg env e ext am = do
   v <- eval env e
   case ext of
     Just ext' -> putExtSize ext' v
     _ -> pure ()
-  pure v
+  let evalShape = mapM (fmap asInt64 . eval env) . shapeDims
+  am' <-
+    if not $ null $ autoMap am
+      then AutoMapMap <$> evalShape (autoMap am)
+      else
+        if not $ null $ autoRep am
+          then AutoMapRep <$> evalShape (autoRep am)
+          else pure AutoMapNone
+  pure (v, am')
 
 returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value
 returned _ _ [] v = pure v
@@ -828,22 +889,31 @@ evalAppExp env (LetPat sizes p e body _) = do
 evalAppExp env (LetFun f (tparams, ps, _, Info ret, fbody) body _) = do
   binding <- evalFunctionBinding env tparams ps ret fbody
   eval (env {envTerm = M.insert f binding $ envTerm env}) body
-evalAppExp env (BinOp (op, _) op_t (x, Info (xext, xam)) (y, Info (yext, yam)) loc)
-  | baseString (qualLeaf op) == "&&" = do
+evalAppExp env (BinOp (op, _) (Info op_t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc)
+  | baseString (qualLeaf op) == "&&",
+    noAutoMap = do
       x' <- asBool <$> eval env x
       if x'
         then eval env y
         else pure $ ValuePrim $ BoolValue False
-  | baseString (qualLeaf op) == "||" = do
+  | baseString (qualLeaf op) == "||",
+    noAutoMap = do
       x' <- asBool <$> eval env x
       if x'
         then pure $ ValuePrim $ BoolValue True
         else eval env y
   | otherwise = do
-      x' <- evalArg env x xext
-      y' <- evalArg env y yext
-      op' <- eval env $ Var op op_t loc
-      apply2 loc env op' x' y'
+      (x', xam') <- evalArg env x xext xam
+      (y', yam') <- evalArg env y yext yam
+      op' <- evalTermVar env op op_t
+      op'' <- applyAM loc env (op', op_t) xam' x'
+      applyAM loc env (op'', op_ret) yam' y'
+  where
+    op_ret = case op_t of
+      Scalar (Arrow _ _ _ _ (RetType _ t)) ->
+        toStruct t
+      _ -> error $ "Nonsensical binop type: " <> prettyString op_t
+    noAutoMap = xam == mempty && yam == mempty
 evalAppExp env (If cond e1 e2 _) = do
   cond' <- asBool <$> eval env cond
   if cond' then eval env e1 else eval env e2
@@ -853,9 +923,11 @@ evalAppExp env (Apply f args loc) = do
   -- type of the functions.
   args' <- reverse <$> mapM evalArg' (reverse $ NE.toList args)
   f' <- eval env f
-  foldM (apply loc env) f' args'
+  foldM apply' f' args'
   where
-    evalArg' (Info (ext, _), x) = evalArg env x ext
+    ft = typeOf f
+    apply' f' (v', am') = applyAM loc env (f', ft) am' v'
+    evalArg' (Info (ext, am), x) = evalArg env x ext am
 evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
@@ -1047,16 +1119,21 @@ eval env (Lambda ps body _ (Info (RetType _ rt)) _) =
   evalFunction env [] ps body rt
 eval env (OpSection qv (Info t) _) =
   evalTermVar env qv $ toStruct t
-eval env (OpSectionLeft qv _ e (Info (_, _, argext, _), _) (Info (RetType _ t), _) loc) = do
-  v <- evalArg env e argext
-  f <- evalTermVar env qv (toStruct t)
-  apply loc env f v
-eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext, _)) (Info (RetType _ t)) loc) = do
-  y <- evalArg env e argext
+eval env (OpSectionLeft qv _ e (Info (_, _, argext, am), _) (Info (RetType _ t), _) loc) = do
+  (v, am') <- evalArg env e argext am
+  f <- evalTermVar env qv t'
+  applyAM loc env (f, t') am' v
+  where
+    t' = toStruct t
+eval env (OpSectionRight qv _ e (Info _, Info (_, _, argext, am)) (Info (RetType _ t)) loc) = do
+  (y, am') <- evalArg env e argext am
   pure $
     ValueFun $ \x -> do
-      f <- evalTermVar env qv $ toStruct t
-      apply2 loc env f x y
+      f <- evalTermVar env qv t'
+      f' <- apply loc env f x
+      applyAM loc env (f', t') am' y
+  where
+    t' = toStruct t
 eval env (IndexSection is _ loc) = do
   is' <- mapM (evalDimIndex env) is
   pure $ ValueFun $ evalIndex loc env is'
