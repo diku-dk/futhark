@@ -944,12 +944,24 @@ checkApply ::
 checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = do
   let argtype = typeOf argexp
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
+    -- argtype = arg_frame argtype'
+    -- tp1 = f_frame tp1'
+    --
+    -- Rep case:
+    -- R arg_frame argtype' = f_frame tp1'
+    -- ==> R = (autoRepRank am)-length prefix of tp1
+    -- ==> frame = f_frame = (autoFrameRank am)-length prefix of tp1
+    --
+    -- Map case:
+    -- arg_frame argtype' = M f_frame tp1'
+    -- ==> M = (autoMapRank am)-length prefix of argtype
+    -- ==> frame = M f_frame = (autoFrameRank am)-length prefix of argtype
     (am_map_shape, argtype_with_frame) <- splitArrayAt (autoMapRank am) <$> normTypeFully argtype
     (am_rep_shape, tp1_with_frame) <- splitArrayAt (autoRepRank am) <$> normTypeFully tp1
     (am_frame_shape, _) <-
       if autoMapRank am == 0
         then splitArrayAt (autoFrameRank am) <$> normTypeFully tp1
-        else pure $ splitArrayAt (autoFrameRank am) argtype_with_frame
+        else splitArrayAt (autoFrameRank am) <$> normTypeFully argtype
 
     debugTraceM $
       unlines
@@ -1010,7 +1022,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
           AutoMap
             { autoRep = am_rep_shape,
               autoMap = am_map_shape,
-              autoFrame = am_map_shape <> am_frame_shape
+              autoFrame = am_frame_shape
             }
 
     pure (tp1, distributeFrame (autoMap am) tp2'', argext, ext, am)
