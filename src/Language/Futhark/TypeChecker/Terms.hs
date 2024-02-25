@@ -946,7 +946,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
   onFailure (CheckingApply fname argexp tp1 argtype) $ do
     (am_map_shape, argtype_with_frame) <- splitArrayAt (autoMapRank am) <$> normTypeFully argtype
     (am_rep_shape, tp1_with_frame) <- splitArrayAt (autoRepRank am) <$> normTypeFully tp1
-    (am_frame_shape, argtype_automap) <-
+    (am_frame_shape, _) <-
       if autoMapRank am == 0
         then splitArrayAt (autoFrameRank am) <$> normTypeFully tp1
         else pure $ splitArrayAt (autoFrameRank am) argtype_with_frame
