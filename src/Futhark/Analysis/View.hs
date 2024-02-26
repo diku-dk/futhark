@@ -103,9 +103,6 @@ getSize _ = error "donk"
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
-toCases :: Exp -> Cases Exp
-toCases e = Cases (NE.singleton (Bool True, e))
-
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
@@ -154,7 +151,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      substituteName subst $ View (Forall i (Iota sz)) (toCases body')
+      substituteName subst $ View (Forall i (Iota sz)) body'
   -- | Just fname <- getFun f,
   --   "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
   --   [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -172,7 +169,7 @@ forward (E.AppExp (E.Apply f args _) _)
   --     pure $ View (Forall i (Iota $ Var i)) (toCases e)
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
-    pure $ View Empty (toCases e')
+    pure $ View Empty e'
 forward e = do
     error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)
 
@@ -190,7 +187,7 @@ toExp (E.AppExp (E.If c t f _) _) = do
   c' <- toExp c
   t' <- toExp t
   f' <- toExp f
-  pure $ If c' t' f'
+  pure $ Cases (NE.fromList [(c', t'), (Not c', f')])
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,

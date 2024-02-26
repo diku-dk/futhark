@@ -41,26 +41,24 @@ substituteViews view = do
 --   let cases = hoistCases' e
 --   pure $ Forall i dom (Cases $ NE.fromList $ cases)
 hoistIf :: View -> ViewM View
-hoistIf (View it (Cases cs)) = do
+hoistIf (View it e) = do
   traceM "🎭 hoisting ifs"
-  let cs' = map hoistIf' $ NE.toList cs
-  let cs'' = mconcat cs'
-  pure $ View it (Cases $ NE.fromList cs'')
+  pure $ View it (Cases $ NE.fromList $ hoistIf' e)
 
-hoistIf' :: (Exp, Exp) -> [(Exp, Exp)]
-hoistIf' (c, e) =
+hoistIf' :: Exp -> [(Exp, Exp)]
+hoistIf' e =
   let cs = getConds e -- XXX `Not` is a hack to match on outermost if.
       xs = onExp e
-  in zip (map (:&& c) cs) xs
+  in zip cs xs
   where
     m1 =
       ASTMapper
         { mapOnExp = getConds }
     getConds (Var x) = pure $ Var x
     getConds (Array xs) = map (foldl1 (:&&)) $ mapM getConds xs
-    getConds (If c t f) =
-      -- TODO also handle if-statements inside c
-      ((:&& c) <$> getConds t) ++ ((:&& Not c) <$> getConds f)
+    -- getConds (If c t f) =
+    --   -- TODO also handle if-statements inside c
+    --   ((:&& c) <$> getConds t) ++ ((:&& Not c) <$> getConds f)
     getConds (SoP sop) =
       -- TODO actually test that this is right
       let lol = mconcat $ map g (SoP.sopToLists sop)
@@ -75,6 +73,9 @@ hoistIf' (c, e) =
     getConds (Idx xs i) =
       -- TODO untested
       (:&&) <$> getConds xs <*> getConds i
+    getConds (Cases cases) =
+      -- TODO also handle condition c (getConds on c)
+      mconcat $ map (\(c, e) -> (:&& c) <$> getConds e) (NE.toList cases)
     getConds v = astMap m1 v
 
     m2 =
@@ -82,9 +83,12 @@ hoistIf' (c, e) =
         { mapOnExp = onExp }
     onExp (Var x) = pure $ Var x
     onExp (Array xs) = Array <$> mapM onExp xs
-    onExp (If c t f) =
-      -- TODO also handle if-statements inside c
-      onExp t ++ onExp f
+    -- onExp (If c t f) =
+    --   -- TODO also handle if-statements inside c
+    --   onExp t ++ onExp f
+    onExp (Cases cases) =
+      -- TODO also handle condition c
+      mconcat $ map (\(c, e) -> onExp e) (NE.toList cases)
     onExp v = astMap m2 v
 
 simplifyPredicates :: View -> ViewM View

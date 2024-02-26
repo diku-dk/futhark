@@ -27,10 +27,10 @@ import Data.List.NonEmpty qualified as NE
 data Exp =
     Var VName
   | Array [Exp]
-  | If
-      Exp    -- predicate
-      Exp    -- true branch
-      Exp    -- false branch
+  -- | If
+  --     Exp    -- predicate
+  --     Exp    -- true branch
+  --     Exp    -- false branch
   | Sum
       Exp    -- index
       Exp    -- lower bound
@@ -50,6 +50,7 @@ data Exp =
   | (:<) Exp Exp
   | (:>) Exp Exp
   | (:&&) Exp Exp
+  | Cases (NE.NonEmpty (Exp, Exp))
   deriving (Show, Eq, Ord)
 
 -- Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
@@ -80,13 +81,13 @@ instance Eq Iterator where
 --
 -- but this makes it more convoluted to merge the "otherwise" cases
 -- when substituting views into views.
-newtype Cases a = Cases (NE.NonEmpty (a, a)) -- [predicate => value]
-  deriving (Show, Eq, Ord)
+-- newtype Cases a = Cases (NE.NonEmpty (a, a)) -- [predicate => value]
+--   deriving (Show, Eq, Ord)
 
 -- TODO add "bottom" for failure?
 data View = View
   { iterator :: Iterator,
-    value :: Cases Exp
+    value :: Exp
     -- shape :: Maybe Shape -- Might make sense to use this.
   }
   deriving (Show, Eq)
@@ -109,10 +110,10 @@ newtype ViewM a = ViewM (RWS () () VEnv a)
       MonadState VEnv
     )
 
-instance Semigroup View where
-  (View i (Cases xs)) <> (View Empty (Cases ys)) = View i (Cases $ xs <> ys)
-  (View Empty (Cases xs)) <> (View i (Cases ys)) = View i (Cases $ xs <> ys)
-  (View _i (Cases _xs)) <> (View _j (Cases _ys)) = error "view semigroup"
+-- instance Semigroup View where
+--   (View i (Cases xs)) <> (View Empty (Cases ys)) = View i (Cases $ xs <> ys)
+--   (View Empty (Cases xs)) <> (View i (Cases ys)) = View i (Cases $ xs <> ys)
+--   (View _i (Cases _xs)) <> (View _j (Cases _ys)) = error "view semigroup"
 
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
@@ -140,8 +141,8 @@ instance ASTMappable View where
   astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
   astMap m (View Empty e) = View Empty <$> astMap m e
 
-instance ASTMappable (Cases Exp) where
-  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
+-- instance ASTMappable (Cases Exp) where
+--   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 -- instance ASTMappable [Exp] where
 --   astMap m = map (mapOnExp m)
@@ -155,7 +156,7 @@ instance ASTMappable (Exp, Exp) where
 instance ASTMappable Exp where
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
-  astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
+  -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
@@ -174,6 +175,7 @@ instance ASTMappable Exp where
   astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 idMap m = runIdentity . astMap m
@@ -244,13 +246,13 @@ instance Pretty Exp where
       <> "^"
       <+> pretty ub
       <+> parens (pretty e)
-  pretty (If c t f) =
-    "If"
-      <+> parens (pretty c)
-      <+> "then"
-      <+> parens (pretty t)
-      <+> "else"
-      <+> parens (pretty f)
+  -- pretty (If c t f) =
+  --   "If"
+  --     <+> parens (pretty c)
+  --     <+> "then"
+  --     <+> parens (pretty t)
+  --     <+> "else"
+  --     <+> parens (pretty f)
   pretty (SoP sop) = pretty sop
   pretty Recurrence = "%₍₋₁₎"
   pretty (Bool x) = pretty x
@@ -259,15 +261,19 @@ instance Pretty Exp where
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
-
-instance Pretty Domain where
-  pretty (Iota e) = "iota" <+> pretty e
-
-instance Pretty a => Pretty (Cases a) where
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
       prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
+
+instance Pretty Domain where
+  pretty (Iota e) = "iota" <+> pretty e
+
+-- instance Pretty a => Pretty (Cases a) where
+--   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
+--     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
+--     where
+--       prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
 
 instance Pretty View where
   pretty (View (Forall i dom) e) =
