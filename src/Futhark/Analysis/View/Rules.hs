@@ -18,18 +18,19 @@ substituteViews view = do
     m vs =
       ASTMapper
         { mapOnExp = onExp vs }
-    onExp _ (Var x) = pure $ Var x
-    onExp vs e@(Idx (Var xs) i) =
-      case M.lookup xs vs of
-        -- XXX merge cases
+    onExp vs e@(Var x) = subst vs e x
+    onExp vs e@(Idx (Var xs) i) = subst vs e xs
+    onExp vs v = astMap (m vs) v
+    subst vs e vn =
+      case M.lookup vn vs of
+        -- XXX use iterator lol
         -- XXX check that domains are compatible
         -- XXX use index i (for starts, just support simple indexing only?)
         -- XXX substitute i for j in the transplanted expression
-        Just (View (Forall j d2) e2) ->
+        Just (View _it e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
           pure e2
         _ -> pure e
-    onExp vs v = astMap (m vs) v
 
 -- Hoists case expressions to be the outermost contructor
 -- in the view expression by merging cases.

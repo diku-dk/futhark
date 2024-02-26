@@ -157,21 +157,22 @@ forward (E.AppExp (E.Apply f args _) _)
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
       substituteName subst $ View (Forall i (Iota sz)) body'
-  -- | Just fname <- getFun f,
-  --   "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
-  --   [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-  --     view <- forward xs'
-  --     xs <- newNameFromString "scan_xs"
-  --     insertView xs view
+  | Just fname <- getFun f,
+    "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
+    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
+    Just xs <- toExp xs' = do
+      let sz = getSize xs'
+      -- xs <- newNameFromString "scan_xs"
+      -- insertView xs view
 
-  --     i <- newNameFromString "i"
-  --     e <-
-  --       case E.baseString vn of
-  --         "+" -> pure $ Recurrence ~+~ Idx (Var xs) (Var i)
-  --         "-" -> pure $ Recurrence ~-~ Idx (Var xs) (Var i)
-  --         "*" -> pure $ Recurrence ~*~ Idx (Var xs) (Var i)
-  --         _ -> error ("toExp not implemented for bin op: " <> show vn)
-  --     pure $ View (Forall i (Iota $ Var i)) (toCases e)
+      i <- newNameFromString "i"
+      e <-
+        case E.baseString vn of
+          "+" -> pure $ Recurrence ~+~ Idx xs (Var i)
+          "-" -> pure $ Recurrence ~-~ Idx xs (Var i)
+          "*" -> pure $ Recurrence ~*~ Idx xs (Var i)
+          _ -> error ("toExp not implemented for bin op: " <> show vn)
+      pure $ View (Forall i (Iota sz)) e
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
     pure $ View Empty e'
