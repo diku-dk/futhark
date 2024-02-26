@@ -1047,7 +1047,7 @@ checkOneExp e = do
       (tparams, _, _) <-
         letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
       fixOverloadedTypes $ typeVars t
-      e''' <- updateTypes e''
+      e''' <- normTypeFully e''
       localChecks e'''
       causalityCheck e'''
       pure (tparams, e''')
@@ -1066,7 +1066,7 @@ checkSizeExp e = do
         typeError (srclocOf e'') mempty . withIndexLink "size-expression-bind" $
           "Size expression with binding is forbidden."
       unify (mkUsage e'' "Size expression") t (Scalar (Prim (Signed Int64)))
-      updateTypes e''
+      normTypeFully e''
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1660,8 +1660,8 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
             typeVars rettype' <> foldMap (typeVars . patternType) params''
 
           -- Then replace all inferred types in the body and parameters.
-          body''' <- updateTypes body''
-          params''' <- updateTypes params''
+          body''' <- normTypeFully body''
+          params''' <- mapM normTypeFully params''
           retdecl''' <- traverse updateTypes retdecl''
           rettype'' <- normTypeFully rettype'
 
