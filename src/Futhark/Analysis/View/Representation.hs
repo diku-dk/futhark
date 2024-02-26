@@ -1,6 +1,7 @@
 -- XXX Add Simplification rule 3 (integer-valued cases)
 -- XXX Add Rule 4 (recursive sum)
 -- XXX Make partition2indices go through.
+-- XXX Rebase this on top of master (don't need Refinement type machinery rn).
 -- XXX Check that iterators/domains are compatible.
 -- XXX Make iterators over same domains unify.
 -- XXX handle let bindings inside expressions
