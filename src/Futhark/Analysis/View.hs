@@ -104,7 +104,7 @@ stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
 toCases :: Exp -> Cases Exp
-toCases e = Cases (NE.fromList [(Bool True, e)])
+toCases e = Cases (NE.singleton (Bool True, e))
 
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
@@ -140,7 +140,7 @@ forward :: E.Exp -> ViewM View
 forward (E.Var (E.QualName _ x) _ _) =
   pure $ View Empty (toCases $ Var x)
 forward (E.ArrayLit [] _ _) =
-  pure $ View Empty (Cases $ NE.singleton (Bool True, Array []))
+  pure $ View Empty (toCases $ Array [])
 forward (E.ArrayLit es _ _) = do
   vs <- mapM forward es
   simplifyPredicates $ foldl1 combine vs
@@ -173,19 +173,22 @@ forward (E.AppExp (E.Apply f args _) _)
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       i <- newNameFromString "i"
-      let arrs = mapMaybe getVarVName args'
       let sz = getSize (head args')
+      let it = Forall i (Iota sz)
+      -- Make susbtitutions from function arguments to array names.
+      let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      ---
       view <- forward body
       case view of
-        View Empty xs -> substituteName subst (View (Forall i (Iota sz)) xs)
-        _ -> undefined
+        View it' xs | it == it' || it' == Empty ->
+          substituteName subst (View (Forall i (Iota sz)) xs)
+        _ -> error ("Cannot unify iterator of:\n"
+                    <> prettyString view <> "\nwith " <> show it)
       -- pure $ view'
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now

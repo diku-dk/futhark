@@ -18,9 +18,10 @@ substituteViews view = do
     onExp _ (Var x) = pure $ Var x
     onExp vs e@(Idx (Var xs) i) =
       case M.lookup xs vs of
+        -- XXX merge cases
         -- XXX check that domains are compatible
         -- XXX use index i (for starts, just support simple indexing only?)
-        -- XXX merge cases (add cases first, lol)
+        -- XXX substitute i for j in the transplanted expression
         Just (View (Forall j d2) e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
           undefined

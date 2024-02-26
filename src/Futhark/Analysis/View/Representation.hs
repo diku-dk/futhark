@@ -1,9 +1,3 @@
--- XXX Add cases.
--- [x] make case a part of Exp;
--- [ ] add hoistCases;
--- [ ] hoistCases after running toExp;
--- [ ] hoistCases after substituting views into views
---
 -- XXX Create domains from sizes.
 -- Make iterators over same domains unify.
 --
