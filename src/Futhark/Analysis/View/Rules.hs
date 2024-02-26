@@ -7,6 +7,7 @@ import Debug.Trace (trace, traceM)
 import Futhark.Util.Pretty (prettyString)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
+import Control.Exception
 -- import Control.Monad.Trans.State.Lazy qualified as S
 
 substituteViews :: View -> ViewM View
@@ -26,7 +27,7 @@ substituteViews view = do
         -- XXX substitute i for j in the transplanted expression
         Just (View (Forall j d2) e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-          undefined
+          pure e2
         _ -> pure e
     onExp vs v = astMap (m vs) v
 
@@ -42,14 +43,15 @@ substituteViews view = do
 --   pure $ Forall i dom (Cases $ NE.fromList $ cases)
 hoistIf :: View -> ViewM View
 hoistIf (View it e) = do
-  traceM "🎭 hoisting ifs"
   pure $ View it (Cases $ NE.fromList $ hoistIf' e)
 
 hoistIf' :: Exp -> [(Exp, Exp)]
 hoistIf' e =
   let cs = getConds e -- XXX `Not` is a hack to match on outermost if.
       xs = onExp e
-  in zip cs xs
+      -- cs' = trace ("\n cs:" <> prettyString cs) cs
+      -- xs' = trace ("\n xs:" <> prettyString xs) xs
+  in assert (length cs /= length (Bool True : xs)) $ zip cs xs
   where
     m1 =
       ASTMapper
@@ -59,13 +61,13 @@ hoistIf' e =
     -- getConds (If c t f) =
     --   -- TODO also handle if-statements inside c
     --   ((:&& c) <$> getConds t) ++ ((:&& Not c) <$> getConds f)
-    getConds (SoP sop) =
-      -- TODO actually test that this is right
-      let lol = mconcat $ map g (SoP.sopToLists sop)
-      in  Bool True : lol
+    getConds (SoP sop) = do
+      -- traceM ("AAA" <> prettyString sop)
+      -- traceM ("BBB" <> prettyString (SoP.sopToLists sop))
+      foldl (:&&) (Bool True) <$> mapM g (SoP.sopToLists sop)
       where
-        g (ts, _) =
-          mconcat $ traverse getConds ts -- TODO mapM?
+        g (ts, _) = do
+          foldl (:&&) (Bool True) <$> traverse getConds ts
     getConds (Sum {}) =
       -- I think it's just:
       -- map (foldl1 (:&&)) $ mapM getConds [i, lb, ub, e]
@@ -99,7 +101,11 @@ simplifyPredicates view =
       ASTMapper
         { mapOnExp = onExp }
     onExp (Var x) = pure $ Var x
-    onExp (Bool x) = pure $ Bool x
-    onExp (x :&& Bool True) = onExp x
-    onExp (Bool True :&& y) = onExp y
+    onExp (x :&& y) = do
+      x' <- onExp x
+      y' <- onExp y
+      case (x', y') of
+        (Bool True, b) -> pure b
+        (a, Bool True) -> pure a
+        (a, b) -> pure $ a :&& b
     onExp v = astMap m v
