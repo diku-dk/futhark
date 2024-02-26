@@ -112,10 +112,12 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
-    newView' <- substituteViews newView
+    newView' <- hoistIf newView >>= simplifyPredicates
     tracePrettyM newView'
+    newView'' <- substituteViews newView'
+    tracePrettyM newView''
     traceM "\n"
-    insertView x newView'
+    insertView x newView''
     forwards body
     pure ()
 forwards _ = pure ()
@@ -170,7 +172,6 @@ forward (E.AppExp (E.Apply f args _) _)
   --     pure $ View (Forall i (Iota $ Var i)) (toCases e)
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
-    i <- newNameFromString "i"
     pure $ View Empty (toCases e')
 forward e = do
     error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)

@@ -143,8 +143,8 @@ instance ASTMappable View where
 instance ASTMappable (Cases Exp) where
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
-instance ASTMappable [Exp] where
-  astMap m = mapM (mapOnExp m)
+-- instance ASTMappable [Exp] where
+--   astMap m = map (mapOnExp m)
 
 instance ASTMappable (Exp, Exp) where
   astMap m (p, e) = (,) <$> mapOnExp m p <*> mapOnExp m e
