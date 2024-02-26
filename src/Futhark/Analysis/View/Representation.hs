@@ -1,7 +1,15 @@
--- XXX Create domains from sizes.
--- Make iterators over same domains unify.
---
--- XXX Finish substituteViews (see Rules).
+-- XXX Add Simplification rule 3 (integer-valued cases)
+-- XXX Add Rule 4 (recursive sum)
+-- XXX Make partition2indices go through.
+-- XXX Check that iterators/domains are compatible.
+-- XXX Make iterators over same domains unify.
+-- XXX handle let bindings inside expressions
+-- [1, let x = 2 in x]
+-- XXX handle subexpressions that ought to be views
+-- map id [[1, 2], map (+1) [1,2]]
+-- A simple first implementation could simply create a name
+-- for the map subexp, create a view for iti and then reference
+-- that here. Later on it would get substituted.
 
 module Futhark.Analysis.View.Representation where
 
@@ -15,14 +23,6 @@ import Futhark.Util.Pretty
 import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
-
--- data PredExp =
---   Bool Bool
---   | Not PredExp
---   | (:==) Exp Exp
---   | (:<) Exp Exp
---   | (:>) Exp Exp
---   deriving (Show, Eq, Ord)
 
 data Exp =
     Var VName
