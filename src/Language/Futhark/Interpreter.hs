@@ -429,11 +429,7 @@ apply2 loc env f x y = stacking loc env $ do
   apply noLoc mempty f' y
 
 data AutoMapArg
-  = -- | Map function across argument of this shape.
-    AutoMapMap [Int64]
-  | -- | Replicate argument to array of this shape.
-    AutoMapRep [Int64]
-  | AutoMapNone
+  = AutoMapArg [Int64] [Int64] [Int64]
   deriving (Eq, Ord, Show)
 
 applyAM ::
@@ -443,38 +439,23 @@ applyAM ::
   AutoMapArg ->
   Value ->
   EvalM Value
-applyAM loc env (ValueArray _ xs, ft) AutoMapNone v = do
+applyAM loc env (f, _) (AutoMapArg [] [] []) v =
+  apply loc env f v
+applyAM loc env (f, ft) am@(AutoMapArg repshape mapshape frame) v = do
+  let v' = repArray repshape v
+      f' = repArray mapshape f
+      rank = length frame
+      vs = fromArrayR rank v'
+      fs = fromArrayR rank f'
   t' <- evalType (eval env) mempty ft
-  undefined
-applyAM loc env (f, _) AutoMapNone v =
-  apply loc env f v
-applyAM loc env (f, _) (AutoMapMap []) v =
-  apply loc env f v
-applyAM loc env (f, _) (AutoMapRep []) v =
-  apply loc env f v
-applyAM loc env (f, _) (AutoMapRep shape) v =
-  apply noLoc mempty f $ repArray shape v
--- The next case essentially implements the "map" primitive.
-applyAM loc env (f, ft) (AutoMapMap shape) v = do
-  t' <- evalType (eval env) mempty ft
-  let rank = length shape
-      vs = fromArrayR rank v
   case t' of
-    Scalar (Arrow _ _ _ _ (RetType _ ret_t@(Scalar Arrow {})))
-      | Just rowshape <- sequenceA $ structTypeShape $ toStruct ret_t -> do
-          fs <- mapM (apply noLoc mempty f) vs
-          pure $ ValueFun $ \v' ->
-            toArrayR shape rowshape
-              <$> zipWithM (apply loc env) fs (fromArrayR rank v')
     Scalar (Arrow _ _ _ _ (RetType _ ret_t))
       | Just rowshape <- sequenceA $ structTypeShape $ toStruct ret_t ->
-          toArrayR shape rowshape <$> mapM (apply noLoc mempty f) vs
-      | otherwise ->
-          error $ "Bad return type: " <> prettyString ret_t
+          toArrayR frame rowshape <$> zipWithM (apply loc env) fs vs
     _ ->
       error $
         "Invalid automap arguments:\n"
-          ++ unlines [prettyString ft, show f, show v]
+          ++ unlines [prettyString ft, show f, show v, show am]
 
 matchPat :: Env -> Pat (TypeBase Size u) -> Value -> EvalM Env
 matchPat env p v = do
@@ -806,19 +787,13 @@ evalFunctionBinding env tparams ps ret fbody = do
               =<< evalFunction env' missing_sizes ps fbody (retType ret)
 
 evalArg :: Env -> Exp -> Maybe VName -> AutoMap -> EvalM (Value, AutoMapArg)
-evalArg env e ext am = do
+evalArg env e ext (AutoMap rshape mshape frame) = do
   v <- eval env e
   case ext of
     Just ext' -> putExtSize ext' v
     _ -> pure ()
   let evalShape = mapM (fmap asInt64 . eval env) . shapeDims
-  am' <-
-    if not $ null $ autoMap am
-      then AutoMapMap <$> evalShape (autoMap am)
-      else
-        if not $ null $ autoRep am
-          then AutoMapRep <$> evalShape (autoRep am)
-          else pure AutoMapNone
+  am' <- AutoMapArg <$> evalShape rshape <*> evalShape mshape <*> evalShape frame
   pure (v, am')
 
 returned :: Env -> TypeBase Size als -> [VName] -> Value -> EvalM Value

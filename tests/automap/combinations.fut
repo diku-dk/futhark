@@ -31,3 +31,8 @@ entry matmat (x: [][]i32) = plus x x
 -- input { [[1,2],[3,4]] [5,6] } output { [[6,8],[8,10]] }
 
 entry matvec (x: [][]i32) (y: []i32) = plus x y
+
+-- ==
+-- entry: vecvecvec
+-- input { [1,2,3] } output { [3,6,9] }
+entry vecvecvec (x: []i32) = (\x y z -> x + y + z) x x x
