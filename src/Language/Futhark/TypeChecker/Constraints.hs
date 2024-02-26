@@ -159,7 +159,15 @@ subTyVar v lvl t = do
 linkTyVar :: VName -> VName -> SolveM ()
 linkTyVar v t = do
   occursCheck v $ Scalar $ TypeVar NoUniqueness (qualName t) []
+  tyvars <- gets solverTyVars
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
+  tyvars' <-
+    case (M.lookup v tyvars, M.lookup t tyvars) of
+      (Just (TyVarUnsol _ info), Just (TyVarUnsol lvl TyVarFree)) ->
+        pure $ M.insert t (TyVarUnsol lvl info) tyvars
+      -- TODO: handle more cases.
+      _ -> pure tyvars
+  modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) tyvars'}
 
 -- Unify at the root, emitting new equalities that must hold.
 unify :: Type -> Type -> Maybe [(Type, Type)]
@@ -190,7 +198,7 @@ solveCt :: Ct -> SolveM ()
 solveCt ct =
   case ct of
     CtEq t1 t2 -> solveCt' (t1, t2)
-    CtAM _ _ _ -> pure () -- Good vibes only.
+    CtAM {} -> pure () -- Good vibes only.
   where
     bad = throwError $ "Unsolvable: " <> prettyText ct
     solveCt' (t1, t2) = do
