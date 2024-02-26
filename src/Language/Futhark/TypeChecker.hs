@@ -225,48 +225,47 @@ checkTypeDecl te = do
 -- redundantly imported multiple times).
 checkSpecs :: [SpecBase NoInfo Name] -> TypeM (TySet, Env, [SpecBase Info VName])
 checkSpecs [] = pure (mempty, mempty, [])
-checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) =
+checkSpecs (ValSpec name tparams vtype NoInfo doc loc : specs) = do
+  (tparams', vtype', vtype_t) <-
+    resolveTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
+      (ext, vtype', vtype_t, _) <- checkTypeDecl vtype
+
+      unless (null ext) $
+        typeError loc mempty $
+          "All function parameters must have non-anonymous sizes."
+            </> "Hint: add size parameters to"
+            <+> dquotes (pretty name)
+            <> "."
+
+      pure (tparams', vtype', vtype_t)
+
   bindSpaced1 Term name loc $ \name' -> do
-    usedName name'
-    (tparams', vtype', vtype_t) <-
-      resolveTypeParams tparams $ \tparams' -> bindingTypeParams tparams' $ do
-        (ext, vtype', vtype_t, _) <- checkTypeDecl vtype
-
-        unless (null ext) $
-          typeError loc mempty $
-            "All function parameters must have non-anonymous sizes."
-              </> "Hint: add size parameters to"
-              <+> dquotes (prettyName name')
-              <> "."
-
-        pure (tparams', vtype', vtype_t)
-
-    let binding = BoundV tparams' vtype_t
-        valenv =
+    let valenv =
           mempty
-            { envVtable = M.singleton name' binding,
+            { envVtable = M.singleton name' $ BoundV tparams' vtype_t,
               envNameMap = M.singleton (Term, name) $ qualName name'
             }
+    usedName name'
     (abstypes, env, specs') <- localEnv valenv $ checkSpecs specs
     pure
       ( abstypes,
         env <> valenv,
         ValSpec name' tparams' vtype' (Info vtype_t) doc loc : specs'
       )
-checkSpecs (TypeAbbrSpec tdec : specs) =
+checkSpecs (TypeAbbrSpec tdec : specs) = do
+  (tenv, tdec') <- checkTypeBind tdec
   bindSpaced1 Type (typeAlias tdec) (srclocOf tdec) $ \name' -> do
     usedName name'
-    (tenv, tdec') <- checkTypeBind tdec
     (abstypes, env, specs') <- localEnv tenv $ checkSpecs specs
     pure
       ( abstypes,
         env <> tenv,
         TypeAbbrSpec tdec' : specs'
       )
-checkSpecs (TypeSpec l name ps doc loc : specs) =
+checkSpecs (TypeSpec l name ps doc loc : specs) = do
+  ps' <- resolveTypeParams ps pure
   bindSpaced1 Type name loc $ \name' -> do
     usedName name'
-    ps' <- resolveTypeParams ps pure
     let tenv =
           mempty
             { envNameMap =
@@ -283,10 +282,10 @@ checkSpecs (TypeSpec l name ps doc loc : specs) =
         env <> tenv,
         TypeSpec l name' ps' doc loc : specs'
       )
-checkSpecs (ModSpec name sig doc loc : specs) =
+checkSpecs (ModSpec name sig doc loc : specs) = do
+  (_sig_abs, mty, sig') <- checkModTypeExp sig
   bindSpaced1 Term name loc $ \name' -> do
     usedName name'
-    (_sig_abs, mty, sig') <- checkModTypeExp sig
     let senv =
           mempty
             { envNameMap = M.singleton (Term, name) $ qualName name',
