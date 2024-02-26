@@ -60,6 +60,13 @@ class ASTMappable x where
   -- into subexpressions.  The mapping is done left-to-right.
   astMap :: (Monad m) => ASTMapper m -> x -> m x
 
+mapOnAutoMap :: (Monad m) => ASTMapper m -> AutoMap -> m AutoMap
+mapOnAutoMap tv (AutoMap r m f) =
+  AutoMap
+    <$> traverse (mapOnExp tv) r
+    <*> traverse (mapOnExp tv) m
+    <*> traverse (mapOnExp tv) f
+
 instance ASTMappable (AppExpBase Info VName) where
   astMap tv (Range start next end loc) =
     Range
@@ -73,7 +80,7 @@ instance ASTMappable (AppExpBase Info VName) where
     Match <$> mapOnExp tv e <*> astMap tv cases <*> pure loc
   astMap tv (Apply f args loc) = do
     f' <- mapOnExp tv f
-    args' <- traverse (traverse $ mapOnExp tv) args
+    args' <- traverse onArg args
     -- Safe to disregard return type because existentials cannot be
     -- instantiated here, as the return is necessarily a function.
     pure $ case f' of
@@ -81,6 +88,9 @@ instance ASTMappable (AppExpBase Info VName) where
         Apply f_inner (args_inner <> args') loc
       _ ->
         Apply f' args' loc
+    where
+      onArg (Info (ext, am), e) =
+        (,) <$> (Info . (ext,) <$> mapOnAutoMap tv am) <*> mapOnExp tv e
   astMap tv (LetPat sizes pat e body loc) =
     LetPat sizes <$> astMap tv pat <*> mapOnExp tv e <*> mapOnExp tv body <*> pure loc
   astMap tv (LetFun name (tparams, params, ret, t, e) body loc) =
@@ -101,13 +111,16 @@ instance ASTMappable (AppExpBase Info VName) where
       <*> mapOnExp tv vexp
       <*> mapOnExp tv body
       <*> pure loc
-  astMap tv (BinOp (fname, fname_loc) t (x, xext) (y, yext) loc) =
+  astMap tv (BinOp (fname, fname_loc) t x y loc) =
     BinOp
       <$> ((,) <$> mapOnName tv fname <*> pure fname_loc)
       <*> traverse (mapOnStructType tv) t
-      <*> ((,) <$> mapOnExp tv x <*> pure xext)
-      <*> ((,) <$> mapOnExp tv y <*> pure yext)
+      <*> onArg x
+      <*> onArg y
       <*> pure loc
+    where
+      onArg (e, Info (ext, am)) =
+        (,) <$> mapOnExp tv e <*> (Info . (ext,) <$> mapOnAutoMap tv am)
   astMap tv (Loop sparams mergepat mergeexp form loopbody loc) =
     Loop sparams
       <$> astMap tv mergepat
