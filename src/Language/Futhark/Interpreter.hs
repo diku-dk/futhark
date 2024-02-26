@@ -855,7 +855,7 @@ evalAppExp env (Apply f args loc) = do
   f' <- eval env f
   foldM (apply loc env) f' args'
   where
-    evalArg' (Info (_, ext), x) = evalArg env x ext
+    evalArg' (Info ext, x) = evalArg env x ext
 evalAppExp env (Index e is loc) = do
   is' <- mapM (evalDimIndex env) is
   arr <- eval env e
