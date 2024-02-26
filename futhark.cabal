@@ -78,6 +78,7 @@ extra-source-files:
     rts/python/values.py
     rts/python/opencl.py
     rts/python/scalar.py
+    rts/wgsl/arith64.wgsl
     prelude/functional.fut
     prelude/math.fut
     prelude/soacs.fut
@@ -207,6 +208,7 @@ library
       Futhark.CodeGen.RTS.OpenCL
       Futhark.CodeGen.RTS.Python
       Futhark.CodeGen.RTS.JavaScript
+      Futhark.CodeGen.RTS.WGSL
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
       Futhark.CodeGen.ImpCode.Multicore
