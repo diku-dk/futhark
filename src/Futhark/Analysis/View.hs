@@ -109,15 +109,20 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
     tracePrettyM newView
-    newView' <- hoistIf newView >>= simplifyPredicates
-    tracePrettyM newView'
-    newView'' <- substituteViews newView'
-    tracePrettyM newView''
+    traceM "🎭 hoisting ifs"
+    newView1 <- hoistIf newView >>= simplifyPredicates
+    tracePrettyM newView1
+    newView2 <- substituteViews newView1 -- >>= hoistIf >>= simplifyPredicates
+    tracePrettyM newView2
+    traceM "🎭 hoisting ifs"
+    newView3 <- hoistIf newView2 >>= simplifyPredicates
+    tracePrettyM newView3
     traceM "\n"
-    insertView x newView''
+    insertView x newView3
     forwards body
     pure ()
 forwards _ = pure ()
+
 
 -- Apply
 --   (ExpBase f vn)
@@ -208,6 +213,11 @@ toExp (E.AppExp (E.Index xs slice _) _)
   let i' = toExp i
       xs' = toExp xs
   in  Idx <$> xs' <*> i'
+toExp (E.AppExp (E.Apply f args _) _)
+  | Just fname <- getFun f,
+    fname == "not",
+    [arg] <- getArgs args =
+  Not <$> toExp arg
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
