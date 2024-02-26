@@ -688,17 +688,6 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       ctEq ftype' $ Scalar $ Arrow NoUniqueness Unnamed Observe a $ RetType [] b
       pure (a, b `setUniqueness` NoUniqueness)
 
-distribute :: TypeBase dim u -> TypeBase dim u
-distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
-  Scalar $
-    Arrow
-      u
-      Unnamed
-      mempty
-      (arrayOf s ta)
-      (RetType rd $ distribute (arrayOfWithAliases (uniqueness tr) s tr))
-distribute t = t
-
 checkSlice :: SliceBase NoInfo VName -> TermM [DimIndex]
 checkSlice = mapM checkDimIndex
   where

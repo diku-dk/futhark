@@ -1025,11 +1025,18 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
               autoFrame = am_frame_shape
             }
 
-    pure (tp1, distributeFrame (autoMap am) tp2'', argext, ext, am)
+    pure (tp1, distribute (arrayOf (autoMap am) tp2''), argext, ext, am)
   where
-    distributeFrame frame (Scalar (Arrow u p d a (RetType ds b))) =
-      Scalar $ Arrow u p d (arrayOf frame a) (RetType ds (arrayOfWithAliases (uniqueness b) frame b))
-    distributeFrame frame t = arrayOf frame t
+    distribute :: TypeBase dim u -> TypeBase dim u
+    distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
+      Scalar $
+        Arrow
+          u
+          Unnamed
+          mempty
+          (arrayOf s ta)
+          (RetType rd $ distribute (arrayOfWithAliases (uniqueness tr) s tr))
+    distribute t = t
 checkApply _ _ _ _ _ =
   error "checkApply: array"
 
