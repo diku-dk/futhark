@@ -56,7 +56,7 @@ hoistIf' e =
     m1 =
       ASTMapper
         { mapOnExp = getConds }
-    getConds (Var x) = pure $ Var x
+    getConds (Var x) = pure $ Bool True
     getConds (Array xs) = map (foldl1 (:&&)) $ mapM getConds xs
     -- getConds (If c t f) =
     --   -- TODO also handle if-statements inside c
@@ -75,6 +75,7 @@ hoistIf' e =
     getConds (Idx xs i) =
       -- TODO untested
       (:&&) <$> getConds xs <*> getConds i
+    getConds Recurrence = pure $ Bool True
     getConds (Cases cases) =
       -- TODO also handle condition c (getConds on c)
       mconcat $ map (\(c, e) -> (:&& c) <$> getConds e) (NE.toList cases)
