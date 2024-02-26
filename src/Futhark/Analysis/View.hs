@@ -137,44 +137,13 @@ forwards _ = pure ()
 --      Just don't include the part that actually refines types or annotates
 --      types in the source.
 forward :: E.Exp -> ViewM View
-forward (E.Var (E.QualName _ x) _ _) =
-  pure $ View Empty (toCases $ Var x)
-forward (E.ArrayLit [] _ _) =
-  pure $ View Empty (toCases $ Array [])
-forward (E.ArrayLit es _ _) = do
-  vs <- mapM forward es
-  simplifyPredicates $ foldl1 combine vs
-  where
-    combine (View i (Cases xs)) (View j (Cases ys))
-      | i == j =
-      let zs = [(px :&& py, Array [vx, vy]) | (px, vx) <- NE.toList xs,
-                                              (py, vy) <- NE.toList ys]
-      in  View i (Cases $ NE.fromList zs)
-    combine _ _ = error "incompatible views"
-forward (E.AppExp (E.If c t f _) _) = do
-  -- Maintain invariant that subexpressions are converted to Views (cases).
-  -- No if-statement in Exp.
-  vc <- forward c
-  vt <- forward t
-  vf <- forward f
-  let cs = collect vc
-  let vct = combine cs vt
-  let vcf = combine (map Not cs) vf
-  simplifyPredicates $ vct <> vcf
-  where
-    combine conds (View it (Cases cases)) =
-      let zs = [(p1 :&& p2, e) | p1 <- conds, (p2, e) <- NE.toList cases]
-      in View it (Cases $ NE.fromList zs)
-    -- TODO what about non-Empty iterator here?
-    collect (View Empty (Cases xs)) = [a :&& b | (a, b) <- NE.toList xs]
-    collect e = error ("collect on non-empty iterator: " <> prettyString e)
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
-    E.Lambda params body _ _ _ : args' <- getArgs args = do
+    E.Lambda params body _ _ _ : args' <- getArgs args,
+    Just body' <- toExp body = do
       i <- newNameFromString "i"
       let sz = getSize (head args')
-      let it = Forall i (Iota sz)
       -- Make susbtitutions from function arguments to array names.
       let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
@@ -183,28 +152,22 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      view <- forward body
-      case view of
-        View it' xs | it == it' || it' == Empty ->
-          substituteName subst (View (Forall i (Iota sz)) xs)
-        _ -> error ("Cannot unify iterator of:\n"
-                    <> prettyString view <> "\nwith " <> show it)
-      -- pure $ view'
-  | Just fname <- getFun f,
-    "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
-    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      view <- forward xs'
-      xs <- newNameFromString "scan_xs"
-      insertView xs view
+      substituteName subst $ View (Forall i (Iota sz)) (toCases body')
+  -- | Just fname <- getFun f,
+  --   "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
+  --   [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+  --     view <- forward xs'
+  --     xs <- newNameFromString "scan_xs"
+  --     insertView xs view
 
-      i <- newNameFromString "i"
-      e <-
-        case E.baseString vn of
-          "+" -> pure $ Recurrence ~+~ Idx (Var xs) (Var i)
-          "-" -> pure $ Recurrence ~-~ Idx (Var xs) (Var i)
-          "*" -> pure $ Recurrence ~*~ Idx (Var xs) (Var i)
-          _ -> error ("toExp not implemented for bin op: " <> show vn)
-      pure $ View (Forall i (Iota $ Var i)) (toCases e)
+  --     i <- newNameFromString "i"
+  --     e <-
+  --       case E.baseString vn of
+  --         "+" -> pure $ Recurrence ~+~ Idx (Var xs) (Var i)
+  --         "-" -> pure $ Recurrence ~-~ Idx (Var xs) (Var i)
+  --         "*" -> pure $ Recurrence ~*~ Idx (Var xs) (Var i)
+  --         _ -> error ("toExp not implemented for bin op: " <> show vn)
+  --     pure $ View (Forall i (Iota $ Var i)) (toCases e)
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
     i <- newNameFromString "i"
@@ -222,16 +185,11 @@ toExp (E.Var (E.QualName _ x) _ _) =
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
--- toExp (E.AppExp (E.If c t f _) _)
---   | Just c' <- toExp c,
---     Just t' <- toExp t,
---     Just f' <- toExp f =
---   pure $ Cases (NE.fromList [(c', t'), (Not c', f')])
--- toExp (E.AppExp (E.If c t f _) _) = do
---   c' <- toExp c
---   t' <- toExp t
---   f' <- toExp f
---   pure $ If c' t' f'
+toExp (E.AppExp (E.If c t f _) _) = do
+  c' <- toExp c
+  t' <- toExp t
+  f' <- toExp f
+  pure $ If c' t' f'
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,

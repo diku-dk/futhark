@@ -27,10 +27,10 @@ import Data.List.NonEmpty qualified as NE
 data Exp =
     Var VName
   | Array [Exp]
-  -- | If
-  --     Exp    -- predicate
-  --     Exp    -- true branch
-  --     Exp    -- false branch
+  | If
+      Exp    -- predicate
+      Exp    -- true branch
+      Exp    -- false branch
   | Sum
       Exp    -- index
       Exp    -- lower bound
@@ -155,7 +155,7 @@ instance ASTMappable (Exp, Exp) where
 instance ASTMappable Exp where
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
-  -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
+  astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
@@ -244,13 +244,13 @@ instance Pretty Exp where
       <> "^"
       <+> pretty ub
       <+> parens (pretty e)
-  -- pretty (If c t f) =
-  --   "If"
-  --     <+> parens (pretty c)
-  --     <+> "then"
-  --     <+> parens (pretty t)
-  --     <+> "else"
-  --     <+> parens (pretty f)
+  pretty (If c t f) =
+    "If"
+      <+> parens (pretty c)
+      <+> "then"
+      <+> parens (pretty t)
+      <+> "else"
+      <+> parens (pretty f)
   pretty (SoP sop) = pretty sop
   pretty Recurrence = "%₍₋₁₎"
   pretty (Bool x) = pretty x
