@@ -50,7 +50,7 @@ data HostOp
   deriving (Show)
 
 -- | The size of one dimension of a block.
-type BlockDim = Either Exp KernelConst
+type BlockDim = Either Exp KernelConstExp
 
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
@@ -157,7 +157,7 @@ instance Pretty Kernel where
         )
     where
       pSize (Left x) = "dyn" <+> pretty x
-      pSize (Right x) = "const " <+> pretty x
+      pSize (Right x) = "const" <+> pretty x
 
 -- | When we do a barrier or fence, is it at the local or global
 -- level?  By the 'Ord' instance, global is greater than local.
