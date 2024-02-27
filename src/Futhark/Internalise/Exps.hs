@@ -14,8 +14,10 @@ import Data.List (elemIndex, find, intercalate, intersperse, maximumBy, transpos
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.IR.SOACS as I hiding (stmPat)
 import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.Bindings
@@ -882,10 +884,15 @@ internalisePatLit l t =
 
 withAutoMap_ :: [AutoMap] -> String -> StructType -> [(E.Exp, Maybe VName)] -> ([[SubExp]] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
 withAutoMap_ ams arg_desc res_t args_e innerM =
-  withAutoMap ams arg_desc res_t args_e $ \args_stms -> do
+  withAutoMapNew (zip3 args_e ams (repeat arg_desc)) $ \args_stms -> do
     let (args, stms) = unzip args_stms
     mapM_ addStms $ reverse stms
     innerM args
+
+-- withAutoMap ams arg_desc res_t args_e $ \args_stms -> do
+--  let (args, stms) = unzip args_stms
+--  mapM_ addStms $ reverse stms
+--  innerM args
 
 -- | Internalization of 'AutoMap'-annotated applications.
 --
@@ -1009,6 +1016,154 @@ withAutoMap_ ams arg_desc res_t args_e innerM =
 --
 -- This process continues until the level is greater than the maximum
 -- true level of any application, at which we terminate.
+type Level = Int
+
+type ArgNum = Int
+
+type ArgMap = M.Map Level (M.Map ArgNum AutoMapArg)
+
+data AutoMapArg = AutoMapArg
+  { amArgs :: [VName],
+    amArgStms :: Stms SOACS
+  }
+  deriving (Show)
+
+data AutoMapParam = AutoMapParam
+  { amParams :: [LParam SOACS],
+    amParamStms :: Stms SOACS,
+    amMapDim :: SubExp
+  }
+  deriving (Show)
+
+withAutoMapNew :: [((E.Exp, Maybe VName), AutoMap, String)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
+withAutoMapNew args_am func = do
+  (param_maps, arg_maps) <-
+    unzip . reverse
+      <$> mapM buildArgMap (reverse args_am)
+  let param_map = M.unionsWith (++) $ (fmap . fmap) pure param_maps
+      arg_map = M.unionsWith (++) $ (fmap . fmap) pure arg_maps
+  traceM $
+    unlines
+      [ "##param_map",
+        show param_map,
+        "##arg_map",
+        show arg_map
+      ]
+  buildMapNest param_map arg_map $ maximum $ M.keys arg_map
+  where
+    buildMapNest _ arg_map 0 =
+      func $ map (\a -> (map I.Var $ amArgs a, amArgStms a)) $ arg_map M.! 0
+    buildMapNest param_map arg_map l =
+      case map amMapDim $ param_map M.! l of
+        [] -> buildMapNest param_map arg_map (l - 1)
+        (map_dim : _) -> do
+          let (params, p_stms) =
+                unzip $
+                  map (\p -> (amParams p, amParamStms p)) $
+                    param_map M.! l
+              (args, arg_stms) =
+                unzip $
+                  map (\a -> (amArgs a, amArgStms a)) $
+                    arg_map M.! l
+          letValExp'
+            "automap"
+            . Op
+            . Screma map_dim (concat args)
+            . mapSOAC
+            =<< mkLambda
+              (concat params)
+              ( do
+                  subExpsRes <$> buildMapNest param_map arg_map (l - 1)
+              )
+
+    buildArgMap :: ((E.Exp, Maybe VName), AutoMap, String) -> InternaliseM (M.Map Level AutoMapParam, M.Map Level AutoMapArg)
+    buildArgMap (arg, am, arg_desc) = do
+      ses <- internaliseArg arg_desc arg
+      arg_vnames <- mapM (letExp "" <=< eSubExp) ses
+      ts <- mapM subExpType ses
+      (p_map, a_map) <-
+        foldM (mkArgsAndParams arg_vnames ses ts) (mempty, mempty) $
+          reverse [0 .. trueLevel am]
+      traceM $
+        unlines
+          [ "##truelevel am",
+            show $ trueLevel am,
+            "## arg",
+            prettyString arg,
+            "## am",
+            show am
+          ]
+
+      pure (p_map, a_map)
+      where
+        mkArgsAndParams arg_vnames ses ts (p_map, a_map) l
+          | l == 0 = do
+              let as =
+                    fromMaybe
+                      arg_vnames
+                      ( ( map I.paramName
+                            . amParams
+                        )
+                          <$> p_map M.!? 1
+                      )
+              (ses, stms) <- mkBottomArgs as ts
+              pure $ (p_map, M.insert 0 (AutoMapArg ses stms) a_map)
+          | l == trueLevel am = do
+              (ps, p_stms) <- mkParams arg_vnames ts l
+              d <- outerDim am l
+              pure
+                ( M.insert l (AutoMapParam ps p_stms d) p_map,
+                  M.insert l (AutoMapArg arg_vnames mempty) a_map
+                )
+          | l < trueLevel am && l > 0 = do
+              (ps, p_stms) <- mkParams arg_vnames ts l
+              d <- outerDim am l
+              let as =
+                    map I.paramName $
+                      amParams $
+                        p_map M.! (l + 1)
+              pure
+                ( M.insert l (AutoMapParam ps p_stms d) p_map,
+                  M.insert l (AutoMapArg as mempty) a_map
+                )
+          | otherwise = error ""
+
+        mkParams _ ts level =
+          collectStms $
+            forM ts $ \t ->
+              newParam ("p_" <> arg_desc) $ argType (level - 1) am t
+        mkBottomArgs arg_vnames ts =
+          collectStms $ do
+            rep_shape <- internaliseShape $ autoRep am `E.shapePrefix` autoFrame am
+            if I.shapeRank rep_shape > 0
+              then concat <$> mapM (letValExp "autorep" . BasicOp . Replicate rep_shape . I.Var) arg_vnames
+              else pure arg_vnames
+
+    argType level am t = I.stripArray (trueLevel am - level) t
+
+    internaliseShape :: E.Shape Size -> InternaliseM I.Shape
+    internaliseShape =
+      fmap I.Shape . mapM (internaliseExp1 "") . E.shapeDims
+
+    trueLevel :: AutoMap -> Int
+    trueLevel am
+      | autoMap am == mempty = max 0 $ E.shapeRank (autoFrame am) - E.shapeRank (autoRep am)
+      | otherwise = E.shapeRank $ autoFrame am
+
+    outerDim :: AutoMap -> Int -> InternaliseM SubExp
+    outerDim am level = do
+      traceM $
+        unlines
+          [ "##outerDim",
+            "##am",
+            show am,
+            "##level",
+            show level,
+            "## dff",
+            show (trueLevel am - level)
+          ]
+      internaliseExp1 "" $ (!! (trueLevel am - level)) $ E.shapeDims $ autoFrame am
+
 withAutoMap :: [AutoMap] -> String -> StructType -> [(E.Exp, Maybe VName)] -> ([([SubExp], Stms SOACS)] -> InternaliseM [SubExp]) -> InternaliseM [SubExp]
 withAutoMap ams arg_desc res_t args_e innerM = do
   (args, stms) <-
