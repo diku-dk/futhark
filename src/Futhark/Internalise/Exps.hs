@@ -1036,9 +1036,14 @@ withAutoMap args_am func = do
               args = map amArgs $ arg_map M.! l
 
           reshaped_args <-
-            forM (concat args) $ \argvn ->
+            forM (concat args) $ \argvn -> do
+              arg_t <- subExpType $ I.Var argvn
               letExp "reshaped" $
-                shapeCoerce [map_dim] argvn
+                I.BasicOp $
+                  I.Reshape
+                    I.ReshapeCoerce
+                    (reshapeOuter (I.Shape [map_dim]) 1 $ I.arrayShape arg_t)
+                    argvn
 
           letValExp'
             "automap"
