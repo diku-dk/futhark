@@ -2,13 +2,19 @@
 -- module-free Futhark program into an equivalent with only simple expresssions.
 -- Notably, all non-trivial expression are converted into a list of
 -- let-bindings to make them simpler, with no nested apply, nested lets...
--- This module only performs synthatic operations.
+-- This module only performs syntactic operations.
 --
--- Also, it performs desugaring that is:
--- * Turn operator section into lambda
--- * turn BinOp into application (&& and || are converted to if structure)
--- * turn `let x [i] = e1` into `let x = x with [i] = e1`
--- * binds all implicit sizes
+-- Also, it performs various kinds of desugaring:
+--
+-- * Turns operator sections into explicit lambdas.
+--
+-- * Rewrites BinOp nodes to Apply nodes (&& and || are converted to conditionals).
+--
+-- * Turns `let x [i] = e1` into `let x = x with [i] = e1`.
+--
+-- * Binds all implicit sizes.
+--
+-- * Turns implicit record fields into explicit record fields.
 --
 -- This is currently not done for expressions inside sizes, this processing
 -- still needed in monomorphisation for now.
@@ -43,7 +49,7 @@ applyModifiers =
 -- A binding that occurs in the calculation flow
 data Binding
   = PatBind [SizeBinder VName] (Pat StructType) Exp
-  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Info VName), Info ResRetType, Exp)
+  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Exp VName), Info ResRetType, Exp)
 
 type NormState = (([Binding], [BindModifier]), VNameSource)
 
@@ -164,7 +170,8 @@ getOrdering _ (RecordLit fs loc) = do
     f (RecordFieldExplicit n e floc) = do
       e' <- getOrdering False e
       pure $ RecordFieldExplicit n e' floc
-    f field@RecordFieldImplicit {} = pure field
+    f (RecordFieldImplicit v t _) =
+      f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
 getOrdering _ (ArrayLit es ty loc) = do
   es' <- mapM (getOrdering False) es
   pure $ ArrayLit es' ty loc
@@ -349,11 +356,10 @@ transformBody e = do
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
 
-transformDec :: (MonadFreshNames m) => Dec -> m Dec
-transformDec (ValDec valbind) = do
+transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
+transformValBind valbind = do
   body' <- transformBody $ valBindBody valbind
-  pure $ ValDec (valbind {valBindBody = body'})
-transformDec d = pure d
+  pure $ valbind {valBindBody = body'}
 
-transformProg :: (MonadFreshNames m) => [Dec] -> m [Dec]
-transformProg = mapM transformDec
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
+transformProg = mapM transformValBind

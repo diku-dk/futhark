@@ -41,7 +41,7 @@ checkDoNotShadow loc v =
 -- really a problem - we mostly do this checking to help the user,
 -- since it is likely an error, but it's easy to assign a semantics to
 -- it (normal name shadowing).
-checkForDuplicateNamesInType :: TypeExp NoInfo Name -> TypeM ()
+checkForDuplicateNamesInType :: TypeExp (ExpBase NoInfo Name) Name -> TypeM ()
 checkForDuplicateNamesInType = check mempty
   where
     bad v loc prev_loc =
@@ -139,12 +139,14 @@ resolveAttrInfo (AttrAtom atom loc) =
 resolveAttrInfo (AttrComp name infos loc) =
   AttrComp name <$> mapM resolveAttrInfo infos <*> pure loc
 
-resolveSizeExp :: SizeExp NoInfo Name -> TypeM (SizeExp NoInfo VName)
+resolveSizeExp :: SizeExp (ExpBase NoInfo Name) -> TypeM (SizeExp (ExpBase NoInfo VName))
 resolveSizeExp (SizeExpAny loc) = pure $ SizeExpAny loc
 resolveSizeExp (SizeExp e loc) = SizeExp <$> resolveExp e <*> pure loc
 
 -- | Resolve names in a single type expression.
-resolveTypeExp :: TypeExp NoInfo Name -> TypeM (TypeExp NoInfo VName)
+resolveTypeExp ::
+  TypeExp (ExpBase NoInfo Name) Name ->
+  TypeM (TypeExp (ExpBase NoInfo VName) VName)
 resolveTypeExp orig = checkForDuplicateNamesInType orig >> f orig
   where
     f (TEVar v loc) =
@@ -165,12 +167,13 @@ resolveTypeExp orig = checkForDuplicateNamesInType orig >> f orig
     f (TEArrow Nothing te1 te2 loc) =
       TEArrow Nothing <$> f te1 <*> f te2 <*> pure loc
     f (TEArrow (Just v) te1 te2 loc) =
-      bindSpaced1 Term v $ \v' ->
+      bindSpaced1 Term v loc $ \v' -> do
+        usedName v'
         TEArrow (Just v') <$> f te1 <*> f te2 <*> pure loc
     f (TESum cs loc) =
       TESum <$> mapM (traverse $ mapM f) cs <*> pure loc
     f (TEDim vs te loc) =
-      bindSpaced (map (Term,) vs) $ \vs' ->
+      bindSpaced (map (Term,,loc) vs) $ \vs' ->
         TEDim vs' <$> f te <*> pure loc
     f (TEArray size te loc) =
       TEArray <$> resolveSizeExp size <*> f te <*> pure loc
@@ -328,14 +331,14 @@ resolveAppExp (LetFun fname (tparams, params, ret, NoInfo, fbody) body loc) = do
       resolveParams params $ \params' -> do
         ret' <- traverse resolveTypeExp ret
         (tparams',params',ret',) <$> resolveExp fbody
-  bindSpaced1 Term fname $ \fname' -> do
+  bindSpaced1 Term fname loc $ \fname' -> do
     body' <- resolveExp body
     pure $ LetFun fname' (tparams', params', ret', NoInfo, fbody') body' loc
 resolveAppExp (LetWith (Ident dst _ dstloc) (Ident src _ srcloc) slice e1 e2 loc) = do
   src' <- Ident <$> resolveName src srcloc <*> pure NoInfo <*> pure srcloc
   e1' <- resolveExp e1
   slice' <- resolveSlice slice
-  bindSpaced1 Term dst $ \dstv -> do
+  bindSpaced1 Term dst loc $ \dstv -> do
     let dst' = Ident dstv NoInfo dstloc
     e2' <- resolveExp e2
     pure $ LetWith dst' src' slice' e1' e2' loc
@@ -351,7 +354,7 @@ resolveAppExp (Loop sizes pat e form body loc) = do
   case form of
     For (Ident i _ iloc) bound -> do
       bound' <- resolveExp bound
-      bindSpaced1 Term i $ \iv -> do
+      bindSpaced1 Term i iloc $ \iv -> do
         let i' = Ident iv NoInfo iloc
         resolvePat pat $ \pat' -> do
           body' <- resolveExp body
@@ -376,15 +379,10 @@ resolveSlice = mapM onDimIndex
         <*> traverse resolveExp e2
         <*> traverse resolveExp e3
 
-patNameMap :: PatBase NoInfo VName t -> NameMap
-patNameMap = M.fromList . map asTerm . patIdents
-  where
-    asTerm (Ident v _ _) = ((Term, baseName v), qualName v)
-
 resolvePat :: PatBase NoInfo Name t -> (PatBase NoInfo VName t -> TypeM a) -> TypeM a
 resolvePat outer m = do
   outer' <- resolve outer
-  bindNameMap (patNameMap outer') $ m outer'
+  bindIdents (patIdents outer') $ m outer'
   where
     resolve (Id v NoInfo loc) = do
       checkDoNotShadow loc v
@@ -419,8 +417,8 @@ resolveTypeParams ps m =
   bindSpaced (map typeParamSpace ps) $ \_ ->
     m =<< evalStateT (mapM checkTypeParam ps) mempty
   where
-    typeParamSpace (TypeParamDim pv _) = (Term, pv)
-    typeParamSpace (TypeParamType _ pv _) = (Type, pv)
+    typeParamSpace (TypeParamDim pv loc) = (Term, pv, loc)
+    typeParamSpace (TypeParamType _ pv loc) = (Type, pv, loc)
 
     checkParamName ns v loc = do
       seen <- gets $ M.lookup (ns, v)
@@ -459,7 +457,7 @@ resolveSizes sizes m = do
           pure $ (sizeName size, srclocOf size) : prev
 
     sizeWithSpace size =
-      (Term, sizeName size)
+      (Term, sizeName size, srclocOf size)
 
 -- | Resolve names in a value binding. If this succeeds, then it is
 -- guaranteed that all names references things that are in scope.
@@ -472,5 +470,6 @@ resolveValBind (ValBind entry fname ret NoInfo tparams params body doc attrs loc
     resolveParams params $ \params' -> do
       ret' <- traverse resolveTypeExp ret
       body' <- resolveExp body
-      bindSpaced1 Term fname $ \fname' ->
+      bindSpaced1 Term fname loc $ \fname' -> do
+        usedName fname'
         pure $ ValBind entry fname' ret' NoInfo tparams' params' body' doc attrs' loc

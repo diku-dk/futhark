@@ -255,7 +255,6 @@ data SizeSource
 data TermTypeState = TermTypeState
   { stateConstraints :: Constraints,
     stateCounter :: !Int,
-    stateUsed :: S.Set VName,
     stateWarnings :: Warnings,
     stateNameSource :: VNameSource
   }
@@ -410,13 +409,6 @@ localScope :: (TermScope -> TermScope) -> TermTypeM a -> TermTypeM a
 localScope f = local $ \tenv -> tenv {termScope = f $ termScope tenv}
 
 instance MonadTypeChecker TermTypeM where
-  checkExpForSize e = do
-    checker <- asks termChecker
-    e' <- checker e
-    let t = toStruct $ typeOf e'
-    unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
-    updateTypes e'
-
   warnings ws =
     modify $ \s -> s {stateWarnings = stateWarnings s <> ws}
 
@@ -464,8 +456,6 @@ lookupVar loc qn@(QualName qs name) = do
     Nothing ->
       error $ "lookupVar: " <> show qn
     Just (BoundV tparams t) -> do
-      when (null qs) . modify $ \s ->
-        s {stateUsed = S.insert name $ stateUsed s}
       if null tparams && null qs
         then pure t
         else do
@@ -581,23 +571,25 @@ require why ts e = do
   mustBeOneOf ts (mkUsage (srclocOf e) why) . toStruct =<< expType e
   pure e
 
-termCheckTypeExp ::
-  TypeExp NoInfo VName ->
-  TermTypeM (TypeExp Info VName, [VName], ResRetType)
-termCheckTypeExp te = do
-  (te', svars, rettype, _l) <- checkTypeExp te
+checkExpForSize :: ExpBase NoInfo VName -> TermTypeM Exp
+checkExpForSize e = do
+  checker <- asks termChecker
+  e' <- checker e
+  let t = toStruct $ typeOf e'
+  unify (mkUsage (locOf e') "Size expression") t (Scalar (Prim (Signed Int64)))
+  updateTypes e'
+
+checkTypeExpNonrigid ::
+  TypeExp (ExpBase NoInfo VName) VName ->
+  TermTypeM (TypeExp Exp VName, ResType, [VName])
+checkTypeExpNonrigid te = do
+  (te', svars, rettype, _l) <- checkTypeExp checkExpForSize te
 
   -- No guarantee that the locally bound sizes in rettype are globally
   -- unique, but we want to turn them into size variables, so let's
-  -- give them some unique names.  Maybe this should be done below,
-  -- where we actually turn these into size variables?
+  -- give them some unique names.
   RetType dims st <- renameRetType rettype
 
-  pure (te', svars, RetType dims st)
-
-checkTypeExpNonrigid :: TypeExp NoInfo VName -> TermTypeM (TypeExp Info VName, ResType, [VName])
-checkTypeExpNonrigid te = do
-  (te', svars, RetType dims st) <- termCheckTypeExp te
   forM_ (svars ++ dims) $ \v ->
     constrain v $ Size Nothing $ mkUsage (srclocOf te) "anonymous size in type expression"
   pure (te', st, svars ++ dims)
@@ -662,7 +654,6 @@ runTermTypeM checker (TermTypeM m) = do
         TermTypeState
           { stateConstraints = mempty,
             stateCounter = 0,
-            stateUsed = mempty,
             stateWarnings = mempty,
             stateNameSource = src
           }

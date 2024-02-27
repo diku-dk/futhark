@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* The prelude definition of `filter` is now more memory efficient,
+  particularly when the output is much smaller than the input. (#2109)
+
 ### Removed
 
 ### Changed
@@ -20,6 +23,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * A concatenation simplification would sometimes mess up sizes.
   (#2104)
+
+* Bug related to monomorphisation of polymorphic local functions
+  (#2106).
+
+* Rare crash in short circuiting.
+
+* Referencing an unbound type parameter could crash the type checker
+  (#2113, #2114).
 
 ## [0.25.13]
 

@@ -289,6 +289,7 @@ library
       Futhark.IR.TypeCheck
       Futhark.Internalise
       Futhark.Internalise.AccurateSizes
+      Futhark.Internalise.ApplyTypeAbbrs
       Futhark.Internalise.Bindings
       Futhark.Internalise.Defunctionalise
       Futhark.Internalise.Defunctorise

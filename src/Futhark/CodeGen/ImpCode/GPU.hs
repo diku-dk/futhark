@@ -145,9 +145,9 @@ instance Pretty Kernel where
         ( "blocks"
             <+> brace (pretty $ kernelNumBlocks kernel)
             </> "tblock_size"
-            <+> brace (list $ map (either pretty pretty) $ kernelBlockSize kernel)
+            <+> brace (list $ map pSize $ kernelBlockSize kernel)
             </> "uses"
-            <+> brace (commasep $ map pretty $ kernelUses kernel)
+            <+> brace (stack $ map pretty $ kernelUses kernel)
             </> "failure_tolerant"
             <+> brace (pretty $ kernelFailureTolerant kernel)
             </> "check_shared_memory"
@@ -155,6 +155,9 @@ instance Pretty Kernel where
             </> "body"
             <+> brace (pretty $ kernelBody kernel)
         )
+    where
+      pSize (Left x) = "dyn" <+> pretty x
+      pSize (Right x) = "const " <+> pretty x
 
 -- | When we do a barrier or fence, is it at the local or global
 -- level?  By the 'Ord' instance, global is greater than local.
@@ -313,6 +316,7 @@ instance Pretty KernelOp where
 
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
+  freeIn' (SharedAlloc _ size) = freeIn' size
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a

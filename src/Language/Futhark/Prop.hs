@@ -153,7 +153,7 @@ defaultEntryPoint = nameFromString "main"
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase dim as -> Int
+arrayRank :: TypeBase () u -> Int
 arrayRank = shapeRank . arrayShape
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
@@ -310,7 +310,7 @@ arrayOf = arrayOfWithAliases mempty
 arrayOfWithAliases ::
   u ->
   Shape dim ->
-  TypeBase dim u ->
+  TypeBase dim u' ->
   TypeBase dim u
 arrayOfWithAliases u shape2 (Array _ shape1 et) =
   Array u (shape2 <> shape1) et
@@ -1499,7 +1499,7 @@ type Case = CaseBase Info VName
 type UncheckedType = TypeBase (Shape Name) ()
 
 -- | An unchecked type expression.
-type UncheckedTypeExp = TypeExp NoInfo Name
+type UncheckedTypeExp = TypeExp UncheckedExp Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

@@ -182,9 +182,9 @@ sliceShape _ _ t = pure (t, [])
 
 checkAscript ::
   SrcLoc ->
-  TypeExp NoInfo VName ->
+  TypeExp (ExpBase NoInfo VName) VName ->
   ExpBase NoInfo VName ->
-  TermTypeM (TypeExp Info VName, Exp)
+  TermTypeM (TypeExp Exp VName, Exp)
 checkAscript loc te e = do
   (te', decl_t, _) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -197,9 +197,9 @@ checkAscript loc te e = do
 
 checkCoerce ::
   SrcLoc ->
-  TypeExp NoInfo VName ->
+  TypeExp (ExpBase NoInfo VName) VName ->
   ExpBase NoInfo VName ->
-  TermTypeM (TypeExp Info VName, StructType, Exp)
+  TermTypeM (TypeExp Exp VName, StructType, Exp)
 checkCoerce loc te e = do
   (te', te_t, ext) <- checkTypeExpNonrigid te
   e' <- checkExp e
@@ -1045,7 +1045,7 @@ checkOneExp e = runTermTypeM checkExp $ do
   (tparams, _, _) <-
     letGeneralise (nameFromString "<exp>") (srclocOf e) [] [] $ toRes Nonunique t
   fixOverloadedTypes $ typeVars t
-  e'' <- updateTypes e'
+  e'' <- normTypeFully e'
   localChecks e''
   causalityCheck e''
   pure (tparams, e'')
@@ -1060,7 +1060,7 @@ checkSizeExp e = runTermTypeM checkExp $ do
     typeError (srclocOf e') mempty . withIndexLink "size-expression-bind" $
       "Size expression with binding is forbidden."
   unify (mkUsage e' "Size expression") t (Scalar (Prim (Signed Int64)))
-  updateTypes e'
+  normTypeFully e'
 
 -- Verify that all sum type constructors and empty array literals have
 -- a size that is known (rigid or a type parameter).  This is to
@@ -1291,7 +1291,7 @@ localChecks = void . check
 -- definitions, by treating them as 0-ary functions.
 checkFunDef ::
   ( VName,
-    Maybe (TypeExp NoInfo VName),
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
     [TypeParam],
     [PatBase NoInfo VName ParamType],
     ExpBase NoInfo VName,
@@ -1300,7 +1300,7 @@ checkFunDef ::
   TypeM
     ( [TypeParam],
       [Pat ParamType],
-      Maybe (TypeExp Info VName),
+      Maybe (TypeExp Exp VName),
       ResRetType,
       Exp
     )
@@ -1315,8 +1315,8 @@ checkFunDef (fname, maybe_retdecl, tparams, params, body, loc) =
       typeVars rettype' <> foldMap (typeVars . patternType) params'
 
     -- Then replace all inferred types in the body and parameters.
-    body'' <- updateTypes body'
-    params'' <- updateTypes params'
+    body'' <- normTypeFully body'
+    params'' <- mapM normTypeFully params'
     maybe_retdecl'' <- traverse updateTypes maybe_retdecl'
     rettype'' <- normTypeFully rettype'
 
@@ -1418,7 +1418,7 @@ inferredReturnType loc params t = do
 
 checkBinding ::
   ( VName,
-    Maybe (TypeExp NoInfo VName),
+    Maybe (TypeExp (ExpBase NoInfo VName) VName),
     [TypeParam],
     [PatBase NoInfo VName ParamType],
     ExpBase NoInfo VName,
@@ -1427,7 +1427,7 @@ checkBinding ::
   TermTypeM
     ( [TypeParam],
       [Pat ParamType],
-      Maybe (TypeExp Info VName),
+      Maybe (TypeExp Exp VName),
       ResRetType,
       Exp
     )
