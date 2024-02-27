@@ -1223,7 +1223,7 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
         else Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
-matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
+matchPatSV pat (Dynamic t@(Scalar Record {})) = matchPatSV pat $ svFromType t
 matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType $ toParam Observe t
 matchPatSV pat sv =
   error $
