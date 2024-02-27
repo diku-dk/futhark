@@ -48,6 +48,7 @@ data Exp
 
 data Stmt
   = Skip
+  | Comment T.Text
   | Seq Stmt Stmt
   | DeclareVar Ident Typ
   | Assign Ident Exp
@@ -119,6 +120,7 @@ instance Pretty Exp where
 
 instance Pretty Stmt where
   pretty Skip = ";"
+  pretty (Comment c) = "//" <+> (pretty c)
   pretty (Seq s1 s2) = semistack [pretty s1, pretty s2]
   pretty (DeclareVar x t) = "var" <+> pretty x <+> ":" <+> pretty t
   pretty (Assign x e) = pretty x <+> "=" <+> pretty e

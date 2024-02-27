@@ -174,7 +174,7 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) =
     (wgslConvOp (ZExt Int32 Int64) $ WGSL.VarExp builtinBlockSize)
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) =
   WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinLockstepWidth)
-genWGSLStm _ = WGSL.Skip
+genWGSLStm _ = WGSL.Comment "TODO: Unimplemented statement"
 
 wgslBinOp :: BinOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslBinOp (Add Int64 _) = \a b -> WGSL.CallExp "add_i64" [a, b]
@@ -186,7 +186,7 @@ wgslBinOp (FSub _) = WGSL.BinOpExp "-"
 wgslBinOp (Mul Int64 _) = \a b -> WGSL.CallExp "mul_i64" [a, b]
 wgslBinOp (Mul _ _) = WGSL.BinOpExp "*"
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
-wgslBinOp _ = WGSL.BinOpExp "???"
+wgslBinOp _ = WGSL.BinOpExp "<TODO: unimplemented binop>"
 
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
