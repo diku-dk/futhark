@@ -1034,15 +1034,21 @@ withAutoMap args_am func = do
         (map_dim : _) -> do
           let params = map amParams $ param_map M.! l
               args = map amArgs $ arg_map M.! l
+
+          reshaped_args <-
+            forM (concat args) $ \argvn ->
+              letExp "reshaped" $
+                shapeCoerce [map_dim] argvn
+
           letValExp'
             "automap"
             . Op
-            . Screma map_dim (concat args)
+            . Screma map_dim reshaped_args
             . mapSOAC
             =<< mkLambda
-                    (concat params)
-                    ( subExpsRes <$> buildMapNest param_map arg_map (l - 1)
-                    )
+              (concat params)
+              ( subExpsRes <$> buildMapNest param_map arg_map (l - 1)
+              )
 
     buildArgMap ::
       ((E.Exp, Maybe VName), AutoMap, String) ->
