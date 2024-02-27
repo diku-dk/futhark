@@ -14,5 +14,5 @@ def calculate_dangling_ranks_am [n] (ranks: [n]f32) (sizes: [n]i32): *[]f32 =
   let total = f32.sum weights / f32.i64 n
   in ranks + total
 
-entry calculate_dangling_ranks [n] (ranks: [n]f32) (sizes: [n]i32): []bool =
-  calculate_dangling_ranks_orig ranks sizes == calculate_dangling_ranks_am ranks sizes 
+entry calculate_dangling_ranks [n] (ranks: [n]f32) (sizes: [n]i32): bool =
+  and (calculate_dangling_ranks_orig ranks sizes == calculate_dangling_ranks_am ranks sizes)
