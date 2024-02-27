@@ -234,12 +234,6 @@ indexExp :: Count Elements (TExp Int64) -> WGSL.Exp
 -- bits.
 indexExp = genWGSLExp . ConvOpExp (ZExt Int64 Int32) . untyped . unCount
 
-scalarUses :: [ImpGPU.KernelUse] -> [(WGSL.Ident, WGSL.Typ)]
-scalarUses [] = []
-scalarUses ((ImpGPU.ScalarUse name typ):us) =
-  (nameToIdent name, WGSL.Prim (primWGSLType typ)) : scalarUses us
-scalarUses (_:us) = scalarUses us
-
 -- | Generate a struct declaration and corresponding uniform binding declaration
 -- for all the scalar 'KernelUse's. Also generate a block of statements that
 -- copies the struct fields into local variables so the kernel body can access
@@ -251,7 +245,8 @@ genScalarCopies kernel = ([structDecl, bufferDecl], copies)
       "Scalars_" <> nameToText (ImpGPU.kernelName kernel)
     bufferName = textToIdent $
       "scalars_" <> nameToText (ImpGPU.kernelName kernel)
-    scalars = scalarUses (ImpGPU.kernelUses kernel)
+    scalars = [(nameToIdent name, WGSL.Prim (primWGSLType typ))
+                | ImpGPU.ScalarUse name typ <- ImpGPU.kernelUses kernel]
     structDecl = WGSL.StructDecl $
       WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
     bufferAttribs = WGSL.bindingAttribs 0 0
@@ -297,8 +292,8 @@ genConstAndBuiltinDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
 genConstAndBuiltinDecls kernel = constDecls ++ builtinDecls
   where
     constDecls =
-      [ WGSL.OverrideDecl (nameToIdent name) (WGSL.Prim WGSL.Int32) |
-        ImpGPU.ConstUse name _ <- ImpGPU.kernelUses kernel ]
+      [ WGSL.OverrideDecl (nameToIdent name) (WGSL.Prim WGSL.Int32)
+        | ImpGPU.ConstUse name _ <- ImpGPU.kernelUses kernel ]
     builtinDecls =
       [WGSL.OverrideDecl builtinLockstepWidth (WGSL.Prim WGSL.Int32),
        WGSL.OverrideDecl builtinBlockSize (WGSL.Prim WGSL.Int32)]
