@@ -89,6 +89,8 @@ struct futhark_context_config {
   int num_build_opts;
   char* *build_opts;
 
+  int unified_memory;
+
   char* preferred_device;
   int preferred_device_num;
 
@@ -110,6 +112,8 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->preferred_device_num = 0;
   cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
+
+  cfg->unified_memory = 2;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
@@ -164,6 +168,10 @@ const char* futhark_context_config_get_program(struct futhark_context_config *cf
 void futhark_context_config_set_program(struct futhark_context_config *cfg, const char *s) {
   free(cfg->program);
   cfg->program = strdup(s);
+}
+
+void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
+  cfg->unified_memory = flag;
 }
 
 void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
@@ -268,11 +276,6 @@ struct futhark_context {
   hipStream_t stream;
 
   struct free_list gpu_free_list;
-
-  // If true, use managed memory for Futhark-level allocations. We may
-  // still use unmanaged memory for our own book-keeping arrays
-  // (global_failure etc).
-  bool use_managed_memory;
 
   size_t max_thread_block_size;
   size_t max_grid_size;
@@ -691,10 +694,12 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   free_list_init(&ctx->gpu_free_list);
 
-  ctx->use_managed_memory = device_query(ctx->dev, hipDeviceAttributeManagedMemory);
+  if (ctx->cfg->unified_memory == 2) {
+    ctx->cfg->unified_memory = device_query(ctx->dev, hipDeviceAttributeManagedMemory);
+  }
 
   if (ctx->cfg->logging) {
-    if (ctx->use_managed_memory) {
+    if (ctx->cfg->unified_memory) {
       fprintf(ctx->log, "Using managed memory\n");
     } else {
       fprintf(ctx->log, "Using unmanaged memory\n");
@@ -955,7 +960,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
   hipError_t res;
 
-  if (ctx->use_managed_memory) {
+  if (ctx->cfg->unified_memory) {
     res = hipMallocManaged(mem_out, size, hipMemAttachGlobal);
   } else {
     res = hipMalloc(mem_out, size);
