@@ -972,7 +972,7 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, a
 
   pure
     ( mkApply fname' [(Nothing, mempty, f'), (argext, am, arg')] callret,
-      autoMapSV (autoMap am) sv
+      autoMapSV (autoFrame am) sv
       -- sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
@@ -996,7 +996,7 @@ defuncApplyArg _ (f', DynamicFun _ sv) (((argext, am), arg), argtypes) = do
         "## ret sv",
         show $ autoMapSV (autoMap am) sv
       ]
-  pure (apply_e, autoMapSV (autoMap am) sv)
+  pure (apply_e, autoMapSV (autoFrame am) sv)
 -- pure (apply_e, sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
