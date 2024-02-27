@@ -147,7 +147,7 @@ instance Pretty Kernel where
             </> "tblock_size"
             <+> brace (list $ map (either pretty pretty) $ kernelBlockSize kernel)
             </> "uses"
-            <+> brace (commasep $ map pretty $ kernelUses kernel)
+            <+> brace (stack $ map pretty $ kernelUses kernel)
             </> "failure_tolerant"
             <+> brace (pretty $ kernelFailureTolerant kernel)
             </> "check_shared_memory"
