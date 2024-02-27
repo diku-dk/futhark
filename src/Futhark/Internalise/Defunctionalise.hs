@@ -907,14 +907,18 @@ defuncApplyArg ::
   DefM (Exp, StaticVal)
 defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, am), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
-  let env' = alwaysMatchPatSV pat arg_sv
+  let arg_sv' =
+        case arg_sv of
+          (Dynamic ty@(Array {})) -> Dynamic $ stripArray (shapeRank $ autoFrame am) ty
+          _ -> arg_sv
       dims = mempty
+      env' = alwaysMatchPatSV pat arg_sv'
   (lam_e', sv) <-
     localNewEnv (env' <> closure_env) $
       defuncExp lam_e
 
   let closure_pat = buildEnvPat dims closure_env
-      pat' = updatePat pat arg_sv
+      pat' = updatePat pat arg_sv'
 
   globals <- asks fst
 
