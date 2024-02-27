@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Translation of ImpCode Exp and Code to C.
 module Futhark.CodeGen.Backends.GenericC.Code
@@ -15,6 +16,7 @@ module Futhark.CodeGen.Backends.GenericC.Code
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.Reader (asks)
 import Data.Map qualified as M
 import Data.Maybe
@@ -43,9 +45,6 @@ errorMsgString (ErrorMsg parts) = do
       onPart (ErrorVal (FloatType Float64) x) = ("%f",) <$> compileExp x
   (formatstrs, formatargs) <- mapAndUnzipM onPart parts
   pure (mconcat formatstrs, formatargs)
-
-compileExp :: Exp -> CompilerM op s C.Exp
-compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
 
 -- | Tell me how to compile a @v@, and I'll Compile any @PrimExp v@ for you.
 compilePrimExp :: (Monad m) => (v -> m C.Exp) -> PrimExp v -> m C.Exp
@@ -112,6 +111,14 @@ compilePrimExp f (BinOpExp bop x y) = do
 compilePrimExp f (FunExp h args _) = do
   args' <- mapM (compilePrimExp f) args
   pure [C.cexp|$id:(funName (nameFromString h))($args:args')|]
+
+-- | Compile prim expression to C expression.
+compileExp :: Exp -> CompilerM op s C.Exp
+compileExp = compilePrimExp $ \v -> pure [C.cexp|$id:v|]
+
+instance C.ToExp (TExp t) where
+  toExp e _ =
+    runIdentity . compilePrimExp (\v -> pure [C.cexp|$id:v|]) $ untyped e
 
 linearCode :: Code op -> [Code op]
 linearCode = reverse . go []
