@@ -1035,10 +1035,20 @@ withAutoMap args_am func = do
           let params = map amParams $ param_map M.! l
               args = map amArgs $ arg_map M.! l
 
+          reshaped_args <-
+            forM (concat args) $ \argvn -> do
+              arg_t <- subExpType $ I.Var argvn
+              letExp "reshaped" $
+                I.BasicOp $
+                  I.Reshape
+                    I.ReshapeCoerce
+                    (reshapeOuter (I.Shape [map_dim]) 1 $ I.arrayShape arg_t)
+                    argvn
+
           letValExp'
             "automap"
             . Op
-            . Screma map_dim (concat args)
+            . Screma map_dim reshaped_args
             . mapSOAC
             =<< mkLambda
               (concat params)
@@ -1069,20 +1079,9 @@ withAutoMap args_am func = do
           | l == trueLevel am = do
               ps <- mkParams arg_vnames ts l
               d <- outerDim am l
-
-              reshaped_args <-
-                forM arg_vnames $ \argvn -> do
-                  arg_t <- subExpType $ I.Var argvn
-                  letExp "reshaped" $
-                    I.BasicOp $
-                      I.Reshape
-                        I.ReshapeCoerce
-                        (reshapeOuter (I.Shape [d]) 1 $ I.arrayShape arg_t)
-                        argvn
-
               pure
                 ( M.insert l (AutoMapParam ps d) p_map,
-                  M.insert l (AutoMapArg reshaped_args) a_map
+                  M.insert l (AutoMapArg arg_vnames) a_map
                 )
           | l < trueLevel am && l > 0 = do
               ps <- mkParams arg_vnames ts l
