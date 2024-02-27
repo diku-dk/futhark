@@ -183,6 +183,7 @@ wgslBinOp (FAdd _) = WGSL.BinOpExp "+"
 wgslBinOp (Sub Int64 _) = \a b -> WGSL.CallExp "sub_i64" [a, b]
 wgslBinOp (Sub _ _) = WGSL.BinOpExp "-"
 wgslBinOp (FSub _) = WGSL.BinOpExp "-"
+wgslBinOp (Mul Int64 _) = \a b -> WGSL.CallExp "mul_i64" [a, b]
 wgslBinOp (Mul _ _) = WGSL.BinOpExp "*"
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
 wgslBinOp _ = WGSL.BinOpExp "???"
