@@ -1062,10 +1062,10 @@ withAutoMap args_am func = do
       ses <- internaliseArg arg_desc arg
       arg_vnames <- mapM (letExp "" <=< eSubExp) ses
       ts <- mapM subExpType ses
-      foldM (mkArgsAndParams arg_vnames ses ts) (mempty, mempty) $
+      foldM (mkArgsAndParams arg_vnames ts) (mempty, mempty) $
         reverse [0 .. trueLevel am]
       where
-        mkArgsAndParams arg_vnames ses ts (p_map, a_map) l
+        mkArgsAndParams arg_vnames ts (p_map, a_map) l
           | l == 0 = do
               let as =
                     maybe
