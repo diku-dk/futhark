@@ -426,6 +426,7 @@ jobs:
           pip install jsonschema
           module unload cuda
           module load cuda/11.8
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader
           futhark test tests \
             --backend=cuda \
             --cache-extension=cache \
