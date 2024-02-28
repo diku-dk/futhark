@@ -10,7 +10,6 @@ module Futhark.CodeGen.ImpGen.GPU.ToOpenCL
 where
 
 import Control.Monad
-import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
@@ -332,21 +331,11 @@ ensureDeviceFuns code = do
     toDevice :: HostOp -> KernelOp
     toDevice _ = bad
 
-compileConstExp :: KernelConstExp -> C.Exp
-compileConstExp e = runIdentity $ GC.compilePrimExp (pure . kernelConstToExp) e
-  where
-    kernelConstToExp (SizeConst key _) =
-      [C.cexp|$id:key|]
-    kernelConstToExp (SizeMaxConst size_class) =
-      [C.cexp|$id:field|]
-      where
-        field = "max_" <> prettyString size_class
-
-isConst :: BlockDim -> Maybe T.Text
+isConst :: BlockDim -> Maybe KernelConstExp
 isConst (Left (ValueExp (IntValue x))) =
-  Just $ prettyText $ intToInt64 x
+  Just $ ValueExp (IntValue x)
 isConst (Right e) =
-  Just $ expText $ compileConstExp e
+  Just e
 isConst _ = Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
@@ -439,15 +428,30 @@ onKernel target kernel = do
           ++ take (numFailureParams safety) failure_params
           ++ use_params
 
-      attribute =
+      (attribute_consts, attribute) =
         case mapM isConst $ kernelBlockSize kernel of
           Just [x, y, z] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, z) <> "\n"
+            ( [(xv, x), (yv, y), (zv, z)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, zv) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
+              zv = nameFromText $ zEncodeText $ nameToText name <> "_dim3"
           Just [x, y] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, 1 :: Int) <> "\n"
+            ( [(xv, x), (yv, y)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
           Just [x] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
-          _ -> "FUTHARK_KERNEL\n"
+            ( [(xv, x)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, 1 :: Int, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+          _ -> (mempty, "FUTHARK_KERNEL\n")
 
       kernel_fun =
         attribute
@@ -469,7 +473,7 @@ onKernel target kernel = do
       { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
         clUsedTypes = typesInKernel kernel <> clUsedTypes s,
         clFailures = kernelFailures kstate,
-        clConstants = kernel_consts <> clConstants s
+        clConstants = attribute_consts <> kernel_consts <> clConstants s
       }
 
   -- The error handling stuff is automatically added later.
