@@ -3,12 +3,11 @@ module Futhark.Analysis.View.Rules where
 import Futhark.Analysis.View.Representation
 import Control.Monad.RWS.Strict hiding (Sum)
 import qualified Data.Map as M
-import Debug.Trace (trace, traceM)
+import Debug.Trace (trace)
 import Futhark.Util.Pretty (prettyString)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Control.Exception
--- import Control.Monad.Trans.State.Lazy qualified as S
 
 substituteViews :: View -> ViewM View
 substituteViews view = do
@@ -32,32 +31,24 @@ substituteViews view = do
           pure e2
         _ -> pure e
 
--- Hoists case expressions to be the outermost contructor
--- in the view expression by merging cases.
--- 1. seems like a fold where the accumulator is the new Exp
---    that always maintains an outermost Case "invariant"
--- hoistCases :: View -> ViewM View
--- -- hoistCases = pure
--- hoistCases (Forall i dom e) = do
---   traceM ("🎭 hoisting ifs")
---   let cases = hoistCases' e
---   pure $ Forall i dom (Cases $ NE.fromList $ cases)
-hoistIf :: View -> ViewM View
-hoistIf (View it e) = do
-  pure $ View it (Cases $ NE.fromList $ hoistIf' e)
+-- Hoist case expressions to the outermost constructor in the view expression
+-- by merging them.
+hoistCases :: View -> ViewM View
+hoistCases (View it e) =
+  pure $ View it (Cases $ NE.fromList $ hoistCases' e)
 
-hoistIf' :: Exp -> [(Exp, Exp)]
-hoistIf' e =
-  let cs = getConds e -- XXX `Not` is a hack to match on outermost if.
+hoistCases' :: Exp -> [(Exp, Exp)]
+hoistCases' e =
+  let cs = getConds e
       xs = onExp e
       -- cs' = trace ("\n cs:" <> prettyString cs) cs
       -- xs' = trace ("\n xs:" <> prettyString xs) xs
-  in assert (length cs /= length (Bool True : xs)) $ zip cs xs
+  in assert (length cs == length xs) $ zip cs xs
   where
     m1 =
       ASTMapper
         { mapOnExp = getConds }
-    getConds (Var x) = pure $ Bool True
+    getConds (Var _) = pure $ Bool True
     getConds (Array xs) = map (foldl1 (:&&)) $ mapM getConds xs
     -- getConds (If c t f) =
     --   -- TODO also handle if-statements inside c
@@ -79,7 +70,7 @@ hoistIf' e =
     getConds Recurrence = pure $ Bool True
     getConds (Cases cases) =
       -- TODO also handle condition c (getConds on c)
-      mconcat $ map (\(c, e) -> (:&& c) <$> getConds e) (NE.toList cases)
+      mconcat $ map (\(c, e') -> (:&& c) <$> getConds e') (NE.toList cases)
     getConds v = astMap m1 v
 
     m2 =
@@ -92,7 +83,7 @@ hoistIf' e =
     --   onExp t ++ onExp f
     onExp (Cases cases) =
       -- TODO also handle condition c
-      mconcat $ map (\(c, e) -> onExp e) (NE.toList cases)
+      mconcat $ map (\(c, e') -> onExp e') (NE.toList cases)
     onExp v = astMap m2 v
 
 simplifyPredicates :: View -> ViewM View

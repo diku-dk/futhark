@@ -110,12 +110,12 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView <- forward e
     tracePrettyM newView
     traceM "🎭 hoisting ifs"
-    newView1 <- hoistIf newView >>= simplifyPredicates
+    newView1 <- hoistCases newView >>= simplifyPredicates
     tracePrettyM newView1
-    newView2 <- substituteViews newView1 -- >>= hoistIf >>= simplifyPredicates
+    newView2 <- substituteViews newView1
     tracePrettyM newView2
     traceM "🎭 hoisting ifs"
-    newView3 <- hoistIf newView2 >>= simplifyPredicates
+    newView3 <- hoistCases newView2 >>= simplifyPredicates
     tracePrettyM newView3
     traceM "\n"
     insertView x newView3
