@@ -136,6 +136,8 @@ struct futhark_context_config {
   char* preferred_device;
   int ignore_blacklist;
 
+  int unified_memory;
+
   char* dump_binary_to;
   char* load_binary_from;
 
@@ -165,6 +167,8 @@ static void backend_context_config_setup(struct futhark_context_config* cfg) {
   cfg->dump_binary_to = NULL;
   cfg->load_binary_from = NULL;
   cfg->program = strconcat(gpu_program);
+
+  cfg->unified_memory = 2;
 
   // The following are dummy sizes that mean the concrete defaults
   // will be set during initialisation via hardware-inspection-based
@@ -430,6 +434,10 @@ void futhark_context_config_dump_binary_to(struct futhark_context_config *cfg, c
 void futhark_context_config_load_binary_from(struct futhark_context_config *cfg, const char *path) {
   free(cfg->load_binary_from);
   cfg->load_binary_from = strdup(path);
+}
+
+void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
+  cfg->unified_memory = flag;
 }
 
 void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {

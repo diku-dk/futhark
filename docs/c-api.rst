@@ -514,6 +514,19 @@ The following API functions are available when using the ``opencl``,
    with :c:func:`futhark_context_config_set_platform`, only the
    devices from matching platforms are considered.
 
+.. c:function:: void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag);
+
+   Use "unified" memory for GPU arrays. This means arrays are located
+   in memory that is also accessible from the CPU. The details depends
+   on the backend and hardware in use. The following values are
+   supported:
+
+   * 0: never use managed memory.
+
+   * 1: always use managed memory.
+
+   * 2: use managed memory if the device claims to support it (the
+     default).
 
 Exotic
 ~~~~~~
