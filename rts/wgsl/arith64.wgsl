@@ -2,6 +2,8 @@
 
 alias i64 = vec2<i32>; // (low, high)
 
+const zero_i64: i64 = i64(0, 0); 
+
 fn add_i64(a: i64, b: i64) -> i64 {
   // return bitcast<i64>(add_u64(bitcast<u64>(a), bitcast<u64>(b)));
   var r = a + b;

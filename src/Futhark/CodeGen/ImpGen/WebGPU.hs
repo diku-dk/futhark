@@ -149,11 +149,27 @@ primWGSLType Bool = WGSL.Bool
 primWGSLType (IntType Int8) = WGSL.Int32
 primWGSLType (IntType Int16) = WGSL.Int32
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
-primWGSLType Unit = error "TODO: no unit in WGSL"
+primWGSLType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
 genWGSLStm :: Code ImpGPU.KernelOp -> WGSL.Stmt
 genWGSLStm Skip = WGSL.Skip
 genWGSLStm (s1 :>>: s2) = WGSL.Seq (genWGSLStm s1) (genWGSLStm s2)
+genWGSLStm (For iName bound body) =
+  WGSL.For i zero (lt (WGSL.VarExp i) (genWGSLExp bound))
+    (WGSL.Assign i $ add (WGSL.VarExp i) (WGSL.IntExp 1))
+    (genWGSLStm body)
+  where
+    i = nameToIdent iName
+    boundIntType = case primExpType bound of
+                     IntType t -> t
+                     _ -> error "non-integer Exp for loop bound"
+    add = wgslBinOp $ Add boundIntType OverflowWrap
+    lt = wgslCmpOp $ CmpUlt boundIntType
+    zero = case boundIntType of
+             Int64 -> WGSL.VarExp "zero_i64"
+             _ -> WGSL.IntExp 0
+genWGSLStm (While cond body) =
+  WGSL.While (genWGSLExp $ untyped cond) (genWGSLStm body)
 genWGSLStm (DeclareScalar name _ typ) =
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
 genWGSLStm (If cond cThen cElse) =
