@@ -709,10 +709,13 @@ histKernelLocalPass
         sComment "initialize histograms in shared memory" $
           onAllHistograms $ \dest_local dest_global op ne local_subhisto_i global_subhisto_i local_bucket_is global_bucket_is ->
             sComment "First subhistogram is initialised from global memory; others with neutral element." $ do
+              dest_global_shape <- map pe64 . arrayDims <$> lookupType dest_global
               let global_is = map Imp.le64 segment_is ++ [0] ++ global_bucket_is
                   local_is = sExt64 local_subhisto_i : local_bucket_is
+                  global_in_bounds =
+                    inBounds (Slice (map DimFix global_is)) dest_global_shape
               sIf
-                (global_subhisto_i .==. 0)
+                (global_subhisto_i .==. 0 .&&. global_in_bounds)
                 (copyDWIMFix dest_local local_is (Var dest_global) global_is)
                 ( sLoopNest (histOpShape op) $ \is ->
                     copyDWIMFix dest_local (local_is ++ is) ne []
