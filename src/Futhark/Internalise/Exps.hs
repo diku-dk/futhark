@@ -8,13 +8,11 @@ module Futhark.Internalise.Exps (transformProg) where
 import Control.Monad
 import Control.Monad.Reader
 import Data.Bifunctor
-import Data.Either
 import Data.Foldable (toList)
-import Data.List (elemIndex, find, intercalate, intersperse, maximumBy, transpose, zip4)
+import Data.List (elemIndex, find, intercalate, intersperse, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.IR.SOACS as I hiding (stmPat)
@@ -348,13 +346,12 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
       let subst = map (,E.ExpSubst (E.sizeFromInteger 0 mempty)) ext
           et' = E.applySubst (`lookup` subst) et
       internaliseExp desc (E.Hole (Info et') loc)
-    (FunctionName qfname, argsam) -> do
+    (FunctionName qfname, args) -> do
       -- Argument evaluation is outermost-in so that any existential sizes
       -- created by function applications can be brought into scope.
       let fname = nameFromString $ prettyString $ baseName $ qualLeaf qfname
           loc = srclocOf e
-          (args, ams) = unzip argsam
-          args_am_desc = zip3 args ams (repeat (nameToString fname ++ "_arg"))
+          arg_desc = nameToString fname ++ "_arg"
 
       -- Some functions are magical (overloaded) and we handle that here.
       case () of
@@ -364,21 +361,20 @@ internaliseAppExp desc (E.AppRes et ext) e@E.Apply {} =
           -- existential), so we can safely ignore the existential
           -- dimensions.
           | Just internalise <- isOverloadedFunction qfname desc loc -> do
-              withAutoMap args_am_desc $ \args' -> do
-                let prepareArg ((arg, _), am, _) arg' =
-                      (E.toStruct $ E.stripArray (E.shapeRank $ autoMap am) (E.typeOf arg), arg')
-                internalise $ zipWith prepareArg args_am_desc args'
+              let prepareArg (arg, _) =
+                    (E.toStruct (E.typeOf arg),) <$> internaliseExp "arg" arg
+              internalise =<< mapM prepareArg args
           | Just internalise <- isIntrinsicFunction qfname (map fst args) loc ->
               internalise desc
           | baseTag (qualLeaf qfname) <= maxIntrinsicTag,
-            Just (rettype, _) <- M.lookup fname I.builtInFunctions ->
-              withAutoMap args_am_desc $ \args' -> do
-                let tag ses = [(se, I.Observe) | se <- ses]
-                let args'' = concatMap tag args'
-                letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
+            Just (rettype, _) <- M.lookup fname I.builtInFunctions -> do
+              let tag ses = [(se, I.Observe) | se <- ses]
+              args' <- reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              let args'' = concatMap tag args'
+              letValExp' desc $ I.Apply fname args'' [(I.Prim rettype, mempty)] (Safe, loc, [])
           | otherwise -> do
-              withAutoMap args_am_desc $ \args' -> do
-                funcall desc qfname (concat args') loc
+              args' <- concat . reverse <$> mapM (internaliseArg arg_desc) (reverse args)
+              funcall desc qfname args' loc
 internaliseAppExp desc _ (E.LetPat sizes pat e body _) =
   internalisePat desc sizes pat e $ internaliseExp desc body
 internaliseAppExp _ _ (E.LetFun ofname _ _ _) =
@@ -878,255 +874,6 @@ internalisePatLit (E.PatLitFloat x) (E.Scalar (E.Prim (E.FloatType ft))) =
   I.FloatValue $ floatValue ft x
 internalisePatLit l t =
   error $ "Nonsensical pattern and type: " ++ show (l, t)
-
--- | Internalization of 'AutoMap'-annotated applications.
---
--- Each application @f x@ has an annotation with @AutoMap R M F@ where
--- @R, M, F@ are the autorep, automap, and frame shapes,
--- respectively.
---
--- The application @f x@ will have type @F t@ for some @t@, i.e. @(f
--- x) : F t@. The frame @F@ is a prefix of the type of @f x@; namely
--- it is the total accumulated shape that is due to implicit maps.
--- Another way of thinking about that is that @|F|@ is is the level
--- of the automap-nest that @f x@ is in. For example, if @|F| = 2@
--- then we know that @f x@ implicitly stands for
---
--- > map (\x' -> map (\x'' -> f x'') x') x
---
--- For an application with a non-empty autorep annotation, the frame
--- tells about how many dimensions of the replicate can be eliminated.
--- For example, @[[1,2],[3,4]] + 5@ will yield the following annotations:
---
--- > ([[1,2],[3,4]] +)     -- AutoMap {R = mempty, M = [2][2], F = [2][2]}
--- > (([[1,2],[3,4]] +) 5) -- AutoMap {R = [2][2], M = mempty, F = [2][2]}
---
--- All replicated arguments are pushed down the auto-map nest. Each
--- time a replicated argument is pushed down a level of an
--- automap-nest, one fewer replicates is needed (i.e., the outermost
--- dimension of @R@ can be dropped). Replicated arguments are pushed
--- down the nest until either 1) the bottom of the nest is encountered
--- or 2) no replicate dimensions remain. For example, in the second
--- application above @R@ = @F@, so we can push the replicated argument
--- down two levels. Since each level effectively removes a dimension
--- of the replicate, no replicates will be required:
---
--- > map (\xs -> map (\x -> f x'' 5) xs) [[1,2],[3,4]]
---
--- The number of replicates that are actually required is given by
--- max(|R| - |F|, 0).
---
--- An expression's "true level" is the level at which that expression
--- will appear in the automap-nest. The bottom of a mapnest is level 0.
---
--- * For annotations with @R = mempty@, the true level is @|F|@.
--- * For annotations with @M = mempty@, the true level is @|F| - |R|@.
---
--- If @|R| > |F|@ then actual replicates (namely @|R| - |F|@ of them)
--- will be required at the bottom of the mapnest.
---
--- Note that replicates can only appear at the bottom of a mapnest; any
--- expression of the form
---
--- > map (\ls x' rs -> e) (replicate x)
---
--- can always be written as
---
--- > map (\ls rs -> e[x' -> x])
---
--- Let's look at another example. Consider (with exact sizes omitted for brevity)
---
--- > f    : a -> a -> a -> []a -> [][][]a -> a
--- > xss  : [][]a
--- > ys   : []a
--- > zsss : [][][]a
--- > w    : a
--- > vss  : [][]a
---
--- and the application
---
--- > f xss ys zsss w vss
---
--- which will have the following annotations
---
--- > (f xss)                          -- AutoMap {R = mempty,    M = [][],   F = [][]}    (1)
--- > ((f xss) ys)                     -- AutoMap {R = [],        M = mempty, F = [][]}    (2)
--- > (((f xss) ys) zsss)              -- AutoMap {R = mempty,    M = [],     F = [][][]}  (3)
--- > ((((f xss) ys) zsss) w)          -- AutoMap {R = [][][][],  M = mempty, F = [][][]}  (4)
--- > (((((f xss) ys) zsss) w) vss)    -- AutoMap {R = [],        M = mempty, F = [][][]}  (5)
---
--- This will yield the following mapnest.
---
--- >   map (\zss ->
--- >    map (\xs zs vs ->
--- >      map (\x y z v -> f x y z (replicate w) v) xs ys zs v) xss zss vss) zsss
---
--- Let's see how we'd construct this mapnest from the annotations. We construct
--- the nest bottom-up. We have:
---
--- Application | True level
--- ---------------------------
--- (1)         | |[][]|                = 2
--- (2)         | |[][]| - |[]|         = 1
--- (3)         | |[][][]|              = 3
--- (4)         | |[][][]| - |[][][][]| = -1
--- (5)         | |[][][]| - |[]|       = 2
---
--- We start at level 0.
--- * Any argument with a negative true level of @-n@ will be replicated @n@ times;
---   the exact shapes can be found by removing the @F@ postfix from @R@,
---   i.e. @R = shapes_to_rep_by <> F@.
--- * Any argument with a 0 true level will be included.
--- * For any argument @arg@ with a positive true level, we construct a new parameter
---   whose type is @arg@ with the leading @n@ dimensions (where @n@ is the true level)
---   removed.
---
--- Following the rules above, @w@ will be replicated once. For the remaining arguments,
--- we create new parameters @x : a, y : a, z : a , v : a@. Hence, level 0 becomes
---
--- > f x y z (replicate w) v
---
--- At level l > 0:
--- * There are no replicates.
--- * Any argument with l true level will be included verbatim.
--- * Any argument with true level > l will have a new parameter constructed for it,
---   whose type has the leading @n - l@ dimensions (where @n@ is the true level) removed.
--- * We surround the previous level with a map that binds that levels' new parameters
---   and is passed the current levels' arguments.
---
--- Following the above recipe for level 1, we create parameters
--- @xs : []a, zs : []a, vs :[]a@ and obtain
---
--- > map (\x y z v -> f x y z (replicate w) v) xs ys zs vs
---
--- This process continues until the level is greater than the maximum
--- true level of any application, at which we terminate.
-type Level = Int
-
-data AutoMapArg = AutoMapArg
-  { amArgs :: [VName]
-  }
-  deriving (Show)
-
-data AutoMapParam = AutoMapParam
-  { amParams :: [LParam SOACS],
-    amMapDim :: SubExp
-  }
-  deriving (Show)
-
-withAutoMap ::
-  [((E.Exp, Maybe VName), AutoMap, String)] ->
-  ([[SubExp]] -> InternaliseM [SubExp]) ->
-  InternaliseM [SubExp]
-withAutoMap args_am func = do
-  (param_maps, arg_maps) <-
-    unzip . reverse
-      <$> mapM buildArgMap (reverse args_am)
-  let param_map = M.unionsWith (<>) $ (fmap . fmap) pure param_maps
-      arg_map = M.unionsWith (<>) $ (fmap . fmap) pure arg_maps
-  buildMapNest param_map arg_map $ maximum $ M.keys arg_map
-  where
-    buildMapNest _ arg_map 0 =
-      func $ map (map I.Var . amArgs) $ arg_map M.! 0
-    buildMapNest param_map arg_map l =
-      case map amMapDim $ param_map M.! l of
-        [] -> buildMapNest param_map arg_map (l - 1)
-        (map_dim : _) -> do
-          let params = map amParams $ param_map M.! l
-              args = map amArgs $ arg_map M.! l
-
-          reshaped_args <-
-            forM (concat args) $ \argvn -> do
-              arg_t <- subExpType $ I.Var argvn
-              letExp "reshaped" $
-                I.BasicOp $
-                  I.Reshape
-                    I.ReshapeCoerce
-                    (reshapeOuter (I.Shape [map_dim]) 1 $ I.arrayShape arg_t)
-                    argvn
-
-          letValExp'
-            "automap"
-            . Op
-            . Screma map_dim reshaped_args
-            . mapSOAC
-            =<< mkLambda
-              (concat params)
-              ( subExpsRes <$> buildMapNest param_map arg_map (l - 1)
-              )
-
-    buildArgMap ::
-      ((E.Exp, Maybe VName), AutoMap, String) ->
-      InternaliseM (M.Map Level AutoMapParam, M.Map Level AutoMapArg)
-    buildArgMap (arg, am, arg_desc) = do
-      ses <- internaliseArg arg_desc arg
-      arg_vnames <- mapM (letExp "" <=< eSubExp) ses
-      ts <- mapM subExpType ses
-      foldM (mkArgsAndParams arg_vnames ts) (mempty, mempty) $
-        reverse [0 .. trueLevel am]
-      where
-        mkArgsAndParams arg_vnames ts (p_map, a_map) l
-          | l == 0 = do
-              let as =
-                    maybe
-                      arg_vnames
-                      ( map I.paramName
-                          . amParams
-                      )
-                      (p_map M.!? 1)
-              ses <- mkBottomArgs as ts
-              pure (p_map, M.insert 0 (AutoMapArg ses) a_map)
-          | l == trueLevel am = do
-              ps <- mkParams arg_vnames ts l
-              d <- outerDim am l
-              pure
-                ( M.insert l (AutoMapParam ps d) p_map,
-                  M.insert l (AutoMapArg arg_vnames) a_map
-                )
-          | l < trueLevel am && l > 0 = do
-              ps <- mkParams arg_vnames ts l
-              d <- outerDim am l
-              let as =
-                    map I.paramName $
-                      amParams $
-                        p_map M.! (l + 1)
-              pure
-                ( M.insert l (AutoMapParam ps d) p_map,
-                  M.insert l (AutoMapArg as) a_map
-                )
-          | otherwise = error ""
-
-        mkParams _ ts level =
-          forM ts $ \t ->
-            newParam ("p_" <> arg_desc) $ argType (level - 1) am t
-        mkBottomArgs arg_vnames ts = do
-          rep_shape <- internaliseShape $ autoRep am `E.shapePrefix` autoFrame am
-          if I.shapeRank rep_shape > 0
-            then
-              concat
-                <$> mapM
-                  ( letValExp "autorep"
-                      . BasicOp
-                      . Replicate rep_shape
-                      . I.Var
-                  )
-                  arg_vnames
-            else pure arg_vnames
-
-    internaliseShape :: E.Shape Size -> InternaliseM I.Shape
-    internaliseShape =
-      fmap I.Shape . mapM (internaliseExp1 "") . E.shapeDims
-
-    trueLevel :: AutoMap -> Int
-    trueLevel am
-      | autoMap am == mempty = max 0 $ E.shapeRank (autoFrame am) - E.shapeRank (autoRep am)
-      | otherwise = E.shapeRank $ autoFrame am
-
-    outerDim :: AutoMap -> Int -> InternaliseM SubExp
-    outerDim am level =
-      internaliseExp1 "" $ (!! (trueLevel am - level)) $ E.shapeDims $ autoFrame am
-
-    argType level am = I.stripArray (trueLevel am - level)
 
 generateCond ::
   E.Pat StructType ->
@@ -1715,14 +1462,14 @@ data Function
   | FunctionHole SrcLoc
   deriving (Show)
 
-findFuncall :: E.AppExp -> (Function, [((E.Exp, Maybe VName), AutoMap)])
+findFuncall :: E.AppExp -> (Function, [(E.Exp, Maybe VName)])
 findFuncall (E.Apply f args _)
   | E.Var fname _ _ <- f =
       (FunctionName fname, map onArg $ NE.toList args)
   | E.Hole (Info _) loc <- f =
       (FunctionHole loc, map onArg $ NE.toList args)
   where
-    onArg (Info (argext, am), e) = ((e, argext), am)
+    onArg (Info (argext, _), e) = (e, argext)
 findFuncall e =
   error $ "Invalid function expression in application:\n" ++ prettyString e
 

@@ -16,7 +16,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Futhark.IR.Pretty ()
 import Futhark.MonadFreshNames
-import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
+import Futhark.Util (mapAccumLM, nubOrd)
 import Language.Futhark
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types (Subst (..), applySubst)
@@ -905,20 +905,16 @@ defuncApplyArg ::
   (Exp, StaticVal) ->
   (((Maybe VName, AutoMap), Exp), [ParamType]) ->
   DefM (Exp, StaticVal)
-defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, am), arg), _) = do
+defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, _), arg), _) = do
   (arg', arg_sv) <- defuncExp arg
-  let arg_sv' =
-        case arg_sv of
-          (Dynamic ty@(Array {})) -> Dynamic $ stripArray (shapeRank $ autoFrame am) ty
-          _ -> arg_sv
+  let env' = alwaysMatchPatSV pat arg_sv
       dims = mempty
-      env' = alwaysMatchPatSV pat arg_sv'
   (lam_e', sv) <-
     localNewEnv (env' <> closure_env) $
       defuncExp lam_e
 
   let closure_pat = buildEnvPat dims closure_env
-      pat' = updatePat pat arg_sv'
+      pat' = updatePat pat arg_sv
 
   globals <- asks fst
 
@@ -959,49 +955,20 @@ defuncApplyArg fname_s (f', LambdaSV pat lam_e_t lam_e closure_env) (((argext, a
       fname' = Var (qualName fname) (Info fname_t) (srclocOf arg)
   callret <- unRetType lifted_rettype
 
-  debugTraceM $
-    unlines
-      [ "##defuncApplyArg LambdaSV",
-        "## fname",
-        fname_s,
-        "## f'",
-        prettyString f',
-        "## arg",
-        prettyString arg,
-        "## sv",
-        show sv,
-        "## ret sv",
-        show $ autoMapSV (autoMap am) sv
-      ]
-
   pure
-    ( mkApply fname' [(Nothing, mempty, f'), (argext, am, arg')] callret,
-      autoMapSV (autoFrame am) sv
-      -- sv
+    ( mkApply fname' [(Nothing, mempty, f'), (argext, mempty, arg')] callret,
+      sv
     )
 -- If 'f' is a dynamic function, we just leave the application in
 -- place, but we update the types since it may be partially
 -- applied or return a higher-order value.
-defuncApplyArg _ (f', DynamicFun _ sv) (((argext, am), arg), argtypes) = do
+defuncApplyArg _ (f', DynamicFun _ sv) (((argext, _), arg), argtypes) = do
   (arg', _) <- defuncExp arg
   let (argtypes', rettype) = dynamicFunType sv argtypes
       restype = foldFunType argtypes' (RetType [] rettype)
       callret = AppRes restype []
-      apply_e = mkApply f' [(argext, am, arg')] callret
-  debugTraceM $
-    unlines
-      [ "##defuncApplyArg DynamicFun",
-        "## f'",
-        prettyString f',
-        "## arg",
-        prettyString arg,
-        "## sv",
-        show sv,
-        "## ret sv",
-        show $ autoMapSV (autoMap am) sv
-      ]
-  pure (apply_e, autoMapSV (autoFrame am) sv)
--- pure (apply_e, sv)
+      apply_e = mkApply f' [(argext, mempty, arg')] callret
+  pure (apply_e, sv)
 --
 defuncApplyArg fname_s (_, sv) ((_, arg), _) =
   error $
@@ -1016,11 +983,6 @@ updateReturn :: AppRes -> Exp -> Exp
 updateReturn (AppRes ret1 ext1) (AppExp apply (Info (AppRes ret2 ext2))) =
   AppExp apply $ Info $ AppRes (combineTypeShapes ret1 ret2) (ext1 <> ext2)
 updateReturn _ e = e
-
-autoMapSV :: Shape Size -> StaticVal -> StaticVal
-autoMapSV shape (Dynamic t) =
-  Dynamic $ arrayOfWithAliases (diet t) shape t
-autoMapSV _ sv = sv
 
 defuncApply :: Exp -> NE.NonEmpty ((Maybe VName, AutoMap), Exp) -> AppRes -> SrcLoc -> DefM (Exp, StaticVal)
 defuncApply f args appres loc = do
@@ -1037,39 +999,10 @@ defuncApply f args appres loc = do
     _ -> do
       let fname = liftedName 0 f
           (argtypes, _) = unfoldFunType $ typeOf f
-      (app, app_sv) <-
-        fmap (first $ updateReturn appres) $
-          foldM (defuncApplyArg fname) (f', f_sv) $
-            NE.zip args $
-              NE.tails argtypes
-
-      let (p_ts, _) = unfoldFunType $ typeOf f
-          arg_ts = typeOf . snd <$> args
-          -- am_dims = zipWith typeShapePrefix (NE.toList arg_ts) p_ts
-          -- ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) am_dims
-          ams = NE.toList $ autoMap . snd . fst <$> args
-          ret_am = maximumBy (\x y -> shapeRank x `compare` shapeRank y) ams
-      debugTraceM $
-        unlines
-          [ "## defuncApply",
-            "## f",
-            prettyString f,
-            "## args",
-            prettyString $ snd <$> args,
-            "## appres",
-            show appres,
-            "## app",
-            prettyString app,
-            "## app_sv",
-            show app_sv,
-            "## f type",
-            prettyString $ typeOf f,
-            "## arg types",
-            prettyString $ typeOf . snd <$> args,
-            "## ret_am",
-            prettyString ret_am
-          ]
-      pure (app, app_sv)
+      fmap (first $ updateReturn appres) $
+        foldM (defuncApplyArg fname) (f', f_sv) $
+          NE.zip args $
+            NE.tails argtypes
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.
@@ -1223,7 +1156,7 @@ matchPatSV (PatConstr c1 _ ps _) (Dynamic (Scalar (Sum fs)))
         else Nothing
   | otherwise =
       error $ "matchPatSV: missing constructor in type: " ++ prettyString c1
-matchPatSV pat (Dynamic t@(Scalar Record {})) = matchPatSV pat $ svFromType t
+matchPatSV pat (Dynamic t) = matchPatSV pat $ svFromType t
 matchPatSV pat (HoleSV t _) = matchPatSV pat $ svFromType $ toParam Observe t
 matchPatSV pat sv =
   error $

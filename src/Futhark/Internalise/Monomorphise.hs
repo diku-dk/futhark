@@ -535,7 +535,7 @@ transformAppExp (Loop sparams pat e1 form body loc) res = do
   (pat_sizes, pat'') <- sizesForPat pat'
   res' <- transformAppRes res
   pure $ AppExp (Loop (sparams' ++ pat_sizes) pat'' e1' form' body' loc) (Info res')
-transformAppExp (BinOp (fname, _) (Info t) (e1, Info (d1, am1)) (e2, Info (d2, am2)) loc) res = do
+transformAppExp (BinOp (fname, _) (Info t) (e1, Info (d1, _)) (e2, Info (d2, _)) loc) res = do
   (AppRes ret ext) <- transformAppRes res
   fname' <- transformFName loc fname (toStruct t)
   e1' <- transformExp e1
@@ -570,8 +570,8 @@ transformAppExp (BinOp (fname, _) (Info t) (e1, Info (d1, am1)) (e2, Info (d2, a
   where
     applyOp ret ext fname' x y =
       mkApply
-        (mkApply fname' [(d1, am1, x)] (AppRes ret mempty))
-        [(d2, am2, y)]
+        (mkApply fname' [(d1, mempty, x)] (AppRes ret mempty))
+        [(d2, mempty, y)]
         (AppRes ret ext)
 
     makeVarParam arg = do
@@ -664,27 +664,27 @@ transformExp (Lambda params e0 decl tp loc) = do
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
-  let (Info (xp, xtype, xargext, xam), Info (yp, ytype)) = arg
+  let (Info (xp, xtype, xargext, _), Info (yp, ytype)) = arg
   e' <- transformExp e
   desugarBinOpSection
     fname
     (Just e')
     Nothing
     t
-    (xp, xtype, xargext, xam)
-    (yp, ytype, Nothing, mempty)
+    (xp, xtype, xargext)
+    (yp, ytype, Nothing)
     (rettype, retext)
     loc
 transformExp (OpSectionRight fname (Info t) e arg (Info rettype) loc) = do
-  let (Info (xp, xtype), Info (yp, ytype, yargext, yam)) = arg
+  let (Info (xp, xtype), Info (yp, ytype, yargext, _)) = arg
   e' <- transformExp e
   desugarBinOpSection
     fname
     Nothing
     (Just e')
     t
-    (xp, xtype, Nothing, mempty)
-    (yp, ytype, yargext, yam)
+    (xp, xtype, Nothing)
+    (yp, ytype, yargext)
     (rettype, [])
     loc
 transformExp (ProjectSection fields (Info t) loc) = do
@@ -735,12 +735,12 @@ desugarBinOpSection ::
   Maybe Exp ->
   Maybe Exp ->
   StructType ->
-  (PName, ParamType, Maybe VName, AutoMap) ->
-  (PName, ParamType, Maybe VName, AutoMap) ->
+  (PName, ParamType, Maybe VName) ->
+  (PName, ParamType, Maybe VName) ->
   (ResRetType, [VName]) ->
   SrcLoc ->
   MonoM Exp
-desugarBinOpSection fname e_left e_right t (xp, xtype, xext, xam) (yp, ytype, yext, yam) (RetType dims rettype, retext) loc = do
+desugarBinOpSection fname e_left e_right t (xp, xtype, xext) (yp, ytype, yext) (RetType dims rettype, retext) loc = do
   t' <- transformType t
   op <- transformFName loc fname $ toStruct t
   (v1, wrap_left, e1, p1) <- makeVarParam e_left =<< transformType xtype
@@ -748,7 +748,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext, xam) (yp, ytype, ye
   let apply_left =
         mkApply
           op
-          [(xext, xam, e1)]
+          [(xext, mempty, e1)]
           (AppRes (Scalar $ Arrow mempty yp (diet ytype) (toStruct ytype) (RetType [] $ toRes Nonunique t')) [])
       onDim (Var d typ _)
         | Named p <- xp, qualLeaf d == p = Var (qualName v1) typ loc
@@ -757,7 +757,7 @@ desugarBinOpSection fname e_left e_right t (xp, xtype, xext, xam) (yp, ytype, ye
       rettype' = first onDim rettype
   body <-
     scoping (S.fromList [v1, v2]) $
-      mkApply apply_left [(yext, yam, e2)]
+      mkApply apply_left [(yext, mempty, e2)]
         <$> transformAppRes (AppRes (toStruct rettype') retext)
   rettype'' <- transformRetTypeSizes (S.fromList [v1, v2]) $ RetType dims rettype'
   pure . wrap_left . wrap_right $
