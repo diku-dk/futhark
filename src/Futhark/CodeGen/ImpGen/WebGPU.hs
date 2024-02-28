@@ -192,32 +192,36 @@ genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) =
   WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinLockstepWidth)
 genWGSLStm _ = WGSL.Comment "TODO: Unimplemented statement"
 
+call2 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
+call2 f a b = WGSL.CallExp f [a, b]
+
 wgslBinOp :: BinOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
-wgslBinOp (Add Int64 _) = \a b -> WGSL.CallExp "add_i64" [a, b]
+wgslBinOp (Add Int64 _) = call2 "add_i64"
 wgslBinOp (Add _ _) = WGSL.BinOpExp "+"
 wgslBinOp (FAdd _) = WGSL.BinOpExp "+"
-wgslBinOp (Sub Int64 _) = \a b -> WGSL.CallExp "sub_i64" [a, b]
+wgslBinOp (Sub Int64 _) = call2 "sub_i64"
 wgslBinOp (Sub _ _) = WGSL.BinOpExp "-"
 wgslBinOp (FSub _) = WGSL.BinOpExp "-"
-wgslBinOp (Mul Int64 _) = \a b -> WGSL.CallExp "mul_i64" [a, b]
+wgslBinOp (Mul Int64 _) = call2 "mul_i64"
 wgslBinOp (Mul _ _) = WGSL.BinOpExp "*"
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
+-- TODO: Div, Mod, Quot, Rem
 wgslBinOp _ = WGSL.BinOpExp "<TODO: unimplemented binop>"
 
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
-wgslCmpOp (CmpUlt Int64) = \a b -> WGSL.CallExp "ult_i64" [a, b]
-wgslCmpOp (CmpUlt _) = \a b -> WGSL.CallExp "ult_i32" [a, b]
-wgslCmpOp (CmpUle Int64) = \a b -> WGSL.CallExp "ule_i64" [a, b]
-wgslCmpOp (CmpUle _) = \a b -> WGSL.CallExp "ule_i32" [a, b]
-wgslCmpOp (CmpSlt Int64) = \a b -> WGSL.CallExp "slt_i64" [a, b]
+wgslCmpOp (CmpUlt Int64) = call2 "ult_i64"
+wgslCmpOp (CmpUlt _) = call2 "ult_i32"
+wgslCmpOp (CmpUle Int64) = call2 "ule_i64"
+wgslCmpOp (CmpUle _) = call2 "ule_i32"
+wgslCmpOp (CmpSlt Int64) = call2 "slt_i64"
 wgslCmpOp (CmpSlt _) = WGSL.BinOpExp "<"
-wgslCmpOp (CmpSle Int64) = \a b -> WGSL.CallExp "sle_i64" [a, b]
+wgslCmpOp (CmpSle Int64) = call2 "sle_i64"
 wgslCmpOp (CmpSle _) = WGSL.BinOpExp "<="
 wgslCmpOp (FCmpLt _) = WGSL.BinOpExp "<"
 wgslCmpOp (FCmpLe _) = WGSL.BinOpExp "<="
-wgslCmpOp CmpLlt = \a b -> WGSL.CallExp "llt" [a, b]
-wgslCmpOp CmpLle = \a b -> WGSL.CallExp "lle" [a, b]
+wgslCmpOp CmpLlt = call2 "llt"
+wgslCmpOp CmpLle = call2 "lle"
 
 wgslConvOp :: ConvOp -> WGSL.Exp -> WGSL.Exp
 wgslConvOp op a = WGSL.CallExp (fun op) [a]
