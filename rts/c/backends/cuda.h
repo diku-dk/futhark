@@ -839,11 +839,11 @@ int backend_context_setup(struct futhark_context* ctx) {
   free_list_init(&ctx->gpu_free_list);
 
   if (ctx->cfg->unified_memory == 2) {
-    ctx->cfg->use_unified_memory = device_query(ctx->dev, MANAGED_MEMORY);
+    ctx->cfg->unified_memory = device_query(ctx->dev, MANAGED_MEMORY);
   }
 
   if (ctx->cfg->logging) {
-    if (ctx->cfg->use_unified_memory) {
+    if (ctx->cfg->unified_memory) {
       fprintf(ctx->log, "Using managed memory\n");
     } else {
       fprintf(ctx->log, "Using unmanaged memory\n");
