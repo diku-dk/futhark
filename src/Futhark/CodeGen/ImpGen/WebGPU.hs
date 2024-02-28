@@ -206,6 +206,21 @@ wgslBinOp (Mul Int64 _) = call2 "mul_i64"
 wgslBinOp (Mul _ _) = WGSL.BinOpExp "*"
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
 -- TODO: Div, Mod, Quot, Rem
+wgslBinOp (SMin Int64) = call2 "smin_i64"
+wgslBinOp (SMin _) = call2 "min"
+wgslBinOp (UMin Int64) = call2 "umin_i64"
+wgslBinOp (UMin _) = call2 "umin_i32"
+wgslBinOp (FMin _) = call2 "min"
+wgslBinOp (SMax Int64) = call2 "smax_i64"
+wgslBinOp (SMax _) = call2 "max"
+wgslBinOp (UMax Int64) = call2 "umax_i64"
+wgslBinOp (UMax _) = call2 "umax_i32"
+wgslBinOp (FMax _) = call2 "max"
+-- TODO: Shifts
+wgslBinOp (And _) = WGSL.BinOpExp "&"
+wgslBinOp (Or _) = WGSL.BinOpExp "|"
+wgslBinOp (Xor _) = WGSL.BinOpExp "^"
+-- TODO: Pow, FPow
 wgslBinOp _ = WGSL.BinOpExp "<TODO: unimplemented binop>"
 
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp

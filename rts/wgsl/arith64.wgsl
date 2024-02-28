@@ -38,6 +38,26 @@ fn mul_i64(a: i64, b: i64) -> i64 {
   );
 }
 
+fn smin_i64(a: i64, b: i64) -> i64 {
+  if slt_i64(a, b) { return a; }
+  return b;
+}
+
+fn umin_i64(a: i64, b: i64) -> i64 {
+  if ult_i64(a, b) { return a; }
+  return b;
+}
+
+fn smax_i64(a: i64, b: i64) -> i64 {
+  if slt_i64(a, b) { return b; }
+  return a;
+}
+
+fn umax_i64(a: i64, b: i64) -> i64 {
+  if ult_i64(a, b) { return b; }
+  return a;
+}
+
 fn ult_i64(a_s: i64, b_s: i64) -> bool {
   let a = bitcast<vec2<u32>>(a_s);
   let b = bitcast<vec2<u32>>(b_s);

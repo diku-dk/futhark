@@ -78,6 +78,7 @@ extra-source-files:
     rts/python/values.py
     rts/python/opencl.py
     rts/python/scalar.py
+    rts/wgsl/arith.wgsl
     rts/wgsl/arith64.wgsl
     prelude/functional.fut
     prelude/math.fut
