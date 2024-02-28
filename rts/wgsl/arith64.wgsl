@@ -20,26 +20,42 @@ fn sub_i64(a: i64, b: i64) -> i64 {
 }
 
 fn mul_u32_full(a32: u32, b32: u32) -> i64 {
-    let a = vec2(a32 & 0xFFFF, a32 >> 16);
-    let b = vec2(b32 & 0xFFFF, b32 >> 16);
-	let ll = a.x * b.x; var hh = a.y * b.y;
-	let lh = a.x * b.y; var hl = a.y * b.x;
-    let mid = hl + (ll >> 16) + (lh & 0xFFFF);
-    return bitcast<i64>(vec2(
-        (mid << 16) | (ll & 0xFFFF),
-        hh + (mid >> 16) + (lh >> 16)
-    ));
+  let a = vec2(a32 & 0xFFFF, a32 >> 16);
+  let b = vec2(b32 & 0xFFFF, b32 >> 16);
+  let ll = a.x * b.x; var hh = a.y * b.y;
+  let lh = a.x * b.y; var hl = a.y * b.x;
+  let mid = hl + (ll >> 16) + (lh & 0xFFFF);
+  return bitcast<i64>(vec2(
+    (mid << 16) | (ll & 0xFFFF),
+    hh + (mid >> 16) + (lh >> 16)
+  ));
 }
 
 fn mul_i64(a: i64, b: i64) -> i64 {
-    return add_i64(
-        mul_u32_full(bitcast<u32>(a.x), bitcast<u32>(b.x)),
-        i64(0, a.x * b.y + b.x * a.y)
-    );
+  return add_i64(
+    mul_u32_full(bitcast<u32>(a.x), bitcast<u32>(b.x)),
+    i64(0, a.x * b.y + b.x * a.y)
+  );
+}
+
+fn ult_i64(a_s: i64, b_s: i64) -> bool {
+  let a = bitcast<vec2<u32>>(a_s);
+  let b = bitcast<vec2<u32>>(b_s);
+  return a.y < b.y || (a.y == b.y && a.x < b.x);
+}
+
+fn ule_i64(a_s: i64, b_s: i64) -> bool {
+  let a = bitcast<vec2<u32>>(a_s);
+  let b = bitcast<vec2<u32>>(b_s);
+  return a.y < b.y || (a.y == b.y && a.x <= b.x);
 }
 
 fn slt_i64(a: i64, b: i64) -> bool {
   return a.y < b.y || (a.y == b.y && a.x < b.x);
+}
+
+fn sle_i64(a: i64, b: i64) -> bool {
+  return a.y < b.y || (a.y == b.y && a.x <= b.x);
 }
 
 fn zext_i32_i64(a: i32) -> i64 {

@@ -62,6 +62,7 @@ onKernel kernel = do
 
   -- TODO: Temporary for testing, this should ultimately appear in the shader
   -- through `webgpuPrelude`
+  addCode RTS.arith
   addCode RTS.arith64
 
   let overrideDecls = genConstAndBuiltinDecls kernel
@@ -119,7 +120,7 @@ kernelsToWebGPU prog =
       prog' =
         Definitions types (Constants ps consts') (Functions funs')
 
-      webgpu_prelude = RTS.arith64
+      webgpu_prelude = RTS.arith <> RTS.arith64
       constants = mempty
       kernels = mempty
       params = mempty
@@ -205,16 +206,18 @@ wgslBinOp _ = WGSL.BinOpExp "<TODO: unimplemented binop>"
 
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
-wgslCmpOp (CmpUlt _) = WGSL.BinOpExp "<"
-wgslCmpOp (CmpUle _) = WGSL.BinOpExp "<="
+wgslCmpOp (CmpUlt Int64) = \a b -> WGSL.CallExp "ult_i64" [a, b]
+wgslCmpOp (CmpUlt _) = \a b -> WGSL.CallExp "ult_i32" [a, b]
+wgslCmpOp (CmpUle Int64) = \a b -> WGSL.CallExp "ule_i64" [a, b]
+wgslCmpOp (CmpUle _) = \a b -> WGSL.CallExp "ule_i32" [a, b]
 wgslCmpOp (CmpSlt Int64) = \a b -> WGSL.CallExp "slt_i64" [a, b]
 wgslCmpOp (CmpSlt _) = WGSL.BinOpExp "<"
+wgslCmpOp (CmpSle Int64) = \a b -> WGSL.CallExp "sle_i64" [a, b]
 wgslCmpOp (CmpSle _) = WGSL.BinOpExp "<="
 wgslCmpOp (FCmpLt _) = WGSL.BinOpExp "<"
 wgslCmpOp (FCmpLe _) = WGSL.BinOpExp "<="
--- TODO: This does not actually work for bools.
-wgslCmpOp CmpLlt = WGSL.BinOpExp "<" 
-wgslCmpOp CmpLle = WGSL.BinOpExp "=="
+wgslCmpOp CmpLlt = \a b -> WGSL.CallExp "llt" [a, b]
+wgslCmpOp CmpLle = \a b -> WGSL.CallExp "lle" [a, b]
 
 wgslConvOp :: ConvOp -> WGSL.Exp -> WGSL.Exp
 wgslConvOp op a = WGSL.CallExp (fun op) [a]
