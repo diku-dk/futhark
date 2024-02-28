@@ -203,13 +203,13 @@ getOrdering final (Lambda params body mte ret loc) = do
   nameExp final $ Lambda params body' mte ret loc
 getOrdering _ (OpSection qn ty loc) =
   pure $ Var qn ty loc
-getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, xam), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
+getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, _), Info (yp, yty)) (Info (RetType dims ret), Info exts) loc) = do
   x <- getOrdering False e
   yn <- newNameFromString "y"
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
-        mkApply (Var op ty mempty) [(xext, xam, x), (Nothing, mempty, y)] $
+        mkApply (Var op ty mempty) [(xext, mempty, x), (Nothing, mempty, y)] $
           AppRes (toStruct ret') exts
   nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
@@ -217,12 +217,12 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext, xam), Info (yp, yty
       | Named p <- xp, p == vn = Just $ ExpSubst x
       | Named p <- yp, p == vn = Just $ ExpSubst y
       | otherwise = Nothing
-getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, yam)) (Info (RetType dims ret)) loc) = do
+getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext, _)) (Info (RetType dims ret)) loc) = do
   xn <- newNameFromString "x"
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Nothing, mempty, x), (yext, yam, y)] $ AppRes (toStruct ret') []
+      body = mkApply (Var op ty mempty) [(Nothing, mempty, x), (yext, mempty, y)] $ AppRes (toStruct ret') []
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
@@ -298,41 +298,25 @@ getOrdering final (AppExp (Loop sizes pat einit form body loc) resT) = do
     While e -> While <$> transformBody e
   body' <- transformBody body
   nameExp final $ AppExp (Loop sizes pat einit' form' body' loc) resT
-getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, elam)) (er, Info (erp, eram)) loc) (Info resT)) = do
+getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info (elp, _)) (er, Info (erp, _)) loc) (Info resT)) = do
   -- Rewrite short-circuiting boolean operators on scalars to explicit
   -- if-then-else. Automapped cases are turned into applications of
   -- intrinsic functions.
   expr' <- case (isOr, isAnd) of
-    (True, _)
-      | elam == mempty,
-        eram == mempty -> do
-          el' <- naming "or_lhs" $ getOrdering True el
-          er' <- naming "or_rhs" $ transformBody er
-          pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
-      | otherwise -> do
-          el' <- naming "or_lhs" $ getOrdering False el
-          er' <- naming "or_rhs" $ getOrdering False er
-          pure $ mkApply orop [(elp, elam, el'), (erp, eram, er')] resT
-    (_, True)
-      | elam == mempty,
-        eram == mempty -> do
-          el' <- naming "and_lhs" $ getOrdering True el
-          er' <- naming "and_rhs" $ transformBody er
-          pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
-      | otherwise -> do
-          el' <- naming "and_lhs" $ getOrdering False el
-          er' <- naming "and_rhs" $ getOrdering False er
-          pure $ mkApply andop [(elp, elam, el'), (erp, eram, er')] resT
-    _ -> do
+    (True, _) -> do
+      el' <- naming "or_lhs" $ getOrdering True el
+      er' <- naming "or_rhs" $ transformBody er
+      pure $ AppExp (If el' (Literal (BoolValue True) mempty) er' loc) (Info resT)
+    (_, True) -> do
+      el' <- naming "and_lhs" $ getOrdering True el
+      er' <- naming "and_rhs" $ transformBody er
+      pure $ AppExp (If el' er' (Literal (BoolValue False) mempty) loc) (Info resT)
+    (False, False) -> do
       el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
       er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
-      pure $ mkApply (Var op opT oloc) [(elp, elam, el'), (erp, eram, er')] resT
+      pure $ mkApply (Var op opT oloc) [(elp, mempty, el'), (erp, mempty, er')] resT
   nameExp final expr'
   where
-    bool = Scalar $ Prim Bool
-    opt = foldFunType [bool, bool] $ RetType [] bool
-    andop = Var (qualName (intrinsicVar "&&")) (Info opt) mempty
-    orop = Var (qualName (intrinsicVar "||")) (Info opt) mempty
     isOr = baseName (qualLeaf op) == "||"
     isAnd = baseName (qualLeaf op) == "&&"
 getOrdering final (AppExp (LetWith (Ident dest dty dloc) (Ident src sty sloc) slice e body loc) _) = do
