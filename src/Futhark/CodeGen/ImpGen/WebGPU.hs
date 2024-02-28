@@ -186,8 +186,7 @@ genWGSLStm (Op (ImpGPU.GetLocalId dest i)) =
   WGSL.Assign (nameToIdent dest) $
     WGSL.to_i32 (WGSL.IndexExp "local_id" (WGSL.IntExp i))
 genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) =
-  WGSL.Assign (nameToIdent dest)
-    (wgslConvOp (ZExt Int32 Int64) $ WGSL.VarExp builtinBlockSize)
+  WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinBlockSize)
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) =
   WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinLockstepWidth)
 genWGSLStm _ = WGSL.Comment "TODO: Unimplemented statement"
@@ -309,6 +308,9 @@ genConstAndBuiltinDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
 genConstAndBuiltinDecls kernel = constDecls ++ builtinDecls
   where
     constDecls =
+      -- TODO: constDecls should be i64s.
+      -- Override declarations must have scalar type however (i.e. we can't use
+      -- a vec2<i32> directly).
       [ WGSL.OverrideDecl (nameToIdent name) (WGSL.Prim WGSL.Int32)
         | ImpGPU.ConstUse name _ <- ImpGPU.kernelUses kernel ]
     builtinDecls =
