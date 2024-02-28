@@ -182,6 +182,11 @@ GPU backends (``opencl``, ``pyopencl``, ``hip``, and ``cuda``).
     nontrivial (and manual) to relate these operations back to source
     Futhark code.
 
+  ``--unified-memory INT``
+
+    Corresponds to
+    :c:func:`futhark_context_config_set_unified_memory`.
+
 OpenCL-specific Options
 ~~~~~~~~~~~~~~~~~~~~~~~
 
