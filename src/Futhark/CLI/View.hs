@@ -5,14 +5,15 @@ import Control.Monad.IO.Class
 import Futhark.Analysis.View
 import Futhark.Compiler
 import Futhark.Util.Options
-import Futhark.Util.Pretty (hPutDoc)
+import Futhark.Util.Pretty (hPutDoc, putDoc, Pretty (pretty))
 import Language.Futhark.Warnings
 import System.IO
 
-import Futhark.Internalise.Defunctionalise as Defunctionalise
-import Futhark.Internalise.Defunctorise as Defunctorise
-import Futhark.Internalise.FullNormalise as FullNormalise
-import Control.Monad.State
+-- import Futhark.Internalise.Defunctionalise as Defunctionalise
+-- import Futhark.Internalise.Defunctorise as Defunctorise
+-- import Futhark.Internalise.FullNormalise as FullNormalise
+-- import Control.Monad.State
+-- import Debug.Trace (traceM)
 
 newtype RefineConfig = RefineConfig
   { checkWarn :: Bool }
@@ -40,7 +41,7 @@ main = mainWithOptions newRefineConfig options "program" $ \args cfg ->
       --                  >>= FullNormalise.transformProg
       -- let res = mkViewProg src valbinds
       let res = mkViewProg src imports
-      putStrLn $ "\nIndex function:\n---------------\n" <> show res
-      -- pure ()
+      putStrLn "\nIndex function:\n---------------\n"
+      putDoc (pretty res)
     _ -> Nothing
 

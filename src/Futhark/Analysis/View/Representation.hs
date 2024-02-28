@@ -1,5 +1,4 @@
--- XXX Add Simplification rule 3 (integer-valued cases)
--- XXX Add Rule 4 (recursive sum)
+-- XXX Recognise `tmp` in part2indices as a recursive sum.
 -- XXX Also recurse into conditions in `hoistIf` (see TODOs).
 -- XXX Make partition2indices go through.
 -- XXX Rebase this on top of master (don't need Refinement type machinery rn).
@@ -27,23 +26,21 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 
 data Exp =
-    Var VName
+    -- Keep Recurrence first for ordering in Ord.
+    Recurrence    -- self-reference y[i-1]
+  | Var VName
   | Array [Exp]
-  -- | If
-  --     Exp    -- predicate
-  --     Exp    -- true branch
-  --     Exp    -- false branch
   | Sum
-      Exp    -- index
-      Exp    -- lower bound
-      Exp    -- upper bound
-      Exp    -- indexed expression
+      Exp         -- index
+      Exp         -- lower bound
+      Exp         -- upper bound
+      Exp         -- indexed expression
   | Idx
-      Exp    -- array
-      Exp    -- index
+      Exp         -- array
+      Exp         -- index
   | SoP (SoP Exp)
-  | Recurrence -- self-reference y[i-1]
-  | -- Have Predicate expressions here to for a simpler `toExp`.
+  | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
+  | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
     Bool Bool
@@ -156,6 +153,7 @@ instance ASTMappable (Exp, Exp) where
 -- to be able to target them using mapOnExp (usually define
 -- mapOnExp catch all to be `astMap m`)
 instance ASTMappable Exp where
+  astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
   -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
@@ -170,7 +168,7 @@ instance ASTMappable Exp where
       g (ts, n) = do
         ts' <- traverse (mapOnExp m) ts
         pure $ foldl (SoP..*.) (SoP.int2SoP 1) (SoP.int2SoP n : map expToSoP ts')
-  astMap _ Recurrence = pure Recurrence
+  astMap m (Indicator p) = Indicator <$> mapOnExp m p
   astMap _ x@(Bool {}) = pure x
   astMap m (Not x) = Not <$> mapOnExp m x
   astMap m (x :== y) = (:==) <$> mapOnExp m x <*> mapOnExp m y
@@ -237,16 +235,15 @@ prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
     subscript = flip lookup $ zip "0123456789" "₀₁₂₃₄₅₆₇₈₉"
 
 instance Pretty Exp where
+  pretty Recurrence = "%₍₋₁₎"
   pretty (Var x) = prettyName x
   pretty (Array ts) = pretty ts
-  pretty (Idx arr i) = parens (pretty arr) <> "[" <> pretty i <> "]"
+  pretty (Idx arr i) = parens (pretty arr) <> brackets (pretty i)
   pretty (Sum i lb ub e) =
-    "Σ_"
+    "Σ"
       <> pretty i
-      <> "="
-      <+> pretty lb
-      <> "^"
-      <+> pretty ub
+      <> "∈"
+      <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
   -- pretty (If c t f) =
   --   "If"
@@ -256,7 +253,9 @@ instance Pretty Exp where
   --     <+> "else"
   --     <+> parens (pretty f)
   pretty (SoP sop) = pretty sop
-  pretty Recurrence = "%₍₋₁₎"
+  pretty (Indicator p) = iversonbrackets (pretty p)
+    where
+      iversonbrackets = enclose "⟦" "⟧"
   pretty (Bool x) = pretty x
   pretty (Not x) = "¬" <> parens (pretty x)
   pretty (x :== y) = pretty x <+> "==" <+> pretty y
@@ -285,3 +284,17 @@ instance Pretty View where
 instance Pretty Views where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
+
+substituteName :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+substituteName substitutions x = do
+  pure $ runIdentity $ astMap (substituter substitutions) x
+  where
+    substituter subst =
+      ASTMapper
+        { mapOnExp = onExp subst }
+    onExp subst e@(Var x') =
+      case M.lookup x' subst of
+        -- Just x'' -> trace ("hihi substituting " <> prettyString x' <> " for " <> prettyString x'') $ pure x''
+        Just x'' -> pure x''
+        Nothing -> pure e
+    onExp subst e = astMap (substituter subst) e

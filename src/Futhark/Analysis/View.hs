@@ -12,16 +12,12 @@ import Language.Futhark.Semantic
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.Map as M
-import Control.Monad.Identity
-import Debug.Trace (trace, traceM)
+import Debug.Trace (traceM)
 import qualified Data.Set as S
 import Futhark.Analysis.View.Rules
 
 
 --------------------------------------------------------------
-tracePretty :: Pretty a => a -> a
-tracePretty a = trace (prettyString a <> "\n") a
-
 tracePrettyM :: (Applicative f, Pretty a) => a -> f ()
 tracePrettyM = traceM . prettyString
 --------------------------------------------------------------
@@ -29,7 +25,7 @@ tracePrettyM = traceM . prettyString
 -- mkViewProg :: VNameSource -> [E.Dec] -> Views
 -- mkViewProg vns prog = tracePretty $ execViewM (mkViewDecs prog) vns
 mkViewProg :: VNameSource -> Imports -> Views
-mkViewProg vns prog = tracePretty $ execViewM (mkViewImports prog) vns
+mkViewProg vns prog = execViewM (mkViewImports prog) vns
 
 mkViewImports :: [(ImportName, FileModule)] -> ViewM ()
 mkViewImports = mapM_ (mkViewDecs . E.progDecs . fileProg . snd)
@@ -68,14 +64,6 @@ getVarVName :: E.Exp -> Maybe VName
 getVarVName (E.Var (E.QualName [] vn) _ _) = Just vn
 getVarVName _ = Nothing
 
--- (QualName {qualQuals = [], qualLeaf = VName (Name "conds") 6070})
--- (Info {unInfo =
---   Array (fromList [AliasBound {aliasVar = VName (Name "conds") 6070}])
---   Nonunique
---   (Shape {shapeDims = [Var (QualName {qualQuals = [], qualLeaf = VName (Name "n") 6068}) (Info {unInfo = Scalar (Prim (Signed Int64))}) noLoc]})
---   (Prim Bool)})
--- noLoc
-
 getSize :: E.Exp -> Exp
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape,
@@ -87,19 +75,6 @@ getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   sz
 getSize _ = error "donk"
 
--- ArrayLit [ExpBase f vn] (f PatType) SrcLoc
--- type PatType = TypeBase Size Aliasing
-
--- -- | An expanded Futhark type is either an array, or something that
--- -- can be an element of an array.  When comparing types for equality,
--- -- function parameter names are ignored.  This representation permits
--- -- some malformed types (arrays of functions), but importantly rules
--- -- out arrays-of-arrays.
--- data TypeBase dim as
---   = Scalar (ScalarTypeBase dim as)
---   | Array as Uniqueness (Shape dim) (ScalarTypeBase dim ())
---   deriving (Eq, Ord, Show)
-
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
@@ -108,17 +83,22 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
+    traceM . show $ newView
     tracePrettyM newView
-    traceM "🎭 hoisting ifs"
+    traceM "🎭 hoisting cases"
     newView1 <- hoistCases newView >>= simplifyPredicates
     tracePrettyM newView1
     newView2 <- substituteViews newView1
     tracePrettyM newView2
-    traceM "🎭 hoisting ifs"
+    traceM "🎭 hoisting cases"
     newView3 <- hoistCases newView2 >>= simplifyPredicates
     tracePrettyM newView3
+    newView4 <- simplifyPredicates (simplify newView3)
+    tracePrettyM newView4
+    newView5 <- rewrite newView4 >>= simplifyPredicates
+    tracePrettyM newView5
     traceM "\n"
-    insertView x newView3
+    insertView x newView5
     forwards body
     pure ()
 forwards _ = pure ()
@@ -136,10 +116,6 @@ forwards _ = pure ()
 --     ExpBase Info VName)
 --  the first of which will be the map lambda (or function)
 --  and the rest are the arrays being mapped over
---
--- TODO I think this work can be rebased on top of master?
---      Just don't include the part that actually refines types or annotates
---      types in the source.
 forward :: E.Exp -> ViewM View
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
@@ -162,16 +138,17 @@ forward (E.AppExp (E.Apply f args _) _)
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
     Just xs <- toExp xs' = do
       let sz = getSize xs'
-      -- xs <- newNameFromString "scan_xs"
-      -- insertView xs view
-
       i <- newNameFromString "i"
-      e <-
+      op <-
         case E.baseString vn of
-          "+" -> pure $ Recurrence ~+~ Idx xs (Var i)
-          "-" -> pure $ Recurrence ~-~ Idx xs (Var i)
-          "*" -> pure $ Recurrence ~*~ Idx xs (Var i)
+          "+" -> pure (~+~)
+          "-" -> pure (~-~)
+          "*" -> pure (~*~)
           _ -> error ("toExp not implemented for bin op: " <> show vn)
+      let e = Cases . NE.fromList $ [(Var i :== SoP (SoP.int2SoP 0),
+                                      Idx xs (Var i)),
+                                     (Not $ Var i :== SoP (SoP.int2SoP 0),
+                                      Recurrence `op` Idx xs (Var i))]
       pure $ View (Forall i (Iota sz)) e
 forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
   | Just e' <- toExp e = do
@@ -225,16 +202,3 @@ toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
 toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
 toExp (E.Literal (E.BoolValue x) _) = pure $ Bool x
 toExp e = error ("toExp not implemented for: " <> show e)
-
-substituteName :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
-substituteName substitutions x = do
-  pure $ runIdentity $ astMap (substituter substitutions) x
-  where
-    substituter subst =
-      ASTMapper
-        { mapOnExp = onExp subst }
-    onExp subst e@(Var x') =
-      case M.lookup x' subst of
-        Just x'' -> pure x''
-        Nothing -> pure e
-    onExp subst e = astMap (substituter subst) e
