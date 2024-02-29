@@ -363,8 +363,8 @@ checkExp (RecordLit fs loc) =
   where
     checkField (RecordFieldExplicit f e rloc) =
       RecordFieldExplicit f <$> checkExp e <*> pure rloc
-    checkField (RecordFieldImplicit name info rloc) =
-      pure $ RecordFieldImplicit name info rloc
+    checkField (RecordFieldImplicit name (Info t) rloc) =
+      RecordFieldImplicit name <$> (Info <$> replaceTyVars rloc t) <*> pure rloc
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use
