@@ -14,6 +14,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor (second)
 import Data.Foldable (toList)
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -30,7 +31,7 @@ import Futhark.CodeGen.RTS.CUDA (preludeCU)
 import Futhark.CodeGen.RTS.OpenCL (copyCL, preludeCL, transposeCL)
 import Futhark.Error (compilerLimitationS)
 import Futhark.MonadFreshNames
-import Futhark.Util (mapAccumLM, zEncodeText)
+import Futhark.Util (zEncodeText)
 import Futhark.Util.IntegralExp (rem)
 import Language.C.Quote.OpenCL qualified as C
 import Language.C.Syntax qualified as C
@@ -330,13 +331,11 @@ ensureDeviceFuns code = do
     toDevice :: HostOp -> KernelOp
     toDevice _ = bad
 
-isConst :: BlockDim -> Maybe T.Text
+isConst :: BlockDim -> Maybe KernelConstExp
 isConst (Left (ValueExp (IntValue x))) =
-  Just $ prettyText $ intToInt64 x
-isConst (Right (SizeConst v _)) =
-  Just $ zEncodeText $ nameToText v
-isConst (Right (SizeMaxConst size_class)) =
-  Just $ "max_" <> prettyText size_class
+  Just $ ValueExp (IntValue x)
+isConst (Right e) =
+  Just e
 isConst _ = Nothing
 
 onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
@@ -359,11 +358,9 @@ onKernel target kernel = do
       (kernel_consts, (const_defs, const_undefs)) =
         second unzip $ unzip $ mapMaybe (constDef (kernelName kernel)) $ kernelUses kernel
 
-  let (shared_memory_bytes, (shared_memory_params, shared_memory_args, shared_memory_init)) =
-        second unzip3 $
-          evalState
-            (mapAccumLM prepareSharedMemory 0 (kernelSharedMemory kstate))
-            blankNameSource
+  let (_, shared_memory_init) =
+        L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
+      shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
@@ -429,18 +426,32 @@ onKernel target kernel = do
       params =
         shared_memory_param
           ++ take (numFailureParams safety) failure_params
-          ++ shared_memory_params
           ++ use_params
 
-      attribute =
+      (attribute_consts, attribute) =
         case mapM isConst $ kernelBlockSize kernel of
           Just [x, y, z] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, z) <> "\n"
+            ( [(xv, x), (yv, y), (zv, z)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, zv) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
+              zv = nameFromText $ zEncodeText $ nameToText name <> "_dim3"
           Just [x, y] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, y, 1 :: Int) <> "\n"
+            ( [(xv, x), (yv, y)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, yv, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+              yv = nameFromText $ zEncodeText $ nameToText name <> "_dim2"
           Just [x] ->
-            "FUTHARK_KERNEL_SIZED" <> prettyText (x, 1 :: Int, 1 :: Int) <> "\n"
-          _ -> "FUTHARK_KERNEL\n"
+            ( [(xv, x)],
+              "FUTHARK_KERNEL_SIZED" <> prettyText (xv, 1 :: Int, 1 :: Int) <> "\n"
+            )
+            where
+              xv = nameFromText $ zEncodeText $ nameToText name <> "_dim1"
+          _ -> (mempty, "FUTHARK_KERNEL\n")
 
       kernel_fun =
         attribute
@@ -449,7 +460,7 @@ onKernel target kernel = do
                     $items:(mconcat unpack_params)
                     $items:const_defs
                     $items:prepare_shared_memory
-                    $items:shared_memory_init
+                    $items:(mconcat shared_memory_init)
                     $items:error_init
                     $items:kernel_body
 
@@ -462,11 +473,11 @@ onKernel target kernel = do
       { clGPU = M.insert name (safety, kernel_fun) $ clGPU s,
         clUsedTypes = typesInKernel kernel <> clUsedTypes s,
         clFailures = kernelFailures kstate,
-        clConstants = kernel_consts <> clConstants s
+        clConstants = attribute_consts <> kernel_consts <> clConstants s
       }
 
   -- The error handling stuff is automatically added later.
-  let args = shared_memory_args ++ kernelArgs kernel
+  let args = kernelArgs kernel
 
   pure $ LaunchKernel safety name shared_memory_bytes args num_tblocks tblock_size
   where
@@ -475,16 +486,14 @@ onKernel target kernel = do
     tblock_size = kernelBlockSize kernel
     padTo8 e = e + ((8 - (e `rem` 8)) `rem` 8)
 
-    prepareSharedMemory (Count offset) (mem, Count size) = do
-      param <- newVName $ baseString mem ++ "_offset"
-      let offset' = offset + padTo8 size
-      pure
-        ( bytes offset',
-          ( [C.cparam|typename int64_t $id:param|],
-            ValueKArg (untyped offset) $ IntType Int64,
-            [C.citem|volatile __local $ty:defaultMemBlockType $id:mem = &shared_mem[$id:param];|]
+    prepareSharedMemory offset (mem, Count size) =
+      let offset_v = nameFromText $ prettyText mem <> "_offset"
+       in ( [C.cexp|$id:offset_v|],
+            [C.citems|
+             volatile __local $ty:defaultMemBlockType $id:mem = &shared_mem[$exp:offset];
+             const typename int64_t $id:offset_v = $exp:offset + $exp:(padTo8 size);
+             |]
           )
-        )
 
 useAsParam :: KernelUse -> Maybe (C.Param, [C.BlockItem])
 useAsParam (ScalarUse name pt) = do

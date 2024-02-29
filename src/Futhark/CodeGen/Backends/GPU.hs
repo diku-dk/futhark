@@ -80,7 +80,7 @@ kernelConstToExp (SizeMaxConst size_class) =
 
 compileBlockDim :: BlockDim -> GC.CompilerM op s C.Exp
 compileBlockDim (Left e) = GC.compileExp e
-compileBlockDim (Right kc) = pure $ kernelConstToExp kc
+compileBlockDim (Right e) = pure $ compileConstExp e
 
 genLaunchKernel ::
   KernelSafety ->

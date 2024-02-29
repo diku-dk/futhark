@@ -1227,7 +1227,7 @@ sKernelOp attrs constants ops name m = do
       x <- isConstExp vtable $ untyped e
       pure $
         case x of
-          Just (LeafExp kc _) -> Right kc
+          Just kc -> Right kc
           _ -> Left $ untyped e
 
     constToUse (v, e) = Imp.ConstUse v e
