@@ -360,7 +360,7 @@ onKernel target kernel = do
 
   let (_, shared_memory_init) =
         L.mapAccumL prepareSharedMemory [C.cexp|0|] (kernelSharedMemory kstate)
-      shared_memory_bytes = sum $ map snd $ kernelSharedMemory kstate
+      shared_memory_bytes = sum $ map (padTo8 . snd) $ kernelSharedMemory kstate
 
   let (use_params, unpack_params) =
         unzip $ mapMaybe useAsParam $ kernelUses kernel
