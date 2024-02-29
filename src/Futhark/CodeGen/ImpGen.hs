@@ -775,7 +775,10 @@ compileExp pat e = do
 caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
 caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
   where
-    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp se (Just (BoolValue True)) =
+      isBool $ toExp' Bool se
+    cmp se (Just v) =
+      isBool $ toExp' (primValueType v) se ~==~ ValueExp v
     cmp _ Nothing = true
 
 defCompileExp ::
