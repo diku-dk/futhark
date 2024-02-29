@@ -22,6 +22,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.TypeChecker.Types (substTyVars)
 
 type SVar = VName
 
@@ -99,21 +100,13 @@ newtype SolverState = SolverState {solverTyVars :: M.Map TyVar TyVarSol}
 initialState :: TyVars -> SolverState
 initialState tyvars = SolverState $ M.map (uncurry TyVarUnsol) tyvars
 
-substTyVars :: (Monoid u) => M.Map TyVar TyVarSol -> TypeBase SComp u -> TypeBase SComp u
-substTyVars m t@(Scalar (TypeVar u (QualName qs v) args)) =
+substTyVar :: (Monoid u) => M.Map TyVar TyVarSol -> VName -> Maybe (TypeBase SComp u)
+substTyVar m v =
   case M.lookup v m of
-    Just (TyVarLink v') ->
-      substTyVars m $ Scalar $ TypeVar u (QualName qs v') args
-    Just (TyVarSol _ t') -> second (const mempty) $ substTyVars m t'
-    Just (TyVarUnsol {}) -> t
-    Nothing -> t
-substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
-substTyVars m (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars m) fs
-substTyVars m (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map $ substTyVars m) cs
-substTyVars m (Scalar (Arrow u pname d t1 (RetType ext t2))) =
-  Scalar $ Arrow u pname d (substTyVars m t1) $ RetType ext $ substTyVars m t2 `setUniqueness` uniqueness t2
-substTyVars m (Array u shape elemt) =
-  arrayOfWithAliases u shape $ substTyVars m $ Scalar elemt
+    Just (TyVarLink v') -> substTyVar m v'
+    Just (TyVarSol _ t') -> Just $ second (const mempty) $ substTyVars (substTyVar m) t'
+    Just (TyVarUnsol {}) -> Nothing
+    Nothing -> Nothing
 
 -- | A solution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
@@ -127,7 +120,7 @@ solution s =
   )
   where
     mkSubst (TyVarSol _lvl t) =
-      Just $ Right $ first (const ()) $ substTyVars (solverTyVars s) t
+      Just $ Right $ first (const ()) $ substTyVars (substTyVar (solverTyVars s)) t
     mkSubst (TyVarLink v') =
       Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
         mkSubst =<< M.lookup v' (solverTyVars s)
@@ -143,7 +136,7 @@ newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
 occursCheck :: VName -> Type -> SolveM ()
 occursCheck v tp = do
   vars <- gets solverTyVars
-  let tp' = substTyVars vars tp
+  let tp' = substTyVars (substTyVar vars) tp
   when (v `S.member` typeVars tp') . throwError . docText $
     "Occurs check: cannot instantiate"
       <+> prettyName v

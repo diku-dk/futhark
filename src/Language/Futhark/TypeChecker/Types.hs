@@ -8,6 +8,7 @@ module Language.Futhark.TypeChecker.Types
     TypeSubs,
     Substitutable (..),
     substTypesAny,
+    substTyVars,
 
     -- * Witnesses
     mustBeExplicitInType,
@@ -530,6 +531,23 @@ substTypesAny lookupSubst ot =
       let toAny (Var v _ _) | qualLeaf v `elem` dims = anySize
           toAny d = d
        in first toAny ot'
+
+-- | Substitution without caring about sizes.
+substTyVars :: (Monoid u) => (VName -> Maybe (TypeBase d NoUniqueness)) -> TypeBase d u -> TypeBase d u
+substTyVars f t@(Scalar (TypeVar u (QualName qs v) args)) =
+  case f v of
+    Just t' -> second (const mempty) $ substTyVars f t'
+    Nothing -> t
+substTyVars _ (Scalar (Prim pt)) = Scalar $ Prim pt
+substTyVars f (Scalar (Record fs)) = Scalar $ Record $ M.map (substTyVars f) fs
+substTyVars f (Scalar (Sum cs)) = Scalar $ Sum $ M.map (map $ substTyVars f) cs
+substTyVars f (Scalar (Arrow u pname d t1 (RetType ext t2))) =
+  Scalar $
+    Arrow u pname d (substTyVars f t1) $
+      RetType ext $
+        substTyVars f t2 `setUniqueness` uniqueness t2
+substTyVars f (Array u shape elemt) =
+  arrayOfWithAliases u shape $ substTyVars f $ Scalar elemt
 
 -- Note [AnySize]
 --

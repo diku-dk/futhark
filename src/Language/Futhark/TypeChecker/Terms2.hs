@@ -640,7 +640,7 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
   ctAM r m $ fmap toSComp (toShape m_var <> fframe)
   ctEq lhs rhs
   debugTraceM $
-    unlines $
+    unlines
       [ "## checkApplyOne",
         "## fname",
         prettyString fname,
@@ -1123,12 +1123,12 @@ checkExp (Coerce e te NoInfo loc) = do
   ctEq (expType e') (toType st)
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
-doDefaults ::
+doDefault ::
   S.Set VName ->
   VName ->
   Either [PrimType] (TypeBase () NoUniqueness) ->
   TermM (TypeBase () NoUniqueness)
-doDefaults tyvars_at_toplevel v (Left pts)
+doDefault tyvars_at_toplevel v (Left pts)
   | Signed Int32 `elem` pts = do
       when (v `S.member` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to i32."
@@ -1145,7 +1145,18 @@ doDefaults tyvars_at_toplevel v (Left pts)
             </> "Add a type annotation to disambiguate the type."
   where
     usage = mkUsage NoLoc "overload"
-doDefaults _ _ (Right t) = pure t
+doDefault _ _ (Right t) = pure t
+
+-- | Apply defaults on otherwise ambiguous types. This may result in
+-- some type variables becoming known, so we have to perform
+-- substitutions on the RHS of the substitutions afterwards.
+doDefaults ::
+  S.Set VName ->
+  M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness)) ->
+  TermM (M.Map TyVar (TypeBase () NoUniqueness))
+doDefaults tyvars_at_toplevel substs = do
+  substs' <- M.traverseWithKey (doDefault tyvars_at_toplevel) substs
+  pure $ M.map (substTyVars (`M.lookup` substs')) substs'
 
 checkValDef ::
   ( VName,
@@ -1187,8 +1198,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
     solutions <-
       forM cts_tyvars' $
-        bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty)))
-          . uncurry solve
+        bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
 
     forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
       debugTraceM $
@@ -1213,6 +1223,5 @@ checkSingleExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   solution <-
-    bitraverse pure (traverse (M.traverseWithKey (doDefaults mempty))) $
-      solve cts tyvars
+    bitraverse pure (traverse (doDefaults mempty)) $ solve cts tyvars
   pure (solution, e')
