@@ -1655,7 +1655,6 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
       case maybe_tysubsts of
         Left err -> typeError loc mempty $ pretty err
         Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
-          debugTraceM $ unlines [unlines $ map show $ M.toList tysubsts, prettyString body']
           let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
           (tparams', params'', retdecl'', RetType dims rettype', body'') <-
             checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)

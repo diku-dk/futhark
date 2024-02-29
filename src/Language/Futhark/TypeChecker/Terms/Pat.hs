@@ -15,6 +15,7 @@ import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Futhark.Util
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -104,9 +105,9 @@ bindingIdent ident = binding [ident]
 
 checkPat' ::
   [(SizeBinder VName, QualName VName)] ->
-  Pat (TypeBase Size u) ->
+  Pat ParamType ->
   Inferred ParamType ->
-  TermTypeM (Pat (TypeBase Size u))
+  TermTypeM (Pat ParamType)
 checkPat' sizes (PatParens p loc) t =
   PatParens <$> checkPat' sizes p t <*> pure loc
 checkPat' sizes (PatAttr attr p loc) t =
@@ -115,16 +116,14 @@ checkPat' _ (Id name (Info t) loc) NoneInferred = do
   t' <- replaceTyVars loc t
   pure $ Id name (Info t') loc
 checkPat' _ (Id name (Info t1) loc) (Ascribed t2) = do
-  t <- replaceTyVars loc t1
-  unify (mkUsage loc "id") (toStruct t) (toStruct t2)
-  pure $ Id name (Info t) loc
+  t' <- instTyVars loc [] (first (const ()) t1) t2
+  pure $ Id name (Info t') loc
 checkPat' _ (Wildcard (Info t) loc) NoneInferred = do
   t' <- replaceTyVars loc t
   pure $ Wildcard (Info t') loc
 checkPat' _ (Wildcard (Info t1) loc) (Ascribed t2) = do
-  t <- replaceTyVars loc t1
-  unify (mkUsage loc "wildcard") (toStruct t) (toStruct t2)
-  pure $ Wildcard (Info t) loc
+  t' <- instTyVars loc [] (first (const ()) t1) t2
+  pure $ Wildcard (Info t') loc
 checkPat' sizes p@(TuplePat ps loc) (Ascribed t)
   | Just ts <- isTupleRecord t,
     length ts == length ps =
@@ -185,9 +184,9 @@ checkPat' sizes (PatConstr n info ps loc) _ = do
 
 checkPat ::
   [(SizeBinder VName, QualName VName)] ->
-  Pat (TypeBase Size u) ->
+  Pat ParamType ->
   Inferred StructType ->
-  (Pat (TypeBase Size u) -> TermTypeM a) ->
+  (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 checkPat sizes p t m = do
   p' <-
@@ -210,14 +209,15 @@ bindingPat ::
   [SizeBinder VName] ->
   Pat (TypeBase Size u) ->
   StructType ->
-  (Pat (TypeBase Size u) -> TermTypeM a) ->
+  (Pat ParamType -> TermTypeM a) ->
   TermTypeM a
 bindingPat sizes p t m = do
   substs <- mapM mkSizeSubst sizes
-  checkPat substs p (Ascribed t) $ \p' -> binding (patIdents (fmap toStruct p')) $
-    case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
-      [] -> m p'
-      size : _ -> unusedSize size
+  checkPat substs (fmap (toParam Observe) p) (Ascribed t) $ \p' ->
+    binding (patIdents (fmap toStruct p')) $
+      case filter ((`S.notMember` fvVars (freeInPat p')) . sizeName) sizes of
+        [] -> m p'
+        size : _ -> unusedSize size
   where
     mkSizeSubst v = do
       v' <- newID $ baseName $ sizeName v

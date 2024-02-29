@@ -25,6 +25,7 @@ module Language.Futhark.TypeChecker.Terms.Monad
     constrain,
     newArrayType,
     allDimsFreshInType,
+    instTyVars,
     replaceTyVars,
     updateTypes,
     Names,
