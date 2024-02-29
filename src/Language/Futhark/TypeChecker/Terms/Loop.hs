@@ -221,14 +221,16 @@ checkLoop checkExp (mergepat, mergeexp, form, loopbody) loc = do
     case form of
       For i uboundexp -> do
         uboundexp' <- checkExp uboundexp
-        bindingIdent i . bindingPat [] mergepat merge_t $
+        it <- expType uboundexp'
+        let i' = i {identType = Info it}
+        bindingIdent i' . bindingPat [] mergepat merge_t $
           \mergepat' -> incLevel $ do
             loopbody' <- checkExp loopbody
             (sparams, mergepat'') <- checkLoopReturnSize mergepat' loopbody'
             pure
               ( sparams,
                 mergepat'',
-                For i uboundexp',
+                For i' uboundexp',
                 loopbody'
               )
       ForIn xpat e -> do
