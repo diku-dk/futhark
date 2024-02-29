@@ -975,7 +975,7 @@ kernelInitialisationSimple num_tblocks tblock_size = do
 
   let set_constants = do
         dPrim_ local_tid int32
-        dPrim_ inner_tblock_size int64
+        dPrim_ inner_tblock_size int32
         dPrim_ wave_size int32
         dPrim_ tblock_id int32
 
@@ -1227,7 +1227,7 @@ sKernelOp attrs constants ops name m = do
       x <- isConstExp vtable $ untyped e
       pure $
         case x of
-          Just (LeafExp kc _) -> Right kc
+          Just kc -> Right kc
           _ -> Left $ untyped e
 
     constToUse (v, e) = Imp.ConstUse v e

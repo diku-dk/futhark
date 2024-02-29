@@ -80,7 +80,7 @@ kernelConstToExp (SizeMaxConst size_class) =
 
 compileBlockDim :: BlockDim -> GC.CompilerM op s C.Exp
 compileBlockDim (Left e) = GC.compileExp e
-compileBlockDim (Right kc) = pure $ kernelConstToExp kc
+compileBlockDim (Right e) = pure $ compileConstExp e
 
 genLaunchKernel ::
   KernelSafety ->
@@ -370,6 +370,13 @@ gpuOptions =
         optionArgument = RequiredArgument "INT",
         optionDescription = "The default parallelism threshold.",
         optionAction = [C.cstm|futhark_context_config_set_default_threshold(cfg, atoi(optarg));|]
+      },
+    Option
+      { optionLongName = "unified-memory",
+        optionShortName = Nothing,
+        optionArgument = RequiredArgument "INT",
+        optionDescription = "Whether to use unified memory",
+        optionAction = [C.cstm|futhark_context_config_set_unified_memory(cfg, atoi(optarg));|]
       }
   ]
 
@@ -462,3 +469,4 @@ generateGPUBoilerplate gpu_program macros backendH kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size);|]
+  GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag);|]

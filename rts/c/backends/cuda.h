@@ -94,6 +94,8 @@ struct futhark_context_config {
   char* preferred_device;
   int preferred_device_num;
 
+  int unified_memory;
+
   char* dump_ptx_to;
   char* load_ptx_from;
 
@@ -120,6 +122,8 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
 
   cfg->dump_ptx_to = NULL;
   cfg->load_ptx_from = NULL;
+
+  cfg->unified_memory = 2;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
@@ -184,6 +188,10 @@ void futhark_context_config_dump_ptx_to(struct futhark_context_config *cfg, cons
 void futhark_context_config_load_ptx_from(struct futhark_context_config *cfg, const char *path) {
   free(cfg->load_ptx_from);
   cfg->load_ptx_from = strdup(path);
+}
+
+void futhark_context_config_set_unified_memory(struct futhark_context_config* cfg, int flag) {
+  cfg->unified_memory = flag;
 }
 
 void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
@@ -830,6 +838,18 @@ int backend_context_setup(struct futhark_context* ctx) {
 
   free_list_init(&ctx->gpu_free_list);
 
+  if (ctx->cfg->unified_memory == 2) {
+    ctx->cfg->unified_memory = device_query(ctx->dev, MANAGED_MEMORY);
+  }
+
+  if (ctx->cfg->logging) {
+    if (ctx->cfg->unified_memory) {
+      fprintf(ctx->log, "Using managed memory\n");
+    } else {
+      fprintf(ctx->log, "Using unmanaged memory\n");
+    }
+  }
+
   // MAX_SHARED_MEMORY_PER_BLOCK gives bogus numbers (48KiB); probably
   // for backwards compatibility.  Add _OPTIN and you seem to get the
   // right number.
@@ -1082,10 +1102,17 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 }
 
 static int gpu_alloc_actual(struct futhark_context *ctx, size_t size, gpu_mem *mem_out) {
-  CUresult res = cuMemAlloc(mem_out, size);
+  CUresult res;
+  if (ctx->cfg->unified_memory) {
+    res = cuMemAllocManaged(mem_out, size, CU_MEM_ATTACH_GLOBAL);
+  } else {
+    res = cuMemAlloc(mem_out, size);
+  }
+
   if (res == CUDA_ERROR_OUT_OF_MEMORY) {
     return FUTHARK_OUT_OF_MEMORY;
   }
+
   CUDA_SUCCEED_OR_RETURN(res);
   return FUTHARK_SUCCESS;
 }
