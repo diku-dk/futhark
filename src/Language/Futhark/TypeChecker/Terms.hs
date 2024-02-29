@@ -1063,16 +1063,14 @@ checkOneExp e = do
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
 checkSizeExp e = do
-  (maybe_tysubsts, e') <- Terms2.checkSingleExp e
+  (maybe_tysubsts, e') <- Terms2.checkSizeExp e
   case maybe_tysubsts of
     Left err -> typeError e' mempty $ pretty err
     Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
-      let t = typeOf e''
       when (hasBinding e'') $
         typeError (srclocOf e'') mempty . withIndexLink "size-expression-bind" $
           "Size expression with binding is forbidden."
-      unify (mkUsage e'' "Size expression") t (Scalar (Prim (Signed Int64)))
       normTypeFully e''
 
 -- Verify that all sum type constructors and empty array literals have
@@ -1657,6 +1655,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
       case maybe_tysubsts of
         Left err -> typeError loc mempty $ pretty err
         Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+          debugTraceM $ unlines [unlines $ map show $ M.toList tysubsts, prettyString body']
           let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
           (tparams', params'', retdecl'', RetType dims rettype', body'') <-
             checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)

@@ -38,6 +38,7 @@
 module Language.Futhark.TypeChecker.Terms2
   ( checkValDef,
     checkSingleExp,
+    checkSizeExp,
     Solution,
   )
 where
@@ -442,8 +443,8 @@ patLitMkType (PatLitFloat _) loc =
 patLitMkType (PatLitPrim v) _ =
   pure $ Scalar $ Prim $ primValueType v
 
-checkSizeExp :: ExpBase NoInfo VName -> TermM Exp
-checkSizeExp e = do
+checkSizeExp' :: ExpBase NoInfo VName -> TermM Exp
+checkSizeExp' e = do
   e' <- checkExp e
   ctEq (expType e') (Scalar (Prim (Signed Int64)))
   pure e'
@@ -496,7 +497,7 @@ checkPat' (RecordPat fs loc) NoneInferred =
     <$> traverse (`checkPat'` NoneInferred) (M.fromList fs)
     <*> pure loc
 checkPat' (PatAscription p t loc) maybe_outer_t = do
-  (t', _, RetType _ st, _) <- checkTypeExp checkSizeExp t
+  (t', _, RetType _ st, _) <- checkTypeExp checkSizeExp' t
 
   -- Uniqueness kung fu to make the Monoid(mempty) instance give what
   -- we expect.  We should perhaps stop being so implicit.
@@ -775,7 +776,7 @@ checkRetDecl ::
   TermM (Maybe (TypeExp Exp VName))
 checkRetDecl _ Nothing = pure Nothing
 checkRetDecl body (Just te) = do
-  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   ctEq (expType body) (toType st)
   pure $ Just te'
 
@@ -1114,12 +1115,12 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
 --
 checkExp (Ascript e te loc) = do
   e' <- checkExp e
-  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   ctEq (expType e') (toType st)
   pure $ Ascript e' te' loc
 checkExp (Coerce e te NoInfo loc) = do
   e' <- checkExp e
-  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp te
+  (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   ctEq (expType e') (toType st)
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
@@ -1220,6 +1221,17 @@ checkSingleExp ::
   TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
+  cts <- gets termConstraints
+  tyvars <- gets termTyVars
+  solution <-
+    bitraverse pure (traverse (doDefaults mempty)) $ solve cts tyvars
+  pure (solution, e')
+
+-- | Type-check a single size expression in isolation.  This expression may
+-- turn out to be polymorphic, in which case it is unified with i64.
+checkSizeExp :: ExpBase NoInfo VName -> TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+checkSizeExp e = runTermM $ do
+  e' <- checkSizeExp' e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   solution <-
