@@ -1174,47 +1174,48 @@ checkValDef ::
       [Exp]
     )
 checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
-  bindParams tparams params $ \params' -> do
-    body' <- checkExp body
+  (params', body', retdecl') <-
+    bindParams tparams params $ \params' -> do
+      body' <- checkExp body
+      retdecl' <- checkRetDecl body' retdecl
+      pure (params', body', retdecl')
 
-    retdecl' <- checkRetDecl body' retdecl
+  cts <- gets termConstraints
 
-    cts <- gets termConstraints
+  tyvars <- gets termTyVars
 
-    tyvars <- gets termTyVars
+  debugTraceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
-    debugTraceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
+  debugTraceM $
+    unlines
+      [ "## cts:",
+        unlines $ map prettyString cts,
+        "## body:",
+        prettyString body',
+        "## tyvars:",
+        unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
+      ]
 
+  (cts_tyvars', bodys') <- unzip <$> rankAnalysis loc cts tyvars body'
+
+  solutions <-
+    forM cts_tyvars' $
+      bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
+
+  forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
     debugTraceM $
       unlines
-        [ "## cts:",
-          unlines $ map prettyString cts,
-          "## body:",
-          prettyString body',
-          "## tyvars:",
-          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
+        [ "## constraints:",
+          unlines $ map prettyString cts',
+          "## tyvars':",
+          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
+          "## solution:",
+          let p (v, t) = prettyNameString v <> " => " <> prettyString t
+           in either T.unpack (unlines . map p . M.toList . snd) solution,
+          either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
         ]
 
-    (cts_tyvars', bodys') <- unzip <$> rankAnalysis loc cts tyvars body'
-
-    solutions <-
-      forM cts_tyvars' $
-        bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
-
-    forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
-      debugTraceM $
-        unlines
-          [ "## constraints:",
-            unlines $ map prettyString cts',
-            "## tyvars':",
-            unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-            "## solution:",
-            let p (v, t) = prettyNameString v <> " => " <> prettyString t
-             in either T.unpack (unlines . map p . M.toList . snd) solution,
-            either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
-          ]
-
-    pure (solutions, params', retdecl', bodys')
+  pure (solutions, params', retdecl', bodys')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
@@ -1229,11 +1230,21 @@ checkSingleExp e = runTermM $ do
 
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
-checkSizeExp :: ExpBase NoInfo VName -> TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+checkSizeExp ::
+  ExpBase NoInfo VName ->
+  TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
-  solution <-
-    bitraverse pure (traverse (doDefaults mempty)) $ solve cts tyvars
-  pure (solution, e')
+
+  (cts_tyvars', es') <- unzip <$> rankAnalysis (srclocOf e) cts tyvars e'
+
+  solutions <-
+    forM cts_tyvars' $
+      bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
+
+  case (solutions, es') of
+    ([solution], [e'']) ->
+      pure (solution, e'')
+    _ -> pure (Left "Ambiguous size expression", e')
