@@ -23,11 +23,18 @@ module Futhark.Internalise.FullNormalise (transformProg) where
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
+import Data.Functor.Identity
+import Data.List (zip4)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Text qualified as T
+import Debug.Trace
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.Pretty
+import Language.Futhark.Primitive (intValue)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Types
 
@@ -347,7 +354,7 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
 -- a complete separtion of states.
 transformBody :: (MonadFreshNames m) => Exp -> m Exp
 transformBody e = do
-  (e', pre_eval) <- runOrdering (getOrdering True e)
+  (e', pre_eval) <- runOrdering . getOrdering True =<< expandAMAnnotations e
   pure $ foldl f e' pre_eval
   where
     appRes = case e of
@@ -366,3 +373,338 @@ transformValBind valbind = do
 
 transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
 transformProg = mapM transformValBind
+
+--- | Expansion of 'AutoMap'-annotated applications.
+---
+--- Each application @f x@ has an annotation with @AutoMap R M F@ where
+--- @R, M, F@ are the autorep, automap, and frame shapes,
+--- respectively.
+---
+--- The application @f x@ will have type @F t@ for some @t@, i.e. @(f
+--- x) : F t@. The frame @F@ is a prefix of the type of @f x@; namely
+--- it is the total accumulated shape that is due to implicit maps.
+--- Another way of thinking about that is that @|F|@ is is the level
+--- of the automap-nest that @f x@ is in. For example, if @|F| = 2@
+--- then we know that @f x@ implicitly stands for
+---
+--- > map (\x' -> map (\x'' -> f x'') x') x
+---
+--- For an application with a non-empty autorep annotation, the frame
+--- tells about how many dimensions of the replicate can be eliminated.
+--- For example, @[[1,2],[3,4]] + 5@ will yield the following annotations:
+---
+--- > ([[1,2],[3,4]] +)     -- AutoMap {R = mempty, M = [2][2], F = [2][2]}
+--- > (([[1,2],[3,4]] +) 5) -- AutoMap {R = [2][2], M = mempty, F = [2][2]}
+---
+--- All replicated arguments are pushed down the auto-map nest. Each
+--- time a replicated argument is pushed down a level of an
+--- automap-nest, one fewer replicates is needed (i.e., the outermost
+--- dimension of @R@ can be dropped). Replicated arguments are pushed
+--- down the nest until either 1) the bottom of the nest is encountered
+--- or 2) no replicate dimensions remain. For example, in the second
+--- application above @R@ = @F@, so we can push the replicated argument
+--- down two levels. Since each level effectively removes a dimension
+--- of the replicate, no replicates will be required:
+---
+--- > map (\xs -> map (\x -> f x'' 5) xs) [[1,2],[3,4]]
+---
+--- The number of replicates that are actually required is given by
+--- max(|R| - |F|, 0).
+---
+--- An expression's "true level" is the level at which that expression
+--- will appear in the automap-nest. The bottom of a mapnest is level 0.
+---
+--- * For annotations with @R = mempty@, the true level is @|F|@.
+--- * For annotations with @M = mempty@, the true level is @|F| - |R|@.
+---
+--- If @|R| > |F|@ then actual replicates (namely @|R| - |F|@ of them)
+--- will be required at the bottom of the mapnest.
+---
+--- Note that replicates can only appear at the bottom of a mapnest; any
+--- expression of the form
+---
+--- > map (\ls x' rs -> e) (replicate x)
+---
+--- can always be written as
+---
+--- > map (\ls rs -> e[x' -> x])
+---
+--- Let's look at another example. Consider (with exact sizes omitted for brevity)
+---
+--- > f    : a -> a -> a -> []a -> [][][]a -> a
+--- > xss  : [][]a
+--- > ys   : []a
+--- > zsss : [][][]a
+--- > w    : a
+--- > vss  : [][]a
+---
+--- and the application
+---
+--- > f xss ys zsss w vss
+---
+--- which will have the following annotations
+---
+--- > (f xss)                          -- AutoMap {R = mempty,    M = [][],   F = [][]}    (1)
+--- > ((f xss) ys)                     -- AutoMap {R = [],        M = mempty, F = [][]}    (2)
+--- > (((f xss) ys) zsss)              -- AutoMap {R = mempty,    M = [],     F = [][][]}  (3)
+--- > ((((f xss) ys) zsss) w)          -- AutoMap {R = [][][][],  M = mempty, F = [][][]}  (4)
+--- > (((((f xss) ys) zsss) w) vss)    -- AutoMap {R = [],        M = mempty, F = [][][]}  (5)
+---
+--- This will yield the following mapnest.
+---
+--- >   map (\zss ->
+--- >    map (\xs zs vs ->
+--- >      map (\x y z v -> f x y z (replicate w) v) xs ys zs v) xss zss vss) zsss
+---
+--- Let's see how we'd construct this mapnest from the annotations. We construct
+--- the nest bottom-up. We have:
+---
+--- Application | True level
+--- ---------------------------
+--- (1)         | |[][]|                = 2
+--- (2)         | |[][]| - |[]|         = 1
+--- (3)         | |[][][]|              = 3
+--- (4)         | |[][][]| - |[][][][]| = -1
+--- (5)         | |[][][]| - |[]|       = 2
+---
+--- We start at level 0.
+--- * Any argument with a negative true level of @-n@ will be replicated @n@ times;
+---   the exact shapes can be found by removing the @F@ postfix from @R@,
+---   i.e. @R = shapes_to_rep_by <> F@.
+--- * Any argument with a 0 true level will be included.
+--- * For any argument @arg@ with a positive true level, we construct a new parameter
+---   whose type is @arg@ with the leading @n@ dimensions (where @n@ is the true level)
+---   removed.
+---
+--- Following the rules above, @w@ will be replicated once. For the remaining arguments,
+--- we create new parameters @x : a, y : a, z : a , v : a@. Hence, level 0 becomes
+---
+--- > f x y z (replicate w) v
+---
+--- At level l > 0:
+--- * There are no replicates.
+--- * Any argument with l true level will be included verbatim.
+--- * Any argument with true level > l will have a new parameter constructed for it,
+---   whose type has the leading @n - l@ dimensions (where @n@ is the true level) removed.
+--- * We surround the previous level with a map that binds that levels' new parameters
+---   and is passed the current levels' arguments.
+---
+--- Following the above recipe for level 1, we create parameters
+--- @xs : []a, zs : []a, vs :[]a@ and obtain
+---
+--- > map (\x y z v -> f x y z (replicate w) v) xs ys zs vs
+---
+--- This process continues until the level is greater than the maximum
+--- true level of any application, at which we terminate.
+
+-- | Expands 'AutoMap' annotations into explicit @map@s and @replicates@.
+expandAMAnnotations :: (MonadFreshNames m) => Exp -> m Exp
+expandAMAnnotations e = do
+  case e of
+    (AppExp (Apply f args loc) (Info res)) -> do
+      let ((exts, ams), arg_es) = first unzip $ unzip $ map (first unInfo) $ NE.toList args
+      f' <- expandAMAnnotations f
+      arg_es' <- mapM expandAMAnnotations arg_es
+      let diets = funDiets $ typeOf f
+      withMapNest loc (zip4 exts ams arg_es diets) $ \args' -> do
+        inner_f <- setNewType f' $ innerFType (typeOf f') ams
+        let (_, ret) = unfoldFunType $ typeOf inner_f
+
+        -- when (any (/= mempty) ams) $
+        --  traceM $
+        --    unlines $
+        --      [ "##f'",
+        --        prettyString $ typeOf f',
+        --        "##inner_f",
+        --        prettyString $ typeOf inner_f,
+        --        "##e",
+        --        prettyString e,
+        --        "##ams",
+        --        show ams
+        --      ]
+        pure $
+          mkApply inner_f (zip3 exts (repeat mempty) args') $
+            res {appResType = snd $ unfoldFunType $ typeOf inner_f}
+    (AppExp (BinOp op (Info t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc) (Info res)) -> do
+      x' <- expandAMAnnotations x
+      y' <- expandAMAnnotations y
+      withMapNest loc [(xext, xam, x', Observe), (yext, yam, y', Observe)] $ \[x'', y''] ->
+        pure $
+          AppExp
+            ( BinOp
+                op
+                (Info t)
+                (x'', Info (xext, mempty))
+                (y'', Info (yext, mempty))
+                loc
+            )
+            (Info res {appResType = stripArray (shapeRank $ autoFrame yam) (appResType res)})
+    _ -> astMap identityMapper {mapOnExp = expandAMAnnotations} e
+  where
+    setNewType e t = astMap identityMapper {mapOnStructType = const $ pure t} e
+
+    funDiets :: TypeBase dim as -> [Diet]
+    funDiets (Scalar (Arrow _ _ d _ (RetType _ t2))) = d : funDiets t2
+    funDiets _ = []
+
+    dropDims :: Int -> TypeBase dim as -> TypeBase dim as
+    dropDims n (Scalar (Arrow u p diet t1 (RetType ds t2))) =
+      Scalar (Arrow u p diet (stripArray n t1) (RetType ds (dropDims n t2)))
+    dropDims n t = stripArray n t
+
+    innerFType :: TypeBase dim as -> [AutoMap] -> TypeBase dim as
+    innerFType (Scalar (Arrow u p diet t1 (RetType ds t2))) ams =
+      Scalar $ Arrow u p diet t1 $ RetType ds $ innerFType' t2 ams
+      where
+        innerFType' t [] = t
+        innerFType' (Scalar (Arrow u p diet t1 (RetType ds t2))) (am : ams) =
+          Scalar $ Arrow u p diet (dropDims (shapeRank (autoMap am)) t1) $ RetType ds $ innerFType' t2 ams
+        innerFType' t [am] = dropDims (shapeRank (autoMap am)) t
+        innerFType' _ _ = error ""
+    innerFType _ _ = error ""
+
+type Level = Int
+
+data AutoMapArg = AutoMapArg
+  { amArg :: Exp
+  }
+  deriving (Show)
+
+data AutoMapParam = AutoMapParam
+  { amParam :: Pat ParamType,
+    amMapDim :: Size,
+    amDiet :: Diet
+  }
+  deriving (Show)
+
+-- | Builds a map-nest based on the 'AutoMap' annotations.
+withMapNest ::
+  forall m.
+  (MonadFreshNames m) =>
+  SrcLoc ->
+  [(Maybe VName, AutoMap, Exp, Diet)] ->
+  ([Exp] -> m Exp) ->
+  m Exp
+withMapNest loc args f = do
+  (param_map, arg_map) <-
+    bimap combineMaps combineMaps . unzip <$> mapM buildArgMap args
+  buildMapNest param_map arg_map $ maximum $ M.keys arg_map
+  where
+    combineMaps :: (Ord k) => [M.Map k v] -> M.Map k [v]
+    combineMaps = M.unionsWith (<>) . (fmap . fmap) pure
+
+    buildMapNest ::
+      M.Map Level [AutoMapParam] ->
+      M.Map Level [AutoMapArg] ->
+      Level ->
+      m Exp
+    buildMapNest _ arg_map 0 =
+      f $ map amArg $ arg_map M.! 0
+    buildMapNest param_map arg_map l =
+      case map amMapDim $ param_map M.! l of
+        [] -> error "Malformed param map."
+        (map_dim : _) -> do
+          let params = map (\p -> (amDiet p, amParam p)) $ param_map M.! l
+              args = map amArg $ arg_map M.! l
+          body <- buildMapNest param_map arg_map (l - 1)
+          pure $
+            mkMap map_dim params body args $
+              RetType [] $
+                arrayOfWithAliases Unique (Shape [map_dim]) (typeOf body)
+
+    buildArgMap ::
+      (Maybe VName, AutoMap, Exp, Diet) ->
+      m (M.Map Level AutoMapParam, M.Map Level AutoMapArg)
+    buildArgMap (ext, am, arg, diet) =
+      foldM (mkArgsAndParams arg) mempty $ reverse [0 .. trueLevel am]
+      where
+        mkArgsAndParams arg (p_map, a_map) l
+          | l == 0 = do
+              let arg' = maybe arg (paramToExp . amParam) (p_map M.!? 1)
+              rarg <- mkReplicateShape (autoRep am `shapePrefix` autoFrame am) arg'
+              pure (p_map, M.insert 0 (AutoMapArg rarg) a_map)
+          | l == trueLevel am = do
+              p <- mkAMParam (typeOf arg) l
+              let d = outerDim am l
+              pure
+                ( M.insert l (AutoMapParam p d diet) p_map,
+                  M.insert l (AutoMapArg arg) a_map
+                )
+          | l < trueLevel am && l > 0 = do
+              p <- mkAMParam (typeOf arg) l
+              let d = outerDim am l
+              let arg' =
+                    paramToExp $
+                      amParam $
+                        p_map M.! (l + 1)
+              pure
+                ( M.insert l (AutoMapParam p d diet) p_map,
+                  M.insert l (AutoMapArg arg') a_map
+                )
+          | otherwise = error "Impossible."
+
+        mkAMParam t level =
+          mkParam ("p_" <> show level) $ argType (level - 1) am t
+
+    trueLevel :: AutoMap -> Int
+    trueLevel am
+      | autoMap am == mempty =
+          max 0 $ shapeRank (autoFrame am) - shapeRank (autoRep am)
+      | otherwise =
+          shapeRank $ autoFrame am
+
+    outerDim :: AutoMap -> Int -> Size
+    outerDim am level =
+      (!! (trueLevel am - level)) $ shapeDims $ autoFrame am
+
+    argType level am = stripArray (trueLevel am - level)
+
+mkParam :: (MonadFreshNames m) => String -> TypeBase Size u -> m (Pat ParamType)
+mkParam desc t = do
+  x <- newVName desc
+  pure $ Id x (Info $ toParam Observe t) mempty
+
+mkReplicateShape :: (MonadFreshNames m) => Shape Size -> Exp -> m Exp
+mkReplicateShape s e = foldM (flip mkReplicate) e s
+
+mkReplicate :: (MonadFreshNames m) => Exp -> Exp -> m Exp
+mkReplicate dim e = do
+  x <- mkParam "x" (Scalar $ Prim $ Unsigned Int64)
+  pure $
+    mkMap dim [(Observe, x)] e [xs] $
+      RetType mempty (arrayOfWithAliases Unique (Shape [dim]) (typeOf e))
+  where
+    xs =
+      AppExp
+        ( Range
+            (Literal (UnsignedValue $ intValue Int64 0) mempty)
+            Nothing
+            (UpToExclusive dim)
+            mempty
+        )
+        ( Info $ AppRes (arrayOf (Shape [dim]) (Scalar $ Prim $ Unsigned Int64)) []
+        )
+
+mkMap :: Exp -> [(Diet, Pat ParamType)] -> Exp -> [Exp] -> ResRetType -> Exp
+mkMap dim params body arrs rettype =
+  mkApply mapN args (AppRes (toStruct $ retType rettype) [])
+  where
+    args = map (Nothing,mempty,) $ lambda : arrs
+    mapt = foldFunType (zipWith toParam (Observe : map fst params) (typeOf lambda : map typeOf arrs)) rettype
+    mapN = Var (QualName [] $ VName "map" 0) (Info mapt) mempty
+    lambda =
+      Lambda
+        (map snd params)
+        body
+        Nothing
+        ( Info $
+            RetType
+              (retDims rettype)
+              (typeOf body `setUniqueness` uniqueness (retType rettype))
+        )
+        mempty
+
+paramToExp :: Pat ParamType -> Exp
+paramToExp (Id vn (Info t) loc) =
+  Var (QualName [] vn) (Info $ toStruct t) loc
+paramToExp p = error $ prettyString p
