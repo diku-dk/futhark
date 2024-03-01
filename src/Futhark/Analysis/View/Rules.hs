@@ -19,6 +19,7 @@ substituteViews view@(View Empty _e) = do
     m vs =
       ASTMapper
         { mapOnExp = onExp vs }
+    onExp :: Views -> Exp -> ViewM Exp
     onExp vs e@(Var vn) =
       case M.lookup vn vs of
         Just (View _ e2) ->
@@ -33,7 +34,7 @@ substituteViews view@(View Empty _e) = do
         Just (View (Forall j _) e2) ->
           -- TODO should I check some kind of equivalence on eidx and i?
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-                substituteName (M.singleton j eidx) e2
+                substituteName j eidx e2
         _ -> pure e
     onExp vs v = astMap (m vs) v
 substituteViews view@(View (Forall _i _dom ) _e) = do
@@ -63,7 +64,7 @@ substituteViews view@(View (Forall _i _dom ) _e) = do
         Just (View (Forall j _) e2) ->
           -- TODO should I check some kind of equivalence on eidx and i?
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-                substituteName (M.singleton j eidx) e2
+                substituteName j eidx e2
         _ -> pure e
     onExp vs v = astMap (m vs) v
 
@@ -129,6 +130,8 @@ normalise view =
       ASTMapper
         { mapOnExp = onExp }
     onExp (Var x) = pure $ Var x
+    onExp (Not (Bool True)) = pure $ Bool False
+    onExp (Not (Bool False)) = pure $ Bool True
     onExp (x :&& y) = do
       x' <- onExp x
       y' <- onExp y
@@ -195,7 +198,7 @@ rewrite (View it@(Forall i'' _) (Cases cases))
       j <- Var <$> newNameFromString "j"
       let lb = SoP (SoP.int2SoP 0)
       let ub = Var i
-      z <- substituteName (M.singleton i j) x
+      z <- substituteName i j x
       pure $ View it (Cases $ NE.singleton (Bool True, Sum j lb ub z))
   where
     justRecurrence :: Exp -> Maybe Exp

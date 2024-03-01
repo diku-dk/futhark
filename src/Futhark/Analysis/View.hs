@@ -132,7 +132,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      substituteName subst $ View (Forall i (Iota sz)) body'
+      substituteNames subst $ View (Forall i (Iota sz)) body'
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,

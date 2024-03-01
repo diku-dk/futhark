@@ -294,8 +294,8 @@ instance Pretty Views where
   pretty env =
     stack $ map (\(a, b) -> pretty a <+> "=" <+> pretty b) $ M.toList env
 
-substituteName :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
-substituteName substitutions x = do
+substituteNames :: ASTMappable x => M.Map VName Exp -> x -> ViewM x
+substituteNames substitutions x = do
   pure $ runIdentity $ astMap (substituter substitutions) x
   where
     substituter subst =
@@ -307,3 +307,6 @@ substituteName substitutions x = do
         Just x'' -> pure x''
         Nothing -> pure e
     onExp subst e = astMap (substituter subst) e
+
+substituteName :: ASTMappable x => VName -> Exp -> x -> ViewM x
+substituteName vn x = substituteNames (M.singleton vn x)
