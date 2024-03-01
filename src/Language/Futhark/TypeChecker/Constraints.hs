@@ -166,6 +166,14 @@ linkTyVar v t = do
 unify :: Type -> Type -> Maybe [(Type, Type)]
 unify (Scalar (Prim pt1)) (Scalar (Prim pt2))
   | pt1 == pt2 = Just []
+unify
+  (Scalar (TypeVar _ (QualName _ v1) targs1))
+  (Scalar (TypeVar _ (QualName _ v2) targs2))
+    | v1 == v2 =
+        Just $ mapMaybe f $ zip targs1 targs2
+    where
+      f (TypeArgType t1, TypeArgType t2) = Just (t1, t2)
+      f _ = Nothing
 unify (Scalar (Arrow _ _ _ t1a (RetType _ t1r))) (Scalar (Arrow _ _ _ t2a (RetType _ t2r))) =
   Just [(t1a, t2a), (t1r', t2r')]
   where
@@ -223,13 +231,9 @@ solveCt ct =
         (Scalar (TypeVar _ (QualName [] v1) []), t2')
           | Just lvl <- flexible v1 ->
               subTyVar v1 lvl t2'
-          | otherwise ->
-              bad
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
           | Just lvl <- flexible v2 ->
               subTyVar v2 lvl t1'
-          | otherwise ->
-              bad
         (t1', t2') -> case unify t1' t2' of
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs
