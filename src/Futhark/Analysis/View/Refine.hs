@@ -65,6 +65,8 @@ refineView (View it (Cases cases)) = do
     -- XXX Sequence onExp so that knowledge from previous cases can be
     -- used in later cases? In fact we want to incorporate negation of
     -- disjunctin of all previous cases!
+    -- At least extend AlgEnv with already solved expressions. (For example,
+    -- I'm thinking we will often have | p => e1 | not p => e2.)
     -- XXX Shouldn't these relations always be in SoP representation?
     eliminateFalse (Bool False) = False
     eliminateFalse (Not (Bool True)) = False
