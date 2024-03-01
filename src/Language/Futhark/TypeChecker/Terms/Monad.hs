@@ -60,6 +60,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames hiding (newName)
 import Futhark.FreshNames qualified
+import Futhark.Util
 import Futhark.Util.Pretty hiding (space)
 import Language.Futhark
 import Language.Futhark.Traversals
@@ -413,8 +414,9 @@ instTyVars loc names orig_t1 orig_t2 = do
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
       f
         (Scalar (TypeVar u v1 targs1))
-        (Scalar (TypeVar _ _ targs2)) =
-          Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
+        (Scalar (TypeVar _ _ targs2))
+          | length targs1 == length targs2 =
+              Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
           where
             g (TypeArgType t1) (TypeArgType t2) =
               TypeArgType <$> f t1 t2
@@ -461,7 +463,6 @@ instTypeScheme qn loc tparams scheme_t inferred = do
 
   let tp_names = map typeParamName $ filter isTypeParam tparams
   t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
-
   pure (names, t')
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
