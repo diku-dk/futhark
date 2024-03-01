@@ -26,9 +26,7 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 
 data Exp =
-    -- Keep Recurrence first for ordering in Ord.
-    Recurrence    -- self-reference y[i-1]
-  | Var VName
+    Var VName
   | Array [Exp]
   | Sum
       Exp         -- index
@@ -50,6 +48,9 @@ data Exp =
   | (:>) Exp Exp
   | (:&&) Exp Exp
   | Cases (NE.NonEmpty (Exp, Exp))
+  | -- Keep Recurrence last for ordering in Ord; we depend
+    -- on this for Rule matching.
+    Recurrence -- self-reference y[i-1]
   deriving (Show, Eq, Ord)
 
 -- Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc

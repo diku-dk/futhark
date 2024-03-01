@@ -86,16 +86,16 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM . show $ newView
     tracePrettyM newView
     traceM "🎭 hoisting cases"
-    newView1 <- hoistCases newView >>= simplifyPredicates
+    newView1 <- hoistCases newView >>= normalise
     tracePrettyM newView1
     newView2 <- substituteViews newView1
     tracePrettyM newView2
     traceM "🎭 hoisting cases"
-    newView3 <- hoistCases newView2 >>= simplifyPredicates
+    newView3 <- hoistCases newView2 >>= normalise
     tracePrettyM newView3
-    newView4 <- simplifyPredicates (simplify newView3)
+    newView4 <- normalise (simplify newView3)
     tracePrettyM newView4
-    newView5 <- rewrite newView4 >>= simplifyPredicates
+    newView5 <- rewrite newView4 >>= normalise
     tracePrettyM newView5
     traceM "\n"
     insertView x newView5

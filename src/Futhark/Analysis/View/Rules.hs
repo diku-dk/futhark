@@ -14,21 +14,29 @@ import Futhark.MonadFreshNames
 substituteViews :: View -> ViewM View
 substituteViews view@(View Empty _e) = do
   knownViews <- gets views
-  pure $ idMap (m knownViews) view
+  astMap (m knownViews) view
   where
     m vs =
       ASTMapper
         { mapOnExp = onExp vs }
-    subst vs vn e =
+    onExp vs e@(Var vn) =
       case M.lookup vn vs of
         Just (View _ e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
                 pure e2
         _ -> pure e
-    onExp vs e@(Var vn) = subst vs vn e
-    onExp vs e@(Idx (Var vn) _eidx) = subst vs vn e
+    onExp vs e@(Idx (Var vn) eidx) =
+      case M.lookup vn vs of
+        Just (View Empty e2) ->
+          trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
+                pure e2
+        Just (View (Forall j _) e2) ->
+          -- TODO should I check some kind of equivalence on eidx and i?
+          trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
+                substituteName (M.singleton j eidx) e2
+        _ -> pure e
     onExp vs v = astMap (m vs) v
-substituteViews view@(View (Forall i _dom ) _e) = do
+substituteViews view@(View (Forall _i _dom ) _e) = do
   knownViews <- gets views
   astMap (m knownViews) view
   where
@@ -45,7 +53,7 @@ substituteViews view@(View (Forall i _dom ) _e) = do
                 pure e2
         Just (View (Forall _ _) _) -> undefined -- Think about this case later.
         _ -> pure e
-    onExp vs e@(Idx (Var vn) _eidx) =
+    onExp vs e@(Idx (Var vn) eidx) =
       case M.lookup vn vs of
         -- XXX check that domains are compatible
         -- XXX use eidx?
@@ -55,7 +63,7 @@ substituteViews view@(View (Forall i _dom ) _e) = do
         Just (View (Forall j _) e2) ->
           -- TODO should I check some kind of equivalence on eidx and i?
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-                substituteName (M.singleton j (Var i)) e2
+                substituteName (M.singleton j eidx) e2
         _ -> pure e
     onExp vs v = astMap (m vs) v
 
@@ -113,8 +121,8 @@ hoistCases' e =
       mconcat $ map (\(_c, e') -> onExp e') (NE.toList cases)
     onExp v = astMap m2 v
 
-simplifyPredicates :: View -> ViewM View
-simplifyPredicates view =
+normalise :: View -> ViewM View
+normalise view =
   pure $ idMap m view
   where
     m =
@@ -128,6 +136,18 @@ simplifyPredicates view =
         (Bool True, b) -> pure b
         (a, Bool True) -> pure a
         (a, b) -> pure $ a :&& b
+    onExp x@(SoP _) = do
+      x' <- astMap m x
+      case x' of
+        SoP sop -> pure . SoP . normaliseNegation $ sop
+        _ -> pure x'
+      where
+       -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
+       -- or the only terms.
+       normaliseNegation sop -- 1 + -1*[[c]] => [[not c]]
+        | [([], 1), ([Indicator c], -1)] <- getSoP sop =
+          SoP.sym2SoP $ Indicator (Not c)
+       normaliseNegation sop = sop
     onExp v = astMap m v
 
 -- TODO Possible to merge this with simplifyPredicates?
@@ -149,7 +169,7 @@ simplifyRule3 (Cases cases)
   | Just sops <- mapM (justSoP . snd) cases = 
   let preds = NE.map fst cases
       sumOfIndicators =
-        foldl1 (SoP..+.) . NE.toList $
+        SoP.normalize . foldl1 (SoP..+.) . NE.toList $
           NE.zipWith
             (\p x -> SoP.sym2SoP (Indicator p) SoP..*. SoP.int2SoP x)
             preds
@@ -162,14 +182,8 @@ simplifyRule3 (Cases cases)
 simplifyRule3 _ = Nothing
 
 
-justRecurrence :: Exp -> Maybe Exp
-justRecurrence (SoP sop)
-  | [([Recurrence], 1), ([x], 1)] <- SoP.sopToLists $ SoP.normalize sop =
-      Just x
-justRecurrence _ = Nothing
-
 rewrite :: View -> ViewM View
-rewrite (View it@(Forall i'' _) (Cases cases))
+rewrite v@(View it@(Forall i'' _) (Cases cases))
   | -- Rule 4 (recursive sum)
     -- XXX make this match tmp in part2indices (e.g. by transforming it to [[neg conds[i]]])
     (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
@@ -184,4 +198,13 @@ rewrite (View it@(Forall i'' _) (Cases cases))
       let ub = Var i
       z <- substituteName (M.singleton i j) x
       pure $ View it (Cases $ NE.singleton (Bool True, Sum j lb ub z))
+  where
+    justRecurrence :: Exp -> Maybe Exp
+    justRecurrence (SoP sop)
+      | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
+          Just x
+    justRecurrence _ = Nothing
 rewrite view = pure view
+
+getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
+getSoP = SoP.sopToLists . SoP.normalize
