@@ -1,4 +1,11 @@
--- XXX Recognise `tmp` in part2indices as a recursive sum.
+-- XXX Solve basic inequalities. For example, in
+--       forall i ∈ iota n .
+--           | n > 0 => e1
+--           | ¬(n₆₀₆₈ > 0) => e2
+--     we have the range over i implies for each branch (add to range env.)
+--     that n ∈ [1, infty). Then we can use the Fourier Motzkin solver
+--     to derive that n > 0 is true and only keep the first case in the view.
+--
 -- XXX Also recurse into conditions in `hoistIf` (see TODOs).
 -- XXX Make partition2indices go through.
 -- XXX Rebase this on top of master (don't need Refinement type machinery rn).
@@ -20,10 +27,12 @@ import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.MonadFreshNames
 import Language.Futhark (VName (VName))
+import Language.Futhark qualified as E
 import Futhark.Util.Pretty
 import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
+import Futhark.SoP.Monad
 
 data Exp =
     Var VName
@@ -96,7 +105,7 @@ type Views = M.Map VName View
 
 data VEnv = VEnv
   { vnamesource :: VNameSource,
-    -- algenv :: AlgEnv Exp E.Exp,
+    algenv :: AlgEnv Exp E.Exp,
     views :: Views
   }
 
@@ -110,19 +119,24 @@ newtype ViewM a = ViewM (RWS () () VEnv a)
       MonadState VEnv
     )
 
--- instance Semigroup View where
---   (View i (Cases xs)) <> (View Empty (Cases ys)) = View i (Cases $ xs <> ys)
---   (View Empty (Cases xs)) <> (View i (Cases ys)) = View i (Cases $ xs <> ys)
---   (View _i (Cases _xs)) <> (View _j (Cases _ys)) = error "view semigroup"
-
 instance (Monoid w) => MonadFreshNames (RWS r w VEnv) where
   getNameSource = gets vnamesource
   putNameSource vns = modify $ \senv -> senv {vnamesource = vns}
 
+-- This is required by MonadSoP.
+instance Nameable Exp where
+  mkName (VNameSource i) = (Var $ VName "x" i, VNameSource $ i + 1)
+
+instance MonadSoP Exp E.Exp ViewM where
+  getUntrans = gets (untrans . algenv)
+  getRanges = gets (ranges . algenv)
+  getEquivs = gets (equivs . algenv)
+  modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
+
 execViewM :: ViewM a -> VNameSource -> Views
 execViewM (ViewM m) vns = views . fst $ execRWS m () s
   where
-    s = VEnv vns mempty
+    s = VEnv vns mempty mempty
 
 insertView :: VName -> View -> ViewM ()
 insertView x v =
@@ -209,12 +223,6 @@ x ~+~ y = flatten $ SoP $ expToSoP x SoP..+. expToSoP y
 x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
 
 -- SoP foreshadowing:
-
--- instance (Monad m) => MonadSoP Exp E.Exp ViewM where
---   getUntrans = gets (untrans . algenv)
---   getRanges = gets (ranges . algenv)
---   getEquivs = gets (equivs . algenv)
---   modifyEnv f = modify $ \env -> env {algenv = f $ algenv env}
 
 -- instance (ASTMappable a) => Substitute VName Exp a where
 --   substitute subst = idMap m

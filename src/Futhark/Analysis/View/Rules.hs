@@ -183,9 +183,8 @@ simplifyRule3 _ = Nothing
 
 
 rewrite :: View -> ViewM View
-rewrite v@(View it@(Forall i'' _) (Cases cases))
+rewrite (View it@(Forall i'' _) (Cases cases))
   | -- Rule 4 (recursive sum)
-    -- XXX make this match tmp in part2indices (e.g. by transforming it to [[neg conds[i]]])
     (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
     i == i'',
     i == i',
