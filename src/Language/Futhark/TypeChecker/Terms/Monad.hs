@@ -411,6 +411,14 @@ instTyVars loc names orig_t1 orig_t2 = do
         (Array _ (Shape (d : ds2)) t2) =
           arrayOfWithAliases u (Shape [d])
             <$> f (arrayOf (Shape ds1) (Scalar t1)) (arrayOf (Shape ds2) (Scalar t2))
+      f
+        (Scalar (TypeVar u v1 targs1))
+        (Scalar (TypeVar _ _ targs2)) =
+          Scalar . TypeVar u v1 <$> zipWithM g targs1 targs2
+          where
+            g (TypeArgType t1) (TypeArgType t2) =
+              TypeArgType <$> f t1 t2
+            g _ targ = pure targ
       f t1 t2 = do
         let mkNew =
               fst <$> lift (allDimsFreshInType (mkUsage loc "instantiation") Nonrigid "dv" t1)
@@ -538,11 +546,6 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       replaceTyVars loc inst_t
     Just OverloadedF {} ->
       replaceTyVars loc inst_t
-  where
-    instOverloaded argtype pts rt =
-      ( map (maybe (toStruct argtype) (Scalar . Prim)) pts,
-        maybe (toStruct argtype) (Scalar . Prim) rt
-      )
 
 onFailure :: Checking -> TermTypeM a -> TermTypeM a
 onFailure c = local $ \env -> env {termChecking = Just c}
