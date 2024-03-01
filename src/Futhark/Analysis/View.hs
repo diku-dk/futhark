@@ -5,6 +5,7 @@ import Data.List.NonEmpty()
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe, fromMaybe)
 import Futhark.Analysis.View.Representation
+import Futhark.Analysis.View.Refine
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
 import Futhark.SoP.SoP qualified as SoP
@@ -97,8 +98,10 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     tracePrettyM newView4
     newView5 <- rewrite newView4 >>= normalise
     tracePrettyM newView5
+    newView6 <- refineView newView5 >>= normalise
+    tracePrettyM newView6
     traceM "\n"
-    insertView x newView5
+    insertView x newView6
     forwards body
     pure ()
 forwards _ = pure ()
@@ -184,6 +187,9 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Equal -> pure $ x :== y
         E.Less -> pure $ x :< y
         E.Greater -> pure $ x :> y
+        -- E.Equal -> pure $ x ~==~ y
+        -- E.Less -> pure $ x ~<~ y
+        -- E.Greater -> pure $ x ~>~ y
         E.LogAnd -> pure $ x :&& y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
 toExp (E.AppExp (E.Index xs slice _) _)

@@ -5,6 +5,8 @@
 --     we have the range over i implies for each branch (add to range env.)
 --     that n ∈ [1, infty). Then we can use the Fourier Motzkin solver
 --     to derive that n > 0 is true and only keep the first case in the view.
+--     TODO change Iota to SoP.Range? Then Empty just becomes mempty.
+--     TODO change relations to SoP.Rel? THen change ~<~ to use SoP.:<: etc.
 --
 -- XXX Also recurse into conditions in `hoistIf` (see TODOs).
 -- XXX Make partition2indices go through.
@@ -33,6 +35,7 @@ import Data.Functor.Identity
 import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
+import Futhark.SoP.Convert (ToSoP (toSoPNum))
 
 data Exp =
     Var VName
@@ -51,6 +54,7 @@ data Exp =
     -- I'm assuming it's safe because the source program was typechecked.
     -- TODO CNF
     Bool Bool
+    -- TODO change this to SoP.Rel?
   | Not Exp
   | (:==) Exp Exp
   | (:<) Exp Exp
@@ -207,6 +211,11 @@ flatten = idMap m
                 _ -> astMap m e
         }
 
+instance ToSoP Exp E.Exp where
+  toSoPNum e = do
+    x <- lookupUntransPE e
+    pure (1, SoP.sym2SoP x)
+
 expToSoP :: Exp -> SoP Exp
 expToSoP e =
   case flatten e of
@@ -221,6 +230,15 @@ x ~+~ y = flatten $ SoP $ expToSoP x SoP..+. expToSoP y
 
 (~*~) :: Exp -> Exp -> Exp
 x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
+
+-- (~<~) :: Exp -> Exp -> Exp
+-- x ~<~ y = flatten $ SoP (expToSoP x) :< SoP (expToSoP y)
+
+-- (~>~) :: Exp -> Exp -> Exp
+-- x ~>~ y = flatten $ SoP (expToSoP x) :> SoP (expToSoP y)
+
+-- (~==~) :: Exp -> Exp -> Exp
+-- x ~==~ y = flatten $ SoP (expToSoP x) :== SoP (expToSoP y)
 
 -- SoP foreshadowing:
 
