@@ -237,7 +237,7 @@ prettyAppExp :: (Eq vn, IsName vn, Annot f) => Int -> AppExpBase f vn -> Doc a
 prettyAppExp p (BinOp (bop, _) _ (x, xi) (y, yi) _) =
   case (unAnnot xi, unAnnot yi) of
     (Just (_, xam), Just (_, yam))
-      | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 ->
+      | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 3 ->
           -- fix
           parens $ align $ prettyBinOp p bop x y </> "Δ" <+> pretty xam </> "Δ" <+> pretty yam
     _ -> prettyBinOp p bop x y
@@ -322,7 +322,7 @@ prettyAppExp p (Apply f args _) =
     prettyArg (i, e) =
       case unAnnot i of
         Just (_, am)
-          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 1 ->
+          | isEnvVarAtLeast "FUTHARK_COMPILER_DEBUGGING" 3 ->
               parens (prettyExp 10 e <+> "Δ" <+> pretty am)
         _ -> prettyExp 10 e
 

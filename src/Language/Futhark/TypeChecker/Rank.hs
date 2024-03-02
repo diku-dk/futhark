@@ -195,7 +195,7 @@ enumerateRankSols prog =
 
 solveRankILP :: (MonadTypeChecker m) => SrcLoc -> LinearProg -> m [Map VName Int]
 solveRankILP loc prog = do
-  debugTraceM $
+  debugTraceM 3 $
     unlines
       [ "## solveRankILP",
         prettyString prog
@@ -203,9 +203,9 @@ solveRankILP loc prog = do
   case enumerateRankSols prog of
     [] -> typeError loc mempty "Rank ILP cannot be solved."
     rs -> do
-      debugTraceM "## rank maps"
+      debugTraceM 3 "## rank maps"
       forM_ (zip [0 :: Int ..] rs) $ \(i, r) ->
-        debugTraceM $
+        debugTraceM 3 $
           unlines $
             "\n## rank map " <> prettyString i
               : map prettyString (M.toList r)

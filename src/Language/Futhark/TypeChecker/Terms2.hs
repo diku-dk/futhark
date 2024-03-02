@@ -640,8 +640,8 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
       rhs = arrayOf (toShape (SVar m)) a
   ctAM r m $ fmap toSComp (toShape m_var <> fframe)
   ctEq lhs rhs
-  debugTraceM $
-    unlines
+  debugTraceM 3 $
+    unlines $
       [ "## checkApplyOne",
         "## fname",
         prettyString fname,
@@ -1184,9 +1184,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
   tyvars <- gets termTyVars
 
-  debugTraceM $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
+  debugTraceM 3 $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
-  debugTraceM $
+  debugTraceM 3 $
     unlines
       [ "## cts:",
         unlines $ map prettyString cts,
@@ -1203,7 +1203,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
 
   forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
-    debugTraceM $
+    debugTraceM 3 $
       unlines
         [ "## constraints:",
           unlines $ map prettyString cts',

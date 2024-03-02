@@ -963,7 +963,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
         then splitArrayAt (autoFrameRank am) <$> normTypeFully tp1
         else splitArrayAt (autoFrameRank am) <$> normTypeFully argtype
 
-    debugTraceM $
+    debugTraceM 3 $
       unlines
         [ "## checkApply",
           "## fn",
