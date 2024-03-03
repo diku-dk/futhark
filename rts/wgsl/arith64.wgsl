@@ -58,6 +58,25 @@ fn umax_i64(a: i64, b: i64) -> i64 {
   return a;
 }
 
+fn shl_i64(a: i64, b_full: i64) -> i64 {
+  // Shifting by more than 64 and by negative amounts is undefined, so we can
+  // assume b.y is 0 and b.x >= 0.
+  let b: u32 = bitcast<u32>(b_full.x);
+  if b == 0 { return a; }
+  if b >= 32 { return i64(0, a.x << (b - 32)); }
+
+  let shifted_out = bitcast<i32>(bitcast<u32>(a.x) >> (32 - b));
+  return i64(a.x << b, (a.y << b) | shifted_out );
+}
+
+fn lshr_i64(a: i64, b: i64) -> i64 {
+  
+}
+
+fn ashr_i64(a: i64, b: i64) -> i64 {
+
+}
+
 fn ult_i64(a_s: i64, b_s: i64) -> bool {
   let a = bitcast<vec2<u32>>(a_s);
   let b = bitcast<vec2<u32>>(b_s);
