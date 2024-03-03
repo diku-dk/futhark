@@ -506,7 +506,7 @@ expandAMAnnotations e = do
       f' <- expandAMAnnotations f
       arg_es' <- mapM expandAMAnnotations arg_es
       let diets = funDiets $ typeOf f
-      withMapNest loc (zip4 exts ams arg_es diets) $ \args' -> do
+      withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
         inner_f <- setNewType f' $ innerFType (typeOf f') ams
         let (_, ret) = unfoldFunType $ typeOf inner_f
 
