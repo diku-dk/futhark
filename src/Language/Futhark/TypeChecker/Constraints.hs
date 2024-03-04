@@ -108,6 +108,16 @@ substTyVar m v =
     Just (TyVarUnsol {}) -> Nothing
     Nothing -> Nothing
 
+lookupTyVar :: TyVar -> SolveM (Maybe Type)
+lookupTyVar orig = do
+  tyvars <- gets solverTyVars
+  let f v = case M.lookup v tyvars of
+        Nothing -> error $ "Unknown tyvar: " <> prettyNameString v
+        Just (TyVarSol _ t) -> pure $ Just t
+        Just (TyVarLink v') -> f v'
+        Just (TyVarUnsol {}) -> pure Nothing
+  f orig
+
 -- | A solution maps a type variable to its substitution. This
 -- substitution is complete, in the sense there are no right-hand
 -- sides that contain a type variable.
@@ -238,11 +248,46 @@ solveCt ct =
           Nothing -> bad
           Just eqs -> mapM_ solveCt' eqs
 
+solveTyVar :: (VName, (Int, TyVarInfo)) -> SolveM ()
+solveTyVar (tv, (_, TyVarFree {})) = pure ()
+solveTyVar (tv, (_, TyVarPrim pts)) = do
+  t <- lookupTyVar tv
+  case t of
+    Nothing -> pure ()
+    Just t'
+      | t' `elem` map (Scalar . Prim) pts -> pure ()
+      | otherwise ->
+          throwError $
+            "Type variable "
+              <> prettyNameText tv
+              <> " must be one of\n"
+              <> prettyText pts
+              <> "\nbut inferred to be\n"
+              <> prettyText t'
+solveTyVar (tv, (_, TyVarRecord fs1)) = do
+  tv_t <- lookupTyVar tv
+  case tv_t of
+    Nothing -> pure ()
+    Just (Scalar (Record fs2))
+      | all (`M.member` fs2) (M.keys fs1) ->
+          forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(k, (t1, t2)) ->
+            solveCt $ CtEq t1 t2
+    Just tv_t' ->
+      throwError $
+        "Type variable "
+          <> prettyNameText tv
+          <> " must be record with fields\n"
+          <> prettyText (Scalar (Record fs1))
+          <> " but inferred to be\n"
+          <> prettyText tv_t'
+
 solve :: Constraints -> TyVars -> Either T.Text ([VName], Solution)
 solve constraints tyvars =
   second solution
     . runExcept
     . flip execStateT (initialState tyvars)
     . runSolveM
-    $ mapM solveCt constraints
+    $ do
+      mapM_ solveCt constraints
+      mapM_ solveTyVar (M.toList tyvars)
 {-# NOINLINE solve #-}
