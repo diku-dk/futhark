@@ -708,13 +708,13 @@ checkValBind vb = do
     checkFunDef (fname, maybe_tdecl, tparams, params, body, loc)
 
   let entry' = Info (entryPoint params' maybe_tdecl' rettype) <$ entry
+      vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
+
+  debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']
+
   case entry' of
     Just _ -> checkEntryPoint loc tparams' params' maybe_tdecl' rettype
     _ -> pure ()
-
-  let vb' = ValBind entry' fname maybe_tdecl' (Info rettype) tparams' params' body' doc attrs' loc
-
-  debugTraceM 3 $ unlines ["# Inferred:", prettyString vb']
 
   pure
     ( mempty
