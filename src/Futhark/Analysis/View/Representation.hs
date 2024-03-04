@@ -1,15 +1,24 @@
--- XXX Solve basic inequalities. For example, in
---       forall i ∈ iota n .
---           | n > 0 => e1
---           | ¬(n₆₀₆₈ > 0) => e2
---     we have the range over i implies for each branch (add to range env.)
---     that n ∈ [1, infty). Then we can use the Fourier Motzkin solver
---     to derive that n > 0 is true and only keep the first case in the view.
---     TODO change Iota to SoP.Range? Then Empty just becomes mempty.
---     TODO change relations to SoP.Rel? THen change ~<~ to use SoP.:<: etc.
+-- XXX use case predicates for simplifying ranges in case values
+-- e.g. n = 0 => sum (0, n-1) can be simplified
+-- XXX add negation of disjunction of previous cases
+-- XXX Next: Make it robust: play with part2indices; rewrite it in other ways such as
+--       - fflgs using negation on conds
+--       - introduce let bindings inside maps
+--       - use exclusive scan and dont subtract one from indices later
+--         (also changes definition of lst)
+--       - use parts from partition2L as inspiration fro changes, like:
+--           let begs   = scan (+) 0 shp --- prepend 0 here; prepend 0 to shp
+--       - etc
+-- Next: mkFlagArray
+-- Next: partition2L
+--       - empty segments may be problematic in lstL;
+--         maybe add outer condition to index funciton representation?
+-- Next: prove that partition2indices result is actually a permutation of 0...n-1
 --
+-- XXX use case perdicates for simplifying ranges in case values
+--     TODO change Iota to SoP.Range? Then Empty just becomes mempty.
+-- XXX make tests/refinement/iota0 reduce to just 0.
 -- XXX Also recurse into conditions in `hoistIf` (see TODOs).
--- XXX Make partition2indices go through.
 -- XXX Rebase this on top of master (don't need Refinement type machinery rn).
 -- XXX Check that iterators/domains are compatible.
 -- XXX Make iterators over same domains unify.
