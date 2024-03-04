@@ -68,11 +68,11 @@ def sobolRecI_am [num_bits][n] (sob_dir_vs: [n][num_bits]i32, prev: [n]i32, x: i
 def sobolReci2_am [n][num_bits] (sob_dirs: [n][num_bits]i32, prev: [n]i32, i: i32): [n]i32=
   prev ^ recM(sob_dirs, i)
 
-entry sobolIndR [m][num_bits] (dir_vs: [m][num_bits]i32) (n: i32): []bool =
-  sobolIndR_orig dir_vs n == sobolIndR_am dir_vs n
+entry sobolIndR [m][num_bits] (dir_vs: [m][num_bits]i32) (n: i32): bool =
+  and (sobolIndR_orig dir_vs n == sobolIndR_am dir_vs n)
 
-entry sobolRecI [num_bits][n] (sob_dir_vs: [n][num_bits]i32) (prev: [n]i32) (x: i32): []bool =
-  sobolRecI_orig (sob_dir_vs, prev, x) == sobolRecI_am (sob_dir_vs, prev, x)
+entry sobolRecI [num_bits][n] (sob_dir_vs: [n][num_bits]i32) (prev: [n]i32) (x: i32): bool =
+  and (sobolRecI_orig (sob_dir_vs, prev, x) == sobolRecI_am (sob_dir_vs, prev, x))
                                            
-entry sobolReci2 [n][num_bits] (sob_dirs: [n][num_bits]i32) (prev: [n]i32) (i: i32): []bool =
-  sobolReci2_orig (sob_dirs, prev, i) == sobolReci2_am (sob_dirs, prev, i)
+entry sobolReci2 [n][num_bits] (sob_dirs: [n][num_bits]i32) (prev: [n]i32) (i: i32): bool =
+  and (sobolReci2_orig (sob_dirs, prev, i) == sobolReci2_am (sob_dirs, prev, i))

@@ -29,4 +29,4 @@ def main_am [n][m][p] (ass: [n][m]f32) (bss: [m][p]f32) (css: [n][p]f32)
                            
 entry main [n][m][p] (ass: [n][m]f32) (bss: [m][p]f32) (css: [n][p]f32)
                    (alpha: f32) (beta: f32) =
-  main_orig ass bss css alpha beta == main_am ass bss css alpha beta
+  and (and (main_orig ass bss css alpha beta == main_am ass bss css alpha beta))

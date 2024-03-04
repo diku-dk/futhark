@@ -1625,17 +1625,27 @@ isIntrinsicFunction qname args loc = do
     handleOps _ _ = Nothing
 
     handleSOACs (lam : args) "map" = Just $ \desc -> do
-      let internaliseVName x = do
-            es <- map (BasicOp . SubExp) <$> internaliseExp "arg" x
-            concat <$> mapM (letValExp "arg") es
-      args' <- concat <$> mapM internaliseVName args
-      param_ts <- mapM (fmap (I.stripArray 1) . lookupType) args'
-      map_dim <- (head . I.shapeDims . I.arrayShape) <$> lookupType (head args')
+      arg_ses <- concat <$> mapM (internaliseExp "arg") args
+      arg_ts <- mapM subExpType arg_ses
+      let param_ts = map rowType arg_ts
+          map_dim = head $ I.shapeDims $ I.arrayShape $ head arg_ts
+
+      arg_ses' <-
+        zipWithM
+          ( \p a ->
+              ensureShape "" mempty (arrayOfRow p map_dim) "" a
+          )
+          param_ts
+          arg_ses
+
+      args_v'' <- mapM (letExp "" . BasicOp . SubExp) arg_ses'
+
       lambda <- internaliseLambdaCoerce lam param_ts
+
       letTupExp'
         desc
         $ Op
-        $ Screma map_dim args'
+        $ Screma map_dim args_v''
         $ mapSOAC lambda
     handleSOACs [k, lam, arr] "partition" = do
       k' <- fromIntegral <$> fromInt32 k

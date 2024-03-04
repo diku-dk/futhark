@@ -509,19 +509,6 @@ expandAMAnnotations e = do
       withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
         inner_f <- setNewType f' $ innerFType (typeOf f') ams
         let (_, ret) = unfoldFunType $ typeOf inner_f
-
-        -- when (any (/= mempty) ams) $
-        --  traceM $
-        --    unlines $
-        --      [ "##f'",
-        --        prettyString $ typeOf f',
-        --        "##inner_f",
-        --        prettyString $ typeOf inner_f,
-        --        "##e",
-        --        prettyString e,
-        --        "##ams",
-        --        show ams
-        --      ]
         pure $
           mkApply inner_f (zip3 exts (repeat mempty) args') $
             res {appResType = snd $ unfoldFunType $ typeOf inner_f}
@@ -610,7 +597,7 @@ withMapNest loc args f = do
           pure $
             mkMap map_dim params body args $
               RetType [] $
-                arrayOfWithAliases Unique (Shape [map_dim]) (typeOf body)
+                arrayOfWithAliases Nonunique (Shape [map_dim]) (typeOf body)
 
     buildArgMap ::
       (Maybe VName, AutoMap, Exp, Diet) ->

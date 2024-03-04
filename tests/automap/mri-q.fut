@@ -35,5 +35,7 @@ def main_am [numK][numX]
 entry main [numK][numX]
          (kx: [numK]f32) (ky: [numK]f32) (kz: [numK]f32)
          (x: [numX]f32) (y: [numX]f32) (z: [numX]f32)
-         (phiR: [numK]f32) (phiI: [numK]f32) : bool =
-  main_orig kx ky kz  x y z phiR phiI == main_am kx ky kz  x y z phiR phiI
+         (phiR: [numK]f32) (phiI: [numK]f32) =
+  let (qr, qi) = main_orig kx ky kz  x y z phiR phiI
+  let (qr_am, qi_am) = main_am kx ky kz  x y z phiR phiI
+  in and (map2 (==) qr qr_am && qi == qi_am)
