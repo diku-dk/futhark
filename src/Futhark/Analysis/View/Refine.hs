@@ -1,14 +1,11 @@
 module Futhark.Analysis.View.Refine where
 
-import Futhark.SoP.Monad (AlgEnv, addRange)
+import Futhark.SoP.Monad (AlgEnv, addRange, delFromEnv)
 import Language.Futhark qualified as E
--- The above can be removed if I don't write out the type signature
--- for onExp, I think.
 import Futhark.SoP.FourierMotzkin
 import Futhark.Analysis.View.Representation
 import Control.Monad.RWS
 import qualified Data.List.NonEmpty as NE
-import Debug.Trace (trace)
 import qualified Data.Set as S
 import qualified Futhark.SoP.SoP as SoP
 
@@ -25,17 +22,22 @@ addIterator (Forall i (Iota (Var n))) = do
   addRange (Var n) (mkRange (int 1) (int maxBound))
 addIterator _ = pure ()
 
+delIterator :: Iterator -> ViewM ()
+delIterator (Forall i (Iota (Var n))) = do
+  delFromEnv (Var i)
+  delFromEnv (Var n)
+delIterator _ = pure ()
+
 refineView :: View -> ViewM View
 refineView (View it (Cases cases)) = do
-  -- maybe astMap over predicates in cases?
-  -- recurse all the way down solving the simplest equations
-  -- then solve their combinations as we traverse back up
   let preds = NE.toList $ NE.map fst cases
   addIterator it
   env <- gets algenv
+  -- let env =  addIteratorLocal env it
   preds' <- NE.fromList <$> mapM (onExp env) preds
   let cases' = NE.filter (eliminateFalse . fst) $
                  NE.zipWith (\c (_,e) -> (c,e)) preds' cases
+  delIterator it
   case cases' of
     [] -> error "No true case; this should never happen."
     cs -> pure $ View it (Cases $ NE.fromList cs)
@@ -44,6 +46,10 @@ refineView (View it (Cases cases)) = do
     m env =
       ASTMapper
         { mapOnExp = onExp env }
+
+    -- NOTE the FME solver returns False if the expression is false
+    -- _or_ if the result is unknown. Hence only True results may be used.
+    -- XXX Not is outside the SoP repr. Should it be converted in expToSoP?
     onExp :: AlgEnv Exp E.Exp -> Exp -> ViewM Exp
     onExp _ (Var vn) = pure $ Var vn
     onExp _ e@(x :== y) = do
@@ -51,27 +57,16 @@ refineView (View it (Cases cases)) = do
       pure $ if b then Bool True else e
     onExp _ e@(x :> y)  = do
       b <- expToSoP x $>$ expToSoP y
-      trace ("O.O hi!! " <> show e) $ pure $ if b then Bool True else e
+      pure $ if b then Bool True else e
     onExp _ e@(x :< y)  = do
       b <- expToSoP x $<$ expToSoP y
       pure $ if b then Bool True else e
     onExp env v = astMap (m env) v
-    -- XXX One problem is that Not is outside this SoP repr. I think we may
-    -- want to bring it in here to leverage Not. (Hence special handling
-    -- in eliminateFalse).
-    -- XXX $==$ returns False also if the solution is unknown (i.e., we
-    -- cannot disprove, hm). We could still prove Not x by proving
-    -- x True and then returning False here.
-    -- XXX Sequence onExp so that knowledge from previous cases can be
-    -- used in later cases? In fact we want to incorporate negation of
-    -- disjunctin of all previous cases!
-    -- At least extend AlgEnv with already solved expressions. (For example,
-    -- I'm thinking we will often have | p => e1 | not p => e2.)
-    -- XXX Shouldn't these relations always be in SoP representation?
+
     eliminateFalse (Bool False) = False
     eliminateFalse (Not (Bool True)) = False
     eliminateFalse _ = True
-refineView _ = error "unnormalised view (just hoistCases)"
+refineView _ = error "unnormalised view (just apply hoistCases)"
 -- XXX I should change the representation to ensure cases outermost, I guess.
 
 
