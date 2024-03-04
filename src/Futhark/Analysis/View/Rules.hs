@@ -30,7 +30,7 @@ substituteViews view@(View Empty _e) = do
       case M.lookup vn vs of
         Just (View Empty e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-                pure e2
+                pure $ Idx e2 eidx
         Just (View (Forall j _) e2) ->
           -- TODO should I check some kind of equivalence on eidx and i?
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
@@ -60,7 +60,7 @@ substituteViews view@(View (Forall _i _dom ) _e) = do
         -- XXX use eidx?
         Just (View Empty e2) ->
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-                pure e2
+                pure $ Idx e2 eidx
         Just (View (Forall j _) e2) ->
           -- TODO should I check some kind of equivalence on eidx and i?
           trace ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
