@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `futhark_context_config_set_unified_memory`, also available on
   executables as ``--unified-memory``.
 
+* The "raw" API functions now do something potentially useful, but are
+  still considered experimental.
+
 ### Removed
 
 ### Changed

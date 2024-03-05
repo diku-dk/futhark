@@ -463,7 +463,7 @@ library
     , free >=5.1.10
     , futhark-data >= 1.1.0.0
     , futhark-server >= 1.2.2.1
-    , futhark-manifest >= 1.3.0.0
+    , futhark-manifest >= 1.4.0.0
     , githash >=0.1.6.1
     , half >= 0.3
     , haskeline
