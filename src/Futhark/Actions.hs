@@ -12,6 +12,7 @@ module Futhark.Actions
     kernelImpCodeGenAction,
     multicoreImpCodeGenAction,
     webgpuImpCodeGenAction,
+    webgpuTestKernelsAction,
     metricsAction,
     compileCAction,
     compileCtoWASMAction,
@@ -61,6 +62,7 @@ import Futhark.IR.MCMem (MCMem)
 import Futhark.IR.SOACS (SOACS)
 import Futhark.IR.SeqMem (SeqMem)
 import Futhark.Optimise.Fusion.GraphRep qualified
+import Futhark.Test.WebGPUTest qualified as WebGPUTest
 import Futhark.Util (runProgramWithExitCode, unixEnvironment)
 import Futhark.Version (versionString)
 import System.Directory
@@ -187,6 +189,15 @@ webgpuImpCodeGenAction =
     { actionName = "Compile imperative WebGPU",
       actionDescription = "Translate program into imperative IL with WebGPU and write it on standard output.",
       actionProcedure = liftIO . putStrLn . prettyString . snd <=< ImpGenWebGPU.compileProg
+    }
+
+-- | Convert the program to WebGPU ImpCode and generate test runner input.
+webgpuTestKernelsAction :: FilePath -> Action GPUMem
+webgpuTestKernelsAction f =
+  Action
+    { actionName = "Setup test for WebGPU WGSL kernels",
+      actionDescription = "Translate program into imperative IL with WebGPU and write it on standard output.",
+      actionProcedure = liftIO . putStrLn . prettyString <=< WebGPUTest.generateTests f
     }
 
 -- Lines that we prepend (in comments) to generated code.

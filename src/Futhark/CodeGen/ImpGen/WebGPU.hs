@@ -55,15 +55,15 @@ builtinBlockSize = "_block_size"
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
-  addCode $ "Input for " <> name <> "\n"
-  addCode $ prettyText kernel <> "\n\n"
-  addCode $ "Code for " <> name <> ":\n"
-  addCode "== SHADER START ==\n"
+  --addCode $ "Input for " <> name <> "\n"
+  --addCode $ prettyText kernel <> "\n\n"
+  --addCode $ "Code for " <> name <> ":\n"
+  --addCode "== SHADER START ==\n"
 
   -- TODO: Temporary for testing, this should ultimately appear in the shader
   -- through `webgpuPrelude`
-  addCode RTS.arith
-  addCode RTS.arith64
+  --addCode RTS.arith
+  --addCode RTS.arith64
 
   let overrideDecls = genConstAndBuiltinDecls kernel
   addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
@@ -86,7 +86,7 @@ onKernel kernel = do
   addCode $ prettyText wgslFun
   addCode "\n"
 
-  addCode "== SHADER END ==\n"
+  --addCode "== SHADER END ==\n"
 
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []

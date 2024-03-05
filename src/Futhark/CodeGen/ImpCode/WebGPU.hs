@@ -107,6 +107,7 @@ instance Pretty Program where
   pretty prog =
     -- TODO: print everything
     "webgpu {"
+      </> indent 2 (stack $ map pretty $ T.lines $ webgpuPrelude prog)
       </> indent 2 (stack $ map pretty $ T.lines $ webgpuProgram prog)
       </> "}"
       </> ""
