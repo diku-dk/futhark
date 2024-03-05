@@ -641,7 +641,7 @@ checkApplyOne loc fname (fframe, ftype) (argframe, argtype) = do
   ctAM r m $ fmap toSComp (toShape m_var <> fframe)
   ctEq lhs rhs
   debugTraceM 3 $
-    unlines $
+    unlines
       [ "## checkApplyOne",
         "## fname",
         prettyString fname,
@@ -1168,11 +1168,12 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( [Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness))],
-      [Pat ParamType],
-      Maybe (TypeExp Exp VName),
-      [Exp]
-    )
+    [ ( Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)),
+        [Pat ParamType],
+        Maybe (TypeExp Exp VName),
+        Exp
+      )
+    ]
 checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   (params', body', retdecl') <-
     bindParams tparams params $ \params' -> do
@@ -1196,13 +1197,11 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
       ]
 
-  (cts_tyvars', bodys') <- unzip <$> rankAnalysis loc cts tyvars body'
+  ranks <- rankAnalysis loc cts tyvars body'
 
-  solutions <-
-    forM cts_tyvars' $
-      bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
-
-  forM_ (zip solutions cts_tyvars') $ \(solution, (cts', tyvars')) ->
+  forM ranks $ \((cts', tyvars'), body'') -> do
+    solution <-
+      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' tyvars'
     debugTraceM 3 $
       unlines
         [ "## constraints:",
@@ -1214,8 +1213,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
            in either T.unpack (unlines . map p . M.toList . snd) solution,
           either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
         ]
-
-  pure (solutions, params', retdecl', bodys')
+    pure (solution, params', retdecl', body'')
 
 checkSingleExp ::
   ExpBase NoInfo VName ->

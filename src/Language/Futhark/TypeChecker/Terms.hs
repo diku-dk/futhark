@@ -22,7 +22,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.Either
-import Data.List (delete, find, genericLength, partition)
+import Data.List (delete, find, genericLength, partition, unzip4)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -1635,12 +1635,13 @@ checkFunDef ::
       Exp
     )
 checkFunDef (fname, retdecl, tparams, params, body, loc) = do
-  (maybe_tysubstss, params', retdecl', bodys') <-
+  solutions <-
     Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
-  case (maybe_tysubstss, bodys') of
-    ([], _) -> error "impossible"
-    ([maybe_tysubsts], [body']) -> doChecks (maybe_tysubsts, params', retdecl', body')
-    (substs, bodies') ->
+  case solutions of
+    [(maybe_tysubsts, params', retdecl', body')] ->
+      doChecks (maybe_tysubsts, params', retdecl', body')
+    ls -> do
+      let (_, _, _, bodies') = unzip4 ls
       typeError loc mempty $
         stack $
           [ "Rank ILP is ambiguous.",
