@@ -49,6 +49,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
+import Data.Either (partitionEithers)
 import Data.List qualified as L
 import Data.List.NonEmpty qualified as NE
 import Data.Loc (Loc (NoLoc))
@@ -1125,17 +1126,17 @@ checkExp (Coerce e te NoInfo loc) = do
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
 doDefault ::
-  S.Set VName ->
+  [VName] ->
   VName ->
   Either [PrimType] (TypeBase () NoUniqueness) ->
   TermM (TypeBase () NoUniqueness)
 doDefault tyvars_at_toplevel v (Left pts)
   | Signed Int32 `elem` pts = do
-      when (v `S.member` tyvars_at_toplevel) $
+      when (v `elem` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to i32."
       pure $ Scalar $ Prim $ Signed Int32
   | FloatType Float64 `elem` pts = do
-      when (v `S.member` tyvars_at_toplevel) $
+      when (v `elem` tyvars_at_toplevel) $
         warn usage "Defaulting ambiguous type to f64."
       pure $ Scalar $ Prim $ FloatType Float64
   | otherwise =
@@ -1152,12 +1153,28 @@ doDefault _ _ (Right t) = pure t
 -- some type variables becoming known, so we have to perform
 -- substitutions on the RHS of the substitutions afterwards.
 doDefaults ::
-  S.Set VName ->
+  [VName] ->
   M.Map TyVar (Either [PrimType] (TypeBase () NoUniqueness)) ->
   TermM (M.Map TyVar (TypeBase () NoUniqueness))
 doDefaults tyvars_at_toplevel substs = do
   substs' <- M.traverseWithKey (doDefault tyvars_at_toplevel) substs
   pure $ M.map (substTyVars (`M.lookup` substs')) substs'
+
+generalise ::
+  StructType -> [VName] -> Solution -> ([TypeParam], [VName])
+generalise fun_t unconstrained solution =
+  -- Candidates for let-generalisation are those type variables that
+  -- are used in fun_t.
+  let visible = foldMap expandTyVars $ typeVars fun_t
+      onTyVar v
+        | v `S.member` visible = Left $ TypeParamType Unlifted v mempty
+        | otherwise = Right v
+   in partitionEithers $ map onTyVar unconstrained
+  where
+    expandTyVars v =
+      case M.lookup v solution of
+        Just (Right t) -> foldMap expandTyVars $ typeVars t
+        _ -> S.singleton v
 
 checkValDef ::
   ( VName,
@@ -1168,7 +1185,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    [ ( Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)),
+    [ ( Either T.Text ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
         [Pat ParamType],
         Maybe (TypeExp Exp VName),
         Exp
@@ -1197,23 +1214,38 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
       ]
 
-  ranks <- rankAnalysis loc cts tyvars body'
+  mapM (onRankSolution params' retdecl') =<< rankAnalysis loc cts tyvars body'
+  where
+    onRankSolution params' retdecl' ((cts', tyvars'), body'') = do
+      solution <-
+        bitraverse pure (onTySolution params' body'') $ solve cts' tyvars'
+      debugTraceM 3 $
+        unlines
+          [ "## constraints:",
+            unlines $ map prettyString cts',
+            "## tyvars':",
+            unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
+            "## solution:",
+            let p (v, t) = prettyNameString v <> " => " <> prettyString t
+             in either T.unpack (unlines . map p . M.toList . snd) solution,
+            either (const mempty) (unlines . ("## generalised:" :) . map prettyString . fst) solution
+          ]
+      pure (solution, params', retdecl', body'')
 
-  forM ranks $ \((cts', tyvars'), body'') -> do
-    solution <-
-      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' tyvars'
-    debugTraceM 3 $
-      unlines
-        [ "## constraints:",
-          unlines $ map prettyString cts',
-          "## tyvars':",
-          unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
-          "## solution:",
-          let p (v, t) = prettyNameString v <> " => " <> prettyString t
-           in either T.unpack (unlines . map p . M.toList . snd) solution,
-          either (const mempty) (unlines . ("## unconstrained:" :) . map prettyNameString . fst) solution
-        ]
-    pure (solution, params', retdecl', body'')
+    onTySolution params' body' (unconstrained, solution) = do
+      let fun_t =
+            foldFunType
+              (map patternType params')
+              (RetType [] $ toRes Nonunique (typeOf body'))
+          (generalised, unconstrained') =
+            generalise fun_t unconstrained solution
+      solution' <- doDefaults (map typeParamName generalised) solution
+      pure
+        ( generalised,
+          -- See #1552 for why we resolve unconstrained and
+          -- un-generalised type variables to ().
+          M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
+        )
 
 checkSingleExp ::
   ExpBase NoInfo VName ->

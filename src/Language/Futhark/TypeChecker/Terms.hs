@@ -1048,7 +1048,7 @@ checkOneExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSingleExp e
   case maybe_tysubsts of
     Left err -> typeError e' mempty $ pretty err
-    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
       (tparams, _, _) <-
@@ -1066,7 +1066,7 @@ checkSizeExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSizeExp e
   case maybe_tysubsts of
     Left err -> typeError e' mempty $ pretty err
-    Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
+    Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       when (hasBinding e'') $
         typeError (srclocOf e'') mempty . withIndexLink "size-expression-bind" $
@@ -1492,14 +1492,16 @@ closeOverTypes defname defloc tparams paramts ret substs = do
           _ -> Nothing
 
   pure
-    ( tparams ++ more_tparams,
+    ( tparams
+        ++ more_tparams,
       injectExt (nubOrd $ retext ++ mapMaybe mkExt (S.toList $ fvVars $ freeInType ret)) ret
     )
   where
     -- Diet does not matter here.
     t = foldFunType (map (toParam Observe) paramts) $ RetType [] ret
-    to_close_over = M.filterWithKey (\k _ -> k `S.member` visible) substs
     visible = typeVars t <> fvVars (freeInType t)
+    to_close_over =
+      M.filterWithKey (\k _ -> k `S.member` visible) substs
 
     (produced_sizes, param_sizes) = dimUses t
 
@@ -1655,39 +1657,39 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) = do
     doChecks (maybe_tysubsts, params', retdecl', body') =
       case maybe_tysubsts of
         Left err -> typeError loc mempty $ pretty err
-        Right (unconstrained, tysubsts) -> runTermTypeM checkExp tysubsts $ do
-          let unconstrained_tparams = map (\v -> TypeParamType Unlifted v mempty) unconstrained
-          (tparams', params'', retdecl'', RetType dims rettype', body'') <-
-            checkBinding (fname, retdecl', unconstrained_tparams <> tparams, params', body', loc)
+        Right (generalised, tysubsts) ->
+          runTermTypeM checkExp tysubsts $ do
+            (tparams', params'', retdecl'', RetType dims rettype', body'') <-
+              checkBinding (fname, retdecl', generalised <> tparams, params', body', loc)
 
-          -- Since this is a top-level function, we also resolve overloaded
-          -- types, using either defaults or complaining about ambiguities.
-          fixOverloadedTypes $
-            typeVars rettype' <> foldMap (typeVars . patternType) params''
+            -- Since this is a top-level function, we also resolve overloaded
+            -- types, using either defaults or complaining about ambiguities.
+            fixOverloadedTypes $
+              typeVars rettype' <> foldMap (typeVars . patternType) params''
 
-          -- Then replace all inferred types in the body and parameters.
-          body''' <- normTypeFully body''
-          params''' <- mapM normTypeFully params''
-          retdecl''' <- traverse updateTypes retdecl''
-          rettype'' <- normTypeFully rettype'
+            -- Then replace all inferred types in the body and parameters.
+            body''' <- normTypeFully body''
+            params''' <- mapM normTypeFully params''
+            retdecl''' <- traverse updateTypes retdecl''
+            rettype'' <- normTypeFully rettype'
 
-          -- Check if the function body can actually be evaluated.
-          causalityCheck body'''
+            -- Check if the function body can actually be evaluated.
+            causalityCheck body'''
 
-          -- Check for various problems.
-          mapM_ (mustBeIrrefutable . fmap toStruct) params''
-          localChecks body'''
+            -- Check for various problems.
+            mapM_ (mustBeIrrefutable . fmap toStruct) params''
+            localChecks body'''
 
-          let ((body'''', updated_ret), errors) =
-                Consumption.checkValDef
-                  ( fname,
-                    params''',
-                    body''',
-                    RetType dims rettype'',
-                    retdecl''',
-                    loc
-                  )
+            let ((body'''', updated_ret), errors) =
+                  Consumption.checkValDef
+                    ( fname,
+                      params''',
+                      body''',
+                      RetType dims rettype'',
+                      retdecl''',
+                      loc
+                    )
 
-          mapM_ throwError errors
+            mapM_ throwError errors
 
-          pure (tparams', params''', retdecl''', updated_ret, body'''')
+            pure (tparams', params''', retdecl''', updated_ret, body'''')
