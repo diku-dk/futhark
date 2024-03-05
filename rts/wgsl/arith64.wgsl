@@ -62,19 +62,40 @@ fn shl_i64(a: i64, b_full: i64) -> i64 {
   // Shifting by more than 64 and by negative amounts is undefined, so we can
   // assume b.y is 0 and b.x >= 0.
   let b: u32 = bitcast<u32>(b_full.x);
+
   if b == 0 { return a; }
   if b >= 32 { return i64(0, a.x << (b - 32)); }
 
-  let shifted_out = bitcast<i32>(bitcast<u32>(a.x) >> (32 - b));
-  return i64(a.x << b, (a.y << b) | shifted_out );
+  let shifted_over = bitcast<i32>(bitcast<u32>(a.x) >> (32 - b));
+  return i64(a.x << b, (a.y << b) | shifted_over);
 }
 
-fn lshr_i64(a: i64, b: i64) -> i64 {
-  
+fn lshr_i64(a: i64, b_full: i64) -> i64 {
+  // Shifting by more than 64 and by negative amounts is undefined, so we can
+  // assume b.y is 0 and b.x >= 0.
+  let b: i32 = b_full.x;
+
+  if b == 0 { return a; }
+  if b >= 32 { return i64(lshr_i32(a.y, b - 32), 0); }
+
+  let shifted_over = a.y << bitcast<u32>(32 - b);
+  return i64(lshr_i32(a.x, b) | shifted_over, lshr_i32(a.y, b));
 }
 
-fn ashr_i64(a: i64, b: i64) -> i64 {
+fn ashr_i64(a: i64, b_full: i64) -> i64 {
+  // Shifting by more than 64 and by negative amounts is undefined, so we can
+  // assume b.y is 0 and b.x >= 0.
+  let b: u32 = bitcast<u32>(b_full.x);
 
+  if b == 0 { return a; }
+  if b >= 32 {
+	var high: i32;
+	if a.y < 0 { high = -1; } else { high = 0; }
+    return i64(a.y >> (b - 32), high);
+  }
+
+  let shifted_over = a.y << (32 - b);
+  return i64(lshr_i32(a.x, bitcast<i32>(b)) | shifted_over, a.y >> b);
 }
 
 fn ult_i64(a_s: i64, b_s: i64) -> bool {
