@@ -1636,20 +1636,8 @@ checkFunDef ::
       ResRetType,
       Exp
     )
-checkFunDef (fname, retdecl, tparams, params, body, loc) = do
-  solutions <-
-    Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
-  case solutions of
-    [(maybe_tysubsts, params', retdecl', body')] ->
-      doChecks (maybe_tysubsts, params', retdecl', body')
-    ls -> do
-      let (_, _, _, bodies') = unzip4 ls
-      typeError loc mempty $
-        stack $
-          [ "Rank ILP is ambiguous.",
-            "Choices:"
-          ]
-            ++ map pretty bodies'
+checkFunDef (fname, retdecl, tparams, params, body, loc) =
+  doChecks =<< Terms2.checkValDef (fname, retdecl, tparams, params, body, loc)
   where
     -- TODO: Print out the possibilities. (And also potentially eliminate
     --- some of the possibilities to disambiguate).

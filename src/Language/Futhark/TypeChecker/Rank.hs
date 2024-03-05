@@ -1,4 +1,8 @@
-module Language.Futhark.TypeChecker.Rank (rankAnalysis) where
+module Language.Futhark.TypeChecker.Rank
+  ( rankAnalysis,
+    rankAnalysis1,
+  )
+where
 
 import Control.Monad.Reader
 import Control.Monad.State
@@ -13,6 +17,7 @@ import Futhark.Solve.GLPK
 import Futhark.Solve.LP hiding (Constraint, LSum, LinearProg)
 import Futhark.Solve.LP qualified as LP
 import Futhark.Util (debugTraceM)
+import Futhark.Util.Pretty
 import Language.Futhark hiding (ScalarType)
 import Language.Futhark.Traversals
 import Language.Futhark.TypeChecker.Constraints
@@ -210,6 +215,20 @@ solveRankILP loc prog = do
             "\n## rank map " <> prettyString i
               : map prettyString (M.toList r)
       pure rs
+
+rankAnalysis1 :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> Exp -> m (([Ct], TyVars), Exp)
+rankAnalysis1 loc cs tyVars body = do
+  solutions <- rankAnalysis loc cs tyVars body
+  case solutions of
+    [sol] -> pure sol
+    sols -> do
+      let (_, bodies') = unzip sols
+      typeError loc mempty $
+        stack $
+          [ "Rank ILP is ambiguous.",
+            "Choices:"
+          ]
+            ++ map pretty bodies'
 
 rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> Exp -> m [(([Ct], TyVars), Exp)]
 rankAnalysis _ [] tyVars body = pure [(([], tyVars), body)]

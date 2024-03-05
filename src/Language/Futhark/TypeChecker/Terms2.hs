@@ -1185,12 +1185,11 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    [ ( Either T.Text ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
-        [Pat ParamType],
-        Maybe (TypeExp Exp VName),
-        Exp
-      )
-    ]
+    ( Either T.Text ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
+      [Pat ParamType],
+      Maybe (TypeExp Exp VName),
+      Exp
+    )
 checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   (params', body', retdecl') <-
     bindParams tparams params $ \params' -> do
@@ -1214,7 +1213,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
       ]
 
-  mapM (onRankSolution params' retdecl') =<< rankAnalysis loc cts tyvars body'
+  onRankSolution params' retdecl' =<< rankAnalysis1 loc cts tyvars body'
   where
     onRankSolution params' retdecl' ((cts', tyvars'), body'') = do
       solution <-
