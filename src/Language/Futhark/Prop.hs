@@ -53,6 +53,7 @@ module Language.Futhark.Prop
     arrayShape,
     orderZero,
     unfoldFunType,
+    unfoldFunTypeWithRet,
     foldFunType,
     typeVars,
     isAccType,
@@ -521,6 +522,15 @@ unfoldFunType (Scalar (Arrow _ _ d t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
    in (second (const d) t1 : ps, r)
 unfoldFunType t = ([], toStruct t)
+
+-- | Extract the parameter types and 'RetTypeBase' from a function type.
+-- If the type is not an arrow type, returns 'Nothing'.
+unfoldFunTypeWithRet :: TypeBase dim as -> Maybe ([TypeBase dim Diet], RetTypeBase dim Uniqueness)
+unfoldFunTypeWithRet (Scalar (Arrow _ _ d t1 (RetType _ t2@(Scalar Arrow {})))) = do
+  (ps, r) <- unfoldFunTypeWithRet t2
+  pure (second (const d) t1 : ps, r)
+unfoldFunTypeWithRet (Scalar (Arrow _ _ d t1 r@RetType {})) = Just ([second (const d) t1], r)
+unfoldFunTypeWithRet _ = Nothing
 
 -- | The type scheme of a value binding, comprising the type
 -- parameters and the actual type.

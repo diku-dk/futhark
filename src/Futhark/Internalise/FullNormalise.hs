@@ -354,7 +354,7 @@ getOrdering final (AppExp (Match expr cs loc) resT) = do
 -- a complete separtion of states.
 transformBody :: (MonadFreshNames m) => Exp -> m Exp
 transformBody e = do
-  (e', pre_eval) <- runOrdering . getOrdering True =<< expandAMAnnotations e
+  (e', pre_eval) <- runOrdering $ getOrdering True e
   pure $ foldl f e' pre_eval
   where
     appRes = case e of
@@ -368,7 +368,7 @@ transformBody e = do
 
 transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
 transformValBind valbind = do
-  body' <- transformBody $ valBindBody valbind
+  body' <- transformBody <=< expandAMAnnotations $ valBindBody valbind
   pure $ valbind {valBindBody = body'}
 
 transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
@@ -508,10 +508,14 @@ expandAMAnnotations e = do
       let diets = funDiets $ typeOf f
       withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
         inner_f <- setNewType f' $ innerFType (typeOf f') ams
-        let (_, ret) = unfoldFunType $ typeOf inner_f
+        let rettype =
+              case unfoldFunTypeWithRet $ typeOf inner_f of
+                Nothing -> error "Function type expected."
+                Just (ptypes, f_ret) ->
+                  foldFunType (drop (length args') ptypes) f_ret
         pure $
           mkApply inner_f (zip3 exts (repeat mempty) args') $
-            res {appResType = snd $ unfoldFunType $ typeOf inner_f}
+            res {appResType = rettype}
     (AppExp (BinOp op (Info t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc) (Info res)) -> do
       x' <- expandAMAnnotations x
       y' <- expandAMAnnotations y
