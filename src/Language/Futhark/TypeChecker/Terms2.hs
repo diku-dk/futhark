@@ -1213,9 +1213,9 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
       ]
 
-  onRankSolution params' retdecl' =<< rankAnalysis1 loc cts tyvars body'
+  onRankSolution retdecl' =<< rankAnalysis1 loc cts tyvars params' body'
   where
-    onRankSolution params' retdecl' ((cts', tyvars'), body'') = do
+    onRankSolution retdecl' ((cts', tyvars'), params', body'') = do
       solution <-
         bitraverse pure (onTySolution params' body'') $ solve cts' tyvars'
       debugTraceM 3 $
@@ -1267,7 +1267,7 @@ checkSizeExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
 
-  (cts_tyvars', es') <- unzip <$> rankAnalysis (srclocOf e) cts tyvars e'
+  (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars [] e'
 
   solutions <-
     forM cts_tyvars' $
