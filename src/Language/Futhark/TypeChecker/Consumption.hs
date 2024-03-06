@@ -489,7 +489,7 @@ consumeAsNeeded loc pt t =
 checkArg :: [(Exp, TypeAliases)] -> ParamType -> AutoMap -> Exp -> CheckM (Exp, TypeAliases)
 checkArg prev p_t am e = do
   ((e', e_als), e_cons) <-
-    contain $ if autoRep am == mempty then noAliases e else checkExp e
+    contain $ if autoRep am /= mempty then noAliases e else checkExp e
   consumed e_cons
   let e_t = typeOf e'
   when (e_cons /= mempty && not (orderZero e_t)) $
