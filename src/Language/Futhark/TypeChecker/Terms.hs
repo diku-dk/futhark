@@ -1017,7 +1017,7 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
               autoFrame = am_frame_shape
             }
 
-    pure (tp1, distribute (arrayOf (autoMap am) tp2''), argext, ext, am')
+    pure (tp1, distribute (arrayOf (autoMap am') tp2''), argext, ext, am')
   where
     distribute :: TypeBase dim u -> TypeBase dim u
     distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
