@@ -22,7 +22,7 @@ import Data.Bifunctor
 import Data.Bitraversable
 import Data.Char (isAscii)
 import Data.Either
-import Data.List (delete, find, genericLength, partition, unzip4)
+import Data.List (delete, find, genericLength, partition)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Maybe
@@ -465,7 +465,7 @@ checkExp (Coerce e te _ loc) = do
   t <- expTypeFully e'
   t' <- matchDims (const . const pure) t te_t
   pure $ Coerce e' te' (Info t') loc
-checkExp e@(AppExp (Apply fe args loc) _) = do
+checkExp (AppExp (Apply fe args loc) _) = do
   fe' <- checkExp fe
   let ams = fmap (snd . unInfo . fst) args
   args' <- mapM (checkExp . snd) args
@@ -727,7 +727,7 @@ checkExp (OpSection op (Info op_t) loc) = do
 checkExp (OpSectionLeft op (Info op_t) e (Info (_, _, _, am), _) _ loc) = do
   ftype <- lookupVar loc op op_t
   e' <- checkExp e
-  (t1, rt, argext, retext, am) <- checkApply loc (Just op, 0) ftype e' am
+  (t1, rt, argext, retext, am') <- checkApply loc (Just op, 0) ftype e' am
   case (ftype, rt) of
     (Scalar (Arrow _ m1 d1 _ _), Scalar (Arrow _ m2 d2 t2 (RetType ds rt2))) ->
       pure $
@@ -735,8 +735,8 @@ checkExp (OpSectionLeft op (Info op_t) e (Info (_, _, _, am), _) _ loc) = do
           op
           (Info ftype)
           e'
-          (Info (m1, toParam d1 t1, argext, am), Info (m2, toParam d2 t2))
-          (Info $ RetType ds $ arrayOfWithAliases (uniqueness rt2) (autoFrame am) rt2, Info retext)
+          (Info (m1, toParam d1 t1, argext, am'), Info (m2, toParam d2 t2))
+          (Info $ RetType ds $ arrayOfWithAliases (uniqueness rt2) (autoFrame am') rt2, Info retext)
           loc
     _ ->
       typeError loc mempty $
@@ -746,7 +746,7 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
   e' <- checkExp e
   case ftype of
     Scalar (Arrow _ m1 d1 t1 (RetType [] (Scalar (Arrow _ m2 d2 t2 (RetType dims2 ret))))) -> do
-      (t2', arrow', argext, _, am) <-
+      (t2', arrow', argext, _, am') <-
         checkApply
           loc
           (Just op, 1)
@@ -760,8 +760,8 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
               op
               (Info ftype)
               e'
-              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext, am))
-              (Info $ RetType dims2' $ arrayOfWithAliases (uniqueness ret') (autoFrame am) ret')
+              (Info (m1, toParam d1 t1'), Info (m2, toParam d2 t2', argext, am'))
+              (Info $ RetType dims2' $ arrayOfWithAliases (uniqueness ret') (autoFrame am') ret')
               loc
         _ -> error $ "OpSectionRight: impossible type\n" <> prettyString arrow'
     _ ->
@@ -922,14 +922,6 @@ dimUses = flip execState mempty . traverseDims f
       where
         fv = freeInExp e `freeWithout` bound
 
--- | Try to find out how many dimensions of the argument we are
--- mapping. Returns the shape mapped and the remaining type.
-stripToMatch :: StructType -> StructType -> (Shape Size, StructType)
-stripToMatch paramt argt | toStructural paramt == toStructural argt = (mempty, argt)
-stripToMatch paramt (Array _ (Shape (d : ds)) argt) =
-  first (Shape [d] <>) $ stripToMatch paramt $ arrayOf (Shape ds) (Scalar argt)
-stripToMatch _ argt = (mempty, argt)
-
 splitArrayAt :: Int -> StructType -> (Shape Size, StructType)
 splitArrayAt x t =
   (Shape $ take x $ shapeDims $ arrayShape t, stripArray x t)
@@ -1018,14 +1010,14 @@ checkApply loc fn@(fname, _) ft@(Scalar (Arrow _ pname _ tp1 tp2)) argexp am = d
                    in pure (Nothing, applySubst parsubst $ toStruct tp2')
         _ -> pure (Nothing, toStruct tp2')
 
-    let am =
+    let am' =
           AutoMap
             { autoRep = am_rep_shape,
               autoMap = am_map_shape,
               autoFrame = am_frame_shape
             }
 
-    pure (tp1, distribute (arrayOf (autoMap am) tp2''), argext, ext, am)
+    pure (tp1, distribute (arrayOf (autoMap am) tp2''), argext, ext, am')
   where
     distribute :: TypeBase dim u -> TypeBase dim u
     distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
