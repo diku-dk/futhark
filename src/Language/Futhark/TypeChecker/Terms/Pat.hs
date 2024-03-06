@@ -2,6 +2,7 @@
 module Language.Futhark.TypeChecker.Terms.Pat
   ( binding,
     bindingParams,
+    bindingParam,
     bindingPat,
     bindingIdent,
     bindingSizes,
@@ -15,7 +16,6 @@ import Data.List (find, isPrefixOf, sort)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Futhark.Util
 import Futhark.Util.Pretty hiding (group, space)
 import Language.Futhark
 import Language.Futhark.TypeChecker.Monad hiding (BoundV)
@@ -203,6 +203,16 @@ checkPat sizes p t m = do
           <+> "as it is never used as the size of a concrete (non-function) value."
     [] ->
       m p'
+
+-- | Check and bind a single parameter.
+bindingParam ::
+  Pat ParamType ->
+  StructType ->
+  (Pat ParamType -> TermTypeM a) ->
+  TermTypeM a
+bindingParam p t m = do
+  checkPat mempty p (Ascribed t) $ \p' ->
+    binding (patIdents (fmap toStruct p')) $ m p'
 
 -- | Check and bind a @let@-pattern.
 bindingPat ::
