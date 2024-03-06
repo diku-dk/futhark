@@ -52,9 +52,6 @@ pkgs.stdenv.mkDerivation {
       python3Packages.sphinx
       python3Packages.sphinxcontrib-bibtex
       imagemagick # needed for literate tests
-      # remove (needed for PuLP)
-      python
-      cbc
       glpk
     ]
     ++ lib.optionals (stdenv.isLinux)

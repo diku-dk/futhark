@@ -28,7 +28,6 @@ module Futhark.Solve.LP
     (~<=~),
     (~>=~),
     rowEchelonLPE,
-    linearProgToPulp,
   )
 where
 
@@ -167,40 +166,6 @@ instance (Ord v) => Vars (LinearProg v a) v where
   vars lp =
     vars (objective lp)
       <> foldMap vars (constraints lp)
-
--- For debugging
-linearProgToPulp :: (Unbox a, IsName v, Ord v, Pretty a, Eq a, Num a) => LinearProg v a -> String
-linearProgToPulp prog =
-  map rm_subscript $
-    unlines
-      [ "from pulp import *",
-        "prob = LpProblem('', " <> lptype <> ")",
-        unlines vars,
-        unlines $ map (("prob += " <>) . prettyString) $ constraints prog,
-        "status = prob.solve()",
-        "print(f'status: {status}')",
-        unlines res
-      ]
-  where
-    lptype =
-      case optType prog of
-        Maximize -> "LpMaximize"
-        Minimize -> "LpMinimize"
-    prog_vars = Map.elems $ snd $ linearProgToLP prog
-    vars =
-      map
-        ( \v ->
-            show (prettyName v)
-              <> " = "
-              <> "LpVariable("
-              <> "'"
-              <> show (prettyName v)
-              <> "_'"
-              <> ", lowBound = 0, cat = 'Integer')"
-        )
-        prog_vars
-    res = map (\v -> "print(f'" <> show (prettyName v) <> ": {value(" <> show (prettyName v) <> ")}')") prog_vars
-    rm_subscript x = fromMaybe x $ lookup x $ zip "₀₁₂₃₄₅₆₇₈₉" "0123456789"
 
 bigM :: (Num a) => a
 bigM = 2 ^ 10
