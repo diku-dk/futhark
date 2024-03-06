@@ -587,11 +587,10 @@ runTests config paths = do
                         { testStatusFail = testStatusFail ts' + 1,
                           testStatusRunPass =
                             testStatusRunPass ts'
-                              + numTestCases test
-                              - length s,
+                              + max 0 (numTestCases test - length s),
                           testStatusRunFail =
                             testStatusRunFail ts'
-                              + length s
+                              + min (numTestCases test) (length s)
                         }
 
   when fancy spaceTable
