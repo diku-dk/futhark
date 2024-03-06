@@ -15,7 +15,6 @@ module Futhark.IR.Syntax.Core
     ShapeBase (..),
     Shape,
     stripDims,
-    takeDims,
     Ext (..),
     ExtSize,
     ExtShape,
@@ -128,11 +127,6 @@ instance Monoid (ShapeBase d) where
 -- @shape@.
 stripDims :: Int -> ShapeBase d -> ShapeBase d
 stripDims n (Shape dims) = Shape $ drop n dims
-
--- | @takeDims n shape@ takes the outer @n@ dimensions from
--- @shape@. If @shape@ has m <= n dimensions, it returns $shape$.
-takeDims :: Int -> ShapeBase d -> ShapeBase d
-takeDims n (Shape dims) = Shape $ take n dims
 
 -- | The size of an array as a list of subexpressions.  If a variable,
 -- that variable must be in scope where this array is used.

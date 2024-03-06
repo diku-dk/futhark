@@ -495,7 +495,6 @@ library
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
      -- remove me later
-    , process
     , glpk-hs
     , silently
 
