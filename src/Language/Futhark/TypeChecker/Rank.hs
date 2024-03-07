@@ -307,13 +307,14 @@ newTyVar :: (MonadTypeChecker m) => TyVar -> SubstT m TyVar
 newTyVar t = do
   t' <- lift $ newTypeName (baseName t)
   shape <- rankToShape t
+  loc <- (locOf . snd . fromJust . (M.!? t)) <$> asks envTyVars
   modify $ \s ->
     s
       { substNewVars = M.insert t t' $ substNewVars s,
         substNewCts =
           substNewCts s
             ++ [ CtEq
-                   (Reason mempty) -- FIXME
+                   (Reason loc)
                    (Scalar (TypeVar mempty (QualName [] t) []))
                    (arrayOf shape (Scalar (TypeVar mempty (QualName [] t') [])))
                ]
