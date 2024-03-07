@@ -344,9 +344,9 @@ addRankInfo t = do
     new_var = do
       t' <- newTyVar t
       old_tyvars <- asks envTyVars
-      let info = fromJust $ old_tyvars M.!? t
-      modify $ \s -> s {substTyVars = M.insert t' info $ substTyVars s}
-      modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree mempty) $ substTyVars s}
+      let (level, tvinfo) = fromJust $ old_tyvars M.!? t
+      modify $ \s -> s {substTyVars = M.insert t' (level, tvinfo) $ substTyVars s}
+      modify $ \s -> s {substTyVars = M.insert t (level, TyVarFree $ locOf tvinfo) $ substTyVars s}
 
 class SubstRanks a where
   substRanks :: (MonadTypeChecker m) => a -> SubstT m a
