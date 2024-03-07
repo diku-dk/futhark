@@ -1249,14 +1249,27 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either TypeError ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM (Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
-  solution <-
-    bitraverse pure (traverse (doDefaults mempty)) $ solve cts tyvars
-  pure (solution, e')
+  ((cts', tyvars'), _, e'') <- rankAnalysis1 (srclocOf e') cts tyvars [] e'
+  case solve cts' tyvars' of
+    Left err -> pure (Left err, e'')
+    Right (unconstrained, solution) -> do
+      let (generalised, unconstrained') =
+            generalise (typeOf e'') unconstrained solution
+      solution' <- doDefaults (map typeParamName generalised) solution
+      pure
+        ( Right
+            ( generalised,
+              -- See #1552 for why we resolve unconstrained and
+              -- un-generalised type variables to ().
+              M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
+            ),
+          e''
+        )
 
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
