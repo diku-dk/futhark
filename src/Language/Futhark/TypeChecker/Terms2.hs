@@ -1177,6 +1177,22 @@ generalise fun_t unconstrained solution =
         Just (Right t) -> foldMap expandTyVars $ typeVars t
         _ -> S.singleton v
 
+generaliseAndDefaults ::
+  [VName] ->
+  Solution ->
+  StructType ->
+  TermM ([TypeParam], M.Map VName (TypeBase () NoUniqueness))
+generaliseAndDefaults unconstrained solution t = do
+  let (generalised, unconstrained') =
+        generalise t unconstrained solution
+  solution' <- doDefaults (map typeParamName generalised) solution
+  pure
+    ( generalised,
+      -- See #1552 for why we resolve unconstrained and
+      -- un-generalised type variables to ().
+      M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
+    )
+
 checkValDef ::
   ( VName,
     Maybe (TypeExp (ExpBase NoInfo VName) VName),
@@ -1237,15 +1253,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
             foldFunType
               (map patternType params')
               (RetType [] $ toRes Nonunique (typeOf body'))
-          (generalised, unconstrained') =
-            generalise fun_t unconstrained solution
-      solution' <- doDefaults (map typeParamName generalised) solution
-      pure
-        ( generalised,
-          -- See #1552 for why we resolve unconstrained and
-          -- un-generalised type variables to ().
-          M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
-        )
+      generaliseAndDefaults unconstrained solution fun_t
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
@@ -1258,18 +1266,8 @@ checkSingleExp e = runTermM $ do
   case solve cts' tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
-      let (generalised, unconstrained') =
-            generalise (typeOf e'') unconstrained solution
-      solution' <- doDefaults (map typeParamName generalised) solution
-      pure
-        ( Right
-            ( generalised,
-              -- See #1552 for why we resolve unconstrained and
-              -- un-generalised type variables to ().
-              M.fromList (map (,Scalar (Record mempty)) unconstrained') <> solution'
-            ),
-          e''
-        )
+      x <- generaliseAndDefaults unconstrained solution $ typeOf e''
+      pure (Right x, e'')
 
 -- | Type-check a single size expression in isolation.  This expression may
 -- turn out to be polymorphic, in which case it is unified with i64.
