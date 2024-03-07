@@ -1,5 +1,6 @@
 module Language.Futhark.TypeChecker.Constraints
-  ( SVar,
+  ( Reason (..),
+    SVar,
     SComp (..),
     Type,
     toType,
@@ -16,13 +17,21 @@ where
 import Control.Monad.Except
 import Control.Monad.State
 import Data.Bifunctor
+import Data.Loc
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Data.Text qualified as T
 import Futhark.Util.Pretty
 import Language.Futhark
+import Language.Futhark.TypeChecker.Monad (TypeError (..))
 import Language.Futhark.TypeChecker.Types (substTyVars)
+
+-- | The reason for a type constraint. Used to generate type error
+-- messages.
+newtype Reason = Reason
+  { reasonLoc :: Loc
+  }
+  deriving (Eq, Ord, Show)
 
 type SVar = VName
 
@@ -62,23 +71,31 @@ instance Pretty Ct where
 
 type Constraints = [Ct]
 
--- | Information about a type variable.
+-- | Information about a type variable. Every type variable is
+-- associated with a location, which is the original syntax element
+-- that it is the type of.
 data TyVarInfo
   = -- | Can be substituted with anything.
-    TyVarFree
+    TyVarFree Loc
   | -- | Can only be substituted with these primitive types.
-    TyVarPrim [PrimType]
+    TyVarPrim Loc [PrimType]
   | -- | Must be a record with these fields.
-    TyVarRecord (M.Map Name Type)
+    TyVarRecord Loc (M.Map Name Type)
   | -- | Must be a sum type with these fields.
-    TyVarSum (M.Map Name [Type])
+    TyVarSum Loc (M.Map Name [Type])
   deriving (Show, Eq)
 
 instance Pretty TyVarInfo where
-  pretty TyVarFree = "free"
-  pretty (TyVarPrim pts) = "∈" <+> pretty pts
-  pretty (TyVarRecord fs) = pretty $ Scalar $ Record fs
-  pretty (TyVarSum cs) = pretty $ Scalar $ Sum cs
+  pretty (TyVarFree _) = "free"
+  pretty (TyVarPrim _ pts) = "∈" <+> pretty pts
+  pretty (TyVarRecord _ fs) = pretty $ Scalar $ Record fs
+  pretty (TyVarSum _ cs) = pretty $ Scalar $ Sum cs
+
+instance Located TyVarInfo where
+  locOf (TyVarFree loc) = loc
+  locOf (TyVarPrim loc _) = loc
+  locOf (TyVarRecord loc _) = loc
+  locOf (TyVarSum loc _) = loc
 
 type TyVar = VName
 
@@ -134,20 +151,20 @@ solution s =
     mkSubst (TyVarLink v') =
       Just . fromMaybe (Right $ Scalar $ TypeVar mempty (qualName v') []) $
         mkSubst =<< M.lookup v' (solverTyVars s)
-    mkSubst (TyVarUnsol _ (TyVarPrim pts)) = Just $ Left pts
+    mkSubst (TyVarUnsol _ (TyVarPrim _ pts)) = Just $ Left pts
     mkSubst _ = Nothing
 
-    unconstrained (v, TyVarUnsol _ TyVarFree) = Just v
+    unconstrained (v, TyVarUnsol _ (TyVarFree _)) = Just v
     unconstrained _ = Nothing
 
-newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except T.Text) a}
-  deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError T.Text)
+newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
+  deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError TypeError)
 
 occursCheck :: VName -> Type -> SolveM ()
 occursCheck v tp = do
   vars <- gets solverTyVars
   let tp' = substTyVars (substTyVar vars) tp
-  when (v `S.member` typeVars tp') . throwError . docText $
+  when (v `S.member` typeVars tp') . throwError . TypeError mempty mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
@@ -166,7 +183,7 @@ linkTyVar v t = do
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
   tyvars' <-
     case (M.lookup v tyvars, M.lookup t tyvars) of
-      (Just (TyVarUnsol _ info), Just (TyVarUnsol lvl TyVarFree)) ->
+      (Just (TyVarUnsol _ info), Just (TyVarUnsol lvl (TyVarFree _))) ->
         pure $ M.insert t (TyVarUnsol lvl info) tyvars
       -- TODO: handle more cases.
       _ -> pure tyvars
@@ -211,7 +228,7 @@ solveCt ct =
     CtEq t1 t2 -> solveCt' (t1, t2)
     CtAM {} -> pure () -- Good vibes only.
   where
-    bad = throwError $ "Unsolvable: " <> prettyText ct
+    bad = throwError $ TypeError mempty mempty $ "Unsolvable:" <+> pretty ct
     solveCt' (t1, t2) = do
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
@@ -249,39 +266,36 @@ solveCt ct =
           Just eqs -> mapM_ solveCt' eqs
 
 solveTyVar :: (VName, (Int, TyVarInfo)) -> SolveM ()
-solveTyVar (tv, (_, TyVarFree {})) = pure ()
-solveTyVar (tv, (_, TyVarPrim pts)) = do
+solveTyVar (_, (_, TyVarFree {})) = pure ()
+solveTyVar (tv, (_, TyVarPrim loc pts)) = do
   t <- lookupTyVar tv
   case t of
     Nothing -> pure ()
     Just t'
       | t' `elem` map (Scalar . Prim) pts -> pure ()
       | otherwise ->
-          throwError $
-            "Type variable "
-              <> prettyNameText tv
-              <> " must be one of\n"
-              <> prettyText pts
-              <> "\nbut inferred to be\n"
-              <> prettyText t'
-solveTyVar (tv, (_, TyVarRecord fs1)) = do
+          throwError . TypeError loc mempty $
+            "Type must be one of"
+              </> indent 2 (pretty pts)
+              </> "but inferred to be"
+              </> indent 2 (pretty t')
+solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
     Nothing -> pure ()
     Just (Scalar (Record fs2))
       | all (`M.member` fs2) (M.keys fs1) ->
-          forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(k, (t1, t2)) ->
+          forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_k, (t1, t2)) ->
             solveCt $ CtEq t1 t2
     Just tv_t' ->
       throwError $
-        "Type variable "
-          <> prettyNameText tv
-          <> " must be record with fields\n"
-          <> prettyText (Scalar (Record fs1))
-          <> " but inferred to be\n"
-          <> prettyText tv_t'
+        TypeError loc mempty $
+          "Type must be record with fields"
+            </> indent 2 (pretty (Scalar (Record fs1)))
+            </> "but inferred to be"
+            </> indent 2 (pretty tv_t')
 
-solve :: Constraints -> TyVars -> Either T.Text ([VName], Solution)
+solve :: Constraints -> TyVars -> Either TypeError ([VName], Solution)
 solve constraints tyvars =
   second solution
     . runExcept

@@ -130,12 +130,12 @@ addCt (CtAM r m f) = do
   addObj tr
 
 addTyVarInfo :: TyVar -> (Int, TyVarInfo) -> RankM ()
-addTyVarInfo _ (_, TyVarFree) = pure ()
-addTyVarInfo tv (_, TyVarPrim _) =
+addTyVarInfo _ (_, TyVarFree _) = pure ()
+addTyVarInfo tv (_, TyVarPrim {}) =
   addConstraint $ rank tv ~==~ constant 0
-addTyVarInfo tv (_, TyVarRecord _) =
+addTyVarInfo tv (_, TyVarRecord {}) =
   addConstraint $ rank tv ~==~ constant 0
-addTyVarInfo tv (_, TyVarSum _) =
+addTyVarInfo tv (_, TyVarSum {}) =
   addConstraint $ rank tv ~==~ constant 0
 
 mkLinearProg :: [Ct] -> TyVars -> LinearProg
@@ -346,7 +346,7 @@ addRankInfo t = do
       old_tyvars <- asks envTyVars
       let info = fromJust $ old_tyvars M.!? t
       modify $ \s -> s {substTyVars = M.insert t' info $ substTyVars s}
-      modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree) $ substTyVars s}
+      modify $ \s -> s {substTyVars = M.insert t (fst info, TyVarFree mempty) $ substTyVars s}
 
 class SubstRanks a where
   substRanks :: (MonadTypeChecker m) => a -> SubstT m a

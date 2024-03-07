@@ -220,8 +220,8 @@ incCounter = do
 tyVarType :: u -> TyVar -> TypeBase dim u
 tyVarType u v = Scalar $ TypeVar u (qualName v) []
 
-newTyVarWith :: (Located loc) => loc -> Name -> TyVarInfo -> TermM TyVar
-newTyVarWith _loc desc info = do
+newTyVarWith :: Name -> TyVarInfo -> TermM TyVar
+newTyVarWith desc info = do
   i <- incCounter
   v <- newID $ mkTypeVarName desc i
   lvl <- curLevel
@@ -229,24 +229,25 @@ newTyVarWith _loc desc info = do
   pure v
 
 newTyVar :: (Located loc) => loc -> Name -> TermM TyVar
-newTyVar loc desc = newTyVarWith loc desc TyVarFree
+newTyVar loc desc = newTyVarWith desc $ TyVarFree $ locOf loc
 
 newType :: (Located loc) => loc -> Name -> u -> TermM (TypeBase dim u)
 newType loc desc u = tyVarType u <$> newTyVar loc desc
 
 newTypeWithField :: SrcLoc -> Name -> Name -> Type -> TermM Type
 newTypeWithField loc desc k t =
-  tyVarType NoUniqueness <$> newTyVarWith loc desc (TyVarRecord $ M.singleton k t)
+  tyVarType NoUniqueness
+    <$> newTyVarWith desc (TyVarRecord (locOf loc) $ M.singleton k t)
 
 newTypeWithConstr :: SrcLoc -> Name -> u -> Name -> [TypeBase SComp u] -> TermM (TypeBase d u)
 newTypeWithConstr loc desc u k ts =
-  tyVarType u <$> newTyVarWith loc desc (TyVarSum $ M.singleton k ts')
+  tyVarType u <$> newTyVarWith desc (TyVarSum (locOf loc) $ M.singleton k ts')
   where
     ts' = map (`setUniqueness` NoUniqueness) ts
 
 newTypeOverloaded :: SrcLoc -> Name -> [PrimType] -> TermM (TypeBase d NoUniqueness)
 newTypeOverloaded loc name pts =
-  tyVarType NoUniqueness <$> newTyVarWith loc name (TyVarPrim pts)
+  tyVarType NoUniqueness <$> newTyVarWith name (TyVarPrim (locOf loc) pts)
 
 newSVar :: (Located loc) => loc -> Name -> TermM SVar
 newSVar _loc desc = do
@@ -1185,7 +1186,7 @@ checkValDef ::
     SrcLoc
   ) ->
   TypeM
-    ( Either T.Text ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
+    ( Either TypeError ([TypeParam], M.Map TyVar (TypeBase () NoUniqueness)),
       [Pat ParamType],
       Maybe (TypeExp Exp VName),
       Exp
@@ -1226,7 +1227,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
             unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars',
             "## solution:",
             let p (v, t) = prettyNameString v <> " => " <> prettyString t
-             in either T.unpack (unlines . map p . M.toList . snd) solution,
+             in either (docString . prettyTypeError) (unlines . map p . M.toList . snd) solution,
             either (const mempty) (unlines . ("## generalised:" :) . map prettyString . fst) solution
           ]
       pure (solution, params', retdecl', body'')
@@ -1248,7 +1249,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM (Either TypeError ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
@@ -1261,7 +1262,7 @@ checkSingleExp e = runTermM $ do
 -- turn out to be polymorphic, in which case it is unified with i64.
 checkSizeExp ::
   ExpBase NoInfo VName ->
-  TypeM (Either T.Text ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
+  TypeM (Either TypeError ([VName], M.Map TyVar (TypeBase () NoUniqueness)), Exp)
 checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
@@ -1276,4 +1277,4 @@ checkSizeExp e = runTermM $ do
   case (solutions, es') of
     ([solution], [e'']) ->
       pure (solution, e'')
-    _ -> pure (Left "Ambiguous size expression", e')
+    _ -> pure (Left $ TypeError (locOf e) mempty "Ambiguous size expression", e')

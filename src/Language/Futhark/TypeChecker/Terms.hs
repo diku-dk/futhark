@@ -1039,7 +1039,7 @@ checkOneExp :: ExpBase NoInfo VName -> TypeM ([TypeParam], Exp)
 checkOneExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSingleExp e
   case maybe_tysubsts of
-    Left err -> typeError e' mempty $ pretty err
+    Left err -> throwError err
     Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       let t = typeOf e''
@@ -1057,7 +1057,7 @@ checkSizeExp :: ExpBase NoInfo VName -> TypeM Exp
 checkSizeExp e = do
   (maybe_tysubsts, e') <- Terms2.checkSizeExp e
   case maybe_tysubsts of
-    Left err -> typeError e' mempty $ pretty err
+    Left err -> throwError err
     Right (generalised, tysubsts) -> runTermTypeM checkExp tysubsts $ do
       e'' <- checkExp e'
       when (hasBinding e'') $
@@ -1636,7 +1636,7 @@ checkFunDef (fname, retdecl, tparams, params, body, loc) =
 
     doChecks (maybe_tysubsts, params', retdecl', body') =
       case maybe_tysubsts of
-        Left err -> typeError loc mempty $ pretty err
+        Left err -> throwError err
         Right (generalised, tysubsts) ->
           runTermTypeM checkExp tysubsts $ do
             (tparams', params'', retdecl'', RetType dims rettype', body'') <-
