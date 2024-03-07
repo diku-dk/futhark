@@ -65,7 +65,7 @@ onKernel kernel = do
   addCode RTS.arith
   addCode RTS.arith64
 
-  let overrideDecls = genConstAndBuiltinDecls kernel
+  let (overrideDecls, overrideInits) = genConstAndBuiltinDecls kernel
   addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
 
   let (scalarDecls, copies) = genScalarCopies kernel
@@ -74,14 +74,14 @@ onKernel kernel = do
   let memDecls = genMemoryDecls kernel
   addCode $ docText (WGSL.prettyDecls memDecls <> "\n\n")
 
-  let wgslBody = WGSL.Seq copies $ genWGSLStm (ImpGPU.kernelBody kernel)
+  let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
                  WGSL.Attrib "workgroup_size" [WGSL.VarExp builtinBlockSize]]
   let wgslFun = WGSL.Function
                   { WGSL.funName = name,
                     WGSL.funAttribs = attribs,
                     WGSL.funParams = entryParams,
-                    WGSL.funBody = wgslBody
+                    WGSL.funBody = WGSL.stmts [overrideInits, copies, wgslBody]
                   }
   addCode $ prettyText wgslFun
   addCode "\n"
@@ -139,9 +139,12 @@ kernelsToWebGPU prog =
 compileProg :: (MonadFreshNames m) => F.Prog F.GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToWebGPU <$> ImpGPU.compileProgOpenCL prog
 
+wgslInt64 :: WGSL.PrimType
+wgslInt64 = WGSL.Vec2 WGSL.Int32
+
 primWGSLType :: PrimType -> WGSL.PrimType
 primWGSLType (IntType Int32) = WGSL.Int32
-primWGSLType (IntType Int64) = WGSL.Vec2 WGSL.Int32
+primWGSLType (IntType Int64) = wgslInt64
 primWGSLType (FloatType Float16) = WGSL.Float16
 primWGSLType (FloatType Float32) = WGSL.Float32
 primWGSLType (FloatType Float64) = error "TODO: WGSL has no f64"
@@ -348,14 +351,20 @@ genMemoryDecls kernel = zipWith memDecl [1..] uses
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
 -- backend-provided values (like block size and lockstep width).
-genConstAndBuiltinDecls :: ImpGPU.Kernel -> [WGSL.Declaration]
-genConstAndBuiltinDecls kernel = constDecls ++ builtinDecls
+-- Some ConstUses can require additional code inserted at the beginning of the
+-- kernel before they can be used, these are contained in the returned
+-- statement.
+genConstAndBuiltinDecls :: ImpGPU.Kernel -> ([WGSL.Declaration], WGSL.Stmt)
+genConstAndBuiltinDecls kernel =
+  let (constDecls, constInits) = unzip constDeclsAndInits
+   in (constDecls ++ builtinDecls, WGSL.stmts constInits)
   where
-    constDecls =
-      -- TODO: constDecls should be i64s.
-      -- Override declarations must have scalar type however (i.e. we can't use
-      -- a vec2<i32> directly).
-      [ WGSL.OverrideDecl (nameToIdent name) (WGSL.Prim WGSL.Int32)
+    constDeclsAndInits =
+      [ let n = nameToIdent name in
+            (WGSL.OverrideDecl (n <> "_x") (WGSL.Prim WGSL.Int32),
+             WGSL.Seq (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
+              (WGSL.Assign n (WGSL.CallExp "i64" [WGSL.VarExp (n <> "_x"),
+                                                  WGSL.IntExp 0])))
         | ImpGPU.ConstUse name _ <- ImpGPU.kernelUses kernel ]
     builtinDecls =
       [WGSL.OverrideDecl builtinLockstepWidth (WGSL.Prim WGSL.Int32),
