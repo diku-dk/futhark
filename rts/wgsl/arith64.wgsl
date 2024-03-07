@@ -98,6 +98,10 @@ fn ashr_i64(a: i64, b_full: i64) -> i64 {
   return i64(lshr_i32(a.x, bitcast<i32>(b)) | shifted_over, a.y >> b);
 }
 
+fn eq_i64(a: i64, b: i64) -> bool {
+  return all(a == b);
+}
+
 fn ult_i64(a_s: i64, b_s: i64) -> bool {
   let a = bitcast<vec2<u32>>(a_s);
   let b = bitcast<vec2<u32>>(b_s);
@@ -116,6 +120,22 @@ fn slt_i64(a: i64, b: i64) -> bool {
 
 fn sle_i64(a: i64, b: i64) -> bool {
   return a.y < b.y || (a.y == b.y && a.x <= b.x);
+}
+
+fn abs_i64(a: i64) -> i64 {
+  if slt_i64(a, zero_i64) { return neg_i64(a); }
+  return a;
+}
+
+fn ssignum_i64(a: i64) -> i64 {
+  if slt_i64(a, zero_i64) { return i64(-1, -1); }
+  if all(a == zero_i64) { return i64(0, 0); }
+  return i64(1, 0);
+}
+
+fn usignum_i64(a: i64) -> i64 {
+  if all(a == zero_i64) { return i64(0, 0); }
+  return i64(1, 0);
 }
 
 fn zext_i32_i64(a: i32) -> i64 {

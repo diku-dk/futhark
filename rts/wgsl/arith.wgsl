@@ -28,4 +28,9 @@ fn lle(a: bool, b: bool) -> bool {
   return a == b || llt(a, b);
 }
 
+fn usignum_i32(a: i32) -> i32 {
+  if a == 0 { return 0; }
+  return 1;
+}
+
 // End of arith.wgsl

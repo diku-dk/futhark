@@ -55,15 +55,15 @@ builtinBlockSize = "_block_size"
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
-  --addCode $ "Input for " <> name <> "\n"
-  --addCode $ prettyText kernel <> "\n\n"
-  --addCode $ "Code for " <> name <> ":\n"
-  --addCode "== SHADER START ==\n"
+  addCode $ "Input for " <> name <> "\n"
+  addCode $ prettyText kernel <> "\n\n"
+  addCode $ "Code for " <> name <> ":\n"
+  addCode "== SHADER START ==\n"
 
   -- TODO: Temporary for testing, this should ultimately appear in the shader
   -- through `webgpuPrelude`
-  --addCode RTS.arith
-  --addCode RTS.arith64
+  addCode RTS.arith
+  addCode RTS.arith64
 
   let overrideDecls = genConstAndBuiltinDecls kernel
   addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
@@ -86,7 +86,7 @@ onKernel kernel = do
   addCode $ prettyText wgslFun
   addCode "\n"
 
-  --addCode "== SHADER END ==\n"
+  addCode "== SHADER END ==\n"
 
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
@@ -192,6 +192,9 @@ genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) =
   WGSL.Assign (nameToIdent dest) (WGSL.VarExp builtinLockstepWidth)
 genWGSLStm _ = WGSL.Comment "TODO: Unimplemented statement"
 
+call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
+call1 f a = WGSL.CallExp f [a]
+
 call2 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 call2 f a b = WGSL.CallExp f [a, b]
 
@@ -229,6 +232,7 @@ wgslBinOp (Xor _) = WGSL.BinOpExp "^"
 wgslBinOp _ = WGSL.BinOpExp "<TODO: unimplemented binop>"
 
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
+wgslCmpOp (CmpEq (IntType Int64)) = call2 "eq_i64"
 wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
 wgslCmpOp (CmpUlt Int64) = call2 "ult_i64"
 wgslCmpOp (CmpUlt _) = call2 "ult_i32"
@@ -242,6 +246,18 @@ wgslCmpOp (FCmpLt _) = WGSL.BinOpExp "<"
 wgslCmpOp (FCmpLe _) = WGSL.BinOpExp "<="
 wgslCmpOp CmpLlt = call2 "llt"
 wgslCmpOp CmpLle = call2 "lle"
+
+wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
+wgslUnOp Not = WGSL.UnOpExp "!"
+wgslUnOp (Complement _) = WGSL.UnOpExp "~"
+wgslUnOp (Abs Int64) = call1 "abs_i64"
+wgslUnOp (Abs _) = call1 "abs"
+wgslUnOp (FAbs _) = call1 "abs"
+wgslUnOp (SSignum Int64) = call1 "ssignum_i64"
+wgslUnOp (SSignum _) = call1 "sign"
+wgslUnOp (USignum Int64) = call1 "usignum_i64"
+wgslUnOp (USignum _) = call1 "usignum_i32"
+wgslUnOp (FSignum _) = call1 "sign"
 
 wgslConvOp :: ConvOp -> WGSL.Exp -> WGSL.Exp
 wgslConvOp op a = WGSL.CallExp (fun op) [a]
@@ -268,6 +284,7 @@ genWGSLExp (BinOpExp op e1 e2) =
   wgslBinOp op (genWGSLExp e1) (genWGSLExp e2)
 genWGSLExp (CmpOpExp op e1 e2) =
   wgslCmpOp op (genWGSLExp e1) (genWGSLExp e2)
+genWGSLExp (UnOpExp op e) = wgslUnOp op (genWGSLExp e)
 genWGSLExp (ConvOpExp op e) = wgslConvOp op (genWGSLExp e)
 genWGSLExp _ = WGSL.StringExp "<not implemented>"
 
