@@ -47,7 +47,7 @@ instance Rank (Shape SComp) where
 
 instance Rank ScalarType where
   rank Prim {} = constant 0
-  rank (TypeVar _ (QualName [] v) []) = var v -- FIXME - might not be a type variable.
+  rank (TypeVar _ (QualName [] v) []) = var v
   rank (TypeVar {}) = constant 0
   rank (Arrow {}) = constant 0
   rank (Record {}) = constant 0
