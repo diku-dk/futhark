@@ -72,7 +72,7 @@ instance Distribute (TypeBase dim u) where
   distribute t = t
 
 instance Distribute Ct where
-  distribute (CtEq t1 t2) = distribute t1 `CtEq` distribute t2
+  distribute (CtEq r t1 t2) = CtEq r (distribute t1) (distribute t2)
   distribute c = c
 
 data RankState = RankState
@@ -117,8 +117,8 @@ addObj sv =
   modify $ \s -> s {rankObj = rankObj s ~+~ var sv}
 
 addCt :: Ct -> RankM ()
-addCt (CtEq t1 t2) = addConstraint $ rank t1 ~==~ rank t2
-addCt (CtAM r m f) = do
+addCt (CtEq _ t1 t2) = addConstraint $ rank t1 ~==~ rank t2
+addCt (CtAM _ r m f) = do
   b_r <- binVar r
   b_m <- binVar m
   b_max <- VName "c_max" <$> incCounter
@@ -242,10 +242,11 @@ rankAnalysis loc cs tyVars params body = do
     cs' = foldMap (splitFuncs . distribute) cs
     splitFuncs
       ( CtEq
+          reason
           (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
           (Scalar (Arrow _ _ _ t2a (RetType _ t2r)))
         ) =
-        splitFuncs (CtEq t1a t2a) ++ splitFuncs (CtEq t1r' t2r')
+        splitFuncs (CtEq reason t1a t2a) ++ splitFuncs (CtEq reason t1r' t2r')
         where
           t1r' = t1r `setUniqueness` NoUniqueness
           t2r' = t2r `setUniqueness` NoUniqueness
@@ -312,6 +313,7 @@ newTyVar t = do
         substNewCts =
           substNewCts s
             ++ [ CtEq
+                   (Reason mempty) -- FIXME
                    (Scalar (TypeVar mempty (QualName [] t) []))
                    (arrayOf shape (Scalar (TypeVar mempty (QualName [] t') [])))
                ]
@@ -374,7 +376,7 @@ instance SubstRanks (TypeBase SComp u) where
   substRanks t = pure t
 
 instance SubstRanks Ct where
-  substRanks (CtEq t1 t2) = CtEq <$> substRanks t1 <*> substRanks t2
+  substRanks (CtEq r t1 t2) = CtEq r <$> substRanks t1 <*> substRanks t2
   substRanks _ = error ""
 
 updAM :: Map VName Int -> Exp -> Exp

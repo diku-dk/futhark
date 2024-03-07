@@ -33,6 +33,9 @@ newtype Reason = Reason
   }
   deriving (Eq, Ord, Show)
 
+instance Located Reason where
+  locOf = reasonLoc
+
 type SVar = VName
 
 -- | A shape component. `SDim` is a single dimension of unspecified
@@ -61,13 +64,20 @@ toType :: TypeBase Size u -> TypeBase SComp u
 toType = first (const SDim)
 
 data Ct
-  = CtEq Type Type
-  | CtAM SVar SVar (Shape SComp)
+  = CtEq Reason Type Type
+  | CtAM Reason SVar SVar (Shape SComp)
   deriving (Show)
 
+ctReason :: Ct -> Reason
+ctReason (CtEq r _ _) = r
+ctReason (CtAM r _ _ _) = r
+
+instance Located Ct where
+  locOf = locOf . ctReason
+
 instance Pretty Ct where
-  pretty (CtEq t1 t2) = pretty t1 <+> "~" <+> pretty t2
-  pretty (CtAM r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
+  pretty (CtEq _ t1 t2) = pretty t1 <+> "~" <+> pretty t2
+  pretty (CtAM _ r m _) = prettyName r <+> "=" <+> "•" <+> "∨" <+> prettyName m <+> "=" <+> "•"
 
 type Constraints = [Ct]
 
@@ -160,25 +170,25 @@ solution s =
 newtype SolveM a = SolveM {runSolveM :: StateT SolverState (Except TypeError) a}
   deriving (Functor, Applicative, Monad, MonadState SolverState, MonadError TypeError)
 
-occursCheck :: VName -> Type -> SolveM ()
-occursCheck v tp = do
+occursCheck :: Reason -> VName -> Type -> SolveM ()
+occursCheck reason v tp = do
   vars <- gets solverTyVars
   let tp' = substTyVars (substTyVar vars) tp
-  when (v `S.member` typeVars tp') . throwError . TypeError mempty mempty $
+  when (v `S.member` typeVars tp') . throwError . TypeError (locOf reason) mempty $
     "Occurs check: cannot instantiate"
       <+> prettyName v
       <+> "with"
       <+> pretty tp
       <> "."
 
-subTyVar :: VName -> Int -> Type -> SolveM ()
-subTyVar v lvl t = do
-  occursCheck v t
+subTyVar :: Reason -> VName -> Int -> Type -> SolveM ()
+subTyVar reason v lvl t = do
+  occursCheck reason v t
   modify $ \s -> s {solverTyVars = M.insert v (TyVarSol lvl t) $ solverTyVars s}
 
-linkTyVar :: VName -> VName -> SolveM ()
-linkTyVar v t = do
-  occursCheck v $ Scalar $ TypeVar NoUniqueness (qualName t) []
+linkTyVar :: Reason -> VName -> VName -> SolveM ()
+linkTyVar reason v t = do
+  occursCheck reason v $ Scalar $ TypeVar NoUniqueness (qualName t) []
   tyvars <- gets solverTyVars
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
   tyvars' <-
@@ -222,13 +232,18 @@ unify t1 t2
       Just [(t1', t2')]
 unify _ _ = Nothing
 
-solveCt :: Ct -> SolveM ()
-solveCt ct =
-  case ct of
-    CtEq t1 t2 -> solveCt' (t1, t2)
-    CtAM {} -> pure () -- Good vibes only.
+solveEq :: Reason -> Type -> Type -> SolveM ()
+solveEq reason orig_t1 orig_t2 = do
+  solveCt' (orig_t1, orig_t2)
   where
-    bad = throwError $ TypeError mempty mempty $ "Unsolvable:" <+> pretty ct
+    cannotUnify = do
+      tyvars <- gets solverTyVars
+      throwError . TypeError (locOf reason) mempty $
+        "Cannot unify"
+          </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t1))
+          </> "with"
+          </> indent 2 (pretty (substTyVars (substTyVar tyvars) orig_t2))
+
     solveCt' (t1, t2) = do
       tyvars <- gets solverTyVars
       let flexible v = case M.lookup v tyvars of
@@ -249,21 +264,27 @@ solveCt ct =
             | v1 == v2 -> pure ()
             | otherwise ->
                 case (flexible v1, flexible v2) of
-                  (Nothing, Nothing) -> bad
-                  (Just lvl, Nothing) -> subTyVar v1 lvl t2'
-                  (Nothing, Just lvl) -> subTyVar v2 lvl t1'
+                  (Nothing, Nothing) -> cannotUnify
+                  (Just lvl, Nothing) -> subTyVar reason v1 lvl t2'
+                  (Nothing, Just lvl) -> subTyVar reason v2 lvl t1'
                   (Just lvl1, Just lvl2)
-                    | lvl1 <= lvl2 -> linkTyVar v1 v2
-                    | otherwise -> linkTyVar v2 v1
+                    | lvl1 <= lvl2 -> linkTyVar reason v1 v2
+                    | otherwise -> linkTyVar reason v2 v1
         (Scalar (TypeVar _ (QualName [] v1) []), t2')
           | Just lvl <- flexible v1 ->
-              subTyVar v1 lvl t2'
+              subTyVar reason v1 lvl t2'
         (t1', Scalar (TypeVar _ (QualName [] v2) []))
           | Just lvl <- flexible v2 ->
-              subTyVar v2 lvl t1'
+              subTyVar reason v2 lvl t1'
         (t1', t2') -> case unify t1' t2' of
-          Nothing -> bad
+          Nothing -> cannotUnify
           Just eqs -> mapM_ solveCt' eqs
+
+solveCt :: Ct -> SolveM ()
+solveCt ct =
+  case ct of
+    CtEq reason t1 t2 -> solveEq reason t1 t2
+    CtAM {} -> pure () -- Good vibes only.
 
 solveTyVar :: (VName, (Int, TyVarInfo)) -> SolveM ()
 solveTyVar (_, (_, TyVarFree {})) = pure ()
@@ -286,7 +307,7 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
     Just (Scalar (Record fs2))
       | all (`M.member` fs2) (M.keys fs1) ->
           forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_k, (t1, t2)) ->
-            solveCt $ CtEq t1 t2
+            solveCt $ CtEq (Reason loc) t1 t2
     Just tv_t' ->
       throwError $
         TypeError loc mempty $
