@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.PyOpenCL
 where
 
 import Control.Monad
+import Control.Monad.Identity
 import Data.Map qualified as M
 import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GenericPython hiding (compileProg)
@@ -212,9 +213,12 @@ kernelConstToExp (Imp.SizeConst key _) =
 kernelConstToExp (Imp.SizeMaxConst size_class) =
   Var $ "self.max_" <> prettyString size_class
 
+compileConstExp :: Imp.KernelConstExp -> PyExp
+compileConstExp e = runIdentity $ compilePrimExp (pure . kernelConstToExp) e
+
 compileBlockDim :: Imp.BlockDim -> CompilerM op s PyExp
 compileBlockDim (Left e) = asLong <$> compileExp e
-compileBlockDim (Right kc) = pure $ kernelConstToExp kc
+compileBlockDim (Right e) = pure $ compileConstExp e
 
 callKernel :: OpCompiler Imp.OpenCL ()
 callKernel (Imp.GetSize v key) = do

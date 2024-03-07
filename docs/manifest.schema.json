@@ -123,7 +123,9 @@
                                   "free": {"type": "string"},
                                   "shape": {"type": "string"},
                                   "values": {"type": "string"},
-                                  "new": {"type": "string"}
+                                  "values_raw": {"type": "string"},
+                                  "new": {"type": "string"},
+                                  "new_raw": {"type": "string"}
                               },
                               "additionalProperties": false
                           }
