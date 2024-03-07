@@ -5,7 +5,9 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad.State
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Reader
+import Control.Monad.Trans.State
 import Data.Bifunctor (second)
 import Data.Map qualified as M
 import Data.Set qualified as S
@@ -40,6 +42,21 @@ addCode :: T.Text -> WebGPUM ()
 addCode code =
   modify $ \s -> s {wsCode = wsCode s <> code}
 
+data KernelR = KernelR
+  { -- | Kernel currently being translated.
+    krKernel :: ImpGPU.Kernel
+  }
+
+type KernelM = ReaderT KernelR WebGPUM
+
+-- | Some names generated are unique in the scope of a single kernel but are
+-- translated to module-scope identifiers in WGSL. This modifies an identifier
+-- to be unique in that scope.
+mkGlobalIdent :: WGSL.Ident -> KernelM WGSL.Ident
+mkGlobalIdent ident = do
+  kernelName <- asks (textToIdent . nameToText . ImpGPU.kernelName . krKernel)
+  pure $ kernelName <> "_" <> ident
+
 entryParams :: [WGSL.Param]
 entryParams =
   [ WGSL.Param "workgroup_id" (WGSL.Prim (WGSL.Vec3 WGSL.UInt32))
@@ -53,26 +70,29 @@ builtinLockstepWidth = "_lockstep_width"
 builtinBlockSize = "_block_size"
 
 -- Main function for translating an ImpGPU kernel to a WebGPU kernel.
-onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
-onKernel kernel = do
-  addCode $ "Input for " <> name <> "\n"
-  addCode $ prettyText kernel <> "\n\n"
-  addCode $ "Code for " <> name <> ":\n"
-  addCode "== SHADER START ==\n"
+genKernel :: KernelM ()
+genKernel = do
+  kernel <- asks krKernel
+  let name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
+
+  gen $ "Input for " <> name <> "\n"
+  gen $ prettyText kernel <> "\n\n"
+  gen $ "Code for " <> name <> ":\n"
+  gen "== SHADER START ==\n"
 
   -- TODO: Temporary for testing, this should ultimately appear in the shader
   -- through `webgpuPrelude`
-  addCode RTS.arith
-  addCode RTS.arith64
+  gen RTS.arith
+  gen RTS.arith64
 
   let (overrideDecls, overrideInits) = genConstAndBuiltinDecls kernel
-  addCode $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
+  gen $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
 
   let (scalarDecls, copies) = genScalarCopies kernel
-  addCode $ docText (WGSL.prettyDecls scalarDecls <> "\n\n")
+  gen $ docText (WGSL.prettyDecls scalarDecls <> "\n\n")
 
   let memDecls = genMemoryDecls kernel
-  addCode $ docText (WGSL.prettyDecls memDecls <> "\n\n")
+  gen $ docText (WGSL.prettyDecls memDecls <> "\n\n")
 
   let wgslBody = genWGSLStm (ImpGPU.kernelBody kernel)
   let attribs = [WGSL.Attrib "compute" [],
@@ -83,14 +103,20 @@ onKernel kernel = do
                     WGSL.funParams = entryParams,
                     WGSL.funBody = WGSL.stmts [overrideInits, copies, wgslBody]
                   }
-  addCode $ prettyText wgslFun
-  addCode "\n"
+  gen $ prettyText wgslFun
+  gen "\n"
 
-  addCode "== SHADER END ==\n"
+  gen "== SHADER END ==\n"
+  pure ()
+    where
+      gen = lift . addCode
 
+
+onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
+onKernel kernel = do
+  runReaderT genKernel (KernelR kernel)
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
-    where name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
