@@ -18,7 +18,7 @@ def main_orig [numK][numX]
   let qr = map1 (map f32.cos >-> map2 (*) phiMag >-> f32.sum) expArgs
   let qi = map1 (map f32.sin >-> map2 (*) phiMag >-> f32.sum) expArgs
   in (qr, qi)
-     
+
 def main_am [numK][numX]
          (kx: [numK]f32) (ky: [numK]f32) (kz: [numK]f32)
          (x: [numX]f32) (y: [numX]f32) (z: [numX]f32)
@@ -31,11 +31,11 @@ def main_am [numK][numX]
   let qr = f32.sum (f32.cos expArgs * phiMag)
   let qi = f32.sum (f32.sin expArgs * phiMag)
   in (qr, qi)
-     
+
 entry main [numK][numX]
          (kx: [numK]f32) (ky: [numK]f32) (kz: [numK]f32)
          (x: [numX]f32) (y: [numX]f32) (z: [numX]f32)
          (phiR: [numK]f32) (phiI: [numK]f32) =
   let (qr, qi) = main_orig kx ky kz  x y z phiR phiI
   let (qr_am, qi_am) = main_am kx ky kz  x y z phiR phiI
-  in and (map2 (==) qr qr_am && qi == qi_am)
+  in and (map2 (==) qr qr_am && map2 (==) qi qi_am)
