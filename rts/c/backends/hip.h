@@ -829,7 +829,7 @@ static int gpu_memcpy(struct futhark_context* ctx,
     HIP_SUCCEED_FATAL(hipEventRecord(event->start, ctx->stream));
   }
   HIP_SUCCEED_OR_RETURN(hipMemcpyWithStream((unsigned char*)dst+dst_offset, (unsigned char*)src+src_offset,
-                                            nbytes, hipMemcpyDeviceToDevice ,ctx->stream));
+                                            nbytes, hipMemcpyDeviceToDevice, ctx->stream));
   if (event != NULL) {
     HIP_SUCCEED_FATAL(hipEventRecord(event->end, ctx->stream));
   }
