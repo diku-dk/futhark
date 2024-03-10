@@ -17,7 +17,7 @@ import Language.Futhark.Core (Name, nameFromString, nameToText)
 areTupleFields :: M.Map Name a -> Maybe [a]
 areTupleFields fs =
   let fs' = sortFields fs
-   in if length fs' > 1
+   in if (null fs || length fs' > 1)
         && and (zipWith (==) (map fst fs') tupleFieldNames)
         then Just $ map snd fs'
         else Nothing
