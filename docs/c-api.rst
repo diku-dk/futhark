@@ -531,12 +531,12 @@ The following API functions are available when using the ``opencl``,
    on the backend and hardware in use. The following values are
    supported:
 
-   * 0: never use managed memory.
+   * 0: never use unified memory (the default on ``hip``).
 
-   * 1: always use managed memory.
+   * 1: always use unified memory.
 
    * 2: use managed memory if the device claims to support it (the
-     default).
+     default on ``cuda``).
 
 Exotic
 ~~~~~~

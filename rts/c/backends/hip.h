@@ -113,7 +113,7 @@ static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->preferred_device = strdup("");
   cfg->program = strconcat(gpu_program);
 
-  cfg->unified_memory = 2;
+  cfg->unified_memory = 0;
 
   cfg->default_block_size = 256;
   cfg->default_grid_size = 0; // Set properly later.
