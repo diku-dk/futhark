@@ -93,16 +93,6 @@ genKernel = do
   kernel <- asks krKernel
   let name = textToIdent $ nameToText (ImpGPU.kernelName kernel)
 
-  gen $ "Input for " <> name <> "\n"
-  gen $ prettyText kernel <> "\n\n"
-  gen $ "Code for " <> name <> ":\n"
-  gen "== SHADER START ==\n"
-
-  -- TODO: Temporary for testing, this should ultimately appear in the shader
-  -- through `webgpuPrelude`
-  gen RTS.arith
-  gen RTS.arith64
-
   (overrideDecls, overrideInits) <- genConstAndBuiltinDecls
   gen $ docText (WGSL.prettyDecls overrideDecls <> "\n\n")
 
@@ -129,7 +119,6 @@ genKernel = do
   gen $ prettyText wgslFun
   gen "\n"
 
-  gen "== SHADER END ==\n"
   pure ()
     where
       gen = lift . addCode
