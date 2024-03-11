@@ -574,20 +574,20 @@ varInfoToExpReturns (MemAcc acc ispace ts u) = MemAcc acc ispace ts u
 varInfoToExpReturns (MemMem space) = MemMem space
 
 matchRetTypeToResult ::
-  (Mem rep inner, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable (Aliases rep)) =>
   [FunReturns] ->
   Result ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchRetTypeToResult rettype result = do
   scope <- askScope
   result_ts <- runReaderT (mapM (subExpMemInfo . resSubExp) result) $ removeScopeAliases scope
   matchReturnType rettype (map resSubExp result) result_ts
 
 matchFunctionReturnType ::
-  (Mem rep inner, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable (Aliases rep), OpReturns (inner (Aliases rep))) =>
   [FunReturns] ->
   Result ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchFunctionReturnType rettype result = do
   matchRetTypeToResult rettype result
   mapM_ (checkResultSubExp . resSubExp) result
@@ -611,10 +611,10 @@ matchFunctionReturnType rettype result = do
                   <> prettyText lmad
 
 matchLoopResultMem ::
-  (Mem rep inner, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable (Aliases rep)) =>
   [FParam (Aliases rep)] ->
   Result ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchLoopResultMem params = matchRetTypeToResult rettype
   where
     param_names = map paramName params
@@ -647,10 +647,10 @@ matchLoopResultMem params = matchRetTypeToResult rettype
         lmad' = existentialiseLMAD param_names lmad
 
 matchBranchReturnType ::
-  (Mem rep inner, TC.Checkable rep) =>
+  (Mem rep inner, TC.Checkable (Aliases rep)) =>
   [BodyReturns] ->
   Body (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchBranchReturnType rettype (Body _ stms res) = do
   scope <- askScope
   ts <- runReaderT (mapM (subExpMemInfo . resSubExp) res) $ removeScopeAliases (scope <> scopeOf stms)
@@ -689,7 +689,7 @@ matchReturnType ::
   [MemInfo ExtSize u MemReturn] ->
   [SubExp] ->
   [MemInfo SubExp NoUniqueness MemBind] ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchReturnType rettype res ts = do
   let existentialiseLMAD0 :: LMAD -> ExtLMAD
       existentialiseLMAD0 = fmap $ fmap Free
@@ -784,10 +784,10 @@ matchReturnType rettype res ts = do
   either bad pure =<< runExceptT (zipWithM_ checkReturn rettype ts)
 
 matchPatToExp ::
-  (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable rep) =>
+  (Mem rep inner, LetDec rep ~ LetDecMem, TC.Checkable (Aliases rep)) =>
   Pat (LetDec (Aliases rep)) ->
   Exp (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 matchPatToExp pat e = do
   scope <- asksScope removeScopeAliases
   rt <- maybe illformed pure $ runReader (expReturns $ removeExpAliases e) scope
@@ -843,12 +843,12 @@ matchPatToExp pat e = do
 varMemInfo ::
   (Mem rep inner) =>
   VName ->
-  TC.TypeM rep (MemInfo SubExp NoUniqueness MemBind)
+  TC.TypeM (Aliases rep) (MemInfo SubExp NoUniqueness MemBind)
 varMemInfo name = do
   dec <- TC.lookupVar name
 
   case dec of
-    LetName (_, summary) -> pure $ letDecMem summary
+    LetName summary -> pure $ letDecMem summary
     FParamName summary -> pure $ noUniquenessReturns summary
     LParamName summary -> pure summary
     IndexName it -> pure $ MemPrim $ IntType it

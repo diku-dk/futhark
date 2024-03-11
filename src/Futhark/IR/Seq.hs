@@ -17,6 +17,7 @@ where
 
 import Futhark.Builder
 import Futhark.Construct
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.Syntax
@@ -35,7 +36,7 @@ instance RepTypes Seq
 instance ASTRep Seq where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.Checkable Seq where
+instance TC.Checkable (Aliases Seq) where
   checkOp NoOp = pure ()
 
 instance Buildable Seq where

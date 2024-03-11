@@ -706,7 +706,7 @@ instance (RepTypes rep) => ST.IndexOp (SOAC rep) where
   indexOp _ _ _ _ = Nothing
 
 -- | Type-check a SOAC.
-typeCheckSOAC :: (TC.Checkable rep) => SOAC (Aliases rep) -> TC.TypeM rep ()
+typeCheckSOAC :: (TC.Checkable (Aliases rep)) => SOAC (Aliases rep) -> TC.TypeM (Aliases rep) ()
 typeCheckSOAC (VJP lam args vec) = do
   args' <- mapM TC.checkArg args
   TC.checkLambda lam $ map TC.noArgAliases args'

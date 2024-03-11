@@ -69,7 +69,7 @@ data ErrorCase rep
   | DupDefinitionError Name
   | DupParamError Name VName
   | DupPatError VName
-  | InvalidPatError (Pat (LetDec (Aliases rep))) [ExtType] (Maybe String)
+  | InvalidPatError (Pat (LetDec rep)) [ExtType] (Maybe String)
   | UnknownVariableError VName
   | UnknownFunctionError Name
   | ParameterMismatch (Maybe Name) [Type] [Type]
@@ -190,9 +190,9 @@ instance (Checkable rep) => Show (TypeError rep) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding rep = ([(RetType (Aliases rep), RetAls)], [FParam (Aliases rep)])
+type FunBinding rep = ([(RetType rep, RetAls)], [FParam rep])
 
-type VarBinding rep = NameInfo (Aliases rep)
+type VarBinding rep = NameInfo rep
 
 data Usage
   = Consumed
@@ -277,7 +277,7 @@ instance Monoid Consumption where
 data Env rep = Env
   { envVtable :: M.Map VName (VarBinding rep),
     envFtable :: M.Map Name (FunBinding rep),
-    envCheckOp :: Op (Aliases rep) -> TypeM rep (),
+    envCheckOp :: Op rep -> TypeM rep (),
     envContext :: [T.Text]
   }
 
@@ -299,7 +299,7 @@ newtype TypeM rep a
 
 instance
   (Checkable rep) =>
-  HasScope (Aliases rep) (TypeM rep)
+  HasScope rep (TypeM rep)
   where
   lookupType = fmap typeOf . lookupVar
   askScope = asks $ M.fromList . mapMaybe varType . M.toList . envVtable
@@ -376,7 +376,7 @@ collectOccurences m = do
   pure (x, o)
 
 checkOpWith ::
-  (Op (Aliases rep) -> TypeM rep ()) ->
+  (Op rep -> TypeM rep ()) ->
   TypeM rep a ->
   TypeM rep a
 checkOpWith checker = local $ \env -> env {envCheckOp = checker}
@@ -425,17 +425,15 @@ consumeOnlyParams consumable m = do
 
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
-expandAliases :: Names -> Env rep -> Names
+expandAliases :: (Aliased rep) => Names -> Env rep -> Names
 expandAliases names env = names <> aliasesOfAliases
   where
     aliasesOfAliases = mconcat . map look . namesToList $ names
-    look k = case M.lookup k $ envVtable env of
-      Just (LetName (als, _)) -> unAliases als
-      _ -> mempty
+    look k = maybe mempty aliases $ M.lookup k $ envVtable env
 
 binding ::
   (Checkable rep) =>
-  Scope (Aliases rep) ->
+  Scope rep ->
   TypeM rep a ->
   TypeM rep a
 binding stms = check . local (`bindVars` stms)
@@ -443,13 +441,14 @@ binding stms = check . local (`bindVars` stms)
     bindVars orig_env = M.foldlWithKey' (bindVar orig_env) orig_env
     boundnames = M.keys stms
 
-    bindVar orig_env env name (LetName (AliasDec als, dec)) =
-      let als'
+    bindVar orig_env env name (LetName dec) =
+      let als = undefined
+          als'
             | primType (typeOf dec) = mempty
             | otherwise = expandAliases als orig_env
        in env
             { envVtable =
-                M.insert name (LetName (AliasDec als', dec)) $ envVtable env
+                M.insert name (LetName dec) $ envVtable env
             }
     bindVar _ env name dec =
       env {envVtable = M.insert name dec $ envVtable env}
@@ -462,7 +461,7 @@ binding stms = check . local (`bindVars` stms)
       tell $ Consumption $ unOccur (namesFromList boundnames) os
       pure a
 
-lookupVar :: VName -> TypeM rep (NameInfo (Aliases rep))
+lookupVar :: VName -> TypeM rep (NameInfo rep)
 lookupVar name = do
   stm <- asks $ M.lookup name . envVtable
   case stm of
@@ -477,8 +476,8 @@ lookupAliases name = do
       then mempty
       else oneName name <> aliases info
 
-aliases :: NameInfo (Aliases rep) -> Names
-aliases (LetName (als, _)) = unAliases als
+aliases :: (Aliased rep) => NameInfo rep -> Names
+aliases (LetName als) = aliasesOf als
 aliases _ = mempty
 
 subExpAliasesM :: (Checkable rep) => SubExp -> TypeM rep Names
@@ -573,7 +572,7 @@ checkOpaques (OpaqueTypes types) = descend [] types
 -- information.
 checkProg ::
   (Checkable rep) =>
-  Prog (Aliases rep) ->
+  Prog rep ->
   Either (TypeError rep) ()
 checkProg (Prog opaques consts funs) = do
   checkOpaques opaques
@@ -616,7 +615,7 @@ initialFtable = fmap M.fromList $ mapM addBuiltin $ M.toList builtInFunctions
 
 checkFun ::
   (Checkable rep) =>
-  FunDef (Aliases rep) ->
+  FunDef rep ->
   TypeM rep ()
 checkFun (FunDef _ _ fname rettype params body) =
   context ("In function " <> nameToText fname)
@@ -639,7 +638,7 @@ checkFun (FunDef _ _ fname rettype params body) =
 
 funParamsToNameInfos ::
   [FParam rep] ->
-  [(VName, NameInfo (Aliases rep))]
+  [(VName, NameInfo rep)]
 funParamsToNameInfos = map nameTypeAndDec
   where
     nameTypeAndDec fparam =
@@ -676,7 +675,7 @@ checkFun' ::
   (Checkable rep) =>
   ( Name,
     [(DeclExtType, RetAls)],
-    [(VName, NameInfo (Aliases rep))]
+    [(VName, NameInfo rep)]
   ) ->
   Maybe [(VName, Names)] ->
   TypeM rep [Names] ->
@@ -746,7 +745,7 @@ checkSubExpRes (SubExpRes cs se) = do
 
 checkStms ::
   (Checkable rep) =>
-  Stms (Aliases rep) ->
+  Stms rep ->
   TypeM rep a ->
   TypeM rep a
 checkStms origstms m = delve $ stmsToList origstms
@@ -768,9 +767,9 @@ checkResult = mapM_ checkSubExpRes
 checkFunBody ::
   (Checkable rep) =>
   [(RetType rep, RetAls)] ->
-  Body (Aliases rep) ->
+  Body rep ->
   TypeM rep [Names]
-checkFunBody rt (Body (_, rep) stms res) = do
+checkFunBody rt (Body rep stms res) = do
   checkBodyDec rep
   checkStms stms $ do
     context "When checking body result" $ checkResult res
@@ -781,9 +780,9 @@ checkFunBody rt (Body (_, rep) stms res) = do
 checkLambdaBody ::
   (Checkable rep) =>
   [Type] ->
-  Body (Aliases rep) ->
+  Body rep ->
   TypeM rep ()
-checkLambdaBody ret (Body (_, rep) stms res) = do
+checkLambdaBody ret (Body rep stms res) = do
   checkBodyDec rep
   checkStms stms $ checkLambdaResult ret res
 
@@ -815,9 +814,9 @@ checkLambdaResult ts es
 
 checkBody ::
   (Checkable rep) =>
-  Body (Aliases rep) ->
+  Body rep ->
   TypeM rep [Names]
-checkBody (Body (_, rep) stms res) = do
+checkBody (Body rep stms res) = do
   checkBodyDec rep
   checkStms stms $ do
     checkResult res
@@ -987,7 +986,7 @@ allowAllAliases n m =
 
 checkExp ::
   (Checkable rep) =>
-  Exp (Aliases rep) ->
+  Exp rep ->
   TypeM rep ()
 checkExp (BasicOp op) = checkBasicOp op
 checkExp (Match ses cases def_case info) = do
@@ -1045,7 +1044,7 @@ checkExp (Loop merge form loopbody) = do
         (Just consumable)
       $ do
         checkFunParams mergepat
-        checkBodyDec $ snd $ bodyDec loopbody
+        checkBodyDec $ bodyDec loopbody
 
         checkStms (bodyStms loopbody) $ do
           context "In loop body result" $
@@ -1241,21 +1240,21 @@ checkFlatSlice (FlatSlice offset idxs) = do
 
 checkStm ::
   (Checkable rep) =>
-  Stm (Aliases rep) ->
+  Stm rep ->
   TypeM rep a ->
   TypeM rep a
-checkStm stm@(Let pat (StmAux (Certs cs) _ (_, dec)) e) m = do
+checkStm stm@(Let pat (StmAux (Certs cs) _ dec) e) m = do
   context "When checking certificates" $ mapM_ (requireI [Prim Unit]) cs
   context "When checking expression annotation" $ checkExpDec dec
   context ("When matching\n" <> message "  " pat <> "\nwith\n" <> message "  " e) $
     matchPat pat e
   binding (scopeOf stm) $ do
-    mapM_ checkPatElem (patElems $ removePatAliases pat)
+    mapM_ checkPatElem $ patElems pat
     m
 
 matchExtPat ::
   (Checkable rep) =>
-  Pat (LetDec (Aliases rep)) ->
+  Pat (LetDec rep) ->
   [ExtType] ->
   TypeM rep ()
 matchExtPat pat ts =
@@ -1275,7 +1274,7 @@ matchExtReturnType rettype res = do
 matchExtBranchType ::
   (Checkable rep) =>
   [ExtType] ->
-  Body (Aliases rep) ->
+  Body rep ->
   TypeM rep ()
 matchExtBranchType rettype (Body _ stms res) = do
   ts <- extendedScope (traverse subExpResType res) stmscope
@@ -1367,7 +1366,7 @@ consumeArgs paramts args =
 -- The boolean indicates whether we only allow consumption of
 -- parameters.
 checkAnyLambda ::
-  (Checkable rep) => Bool -> Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
+  (Checkable rep) => Bool -> Lambda rep -> [Arg] -> TypeM rep ()
 checkAnyLambda soac (Lambda params rettype body) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args
@@ -1399,7 +1398,7 @@ checkAnyLambda soac (Lambda params rettype body) args = do
           <> prettyText (length args)
           <> " arguments."
 
-checkLambda :: (Checkable rep) => Lambda (Aliases rep) -> [Arg] -> TypeM rep ()
+checkLambda :: (Checkable rep) => Lambda rep -> [Arg] -> TypeM rep ()
 checkLambda = checkAnyLambda True
 
 checkPrimExp :: (Checkable rep) => PrimExp VName -> TypeM rep ()
@@ -1439,55 +1438,55 @@ requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
     prettyText e <> " must have type " <> prettyText t
 
 -- | The class of representations that can be type-checked.
-class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
+class (Aliased rep) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()
   checkLParamDec :: VName -> LParamInfo rep -> TypeM rep ()
   checkLetBoundDec :: VName -> LetDec rep -> TypeM rep ()
   checkRetType :: [RetType rep] -> TypeM rep ()
-  matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
-  primFParam :: VName -> PrimType -> TypeM rep (FParam (Aliases rep))
+  matchPat :: Pat (LetDec rep) -> Exp rep -> TypeM rep ()
+  primFParam :: VName -> PrimType -> TypeM rep (FParam rep)
   matchReturnType :: [RetType rep] -> Result -> TypeM rep ()
-  matchBranchType :: [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
-  matchLoopResult :: [FParam (Aliases rep)] -> Result -> TypeM rep ()
+  matchBranchType :: [BranchType rep] -> Body rep -> TypeM rep ()
+  matchLoopResult :: [FParam rep] -> Result -> TypeM rep ()
 
   -- | Used at top level; can be locally changed with 'checkOpWith'.
-  checkOp :: Op (Aliases rep) -> TypeM rep ()
+  checkOp :: Op rep -> TypeM rep ()
 
-  default checkExpDec :: (ExpDec rep ~ ()) => ExpDec rep -> TypeM rep ()
-  checkExpDec = pure
+  -- default checkExpDec :: (ExpDec rep ~ ()) => ExpDec rep -> TypeM rep ()
+  -- checkExpDec = pure
 
-  default checkBodyDec :: (BodyDec rep ~ ()) => BodyDec rep -> TypeM rep ()
-  checkBodyDec = pure
+  -- default checkBodyDec :: (BodyDec rep ~ ()) => BodyDec rep -> TypeM rep ()
+  -- checkBodyDec = pure
 
-  default checkFParamDec :: (FParamInfo rep ~ DeclType) => VName -> FParamInfo rep -> TypeM rep ()
-  checkFParamDec _ = checkType
+  -- default checkFParamDec :: (FParamInfo rep ~ DeclType) => VName -> FParamInfo rep -> TypeM rep ()
+  -- checkFParamDec _ = checkType
 
-  default checkLParamDec :: (LParamInfo rep ~ Type) => VName -> LParamInfo rep -> TypeM rep ()
-  checkLParamDec _ = checkType
+  -- default checkLParamDec :: (LParamInfo rep ~ Type) => VName -> LParamInfo rep -> TypeM rep ()
+  -- checkLParamDec _ = checkType
 
-  default checkLetBoundDec :: (LetDec rep ~ Type) => VName -> LetDec rep -> TypeM rep ()
-  checkLetBoundDec _ = checkType
+  -- default checkLetBoundDec :: (LetDec rep ~ Type) => VName -> LetDec rep -> TypeM rep ()
+  -- checkLetBoundDec _ = checkType
 
-  default checkRetType :: (RetType rep ~ DeclExtType) => [RetType rep] -> TypeM rep ()
-  checkRetType = mapM_ $ checkExtType . declExtTypeOf
+  -- default checkRetType :: (RetType rep ~ DeclExtType) => [RetType rep] -> TypeM rep ()
+  -- checkRetType = mapM_ $ checkExtType . declExtTypeOf
 
-  default matchPat :: Pat (LetDec (Aliases rep)) -> Exp (Aliases rep) -> TypeM rep ()
-  matchPat pat = matchExtPat pat <=< expExtType
+  -- default matchPat :: Pat (LetDec rep) -> Exp rep -> TypeM rep ()
+  -- matchPat pat = matchExtPat pat <=< expExtType
 
-  default primFParam :: (FParamInfo rep ~ DeclType) => VName -> PrimType -> TypeM rep (FParam (Aliases rep))
+  default primFParam :: (FParamInfo rep ~ DeclType) => VName -> PrimType -> TypeM rep (FParam rep)
   primFParam name t = pure $ Param mempty name (Prim t)
 
-  default matchReturnType :: (RetType rep ~ DeclExtType) => [RetType rep] -> Result -> TypeM rep ()
-  matchReturnType = matchExtReturnType . map fromDecl
+-- default matchReturnType :: (RetType rep ~ DeclExtType) => [RetType rep] -> Result -> TypeM rep ()
+-- matchReturnType = matchExtReturnType . map fromDecl
 
-  default matchBranchType :: (BranchType rep ~ ExtType) => [BranchType rep] -> Body (Aliases rep) -> TypeM rep ()
-  matchBranchType = matchExtBranchType
+-- default matchBranchType :: (BranchType rep ~ ExtType) => [BranchType rep] -> Body rep -> TypeM rep ()
+-- matchBranchType = matchExtBranchType
 
-  default matchLoopResult ::
-    (FParamInfo rep ~ DeclType) =>
-    [FParam (Aliases rep)] ->
-    Result ->
-    TypeM rep ()
-  matchLoopResult = matchLoopResultExt
+-- default matchLoopResult ::
+--   (FParamInfo rep ~ DeclType) =>
+--   [FParam rep] ->
+--   Result ->
+--   TypeM rep ()
+-- matchLoopResult = matchLoopResultExt

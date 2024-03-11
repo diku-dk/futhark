@@ -16,6 +16,7 @@ where
 
 import Futhark.Builder
 import Futhark.Construct
+import Futhark.IR.Aliases
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
 import Futhark.IR.SOACS.SOAC
@@ -32,8 +33,9 @@ instance RepTypes SOACS where
 instance ASTRep SOACS where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.Checkable SOACS where
-  checkOp = typeCheckSOAC
+instance TC.Checkable (Aliases SOACS)
+
+--  checkOp = typeCheckSOAC
 
 instance Buildable SOACS where
   mkBody = Body ()

@@ -35,7 +35,8 @@ import Data.Time.Clock
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Compiler.Config (Verbosity (..))
 import Futhark.Error
-import Futhark.IR (PrettyRep, Prog)
+import Futhark.IR (ASTRep, PrettyRep, Prog)
+import Futhark.IR.Aliases (AliasableRep, Aliases)
 import Futhark.IR.TypeCheck
 import Futhark.MonadFreshNames
 import Futhark.Pass
@@ -153,7 +154,7 @@ runPipeline p cfg prog = do
 
 -- | Construct a pipeline from a single compiler pass.
 onePass ::
-  (Checkable torep) =>
+  (AliasableRep torep, Checkable (Aliases torep)) =>
   Pass fromrep torep ->
   Pipeline fromrep torep
 onePass pass = Pipeline perform
@@ -193,7 +194,7 @@ condPipeline cond (Pipeline f) =
 
 -- | Create a pipeline from a list of passes.
 passes ::
-  (Checkable rep) =>
+  (AliasableRep rep, Checkable (Aliases rep)) =>
   [Pass rep rep] ->
   Pipeline rep rep
 passes = foldl (>>>) id . map onePass

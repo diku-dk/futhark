@@ -127,10 +127,10 @@ instance (RephraseOp op) => RephraseOp (MCOp op) where
   rephraseInOp r (OtherOp op) = OtherOp <$> rephraseInOp r op
 
 typeCheckMCOp ::
-  (TC.Checkable rep) =>
-  (op (Aliases rep) -> TC.TypeM rep ()) ->
+  (TC.Checkable (Aliases rep)) =>
+  (op (Aliases rep) -> TC.TypeM (Aliases rep) ()) ->
   MCOp op (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 typeCheckMCOp _ (ParOp (Just par_op) op) = do
   -- It is valid for the same array to be consumed in both par_op and op.
   _ <- typeCheckSegOp pure par_op `TC.alternative` typeCheckSegOp pure op

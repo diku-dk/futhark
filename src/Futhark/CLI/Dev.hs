@@ -13,8 +13,8 @@ import Futhark.Actions
 import Futhark.Analysis.Alias qualified as Alias
 import Futhark.Analysis.Metrics (OpMetrics)
 import Futhark.Compiler.CLI hiding (compilerMain)
-import Futhark.IR (Op, Prog, prettyString)
-import Futhark.IR.Aliases (AliasableRep)
+import Futhark.IR (ASTRep, Op, Prog, prettyString)
+import Futhark.IR.Aliases (AliasableRep, Aliases, CanBeAliased)
 import Futhark.IR.GPU qualified as GPU
 import Futhark.IR.GPUMem qualified as GPUMem
 import Futhark.IR.MC qualified as MC
@@ -241,7 +241,7 @@ mcMemProg name rep =
     "Pass '" <> name <> "' expects MCMem representation, but got " <> representation rep
 
 typedPassOption ::
-  (Checkable torep) =>
+  (AliasableRep torep, Checkable (Aliases torep)) =>
   (String -> UntypedPassState -> FutharkM (Prog fromrep)) ->
   (Prog torep -> UntypedPassState) ->
   Pass fromrep torep ->

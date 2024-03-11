@@ -51,7 +51,7 @@ instance OpReturns (MCOp NoOp (Engine.Wise MCMem)) where
 
 instance PrettyRep MCMem
 
-instance TC.Checkable MCMem where
+instance TC.Checkable (Aliases MCMem) where
   checkOp = typeCheckMemoryOp
     where
       typeCheckMemoryOp (Alloc size _) =
@@ -60,7 +60,7 @@ instance TC.Checkable MCMem where
         typeCheckMCOp (const $ pure ()) op
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
-  checkLetBoundDec = checkMemInfo
+  checkLetBoundDec v (_, dec) = checkMemInfo v dec
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp

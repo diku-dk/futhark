@@ -36,14 +36,14 @@ instance RepTypes GPU where
 instance ASTRep GPU where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TC.Checkable GPU where
+instance TC.Checkable (Aliases GPU) where
   checkOp = typeCheckGPUOp Nothing
     where
       -- GHC 9.2 goes into an infinite loop without the type annotation.
       typeCheckGPUOp ::
         Maybe SegLevel ->
         HostOp SOAC (Aliases GPU) ->
-        TC.TypeM GPU ()
+        TC.TypeM (Aliases GPU) ()
       typeCheckGPUOp lvl =
         typeCheckHostOp (typeCheckGPUOp . Just) lvl typeCheckSOAC
 

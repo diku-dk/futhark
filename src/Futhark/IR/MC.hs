@@ -20,6 +20,7 @@ where
 
 import Futhark.Builder
 import Futhark.Construct
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.MC.Op
 import Futhark.IR.Pretty
 import Futhark.IR.Prop
@@ -42,7 +43,7 @@ instance RepTypes MC where
 instance ASTRep MC where
   expTypesFromPat = pure . expExtTypesFromPat
 
-instance TypeCheck.Checkable MC where
+instance TypeCheck.Checkable (Aliases MC) where
   checkOp = typeCheckMCOp typeCheckSOAC
 
 instance Buildable MC where

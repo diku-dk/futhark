@@ -2,4 +2,4 @@ packages: futhark.cabal
 index-state: 2024-03-04T18:26:54Z
 
 package futhark
-  ghc-options: -j -fwrite-ide-info -hiedir=.hie
+  ghc-options: -j -fwrite-ide-info -hiedir=.hie -fprof-cafs -ddump-to-file -ddump-simpl

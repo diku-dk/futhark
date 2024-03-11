@@ -54,21 +54,21 @@ instance OpReturns (HostOp NoOp (Engine.Wise GPUMem)) where
 
 instance PrettyRep GPUMem
 
-instance TC.Checkable GPUMem where
+instance TC.Checkable (Aliases GPUMem) where
   checkOp = typeCheckMemoryOp Nothing
     where
       -- GHC 9.2 goes into an infinite loop without the type annotation.
       typeCheckMemoryOp ::
         Maybe SegLevel ->
         MemOp (HostOp NoOp) (Aliases GPUMem) ->
-        TC.TypeM GPUMem ()
+        TC.TypeM (Aliases GPUMem) ()
       typeCheckMemoryOp _ (Alloc size _) =
         TC.require [Prim int64] size
       typeCheckMemoryOp lvl (Inner op) =
         typeCheckHostOp (typeCheckMemoryOp . Just) lvl (const $ pure ()) op
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
-  checkLetBoundDec = checkMemInfo
+  checkLetBoundDec v (_, dec) = checkMemInfo v dec
   checkRetType = mapM_ $ TC.checkExtType . declExtTypeOf
   primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp

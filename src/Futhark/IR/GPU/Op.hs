@@ -388,12 +388,12 @@ checkSegLevel Nothing (SegBlock _virt grid) =
   mapM_ checkGrid grid
 
 typeCheckHostOp ::
-  (TC.Checkable rep) =>
-  (SegLevel -> Op (Aliases rep) -> TC.TypeM rep ()) ->
+  (TC.Checkable (Aliases rep)) =>
+  (SegLevel -> Op (Aliases rep) -> TC.TypeM (Aliases rep) ()) ->
   Maybe SegLevel ->
-  (op (Aliases rep) -> TC.TypeM rep ()) ->
+  (op (Aliases rep) -> TC.TypeM (Aliases rep) ()) ->
   HostOp op (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 typeCheckHostOp checker lvl _ (SegOp op) =
   TC.checkOpWith (checker $ segLevel op) $
     typeCheckSegOp (checkSegLevel lvl) op

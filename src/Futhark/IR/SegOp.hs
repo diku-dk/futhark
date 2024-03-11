@@ -297,11 +297,11 @@ consumedInKernelBody (KernelBody dec stms res) =
     consumedByReturn _ = mempty
 
 checkKernelBody ::
-  (TC.Checkable rep) =>
+  (TC.Checkable (Aliases rep)) =>
   [Type] ->
   KernelBody (Aliases rep) ->
-  TC.TypeM rep ()
-checkKernelBody ts (KernelBody (_, dec) stms kres) = do
+  TC.TypeM (Aliases rep) ()
+checkKernelBody ts (KernelBody dec stms kres) = do
   TC.checkBodyDec dec
   -- We consume the kernel results (when applicable) before
   -- type-checking the stms, so we will get an error if a statement
@@ -540,10 +540,10 @@ instance AliasedOp (SegOp lvl) where
 
 -- | Type check a 'SegOp', given a checker for its level.
 typeCheckSegOp ::
-  (TC.Checkable rep) =>
-  (lvl -> TC.TypeM rep ()) ->
+  (TC.Checkable (Aliases rep)) =>
+  (lvl -> TC.TypeM (Aliases rep) ()) ->
   SegOp lvl (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 typeCheckSegOp checkLvl (SegMap lvl space ts kbody) = do
   checkLvl lvl
   checkScanRed space [] ts kbody
@@ -615,12 +615,12 @@ typeCheckSegOp checkLvl (SegHist lvl space ops ts kbody) = do
     segment_dims = init $ segSpaceDims space
 
 checkScanRed ::
-  (TC.Checkable rep) =>
+  (TC.Checkable (Aliases rep)) =>
   SegSpace ->
   [(Lambda (Aliases rep), [SubExp], Shape)] ->
   [Type] ->
   KernelBody (Aliases rep) ->
-  TC.TypeM rep ()
+  TC.TypeM (Aliases rep) ()
 checkScanRed space ops ts kbody = do
   checkSegSpace space
   mapM_ TC.checkType ts

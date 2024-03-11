@@ -13,6 +13,7 @@ module Futhark.IR.SeqMem
 where
 
 import Futhark.Analysis.PrimExp.Convert
+import Futhark.IR.Aliases (Aliases)
 import Futhark.IR.Mem
 import Futhark.IR.Mem.Simplify
 import Futhark.IR.TypeCheck qualified as TC
@@ -35,12 +36,12 @@ instance ASTRep SeqMem where
 
 instance PrettyRep SeqMem
 
-instance TC.Checkable SeqMem where
+instance TC.Checkable (Aliases SeqMem) where
   checkOp (Alloc size _) = TC.require [Prim int64] size
   checkOp (Inner NoOp) = pure ()
   checkFParamDec = checkMemInfo
   checkLParamDec = checkMemInfo
-  checkLetBoundDec = checkMemInfo
+  checkLetBoundDec v (_, dec) = checkMemInfo v dec
   checkRetType = mapM_ (TC.checkExtType . declExtTypeOf)
   primFParam name t = pure $ Param mempty name (MemPrim t)
   matchPat = matchPatToExp
