@@ -289,8 +289,8 @@ solveCt ct =
 solveTyVar :: (VName, (Int, TyVarInfo)) -> SolveM ()
 solveTyVar (_, (_, TyVarFree {})) = pure ()
 solveTyVar (tv, (_, TyVarPrim loc pts)) = do
-  t <- lookupTyVar tv
-  case t of
+  tv_t <- lookupTyVar tv
+  case tv_t of
     Nothing -> pure ()
     Just t'
       | t' `elem` map (Scalar . Prim) pts -> pure ()
@@ -309,12 +309,29 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
           forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_k, (t1, t2)) ->
             solveCt $ CtEq (Reason loc) t1 t2
     Just tv_t' ->
-      throwError $
-        TypeError loc mempty $
-          "Type must be record with fields"
-            </> indent 2 (pretty (Scalar (Record fs1)))
-            </> "but inferred to be"
-            </> indent 2 (pretty tv_t')
+      throwError . TypeError loc mempty $
+        "Type must be record with fields"
+          </> indent 2 (pretty (Scalar (Record fs1)))
+          </> "but inferred to be"
+          </> indent 2 (pretty tv_t')
+solveTyVar (tv, (_, TyVarSum loc cs1)) = do
+  tv_t <- lookupTyVar tv
+  case tv_t of
+    Nothing -> pure ()
+    Just (Scalar (Sum cs2))
+      | all (`M.member` cs2) (M.keys cs1),
+        cs3 <- M.toList $ M.intersectionWith (,) cs1 cs2,
+        all (sameLength . snd) cs3 ->
+          forM_ cs3 $ \(_k, (t1s, t2s)) ->
+            mapM_ solveCt $ zipWith (CtEq (Reason loc)) t1s t2s
+    Just tv_t' ->
+      throwError . TypeError loc mempty $
+        "Type must be sum type with constructors"
+          </> indent 2 (pretty (Scalar (Sum cs1)))
+          </> "but inferred to be"
+          </> indent 2 (pretty tv_t')
+  where
+    sameLength (x, y) = length x == length y
 
 solve :: Constraints -> TyVars -> Either TypeError ([VName], Solution)
 solve constraints tyvars =

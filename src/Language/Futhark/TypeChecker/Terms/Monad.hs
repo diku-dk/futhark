@@ -87,6 +87,7 @@ unusedSize p =
 data Inferred t
   = NoneInferred
   | Ascribed t
+  deriving (Show)
 
 instance Functor Inferred where
   fmap _ NoneInferred = NoneInferred

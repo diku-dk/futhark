@@ -178,9 +178,19 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
         <*> pure loc
 checkPat' _ (PatLit l info loc) _ =
   pure $ PatLit l info loc
-checkPat' sizes (PatConstr n info ps loc) _ = do
+checkPat' sizes (PatConstr n info ps loc) NoneInferred = do
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
   pure $ PatConstr n info ps' loc
+checkPat' sizes (PatConstr n info ps loc) (Ascribed (Scalar (Sum cs)))
+  | Just ts <- M.lookup n cs = do
+      ps' <- zipWithM (\p t -> checkPat' sizes p (Ascribed t)) ps ts
+      pure $ PatConstr n info ps' loc
+checkPat' _ p t =
+  error . unlines $
+    [ "checkPat': bad case",
+      prettyString p,
+      show t
+    ]
 
 checkPat ::
   [(SizeBinder VName, QualName VName)] ->
