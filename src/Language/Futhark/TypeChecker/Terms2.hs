@@ -1096,12 +1096,10 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
           let i' = Ident i (Info (typeOf bound')) iloc
           bind [i'] $ do
             body' <- checkExp body
-            ctEq (Reason (locOf arg')) (expType arg') (expType body')
             pure (For i' bound', body')
         While cond -> do
           cond' <- checkExp cond
           body' <- checkExp body
-          ctEq (Reason (locOf arg')) (expType arg') (expType body')
           pure (While cond', body')
         ForIn elemp arr -> do
           arr' <- checkExp arr
@@ -1110,6 +1108,7 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
           bindLetPat elemp elem_t $ \elemp' -> do
             body' <- checkExp body
             pure (ForIn (toStruct <$> elemp') arr', body')
+    ctEq (Reason (locOf loc)) (expType arg') (expType body')
     pure $
       AppExp
         (Loop [] pat' arg' form' body' loc)
