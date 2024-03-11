@@ -650,17 +650,8 @@ transformExp (Negate e loc) =
   Negate <$> transformExp e <*> pure loc
 transformExp (Not e loc) =
   Not <$> transformExp e <*> pure loc
-transformExp (Lambda params e0 decl tp loc) = do
-  let patArgs = S.fromList $ foldMap patNames params
-  dimArgs <- withArgs patArgs $ askIntros (foldMap (fvVars . freeInPat) params)
-  let argset = dimArgs `S.union` patArgs
-  params' <- mapM transformPat params
-  paramed <- parametrizing argset
-  Lambda params'
-    <$> withParams paramed (scoping argset $ transformExp e0)
-    <*> pure decl
-    <*> traverse transformRetType tp
-    <*> pure loc
+transformExp (Lambda {}) =
+  error "transformExp: Lambda is not supposed to occur"
 transformExp (OpSection qn t loc) =
   transformExp $ Var qn t loc
 transformExp (OpSectionLeft fname (Info t) e arg (Info rettype, Info retext) loc) = do
@@ -890,9 +881,6 @@ noNamedParams = f
     f' (Arrow u _ d1 t1 (RetType dims t2)) =
       Arrow u Unnamed d1 (f t1) (RetType dims (f t2))
     f' t = t
-
-transformRetType :: RetTypeBase Size u -> MonoM (RetTypeBase Size u)
-transformRetType (RetType ext t) = RetType ext <$> transformType t
 
 -- | arrowArg takes a return type and returns it
 -- with the existentials bound moved at the right of arrows.
