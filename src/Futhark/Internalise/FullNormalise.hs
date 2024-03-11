@@ -507,14 +507,13 @@ expandAMAnnotations e = do
       arg_es' <- mapM expandAMAnnotations arg_es
       let diets = funDiets $ typeOf f
       withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
-        inner_f <- setNewType f' $ innerFType (typeOf f') ams
         let rettype =
-              case unfoldFunTypeWithRet $ typeOf inner_f of
+              case unfoldFunTypeWithRet $ typeOf f' of
                 Nothing -> error "Function type expected."
                 Just (ptypes, f_ret) ->
                   foldFunType (drop (length args') ptypes) f_ret
         pure $
-          mkApply inner_f (zip3 exts (repeat mempty) args') $
+          mkApply f' (zip3 exts (repeat mempty) args') $
             res {appResType = rettype}
     (AppExp (BinOp op (Info t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc) (Info res)) -> do
       x' <- expandAMAnnotations x
