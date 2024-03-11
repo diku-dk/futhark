@@ -1068,8 +1068,6 @@ intrinsics =
             )
           ++
           -- This overrides the ! from Primitive.
-
-          -- This overrides the ! from Primitive.
           [ ( "!",
               IntrinsicOverloadedFun
                 ( map Signed [minBound .. maxBound]
