@@ -59,7 +59,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Futhark.FreshNames qualified as FreshNames
 import Futhark.MonadFreshNames hiding (newName)
-import Futhark.Util (debugTraceM, mapAccumLM)
+import Futhark.Util (debugTraceM, mapAccumLM, nubOrd)
 import Futhark.Util.Pretty
 import Language.Futhark
 import Language.Futhark.TypeChecker.Constraints
@@ -481,6 +481,16 @@ checkPat' (TuplePat ps loc) (Ascribed t)
       TuplePat <$> zipWithM checkPat' ps (map Ascribed ps_t) <*> pure loc
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
+checkPat' p@(RecordPat p_fs loc) _
+  | Just (f, fp) <- L.find (("_" `T.isPrefixOf`) . nameToText . fst) p_fs =
+      typeError fp mempty $
+        "Underscore-prefixed fields are not allowed."
+          </> "Did you mean"
+          <> dquotes (pretty (T.drop 1 (nameToText f)) <> "=_")
+          <> "?"
+  | nubOrd (map fst p_fs) /= map fst p_fs =
+      typeError loc mempty $
+        "Duplicate fields in record pattern" <+> pretty p <> "."
 checkPat' p@(RecordPat p_fs loc) (Ascribed t)
   | Scalar (Record t_fs) <- t,
     L.sort (map fst p_fs) == L.sort (M.keys t_fs) =
