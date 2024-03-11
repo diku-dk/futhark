@@ -783,10 +783,10 @@ checkExp (AppExp (Loop _ mergepat mergeexp form loopbody loc) _) = do
     AppExp
       (Loop sparams mergepat' mergeexp' form' loopbody' loc)
       (Info appres)
-checkExp (Constr name es _ loc) = do
-  t <- newTypeVar loc "t"
+checkExp (Constr name es (Info t) loc) = do
+  t' <- replaceTyVars loc t
   es' <- mapM checkExp es
-  pure $ Constr name es' (Info t) loc
+  pure $ Constr name es' (Info t') loc
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
   mt <- expType e'

@@ -181,10 +181,10 @@ checkPat' _ (PatLit l info loc) _ =
 checkPat' sizes (PatConstr n info ps loc) NoneInferred = do
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
   pure $ PatConstr n info ps' loc
-checkPat' sizes (PatConstr n info ps loc) (Ascribed (Scalar (Sum cs)))
+checkPat' sizes (PatConstr n _ ps loc) (Ascribed (Scalar (Sum cs)))
   | Just ts <- M.lookup n cs = do
       ps' <- zipWithM (\p t -> checkPat' sizes p (Ascribed t)) ps ts
-      pure $ PatConstr n info ps' loc
+      pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
 checkPat' _ p t =
   error . unlines $
     [ "checkPat': bad case",
