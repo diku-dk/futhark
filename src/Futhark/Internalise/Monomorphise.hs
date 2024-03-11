@@ -993,15 +993,7 @@ monomorphiseBinding ::
   MonoType ->
   MonoM (VName, InferSizeArgs, ValBind)
 monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, attrs, loc)) inst_t = do
-  letFun <- asks $ S.member name . envScope
-  let paramGetClean argset =
-        if letFun
-          then parametrizing argset
-          else do
-            ret <- get
-            put mempty
-            pure ret
-  (if letFun then id else isolateNormalisation) $ do
+  isolateNormalisation $ do
     let bind_t = funType params rettype
     (substs, t_shape_params) <-
       typeSubstsM loc (noSizes bind_t) $ noNamedParams inst_t
@@ -1011,7 +1003,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
           substTypesAny (fmap (fmap (second (const mempty))) . (`M.lookup` substs'))
         params' = map (substPat substStructType) params
     params'' <- withArgs shape_names $ mapM transformPat params'
-    exp_naming <- paramGetClean shape_names
+    exp_naming <- paramGetClean
 
     let args = S.fromList $ foldMap patNames params
         arg_params = map snd exp_naming
@@ -1020,7 +1012,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
       withParams exp_naming $
         withArgs (args <> shape_names) $
           hardTransformRetType (applySubst (`M.lookup` substs') rettype)
-    extNaming <- paramGetClean (args <> shape_names)
+    extNaming <- paramGetClean
     scope <- S.union shape_names <$> askScope'
     let (rettype'', new_params) = arrowArg scope args arg_params rettype'
         bind_t' = substTypesAny (`M.lookup` substs') bind_t
@@ -1035,9 +1027,7 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
     body'' <- withParams exp_naming' $ withArgs (shape_names <> args) $ transformExp body'
     scope' <- S.union (shape_names <> args) <$> askScope'
     body''' <-
-      if letFun
-        then unscoping (shape_names <> args) body''
-        else expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
+      expReplace exp_naming' <$> (calculateDims body'' . canCalculate scope' =<< get)
 
     seen_before <- elem name . map (fst . fst) <$> getLifts
     name' <-
@@ -1070,6 +1060,11 @@ monomorphiseBinding entry (PolyBinding (name, tparams, params, rettype, body, at
     shape_params = filter (not . isTypeParam) tparams
 
     updateExpTypes substs = astMap (mapper substs)
+
+    paramGetClean = do
+      ret <- get
+      put mempty
+      pure ret
 
     hardTransformRetType (RetType dims ty) = do
       ty' <- transformType ty
