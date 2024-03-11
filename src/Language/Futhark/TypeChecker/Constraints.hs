@@ -303,7 +303,11 @@ solveTyVar (tv, (_, TyVarPrim loc pts)) = do
 solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
-    Nothing -> pure ()
+    Nothing ->
+      throwError . TypeError loc mempty $
+        "Type is ambiguous."
+          </> "Must be a record with fields"
+          </> indent 2 (pretty (Scalar (Record fs1)))
     Just (Scalar (Record fs2))
       | all (`M.member` fs2) (M.keys fs1) ->
           forM_ (M.toList $ M.intersectionWith (,) fs1 fs2) $ \(_k, (t1, t2)) ->
@@ -317,7 +321,11 @@ solveTyVar (tv, (_, TyVarRecord loc fs1)) = do
 solveTyVar (tv, (_, TyVarSum loc cs1)) = do
   tv_t <- lookupTyVar tv
   case tv_t of
-    Nothing -> pure ()
+    Nothing ->
+      throwError . TypeError loc mempty $
+        "Type is ambiguous."
+          </> "Must be a sum type with constructors"
+          </> indent 2 (pretty (Scalar (Sum cs1)))
     Just (Scalar (Sum cs2))
       | all (`M.member` cs2) (M.keys cs1),
         cs3 <- M.toList $ M.intersectionWith (,) cs1 cs2,
