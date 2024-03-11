@@ -2,5 +2,5 @@
 -- ==
 
 def main (x: i32) (y: bool) =
-  let f x y = (y,x)
+  let f 'a 'b (x: a) (y: b) = (y,x)
   in (f x y, f y x)
