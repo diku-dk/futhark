@@ -137,6 +137,8 @@ addTyVarInfo tv (_, TyVarRecord {}) =
   addConstraint $ rank tv ~==~ constant 0
 addTyVarInfo tv (_, TyVarSum {}) =
   addConstraint $ rank tv ~==~ constant 0
+addTyVarInfo tv (_, TyVarEql {}) =
+  addConstraint $ rank tv ~==~ constant 0
 
 mkLinearProg :: [Ct] -> TyVars -> LinearProg
 mkLinearProg cs tyVars =

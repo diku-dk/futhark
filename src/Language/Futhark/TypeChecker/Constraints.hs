@@ -93,6 +93,8 @@ data TyVarInfo
     TyVarRecord Loc (M.Map Name Type)
   | -- | Must be a sum type with these fields.
     TyVarSum Loc (M.Map Name [Type])
+  | -- | Must be a type that supports equality.
+    TyVarEql Loc
   deriving (Show, Eq)
 
 instance Pretty TyVarInfo where
@@ -100,12 +102,14 @@ instance Pretty TyVarInfo where
   pretty (TyVarPrim _ pts) = "∈" <+> pretty pts
   pretty (TyVarRecord _ fs) = pretty $ Scalar $ Record fs
   pretty (TyVarSum _ cs) = pretty $ Scalar $ Sum cs
+  pretty (TyVarEql _) = "equality"
 
 instance Located TyVarInfo where
   locOf (TyVarFree loc) = loc
   locOf (TyVarPrim loc _) = loc
   locOf (TyVarRecord loc _) = loc
   locOf (TyVarSum loc _) = loc
+  locOf (TyVarEql loc) = loc
 
 type TyVar = VName
 
@@ -340,6 +344,8 @@ solveTyVar (tv, (_, TyVarSum loc cs1)) = do
           </> indent 2 (pretty tv_t')
   where
     sameLength (x, y) = length x == length y
+solveTyVar (_, (_, TyVarEql _)) =
+  pure ()
 
 solve :: Constraints -> TyVars -> Either TypeError ([VName], Solution)
 solve constraints tyvars =

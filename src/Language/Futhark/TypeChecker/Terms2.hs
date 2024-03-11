@@ -410,7 +410,8 @@ lookupVar loc qn@(QualName qs name) = do
           outer_env <- asks termOuterEnv
           asStructType loc $ first (const SDim) $ qualifyTypeVars outer_env tnames qs t'
     Just EqualityF -> do
-      argtype <- newTypeOverloaded loc "t" anyPrimType
+      argtype <-
+        tyVarType NoUniqueness <$> newTyVarWith "t" (TyVarEql (locOf loc))
       pure $ foldFunType [toParam Observe argtype, toParam Observe argtype] $ RetType [] $ Scalar $ Prim Bool
     Just (OverloadedF ts pts rt) -> do
       argtype <- newTypeOverloaded loc "t" ts
