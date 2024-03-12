@@ -218,13 +218,13 @@ solveRankILP loc prog = do
               : map prettyString (M.toList r)
       pure rs
 
-rankAnalysis1 :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> [Pat ParamType] -> Exp -> m (([Ct], TyVars), [Pat ParamType], Exp)
-rankAnalysis1 loc cs tyVars params body = do
-  solutions <- rankAnalysis loc cs tyVars params body
+rankAnalysis1 :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> M.Map TyVar Type -> [Pat ParamType] -> Exp -> m (([Ct], TyVars), M.Map TyVar Type, [Pat ParamType], Exp)
+rankAnalysis1 loc cs tyVars artificial params body = do
+  solutions <- rankAnalysis loc cs tyVars artificial params body
   case solutions of
     [sol] -> pure sol
     sols -> do
-      let (_, _, bodies') = unzip3 sols
+      let (_, _, _, bodies') = L.unzip4 sols
       typeError loc mempty $
         stack $
           [ "Rank ILP is ambiguous.",
@@ -232,14 +232,15 @@ rankAnalysis1 loc cs tyVars params body = do
           ]
             ++ map pretty bodies'
 
-rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> [Pat ParamType] -> Exp -> m [(([Ct], TyVars), [Pat ParamType], Exp)]
-rankAnalysis _ [] tyVars params body = pure [(([], tyVars), params, body)]
-rankAnalysis loc cs tyVars params body = do
+rankAnalysis :: (MonadTypeChecker m) => SrcLoc -> [Ct] -> TyVars -> M.Map TyVar Type -> [Pat ParamType] -> Exp -> m [(([Ct], TyVars), M.Map TyVar Type, [Pat ParamType], Exp)]
+rankAnalysis _ [] tyVars artificial params body = pure [(([], tyVars), artificial, params, body)]
+rankAnalysis loc cs tyVars artificial params body = do
   rank_maps <- solveRankILP loc (mkLinearProg cs' tyVars)
   cts_tyvars' <- mapM (substRankInfo cs tyVars) rank_maps
   let bodys = map (`updAM` body) rank_maps
       params' = map ((`map` params) . updAMPat) rank_maps
-  pure $ zip3 cts_tyvars' params' bodys
+  artificial' <- mapM (substRankInfoArtificial tyVars artificial) rank_maps
+  pure $ L.zip4 cts_tyvars' artificial' params' bodys
   where
     cs' = foldMap (splitFuncs . distribute) cs
     splitFuncs
@@ -264,6 +265,12 @@ substRankInfo cs tyVars rankmap = do
   where
     isCtAM (CtAM {}) = True
     isCtAM _ = False
+
+substRankInfoArtificial :: (MonadTypeChecker m) => TyVars -> M.Map VName Type -> Map VName Int -> m (M.Map VName Type)
+substRankInfoArtificial tyvars artificial rankmap = do
+  (artificial', _, _) <-
+    runSubstT tyvars rankmap $ traverse substRanks artificial
+  pure artificial'
 
 runSubstT :: (MonadTypeChecker m) => TyVars -> Map VName Int -> SubstT m a -> m (a, [Ct], TyVars)
 runSubstT tyVars rankmap (SubstT m) = do
@@ -372,6 +379,7 @@ instance SubstRanks (TypeBase SComp u) where
     ta' <- substRanks ta
     tr' <- substRanks tr
     pure $ Scalar (Arrow u p d ta' (RetType retdims tr'))
+  substRanks (Scalar (Record fs)) = Scalar . Record <$> traverse substRanks fs
   substRanks (Array u shape t) = do
     shape' <- substRanks shape
     t' <- substRanks $ Scalar t
@@ -391,15 +399,15 @@ updAM rank_map e =
        in AppExp (Apply f' args' loc) res
     AppExp (BinOp op t (x, Info (xv, xam)) (y, Info (yv, yam)) loc) res ->
       AppExp (BinOp op t (updAM rank_map x, Info (xv, upd xam)) (updAM rank_map y, Info (yv, upd yam)) loc) res
-    _ -> runIdentity $ astMap m e
+    _ -> runIdentity $ astMap mapper e
   where
     dimToRank (Var (QualName [] x) _ _) =
       replicate (rank_map M.! x) (TupLit mempty mempty)
-    dimToRank e = error $ prettyString e
+    dimToRank e' = error $ prettyString e'
     shapeToRank = Shape . foldMap dimToRank
     upd (AutoMap r m f) =
       AutoMap (shapeToRank r) (shapeToRank m) (shapeToRank f)
-    m =
+    mapper =
       identityMapper
         { mapOnExp = pure . updAM rank_map
         }

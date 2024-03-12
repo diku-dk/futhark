@@ -497,7 +497,7 @@ typeOf (Attr _ e _) = typeOf e
 typeOf (AppExp _ (Info res)) = appResType res
 
 -- | The type of a function with the given parameters and return type.
-funType :: [Pat ParamType] -> ResRetType -> StructType
+funType :: [Pat (TypeBase d Diet)] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 funType params ret =
   let RetType _ t = foldr (arrow . patternParam) ret params
    in toStruct t
@@ -507,7 +507,7 @@ funType params ret =
 
 -- | @foldFunType ts ret@ creates a function type ('Arrow') that takes
 -- @ts@ as parameters and returns @ret@.
-foldFunType :: [ParamType] -> ResRetType -> StructType
+foldFunType :: [TypeBase d Diet] -> RetTypeBase d Uniqueness -> TypeBase d NoUniqueness
 foldFunType ps ret =
   let RetType _ t = foldr arrow ret ps
    in toStruct t
@@ -621,7 +621,7 @@ patternStructType = toStruct . patternType
 
 -- | When viewed as a function parameter, does this pattern correspond
 -- to a named parameter of some type?
-patternParam :: Pat ParamType -> (PName, Diet, StructType)
+patternParam :: Pat (TypeBase d Diet) -> (PName, Diet, TypeBase d NoUniqueness)
 patternParam (PatParens p _) =
   patternParam p
 patternParam (PatAttr _ p _) =

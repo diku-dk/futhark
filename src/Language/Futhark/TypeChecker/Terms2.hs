@@ -79,13 +79,10 @@ instance Functor Inferred where
   fmap f (Ascribed t) = Ascribed (f t)
 
 data ValBinding
-  = BoundV [TypeParam] StructType
+  = BoundV [TypeParam] Type
   | OverloadedF [PrimType] [Maybe PrimType] (Maybe PrimType)
   | EqualityF
   deriving (Show)
-
-expType :: Exp -> Type
-expType = toType . typeOf
 
 data TermScope = TermScope
   { scopeVtable :: M.Map VName ValBinding,
@@ -116,7 +113,9 @@ data TermState = TermState
     termTyVars :: TyVars,
     termCounter :: !Int,
     termWarnings :: Warnings,
-    termNameSource :: VNameSource
+    termNameSource :: VNameSource,
+    -- | Mapping from artificial type variables to the actual types they represent.
+    termArtificial :: M.Map TyVar Type
   }
 
 newtype TermM a
@@ -143,7 +142,7 @@ envToTermScope env =
     }
   where
     vtable = M.map valBinding $ envVtable env
-    valBinding (TypeM.BoundV tps v) = BoundV tps v
+    valBinding (TypeM.BoundV tps v) = BoundV tps $ toType v
 
 initialTermScope :: TermScope
 initialTermScope =
@@ -169,7 +168,7 @@ initialTermScope =
     addIntrinsicF (name, IntrinsicPolyFun tvs pts rt) =
       Just
         ( name,
-          BoundV tvs $ foldFunType pts rt
+          BoundV tvs $ toType $ foldFunType pts rt
         )
     addIntrinsicF (name, IntrinsicEquality) =
       Just (name, EqualityF)
@@ -194,7 +193,8 @@ runTermM (TermM m) = do
             termTyVars = mempty,
             termWarnings = mempty,
             termNameSource = src,
-            termCounter = 0
+            termCounter = 0,
+            termArtificial = mempty
           }
   case runExcept (runStateT (runReaderT m initial_env) initial_state) of
     Left (ws, e) -> do
@@ -254,25 +254,41 @@ newSVar _loc desc = do
   i <- incCounter
   newID $ mkTypeVarName desc i
 
-asStructType :: SrcLoc -> TypeBase SComp u -> TermM (TypeBase Size u)
-asStructType _ (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
-asStructType _ (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
-asStructType loc (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
-  t1' <- asStructType loc t1
-  t2' <- asStructType loc t2
+newArtificial :: u -> TypeBase SComp u -> TermM (TypeBase Size u)
+newArtificial u t = do
+  v <- newID "artificial"
+  let t' = tyVarType u v
+  modify $ \s -> s {termArtificial = M.insert v (second (const NoUniqueness) t) $ termArtificial s}
+  pure t'
+
+-- The AST requires annotations to be StructTypes, but the type
+-- checker works with Types. This creates artificial type "variables"
+-- that allow us to connect the AST annotations with the actual
+-- inferred types. The artificial variables should never occur in
+-- constraints - they can be substituted away with asType.
+asStructType :: TypeBase SComp u -> TermM (TypeBase Size u)
+asStructType (Scalar (Prim pt)) = pure $ Scalar $ Prim pt
+asStructType (Scalar (TypeVar u v [])) = pure $ Scalar $ TypeVar u v []
+asStructType (Scalar (Arrow u pname d t1 (RetType ext t2))) = do
+  t1' <- asStructType t1
+  t2' <- asStructType t2
   pure $ Scalar $ Arrow u pname d t1' $ RetType ext t2'
-asStructType loc (Scalar (Record fs)) =
-  Scalar . Record <$> traverse (asStructType loc) fs
-asStructType loc (Scalar (Sum cs)) =
-  Scalar . Sum <$> traverse (mapM (asStructType loc)) cs
-asStructType loc t@(Scalar (TypeVar u _ _)) = do
-  t' <- newType loc "artificial" u
-  ctEq (Reason (locOf loc)) (toType t') t
-  pure t'
-asStructType loc t@(Array u _ _) = do
-  t' <- newType loc "artificial" u
-  ctEq (Reason (locOf loc)) (toType t') t
-  pure t'
+asStructType (Scalar (Record fs)) =
+  Scalar . Record <$> traverse asStructType fs
+asStructType (Scalar (Sum cs)) =
+  Scalar . Sum <$> traverse (mapM asStructType) cs
+asStructType t@(Scalar (TypeVar u _ _)) =
+  newArtificial u t
+asStructType t@(Array u _ _) = do
+  newArtificial u t
+
+asType :: (Monoid u) => TypeBase Size u -> TermM (TypeBase SComp u)
+asType t = do
+  artificial <- gets termArtificial
+  pure $ substTyVars (`M.lookup` artificial) (toType t)
+
+expType :: Exp -> TermM Type
+expType = asType . typeOf -- NOTE: Only place you should use typeOf.
 
 addCt :: Ct -> TermM ()
 addCt ct = modify $ \s -> s {termConstraints = ct : termConstraints s}
@@ -336,8 +352,10 @@ instance MonadTypeChecker TermM where
     i <- incCounter
     newID $ mkTypeVarName name i
 
-  bindVal v (TypeM.BoundV tps t) = localScope $ \scope ->
-    scope {scopeVtable = M.insert v (BoundV tps t) $ scopeVtable scope}
+  bindVal v (TypeM.BoundV tps t) m = do
+    t' <- asType t
+    let f scope = scope {scopeVtable = M.insert v (BoundV tps t') $ scopeVtable scope}
+    localScope f m
 
   lookupType qn = do
     outer_env <- asks termOuterEnv
@@ -361,11 +379,13 @@ arrayOfRank n = arrayOf $ Shape $ replicate n SDim
 
 require :: T.Text -> [PrimType] -> Exp -> TermM Exp
 require _why [pt] e = do
-  ctEq (Reason (locOf e)) (Scalar $ Prim pt) (expType e)
+  e_t <- expType e
+  ctEq (Reason (locOf e)) (Scalar $ Prim pt) e_t
   pure e
 require _why pts e = do
   t :: Type <- newTypeOverloaded (srclocOf e) "t" pts
-  ctEq (Reason (locOf e)) t $ expType e
+  e_t <- expType e
+  ctEq (Reason (locOf e)) t e_t
   pure e
 
 -- | Instantiate a type scheme with fresh type variables for its type
@@ -375,18 +395,18 @@ instTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
-  StructType ->
-  TermM ([VName], StructType)
+  Type ->
+  TermM ([VName], Type)
 instTypeScheme _qn loc tparams t = do
   (names, substs) <- fmap (unzip . catMaybes) $
     forM tparams $ \tparam ->
       case tparam of
         TypeParamType _ v _ -> do
           v' <- newTyVar loc $ nameFromString $ takeWhile isAscii $ baseString v
-          pure $ Just (v, (typeParamName tparam, Subst [] $ RetType [] $ tyVarType NoUniqueness v'))
+          pure $ Just (v, (typeParamName tparam, tyVarType NoUniqueness v'))
         TypeParamDim {} ->
           pure Nothing
-  let t' = applySubst (`lookup` substs) t
+  let t' = substTyVars (`lookup` substs) t
   pure (names, t')
 
 lookupMod :: QualName VName -> TermM Mod
@@ -396,7 +416,7 @@ lookupMod qn@(QualName _ name) = do
     Nothing -> error $ "lookupMod: " <> show qn
     Just m -> pure m
 
-lookupVar :: SrcLoc -> QualName VName -> TermM StructType
+lookupVar :: SrcLoc -> QualName VName -> TermM Type
 lookupVar loc qn@(QualName qs name) = do
   scope <- lookupQualNameEnv qn
   case M.lookup name $ scopeVtable scope of
@@ -407,16 +427,15 @@ lookupVar loc qn@(QualName qs name) = do
         then pure t
         else do
           (tnames, t') <- instTypeScheme qn loc tparams t
-          outer_env <- asks termOuterEnv
-          asStructType loc $ first (const SDim) $ qualifyTypeVars outer_env tnames qs t'
+          -- TODO - qualify type names, like in the old type checker.
+          pure t'
     Just EqualityF -> do
-      argtype <-
-        tyVarType NoUniqueness <$> newTyVarWith "t" (TyVarEql (locOf loc))
-      pure $ foldFunType [toParam Observe argtype, toParam Observe argtype] $ RetType [] $ Scalar $ Prim Bool
+      argtype <- tyVarType Observe <$> newTyVarWith "t" (TyVarEql (locOf loc))
+      pure $ foldFunType [argtype, argtype] $ RetType [] $ Scalar $ Prim Bool
     Just (OverloadedF ts pts rt) -> do
       argtype <- newTypeOverloaded loc "t" ts
       let (pts', rt') = instOverloaded argtype pts rt
-      pure $ foldFunType (map (toParam Observe) pts') $ RetType [] $ toRes Nonunique rt'
+      pure $ foldFunType (map (second $ const Observe) pts') $ RetType [] $ second (const Nonunique) rt'
   where
     instOverloaded argtype pts rt =
       ( map (maybe argtype (Scalar . Prim)) pts,
@@ -427,13 +446,16 @@ bind ::
   [Ident StructType] ->
   TermM a ->
   TermM a
-bind idents = localScope (`bindVars` idents)
+bind idents m = do
+  let names = map identName idents
+  ts <- mapM (asType . unInfo . identType) idents
+  localScope (`bindVars` zip names ts) m
   where
     bindVars = foldl bindVar
 
-    bindVar scope (Ident name (Info tp) _) =
+    bindVar scope (name, t) =
       scope
-        { scopeVtable = M.insert name (BoundV [] tp) $ scopeVtable scope
+        { scopeVtable = M.insert name (BoundV [] t) $ scopeVtable scope
         }
 
 -- All this complexity is just so we can handle un-suffixed numeric
@@ -449,24 +471,27 @@ patLitMkType (PatLitPrim v) _ =
 checkSizeExp' :: ExpBase NoInfo VName -> TermM Exp
 checkSizeExp' e = do
   e' <- checkExp e
-  ctEq (Reason (locOf e)) (expType e') (Scalar (Prim (Signed Int64)))
+  e_t <- expType e'
+  ctEq (Reason (locOf e)) e_t (Scalar (Prim (Signed Int64)))
   pure e'
 
 checkPat' ::
   PatBase NoInfo VName ParamType ->
-  Inferred ParamType ->
+  Inferred (TypeBase SComp Diet) ->
   TermM (Pat ParamType)
 checkPat' (PatParens p loc) t =
   PatParens <$> checkPat' p t <*> pure loc
 checkPat' (PatAttr attr p loc) t =
   PatAttr <$> checkAttr attr <*> checkPat' p t <*> pure loc
-checkPat' (Id name NoInfo loc) (Ascribed t) =
-  pure $ Id name (Info t) loc
+checkPat' (Id name NoInfo loc) (Ascribed t) = do
+  t' <- asStructType t
+  pure $ Id name (Info t') loc
 checkPat' (Id name NoInfo loc) NoneInferred = do
   t <- newType loc "t" Observe
   pure $ Id name (Info t) loc
-checkPat' (Wildcard _ loc) (Ascribed t) =
-  pure $ Wildcard (Info t) loc
+checkPat' (Wildcard _ loc) (Ascribed t) = do
+  t' <- asStructType t
+  pure $ Wildcard (Info t') loc
 checkPat' (Wildcard NoInfo loc) NoneInferred = do
   t <- newType loc "t" Observe
   pure $ Wildcard (Info t) loc
@@ -477,9 +502,9 @@ checkPat' (TuplePat ps loc) (Ascribed t)
         <$> zipWithM checkPat' ps (map Ascribed ts)
         <*> pure loc
   | otherwise = do
-      ps_t <- replicateM (length ps) (newType loc "t" Observe)
-      ctEq (Reason (locOf loc)) (toType (Scalar (tupleRecord ps_t))) (toType t)
-      TuplePat <$> zipWithM checkPat' ps (map Ascribed ps_t) <*> pure loc
+      ps_tvs <- replicateM (length ps) (newTyVar loc "t")
+      ctEq (Reason (locOf loc)) (Scalar (tupleRecord $ map (tyVarType NoUniqueness) ps_tvs)) t
+      TuplePat <$> zipWithM checkPat' ps (map (Ascribed . tyVarType Observe) ps_tvs) <*> pure loc
 checkPat' (TuplePat ps loc) NoneInferred =
   TuplePat <$> mapM (`checkPat'` NoneInferred) ps <*> pure loc
 checkPat' p@(RecordPat p_fs loc) _
@@ -498,9 +523,8 @@ checkPat' p@(RecordPat p_fs loc) (Ascribed t)
       RecordPat . M.toList <$> check t_fs <*> pure loc
   | otherwise = do
       p_fs' <- traverse (const $ newType loc "t" NoUniqueness) $ M.fromList p_fs
-      ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) $ toType t
-      st <- asStructType loc $ Scalar (Record p_fs')
-      checkPat' p $ Ascribed $ toParam Observe st
+      ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) t
+      checkPat' p $ Ascribed $ const Observe <$> Scalar (Record p_fs')
   where
     check t_fs =
       traverse (uncurry checkPat') $
@@ -514,11 +538,11 @@ checkPat' (PatAscription p t loc) maybe_outer_t = do
 
   -- Uniqueness kung fu to make the Monoid(mempty) instance give what
   -- we expect.  We should perhaps stop being so implicit.
-  st' <- asStructType loc $ toType $ resToParam st
+  st' <- asType $ resToParam st
 
   case maybe_outer_t of
     Ascribed outer_t -> do
-      ctEq (Reason (locOf loc)) (toType st') (toType outer_t)
+      ctEq (Reason (locOf loc)) st' outer_t
       PatAscription
         <$> checkPat' p (Ascribed st')
         <*> pure t'
@@ -530,7 +554,7 @@ checkPat' (PatAscription p t loc) maybe_outer_t = do
         <*> pure loc
 checkPat' (PatLit l NoInfo loc) (Ascribed t) = do
   t' <- patLitMkType l loc
-  ctEq (Reason (locOf loc)) (toType t') (toType t)
+  ctEq (Reason (locOf loc)) (toType t') t
   pure $ PatLit l (Info t') loc
 checkPat' (PatLit l NoInfo loc) NoneInferred = do
   t' <- patLitMkType l loc
@@ -547,28 +571,29 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
               <+> pretty (length ts)
               <+> "arguments."
       ps' <- zipWithM checkPat' ps $ map Ascribed ts
-      pure $ PatConstr n (Info (Scalar (Sum cs))) ps' loc
+      cs' <- traverse (mapM (asStructType)) cs
+      pure $ PatConstr n (Info (Scalar (Sum cs'))) ps' loc
 checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
   ps' <- forM ps $ \p -> do
     p_t <- newType (srclocOf p) "t" Observe
     checkPat' p $ Ascribed p_t
   t' <- newTypeWithConstr loc "t" Observe n $ map (toType . patternType) ps'
-  ctEq (Reason (locOf loc)) t' (toType t)
-  t'' <- asStructType loc t'
+  ctEq (Reason (locOf loc)) t' t
+  t'' <- asStructType t'
   pure $ PatConstr n (Info $ toParam Observe t'') ps' loc
 checkPat' (PatConstr n NoInfo ps loc) NoneInferred = do
   ps' <- mapM (`checkPat'` NoneInferred) ps
   t <- newTypeWithConstr loc "t" Observe n $ map (toType . patternType) ps'
-  t' <- asStructType loc t
+  t' <- asStructType t
   pure $ PatConstr n (Info $ toParam Observe t') ps' loc
 
 checkPat ::
   PatBase NoInfo VName (TypeBase Size u) ->
-  Inferred StructType ->
+  Inferred Type ->
   (Pat ParamType -> TermM a) ->
   TermM a
 checkPat p t m =
-  m =<< checkPat' (fmap (toParam Observe) p) (fmap (toParam Observe) t)
+  m =<< checkPat' (fmap (toParam Observe) p) (fmap (fmap (const Observe)) t)
 
 -- | Bind @let@-bound sizes.  This is usually followed by 'bindletPat'
 -- immediately afterwards.
@@ -581,7 +606,7 @@ bindSizes sizes m = bind (map sizeWithType sizes) m
 
 bindLetPat ::
   PatBase NoInfo VName (TypeBase Size u) ->
-  StructType ->
+  Type ->
   (Pat ParamType -> TermM a) ->
   TermM a
 bindLetPat p t m = do
@@ -628,11 +653,15 @@ bindParams tps orig_ps m = bindTypeParams tps $ do
 
   incLevel $ descend [] orig_ps
 
-checkApply :: SrcLoc -> Maybe (QualName VName) -> (Shape Size, Type) -> NE.NonEmpty (Shape Size, Type) -> TermM (StructType, NE.NonEmpty AutoMap)
+checkApply ::
+  SrcLoc ->
+  Maybe (QualName VName) ->
+  (Shape Size, Type) ->
+  NE.NonEmpty (Shape Size, Type) ->
+  TermM (Type, NE.NonEmpty AutoMap)
 checkApply loc fname (fframe, ftype) args = do
   ((_, _, rt), argts) <- mapAccumLM onArg (0, fframe, ftype) args
-  rt' <- asStructType loc rt
-  pure (rt', argts)
+  pure (rt, argts)
   where
     onArg (i, f_f, f_t) (argframe, argtype) = do
       (rt, am) <- checkApplyOne loc (fname, i) (f_f, f_t) (argframe, argtype)
@@ -732,18 +761,19 @@ mustHaveFields loc t (f : fs) ve_t = do
   ctEq (Reason (locOf loc)) t rt
 
 checkCase ::
-  StructType ->
+  Type ->
   CaseBase NoInfo VName ->
-  TermM (CaseBase Info VName, StructType)
+  TermM (CaseBase Info VName, Type)
 checkCase mt (CasePat p e loc) =
   bindLetPat p mt $ \p' -> do
     e' <- checkExp e
-    pure (CasePat (fmap toStruct p') e' loc, typeOf e')
+    e_t <- expType e'
+    pure (CasePat (fmap toStruct p') e' loc, e_t)
 
 checkCases ::
-  StructType ->
+  Type ->
   NE.NonEmpty (CaseBase NoInfo VName) ->
-  TermM (NE.NonEmpty (CaseBase Info VName), StructType)
+  TermM (NE.NonEmpty (CaseBase Info VName), Type)
 checkCases mt rest_cs =
   case NE.uncons rest_cs of
     (c, Nothing) -> do
@@ -752,7 +782,7 @@ checkCases mt rest_cs =
     (c, Just cs) -> do
       (c', c_t) <- checkCase mt c
       (cs', cs_t) <- checkCases mt cs
-      ctEq (Reason (locOf c)) (toType c_t) (toType cs_t)
+      ctEq (Reason (locOf c)) c_t cs_t
       pure (NE.cons c' cs', c_t)
 
 -- | An unmatched pattern. Used in in the generation of
@@ -790,16 +820,18 @@ checkRetDecl ::
 checkRetDecl _ Nothing = pure Nothing
 checkRetDecl body (Just te) = do
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
-  ctEq (Reason (locOf body)) (expType body) (toType st)
+  body_t <- expType body
+  st' <- asType st
+  ctEq (Reason (locOf body)) body_t st'
   pure $ Just te'
 
 checkExp :: ExpBase NoInfo VName -> TermM (ExpBase Info VName)
 --
 checkExp (Var qn _ loc) = do
-  t <- lookupVar loc qn
+  t <- asStructType =<< lookupVar loc qn
   pure $ Var qn (Info t) loc
 checkExp (OpSection op _ loc) = do
-  ftype <- lookupVar loc op
+  ftype <- asStructType =<< lookupVar loc op
   pure $ OpSection op (Info ftype) loc
 checkExp (Negate arg loc) = do
   arg' <- require "numeric negation" anyNumberType =<< checkExp arg
@@ -841,7 +873,9 @@ checkExp (ArrayLit es _ loc) = do
   et <- newType loc "et" NoUniqueness
   es' <- forM es $ \e -> do
     e' <- checkExp e
-    ctEq (Reason (locOf loc)) (expType e') (toType et)
+    e_t <- expType e'
+    et' <- asType et
+    ctEq (Reason (locOf loc)) e_t et'
     pure e'
   let arr_t = arrayOf (Shape [sizeFromInteger (L.genericLength es) loc]) et
   pure $ ArrayLit es' (Info arr_t) loc
@@ -856,7 +890,8 @@ checkExp (RecordLit fs loc) =
       errIfAlreadySet (baseName name) rloc
       t <- lift $ lookupVar rloc $ qualName name
       modify $ M.insert (baseName name) rloc
-      pure $ RecordFieldImplicit name (Info t) rloc
+      t' <- lift $ asStructType t
+      pure $ RecordFieldImplicit name (Info t') rloc
 
     errIfAlreadySet f rloc = do
       maybe_sloc <- gets $ M.lookup f
@@ -880,7 +915,8 @@ checkExp (Assert e1 e2 NoInfo loc) = do
 --
 checkExp (Constr name es NoInfo loc) = do
   es' <- mapM checkExp es
-  t <- newTypeWithConstr loc "t" NoUniqueness name $ map expType es'
+  es_ts <- mapM expType es'
+  t <- newTypeWithConstr loc "t" NoUniqueness name es_ts
   pure $ Constr name es' (Info t) loc
 --
 checkExp (AppExp (Apply fe args loc) NoInfo) = do
@@ -891,13 +927,15 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
         args
         ( \(_, arg) -> do
             arg' <- checkExp arg
-            pure (arg', (frameOf arg', expType arg'))
+            arg_t <- expType arg'
+            pure (arg', (frameOf arg', arg_t))
         )
-  (rt, ams) <- checkApply loc fname (frameOf fe', expType fe') argts'
+  fe_t <- expType fe'
+  (rt, ams) <- checkApply loc fname (frameOf fe', fe_t) argts'
+  rt' <- asStructType rt
   pure $
     AppExp (Apply fe' (NE.zipWith (\am arg -> (Info (Nothing, am), arg)) ams args') loc) $
-      Info $
-        AppRes rt []
+      Info (AppRes rt' [])
   where
     fname =
       case fe of
@@ -906,59 +944,71 @@ checkExp (AppExp (Apply fe args loc) NoInfo) = do
 checkExp (AppExp (BinOp (op, oploc) NoInfo (e1, _) (e2, _) loc) NoInfo) = do
   ftype <- lookupVar oploc op
   e1' <- checkExp e1
+  e1_t <- expType e1'
   e2' <- checkExp e2
+  e2_t <- expType e2'
+
   (rt, ams) <-
     checkApply
       loc
       (Just op)
-      (mempty, toType ftype)
-      ((frameOf e1', toType $ typeOf e1') NE.:| [(frameOf e2', toType $ typeOf e2')])
+      (mempty, ftype)
+      ((frameOf e1', e1_t) NE.:| [(frameOf e2', e2_t)])
+  rt' <- asStructType rt
   let (am1 NE.:| [am2]) = ams
 
+  ftype' <- asStructType ftype
   pure $
     AppExp
-      (BinOp (op, oploc) (Info ftype) (e1', Info (Nothing, am1)) (e2', Info (Nothing, am2)) loc)
-      (Info (AppRes rt []))
+      (BinOp (op, oploc) (Info ftype') (e1', Info (Nothing, am1)) (e2', Info (Nothing, am2)) loc)
+      (Info (AppRes rt' []))
 --
 checkExp (OpSectionLeft op _ e _ _ loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
+  e_t <- expType e'
   t2 <- newType loc "t" NoUniqueness
-  t2' <- asStructType loc t2
-  let t1 = typeOf e'
-      f1 = frameOf e'
-  (rt, ams) <- checkApply loc (Just op) (mempty, toType optype) ((f1, toType t1) NE.:| [(mempty, t2)])
+  t2' <- asStructType t2
+  let f1 = frameOf e'
+  (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((f1, e_t) NE.:| [(mempty, t2)])
+  rt' <- asStructType rt
 
   let (am1 NE.:| _) = ams
+  t1 <- asStructType e_t
+  optype' <- asStructType optype
   pure $
     OpSectionLeft
       op
-      (Info optype)
+      (Info optype')
       e'
       ( Info (Unnamed, toParam Observe t1, Nothing, am1),
         Info (Unnamed, toParam Observe t2')
       )
-      (Info (RetType [] (rt `setUniqueness` Nonunique)), Info [])
+      (Info (RetType [] (rt' `setUniqueness` Nonunique)), Info [])
       loc
 checkExp (OpSectionRight op _ e _ NoInfo loc) = do
   optype <- lookupVar loc op
   e' <- checkExp e
+  e_t <- expType e'
   t1 <- newType loc "t" NoUniqueness
-  t1' <- asStructType loc t1
-  let t2 = typeOf e'
-      f2 = frameOf e'
-  (rt, ams) <- checkApply loc (Just op) (mempty, toType optype) ((mempty, t1) NE.:| [(f2, toType t2)])
+  t1' <- asStructType t1
+  let f2 = frameOf e'
+  (rt, ams) <- checkApply loc (Just op) (mempty, optype) ((mempty, t1) NE.:| [(f2, e_t)])
+  rt' <- asStructType rt
   let (_ NE.:| [am2]) = ams
+  t2 <- asStructType e_t
+
+  optype' <- asStructType optype
   pure $
     OpSectionRight
       op
-      (Info optype)
+      (Info optype')
       e'
       -- Dummy types.
       ( Info (Unnamed, toParam Observe t1'),
         Info (Unnamed, toParam Observe t2, Nothing, am2)
       )
-      (Info $ RetType [] (rt `setUniqueness` Nonunique))
+      (Info $ RetType [] (rt' `setUniqueness` Nonunique))
       loc
 --
 checkExp (ProjectSection fields NoInfo loc) = do
@@ -971,70 +1021,91 @@ checkExp (ProjectSection fields NoInfo loc) = do
 checkExp (Lambda params body retdecl NoInfo loc) = do
   bindParams [] params $ \params' -> do
     body' <- checkExp body
+    body_t <- expType body'
+
+    body_t' <- asStructType body_t
     retdecl' <- checkRetDecl body' retdecl
-    let ret = RetType [] $ toRes Nonunique $ typeOf body'
+    let ret = RetType [] $ toRes Nonunique body_t'
     pure $ Lambda params' body' retdecl' (Info ret) loc
 --
 checkExp (AppExp (LetPat sizes pat e body loc) _) = do
   e' <- checkExp e
+  e_t <- expType e'
 
-  bindSizes sizes . incLevel . bindLetPat pat (typeOf e') $ \pat' -> do
+  bindSizes sizes . incLevel . bindLetPat pat e_t $ \pat' -> do
     body' <- incLevel $ checkExp body
+    body_t <- expType body'
+
+    body_t' <- asStructType body_t
     pure $
       AppExp
         (LetPat sizes (fmap toStruct pat') e' body' loc)
-        (Info $ AppRes (typeOf body') [])
+        (Info $ AppRes body_t' [])
 --
 checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _) = do
   (tparams', params', retdecl', rettype, e') <-
     bindParams tparams params $ \params' -> do
       e' <- checkExp e
-      let ret = RetType [] $ toRes Nonunique $ typeOf e'
+      e_t <- expType e'
+      let ret = fmap (const Nonunique) e_t
       retdecl' <- checkRetDecl e' retdecl
       pure (tparams, params', retdecl', ret, e')
 
-  let entry = BoundV tparams' $ funType params' rettype
+  params'' <- mapM (traverse asType) params'
+
+  let entry = BoundV tparams' $ funType params'' $ RetType [] rettype
       bindF scope =
         scope
           { scopeVtable = M.insert name entry $ scopeVtable scope
           }
   body' <- localScope bindF $ checkExp body
+  body_t <- expType body'
 
+  body_t' <- asStructType body_t
+  rettype' <- asStructType rettype
   pure $
     AppExp
       ( LetFun
           name
-          (tparams', params', retdecl', Info rettype, e')
+          (tparams', params', retdecl', Info (RetType [] rettype'), e')
           body'
           loc
       )
-      (Info $ AppRes (typeOf body') [])
+      (Info $ AppRes body_t' [])
 --
 checkExp (AppExp (Range start maybe_step end loc) _) = do
   start' <- require "use in range expression" anyIntType =<< checkExp start
   let check e = do
         e' <- checkExp e
-        ctEq (Reason (locOf e')) (expType start') (expType e')
+        start_t <- expType start'
+        e_t <- expType e'
+        ctEq (Reason (locOf e')) start_t e_t
         pure e'
   maybe_step' <- traverse check maybe_step
   end' <- traverse check end
   range_t <- newType loc "range" NoUniqueness
-  ctEq (Reason (locOf start')) (toType range_t) (arrayOfRank 1 (expType start'))
+  range_t' <- asType range_t
+  start_t <- expType start'
+  ctEq (Reason (locOf start')) range_t' (arrayOfRank 1 start_t)
   pure $ AppExp (Range start' maybe_step' end' loc) $ Info $ AppRes range_t []
 --
 checkExp (Project k e NoInfo loc) = do
   e' <- checkExp e
   kt <- newType loc "kt" NoUniqueness
   t <- newTypeWithField loc "t" k kt
-  ctEq (Reason (locOf e')) (expType e') t
-  kt' <- asStructType loc kt
+  e_t <- expType e'
+  ctEq (Reason (locOf e')) e_t t
+  kt' <- asStructType kt
   pure $ Project k e' (Info kt') loc
 --
 checkExp (RecordUpdate src fields ve NoInfo loc) = do
   src' <- checkExp src
+  src_t <- expType src'
   ve' <- checkExp ve
-  mustHaveFields loc (expType src') fields (expType ve')
-  pure $ RecordUpdate src' fields ve' (Info (typeOf src')) loc
+  ve_t <- expType ve'
+  mustHaveFields loc src_t fields ve_t
+  src_t' <- asStructType src_t
+  pure $ RecordUpdate src' fields ve' (Info src_t') loc
 --
 checkExp (IndexSection slice NoInfo loc) = do
   slice' <- checkSlice slice
@@ -1044,67 +1115,84 @@ checkExp (IndexSection slice NoInfo loc) = do
   let num_slices = length $ filter isSlice slice
   ctEq (Reason (locOf loc)) (toType index_arg_t) $ arrayOfRank num_slices index_elem_t
   ctEq (Reason (locOf loc)) index_res_t $ arrayOfRank (length slice) index_elem_t
-  index_res_t' <- asStructType loc index_res_t
+  index_res_t' <- asStructType index_res_t
   let ft = Scalar $ Arrow mempty Unnamed Observe index_arg_t $ toResRet Nonunique $ RetType [] index_res_t'
   pure $ IndexSection slice' (Info ft) loc
 --
 checkExp (AppExp (Index e slice loc) _) = do
   e' <- checkExp e
+  e_t <- expType e'
   slice' <- checkSlice slice
-  index_t <- newType loc "index" NoUniqueness
+  index_tv <- newTyVar loc "index"
   index_elem_t <- newType loc "index_elem" NoUniqueness
   let num_slices = length $ filter isSlice slice
-  ctEq (Reason (locOf loc)) (toType index_t) $ arrayOfRank num_slices index_elem_t
-  ctEq (Reason (locOf e')) (expType e') $ arrayOfRank (length slice) index_elem_t
-  pure $ AppExp (Index e' slice' loc) (Info $ AppRes index_t [])
+  ctEq (Reason (locOf loc)) (tyVarType NoUniqueness index_tv) $ arrayOfRank num_slices index_elem_t
+  ctEq (Reason (locOf e')) e_t $ arrayOfRank (length slice) index_elem_t
+  pure $ AppExp (Index e' slice' loc) (Info $ AppRes (tyVarType NoUniqueness index_tv) [])
 --
 checkExp (Update src slice ve loc) = do
   src' <- checkExp src
+  src_t <- expType src'
   slice' <- checkSlice slice
   ve' <- checkExp ve
+  ve_t <- expType ve'
   let num_slices = length $ filter isSlice slice
   update_elem_t <- newType loc "update_elem" NoUniqueness
-  ctEq (Reason (locOf src')) (expType src') $ arrayOfRank (length slice) update_elem_t
-  ctEq (Reason (locOf ve')) (expType ve') $ arrayOfRank num_slices update_elem_t
+  ctEq (Reason (locOf src')) src_t $ arrayOfRank (length slice) update_elem_t
+  ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
   pure $ Update src' slice' ve' loc
 --
 checkExp (AppExp (LetWith dest src slice ve body loc) _) = do
   src_t <- lookupVar (srclocOf src) $ qualName $ identName src
-  let src' = src {identType = Info src_t}
-      dest' = dest {identType = Info src_t}
+  src_t' <- asStructType src_t
+  let src' = src {identType = Info src_t'}
+      dest' = dest {identType = Info src_t'}
   slice' <- checkSlice slice
   ve' <- checkExp ve
+  ve_t <- expType ve'
   let num_slices = length $ filter isSlice slice
   update_elem_t <- newType loc "update_elem" NoUniqueness
-  ctEq (Reason (locOf loc)) (toType src_t) $ arrayOfRank (length slice) update_elem_t
-  ctEq (Reason (locOf ve')) (expType ve') $ arrayOfRank num_slices update_elem_t
+  ctEq (Reason (locOf loc)) src_t $ arrayOfRank (length slice) update_elem_t
+  ctEq (Reason (locOf ve')) ve_t $ arrayOfRank num_slices update_elem_t
   bind [dest'] $ do
     body' <- checkExp body
-    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes (typeOf body') [])
+    body_t <- expType body'
+    body_t' <- asStructType body_t
+    pure $ AppExp (LetWith dest' src' slice' ve' body' loc) (Info $ AppRes body_t' [])
 --
 checkExp (AppExp (If e1 e2 e3 loc) _) = do
   e1' <- checkExp e1
+  e1_t <- expType e1'
   e2' <- checkExp e2
+  e2_t <- expType e2'
   e3' <- checkExp e3
+  e3_t <- expType e3'
 
-  ctEq (Reason (locOf e1')) (expType e1') (Scalar (Prim Bool))
-  ctEq (Reason (locOf loc)) (expType e2') (expType e3')
+  ctEq (Reason (locOf e1')) e1_t (Scalar (Prim Bool))
+  ctEq (Reason (locOf loc)) e2_t e3_t
 
-  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes (typeOf e2') [])
+  e2_t' <- asStructType e2_t
+  pure $ AppExp (If e1' e2' e3' loc) (Info $ AppRes e2_t' [])
 --
 checkExp (AppExp (Match e cs loc) _) = do
   e' <- checkExp e
-  (cs', t) <- checkCases (typeOf e') cs
-  pure $ AppExp (Match e' cs' loc) (Info $ AppRes t [])
+  e_t <- expType e'
+
+  (cs', t) <- checkCases e_t cs
+  t' <- asStructType t
+  pure $ AppExp (Match e' cs' loc) (Info $ AppRes t' [])
 --
 checkExp (AppExp (Loop _ pat arg form body loc) _) = do
   arg' <- checkExp arg
-  bindLetPat pat (typeOf arg') $ \pat' -> do
+  arg_t <- expType arg'
+  bindLetPat pat arg_t $ \pat' -> do
     (form', body') <-
       case form of
         For (Ident i _ iloc) bound -> do
           bound' <- require "loop bound" anyIntType =<< checkExp bound
-          let i' = Ident i (Info (typeOf bound')) iloc
+          bound_t <- expType bound'
+          bound_t' <- asStructType bound_t
+          let i' = Ident i (Info bound_t') iloc
           bind [i'] $ do
             body' <- checkExp body
             pure (For i' bound', body')
@@ -1115,11 +1203,14 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
         ForIn elemp arr -> do
           arr' <- checkExp arr
           elem_t <- newType elemp "elem" NoUniqueness
-          ctEq (Reason (locOf arr')) (expType arr') $ arrayOfRank 1 (toType elem_t)
-          bindLetPat elemp elem_t $ \elemp' -> do
+          arr_t <- expType arr'
+          elem_t' <- asType elem_t
+          ctEq (Reason (locOf arr')) arr_t $ arrayOfRank 1 elem_t'
+          bindLetPat elemp elem_t' $ \elemp' -> do
             body' <- checkExp body
             pure (ForIn (toStruct <$> elemp') arr', body')
-    ctEq (Reason (locOf loc)) (expType arg') (expType body')
+    body_t <- expType body'
+    ctEq (Reason (locOf loc)) arg_t body_t
     pure $
       AppExp
         (Loop [] pat' arg' form' body' loc)
@@ -1128,12 +1219,16 @@ checkExp (AppExp (Loop _ pat arg form body loc) _) = do
 checkExp (Ascript e te loc) = do
   e' <- checkExp e
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
-  ctEq (Reason (locOf e')) (expType e') (toType st)
+  e_t <- expType e'
+  st' <- asType st
+  ctEq (Reason (locOf e')) e_t st'
   pure $ Ascript e' te' loc
 checkExp (Coerce e te NoInfo loc) = do
   e' <- checkExp e
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
-  ctEq (Reason (locOf e')) (expType e') (toType st)
+  e_t <- expType e'
+  st' <- asType st
+  ctEq (Reason (locOf e')) e_t st'
   pure $ Coerce e' te' (Info (toStruct st)) loc
 
 doDefault ::
@@ -1172,7 +1267,7 @@ doDefaults tyvars_at_toplevel substs = do
   pure $ M.map (substTyVars (`M.lookup` substs')) substs'
 
 generalise ::
-  StructType -> [VName] -> Solution -> ([TypeParam], [VName])
+  TypeBase () NoUniqueness -> [VName] -> Solution -> ([TypeParam], [VName])
 generalise fun_t unconstrained solution =
   -- Candidates for let-generalisation are those type variables that
   -- are used in fun_t.
@@ -1190,7 +1285,7 @@ generalise fun_t unconstrained solution =
 generaliseAndDefaults ::
   [VName] ->
   Solution ->
-  StructType ->
+  TypeBase () NoUniqueness ->
   TermM ([TypeParam], M.Map VName (TypeBase () NoUniqueness))
 generaliseAndDefaults unconstrained solution t = do
   let (generalised, unconstrained') =
@@ -1225,8 +1320,8 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (params', body', retdecl')
 
   cts <- gets termConstraints
-
   tyvars <- gets termTyVars
+  artificial <- gets termArtificial
 
   debugTraceM 3 $ "\n# function " <> prettyNameString fname <> "\n# " <> locStr loc <> "\n"
 
@@ -1237,14 +1332,20 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
         "## body:",
         prettyString body',
         "## tyvars:",
-        unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars
+        unlines $ map (prettyString . first prettyNameString) $ M.toList tyvars,
+        "## artificial:",
+        unlines $ map (\(v, t) -> prettyNameString v <> " => " <> prettyString t) (M.toList artificial)
       ]
 
-  onRankSolution retdecl' =<< rankAnalysis1 loc cts tyvars params' body'
+  onRankSolution retdecl'
+    =<< rankAnalysis1 loc cts tyvars artificial params' body'
   where
-    onRankSolution retdecl' ((cts', tyvars'), params', body'') = do
+    onRankSolution retdecl' ((cts', tyvars'), artificial, params', body'') = do
       solution <-
-        bitraverse pure (onTySolution params' body'') $ solve cts' tyvars'
+        bitraverse
+          pure
+          (fmap (second (onArtificial artificial)) . onTySolution params' body'')
+          $ solve cts' tyvars'
       debugTraceM 3 $
         unlines
           [ "## constraints:",
@@ -1259,11 +1360,15 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
       pure (solution, params', retdecl', body'')
 
     onTySolution params' body' (unconstrained, solution) = do
+      body_t <- expType body'
       let fun_t =
             foldFunType
-              (map patternType params')
-              (RetType [] $ toRes Nonunique (typeOf body'))
+              (map (first (const ()) . patternType) params')
+              (RetType [] $ bimap (const ()) (const Nonunique) body_t)
       generaliseAndDefaults unconstrained solution fun_t
+
+    onArtificial artificial solution =
+      M.map (substTyVars (`M.lookup` solution) . first (const ())) artificial <> solution
 
 checkSingleExp ::
   ExpBase NoInfo VName ->
@@ -1272,11 +1377,13 @@ checkSingleExp e = runTermM $ do
   e' <- checkExp e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
-  ((cts', tyvars'), _, e'') <- rankAnalysis1 (srclocOf e') cts tyvars [] e'
+  artificial <- gets termArtificial
+  ((cts', tyvars'), _, _, e'') <- rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
   case solve cts' tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
-      x <- generaliseAndDefaults unconstrained solution $ typeOf e''
+      e_t <- expType e''
+      x <- generaliseAndDefaults unconstrained solution $ first (const ()) e_t
       pure (Right x, e'')
 
 -- | Type-check a single size expression in isolation.  This expression may
@@ -1288,8 +1395,9 @@ checkSizeExp e = runTermM $ do
   e' <- checkSizeExp' e
   cts <- gets termConstraints
   tyvars <- gets termTyVars
+  artificial <- gets termArtificial
 
-  (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars [] e'
+  (cts_tyvars', _, _, es') <- L.unzip4 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
 
   solutions <-
     forM cts_tyvars' $
