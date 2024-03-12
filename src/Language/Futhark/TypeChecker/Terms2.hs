@@ -524,7 +524,7 @@ checkPat' p@(RecordPat p_fs loc) (Ascribed t)
   | otherwise = do
       p_fs' <- traverse (const $ newType loc "t" NoUniqueness) $ M.fromList p_fs
       ctEq (Reason (locOf loc)) (Scalar (Record p_fs')) t
-      checkPat' p $ Ascribed $ const Observe <$> Scalar (Record p_fs')
+      checkPat' p $ Ascribed $ Observe <$ Scalar (Record p_fs')
   where
     check t_fs =
       traverse (uncurry checkPat') $
@@ -571,7 +571,7 @@ checkPat' (PatConstr n NoInfo ps loc) (Ascribed (Scalar (Sum cs)))
               <+> pretty (length ts)
               <+> "arguments."
       ps' <- zipWithM checkPat' ps $ map Ascribed ts
-      cs' <- traverse (mapM (asStructType)) cs
+      cs' <- traverse (mapM asStructType) cs
       pure $ PatConstr n (Info (Scalar (Sum cs'))) ps' loc
 checkPat' (PatConstr n NoInfo ps loc) (Ascribed t) = do
   ps' <- forM ps $ \p -> do
@@ -1340,7 +1340,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   onRankSolution retdecl'
     =<< rankAnalysis1 loc cts tyvars artificial params' body'
   where
-    onRankSolution retdecl' ((cts', tyvars'), artificial, params', body'') = do
+    onRankSolution retdecl' ((cts', artificial, tyvars'), params', body'') = do
       solution <-
         bitraverse
           pure
@@ -1378,7 +1378,8 @@ checkSingleExp e = runTermM $ do
   cts <- gets termConstraints
   tyvars <- gets termTyVars
   artificial <- gets termArtificial
-  ((cts', tyvars'), _, _, e'') <- rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
+  ((cts', artificial', tyvars'), _, e'') <-
+    rankAnalysis1 (srclocOf e') cts tyvars artificial [] e'
   case solve cts' tyvars' of
     Left err -> pure (Left err, e'')
     Right (unconstrained, solution) -> do
@@ -1397,11 +1398,11 @@ checkSizeExp e = runTermM $ do
   tyvars <- gets termTyVars
   artificial <- gets termArtificial
 
-  (cts_tyvars', _, _, es') <- L.unzip4 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
+  (cts_tyvars', _, es') <- unzip3 <$> rankAnalysis (srclocOf e) cts tyvars artificial [] e'
 
   solutions <-
-    forM cts_tyvars' $
-      bitraverse pure (traverse (doDefaults mempty)) . uncurry solve
+    forM cts_tyvars' $ \(cts', artificial', tyvars') ->
+      bitraverse pure (traverse (doDefaults mempty)) $ solve cts' tyvars'
 
   case (solutions, es') of
     ([solution], [e'']) ->
