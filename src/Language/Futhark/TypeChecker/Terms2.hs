@@ -888,10 +888,9 @@ checkExp (RecordLit fs loc) =
       RecordFieldExplicit f <$> lift (checkExp e) <*> pure rloc
     checkField (RecordFieldImplicit name NoInfo rloc) = do
       errIfAlreadySet (baseName name) rloc
-      t <- lift $ lookupVar rloc $ qualName name
+      t <- lift $ asStructType =<< lookupVar rloc (qualName name)
       modify $ M.insert (baseName name) rloc
-      t' <- lift $ asStructType t
-      pure $ RecordFieldImplicit name (Info t') rloc
+      pure $ RecordFieldImplicit name (Info t) rloc
 
     errIfAlreadySet f rloc = do
       maybe_sloc <- gets $ M.lookup f
