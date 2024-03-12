@@ -5,6 +5,7 @@ where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Text qualified as T
+import Data.Map qualified as M
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU (compileProg)
 import Futhark.IR.GPUMem qualified as F
@@ -21,18 +22,31 @@ generateTests path prog = do
   compiled <- snd <$> compileProg prog
   spec <- liftIO $ testSpecFromProgramOrDie (path <> ".fut")
   let tests = testCasesLiteral spec
+  let info = kernelInfoLiteral compiled
   let shader = shaderLiteral compiled
-  pure (tests <> "\n\n" <> shader)
+  pure (tests <> "\n\n" <> info <> "\n\n" <> shader)
 
 shaderLiteral :: Program -> T.Text
 shaderLiteral prog = "const shader = `\n" <> webgpuProgram prog <> "\n`;"
 
-testCasesLiteral :: ProgramTest -> T.Text
-testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
-  let specs = map ((<> ",\n") . prettyText . mkTestSpec) ios
-   in "const tests = [\n" <> foldl' (<>) "" specs <> "];"
-testCasesLiteral t = "// Unsupported test: " <> testDescription t
-
+-- const kernels = [
+--   { name: 'some_vname_5568',
+--     overrides: ['override', 'declarations'],
+--     group: 0,
+--   },
+-- ];
+kernelInfoLiteral :: Program -> T.Text
+kernelInfoLiteral prog = "const kernels = " <> docText fmtInfos <> ";"
+  where
+    infos = M.toList $ webgpuKernelInfo prog
+    fmtInfos = "[" </> indent 2 (commastack $ map fmtInfo infos) </> "]"
+    fmtInfo (name, (overrides, group)) =
+      "{" </> indent 2 (
+        "name: '" <> pretty name <> "',"
+        </> "overrides: [" <> commasep
+          (map (\o -> "'" <> pretty o <> "'") overrides) <> "],"
+        </> "group: " <> pretty group <> ","
+      ) </> "}"
 
 -- const tests = [
 --   { entry: 'someName',
@@ -45,6 +59,12 @@ testCasesLiteral t = "// Unsupported test: " <> testDescription t
 --     ],
 --   },
 -- ];
+testCasesLiteral :: ProgramTest -> T.Text
+testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
+  let specs = map ((<> ",\n") . prettyText . mkTestSpec) ios
+   in "const tests = [\n" <> foldl' (<>) "" specs <> "];"
+testCasesLiteral t = "// Unsupported test: " <> testDescription t
+
 data JsTestSpec = JsTestSpec 
   { jsEntryPoint :: T.Text,
     jsRuns :: [JsTestRun]

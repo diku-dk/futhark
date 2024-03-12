@@ -7,7 +7,7 @@ where
 
 import Control.Monad (liftM2, liftM3, zipWithM)
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.Reader
+import Control.Monad.Trans.RWS hiding (get, modify, put)
 import Control.Monad.Trans.State
 import Data.Bifunctor (second)
 import Data.Map qualified as M
@@ -26,13 +26,19 @@ import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 import Data.List (foldl')
 
+data KernelInterface = KernelInterface
+  { kiName :: WGSL.Ident,
+    kiOverrides :: [WGSL.Ident],
+    kiBindGroup :: Int
+  }
+
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
   { -- | Accumulated code.
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
-    -- | How many kernels have been generated into wsCode already.
-    wsFinishedKernels :: Int
+    -- | Interface of kernels already generated into wsCode.
+    wsKernels :: [KernelInterface]
   }
 
 -- The monad in which we perform the translation. The state will
@@ -46,9 +52,6 @@ addSize key sclass =
 addCode :: T.Text -> WebGPUM ()
 addCode code =
   modify $ \s -> s {wsCode = wsCode s <> code}
-
-finishKernel :: WebGPUM ()
-finishKernel = modify $ \s -> s {wsFinishedKernels = wsFinishedKernels s + 1}
 
 data KernelR = KernelR
   { -- | Kernel currently being translated.
@@ -64,7 +67,17 @@ addRenames renames r = r { krNameReplacements = insert (krNameReplacements r) }
   where
     insert m' = foldl' (\m (k, v) -> M.insert k v m) m' renames
 
-type KernelM = ReaderT KernelR WebGPUM
+data KernelW = KernelW
+  { kwOverrides :: [WGSL.Ident]
+  }
+
+instance Semigroup KernelW where
+  (KernelW a) <> (KernelW b) = KernelW (a <> b)
+
+instance Monoid KernelW where
+  mempty = KernelW []
+
+type KernelM = RWST KernelR KernelW () WebGPUM
 
 -- | Some names generated are unique in the scope of a single kernel but are
 -- translated to module-scope identifiers in WGSL. This modifies an identifier
@@ -82,7 +95,21 @@ getIdent name = asks (M.findWithDefault t t . krNameReplacements)
 
 -- | The bind group index that bindings for the current kernel should use.
 bindGroup :: KernelM Int
-bindGroup = wsFinishedKernels <$> lift get
+bindGroup = (length . wsKernels) <$> lift get
+
+-- | Write an override declaration to add to the current kernel's interface.
+addOverride :: WGSL.Ident -> KernelM ()
+addOverride ident = tell (KernelW [ident])
+
+finishKernel :: KernelR -> KernelW -> WebGPUM ()
+finishKernel (KernelR kernel _) (KernelW overrides) = do
+  s <- get
+  let interface = KernelInterface {
+    kiName = textToIdent $ nameToText $ ImpGPU.kernelName kernel,
+    kiOverrides = overrides,
+    kiBindGroup = length $ wsKernels s
+  }
+  put $ s {wsKernels = wsKernels s <> [interface]}
 
 entryParams :: [WGSL.Param]
 entryParams =
@@ -135,8 +162,9 @@ genKernel = do
 
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
-  runReaderT genKernel (KernelR kernel M.empty)
-  finishKernel
+  let r = KernelR kernel M.empty
+  ((), (), w) <- runRWST genKernel r ()
+  finishKernel r w
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
 
@@ -162,7 +190,7 @@ kernelsToWebGPU prog =
       initial_state = WebGPUS {
         wsCode = mempty,
         wsSizes = mempty,
-        wsFinishedKernels = 0
+        wsKernels = mempty
       }
 
       ((consts', funs'), translation) =
@@ -172,9 +200,14 @@ kernelsToWebGPU prog =
       prog' =
         Definitions types (Constants ps consts') (Functions funs')
 
+      kernels = M.fromList $ map (\ki -> (nameFromText $ kiName ki, SafetyNone)) 
+        (wsKernels translation)
+      kernelInfo = M.fromList $
+        map (\(KernelInterface n o g) -> (nameFromText n, (o, g)))
+        (wsKernels translation)
+
       webgpu_prelude = RTS.arith <> RTS.arith64
       constants = mempty
-      kernels = mempty
       params = mempty
       failures = mempty
    in Program
@@ -184,6 +217,7 @@ kernelsToWebGPU prog =
           webgpuKernelNames = kernels,
           webgpuParams = params,
           webgpuFailures = failures,
+          webgpuKernelInfo = kernelInfo,
           hostDefinitions = prog'
         }
 
@@ -447,7 +481,9 @@ genConstAndBuiltinDecls = do
                                               WGSL.IntExp 0]))
           | (n, i) <- zip consts moduleNames]
 
-  pure (builtinDecls ++ constDecls, WGSL.stmts constInits)
+  let decls = builtinDecls ++ constDecls
+  sequence_ [addOverride n | WGSL.OverrideDecl n _ <- decls]
+  pure (decls, WGSL.stmts constInits)
 
 nameToIdent :: VName -> WGSL.Ident
 nameToIdent = zEncodeText . prettyText
