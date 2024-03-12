@@ -207,10 +207,6 @@ instance TypedOp SizeOp where
   opType CmpSizeLe {} = pure [Prim Bool]
   opType CalcNumBlocks {} = pure [Prim int64]
 
-instance AliasedOp SizeOp where
-  opAliases _ = [mempty]
-  consumedInOp _ = mempty
-
 instance FreeIn SizeOp where
   freeIn' (CmpSizeLe _ _ x) = freeIn' x
   freeIn' (CalcNumBlocks w _ tblock_size) = freeIn' w <> freeIn' tblock_size
@@ -309,15 +305,15 @@ instance (TypedOp (op rep)) => TypedOp (HostOp op rep) where
   opType (GPUBody ts _) =
     pure $ staticShapes $ map (`arrayOfRow` intConst Int64 1) ts
 
-instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (HostOp op rep) where
+instance (AliasedOp op) => AliasedOp (HostOp op) where
   opAliases (SegOp op) = opAliases op
   opAliases (OtherOp op) = opAliases op
-  opAliases (SizeOp op) = opAliases op
+  opAliases (SizeOp _) = [mempty]
   opAliases (GPUBody ts _) = map (const mempty) ts
 
   consumedInOp (SegOp op) = consumedInOp op
   consumedInOp (OtherOp op) = consumedInOp op
-  consumedInOp (SizeOp op) = consumedInOp op
+  consumedInOp (SizeOp _) = mempty
   consumedInOp (GPUBody _ body) = consumedInBody body
 
 instance (ASTRep rep, FreeIn (op rep)) => FreeIn (HostOp op rep) where

@@ -32,7 +32,7 @@ type SimplifyMemory rep inner =
     BuilderOps (Wise rep),
     OpReturns (inner (Wise rep)),
     ST.IndexOp (inner (Wise rep)),
-    AliasedOp (inner (Wise rep)),
+    AliasedOp inner,
     Mem rep inner,
     CanBeWise inner,
     RephraseOp inner

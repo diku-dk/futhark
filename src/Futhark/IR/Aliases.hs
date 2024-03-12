@@ -132,7 +132,7 @@ withoutAliases m = do
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep),
     IsOp (OpC rep (Aliases rep))
   ) =>
   ASTRep (Aliases rep)
@@ -140,13 +140,14 @@ instance
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
-instance (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) => Aliased (Aliases rep) where
+instance (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) => Aliased (Aliases rep) where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
+    IsOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep),
     Pretty (OpC rep (Aliases rep))
   ) =>
   PrettyRep (Aliases rep)
@@ -264,7 +265,7 @@ removePatAliases = runIdentity . rephrasePat (pure . snd)
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
 mkAliasedBody ::
-  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
+  (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
   Result ->
@@ -370,7 +371,7 @@ trackAliases (aliasmap, consumed) stm =
     look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedStm ::
-  (ASTRep rep, AliasedOp (OpC rep (Aliases rep))) =>
+  (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
@@ -381,7 +382,13 @@ mkAliasedStm pat (StmAux cs attrs dec) e =
     (StmAux cs attrs (AliasDec $ consumedInExp e, dec))
     e
 
-instance (Buildable rep, AliasedOp (OpC rep (Aliases rep))) => Buildable (Aliases rep) where
+instance
+  ( Buildable rep,
+    IsOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep)
+  ) =>
+  Buildable (Aliases rep)
+  where
   mkExpDec pat e =
     let dec = mkExpDec (removePatAliases pat) $ removeExpAliases e
      in (AliasDec $ consumedInExp e, dec)
@@ -401,7 +408,7 @@ instance (Buildable rep, AliasedOp (OpC rep (Aliases rep))) => Buildable (Aliase
 
 instance
   ( ASTRep rep,
-    AliasedOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep),
     Buildable (Aliases rep)
   ) =>
   BuilderOps (Aliases rep)
@@ -411,7 +418,8 @@ type AliasableRep rep =
   ( ASTRep rep,
     RephraseOp (OpC rep),
     CanBeAliased (OpC rep),
-    AliasedOp (OpC rep (Aliases rep))
+    IsOp (OpC rep (Aliases rep)),
+    AliasedOp (OpC rep)
   )
 
 -- | The class of operations that can be given aliasing information.
