@@ -30,7 +30,9 @@ import Data.List (foldl')
 data WebGPUS = WebGPUS
   { -- | Accumulated code.
     wsCode :: T.Text,
-    wsSizes :: M.Map Name SizeClass
+    wsSizes :: M.Map Name SizeClass,
+    -- | How many kernels have been generated into wsCode already.
+    wsFinishedKernels :: Int
   }
 
 -- The monad in which we perform the translation. The state will
@@ -45,10 +47,13 @@ addCode :: T.Text -> WebGPUM ()
 addCode code =
   modify $ \s -> s {wsCode = wsCode s <> code}
 
+finishKernel :: WebGPUM ()
+finishKernel = modify $ \s -> s {wsFinishedKernels = wsFinishedKernels s + 1}
+
 data KernelR = KernelR
   { -- | Kernel currently being translated.
     krKernel :: ImpGPU.Kernel,
-    -- | Identifier replacement map. We have to rename some identifiers, when
+    -- | Identifier replacement map. We have to rename some identifiers; when
     -- translating Imp Code and PrimExps this map is consulted to respect the
     -- renaming.
     krNameReplacements :: M.Map WGSL.Ident WGSL.Ident
@@ -74,6 +79,10 @@ mkGlobalIdent ident = do
 getIdent :: (F.Pretty a) => a -> KernelM WGSL.Ident
 getIdent name = asks (M.findWithDefault t t . krNameReplacements)
   where t = zEncodeText $ prettyText name
+
+-- | The bind group index that bindings for the current kernel should use.
+bindGroup :: KernelM Int
+bindGroup = wsFinishedKernels <$> lift get
 
 entryParams :: [WGSL.Param]
 entryParams =
@@ -127,6 +136,7 @@ genKernel = do
 onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
   runReaderT genKernel (KernelR kernel M.empty)
+  finishKernel
   -- TODO: return something sensible.
   pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
 
@@ -149,7 +159,11 @@ kernelsToWebGPU prog =
         (ImpGPU.Constants ps consts)
         (ImpGPU.Functions funs) = prog
 
-      initial_state = WebGPUS {wsCode = mempty, wsSizes = mempty}
+      initial_state = WebGPUS {
+        wsCode = mempty,
+        wsSizes = mempty,
+        wsFinishedKernels = 0
+      }
 
       ((consts', funs'), translation) =
         flip runState initial_state $
@@ -357,7 +371,8 @@ genScalarDecls = do
   let structDecl = WGSL.StructDecl $
         WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
 
-  let bufferAttribs = WGSL.bindingAttribs 0 0
+  group <- bindGroup
+  let bufferAttribs = WGSL.bindingAttribs group 0
   let bufferDecl = WGSL.VarDecl
         bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
 
@@ -404,7 +419,8 @@ genMemoryDecls = do
           error "Using buffer at multiple types not supported in WebGPU backend"
     moduleDecl i (name, typ) = do
       ident <- mkGlobalIdent name
-      pure $ WGSL.VarDecl (WGSL.bindingAttribs 0 i)
+      group <- bindGroup
+      pure $ WGSL.VarDecl (WGSL.bindingAttribs group i)
         (WGSL.Storage WGSL.ReadWrite) ident (WGSL.Array $ primWGSLType typ)
     rename (name, _) = (name, ) <$> mkGlobalIdent name
 
