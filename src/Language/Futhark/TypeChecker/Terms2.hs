@@ -489,7 +489,7 @@ checkPat' p@(RecordPat p_fs loc) _
           </> "Did you mean"
           <> dquotes (pretty (T.drop 1 (nameToText f)) <> "=_")
           <> "?"
-  | nubOrd (map fst p_fs) /= map fst p_fs =
+  | length (nubOrd (map fst p_fs)) /= length (map fst p_fs) =
       typeError loc mempty $
         "Duplicate fields in record pattern" <+> pretty p <> "."
 checkPat' p@(RecordPat p_fs loc) (Ascribed t)
