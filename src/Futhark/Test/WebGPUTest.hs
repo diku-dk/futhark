@@ -71,9 +71,14 @@ instance Pretty JsTestRun where
       "type: ["
         <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'") typs)
         <> "],"
-      </> "input: " <> pretty input <> ","
-      </> "expected: " <> pretty expected <> ","
+      </> "input: " <> fmt input <> ","
+      </> "expected: " <> fmt expected <> ","
     ) </> "}"
+    where
+      -- Hacky way to avoid the 'i32', 'i64' etc. suffixes as they are not valid
+      -- JS.
+      fmtArr typ vs = pretty $ T.replace (V.primTypeText typ) "" (prettyText vs)
+      fmt vss = "[" <> commasep (zipWith fmtArr typs vss) <> "]"
 
 instance Pretty JsTestSpec where
   pretty (JsTestSpec entry runs) =
