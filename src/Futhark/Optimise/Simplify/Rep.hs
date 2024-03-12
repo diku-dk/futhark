@@ -291,7 +291,8 @@ instance (Buildable rep, Informing rep) => Buildable (Wise rep) where
 -- representation.
 type Informing rep =
   ( ASTRep rep,
-    AliasedOp (OpC rep (Wise rep)),
+    IsOp (OpC rep (Wise rep)),
+    AliasedOp (OpC rep),
     RephraseOp (OpC rep),
     CanBeWise (OpC rep),
     FreeIn (OpC rep (Wise rep))

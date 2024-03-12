@@ -1045,7 +1045,7 @@ mkLetNamesB'' ::
     Rep m ~ Engine.Wise rep,
     HasScope (Engine.Wise rep) m,
     MonadBuilder m,
-    AliasedOp (inner (Engine.Wise rep)),
+    AliasedOp inner,
     RephraseOp (MemOp inner),
     Engine.CanBeWise inner
   ) =>
@@ -1084,7 +1084,7 @@ simplifiable ::
     RephraseOp inner,
     IsOp (inner rep),
     OpReturns (inner (Engine.Wise rep)),
-    AliasedOp (inner (Engine.Wise rep)),
+    AliasedOp inner,
     IndexOp (inner (Engine.Wise rep))
   ) =>
   (inner (Engine.Wise rep) -> UT.UsageTable) ->

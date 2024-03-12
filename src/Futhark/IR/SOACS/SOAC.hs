@@ -534,7 +534,7 @@ soacType (Screma w _arrs form) =
 instance (ASTRep rep) => TypedOp (SOAC rep) where
   opType = pure . staticShapes . soacType
 
-instance (Aliased rep) => AliasedOp (SOAC rep) where
+instance AliasedOp SOAC where
   opAliases = map (const mempty) . soacType
 
   consumedInOp JVP {} = mempty

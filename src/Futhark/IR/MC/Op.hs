@@ -85,7 +85,7 @@ instance (TypedOp (op rep)) => TypedOp (MCOp op rep) where
   opType (ParOp _ op) = opType op
   opType (OtherOp op) = opType op
 
-instance (Aliased rep, AliasedOp (op rep)) => AliasedOp (MCOp op rep) where
+instance (AliasedOp op) => AliasedOp (MCOp op) where
   opAliases (ParOp _ op) = opAliases op
   opAliases (OtherOp op) = opAliases op
 

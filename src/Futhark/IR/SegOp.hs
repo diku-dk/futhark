@@ -526,7 +526,7 @@ segOpType (SegHist _ space ops _ _) = do
 instance TypedOp (SegOp lvl rep) where
   opType = pure . staticShapes . segOpType
 
-instance (ASTConstraints lvl, Aliased rep) => AliasedOp (SegOp lvl rep) where
+instance AliasedOp (SegOp lvl) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =

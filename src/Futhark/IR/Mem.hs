@@ -205,7 +205,7 @@ instance (TypedOp (inner rep)) => TypedOp (MemOp inner rep) where
   opType (Alloc _ space) = pure [Mem space]
   opType (Inner k) = opType k
 
-instance (AliasedOp (inner rep)) => AliasedOp (MemOp inner rep) where
+instance (AliasedOp inner) => AliasedOp (MemOp inner) where
   opAliases Alloc {} = [mempty]
   opAliases (Inner k) = opAliases k
 
