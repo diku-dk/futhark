@@ -1014,8 +1014,8 @@ checkExp (OpSectionRight op _ e _ NoInfo loc) = do
 checkExp (ProjectSection fields NoInfo loc) = do
   a <- newType loc "a" NoUniqueness
   b <- newType loc "b" NoUniqueness
-  mustHaveFields loc (toType a) fields (toType b)
-  let ft = Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ b `setUniqueness` Nonunique
+  mustHaveFields loc a fields b
+  ft <- asStructType $ Scalar $ Arrow mempty Unnamed Observe a $ RetType [] $ b `setUniqueness` Nonunique
   pure $ ProjectSection fields (Info ft) loc
 --
 checkExp (Lambda params body retdecl NoInfo loc) = do
@@ -1047,9 +1047,8 @@ checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _)
     bindParams tparams params $ \params' -> do
       e' <- checkExp e
       e_t <- expType e'
-      let ret = fmap (const Nonunique) e_t
       retdecl' <- checkRetDecl e' retdecl
-      pure (tparams, params', retdecl', ret, e')
+      pure (tparams, params', retdecl', fmap (const Nonunique) e_t, e')
 
   params'' <- mapM (traverse asType) params'
 
@@ -1113,10 +1112,9 @@ checkExp (IndexSection slice NoInfo loc) = do
   index_elem_t <- newType loc "index_elem" NoUniqueness
   index_res_t <- newType loc "index_res" NoUniqueness
   let num_slices = length $ filter isSlice slice
-  ctEq (Reason (locOf loc)) (toType index_arg_t) $ arrayOfRank num_slices index_elem_t
+  ctEq (Reason (locOf loc)) index_arg_t $ arrayOfRank num_slices index_elem_t
   ctEq (Reason (locOf loc)) index_res_t $ arrayOfRank (length slice) index_elem_t
-  index_res_t' <- asStructType index_res_t
-  let ft = Scalar $ Arrow mempty Unnamed Observe index_arg_t $ toResRet Nonunique $ RetType [] index_res_t'
+  ft <- asStructType $ Scalar $ Arrow mempty Unnamed Observe index_arg_t $ second (const Nonunique) $ RetType [] index_res_t
   pure $ IndexSection slice' (Info ft) loc
 --
 checkExp (AppExp (Index e slice loc) _) = do
