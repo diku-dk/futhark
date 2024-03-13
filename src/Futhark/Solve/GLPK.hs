@@ -48,8 +48,12 @@ glpk lp = do
     res
 
 glpk' :: (Ord v, Real a) => F.LinearProg v a -> IO (Maybe (Int, M.Map v Int))
-glpk' lp = do
-  (_, mres) <- glpSolveVars opts $ linearProgToGLPK lp
-  pure $ (\(opt, vs) -> (truncate opt, fmap truncate vs)) <$> mres
+glpk' lp
+  | F.isConstant (F.objective lp) -- FIXME
+    =
+      pure $ pure (0, M.fromList $ map (,0) $ S.toList $ F.vars lp)
+  | otherwise = do
+      (_, mres) <- glpSolveVars opts $ linearProgToGLPK lp
+      pure $ (\(opt, vs) -> (truncate opt, fmap truncate vs)) <$> mres
   where
     opts = mipDefaults {msgLev = MsgAll}

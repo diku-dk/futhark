@@ -28,6 +28,7 @@ module Futhark.Solve.LP
     (~<=~),
     (~>=~),
     rowEchelonLPE,
+    isConstant,
   )
 where
 
@@ -108,6 +109,9 @@ instance (IsName v, Pretty a, Eq a, Num a) => Pretty (LSum v a) where
               Just k' -> (if a == 1 then mempty else pretty a <> "*") <> prettyName k'
         )
       $ Map.toList m
+
+isConstant :: (Ord v) => LSum v a -> Bool
+isConstant (LSum m) = Map.keysSet m `S.isSubsetOf` S.singleton Nothing
 
 instance Functor (LSum v) where
   fmap f (LSum m) = LSum $ fmap f m
