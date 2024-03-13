@@ -99,22 +99,6 @@ distribAndSplitCnstrs ct@(CtEq r t1 t2) =
     splitCnstrs c = []
 distribAndSplitCnstrs ct = [ct]
 
-distributeOverCnstrs :: Ct -> [Ct]
-distributeOverCnstrs ct@(CtEq r t1 t2) =
-  [ct, CtEq r t1' t2']
-  where
-    -- case (t1', t2') of
-    --  (Nothing, Nothing) -> [ct]
-    --  _ -> [ct, CtEq r (fromMaybe t1 t1') (fromMaybe t2 t2')]
-
-    distribute :: TypeBase dim as -> TypeBase dim as
-    distribute (Array u s (Record ts1)) =
-      Scalar $ Record $ fmap (distribute . arrayOfWithAliases u s) ts1
-    distribute t = t
-    t1' = distribute t1
-    t2' = distribute t2
-distributeOverCnstrs c = [c]
-
 data RankState = RankState
   { rankBinVars :: Map VName VName,
     rankCounter :: !Int,
