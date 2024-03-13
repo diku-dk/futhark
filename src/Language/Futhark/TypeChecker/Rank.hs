@@ -57,23 +57,63 @@ instance Rank Type where
   rank (Scalar t) = rank t
   rank (Array _ shape t) = rank shape ~+~ rank t
 
-class Distribute a where
-  distribute :: a -> a
+distribAndSplitArrows :: Ct -> [Ct]
+distribAndSplitArrows (CtEq r t1 t2) =
+  splitArrows $ CtEq r (distribute t1) (distribute t2)
+  where
+    distribute :: TypeBase dim as -> TypeBase dim as
+    distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
+      Scalar $
+        Arrow
+          u
+          Unnamed
+          mempty
+          (arrayOf s ta)
+          (RetType rd $ distribute $ arrayOfWithAliases Nonunique s tr)
+    distribute t = t
 
-instance Distribute (TypeBase dim u) where
-  distribute (Array u s (Arrow _ _ _ ta (RetType rd tr))) =
-    Scalar $
-      Arrow
-        u
-        Unnamed
-        mempty
-        (arrayOf s ta)
-        (RetType rd $ distribute (arrayOfWithAliases Nonunique s tr))
-  distribute t = t
+    splitArrows
+      ( CtEq
+          reason
+          (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
+          (Scalar (Arrow _ _ _ t2a (RetType _ t2r)))
+        ) =
+        splitArrows (CtEq reason t1a t2a) ++ splitArrows (CtEq reason t1r' t2r')
+        where
+          t1r' = t1r `setUniqueness` NoUniqueness
+          t2r' = t2r `setUniqueness` NoUniqueness
+    splitArrows c = [c]
+distribAndSplitArrows ct = [ct]
 
-instance Distribute Ct where
-  distribute (CtEq r t1 t2) = CtEq r (distribute t1) (distribute t2)
-  distribute c = c
+distribAndSplitCnstrs :: Ct -> [Ct]
+distribAndSplitCnstrs ct@(CtEq r t1 t2) =
+  ct : splitCnstrs (CtEq r (distribute1 t1) (distribute1 t2))
+  where
+    distribute1 :: TypeBase dim as -> TypeBase dim as
+    distribute1 (Array u s (Record ts1)) =
+      Scalar $ Record $ fmap (arrayOfWithAliases u s) ts1
+    distribute1 t = t
+
+    splitCnstrs (CtEq reason (Scalar (Record ts1)) (Scalar (Record ts2))) =
+      concat $ zipWith (\x y -> distribAndSplitCnstrs $ CtEq reason x y) (M.elems ts1) (M.elems ts2)
+    splitCnstrs c = []
+distribAndSplitCnstrs ct = [ct]
+
+distributeOverCnstrs :: Ct -> [Ct]
+distributeOverCnstrs ct@(CtEq r t1 t2) =
+  [ct, CtEq r t1' t2']
+  where
+    -- case (t1', t2') of
+    --  (Nothing, Nothing) -> [ct]
+    --  _ -> [ct, CtEq r (fromMaybe t1 t1') (fromMaybe t2 t2')]
+
+    distribute :: TypeBase dim as -> TypeBase dim as
+    distribute (Array u s (Record ts1)) =
+      Scalar $ Record $ fmap (distribute . arrayOfWithAliases u s) ts1
+    distribute t = t
+    t1' = distribute t1
+    t2' = distribute t2
+distributeOverCnstrs c = [c]
 
 data RankState = RankState
   { rankBinVars :: Map VName VName,
@@ -258,18 +298,9 @@ rankAnalysis loc cs tyVars artificial params body = do
       params' = map ((`map` params) . updAMPat) rank_maps
   pure $ zip3 cts_tyvars' params' bodys
   where
-    cs' = foldMap (splitFuncs . distribute) cs
-    splitFuncs
-      ( CtEq
-          reason
-          (Scalar (Arrow _ _ _ t1a (RetType _ t1r)))
-          (Scalar (Arrow _ _ _ t2a (RetType _ t2r)))
-        ) =
-        splitFuncs (CtEq reason t1a t2a) ++ splitFuncs (CtEq reason t1r' t2r')
-        where
-          t1r' = t1r `setUniqueness` NoUniqueness
-          t2r' = t2r `setUniqueness` NoUniqueness
-    splitFuncs c = [c]
+    cs' =
+      foldMap distribAndSplitCnstrs $
+        foldMap distribAndSplitArrows cs
 
 substRankInfo ::
   (MonadTypeChecker m) =>
@@ -331,7 +362,7 @@ newTyVar :: (MonadTypeChecker m) => TyVar -> SubstT m TyVar
 newTyVar t = do
   t' <- lift $ newTypeName (baseName t)
   shape <- rankToShape t
-  loc <- (locOf . snd . fromJust . (M.!? t)) <$> asks envTyVars
+  loc <- asks ((locOf . snd . fromJust . (M.!? t)) . envTyVars)
   modify $ \s ->
     s
       { substNewVars = M.insert t t' $ substNewVars s,
@@ -399,6 +430,9 @@ instance SubstRanks (TypeBase SComp u) where
     shape' <- substRanks shape
     t' <- substRanks $ Scalar t
     pure $ arrayOfWithAliases u shape' t'
+  substRanks (Scalar (Record fs)) = do
+    fs' <- mapM substRanks fs
+    pure $ Scalar $ Record fs'
   substRanks t = pure t
 
 instance SubstRanks Ct where
