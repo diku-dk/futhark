@@ -523,10 +523,10 @@ segOpType (SegHist _ space ops _ _) = do
     dims = segSpaceDims space
     segment_dims = init dims
 
-instance TypedOp (SegOp lvl rep) where
+instance TypedOp (SegOp lvl) where
   opType = pure . staticShapes . segOpType
 
-instance (ASTConstraints lvl, Aliased rep) => AliasedOp (SegOp lvl rep) where
+instance (ASTConstraints lvl) => AliasedOp (SegOp lvl) where
   opAliases = map (const mempty) . segOpType
 
   consumedInOp (SegMap _ _ _ kbody) =
@@ -993,10 +993,7 @@ instance (ASTRep rep) => ST.IndexOp (SegOp lvl rep) where
         | otherwise = lift Nothing
   indexOp _ _ _ _ = Nothing
 
-instance
-  (ASTRep rep, ASTConstraints lvl) =>
-  IsOp (SegOp lvl rep)
-  where
+instance (ASTConstraints lvl) => IsOp (SegOp lvl) where
   cheapOp _ = False
   safeOp _ = True
   opDependencies op = replicate (length (segOpType op)) (freeIn op)
@@ -1428,7 +1425,7 @@ kernelBodyReturns = zipWithM correct . kernelBodyResult
 -- | Like 'segOpType', but for memory representations.
 segOpReturns ::
   (Mem rep inner, Monad m, HasScope rep m) =>
-  SegOp lvl somerep ->
+  SegOp lvl rep ->
   m [ExpReturns]
 segOpReturns k@(SegMap _ _ _ kbody) =
   kernelBodyReturns kbody . extReturns =<< opType k
