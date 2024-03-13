@@ -27,7 +27,6 @@ module Futhark.Test
 where
 
 import Codec.Compression.GZip
-import Codec.Compression.Zlib.Internal (DecompressError)
 import Control.Applicative
 import Control.Exception (catch)
 import Control.Exception.Base qualified as E
