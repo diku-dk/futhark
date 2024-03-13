@@ -34,6 +34,9 @@ let
           futhark-manifest =
             haskellPackagesNew.callPackage ./nix/futhark-manifest.nix { };
 
+          zlib =
+            haskellPackagesNew.callPackage ./nix/zlib.nix {zlib=pkgs.zlib;};
+
           futhark =
             # callCabal2Nix does not do a great job at determining
             # which files must be included as source, which causes
