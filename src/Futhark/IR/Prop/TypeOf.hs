@@ -122,7 +122,7 @@ basicOpType (UpdateAcc v _ _) =
 
 -- | The type of an expression.
 expExtType ::
-  (HasScope rep m, TypedOp (Op rep)) =>
+  (HasScope rep m, TypedOp (OpC rep)) =>
   Exp rep ->
   m [ExtType]
 expExtType (Apply _ _ rt _) = pure $ map (fromDecl . declExtTypeOf . fst) rt
@@ -150,7 +150,7 @@ loopExtType params =
 -- | Any operation must define an instance of this class, which
 -- describes the type of the operation (at the value level).
 class TypedOp op where
-  opType :: (HasScope t m) => op -> m [ExtType]
+  opType :: (HasScope rep m) => op rep -> m [ExtType]
 
-instance TypedOp (NoOp rep) where
+instance TypedOp NoOp where
   opType NoOp = pure []

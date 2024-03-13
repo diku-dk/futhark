@@ -22,7 +22,7 @@ import Futhark.IR.SeqMem
 import Futhark.Pass (Pass (..))
 
 liftInProg ::
-  (AliasableRep rep, Mem rep inner, OpReturns (inner (Aliases rep))) =>
+  (AliasableRep rep, Mem rep inner, ASTConstraints (inner (Aliases rep))) =>
   (inner (Aliases rep) -> LiftM (inner (Aliases rep)) (inner (Aliases rep))) ->
   Prog rep ->
   Prog rep

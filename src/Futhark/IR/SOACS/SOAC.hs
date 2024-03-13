@@ -531,7 +531,7 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 
-instance (ASTRep rep) => TypedOp (SOAC rep) where
+instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
 
 instance AliasedOp SOAC where
@@ -590,7 +590,7 @@ instance CanBeAliased SOAC where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
 
-instance (ASTRep rep) => IsOp (SOAC rep) where
+instance IsOp SOAC where
   safeOp _ = False
   cheapOp _ = False
   opDependencies (Stream w arrs accs lam) =

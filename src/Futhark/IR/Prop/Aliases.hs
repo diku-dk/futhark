@@ -31,7 +31,7 @@ where
 import Data.Bifunctor (first, second)
 import Data.List (find, transpose)
 import Data.Map qualified as M
-import Futhark.IR.Prop (ASTRep, NameInfo (..), Scope)
+import Futhark.IR.Prop (ASTRep, IsOp, NameInfo (..), Scope)
 import Futhark.IR.Prop.Names
 import Futhark.IR.Prop.Pat
 import Futhark.IR.Prop.Types
@@ -221,7 +221,7 @@ lookupAliases root scope =
 
 -- | The class of operations that can produce aliasing and consumption
 -- information.
-class AliasedOp op where
+class (IsOp op) => AliasedOp op where
   opAliases :: (Aliased rep) => op rep -> [Names]
   consumedInOp :: (Aliased rep) => op rep -> Names
 
