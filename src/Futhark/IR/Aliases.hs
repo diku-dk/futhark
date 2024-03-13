@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 
 -- | A representation where all patterns are annotated with aliasing
 -- information.  It also records consumption of variables in bodies.
