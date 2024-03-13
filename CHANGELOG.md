@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * Referencing an unbound type parameter could crash the type checker
   (#2113, #2114).
 
+* Futhark now works with GHC 9.8 (#2105).
+
 ## [0.25.13]
 
 ### Added

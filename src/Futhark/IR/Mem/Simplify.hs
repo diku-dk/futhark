@@ -30,12 +30,13 @@ type SimplifyMemory rep inner =
     BodyDec rep ~ (),
     CanBeWise (OpC rep),
     BuilderOps (Wise rep),
-    OpReturns (inner (Wise rep)),
+    OpReturns inner,
     ST.IndexOp (inner (Wise rep)),
     AliasedOp inner,
     Mem rep inner,
     CanBeWise inner,
-    RephraseOp inner
+    RephraseOp inner,
+    ASTConstraints (inner (Engine.Wise rep))
   )
 
 simpleGeneric ::

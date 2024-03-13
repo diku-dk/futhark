@@ -122,7 +122,7 @@ instance
     Ord (OpC rep (Wise rep)),
     Eq (OpC rep (Wise rep)),
     Show (OpC rep (Wise rep)),
-    IsOp (OpC rep (Wise rep)),
+    IsOp (OpC rep),
     Pretty (OpC rep (Wise rep))
   ) =>
   RepTypes (Wise rep)
@@ -144,7 +144,7 @@ withoutWisdom m = do
   scope <- asksScope removeScopeWisdom
   runReaderT m scope
 
-instance (Informing rep, IsOp (OpC rep (Wise rep))) => ASTRep (Wise rep) where
+instance (Informing rep, IsOp (OpC rep)) => ASTRep (Wise rep) where
   expTypesFromPat =
     withoutWisdom . expTypesFromPat . removePatWisdom
 
@@ -291,11 +291,11 @@ instance (Buildable rep, Informing rep) => Buildable (Wise rep) where
 -- representation.
 type Informing rep =
   ( ASTRep rep,
-    IsOp (OpC rep (Wise rep)),
     AliasedOp (OpC rep),
     RephraseOp (OpC rep),
     CanBeWise (OpC rep),
-    FreeIn (OpC rep (Wise rep))
+    FreeIn (OpC rep (Wise rep)),
+    ASTConstraints (OpC rep (Wise rep))
   )
 
 -- | A type class for indicating that this operation can be lifted into the simplifier representation.

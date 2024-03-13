@@ -1439,7 +1439,7 @@ requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
     prettyText e <> " must have type " <> prettyText t
 
 -- | The class of representations that can be type-checked.
-class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
+class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()

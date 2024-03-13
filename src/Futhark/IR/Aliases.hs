@@ -133,22 +133,27 @@ withoutAliases m = do
 instance
   ( ASTRep rep,
     AliasedOp (OpC rep),
-    IsOp (OpC rep (Aliases rep))
+    ASTConstraints (OpC rep (Aliases rep))
   ) =>
   ASTRep (Aliases rep)
   where
   expTypesFromPat =
     withoutAliases . expTypesFromPat . removePatAliases
 
-instance (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) => Aliased (Aliases rep) where
+instance
+  ( ASTRep rep,
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
+  ) =>
+  Aliased (Aliases rep)
+  where
   bodyAliases = map unAliases . fst . fst . bodyDec
   consumedInBody = unAliases . snd . fst . bodyDec
 
 instance
   ( ASTRep rep,
-    IsOp (OpC rep (Aliases rep)),
     AliasedOp (OpC rep),
-    Pretty (OpC rep (Aliases rep))
+    ASTConstraints (OpC rep (Aliases rep))
   ) =>
   PrettyRep (Aliases rep)
   where
@@ -265,7 +270,7 @@ removePatAliases = runIdentity . rephrasePat (pure . snd)
 -- | Augment a body decoration with aliasing information provided by
 -- the statements and result of that body.
 mkAliasedBody ::
-  (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) =>
+  (ASTRep rep, AliasedOp (OpC rep), ASTConstraints (OpC rep (Aliases rep))) =>
   BodyDec rep ->
   Stms (Aliases rep) ->
   Result ->
@@ -371,7 +376,7 @@ trackAliases (aliasmap, consumed) stm =
     look k = M.findWithDefault mempty k aliasmap
 
 mkAliasedStm ::
-  (ASTRep rep, IsOp (OpC rep (Aliases rep)), AliasedOp (OpC rep)) =>
+  (ASTRep rep, AliasedOp (OpC rep), ASTConstraints (OpC rep (Aliases rep))) =>
   Pat (LetDec rep) ->
   StmAux (ExpDec rep) ->
   Exp (Aliases rep) ->
@@ -384,8 +389,8 @@ mkAliasedStm pat (StmAux cs attrs dec) e =
 
 instance
   ( Buildable rep,
-    IsOp (OpC rep (Aliases rep)),
-    AliasedOp (OpC rep)
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
   ) =>
   Buildable (Aliases rep)
   where
@@ -418,8 +423,8 @@ type AliasableRep rep =
   ( ASTRep rep,
     RephraseOp (OpC rep),
     CanBeAliased (OpC rep),
-    IsOp (OpC rep (Aliases rep)),
-    AliasedOp (OpC rep)
+    AliasedOp (OpC rep),
+    ASTConstraints (OpC rep (Aliases rep))
   )
 
 -- | The class of operations that can be given aliasing information.
