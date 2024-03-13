@@ -92,11 +92,16 @@ distribAndSplitCnstrs ct@(CtEq r t1 t2) =
     distribute1 :: TypeBase dim as -> TypeBase dim as
     distribute1 (Array u s (Record ts1)) =
       Scalar $ Record $ fmap (arrayOfWithAliases u s) ts1
+    distribute1 (Array u s (Sum cs)) =
+      Scalar $ Sum $ (fmap . fmap) (arrayOfWithAliases u s) cs
     distribute1 t = t
 
+    -- FIXME. Should check for key set equality here.
     splitCnstrs (CtEq reason (Scalar (Record ts1)) (Scalar (Record ts2))) =
       concat $ zipWith (\x y -> distribAndSplitCnstrs $ CtEq reason x y) (M.elems ts1) (M.elems ts2)
-    splitCnstrs c = []
+    splitCnstrs (CtEq reason (Scalar (Sum cs1)) (Scalar (Sum cs2))) =
+      concat $ concat $ (zipWith . zipWith) (\x y -> distribAndSplitCnstrs $ CtEq reason x y) (M.elems cs1) (M.elems cs2)
+    splitCnstrs _ = []
 distribAndSplitCnstrs ct = [ct]
 
 data RankState = RankState
@@ -276,6 +281,14 @@ rankAnalysis ::
 rankAnalysis _ [] tyVars artificial params body =
   pure [(([], artificial, tyVars), params, body)]
 rankAnalysis loc cs tyVars artificial params body = do
+  debugTraceM 3 $
+    unlines $
+      [ "##rankAnalysis",
+        "cs:",
+        unlines $ map prettyString cs,
+        "cs':",
+        unlines $ map prettyString cs'
+      ]
   rank_maps <- solveRankILP loc (mkLinearProg cs' tyVars)
   cts_tyvars' <- mapM (substRankInfo cs artificial tyVars) rank_maps
   let bodys = map (`updAM` body) rank_maps
@@ -294,10 +307,10 @@ substRankInfo ::
   Map VName Int ->
   m ([Ct], M.Map VName Type, TyVars)
 substRankInfo cs artificial tyVars rankmap = do
-  ((cs', artificial'), new_cs, new_tyVars) <-
+  ((cs', artificial', tyVars'), new_cs, new_tyVars) <-
     runSubstT tyVars rankmap $
-      (,) <$> substRanks (filter (not . isCtAM) cs) <*> traverse substRanks artificial
-  pure (cs' <> new_cs, artificial', new_tyVars <> tyVars)
+      (,,) <$> substRanks (filter (not . isCtAM) cs) <*> traverse substRanks artificial <*> traverse substRanks tyVars
+  pure (cs' <> new_cs, artificial', new_tyVars <> tyVars')
   where
     isCtAM (CtAM {}) = True
     isCtAM _ = False
@@ -409,19 +422,31 @@ instance SubstRanks (TypeBase SComp u) where
     ta' <- substRanks ta
     tr' <- substRanks tr
     pure $ Scalar (Arrow u p d ta' (RetType retdims tr'))
-  substRanks (Scalar (Record fs)) = Scalar . Record <$> traverse substRanks fs
+  substRanks (Scalar (Record fs)) =
+    Scalar . Record <$> traverse substRanks fs
+  substRanks (Scalar (Sum cs)) =
+    Scalar . Sum <$> (traverse . traverse) substRanks cs
   substRanks (Array u shape t) = do
     shape' <- substRanks shape
     t' <- substRanks $ Scalar t
     pure $ arrayOfWithAliases u shape' t'
-  substRanks (Scalar (Record fs)) = do
-    fs' <- mapM substRanks fs
-    pure $ Scalar $ Record fs'
   substRanks t = pure t
 
 instance SubstRanks Ct where
   substRanks (CtEq r t1 t2) = CtEq r <$> substRanks t1 <*> substRanks t2
   substRanks _ = error ""
+
+instance SubstRanks TyVarInfo where
+  substRanks tv@TyVarFree {} = pure tv
+  substRanks tv@TyVarPrim {} = pure tv
+  substRanks (TyVarRecord loc fs) =
+    TyVarRecord loc <$> traverse substRanks fs
+  substRanks (TyVarSum loc cs) =
+    TyVarSum loc <$> (traverse . traverse) substRanks cs
+  substRanks tv@TyVarEql {} = pure tv
+
+instance SubstRanks (Int, TyVarInfo) where
+  substRanks (lvl, tv) = (lvl,) <$> substRanks tv
 
 updAM :: Map VName Int -> Exp -> Exp
 updAM rank_map e =
