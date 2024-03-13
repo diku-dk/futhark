@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The "raw" API functions now do something potentially useful, but are
   still considered experimental.
 
+* `futhark --version` now reports GHC version.
+
 ### Removed
 
 ### Changed
