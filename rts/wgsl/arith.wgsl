@@ -39,8 +39,16 @@ fn umax_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(max(bitcast<u32>(a), bitcast<u32>(b)));
 }
 
+fn shl_i32(a: i32, b: i32) -> i32 {
+  return a << bitcast<u32>(b);
+}
+
 fn lshr_i32(a: i32, b: i32) -> i32 {
-  return bitcast<i32>(bitcast<u32>(a) << bitcast<u32>(b));
+  return bitcast<i32>(bitcast<u32>(a) >> bitcast<u32>(b));
+}
+
+fn ashr_i32(a: i32, b: i32) -> i32 {
+  return a >> bitcast<u32>(b);
 }
 
 fn pow_i32(a_p: i32, b: i32) -> i32 {
