@@ -13,7 +13,6 @@ async function runTest(device, shaderModule, testInfo) {
 	}
 
 	const templateRun = testInfo.runs[0];
-	console.log(templateRun);
 
 	// Create input buffers.
 	let inputBuffers = [];
@@ -125,7 +124,8 @@ async function runTest(device, shaderModule, testInfo) {
 		}
 	});
 
-	for (const run of testInfo.runs) {
+	for (let ri = 0; ri < testInfo.runs.length; ri++) {
+		const run = testInfo.runs[ri];
 		const length = run.input[0].length;
 		let hScalars = new Int32Array(2);
 		hScalars[0] = length;
@@ -158,14 +158,24 @@ async function runTest(device, shaderModule, testInfo) {
 		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, length * 4);
 		const stagingMapped = stagingBuffer.getMappedRange(0, length * 4);
 		const data = new Int32Array(stagingMapped.slice());
-		console.log(data);
 		stagingBuffer.unmap();
 
+		let errors = [];
 		for (let i = 0; i < length; i++) {
 			if (data[i] != run.expected[0][i]) {
-				console.error(`mismatch! test ${testInfo.entry}, run: ${run}, ` +
-					`i ${i}, got ${data[i]}, expected ${run.expected[0][i]}`);
+				errors.push({i: i, expect: run.expected[0][i], got: data[i]});
 			}
+		}
+
+		if (errors.length > 0) {
+			let msg = `Test for entry ${testInfo.entry}, run ${ri}: FAIL:\n`;
+			for (const err of errors) {
+				msg += `  [${err.i}] expected ${err.expect} got ${err.got}\n`;
+			}
+			console.error(msg);
+		}
+		else {
+			console.log(`Test for entry ${testInfo.entry}, run ${ri}: PASS\n`);
 		}
 	}
 }
@@ -212,10 +222,6 @@ async function init() {
 
 	const shaderInfo = await shaderModule.getCompilationInfo();
 	console.log("Shader compilation info:", shaderInfo);
-
-	//if (shaderName in runnableShaders) {
-	//	runnableShaders[shaderName](device, shaderModule);
-	//}
 
 	for (const test of window.tests) {
 		await runTest(device, shaderModule, test);
