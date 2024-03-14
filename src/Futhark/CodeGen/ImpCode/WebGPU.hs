@@ -44,10 +44,11 @@ data Program = Program
     -- | Assertion failure error messages.
     webgpuFailures :: [FailureMsg],
     -- | Information about arguments passed to a kernel. List of override
-    -- variable names and the bind group number assigned to the kernel. Mostly
-    -- to support the temporary WGSL kernel testing setup, should not be
+    -- variable names and the bind slots used by the kernel.
+    --
+    -- Mostly to support the temporary WGSL kernel testing setup, should not be
     -- required in this form when proper host-side code generation is done.
-    webgpuKernelInfo :: M.Map KernelName ([T.Text], Int),
+    webgpuKernelInfo :: M.Map KernelName ([T.Text], [Int]),
     hostDefinitions :: Definitions HostOp
   }
 

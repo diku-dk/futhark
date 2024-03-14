@@ -29,7 +29,7 @@ import Data.List (foldl')
 data KernelInterface = KernelInterface
   { kiName :: WGSL.Ident,
     kiOverrides :: [WGSL.Ident],
-    kiBindGroup :: Int
+    kiBindSlots :: [Int]
   }
 
 -- State carried during WebGPU translation.
@@ -38,7 +38,8 @@ data WebGPUS = WebGPUS
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
     -- | Interface of kernels already generated into wsCode.
-    wsKernels :: [KernelInterface]
+    wsKernels :: [KernelInterface],
+    wsNextBindSlot :: Int
   }
 
 -- The monad in which we perform the translation. The state will
@@ -68,14 +69,15 @@ addRenames renames r = r { krNameReplacements = insert (krNameReplacements r) }
     insert m' = foldl' (\m (k, v) -> M.insert k v m) m' renames
 
 data KernelW = KernelW
-  { kwOverrides :: [WGSL.Ident]
+  { kwOverrides :: [WGSL.Ident],
+    kwBindSlots :: [Int]
   }
 
 instance Semigroup KernelW where
-  (KernelW a) <> (KernelW b) = KernelW (a <> b)
+  (KernelW ao as) <> (KernelW bo bs) = KernelW (ao <> bo) (as <> bs)
 
 instance Monoid KernelW where
-  mempty = KernelW []
+  mempty = KernelW [] []
 
 type KernelM = RWST KernelR KernelW () WebGPUM
 
@@ -93,21 +95,27 @@ getIdent :: (F.Pretty a) => a -> KernelM WGSL.Ident
 getIdent name = asks (M.findWithDefault t t . krNameReplacements)
   where t = zEncodeText $ prettyText name
 
--- | The bind group index that bindings for the current kernel should use.
-bindGroup :: KernelM Int
-bindGroup = (length . wsKernels) <$> lift get
+-- | Get a new, unused binding index and add it to the list of bind slots used
+-- by the current kernel.
+assignBindSlot :: KernelM Int
+assignBindSlot = do
+  wState <- lift get
+  let slot = wsNextBindSlot wState
+  tell (KernelW [] [slot])
+  lift $ put (wState {wsNextBindSlot = slot + 1})
+  pure slot
 
 -- | Write an override declaration to add to the current kernel's interface.
 addOverride :: WGSL.Ident -> KernelM ()
-addOverride ident = tell (KernelW [ident])
+addOverride ident = tell (KernelW [ident] [])
 
 finishKernel :: KernelR -> KernelW -> WebGPUM ()
-finishKernel (KernelR kernel _) (KernelW overrides) = do
+finishKernel (KernelR kernel _) (KernelW overrides slots) = do
   s <- get
   let interface = KernelInterface {
     kiName = textToIdent $ nameToText $ ImpGPU.kernelName kernel,
     kiOverrides = overrides,
-    kiBindGroup = length $ wsKernels s
+    kiBindSlots = slots
   }
   put $ s {wsKernels = wsKernels s <> [interface]}
 
@@ -190,7 +198,8 @@ kernelsToWebGPU prog =
       initial_state = WebGPUS {
         wsCode = mempty,
         wsSizes = mempty,
-        wsKernels = mempty
+        wsKernels = mempty,
+        wsNextBindSlot = 0
       }
 
       ((consts', funs'), translation) =
@@ -203,7 +212,7 @@ kernelsToWebGPU prog =
       kernels = M.fromList $ map (\ki -> (nameFromText $ kiName ki, SafetyNone)) 
         (wsKernels translation)
       kernelInfo = M.fromList $
-        map (\(KernelInterface n o g) -> (nameFromText n, (o, g)))
+        map (\(KernelInterface n o s) -> (nameFromText n, (o, s)))
         (wsKernels translation)
 
       webgpu_prelude = RTS.arith <> RTS.arith64
@@ -426,8 +435,8 @@ genScalarDecls = do
   let structDecl = WGSL.StructDecl $
         WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
 
-  group <- bindGroup
-  let bufferAttribs = WGSL.bindingAttribs group 0
+  slot <- assignBindSlot
+  let bufferAttribs = WGSL.bindingAttribs 0 slot
   let bufferDecl = WGSL.VarDecl
         bufferAttribs WGSL.Uniform bufferName (WGSL.Named structName)
 
@@ -461,7 +470,7 @@ genMemoryDecls :: KernelM ([WGSL.Declaration], [(WGSL.Ident, WGSL.Ident)])
 genMemoryDecls = do
   uses <- asks (ImpGPU.kernelUses . krKernel)
   memUses <- catMaybes <$> sequence [withType n | ImpGPU.MemoryUse n <- uses]
-  decls <- zipWithM moduleDecl [1..] memUses
+  decls <- mapM moduleDecl memUses
   renames <- mapM rename memUses
   pure (decls, renames)
   where
@@ -472,10 +481,10 @@ genMemoryDecls = do
         [t] -> pure $ Just (nameToIdent name, t)
         _more ->
           error "Using buffer at multiple types not supported in WebGPU backend"
-    moduleDecl i (name, typ) = do
+    moduleDecl (name, typ) = do
       ident <- mkGlobalIdent name
-      group <- bindGroup
-      pure $ WGSL.VarDecl (WGSL.bindingAttribs group i)
+      slot <- assignBindSlot
+      pure $ WGSL.VarDecl (WGSL.bindingAttribs 0 slot)
         (WGSL.Storage WGSL.ReadWrite) ident (WGSL.Array $ primWGSLType typ)
     rename (name, _) = (name, ) <$> mkGlobalIdent name
 

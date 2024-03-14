@@ -36,7 +36,7 @@ shaderLiteral prog = "window.shader = `\n"
 -- window.kernels = [
 --   { name: 'some_vname_5568',
 --     overrides: ['override', 'declarations'],
---     group: 0,
+--     bindSlots: [0, 1, 2],
 --   },
 -- ];
 kernelInfoLiteral :: Program -> T.Text
@@ -44,12 +44,12 @@ kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
   where
     infos = M.toList $ webgpuKernelInfo prog
     fmtInfos = "[" </> indent 2 (commastack $ map fmtInfo infos) </> "]"
-    fmtInfo (name, (overrides, group)) =
+    fmtInfo (name, (overrides, slots)) =
       "{" </> indent 2 (
         "name: '" <> pretty name <> "',"
         </> "overrides: [" <> commasep
           (map (\o -> "'" <> pretty o <> "'") overrides) <> "],"
-        </> "group: " <> pretty group <> ","
+        </> "bindSlots: " <> pretty slots <> ","
       ) </> "}"
 
 -- window.tests = [

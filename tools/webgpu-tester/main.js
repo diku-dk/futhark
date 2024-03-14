@@ -61,48 +61,36 @@ async function runTest(device, shaderModule, testInfo) {
 	});
 
 	let bglEntries = [
-		{ binding: 0, visibility: GPUShaderStage.COMPUTE,
+		{ binding: kernelInfo.bindSlots[0], visibility: GPUShaderStage.COMPUTE,
 		  buffer: { type: "uniform" } }
 	];
 	let bgEntries = [
-		{ binding: 0, resource: { buffer: scalarBuffer } }
+		{ binding: kernelInfo.bindSlots[0], resource: { buffer: scalarBuffer } }
 	];
 	for (let i = 0; i < inputBuffers.length; i++) {
 		bglEntries.push({
-			binding: i + 1, visibility: GPUShaderStage.COMPUTE,
+			binding: kernelInfo.bindSlots[i + 1],
+			visibility: GPUShaderStage.COMPUTE,
 			buffer: { type: "storage" }
 		});
 		bgEntries.push({
-			binding: i + 1, resource: { buffer: inputBuffers[i] }
+			binding: kernelInfo.bindSlots[i + 1],
+			resource: { buffer: inputBuffers[i] }
 		});
 	}
 	bglEntries.push({
-		binding: inputBuffers.length + 1,
+		binding: kernelInfo.bindSlots[inputBuffers.length + 1],
 		visibility: GPUShaderStage.COMPUTE,
 		buffer: { type: "storage" } }
 	);
 	bgEntries.push({
-		binding: inputBuffers.length + 1,
+		binding: kernelInfo.bindSlots[inputBuffers.length + 1],
 		resource: { buffer: outputBuffer }
 	});
 	const bgl = device.createBindGroupLayout({
 		entries: bglEntries
 	});
 	const bg = device.createBindGroup({ layout: bgl, entries: bgEntries });
-
-	let bgls = [];
-	let bgs = [];
-	for (let i = 0; i <= kernelInfo.group; i++) {
-		if (i == kernelInfo.group) {
-			bgls.push(bgl);
-			bgs.push(bg);
-		}
-		else {
-			const emptyBgl = device.createBindGroupLayout({ entries: [] });
-			bgls.push(emptyBgl);
-			bgs.push(device.createBindGroup({ layout: emptyBgl, entries: [] }));
-		}
-	}
 
 	const block_size = 256;
 	let overrideConsts = {};
@@ -117,7 +105,7 @@ async function runTest(device, shaderModule, testInfo) {
 	}
 
 	const pipeline = device.createComputePipeline({
-		layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
+		layout: device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
 		compute: {
 			module: shaderModule, entryPoint: kernelInfo.name,
 			constants: overrideConsts,
@@ -145,9 +133,7 @@ async function runTest(device, shaderModule, testInfo) {
 		const passEncoder = commandEncoder.beginComputePass();
 		passEncoder.setPipeline(pipeline);
 
-		for (let i = 0; i <= kernelInfo.group; i++) {
-			passEncoder.setBindGroup(i, bgs[i]);
-		}
+		passEncoder.setBindGroup(0, bg);
 
 		passEncoder.dispatchWorkgroups(Math.ceil(length / block_size));
 		passEncoder.end();
