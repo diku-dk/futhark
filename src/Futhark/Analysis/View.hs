@@ -72,7 +72,7 @@ getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
     toExp dim
-getSize _ = error "donk"
+getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
 
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
@@ -135,7 +135,7 @@ forward (E.AppExp (E.Apply f args _) _)
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
       substituteNames subst $ View (Forall i (Iota sz)) body'
   | Just fname <- getFun f,
-    "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
+    "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       sz <- getSize xs'
       xs <- toExp xs'
@@ -151,6 +151,12 @@ forward (E.AppExp (E.Apply f args _) _)
                                      (Not $ Var i :== SoP (SoP.int2SoP 0),
                                       Recurrence `op` Idx xs (Var i))]
       pure $ View (Forall i (Iota sz)) e
+  | Just fname <- getFun f,
+    "iota" == fname,
+    [n] <- getArgs args = do
+      n' <- toExp n
+      i <- newNameFromString "i"
+      pure $ View (Forall i (Iota n')) (Var i)
 forward e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
     e' <- toExp e
     pure $ View Empty e'
