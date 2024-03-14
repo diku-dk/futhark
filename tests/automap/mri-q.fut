@@ -38,4 +38,4 @@ entry main [numK][numX]
          (phiR: [numK]f32) (phiI: [numK]f32) =
   let (qr, qi) = main_orig kx ky kz  x y z phiR phiI
   let (qr_am, qi_am) = main_am kx ky kz  x y z phiR phiI
-  in and (map2 (==) qr qr_am && map2 (==) qi qi_am)
+  in and (qr == qr_am && qi == qi_am)
