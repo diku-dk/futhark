@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.14]
+
+### Added
+
 * The prelude definition of `filter` is now more memory efficient,
   particularly when the output is much smaller than the input. (#2109)
 
@@ -20,10 +30,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   still considered experimental.
 
 * `futhark --version` now reports GHC version.
-
-### Removed
-
-### Changed
 
 ### Fixed
 
