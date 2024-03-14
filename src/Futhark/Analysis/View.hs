@@ -65,15 +65,13 @@ getVarVName :: E.Exp -> Maybe VName
 getVarVName (E.Var (E.QualName [] vn) _ _) = Just vn
 getVarVName _ = Nothing
 
-getSize :: E.Exp -> Exp
+getSize :: E.Exp -> ViewM Exp
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape,
-    Just sz <- toExp dim =
-  sz
+  | dim:_ <- E.shapeDims shape =
+    toExp dim
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
-  | dim:_ <- E.shapeDims shape,
-    Just sz <- toExp dim =
-  sz
+  | dim:_ <- E.shapeDims shape =
+    toExp dim
 getSize _ = error "donk"
 
 stripExp :: E.Exp -> E.Exp
@@ -123,10 +121,10 @@ forward :: E.Exp -> ViewM View
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
-    E.Lambda params body _ _ _ : args' <- getArgs args,
-    Just body' <- toExp body = do
+    E.Lambda params body _ _ _ : args' <- getArgs args = do
+      body' <- toExp body
       i <- newNameFromString "i"
-      let sz = getSize (head args')
+      sz <- getSize (head args')
       -- Make susbtitutions from function arguments to array names.
       let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
@@ -138,9 +136,9 @@ forward (E.AppExp (E.Apply f args _) _)
       substituteNames subst $ View (Forall i (Iota sz)) body'
   | Just fname <- getFun f,
     "scan" `L.isPrefixOf` fname, -- XXX support only builtin ops for now
-    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args,
-    Just xs <- toExp xs' = do
-      let sz = getSize xs'
+    [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
+      sz <- getSize xs'
+      xs <- toExp xs'
       i <- newNameFromString "i"
       op <-
         case E.baseString vn of
@@ -153,17 +151,15 @@ forward (E.AppExp (E.Apply f args _) _)
                                      (Not $ Var i :== SoP (SoP.int2SoP 0),
                                       Recurrence `op` Idx xs (Var i))]
       pure $ View (Forall i (Iota sz)) e
-forward e -- No iteration going on here, e.g., `x = if c then 0 else 1`.
-  | Just e' <- toExp e = do
+forward e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
+    e' <- toExp e
     pure $ View Empty e'
-forward e = do
-    error ("Unhandled exp: " <> prettyString e <> "\n" <> show e)
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
 
-toExp :: E.Exp -> Maybe Exp
+toExp :: E.Exp -> ViewM Exp
 toExp (E.Var (E.QualName _ x) _ _) =
   pure $ Var x
 toExp (E.ArrayLit es _ _) =
@@ -200,6 +196,10 @@ toExp (E.AppExp (E.Apply f args _) _)
     fname == "not",
     [arg] <- getArgs args =
   Not <$> toExp arg
+toExp (E.AppExp (E.LetPat _ (E.Id vn _ _) e1 e2 _) _) = do
+  e1' <- toExp e1
+  e2' <- toExp e2
+  substituteName vn e1' e2'
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
