@@ -69,6 +69,7 @@ data Exp =
   | (:<) Exp Exp
   | (:>) Exp Exp
   | (:&&) Exp Exp
+  | (:||) Exp Exp
   | Cases (NE.NonEmpty (Exp, Exp))
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
@@ -203,6 +204,7 @@ instance ASTMappable Exp where
   astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :|| y) = (:||) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
@@ -298,6 +300,7 @@ instance Pretty Exp where
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
+  pretty (x :|| y) = pretty x <+> "||" <+> pretty y
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where

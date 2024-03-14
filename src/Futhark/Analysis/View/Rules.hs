@@ -138,7 +138,18 @@ normalise view =
       case (x', y') of
         (Bool True, b) -> pure b
         (a, Bool True) -> pure a
+        (Bool False, _) -> pure (Bool False)
+        (_, Bool False) -> pure (Bool False)
         (a, b) -> pure $ a :&& b
+    onExp (x :|| y) = do
+      x' <- onExp x
+      y' <- onExp y
+      case (x', y') of
+        (Bool True, _) -> pure (Bool True)
+        (_, Bool True) -> pure (Bool True)
+        (Bool False, b) -> pure b
+        (a, Bool False) -> pure a
+        (a, b) -> pure $ a :|| b
     onExp x@(SoP _) = do
       x' <- astMap m x
       case x' of

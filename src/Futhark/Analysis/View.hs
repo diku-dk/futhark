@@ -187,10 +187,8 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Equal -> pure $ x :== y
         E.Less -> pure $ x :< y
         E.Greater -> pure $ x :> y
-        -- E.Equal -> pure $ x ~==~ y
-        -- E.Less -> pure $ x ~<~ y
-        -- E.Greater -> pure $ x ~>~ y
         E.LogAnd -> pure $ x :&& y
+        E.LogOr -> pure $ x :|| y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
 toExp (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix i] <- slice = -- XXX support only simple indexing for now
