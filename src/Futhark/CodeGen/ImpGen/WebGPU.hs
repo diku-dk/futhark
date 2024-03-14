@@ -469,12 +469,13 @@ genConstAndBuiltinDecls = do
 
   builtins <- sequence [builtinLockstepWidth, builtinBlockSize]
   let builtinDecls =
-        [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32) | n <- builtins]
+        [WGSL.OverrideDecl n (WGSL.Prim WGSL.Int32)
+         (Just $ WGSL.IntExp 0) | n <- builtins]
 
   let consts = [nameToIdent n | ImpGPU.ConstUse n _ <- ImpGPU.kernelUses kernel]
   moduleNames <- mapM mkGlobalIdent consts
   let constDecls = [WGSL.OverrideDecl (i <> "_x") (WGSL.Prim WGSL.Int32)
-                    | i <- moduleNames]
+                    (Just $ WGSL.IntExp 0) | i <- moduleNames]
   let constInits =
         [WGSL.Seq (WGSL.DeclareVar n (WGSL.Prim wgslInt64))
           (WGSL.Assign n (WGSL.CallExp "i64" [WGSL.VarExp (i <> "_x"),
@@ -482,7 +483,7 @@ genConstAndBuiltinDecls = do
           | (n, i) <- zip consts moduleNames]
 
   let decls = builtinDecls ++ constDecls
-  sequence_ [addOverride n | WGSL.OverrideDecl n _ <- decls]
+  sequence_ [addOverride n | WGSL.OverrideDecl n _ _ <- decls]
   pure (decls, WGSL.stmts constInits)
 
 nameToIdent :: VName -> WGSL.Ident

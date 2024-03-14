@@ -77,7 +77,7 @@ data AddressSpace = Storage AccessMode | Uniform
 data Declaration = FunDecl Function
                  | StructDecl Struct
                  | VarDecl [Attrib] AddressSpace Ident Typ
-                 | OverrideDecl Ident Typ
+                 | OverrideDecl Ident Typ (Maybe Exp)
 
 stmts :: [Stmt] -> Stmt
 stmts [] = Skip
@@ -198,8 +198,11 @@ instance Pretty Declaration where
   pretty (VarDecl attribs as name typ) =
     hsep (map pretty attribs) </>
     "var<" <> pretty as <> ">" <+> pretty name <+> ":" <+> pretty typ <> ";"
-  pretty (OverrideDecl name typ) =
+  pretty (OverrideDecl name typ Nothing) =
     "override" <+> pretty name <+> ":" <+> pretty typ <> ";"
+  pretty (OverrideDecl name typ (Just initial)) =
+    "override" <+> pretty name <+> ":" <+> pretty typ
+      <+> "=" <+> pretty initial <> ";"
 
 prettyDecls :: [Declaration] -> Doc a
 prettyDecls decls = stack (map pretty decls) 
