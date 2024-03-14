@@ -68,6 +68,9 @@ data Exp =
   | (:==) Exp Exp
   | (:<) Exp Exp
   | (:>) Exp Exp
+  | (:/=) Exp Exp
+  | (:>=) Exp Exp
+  | (:<=) Exp Exp
   | (:&&) Exp Exp
   | (:||) Exp Exp
   | Cases (NE.NonEmpty (Exp, Exp))
@@ -203,6 +206,9 @@ instance ASTMappable Exp where
   astMap m (x :== y) = (:==) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :< y) = (:<) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :> y) = (:>) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :/= y) = (:/=) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :>= y) = (:>=) <$> mapOnExp m x <*> mapOnExp m y
+  astMap m (x :<= y) = (:<=) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :|| y) = (:||) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
@@ -299,6 +305,9 @@ instance Pretty Exp where
   pretty (x :== y) = pretty x <+> "==" <+> pretty y
   pretty (x :< y) = pretty x <+> "<" <+> pretty y
   pretty (x :> y) = pretty x <+> ">" <+> pretty y
+  pretty (x :/= y) = pretty x <+> "/=" <+> pretty y
+  pretty (x :>= y) = pretty x <+> ">=" <+> pretty y
+  pretty (x :<= y) = pretty x <+> "<=" <+> pretty y
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
   pretty (x :|| y) = pretty x <+> "||" <+> pretty y
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
@@ -340,3 +349,15 @@ substituteNames substitutions x = do
 
 substituteName :: ASTMappable x => VName -> Exp -> x -> ViewM x
 substituteName vn x = substituteNames (M.singleton vn x)
+
+negateExp :: Exp -> Exp
+negateExp (x :== y) = x :/= y
+negateExp (x :< y) = x :>= y
+negateExp (x :> y) = x :<= y
+negateExp (x :/= y) = x :== y
+negateExp (x :>= y) = x :< y
+negateExp (x :<= y) = x :> y
+negateExp (x :&& y) = negateExp x :|| negateExp y
+negateExp (x :|| y) = negateExp x :&& negateExp y
+negateExp (Not x) = x
+negateExp e = error ("negateExp on " <> prettyString e)
