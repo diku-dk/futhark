@@ -27,16 +27,20 @@ generateTests path prog = do
   pure (tests <> "\n\n" <> info <> "\n\n" <> shader)
 
 shaderLiteral :: Program -> T.Text
-shaderLiteral prog = "const shader = `\n" <> webgpuProgram prog <> "\n`;"
+shaderLiteral prog = "window.shader = `\n"
+  <> webgpuPrelude prog
+  <> "\n"
+  <> webgpuProgram prog
+  <> "\n`;"
 
--- const kernels = [
+-- window.kernels = [
 --   { name: 'some_vname_5568',
 --     overrides: ['override', 'declarations'],
 --     group: 0,
 --   },
 -- ];
 kernelInfoLiteral :: Program -> T.Text
-kernelInfoLiteral prog = "const kernels = " <> docText fmtInfos <> ";"
+kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
   where
     infos = M.toList $ webgpuKernelInfo prog
     fmtInfos = "[" </> indent 2 (commastack $ map fmtInfo infos) </> "]"
@@ -48,7 +52,7 @@ kernelInfoLiteral prog = "const kernels = " <> docText fmtInfos <> ";"
         </> "group: " <> pretty group <> ","
       ) </> "}"
 
--- const tests = [
+-- window.tests = [
 --   { entry: 'someName',
 --     runs: [
 --       {
@@ -62,7 +66,7 @@ kernelInfoLiteral prog = "const kernels = " <> docText fmtInfos <> ";"
 testCasesLiteral :: ProgramTest -> T.Text
 testCasesLiteral (ProgramTest _ _ (RunCases ios _ _)) =
   let specs = map ((<> ",\n") . prettyText . mkTestSpec) ios
-   in "const tests = [\n" <> foldl' (<>) "" specs <> "];"
+   in "window.tests = [\n" <> foldl' (<>) "" specs <> "];"
 testCasesLiteral t = "// Unsupported test: " <> testDescription t
 
 data JsTestSpec = JsTestSpec 
@@ -88,7 +92,7 @@ mkRun _ = Nothing
 instance Pretty JsTestRun where
   pretty (JsTestRun typs input expected) =
     "{" </> indent 2 (
-      "type: ["
+      "inputTypes: ["
         <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'") typs)
         <> "],"
       </> "input: " <> fmt input <> ","
