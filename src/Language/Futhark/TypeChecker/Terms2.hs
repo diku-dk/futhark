@@ -816,14 +816,14 @@ instance Pretty (Unmatched (Pat StructType)) where
 checkRetDecl ::
   Exp ->
   Maybe (TypeExp (ExpBase NoInfo VName) VName) ->
-  TermM (Maybe (TypeExp Exp VName))
-checkRetDecl _ Nothing = pure Nothing
+  TermM (Type, Maybe (TypeExp Exp VName))
+checkRetDecl body Nothing = (,Nothing) <$> expType body
 checkRetDecl body (Just te) = do
   (te', _, RetType _ st, _) <- checkTypeExp checkSizeExp' te
   body_t <- expType body
   st' <- asType st
   ctEq (Reason (locOf body)) body_t st'
-  pure $ Just te'
+  pure (second (const NoUniqueness) st', Just te')
 
 checkExp :: ExpBase NoInfo VName -> TermM (ExpBase Info VName)
 --
@@ -1020,10 +1020,9 @@ checkExp (ProjectSection fields NoInfo loc) = do
 checkExp (Lambda params body retdecl NoInfo loc) = do
   bindParams [] params $ \params' -> do
     body' <- checkExp body
-    body_t <- expType body'
 
+    (body_t, retdecl') <- checkRetDecl body' retdecl
     body_t' <- asStructType body_t
-    retdecl' <- checkRetDecl body' retdecl
     let ret = RetType [] $ toRes Nonunique body_t'
     pure $ Lambda params' body' retdecl' (Info ret) loc
 --
@@ -1045,8 +1044,7 @@ checkExp (AppExp (LetFun name (tparams, params, retdecl, NoInfo, e) body loc) _)
   (tparams', params', retdecl', rettype, e') <-
     bindParams tparams params $ \params' -> do
       e' <- checkExp e
-      e_t <- expType e'
-      retdecl' <- checkRetDecl e' retdecl
+      (e_t, retdecl') <- checkRetDecl e' retdecl
       pure (tparams, params', retdecl', fmap (const Nonunique) e_t, e')
 
   params'' <- mapM (traverse asType) params'
@@ -1313,7 +1311,7 @@ checkValDef (fname, retdecl, tparams, params, body, loc) = runTermM $ do
   (params', body', retdecl') <-
     bindParams tparams params $ \params' -> do
       body' <- checkExp body
-      retdecl' <- checkRetDecl body' retdecl
+      (_, retdecl') <- checkRetDecl body' retdecl
       pure (params', body', retdecl')
 
   cts <- gets termConstraints
