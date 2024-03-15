@@ -440,31 +440,32 @@ instTyVars loc names orig_t1 orig_t2 = do
 
   evalStateT (f orig_t1 orig_t2) mempty
 
--- | Instantiate a type scheme with fresh size variables for its size
--- parameters. Replaces type parameters with their known
--- instantiations. Returns the names of the fresh size variables and
--- the instantiated type.
+-- | Instantiate a type scheme with fresh variables for its size and
+-- type parameters. Returns the names of the fresh size and type
+-- variables and the instantiated type.
 instTypeScheme ::
   QualName VName ->
   SrcLoc ->
   [TypeParam] ->
   StructType ->
-  TypeBase () NoUniqueness ->
   TermTypeM ([VName], StructType)
-instTypeScheme qn loc tparams scheme_t inferred = do
-  (names, substs) <- fmap (unzip . catMaybes) . forM tparams $ \tparam -> do
+instTypeScheme qn loc tparams scheme_t = do
+  (names, substs) <- fmap unzip . forM tparams $ \tparam -> do
     case tparam of
-      TypeParamType {} -> pure Nothing
+      TypeParamType l v _ -> do
+        i <- incCounter
+        v' <- newID $ mkTypeVarName (baseName v) i
+        constrain v' . NoConstraint l . mkUsage loc . docText $
+          "instantiated type parameter of " <> dquotes (pretty qn)
+        pure (v', (v, Subst [] $ RetType [] $ Scalar $ TypeVar mempty (qualName v') []))
       TypeParamDim v _ -> do
         i <- incCounter
         v' <- newID $ mkTypeVarName (baseName v) i
         constrain v' . Size Nothing . mkUsage loc . docText $
           "instantiated size parameter of " <> dquotes (pretty qn)
-        pure $ Just (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
+        pure (v', (v, ExpSubst $ sizeFromName (qualName v') loc))
 
-  let tp_names = map typeParamName $ filter isTypeParam tparams
-  t' <- instTyVars loc tp_names inferred $ applySubst (`lookup` substs) scheme_t
-  pure (names, t')
+  pure (names, applySubst (`lookup` substs) scheme_t)
 
 lookupQualNameEnv :: QualName VName -> TermTypeM TermScope
 lookupQualNameEnv (QualName [q] _)
@@ -541,7 +542,7 @@ lookupVar loc qn@(QualName qs name) inst_t = do
       if null tparams && null qs
         then pure bound_t
         else do
-          (tnames, t) <- instTypeScheme qn loc tparams bound_t $ first (const ()) inst_t
+          (tnames, t) <- instTypeScheme qn loc tparams bound_t
           outer_env <- asks termOuterEnv
           pure $ qualifyTypeVars outer_env tnames qs t
     Just EqualityF ->
