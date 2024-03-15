@@ -197,7 +197,9 @@ linkTyVar reason v t = do
   modify $ \s -> s {solverTyVars = M.insert v (TyVarLink t) $ solverTyVars s}
   tyvars' <-
     case (M.lookup v tyvars, M.lookup t tyvars) of
-      (Just (TyVarUnsol _ info), Just (TyVarUnsol lvl (TyVarFree _))) ->
+      (Just (TyVarUnsol _ info), Just (TyVarUnsol lvl TyVarFree {})) ->
+        pure $ M.insert t (TyVarUnsol lvl info) tyvars
+      (Just (TyVarUnsol _ info@TyVarPrim {}), Just (TyVarUnsol lvl TyVarEql {})) ->
         pure $ M.insert t (TyVarUnsol lvl info) tyvars
       -- TODO: handle more cases.
       _ -> pure tyvars
