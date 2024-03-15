@@ -176,8 +176,9 @@ checkPat' sizes (PatAscription p t loc) maybe_outer_t = do
         <$> checkPat' sizes p (Ascribed (resToParam st))
         <*> pure t'
         <*> pure loc
-checkPat' _ (PatLit l info loc) _ =
-  pure $ PatLit l info loc
+checkPat' _ (PatLit l (Info t) loc) _ = do
+  t' <- replaceTyVars loc t
+  pure $ PatLit l (Info t') loc
 checkPat' sizes (PatConstr n info ps loc) NoneInferred = do
   ps' <- mapM (\p -> checkPat' sizes p NoneInferred) ps
   pure $ PatConstr n info ps' loc
