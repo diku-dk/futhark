@@ -72,10 +72,17 @@ getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
     toExp dim
+-- XXX Don't do this. Create a view for the argument that getSize was called on.
+-- getSize (E.AppExp (E.Apply {}) res)
+--   | E.Array _ _ shp _ <- E.appResType . E.unInfo $ res =
+--     toExp . head . E.shapeDims $ shp
 getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
 
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
+
+toCases :: Exp -> Cases Exp
+toCases e = Cases (NE.fromList [(Bool True, e)])
 
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
@@ -84,22 +91,26 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView <- forward e
     traceM . show $ newView
     tracePrettyM newView
-    traceM "🎭 hoisting cases"
-    newView1 <- hoistCases newView >>= normalise
+    traceM "💿 normalise"
+    newView1 <- normalise newView
     tracePrettyM newView1
-    newView2 <- substituteViews newView1
-    tracePrettyM newView2
-    traceM "🎭 hoisting cases"
-    newView3 <- hoistCases newView2 >>= normalise
-    tracePrettyM newView3
-    newView4 <- normalise (simplify newView3)
-    tracePrettyM newView4
-    newView5 <- rewrite newView4 >>= normalise
-    tracePrettyM newView5
-    newView6 <- refineView newView5 >>= normalise
-    tracePrettyM newView6
+    -- newView6 <- substituteViews newView
+    -- traceM "🎭 hoisting cases"
+    -- newView1 <- hoistCases newView >>= normalise
+    -- tracePrettyM newView1
+    -- newView2 <- substituteViews newView1
+    -- tracePrettyM newView2
+    -- traceM "🎭 hoisting cases"
+    -- newView3 <- hoistCases newView2 >>= normalise
+    -- tracePrettyM newView3
+    -- newView4 <- normalise (simplify newView3)
+    -- tracePrettyM newView4
+    -- newView5 <- rewrite newView4 >>= normalise
+    -- tracePrettyM newView5
+    -- newView6 <- refineView newView5 >>= normalise
+    -- tracePrettyM newView6
     traceM "\n"
-    insertView x newView6
+    insertView x newView1
     forwards body
     pure ()
 forwards _ = pure ()
@@ -124,6 +135,10 @@ forward (E.AppExp (E.Apply f args _) _)
     E.Lambda params body _ _ _ : args' <- getArgs args = do
       body' <- toExp body
       i <- newNameFromString "i"
+      -- TODO Right now we only support variables as arguments.
+      -- Add support for any expression by creating views for function
+      -- applications. Literals also need to be handled.
+      -- After this, maybe don't use mapMaybe in arrs below.
       sz <- getSize (head args')
       -- Make susbtitutions from function arguments to array names.
       let arrs = mapMaybe getVarVName args'
@@ -133,7 +148,8 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      substituteNames subst $ View (Forall i (Iota sz)) body'
+      let body'' = hoistIf body'
+      substituteNames subst $ View (Forall i (Iota sz)) body''
   | Just fname <- getFun f,
     "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -156,10 +172,10 @@ forward (E.AppExp (E.Apply f args _) _)
     [n] <- getArgs args = do
       n' <- toExp n
       i <- newNameFromString "i"
-      pure $ View (Forall i (Iota n')) (Var i)
+      pure $ View (Forall i (Iota n')) (toCases $ Var i)
 forward e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
     e' <- toExp e
-    pure $ View Empty e'
+    pure $ View Empty (hoistIf e')
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -171,11 +187,8 @@ toExp (E.Var (E.QualName _ x) _ _) =
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
-toExp (E.AppExp (E.If c t f _) _) = do
-  c' <- toExp c
-  t' <- toExp t
-  f' <- toExp f
-  pure $ Cases (NE.fromList [(c', t'), (Not c', f')])
+toExp (E.AppExp (E.If c t f _) _) =
+ If <$> toExp c <*> toExp t <*> toExp f
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -189,6 +202,7 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.Equal -> pure $ x :== y
         E.Less -> pure $ x :< y
         E.Greater -> pure $ x :> y
+        E.Leq -> pure $ x :<= y
         E.LogAnd -> pure $ x :&& y
         E.LogOr -> pure $ x :|| y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
@@ -201,7 +215,7 @@ toExp (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     fname == "not",
     [arg] <- getArgs args =
-  Not <$> toExp arg
+  toNNF . Not <$> toExp arg
 toExp (E.AppExp (E.LetPat _ (E.Id vn _ _) e1 e2 _) _) = do
   e1' <- toExp e1
   e2' <- toExp e2

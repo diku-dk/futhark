@@ -60,6 +60,7 @@ data Exp =
       Exp         -- array
       Exp         -- index
   | SoP (SoP Exp)
+  | If Exp Exp Exp
   | Indicator Exp -- predicate (the corresponding value of 0 or 1 is implicit)
   | -- Predicate expressions follow here for simplicity.
     -- I'm assuming it's safe because the source program was typechecked.
@@ -75,7 +76,6 @@ data Exp =
   | (:<=) Exp Exp
   | (:&&) Exp Exp
   | (:||) Exp Exp
-  | Cases (NE.NonEmpty (Exp, Exp))
   | -- Keep Recurrence last for ordering in Ord; we depend
     -- on this for Rule matching.
     Recurrence -- self-reference y[i-1]
@@ -112,10 +112,13 @@ instance Eq Iterator where
 -- newtype Cases a = Cases (NE.NonEmpty (a, a)) -- [predicate => value]
 --   deriving (Show, Eq, Ord)
 
+newtype Cases a = Cases (NE.NonEmpty (a, a))
+  deriving (Show, Eq)
+
 -- TODO add "bottom" for failure?
 data View = View
   { iterator :: Iterator,
-    value :: Exp
+    value :: Cases Exp
     -- shape :: Maybe Shape -- Might make sense to use this.
   }
   deriving (Show, Eq)
@@ -174,8 +177,8 @@ instance ASTMappable View where
   astMap m (View (Forall i dom) e) = View (Forall i dom) <$> astMap m e
   astMap m (View Empty e) = View Empty <$> astMap m e
 
--- instance ASTMappable (Cases Exp) where
---   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
+instance ASTMappable (Cases Exp) where
+  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 -- instance ASTMappable [Exp] where
 --   astMap m = map (mapOnExp m)
@@ -190,7 +193,7 @@ instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnExp m $ Var x
   astMap m (Array ts) = Array <$> traverse (mapOnExp m) ts
-  -- astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
+  astMap m (If c t f) = If <$> mapOnExp m c <*> mapOnExp m t <*> mapOnExp m f
   astMap m (Sum i lb ub e) = Sum <$> mapOnExp m i <*> mapOnExp m lb <*> mapOnExp m ub <*> mapOnExp m e
   astMap m (Idx xs i) = Idx <$> mapOnExp m xs <*> mapOnExp m i
   astMap m (SoP sop) = do
@@ -213,7 +216,6 @@ instance ASTMappable Exp where
   astMap m (x :<= y) = (:<=) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :&& y) = (:&&) <$> mapOnExp m x <*> mapOnExp m y
   astMap m (x :|| y) = (:||) <$> mapOnExp m x <*> mapOnExp m y
-  astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
 idMap :: (ASTMappable a) => ASTMapper Identity -> a -> a
 idMap m = runIdentity . astMap m
@@ -291,13 +293,13 @@ instance Pretty Exp where
       <> "∈"
       <> brackets (commasep [pretty lb, "...", pretty ub])
       <+> parens (pretty e)
-  -- pretty (If c t f) =
-  --   "If"
-  --     <+> parens (pretty c)
-  --     <+> "then"
-  --     <+> parens (pretty t)
-  --     <+> "else"
-  --     <+> parens (pretty f)
+  pretty (If c t f) =
+    "If"
+      <+> parens (pretty c)
+      <+> "then"
+      <+> parens (pretty t)
+      <+> "else"
+      <+> parens (pretty f)
   pretty (SoP sop) = pretty sop
   pretty (Indicator p) = iversonbrackets (pretty p)
     where
@@ -312,6 +314,8 @@ instance Pretty Exp where
   pretty (x :<= y) = pretty x <+> "<=" <+> pretty y
   pretty (x :&& y) = pretty x <+> "&&" <+> pretty y
   pretty (x :|| y) = pretty x <+> "||" <+> pretty y
+
+instance Pretty a => Pretty (Cases a) where
   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
     where
@@ -352,14 +356,11 @@ substituteNames substitutions x = do
 substituteName :: ASTMappable x => VName -> Exp -> x -> ViewM x
 substituteName vn x = substituteNames (M.singleton vn x)
 
-negateExp :: Exp -> Exp
-negateExp (x :== y) = x :/= y
-negateExp (x :< y) = x :>= y
-negateExp (x :> y) = x :<= y
-negateExp (x :/= y) = x :== y
-negateExp (x :>= y) = x :< y
-negateExp (x :<= y) = x :> y
-negateExp (x :&& y) = negateExp x :|| negateExp y
-negateExp (x :|| y) = negateExp x :&& negateExp y
-negateExp (Not x) = x
-negateExp e = error ("negateExp on " <> prettyString e)
+-- Convert expression to Negation Normal Form.
+toNNF :: Exp -> Exp
+toNNF (Not (Not x)) = x
+toNNF (Not (Bool True)) = Bool False
+toNNF (Not (Bool False)) = Bool True
+toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
+toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
+toNNF x = x
