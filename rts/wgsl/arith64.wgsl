@@ -3,6 +3,7 @@
 alias i64 = vec2<i32>; // (low, high)
 
 const zero_i64: i64 = i64(0, 0); 
+const one_i64: i64 = i64(1, 0);
 
 fn add_i64(a: i64, b: i64) -> i64 {
   // return bitcast<i64>(add_u64(bitcast<u64>(a), bitcast<u64>(b)));
@@ -12,7 +13,7 @@ fn add_i64(a: i64, b: i64) -> i64 {
 }
 
 fn neg_i64(a: i64) -> i64 {
-  return add_i64(-a, i64(1, 0));
+  return add_i64(-a, one_i64);
 }
 
 fn sub_i64(a: i64, b: i64) -> i64 {
@@ -96,6 +97,22 @@ fn ashr_i64(a: i64, b_full: i64) -> i64 {
 
   let shifted_over = a.y << (32 - b);
   return i64(lshr_i32(a.x, bitcast<i32>(b)) | shifted_over, a.y >> b);
+}
+
+fn pow_i64(a_p: i64, b: i64) -> i64 {
+  var a = a_p;
+  var res: i64 = one_i64;
+  var rem: i64 = b;
+
+  while !eq_i64(rem, zero_i64) {
+    if !eq_i64(rem & one_i64, zero_i64) {
+      res = mul_i64(res, a);
+    }
+    rem = ashr_i64(rem, one_i64);
+    a = mul_i64(a, a);
+  }
+
+  return res;
 }
 
 fn eq_i64(a: i64, b: i64) -> bool {
