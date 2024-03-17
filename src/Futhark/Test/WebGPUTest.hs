@@ -99,10 +99,15 @@ instance Pretty JsTestRun where
       </> "expected: " <> fmt expected <> ","
     ) </> "}"
     where
+      fmtVal :: V.PrimType -> V.Value -> Doc ann
+      fmtVal V.I64 v = pretty v <> "n"
+      fmtVal typ v = pretty v
+      fmtArrRaw typ vs = "[" <> commasep (map (fmtVal typ) vs) <> "]"
       -- Hacky way to avoid the 'i32', 'i64' etc. suffixes as they are not valid
       -- JS.
-      fmtArr typ vs = pretty $ T.replace (V.primTypeText typ) "" (prettyText vs)
-      fmt vss = "[" <> commasep (zipWith fmtArr typs vss) <> "]"
+      fixAnnots typ d = pretty $ T.replace (V.primTypeText typ) "" (prettyText d)
+      fmtArray typ vs = fixAnnots typ $ fmtArrRaw typ vs
+      fmt vss = "[" <> commasep (zipWith fmtArray typs vss) <> "]"
 
 instance Pretty JsTestSpec where
   pretty (JsTestSpec entry runs) =
