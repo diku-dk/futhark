@@ -343,6 +343,9 @@ unscopeType tloc unscoped =
   sizeFree tloc $ find (`elem` unscoped) . fvVars . freeInExp
 
 checkExp :: Exp -> TermTypeM Exp
+checkExp (Var qn (Info t) loc) = do
+  t' <- lookupVar loc qn t
+  pure $ Var qn (Info t') loc
 checkExp (Literal val loc) =
   pure $ Literal val loc
 checkExp (Hole (Info t) loc) = do
@@ -363,8 +366,9 @@ checkExp (RecordLit fs loc) =
   where
     checkField (RecordFieldExplicit f e rloc) =
       RecordFieldExplicit f <$> checkExp e <*> pure rloc
-    checkField (RecordFieldImplicit name (Info t) rloc) =
-      RecordFieldImplicit name <$> (Info <$> replaceTyVars rloc t) <*> pure rloc
+    checkField (RecordFieldImplicit name (Info t) rloc) = do
+      t' <- lookupVar rloc (qualName name) t
+      pure $ RecordFieldImplicit name (Info t') rloc
 checkExp (ArrayLit all_es _ loc) =
   -- Construct the result type and unify all elements with it.  We
   -- only create a type variable for empty arrays; otherwise we use
@@ -540,9 +544,6 @@ checkExp (QualParens (modname, modnameloc) e loc) = do
     ModFun {} ->
       typeError loc mempty . withIndexLink "module-is-parametric" $
         "Module" <+> pretty modname <+> " is a parametric module."
-checkExp (Var qn (Info t) loc) = do
-  t' <- lookupVar loc qn t
-  pure $ Var qn (Info t') loc
 checkExp (Negate arg loc) = do
   arg' <- checkExp arg
   pure $ Negate arg' loc
