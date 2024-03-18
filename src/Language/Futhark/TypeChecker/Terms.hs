@@ -770,6 +770,11 @@ checkExp (OpSectionRight op (Info op_t) e (_, Info (_, _, _, am)) _ loc) = do
         "Operator section with invalid operator of type" <+> pretty ftype
 checkExp (ProjectSection fields (Info t) loc) = do
   t' <- replaceTyVars loc t
+  case t' of
+    Scalar (Arrow _ _ _ t'' (RetType _ rt))
+      | Just ft <- recordField fields t'' ->
+          unify (mkUsage loc "result of projection") ft $ toStruct rt
+    _ -> error $ "checkExp ProjectSection: " <> show t'
   pure $ ProjectSection fields (Info t') loc
 checkExp (IndexSection slice _ loc) = do
   slice' <- checkSlice slice

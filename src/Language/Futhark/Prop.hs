@@ -57,6 +57,7 @@ module Language.Futhark.Prop
     foldFunType,
     typeVars,
     isAccType,
+    recordField,
 
     -- * Operations on types
     peelArray,
@@ -250,6 +251,14 @@ diet (Scalar (Arrow {})) = Observe
 diet (Array d _ _) = d
 diet (Scalar (TypeVar d _ _)) = d
 diet (Scalar (Sum cs)) = foldl max Observe $ foldMap (map diet) cs
+
+-- | Look up this record field if it exists.
+recordField :: [Name] -> TypeBase dim u -> Maybe (TypeBase dim u)
+recordField [] t = Just t
+recordField (f : fs) (Scalar (Record fts))
+  | Just ft <- M.lookup f fts =
+      recordField fs ft
+recordField _ _ = Nothing
 
 -- | Convert any type to one that has rank information, no alias
 -- information, and no embedded names.
