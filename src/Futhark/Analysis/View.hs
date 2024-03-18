@@ -13,9 +13,12 @@ import Language.Futhark.Semantic
 import Language.Futhark (VName)
 import Language.Futhark qualified as E
 import qualified Data.Map as M
-import Debug.Trace (traceM)
+import Debug.Trace (traceM, trace)
 import qualified Data.Set as S
 import Futhark.Analysis.View.Rules
+import Language.Futhark.Traversals qualified as T
+import Data.Functor.Identity
+import Control.Monad.RWS.Strict hiding (Sum)
 
 
 --------------------------------------------------------------
@@ -116,6 +119,56 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
 forwards _ = pure ()
 
 
+-- forward on part2indices:
+--
+-- let tflgs = map (\c -> if c then 1 else 0) conds
+-- let fflgs = map (\ b -> 1 - b) tflgs
+-- let indsT = scan (+) 0 tflgs
+--
+-- tflgs:
+--   0. Create iterator and transform expression to use it:
+--       map (\i -> if conds[i] then 1 else 0) (iota n)
+--   1. iota n . | true => 1
+--      (Note how iterator is propagated here.)
+--   2. iota n . | true => 0
+--   3. Use map rule:
+--      iota n . | conds[i] => 1 | not conds[i] => 0
+-- 	 conds is an argument; no substitution:
+--      Rewrite:
+--      iota n . | true => [[conds[i]]]
+--
+-- fflgs:
+--   0. Create iterator and transform expression to use it:
+--       map (\i -> 1 - tflgs[i]) (iota n)
+--   1. iota n . | true => 1 - tflgs[i]
+--      Substitute tflgs:
+--      iota n . | true => 1 - [[conds[i]]]
+--      Rewrite:
+--      iota n . | true => [[not conds[i]]]
+--
+-- indsT:
+--   1. iota n . | % + tflgs[i]
+--      Substitute tflgs:
+--      iota n . | % + [[conds[i]]]
+-- 	 Use scan rule:
+--      iota n . | i == 0 => [[conds[i]]]
+-- 	          | i != 0 => % + [[conds[i]]]
+-- 	 Rewrite:
+--      iota n . | true => Sum j 0 i [[conds[j]]]
+
+
+combineIt Empty it = it
+combineIt it Empty = it
+combineIt (Forall i dom_i) (Forall j dom_j)
+  | dom_i == dom_j =
+      Forall i dom_i
+combineIt _ _ = undefined
+
+combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
+combineCases f (Cases xs) (Cases ys) =
+  Cases . NE.fromList $
+    [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
+
 -- Apply
 --   (ExpBase f vn)
 --   (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
@@ -129,11 +182,25 @@ forwards _ = pure ()
 --  the first of which will be the map lambda (or function)
 --  and the rest are the arrays being mapped over
 forward :: E.Exp -> ViewM View
+forward e@(E.Var (E.QualName _ vn) _ _) = do
+  views <- gets views
+  case M.lookup vn views of
+    Just (View it e2) -> do
+      traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
+      pure $ View it e2
+    _ ->
+      pure $ View Empty (toCases $ Var vn)
+forward (E.AppExp (E.Index xs slice _) _)
+  | [E.DimFix i] <- slice = do -- XXX support only simple indexing for now
+    View it_i i' <- forward i
+    View it_xs xs' <- forward xs
+    pure $ View (combineIt it_i it_xs) (combineCases Idx xs' i')
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
-      body' <- toExp body
+      traceM ("##### body: " <> show body)
+      -- 0. Create iterator and transform expression to use it
       i <- newNameFromString "i"
       -- TODO Right now we only support variables as arguments.
       -- Add support for any expression by creating views for function
@@ -141,15 +208,25 @@ forward (E.AppExp (E.Apply f args _) _)
       -- After this, maybe don't use mapMaybe in arrs below.
       sz <- getSize (head args')
       -- Make susbtitutions from function arguments to array names.
-      let arrs = mapMaybe getVarVName args'
+      -- let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
-      let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      let body'' = hoistIf body'
-      substituteNames subst $ View (Forall i (Iota sz)) body''
+      -- let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
+      let subst = M.fromList (zip params'' (map (`index` i) args'))
+      body' <- transformNames subst body
+      -- traceM $ "#### subst: " <> show subst
+      -- traceM $ "#### body transformed: " <> show body'
+      View it_body body'' <- forward body'
+      let it = combineIt (Forall i (Iota sz)) it_body
+      pure $ View it body''
+
+      -- let scope' = scope <> M.fromList (zip params'' (map (i,) arrs))
+      -- View it_body body' <- forward scope' body
+      -- let it = combineIt (Forall i (Iota sz)) it_body
+      -- pure $ View it body'
   | Just fname <- getFun f,
     "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -173,9 +250,10 @@ forward (E.AppExp (E.Apply f args _) _)
       n' <- toExp n
       i <- newNameFromString "i"
       pure $ View (Forall i (Iota n')) (toCases $ Var i)
-forward e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
-    e' <- toExp e
-    pure $ View Empty (hoistIf e')
+forward e = error $ "forward on " <> show e
+-- forward scope e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
+--     e' <- toExp e
+--     pure $ View Empty (hoistIf e')
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -226,3 +304,48 @@ toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
 toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
 toExp (E.Literal (E.BoolValue x) _) = pure $ Bool x
 toExp e = error ("toExp not implemented for: " <> show e)
+
+index :: E.Exp -> E.VName -> E.Exp
+index xs i =
+  E.AppExp (E.Index xs [E.DimFix i'] mempty) (E.Info $ E.AppRes (E.typeOf xs) [])
+  where
+    i' = E.Var (E.QualName [] i) (E.Info . E.Scalar . E.Prim . E.Signed $ E.Int64) mempty
+
+-- AppExp (
+-- Index
+--   (Var (QualName {qualQuals = [], qualLeaf = VName (Name "conds") 6070})
+--        (Info {unInfo = Array (fromList [AliasBound {aliasVar = VName (Name "conds") 6070}]) Nonunique (Shape {shapeDims = [Var (QualName {qualQuals = [], qualLeaf = VName (Name "n") 6068}) (Info {unInfo = Scalar (Prim (Signed Int64))}) noLoc]}) (Prim Bool)})
+--        noLoc)
+--   [DimFix (Var (QualName {qualQuals = [], qualLeaf = VName (Name "i") 6086})
+--                  (Info {unInfo = Scalar (Prim (Signed Int64))})
+--                  noLoc)]
+--   noLoc)
+--   (Info {unInfo = AppRes {appResType = Scalar (Prim Bool), appResExt = []}})
+
+
+-- Not to be confused with substituteNames lmao.
+transformNames :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
+transformNames = onExp
+  where
+    substituter subst =
+      T.ASTMapper
+        { T.mapOnExp = onExp subst,
+          T.mapOnName = pure,
+          T.mapOnStructType = T.astMap (substituter subst),
+          T.mapOnPatType = T.astMap (substituter subst),
+          T.mapOnStructRetType = T.astMap (substituter subst),
+          T.mapOnPatRetType = T.astMap (substituter subst)
+        }
+      -- T.identityMapper
+      --   { T.mapOnExp = onExp subst }
+    onExp :: M.Map VName E.Exp -> E.ExpBase E.Info VName -> ViewM (E.ExpBase E.Info VName)
+    onExp subst e@(E.Var (E.QualName _ x) _ _) =
+      case M.lookup x subst of
+        -- Just x' -> trace ("hihi substituting " <> prettyString x <> " for " <> prettyString x') $ pure x'
+        -- Nothing -> error $ show e
+        Just x' -> pure x'
+        Nothing -> pure e
+    onExp subst e = T.astMap (substituter subst) e
+
+-- transformName :: T.ASTMappable a => VName -> E.Exp -> a -> ViewM a
+-- transformName vn x = transformNames (M.singleton vn x)
