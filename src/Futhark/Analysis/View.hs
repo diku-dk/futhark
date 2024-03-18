@@ -81,8 +81,8 @@ getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
--- toCases :: Exp -> Cases Exp
--- toCases e = Cases (NE.fromList [(Bool True, e)])
+toCases :: Exp -> Cases Exp
+toCases e = Cases (NE.fromList [(Bool True, e)])
 
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
@@ -92,17 +92,17 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     traceM . show $ newView
     tracePrettyM newView
     traceM "💿 normalise"
-    newView0 <- normalise newView
-    -- tracePrettyM newView1
-    -- newView2 <- substituteViews newView1 >>= normalise
-    traceM "🎭 hoisting cases"
-    newView1 <- hoistCases newView0 >>= normalise
+    newView1 <- normalise newView
     tracePrettyM newView1
-    newView2 <- substituteViews newView1
-    tracePrettyM newView2
-    traceM "🎭 hoisting cases"
-    newView3 <- hoistCases newView2 >>= normalise
-    tracePrettyM newView3
+    -- newView6 <- substituteViews newView
+    -- traceM "🎭 hoisting cases"
+    -- newView1 <- hoistCases newView >>= normalise
+    -- tracePrettyM newView1
+    -- newView2 <- substituteViews newView1
+    -- tracePrettyM newView2
+    -- traceM "🎭 hoisting cases"
+    -- newView3 <- hoistCases newView2 >>= normalise
+    -- tracePrettyM newView3
     -- newView4 <- normalise (simplify newView3)
     -- tracePrettyM newView4
     -- newView5 <- rewrite newView4 >>= normalise
@@ -110,7 +110,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     -- newView6 <- refineView newView5 >>= normalise
     -- tracePrettyM newView6
     traceM "\n"
-    insertView x newView3
+    insertView x newView1
     forwards body
     pure ()
 forwards _ = pure ()
@@ -148,7 +148,8 @@ forward (E.AppExp (E.Apply f args _) _)
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
-      substituteNames subst $ View (Forall i (Iota sz)) body'
+      let body'' = hoistIf body'
+      substituteNames subst $ View (Forall i (Iota sz)) body''
   | Just fname <- getFun f,
     "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
@@ -171,10 +172,10 @@ forward (E.AppExp (E.Apply f args _) _)
     [n] <- getArgs args = do
       n' <- toExp n
       i <- newNameFromString "i"
-      pure $ View (Forall i (Iota n')) (Var i)
+      pure $ View (Forall i (Iota n')) (toCases $ Var i)
 forward e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
     e' <- toExp e
-    pure $ View Empty e'
+    pure $ View Empty (hoistIf e')
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -186,12 +187,8 @@ toExp (E.Var (E.QualName _ x) _ _) =
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
-toExp (E.AppExp (E.If c t f _) _) = do
- -- If <$> toExp c <*> toExp t <*> toExp f
-  c' <- toExp c
-  t' <- toExp t
-  f' <- toExp f
-  pure $ Cases (NE.fromList [(c', t'), (toNNF (Not c'), f')])
+toExp (E.AppExp (E.If c t f _) _) =
+ If <$> toExp c <*> toExp t <*> toExp f
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
