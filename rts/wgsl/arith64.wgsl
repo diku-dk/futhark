@@ -13,7 +13,7 @@ fn add_i64(a: i64, b: i64) -> i64 {
 }
 
 fn neg_i64(a: i64) -> i64 {
-  return add_i64(-a, one_i64);
+  return add_i64(~a, one_i64);
 }
 
 fn sub_i64(a: i64, b: i64) -> i64 {
