@@ -1,3 +1,26 @@
+function typeSize(type) {
+	if (type == 'i32') { return 4; }
+	else if (type == 'i64') { return 8; }
+	else throw "unsupported type";
+}
+
+function toTypedArray(array, type) {
+	if (type == 'i32') {
+		return new Int32Array(array);
+	}
+	else if (type == 'i64') {
+		const dest = new Int32Array(array.length * 2);
+		for (let i = 0; i < array.length; i++) {
+			dest[i*2] = Number(BigInt.asIntN(32,
+				array[i] & 0xffffffffn));
+			dest[i*2+1] = Number(BigInt.asIntN(32,
+				(array[i] >> 32n) & 0xffffffffn));
+		}
+		return dest;
+	}
+	else throw "unsupported type";
+}
+
 async function runTest(device, shaderModule, testInfo) {
 	// Find kernel corresponding to entry.
 	let kernelInfo = undefined;
@@ -17,11 +40,7 @@ async function runTest(device, shaderModule, testInfo) {
 	// Create input buffers.
 	let inputBuffers = [];
 	for (let i = 0; i < templateRun.input.length; i++) {
-		if (templateRun.inputTypes[i] != "i32") {
-			console.error("Only i32 supported atm.");
-			return;
-		}
-		const inputElemSize = 4;
+		const inputElemSize = typeSize(templateRun.inputTypes[i]);
 		
 		// Find maximum required size for buffer.
 		let maxLength = 0;
@@ -46,12 +65,16 @@ async function runTest(device, shaderModule, testInfo) {
 		}
 	}
 
+	// TODO: This is not always true.
+	const outputType = templateRun.inputTypes[0];
+	const outputElemSize = typeSize(outputType);
+
 	let outputBuffer = device.createBuffer({
-		size: maxLength * 4, // TODO: elem size
+		size: maxLength * outputElemSize,
 		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 
 	});
 	let stagingBuffer = device.createBuffer({
-		size: maxLength * 4, // TODO: elem size
+		size: maxLength * outputElemSize,
 		usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST, 
 	});
 
@@ -122,10 +145,9 @@ async function runTest(device, shaderModule, testInfo) {
 
 		for (let i = 0; i < run.input.length; i++) {
 			const input = run.input[i];
-			let hInput = new Int32Array(input.length);
-			for (let j = 0; j < input.length; j++) {
-				hInput[j] = input[j];
-			}
+			const inputType = run.inputTypes[i];
+
+			let hInput = toTypedArray(input, inputType);
 			device.queue.writeBuffer(inputBuffers[i], 0, hInput, 0);
 		}
 
@@ -138,18 +160,20 @@ async function runTest(device, shaderModule, testInfo) {
 		passEncoder.dispatchWorkgroups(Math.ceil(length / block_size));
 		passEncoder.end();
 		commandEncoder.copyBufferToBuffer(
-			outputBuffer, 0, stagingBuffer, 0, length * 4);
+			outputBuffer, 0, stagingBuffer, 0, length * outputElemSize);
 		device.queue.submit([commandEncoder.finish()]);
 
-		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, length * 4);
-		const stagingMapped = stagingBuffer.getMappedRange(0, length * 4);
+		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, length * outputElemSize);
+		const stagingMapped = stagingBuffer.getMappedRange(0, length * outputElemSize);
 		const data = new Int32Array(stagingMapped.slice());
 		stagingBuffer.unmap();
 
+		const expected = toTypedArray(run.expected[0], outputType);
+
 		let errors = [];
-		for (let i = 0; i < length; i++) {
-			if (data[i] != run.expected[0][i]) {
-				errors.push({i: i, expect: run.expected[0][i], got: data[i]});
+		for (let i = 0; i < expected.length; i++) {
+			if (data[i] != expected[i]) {
+				errors.push({i: i, expect: expected[i], got: data[i]});
 			}
 		}
 
