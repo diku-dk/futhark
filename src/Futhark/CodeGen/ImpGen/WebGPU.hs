@@ -5,11 +5,12 @@ module Futhark.CodeGen.ImpGen.WebGPU
   )
 where
 
-import Control.Monad (liftM2, liftM3, zipWithM)
+import Control.Monad (liftM2, liftM3)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS hiding (get, modify, put)
 import Control.Monad.Trans.State
 import Data.Bifunctor (second)
+import Data.Bits qualified as Bits
 import Data.Map qualified as M
 import Data.Maybe (catMaybes)
 import Data.Set qualified as S
@@ -394,6 +395,14 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
     fun (SExt Int64 Int32) = "trunc_i64_i32"
     fun _ = "TODO_not_implemented"
 
+intLiteral :: IntValue -> WGSL.Exp
+intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
+  where
+    low = WGSL.IntExp $ fromIntegral $ v Bits..&. 0xffffff
+    high = WGSL.IntExp $ fromIntegral $
+      (v `Bits.shift` (-32)) Bits..&. 0xffffff
+intLiteral v = WGSL.IntExp (valueIntegral v)
+
 valueFloat :: FloatValue -> Double
 valueFloat (Float16Value v) = convFloat v
 valueFloat (Float32Value v) = convFloat v
@@ -401,7 +410,7 @@ valueFloat (Float64Value v) = v
 
 genWGSLExp :: Exp -> KernelM WGSL.Exp
 genWGSLExp (LeafExp name _) = WGSL.VarExp <$> getIdent name
-genWGSLExp (ValueExp (IntValue v)) = pure $ WGSL.IntExp (valueIntegral v)
+genWGSLExp (ValueExp (IntValue v)) = pure $ intLiteral v
 genWGSLExp (ValueExp (FloatValue v)) = pure $ WGSL.FloatExp (valueFloat v)
 genWGSLExp (ValueExp (BoolValue v)) = pure $ WGSL.BoolExp v
 genWGSLExp (ValueExp UnitValue) =
