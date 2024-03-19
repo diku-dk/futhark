@@ -1,6 +1,8 @@
 function typeSize(type) {
 	if (type == 'i32') { return 4; }
+	else if (type == 'u32') { return 4; }
 	else if (type == 'i64') { return 8; }
+	else if (type == 'u64') { return 8; }
 	else throw "unsupported type";
 }
 
@@ -8,12 +10,25 @@ function toTypedArray(array, type) {
 	if (type == 'i32') {
 		return new Int32Array(array);
 	}
+	else if (type == 'u32') {
+		return new Uint32Array(array);
+	}
 	else if (type == 'i64') {
 		const dest = new Int32Array(array.length * 2);
 		for (let i = 0; i < array.length; i++) {
 			dest[i*2] = Number(BigInt.asIntN(32,
 				array[i] & 0xffffffffn));
 			dest[i*2+1] = Number(BigInt.asIntN(32,
+				(array[i] >> 32n) & 0xffffffffn));
+		}
+		return dest;
+	}
+	else if (type == 'u64') {
+		const dest = new Uint32Array(array.length * 2);
+		for (let i = 0; i < array.length; i++) {
+			dest[i*2] = Number(BigInt.asUintN(32,
+				array[i] & 0xffffffffn));
+			dest[i*2+1] = Number(BigInt.asUintN(32,
 				(array[i] >> 32n) & 0xffffffffn));
 		}
 		return dest;
@@ -32,7 +47,7 @@ async function runTest(device, shaderModule, testInfo) {
 	}
 	if (kernelInfo === undefined) {
 		console.error("Could not find kernel info for", testInfo);
-		return;
+		return {0: "❌ failed to find kernel info"};
 	}
 
 	const templateRun = testInfo.runs[0];

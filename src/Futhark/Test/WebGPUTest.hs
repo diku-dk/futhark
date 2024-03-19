@@ -100,6 +100,7 @@ instance Pretty JsTestRun where
     ) </> "}"
     where
       fmtVal V.I64 v = pretty v <> "n"
+      fmtVal V.U64 v = pretty v <> "n"
       fmtVal _ v = pretty v
       fmtArrRaw typ vs = "[" <> commasep (map (fmtVal typ) vs) <> "]"
       -- Hacky way to avoid the 'i32', 'i64' etc. suffixes as they are not valid
