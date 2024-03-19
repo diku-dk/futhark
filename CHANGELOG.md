@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+### Removed
+
+### Changed
+
+### Fixed
+
+## [0.25.14]
+
+### Added
+
 * The prelude definition of `filter` is now more memory efficient,
   particularly when the output is much smaller than the input. (#2109)
 
@@ -19,9 +29,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 * The "raw" API functions now do something potentially useful, but are
   still considered experimental.
 
-### Removed
-
-### Changed
+* `futhark --version` now reports GHC version.
 
 ### Fixed
 
@@ -38,6 +46,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Referencing an unbound type parameter could crash the type checker
   (#2113, #2114).
+
+* Futhark now works with GHC 9.8 (#2105).
 
 ## [0.25.13]
 

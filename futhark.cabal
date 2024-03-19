@@ -488,7 +488,7 @@ library
     , transformers >=0.3
     , vector >=0.12
     , versions >=6.0.0
-    , zlib >=0.6.1.2
+    , zlib >=0.7.0.0
     , statistics
     , mwc-random
     , prettyprinter >= 1.7
