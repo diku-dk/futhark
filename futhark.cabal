@@ -379,7 +379,7 @@ library
       Futhark.Script
       Futhark.Test
       Futhark.Test.Spec
-	  Futhark.Test.WebGPUTest
+      Futhark.Test.WebGPUTest
       Futhark.Test.Values
       Futhark.Tools
       Futhark.Transform.CopyPropagate
