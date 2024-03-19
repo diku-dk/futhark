@@ -135,6 +135,8 @@ async function runTest(device, shaderModule, testInfo) {
 		}
 	});
 
+	let results = {};
+
 	for (let ri = 0; ri < testInfo.runs.length; ri++) {
 		const run = testInfo.runs[ri];
 		const length = run.input[0].length;
@@ -183,20 +185,32 @@ async function runTest(device, shaderModule, testInfo) {
 				msg += `  [${err.i}] expected ${err.expect} got ${err.got}\n`;
 			}
 			console.error(msg);
+
+			results[ri] = "❌";
 		}
 		else {
 			console.log(`Test for entry ${testInfo.entry}, run ${ri}: PASS\n`);
+			results[ri] = "✅";
 		}
 	}
+
+	return results;
 }
 
-function getTestName() {
+async function getTestNames() {
 	const urlParams = new URLSearchParams(window.location.search);
-	return urlParams.get('test');
+
+	if (urlParams.get('tests-file')) {
+		const response = await fetch(urlParams.get('tests-file'));
+		const tests = await response.json();
+		return tests;
+	}
+
+	return [urlParams.get('test')];
 }
 
 async function evalTestInfo(testName) {
-	const testPath = `./${testName}.js`;
+	const testPath = `./tests/${testName}.js`;
 	console.log(`Test info from: ${testPath}`);
 
 	const response = await fetch(testPath);
@@ -222,19 +236,66 @@ async function init() {
 	const device = await adapter.requestDevice();
 	console.log("Acquired device: ", device);
 
-	const testName = getTestName();
+	const testNames = await getTestNames();
 
-	await evalTestInfo(testName);
+	var results = {};
 
-	const shaderModule = device.createShaderModule({
-		code: shader,
-	});
+	for (const testName of testNames) {
+		try {
+			await evalTestInfo(testName);
+		} catch (e) {
+			results[testName] = { compiled: false, res: {
+				"<could not load testInfo:>": {0: e} } };
+			continue;
+		}
 
-	const shaderInfo = await shaderModule.getCompilationInfo();
-	console.log("Shader compilation info:", shaderInfo);
+		const shaderModule = device.createShaderModule({
+			code: shader,
+		});
 
-	for (const test of window.tests) {
-		await runTest(device, shaderModule, test);
+		const shaderInfo = await shaderModule.getCompilationInfo();
+		console.log(`${testName}: Shader compilation info:`, shaderInfo);
+
+		if (shaderInfo.messages.length > 0) {
+			results[testName] = { compiled: false, res: {} };
+		}
+		else {
+			var testResults = {};
+			for (const test of window.tests) {
+				const r = await runTest(device, shaderModule, test);
+				testResults[test.entry] = r;
+			}
+			results[testName] = { compiled: true, res: testResults };
+		}
+	}
+
+	renderTestResults(results);
+}
+
+function renderTestResults(results) {
+	const container = document.getElementById("results");
+	for (const [testName, testResults] of Object.entries(results)) {
+		const h = document.createElement("h3");
+		h.innerHTML = testName;
+		container.appendChild(h);
+
+		const c = document.createElement("span");
+		c.classList = "compiled";
+		c.innerHTML = "Compiled: " + (testResults.compiled ? "✅" : "❌");
+		container.appendChild(c);
+
+		for (const [entry, entryRes] of Object.entries(testResults.res)) {
+			const eh = document.createElement("h4");
+			eh.innerHTML = entry;
+			container.appendChild(eh);
+
+			for (const [run, runRes] of Object.entries(entryRes)) {
+				const r = document.createElement("span");
+				r.classList = "run";
+				r.innerHTML = run + ": " + runRes;
+				container.appendChild(r);
+			}
+		}
 	}
 }
 
