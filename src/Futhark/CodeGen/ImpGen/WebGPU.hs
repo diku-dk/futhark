@@ -271,10 +271,13 @@ genWGSLStm (For iName bound body) = do
              _ -> WGSL.IntExp 0
 genWGSLStm (While cond body) = liftM2
   WGSL.While (genWGSLExp $ untyped cond) (genWGSLStm body)
+genWGSLStm (DeclareMem _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (DeclareScalar name _ typ) = pure $
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
-genWGSLStm (If cond cThen cElse) = liftM3
-  WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
+genWGSLStm (DeclareArray _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Allocate _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Copy _ _ _ _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
@@ -282,6 +285,14 @@ genWGSLStm (SetScalar name e) =
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
+genWGSLStm (SetMem _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Call _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement" 
+genWGSLStm (If cond cThen cElse) = liftM3
+  WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
+genWGSLStm (Assert _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement" 
+genWGSLStm (Comment c s) = WGSL.Seq (WGSL.Comment c) <$> genWGSLStm s
+genWGSLStm (DebugPrint _ _) = pure $ WGSL.Skip
+genWGSLStm (TracePrint _) = pure $ WGSL.Skip
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $ WGSL.Assign destId $
@@ -296,7 +307,16 @@ genWGSLStm (Op (ImpGPU.GetLocalSize dest _)) = do
 genWGSLStm (Op (ImpGPU.GetLockstepWidth dest)) = do
   destId <- getIdent dest
   WGSL.Assign destId . WGSL.VarExp <$> builtinLockstepWidth
-genWGSLStm _ = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.Atomic _ _)) = pure $
+  WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.Barrier _)) = pure $
+  WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.MemFence _)) = pure $
+  WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.SharedAlloc _ _)) = pure $
+  WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Op (ImpGPU.ErrorSync _)) = pure $
+  WGSL.Comment "TODO: Unimplemented statement"
 
 call1 :: WGSL.Ident -> WGSL.Exp -> WGSL.Exp
 call1 f a = WGSL.CallExp f [a]
@@ -399,8 +419,7 @@ intLiteral :: IntValue -> WGSL.Exp
 intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
   where
     low = WGSL.IntExp $ fromIntegral $ v Bits..&. 0xffffff
-    high = WGSL.IntExp $ fromIntegral $
-      (v `Bits.shift` (-32)) Bits..&. 0xffffff
+    high = WGSL.IntExp $ fromIntegral $ (v `Bits.shift` (-32)) Bits..&. 0xffffff
 intLiteral v = WGSL.IntExp (valueIntegral v)
 
 valueFloat :: FloatValue -> Double
