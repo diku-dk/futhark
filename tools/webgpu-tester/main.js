@@ -274,7 +274,7 @@ async function init() {
 			await evalTestInfo(testName);
 		} catch (e) {
 			results[testName] = { compiled: false, res: {
-				"<could not load testInfo:>": {0: e} } };
+				"[❌ could not load testInfo:]": {0: e} } };
 			continue;
 		}
 
@@ -289,12 +289,18 @@ async function init() {
 			results[testName] = { compiled: false, res: {} };
 		}
 		else {
-			var testResults = {};
-			for (const test of window.tests) {
-				const r = await runTest(device, shaderModule, test);
-				testResults[test.entry] = r;
+			try {
+				var testResults = {};
+				for (const test of window.tests) {
+					const r = await runTest(device, shaderModule, test);
+					testResults[test.entry] = r;
+				}
+				results[testName] = { compiled: true, res: testResults };
+			} catch (e) {
+				results[testName] = { compiled: true, res: {
+					"[❌ error]": {0: e} } };
+				continue;
 			}
-			results[testName] = { compiled: true, res: testResults };
 		}
 	}
 
