@@ -106,7 +106,10 @@ instance Pretty JsTestRun where
       -- Hacky way to avoid the 'i32', 'i64' etc. suffixes as they are not valid
       -- JS.
       fixAnnots typ d = pretty $ T.replace (V.primTypeText typ) "" (docText d)
-      fmtArray typ vs = fixAnnots typ $ fmtArrRaw typ (V.valueElems vs)
+      fixSpecials d = pretty $
+        T.replace ".nan" "NaN" $ T.replace ".inf" "Infinity" $ docText d
+      fmtArray typ vs = fixSpecials $ fixAnnots typ $
+        fmtArrRaw typ (V.valueElems vs)
       fmt vss = "[" <> commasep (zipWith fmtArray typs vss) <> "]"
 
 instance Pretty JsTestSpec where

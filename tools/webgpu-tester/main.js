@@ -1,9 +1,10 @@
 function typeSize(type) {
 	if (type == 'i32') { return 4; }
-	else if (type == 'u32') { return 4; }
-	else if (type == 'i64') { return 8; }
-	else if (type == 'u64') { return 8; }
-	else throw "unsupported type";
+	if (type == 'u32') { return 4; }
+	if (type == 'i64') { return 8; }
+	if (type == 'u64') { return 8; }
+	if (type == 'f32') { return 4; }
+	throw "unsupported type";
 }
 
 function toTypedArray(array, type) {
@@ -29,6 +30,7 @@ function toTypedArray(array, type) {
 		}
 		return dest;
 	}
+	if (type == 'f32') { return new Float32Array(array); }
 	throw "unsupported type";
 }
 
@@ -37,7 +39,15 @@ function arrayBufferToTypedArray(buffer, type) {
 	if (type == 'u32') { return new Uint32Array(buffer); }
 	if (type == 'i64') { return new Int32Array(buffer); }
 	if (type == 'u64') { return new Uint32Array(buffer); }
+	if (type == 'f32') { return new Float32Array(buffer); }
 	throw "unsupported type";
+}
+
+function compareExpected(val, expected, type) {
+	if (type == 'f32') {
+		return val == expected || (isNaN(val) && isNaN(expected));
+	}
+	return val == expected;
 }
 
 async function runTest(device, shaderModule, testInfo) {
@@ -193,7 +203,7 @@ async function runTest(device, shaderModule, testInfo) {
 
 		let errors = [];
 		for (let i = 0; i < expected.length; i++) {
-			if (data[i] != expected[i]) {
+			if (!compareExpected(data[i], expected[i], outputType)) {
 				errors.push({i: i, expect: expected[i], got: data[i]});
 			}
 		}
