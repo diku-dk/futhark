@@ -210,7 +210,7 @@ kernelsToWebGPU prog =
       prog' =
         Definitions types (Constants ps consts') (Functions funs')
 
-      kernels = M.fromList $ map (\ki -> (nameFromText $ kiName ki, SafetyNone)) 
+      kernels = M.fromList $ map (\ki -> (nameFromText $ kiName ki, SafetyNone))
         (wsKernels translation)
       kernelInfo = M.fromList $
         map (\(KernelInterface n o s) -> (nameFromText n, (o, s)))
@@ -274,10 +274,10 @@ genWGSLStm (While cond body) = liftM2
 genWGSLStm (DeclareMem _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (DeclareScalar name _ typ) = pure $
   WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
-genWGSLStm (DeclareArray _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Allocate _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (DeclareArray {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Allocate {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Copy _ _ _ _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Copy {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
@@ -285,14 +285,21 @@ genWGSLStm (SetScalar name e) =
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
-genWGSLStm (SetMem _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Call _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement" 
+genWGSLStm (SetMem {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Call [dest] f args) = do
+  fun <- (WGSL.CallExp . ("futrts_" <>)) <$> getIdent f
+  let getArg (ExpArg e) = genWGSLExp e
+      getArg (MemArg n) = WGSL.VarExp <$> getIdent n
+  argExps <- mapM getArg args
+  WGSL.Assign <$> getIdent dest <*> pure (fun argExps)
+genWGSLStm (Call {}) = pure $
+  WGSL.Comment "TODO: Multi-dest calls not supported"
 genWGSLStm (If cond cThen cElse) = liftM3
   WGSL.If (genWGSLExp $ untyped cond) (genWGSLStm cThen) (genWGSLStm cElse)
-genWGSLStm (Assert _ _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement" 
+genWGSLStm (Assert {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Comment c s) = WGSL.Seq (WGSL.Comment c) <$> genWGSLStm s
-genWGSLStm (DebugPrint _ _) = pure $ WGSL.Skip
-genWGSLStm (TracePrint _) = pure $ WGSL.Skip
+genWGSLStm (DebugPrint _ _) = pure WGSL.Skip
+genWGSLStm (TracePrint _) = pure WGSL.Skip
 genWGSLStm (Op (ImpGPU.GetBlockId dest i)) = do
   destId <- getIdent dest
   pure $ WGSL.Assign destId $
