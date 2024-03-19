@@ -7,13 +7,9 @@ function typeSize(type) {
 }
 
 function toTypedArray(array, type) {
-	if (type == 'i32') {
-		return new Int32Array(array);
-	}
-	else if (type == 'u32') {
-		return new Uint32Array(array);
-	}
-	else if (type == 'i64') {
+	if (type == 'i32') { return new Int32Array(array); }
+	if (type == 'u32') { return new Uint32Array(array); }
+	if (type == 'i64') {
 		const dest = new Int32Array(array.length * 2);
 		for (let i = 0; i < array.length; i++) {
 			dest[i*2] = Number(BigInt.asIntN(32,
@@ -23,7 +19,7 @@ function toTypedArray(array, type) {
 		}
 		return dest;
 	}
-	else if (type == 'u64') {
+	if (type == 'u64') {
 		const dest = new Uint32Array(array.length * 2);
 		for (let i = 0; i < array.length; i++) {
 			dest[i*2] = Number(BigInt.asUintN(32,
@@ -33,7 +29,15 @@ function toTypedArray(array, type) {
 		}
 		return dest;
 	}
-	else throw "unsupported type";
+	throw "unsupported type";
+}
+
+function arrayBufferToTypedArray(buffer, type) {
+	if (type == 'i32') { return new Int32Array(buffer); }
+	if (type == 'u32') { return new Uint32Array(buffer); }
+	if (type == 'i64') { return new Int32Array(buffer); }
+	if (type == 'u64') { return new Uint32Array(buffer); }
+	throw "unsupported type";
 }
 
 async function runTest(device, shaderModule, testInfo) {
@@ -182,7 +186,7 @@ async function runTest(device, shaderModule, testInfo) {
 
 		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, length * outputElemSize);
 		const stagingMapped = stagingBuffer.getMappedRange(0, length * outputElemSize);
-		const data = new Int32Array(stagingMapped.slice());
+		const data = arrayBufferToTypedArray(stagingMapped.slice(), outputType);
 		stagingBuffer.unmap();
 
 		const expected = toTypedArray(run.expected[0], outputType);
