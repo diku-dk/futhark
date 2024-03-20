@@ -218,12 +218,8 @@ forward (E.ArrayLit es _ _) = do
     f _ _ = error "impossible"
   -- let es' = map toExp es
   -- in  Array <$> sequence es'
-forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
-  View it_x x' <- forward x
-  View it_y y' <- forward y
-  let it = combineIt it_x it_y
-  cs <- combineCasesM (substituteName vn) x' y'
-  normalise $ View it cs
+forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) =
+  substituteNameE vn x y >>= forward >>= normalise
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -283,7 +279,7 @@ forward (E.AppExp (E.Apply f args _) _)
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
       -- let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
       let subst = M.fromList (zip params'' (map (`index` i) args'))
-      body' <- transformNames subst body
+      body' <- substituteNamesE subst body
       -- traceM $ "#### subst: " <> show subst
       -- traceM $ "#### body transformed: " <> show body'
       View it_body body'' <- forward body'
@@ -399,8 +395,8 @@ index xs i =
 
 
 -- Not to be confused with substituteNames lmao.
-transformNames :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
-transformNames = onExp
+substituteNamesE :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
+substituteNamesE = onExp
   where
     substituter subst =
       T.ASTMapper
@@ -422,5 +418,5 @@ transformNames = onExp
         Nothing -> pure e
     onExp subst e = T.astMap (substituter subst) e
 
--- transformName :: T.ASTMappable a => VName -> E.Exp -> a -> ViewM a
--- transformName vn x = transformNames (M.singleton vn x)
+substituteNameE :: VName -> E.Exp -> E.Exp -> ViewM E.Exp
+substituteNameE vn x = substituteNamesE (M.singleton vn x)
