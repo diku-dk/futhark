@@ -64,10 +64,6 @@ getFun :: E.Exp -> Maybe String
 getFun (E.Var (E.QualName [] vn) _ _) = Just $ E.baseString vn
 getFun _ = Nothing
 
-getVarVName :: E.Exp -> Maybe VName
-getVarVName (E.Var (E.QualName [] vn) _ _) = Just vn
-getVarVName _ = Nothing
-
 getSize :: E.Exp -> ViewM Exp
 getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
@@ -75,10 +71,6 @@ getSize (E.Var _ (E.Info {E.unInfo = E.Array _ _ shape _}) _)
 getSize (E.ArrayLit [] (E.Info {E.unInfo = E.Array _ _ shape _}) _)
   | dim:_ <- E.shapeDims shape =
     toExp dim
--- XXX Don't do this. Create a view for the argument that getSize was called on.
--- getSize (E.AppExp (E.Apply {}) res)
---   | E.Array _ _ shp _ <- E.appResType . E.unInfo $ res =
---     toExp . head . E.shapeDims $ shp
 getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
 
 stripExp :: E.Exp -> E.Exp
@@ -118,44 +110,6 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
 forwards _ = pure ()
 
 
--- forward on part2indices:
---
--- let tflgs = map (\c -> if c then 1 else 0) conds
--- let fflgs = map (\ b -> 1 - b) tflgs
--- let indsT = scan (+) 0 tflgs
---
--- tflgs:
---   0. Create iterator and transform expression to use it:
---       map (\i -> if conds[i] then 1 else 0) (iota n)
---   1. iota n . | true => 1
---      (Note how iterator is propagated here.)
---   2. iota n . | true => 0
---   3. Use map rule:
---      iota n . | conds[i] => 1 | not conds[i] => 0
--- 	 conds is an argument; no substitution:
---      Rewrite:
---      iota n . | true => [[conds[i]]]
---
--- fflgs:
---   0. Create iterator and transform expression to use it:
---       map (\i -> 1 - tflgs[i]) (iota n)
---   1. iota n . | true => 1 - tflgs[i]
---      Substitute tflgs:
---      iota n . | true => 1 - [[conds[i]]]
---      Rewrite:
---      iota n . | true => [[not conds[i]]]
---
--- indsT:
---   1. iota n . | % + tflgs[i]
---      Substitute tflgs:
---      iota n . | % + [[conds[i]]]
--- 	 Use scan rule:
---      iota n . | i == 0 => [[conds[i]]]
--- 	          | i != 0 => % + [[conds[i]]]
--- 	 Rewrite:
---      iota n . | true => Sum j 0 i [[conds[j]]]
-
-
 combineIt :: Iterator -> Iterator -> Iterator
 combineIt Empty it = it
 combineIt it Empty = it
@@ -181,11 +135,15 @@ toView :: Exp -> View
 toView e = View Empty (toCases e)
 
 forward :: E.Exp -> ViewM View
+forward (E.Parens e _) = forward e
+forward (E.Attr _ e _) = forward e
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
-  normalise . toView $ Bool x
+  pure . toView $ Bool x
 forward (E.IntLit x _ _) =
-  normalise . toView . SoP $ SoP.int2SoP x
+  pure . toView . SoP $ SoP.int2SoP x
+forward (E.Negate (E.IntLit x _ _) _) =
+  normalise . toView . SoP $ SoP.negSoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   -- Gets previous top-level views.
@@ -292,7 +250,6 @@ forward (E.AppExp (E.Apply f args _) _)
       -- After this, maybe don't use mapMaybe in arrs below.
       sz <- getSize (head args')
       -- Make susbtitutions from function arguments to array names.
-      -- let arrs = mapMaybe getVarVName args'
       let params' = map E.patNames params
       -- TODO params' is a [Set], I assume because we might have
       --   map (\(x, y) -> ...) xys
@@ -338,9 +295,6 @@ forward (E.AppExp (E.Apply f args _) _)
       -- toView . toNNF . Not <$> toExp arg
       normalise $ View it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e
--- forward scope e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
---     e' <- toExp e
---     pure $ View Empty (hoistIf e')
 
 -- Strip unused information.
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
@@ -352,8 +306,6 @@ toExp (E.Var (E.QualName _ x) _ _) =
 toExp (E.ArrayLit es _ _) =
   let es' = map toExp es
   in  Array <$> sequence es'
-toExp (E.AppExp (E.If c t f _) _) =
- If <$> toExp c <*> toExp t <*> toExp f
 toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -371,25 +323,9 @@ toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
         E.LogAnd -> pure $ x :&& y
         E.LogOr -> pure $ x :|| y
         _ -> error ("toExp not implemented for bin op: " <> show bop)
-toExp (E.AppExp (E.Index xs slice _) _)
-  | [E.DimFix i] <- slice = -- XXX support only simple indexing for now
-  let i' = toExp i
-      xs' = toExp xs
-  in  Idx <$> xs' <*> i'
-toExp (E.AppExp (E.Apply f args _) _)
-  | Just fname <- getFun f,
-    fname == "not",
-    [arg] <- getArgs args =
-  toNNF . Not <$> toExp arg
-toExp (E.AppExp (E.LetPat _ (E.Id vn _ _) e1 e2 _) _) = do
-  e1' <- toExp e1
-  e2' <- toExp e2
-  substituteName vn e1' e2'
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
-toExp (E.Negate (E.IntLit x _ _) _) = pure $ SoP $ SoP.negSoP $ SoP.int2SoP x
-toExp (E.Literal (E.BoolValue x) _) = pure $ Bool x
 toExp e = error ("toExp not implemented for: " <> show e)
 
 index :: E.Exp -> E.VName -> E.Exp
@@ -397,18 +333,6 @@ index xs i =
   E.AppExp (E.Index xs [E.DimFix i'] mempty) (E.Info $ E.AppRes (E.typeOf xs) [])
   where
     i' = E.Var (E.QualName [] i) (E.Info . E.Scalar . E.Prim . E.Signed $ E.Int64) mempty
-
--- AppExp (
--- Index
---   (Var (QualName {qualQuals = [], qualLeaf = VName (Name "conds") 6070})
---        (Info {unInfo = Array (fromList [AliasBound {aliasVar = VName (Name "conds") 6070}]) Nonunique (Shape {shapeDims = [Var (QualName {qualQuals = [], qualLeaf = VName (Name "n") 6068}) (Info {unInfo = Scalar (Prim (Signed Int64))}) noLoc]}) (Prim Bool)})
---        noLoc)
---   [DimFix (Var (QualName {qualQuals = [], qualLeaf = VName (Name "i") 6086})
---                  (Info {unInfo = Scalar (Prim (Signed Int64))})
---                  noLoc)]
---   noLoc)
---   (Info {unInfo = AppRes {appResType = Scalar (Prim Bool), appResExt = []}})
-
 
 -- Not to be confused with substituteNames lmao.
 substituteNamesE :: M.Map E.VName E.Exp -> E.Exp -> ViewM E.Exp
