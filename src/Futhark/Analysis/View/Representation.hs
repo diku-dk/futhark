@@ -95,8 +95,13 @@ data Iterator = Forall VName Domain
               -- | Union VName Iterator
   deriving (Show, Ord)
 
+iteratorName :: Iterator -> Maybe VName
+iteratorName (Forall vn _) = Just vn
+iteratorName _ = Nothing
+
 instance Eq Iterator where
-  _i == _j = True --- TODO
+  (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
+  _ == _ = False -- TODO
 
 -- Case statement evaluated from left to right to ensure no two
 -- cases overlap. Must additionally partition the domain, so the

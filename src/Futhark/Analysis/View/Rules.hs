@@ -188,8 +188,10 @@ simplify (View it e) =
 removeDeadCases :: Cases Exp -> Cases Exp
 removeDeadCases (Cases cases)
   | xs <- NE.filter f cases,
-    not $ null xs =
-  Cases $ NE.fromList xs
+    not $ null xs,
+    length xs /= length cases = -- Something actualy got removed.
+  trace "👀 Removing dead cases" $
+    Cases $ NE.fromList xs
   where
     f (Bool False, _) = False
     f _ = True

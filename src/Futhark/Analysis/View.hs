@@ -94,8 +94,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView <- forward e
     -- traceM . show $ newView
     tracePrettyM newView
-    traceM "💿 simplify"
-    let newView1 = simplify newView
+    newView1 <- rewrite $ simplify newView
     tracePrettyM newView1
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"
@@ -160,9 +159,7 @@ forwards _ = pure ()
 combineIt :: Iterator -> Iterator -> Iterator
 combineIt Empty it = it
 combineIt it Empty = it
-combineIt (Forall i dom_i) (Forall j dom_j)
-  | dom_i == dom_j =
-      Forall i dom_i
+combineIt d1 d2 | d1 == d2 = d1
 combineIt _ _ = undefined
 
 combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
@@ -177,6 +174,9 @@ combineCasesM f (Cases xs) (Cases ys) = do
           [sequence (cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
   pure . Cases . NE.fromList $ cs
 
+casesToList :: Cases a -> [(a, a)]
+casesToList (Cases xs) = NE.toList xs
+
 toView :: Exp -> View
 toView e = View Empty (toCases e)
 
@@ -188,19 +188,41 @@ forward (E.IntLit x _ _) =
   normalise . toView . SoP $ SoP.int2SoP x
 -- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
+  -- Gets previous top-level views.
+  -- traceM $ "🪲 Var " <> prettyString e
   views <- gets views
   case M.lookup vn views of
-    Just (View it e2) -> do
+    Just v@(View _ e2) -> do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-      normalise $ View it e2
+      pure v
     _ ->
-      normalise $ View Empty (toCases $ Var vn)
--- Nodes.
-forward (E.AppExp (E.Index xs slice _) _)
-  | [E.DimFix i] <- slice = do -- XXX support only simple indexing for now
-    View it_i i' <- forward i
+      pure $ View Empty (toCases $ Var vn)
+forward e@(E.AppExp (E.Index xs slice _) _)
+  | [E.DimFix idx] <- slice, -- XXX support only simple indexing for now
+    (E.Var (E.QualName _ vn) _ _) <- stripExp xs = do
+      -- traceM $ "🪲 Index1 " <> prettyString e
+      View i e_i <- forward idx
+      -- Gets previous top-level views.
+      views <- gets views
+      case M.lookup vn views of
+        Just (View Empty xs') -> do
+          traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString xs')
+          normalise $ View i (combineCases Idx xs' e_i)
+        Just (View j xs')
+          | Just j' <- iteratorName j -> do
+          traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString xs')
+          e2 <- combineCasesM (substituteName j') e_i xs'
+          normalise $ View (combineIt i j) e2
+        _ -> do
+          -- TODO this is duplicated below.
+          View j xs' <- forward xs
+          normalise $ View (combineIt i j) (combineCases Idx xs' e_i)
+  | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
+    -- traceM $ "🪲 Index2 " <> prettyString e
+    View i e_i <- forward idx
     View it_xs xs' <- forward xs
-    normalise $ View (combineIt it_i it_xs) (combineCases Idx xs' i')
+    normalise $ View (combineIt i it_xs) (combineCases Idx xs' e_i)
+-- Nodes.
 forward (E.ArrayLit es _ _) = do
   es' <- mapM forward es
   let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
@@ -249,15 +271,14 @@ forward (E.AppExp (E.If c t f _) _) = do
   View it_f f' <- forward f
   -- `c` has cases, so the case conditions and values are put in conjunction.
   let c'' = flattenCases c'
-  let cases_t = [(cc :&& cx, vx) | cc <- NE.toList c'',
-                                   (cx, vx) <- NE.toList (getCases t')]
-  let cases_f = [(toNNF (Not cc) :&& cx, vx) | cc <- NE.toList c'',
-                                               (cx, vx) <- NE.toList (getCases f')]
+  let cases_t = [(cc :&& cx, vx) | cc <- c'',
+                                   (cx, vx) <- casesToList t']
+  let cases_f = [(toNNF (Not cc) :&& cx, vx) | cc <- c'',
+                                               (cx, vx) <- casesToList f']
   let it = combineIt it_c (combineIt it_t it_f)
   normalise $ View it (Cases . NE.fromList $ cases_t ++ cases_f)
   where
-    flattenCases (Cases xs) = fmap (uncurry (:&&)) xs
-    getCases (Cases xs) = xs
+    flattenCases (Cases xs) = NE.toList $ fmap (uncurry (:&&)) xs
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -277,7 +298,6 @@ forward (E.AppExp (E.Apply f args _) _)
       --   map (\(x, y) -> ...) xys
       -- meaning x needs to be substituted by x[i].0
       let params'' = mconcat $ map S.toList params' -- XXX wrong, see above
-      -- let subst = M.fromList (zip params'' (map (flip Idx (Var i) . Var) arrs))
       let subst = M.fromList (zip params'' (map (`index` i) args'))
       body' <- substituteNamesE subst body
       -- traceM $ "#### subst: " <> show subst
@@ -285,29 +305,25 @@ forward (E.AppExp (E.Apply f args _) _)
       View it_body body'' <- forward body'
       let it = combineIt (Forall i (Iota sz)) it_body
       normalise $ View it body''
-
-      -- let scope' = scope <> M.fromList (zip params'' (map (i,) arrs))
-      -- View it_body body' <- forward scope' body
-      -- let it = combineIt (Forall i (Iota sz)) it_body
-      -- pure $ View it body'
   | Just fname <- getFun f,
     "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      -- sz <- getSize xs'
-      -- xs <- toExp xs'
-      -- i <- newNameFromString "i"
-      -- op <-
-      --   case E.baseString vn of
-      --     "+" -> pure (~+~)
-      --     "-" -> pure (~-~)
-      --     "*" -> pure (~*~)
-      --     _ -> error ("toExp not implemented for bin op: " <> show vn)
-      -- let e = Cases . NE.fromList $ [(Var i :== SoP (SoP.int2SoP 0),
-      --                                 Idx xs (Var i)),
-      --                                (Not $ Var i :== SoP (SoP.int2SoP 0),
-      --                                 Recurrence `op` Idx xs (Var i))]
-      -- pure $ View (Forall i (Iota sz)) e
-      undefined
+      sz <- getSize xs'
+      i <- newNameFromString "i"
+      let i' = Var i
+      op <-
+        case E.baseString vn of
+          "+" -> pure (~+~)
+          "-" -> pure (~-~)
+          "*" -> pure (~*~)
+          _ -> error ("toExp not implemented for bin op: " <> show vn)
+      -- Note forward on indexed xs.
+      View it_xs xs <- forward (index xs' i)
+      let base_case = i' :== SoP (SoP.int2SoP 0)
+      let e1 = [(base_case :&& cx, vx) | (cx, vx) <- casesToList xs]
+      let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
+      let it = combineIt (Forall i (Iota sz)) it_xs
+      normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
   | Just fname <- getFun f,
     "iota" == fname,
     [n] <- getArgs args = do
