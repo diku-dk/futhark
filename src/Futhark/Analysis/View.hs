@@ -170,6 +170,13 @@ combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
 
+combineCasesM :: (Exp -> Exp -> ViewM Exp) -> Cases Exp -> Cases Exp -> ViewM (Cases Exp)
+combineCasesM f (Cases xs) (Cases ys) = do
+  -- Cases . NE.fromList $
+  cs <- sequence $
+          [sequence (cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
+  pure . Cases . NE.fromList $ cs
+
 toView :: Exp -> View
 toView e = View Empty (toCases e)
 
@@ -211,6 +218,12 @@ forward (E.ArrayLit es _ _) = do
     f _ _ = error "impossible"
   -- let es' = map toExp es
   -- in  Array <$> sequence es'
+forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) = do
+  View it_x x' <- forward x
+  View it_y y' <- forward y
+  let it = combineIt it_x it_y
+  cs <- combineCasesM (substituteName vn) x' y'
+  normalise $ View it cs
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
