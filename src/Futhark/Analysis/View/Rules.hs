@@ -135,8 +135,6 @@ hoistIf e =
     flattenConds v = astMap m1 v
 
 normalise :: View -> ViewM View
--- normalise view =
---   pure $ idMap m view
 normalise view =
   pure $ idMap m view
   where
@@ -152,7 +150,12 @@ normalise view =
         (a, Bool True) -> pure a
         (Bool False, _) -> pure (Bool False)
         (_, Bool False) -> pure (Bool False)
-        (a, b) -> pure $ a :&& b
+        (a, b) | a == b ->
+          pure a
+        (a, b) | a == toNNF (Not b) -> -- A contradiction.
+          pure (Bool False)
+        (a, b) ->
+          pure $ a :&& b
     normExp (x :|| y) = do
       x' <- normExp x
       y' <- normExp y
@@ -178,19 +181,25 @@ normalise view =
 
 -- TODO Possible to merge this with simplifyPredicates?
 simplify :: View -> View
-simplify (View it e)
-  | Just e' <- simplify' it e =
-  View it e'
-simplify view = view
+simplify (View it e) =
+  let e' = simplifyRule3 . removeDeadCases $ e
+  in  View it e'
 
-simplify' :: Iterator -> Cases Exp -> Maybe (Cases Exp)
-simplify' _it = simplifyRule3
+removeDeadCases :: Cases Exp -> Cases Exp
+removeDeadCases (Cases cases)
+  | xs <- NE.filter f cases,
+    not $ null xs =
+  Cases $ NE.fromList xs
+  where
+    f (Bool False, _) = False
+    f _ = True
+removeDeadCases cs = cs
 
 -- TODO Maybe this should only apply to | True => 1 | False => 0
 -- (and its negation)?
 -- Applies if all case values are integer constants.
-simplifyRule3 :: Cases Exp -> Maybe (Cases Exp)
-simplifyRule3 (Cases ((Bool True, _) NE.:| [])) = Nothing
+simplifyRule3 :: Cases Exp -> Cases Exp
+simplifyRule3 e@(Cases ((Bool True, _) NE.:| [])) = e
 simplifyRule3 (Cases cases)
   | Just sops <- mapM (justSoP . snd) cases = 
   let preds = NE.map fst cases
@@ -201,11 +210,11 @@ simplifyRule3 (Cases cases)
             preds
             sops
   in  trace "👀 Using Simplification Rule 3" $
-        pure $ Cases $ NE.singleton (Bool True, SoP sumOfIndicators)
+        Cases $ NE.singleton (Bool True, SoP sumOfIndicators)
   where
     justSoP (SoP sop) = SoP.justConstant sop
     justSoP _ = Nothing
-simplifyRule3 _ = Nothing
+simplifyRule3 e = e
 
 
 rewrite :: View -> ViewM View

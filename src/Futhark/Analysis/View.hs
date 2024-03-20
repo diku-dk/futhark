@@ -92,10 +92,10 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
-    traceM . show $ newView
+    -- traceM . show $ newView
     tracePrettyM newView
-    traceM "💿 normalise"
-    newView1 <- normalise newView
+    traceM "💿 simplify"
+    let newView1 = simplify newView
     tracePrettyM newView1
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"
@@ -170,9 +170,6 @@ combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
 
-getCases :: Cases Exp -> NE.NonEmpty (Exp, Exp)
-getCases (Cases xs) = xs
-
 toView :: Exp -> View
 toView e = View Empty (toCases e)
 
@@ -197,6 +194,23 @@ forward (E.AppExp (E.Index xs slice _) _)
     View it_i i' <- forward i
     View it_xs xs' <- forward xs
     normalise $ View (combineIt it_i it_xs) (combineCases Idx xs' i')
+forward (E.ArrayLit es _ _) = do
+  es' <- mapM forward es
+  let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
+  let it = foldl1 combineIt (getIters es')
+  -- traceM ("🪲 array forward: " <> prettyString es')
+  -- traceM ("🪲 array combine: " <> prettyString arrs)
+  -- traceM ("🪲 array iterators: " <> show it <> "\n")
+  normalise $ View it arrs
+  where
+    getCases [] = []
+    getCases (View _ body : xs) = body : getCases xs
+    getIters [] = []
+    getIters (View it _ : xs) = it : getIters xs
+    f y (Array acc) = Array (y : acc)
+    f _ _ = error "impossible"
+  -- let es' = map toExp es
+  -- in  Array <$> sequence es'
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
   | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
     name <- E.baseString $ E.qualLeaf op,
@@ -234,11 +248,12 @@ forward (E.AppExp (E.If c t f _) _) = do
   normalise $ View it (Cases . NE.fromList $ cases_t ++ cases_f)
   where
     flattenCases (Cases xs) = fmap (uncurry (:&&)) xs
+    getCases (Cases xs) = xs
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
-      traceM ("##### body: " <> show body)
+      traceM ("🪲 map body: " <> show body <> "\n")
       -- 0. Create iterator and transform expression to use it
       i <- newNameFromString "i"
       -- TODO Right now we only support variables as arguments.
