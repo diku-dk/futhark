@@ -40,7 +40,7 @@ import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.RTS.C (scalarF16H, scalarH)
-import Futhark.Util (hashText, zEncodeText)
+import Futhark.Util (hashText, showText, zEncodeText)
 import Language.C.Quote.C qualified as C
 import Language.C.Syntax qualified as C
 
@@ -123,18 +123,34 @@ escapeName v
   | isValidCName v = v
   | otherwise = zEncodeText v
 
+-- | Valid C identifier name?
+valid :: T.Text -> Bool
+valid s =
+  T.head s /= '_'
+    && not (isDigit $ T.head s)
+    && T.all ok s
+  where
+    ok c = isAlphaNum c || c == '_'
+
+isArrayName :: T.Text -> (Int, T.Text)
+isArrayName s =
+  if "[]" `T.isPrefixOf` s
+    then
+      let (k, s') = isArrayName (T.drop 2 s)
+       in (k + 1, s')
+    else (0, s)
+
 -- | The name of exposed opaque types.
 opaqueName :: Name -> T.Text
 opaqueName "()" = "opaque_unit" -- Hopefully this ad-hoc convenience won't bite us.
 opaqueName s
-  | valid = "opaque_" <> s'
+  | (k, s'') <- isArrayName s',
+    k > 0,
+    valid s'' =
+      "opaque_arr_" <> s'' <> "_" <> showText k <> "d"
+  | valid s' = "opaque_" <> s'
   where
     s' = nameToText s
-    valid =
-      T.head s' /= '_'
-        && not (isDigit $ T.head s')
-        && T.all ok s'
-    ok c = isAlphaNum c || c == '_'
 opaqueName s = "opaque_" <> hashText (nameToText s)
 
 -- | The 'PrimType' (and sign) correspond to a human-readable scalar
