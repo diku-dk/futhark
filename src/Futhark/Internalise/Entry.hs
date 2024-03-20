@@ -51,6 +51,7 @@ rootType :: E.TypeExp E.Exp VName -> E.TypeExp E.Exp VName
 rootType (E.TEApply te E.TypeArgExpSize {} _) = rootType te
 rootType (E.TEUnique te _) = rootType te
 rootType (E.TEDim _ te _) = rootType te
+rootType (E.TEParens te _) = rootType te
 rootType te = te
 
 typeExpOpaqueName :: E.TypeExp E.Exp VName -> Name
