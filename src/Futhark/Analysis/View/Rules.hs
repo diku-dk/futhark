@@ -3,13 +3,14 @@ module Futhark.Analysis.View.Rules where
 import Futhark.Analysis.View.Representation
 import Debug.Trace (trace, traceM)
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
 
 normalise :: View -> ViewM View
 normalise view =
-  pure $ idMap m view
+  pure $ toNNF' $ idMap m view
   where
     m =
       ASTMapper
@@ -52,30 +53,52 @@ normalise view =
        normaliseNegation sop = sop
     normExp v = astMap m v
 
--- TODO Possible to merge this with simplifyPredicates?
-simplify :: View -> View
-simplify (View it e) =
-  let e' = simplifyRule3 . removeDeadCases $ e
-  in  View it e'
+simplify :: View -> ViewM View
+simplify view =
+  removeDeadCases view
+  >>= simplifyRule1
+  >>= removeDeadCases
+  >>= simplifyRule3
+  >>= removeDeadCases
 
-removeDeadCases :: Cases Exp -> Cases Exp
-removeDeadCases (Cases cases)
+removeDeadCases :: View -> ViewM View
+removeDeadCases (View it (Cases cases))
   | xs <- NE.filter f cases,
     not $ null xs,
     length xs /= length cases = -- Something actualy got removed.
   trace "👀 Removing dead cases" $
-    Cases $ NE.fromList xs
+    pure $ View it $ Cases (NE.fromList xs)
   where
     f (Bool False, _) = False
     f _ = True
-removeDeadCases cs = cs
+removeDeadCases view = pure view
+
+-- Eliminate check for non-empty range
+simplifyRule1 :: View -> ViewM View
+simplifyRule1 view@(View it _) =
+  pure $ toNNF' $ idMap m view
+  where
+    m =
+      ASTMapper
+        { mapOnExp = normExp }
+    normExp (Var x) = pure $ Var x
+    normExp (x :> y)
+      | y == SoP (SoP.int2SoP 0),
+        Just n <- getIterSize it,
+        x == n =
+          trace "👀 Using Simplification Rule 1" $
+            pure (Bool True)
+      where
+        getIterSize (Forall _ (Iota sz)) = Just sz
+        getIterSize _ = Nothing
+    normExp e = astMap m e
 
 -- TODO Maybe this should only apply to | True => 1 | False => 0
 -- (and its negation)?
 -- Applies if all case values are integer constants.
-simplifyRule3 :: Cases Exp -> Cases Exp
-simplifyRule3 e@(Cases ((Bool True, _) NE.:| [])) = e
-simplifyRule3 (Cases cases)
+simplifyRule3 :: View -> ViewM View
+simplifyRule3 v@(View _ (Cases ((Bool True, _) NE.:| []))) = pure v
+simplifyRule3 (View it (Cases cases))
   | Just sops <- mapM (justSoP . snd) cases = 
   let preds = NE.map fst cases
       sumOfIndicators =
@@ -85,11 +108,11 @@ simplifyRule3 (Cases cases)
             preds
             sops
   in  trace "👀 Using Simplification Rule 3" $
-        Cases $ NE.singleton (Bool True, SoP sumOfIndicators)
+        pure $ View it $ Cases (NE.singleton (Bool True, SoP sumOfIndicators))
   where
     justSoP (SoP sop) = SoP.justConstant sop
     justSoP _ = Nothing
-simplifyRule3 e = e
+simplifyRule3 v = pure v
 
 
 rewrite :: View -> ViewM View
@@ -117,3 +140,7 @@ rewrite view = pure view
 
 getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
 getSoP = SoP.sopToLists . SoP.normalize
+
+toNNF' :: View -> View
+toNNF' (View i (Cases cs)) =
+  View i (Cases (NE.map (bimap toNNF toNNF) cs))

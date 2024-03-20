@@ -94,7 +94,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView <- forward e
     -- traceM . show $ newView
     tracePrettyM newView
-    newView1 <- rewrite $ simplify newView
+    newView1 <- simplify newView >>= rewrite >>= normalise
     tracePrettyM newView1
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"
