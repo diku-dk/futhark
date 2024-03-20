@@ -36,6 +36,7 @@ module Futhark.Analysis.View.Representation where
 
 import Data.Map.Strict qualified as M
 import Data.Maybe (mapMaybe)
+import Data.Bifunctor (second)
 import Futhark.SoP.SoP (SoP)
 import Futhark.SoP.SoP qualified as SoP
 import Futhark.MonadFreshNames
@@ -364,3 +365,10 @@ toNNF (Not (Bool False)) = Bool True
 toNNF (Not (x :|| y)) = toNNF (Not x) :&& toNNF (Not y)
 toNNF (Not (x :&& y)) = toNNF (Not x) :|| toNNF (Not y)
 toNNF x = x
+
+-- A kind of map that only admits type-preserving functions.
+cmap :: ((a, a) -> (a, a)) -> Cases a -> Cases a
+cmap f (Cases xs) = Cases (fmap f xs)
+
+cmapValues :: (a -> a) -> Cases a -> Cases a
+cmapValues f = cmap (second f)

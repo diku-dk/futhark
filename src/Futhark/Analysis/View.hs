@@ -157,6 +157,7 @@ forwards _ = pure ()
 --      iota n . | true => Sum j 0 i [[conds[j]]]
 
 
+combineIt :: Iterator -> Iterator -> Iterator
 combineIt Empty it = it
 combineIt it Empty = it
 combineIt (Forall i dom_i) (Forall j dom_j)
@@ -169,32 +170,70 @@ combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
 
--- Apply
---   (ExpBase f vn)
---   (NE.NonEmpty (f (Diet, Maybe VName), ExpBase f vn))
---   SrcLoc
---
---  Above, f is Info which adds type info to stuff.
---  First parameter just contains the name map from the prelude here.
---  Second parameter is the map arguments; a non-empty list of pairs
---    (Info (Diet, Maybe VName),
---     ExpBase Info VName)
---  the first of which will be the map lambda (or function)
---  and the rest are the arrays being mapped over
+getCases :: Cases Exp -> NE.NonEmpty (Exp, Exp)
+getCases (Cases xs) = xs
+
+toView :: Exp -> View
+toView e = View Empty (toCases e)
+
 forward :: E.Exp -> ViewM View
+-- Leaves.
+forward (E.Literal (E.BoolValue x) _) =
+  normalise . toView $ Bool x
+forward (E.IntLit x _ _) =
+  normalise . toView . SoP $ SoP.int2SoP x
+-- Potential substitions.
 forward e@(E.Var (E.QualName _ vn) _ _) = do
   views <- gets views
   case M.lookup vn views of
     Just (View it e2) -> do
       traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString e2)
-      pure $ View it e2
+      normalise $ View it e2
     _ ->
-      pure $ View Empty (toCases $ Var vn)
+      normalise $ View Empty (toCases $ Var vn)
+-- Nodes.
 forward (E.AppExp (E.Index xs slice _) _)
   | [E.DimFix i] <- slice = do -- XXX support only simple indexing for now
     View it_i i' <- forward i
     View it_xs xs' <- forward xs
-    pure $ View (combineIt it_i it_xs) (combineCases Idx xs' i')
+    normalise $ View (combineIt it_i it_xs) (combineCases Idx xs' i')
+forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
+  | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
+    name <- E.baseString $ E.qualLeaf op,
+    Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
+      View it_x x <- forward e_x
+      View it_y y <- forward e_y
+      let it = combineIt it_x it_y
+      let doOp bopExp = normalise $ View it (combineCases bopExp x y)
+      -- traceM $ "binop bop " <> show bop
+      -- traceM $ "binop x " <> prettyString x
+      -- traceM $ "binop y " <> prettyString y
+      -- traceM $ "binop lol " <> prettyString (doOp (:||))
+      case bop of
+        E.Plus -> doOp (~+~)
+        E.Times -> doOp (~*~)
+        E.Minus -> doOp (~-~)
+        E.Equal -> doOp (:==)
+        E.Less -> doOp (:<)
+        E.Greater -> doOp (:>)
+        E.Leq -> doOp (:<=)
+        E.LogAnd -> doOp (:&&)
+        E.LogOr -> doOp (:||)
+        _ -> error ("forward not implemented for bin op: " <> show bop)
+forward (E.AppExp (E.If c t f _) _) = do
+  View it_c c' <- forward c
+  View it_t t' <- forward t
+  View it_f f' <- forward f
+  -- `c` has cases, so the case conditions and values are put in conjunction.
+  let c'' = flattenCases c'
+  let cases_t = [(cc :&& cx, vx) | cc <- NE.toList c'',
+                                   (cx, vx) <- NE.toList (getCases t')]
+  let cases_f = [(toNNF (Not cc) :&& cx, vx) | cc <- NE.toList c'',
+                                               (cx, vx) <- NE.toList (getCases f')]
+  let it = combineIt it_c (combineIt it_t it_f)
+  normalise $ View it (Cases . NE.fromList $ cases_t ++ cases_f)
+  where
+    flattenCases (Cases xs) = fmap (uncurry (:&&)) xs
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
@@ -221,7 +260,7 @@ forward (E.AppExp (E.Apply f args _) _)
       -- traceM $ "#### body transformed: " <> show body'
       View it_body body'' <- forward body'
       let it = combineIt (Forall i (Iota sz)) it_body
-      pure $ View it body''
+      normalise $ View it body''
 
       -- let scope' = scope <> M.fromList (zip params'' (map (i,) arrs))
       -- View it_body body' <- forward scope' body
@@ -230,26 +269,34 @@ forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "scan" == fname, -- XXX support only builtin ops for now
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
-      sz <- getSize xs'
-      xs <- toExp xs'
-      i <- newNameFromString "i"
-      op <-
-        case E.baseString vn of
-          "+" -> pure (~+~)
-          "-" -> pure (~-~)
-          "*" -> pure (~*~)
-          _ -> error ("toExp not implemented for bin op: " <> show vn)
-      let e = Cases . NE.fromList $ [(Var i :== SoP (SoP.int2SoP 0),
-                                      Idx xs (Var i)),
-                                     (Not $ Var i :== SoP (SoP.int2SoP 0),
-                                      Recurrence `op` Idx xs (Var i))]
-      pure $ View (Forall i (Iota sz)) e
+      -- sz <- getSize xs'
+      -- xs <- toExp xs'
+      -- i <- newNameFromString "i"
+      -- op <-
+      --   case E.baseString vn of
+      --     "+" -> pure (~+~)
+      --     "-" -> pure (~-~)
+      --     "*" -> pure (~*~)
+      --     _ -> error ("toExp not implemented for bin op: " <> show vn)
+      -- let e = Cases . NE.fromList $ [(Var i :== SoP (SoP.int2SoP 0),
+      --                                 Idx xs (Var i)),
+      --                                (Not $ Var i :== SoP (SoP.int2SoP 0),
+      --                                 Recurrence `op` Idx xs (Var i))]
+      -- pure $ View (Forall i (Iota sz)) e
+      undefined
   | Just fname <- getFun f,
     "iota" == fname,
     [n] <- getArgs args = do
-      n' <- toExp n
-      i <- newNameFromString "i"
-      pure $ View (Forall i (Iota n')) (toCases $ Var i)
+      -- n' <- toExp n
+      -- i <- newNameFromString "i"
+      -- pure $ View (Forall i (Iota n')) (toCases $ Var i)
+      undefined
+  | Just fname <- getFun f,
+    fname == "not",
+    [arg] <- getArgs args = do
+      View it body <- forward arg
+      -- toView . toNNF . Not <$> toExp arg
+      normalise $ View it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e
 -- forward scope e = do -- No iteration going on here, e.g., `x = if c then 0 else 1`.
 --     e' <- toExp e
