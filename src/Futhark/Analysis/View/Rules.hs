@@ -96,7 +96,6 @@ rewrite :: View -> ViewM View
 rewrite (View it@(Forall i'' _) (Cases cases))
   | -- Rule 4 (recursive sum)
     (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
-    -- XXX with NNF we have to test that second case is (toNNF . Not (fst case))?
     i == i'',
     i == i',
     b == b',
