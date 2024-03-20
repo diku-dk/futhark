@@ -1376,12 +1376,20 @@ similarSlices slice1 slice2
 
 -- | If these two expressions are structurally similar at top level as
 -- sizes, produce their subexpressions (which are not necessarily
--- similar, but you can check for that!).  This is the machinery
--- underlying expresssion unification.
+-- similar, but you can check for that!). This is the machinery
+-- underlying expresssion unification. We assume that the expressions
+-- have the same type.
 similarExps :: Exp -> Exp -> Maybe [(Exp, Exp)]
 similarExps e1 e2 | bareExp e1 == bareExp e2 = Just []
 similarExps e1 e2 | Just e1' <- stripExp e1 = similarExps e1' e2
 similarExps e1 e2 | Just e2' <- stripExp e2 = similarExps e1 e2'
+similarExps (IntLit x _ _) (Literal v _) =
+  case v of
+    SignedValue (Int8Value y) | x == toInteger y -> Just []
+    SignedValue (Int16Value y) | x == toInteger y -> Just []
+    SignedValue (Int32Value y) | x == toInteger y -> Just []
+    SignedValue (Int64Value y) | x == toInteger y -> Just []
+    _ -> Nothing
 similarExps
   (AppExp (BinOp (op1, _) _ (x1, _) (y1, _) _) _)
   (AppExp (BinOp (op2, _) _ (x2, _) (y2, _) _) _)
