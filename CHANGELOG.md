@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+* Ignore type suffixes when unifying expressions (#2124).
+
 ## [0.25.14]
 
 ### Added
