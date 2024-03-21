@@ -1,4 +1,4 @@
-// Start of arith64.wgsl
+// Start of scalar64.wgsl
 
 alias i64 = vec2<i32>; // (low, high)
 
@@ -168,4 +168,4 @@ fn trunc_i64_i32(a: i64) -> i32 {
 	return a.x;
 }
 
-// End of arith64.wgsl
+// End of scalar64.wgsl

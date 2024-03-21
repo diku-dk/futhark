@@ -1,4 +1,4 @@
-// Start of arith.wgsl
+// Start of scalar.wgsl
 
 fn udiv_i32(a: i32, b: i32) -> i32 {
   return bitcast<i32>(bitcast<u32>(a) / bitcast<u32>(b));
@@ -176,4 +176,4 @@ fn futrts_atan2_32(a: f32, b: f32) -> f32 {
   return atan2(a, b);
 }
 
-// End of arith.wgsl
+// End of scalar.wgsl

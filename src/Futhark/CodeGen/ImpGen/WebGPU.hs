@@ -216,7 +216,7 @@ kernelsToWebGPU prog =
         map (\(KernelInterface n o s) -> (nameFromText n, (o, s)))
         (wsKernels translation)
 
-      webgpu_prelude = RTS.arith <> RTS.arith64
+      webgpu_prelude = RTS.scalar <> RTS.scalar64
       constants = mempty
       params = mempty
       failures = mempty
