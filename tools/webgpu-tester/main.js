@@ -308,8 +308,10 @@ async function init() {
 }
 
 function renderTestResults(results) {
-	const container = document.getElementById("results");
+	const resultsContainer = document.getElementById("results");
 	for (const [testName, testResults] of Object.entries(results)) {
+		const container = document.createElement("li");
+
 		const h = document.createElement("h3");
 		h.innerHTML = testName;
 		container.appendChild(h);
@@ -331,6 +333,8 @@ function renderTestResults(results) {
 				container.appendChild(r);
 			}
 		}
+
+		resultsContainer.appendChild(container);
 	}
 }
 
