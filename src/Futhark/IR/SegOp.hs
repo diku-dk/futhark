@@ -1230,11 +1230,7 @@ topDownSegOp vtable (Pat kpes) dec (SegMap lvl space ts (KernelBody _ kstms kres
   when (kres == kres') cannotSimplify
 
   kbody <- mkKernelBodyM kstms kres'
-  addStm $
-    Let (Pat kpes') dec $
-      Op $
-        segOp $
-          SegMap lvl space ts' kbody
+  addStm $ Let (Pat kpes') dec $ Op $ segOp $ SegMap lvl space ts' kbody
   where
     isInvariant Constant {} = True
     isInvariant (Var v) = isJust $ ST.lookup v vtable
