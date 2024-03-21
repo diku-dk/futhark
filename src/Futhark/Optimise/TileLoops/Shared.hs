@@ -1,27 +1,36 @@
 module Futhark.Optimise.TileLoops.Shared
   ( TileM,
     Env,
+    ceilDiv,
+    indices,
+    scratch,
     index,
     update,
     forLoop',
     forLoop,
+    forLoopNest',
+    forLoopNest,
     segMap1D,
     segMap2D,
     segMap3D,
+    segMapND,
     segScatter2D,
     VarianceTable,
     varianceInStms,
     isTileableRedomap,
     changeEnv,
     TileKind (..),
+    myDebug,
+    myDebugM,
   )
 where
 
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (foldl', zip4)
+import Data.List (foldl', intercalate, zip4)
 import Data.Map qualified as M
+import Debug.Trace
 import Futhark.IR.GPU
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SeqMem qualified as ExpMem
@@ -29,10 +38,31 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 
+myDebug :: String -> a -> a
+myDebug s = trace $ concat [sep, "\n", s', "\n", sep]
+  where
+    s' = intercalate "\n" $ map ("DEBUG: " ++) $ lines s
+    sep = replicate 100 '='
+
+myDebugM :: Applicative f => String -> f ()
+myDebugM s = myDebug s $ pure ()
+
 type TileM = ReaderT (Scope GPU) (State VNameSource)
 
 -- | Are we working with full or partial tiles?
 data TileKind = TilePartial | TileFull
+
+-- list of valid indices into a given list.
+indices :: Traversable t => t a -> [Int]
+indices xs = [0 .. length xs - 1]
+
+-- ceiled integer division expression
+ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
+ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
+
+-- scratch memory of a given shape.
+scratch :: (MonadBuilder m) => String -> PrimType -> [SubExp] -> m VName
+scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
@@ -43,15 +73,15 @@ index se_desc arr outer_indices = do
   letExp se_desc $ BasicOp $ Index arr slice
 
 update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
-update se_desc arr indices new_elem =
-  letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) indices) new_elem
+update se_desc arr idxs new_elem =
+  letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) idxs) new_elem
 
 forLoop' ::
-  SubExp -> -- loop var
-  [VName] -> -- loop inits
-  ( VName ->
-    [VName] -> -- (loop var -> loop inits -> loop body)
-    Builder GPU (Body GPU)
+  SubExp -> -- loop bound.
+  [VName] -> -- loop merge initializers.
+  ( VName -> -- loop count variable.
+    [VName] -> -- merge variables.
+    Builder GPU [VName] -- merge update values.
   ) ->
   Builder GPU [VName]
 forLoop' i_bound merge body = do
@@ -63,20 +93,75 @@ forLoop' i_bound merge body = do
 
   loop_body <-
     runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
-      body i $
-        map paramName loop_inits
+      body i (map paramName loop_inits)
+        >>= resultBodyM . map Var
 
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
 forLoop ::
-  SubExp ->
-  [VName] ->
-  (VName -> [VName] -> Builder GPU (Body GPU)) ->
+  SubExp -> -- loop bound.
+  [VName] -> -- loop merge initializers.
+  ( VName -> -- loop count variable.
+    [VName] -> -- merge variables.
+    Builder GPU [VName] -- merge update values.
+  ) ->
   Builder GPU VName
-forLoop i_bound merge body = do
-  res_list <- forLoop' i_bound merge body
-  pure $ head res_list
+forLoop i_bound merge body = head <$> forLoop' i_bound merge body
+
+forLoopNest' ::
+  [SubExp] -> -- loop bound for each loop in the nest.
+  [VName] -> -- merge variable initializers.
+  ( [VName] -> -- loop variables ->
+    [VName] -> -- merge variables ->
+    Builder GPU [VName] -- merge update values.
+  ) ->
+  Builder GPU [VName]
+forLoopNest' = buildNest []
+  where
+    -- recursively build nest; finally pass accumulated loop vars to loop body.
+    buildNest is (bound : bounds) inits body =
+      forLoop' bound inits $ \i merge -> buildNest (i : is) bounds merge body
+    buildNest is _ merge body = body is merge
+
+forLoopNest ::
+  [SubExp] ->
+  [VName] ->
+  ( [VName] ->
+    [VName] ->
+    Builder GPU [VName]
+  ) ->
+  Builder GPU VName
+forLoopNest bounds inits body = head <$> forLoopNest' bounds inits body
+
+segMapND ::
+  String -> -- desc
+  SegLevel -> -- lvl
+  ResultManifest -> -- manifest
+  [SubExp] -> -- dims
+  ( [VName] -> -- f
+    Builder GPU Result
+  ) ->
+  Builder GPU [VName]
+segMapND desc lvl manifest dims f = do
+  ltids <-
+    mapM (newVName . ("ltid_dim_" ++)) $
+      if length dims <= 3 then ["z", "y", "x"] else map show $ reverse $ indices dims
+
+  ltid_flat <- newVName "ltid_flat"
+  let segspace = SegSpace ltid_flat $ zip ltids dims
+
+  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
+    res <- f ltids
+    ts <- mapM subExpResType res
+    pure (ts, res)
+
+  let ret (SubExpRes cs se) = Returns manifest cs se
+  letTupExp desc <=< renameExp $
+    Op . SegOp $
+      SegMap lvl segspace ts $
+        KernelBody () stms $
+          map ret res
 
 segMap1D ::
   String ->
@@ -85,78 +170,32 @@ segMap1D ::
   SubExp -> -- dim_x
   (VName -> Builder GPU Result) ->
   Builder GPU [VName]
-segMap1D desc lvl manifest w f = do
-  ltid <- newVName "ltid"
-  ltid_flat <- newVName "ltid_flat"
-  let space = SegSpace ltid_flat [(ltid, w)]
-
-  ((ts, res), stms) <- localScope (scopeOfSegSpace space) . runBuilder $ do
-    res <- f ltid
-    ts <- mapM subExpResType res
-    pure (ts, res)
-  Body _ stms' res' <- renameBody $ mkBody stms res
-
-  let ret (SubExpRes cs se) = Returns manifest cs se
-  letTupExp desc $
-    Op . SegOp $
-      SegMap lvl space ts $
-        KernelBody () stms' $
-          map ret res'
+segMap1D desc lvl manifest dim_x f =
+  segMapND desc lvl manifest [dim_x] (f . head)
 
 segMap2D ::
-  String -> -- desc
-  SegLevel -> -- lvl
-  ResultManifest -> -- manifest
+  String ->
+  SegLevel ->
+  ResultManifest ->
   (SubExp, SubExp) -> -- (dim_x, dim_y)
-  ( (VName, VName) -> -- f
+  ( (VName, VName) ->
     Builder GPU Result
   ) ->
   Builder GPU [VName]
-segMap2D desc lvl manifest (dim_y, dim_x) f = do
-  ltid_xx <- newVName "ltid_x"
-  ltid_yy <- newVName "ltid_y"
-  ltid_flat <- newVName "ltid_flat"
-  let segspace = SegSpace ltid_flat [(ltid_yy, dim_y), (ltid_xx, dim_x)]
-
-  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
-    res <- f (ltid_yy, ltid_xx)
-    ts <- mapM subExpResType res
-    pure (ts, res)
-
-  let ret (SubExpRes cs se) = Returns manifest cs se
-  letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+segMap2D desc lvl manifest (dim_y, dim_x) f =
+  segMapND desc lvl manifest [dim_y, dim_x] (\(y : x : _) -> f (y, x))
 
 segMap3D ::
-  String -> -- desc
-  SegLevel -> -- lvl
-  ResultManifest -> -- manifest
-  (SubExp, SubExp, SubExp) -> -- (dim_z, dim_y, dim_x)
-  ( (VName, VName, VName) -> -- f
+  String ->
+  SegLevel ->
+  ResultManifest ->
+  (SubExp, SubExp, SubExp) -> -- (dim_x, dim_y, dim_z)
+  ( (VName, VName, VName) ->
     Builder GPU Result
   ) ->
   Builder GPU [VName]
-segMap3D desc lvl manifest (dim_z, dim_y, dim_x) f = do
-  ltid_flat <- newVName "ltid_flat"
-  ltid_z <- newVName "ltid_z"
-  ltid_y <- newVName "ltid_y"
-  ltid_x <- newVName "ltid_x"
-  let segspace = SegSpace ltid_flat [(ltid_z, dim_z), (ltid_y, dim_y), (ltid_x, dim_x)]
-
-  ((ts, res), stms) <- localScope (scopeOfSegSpace segspace) . runBuilder $ do
-    res <- f (ltid_z, ltid_y, ltid_x)
-    ts <- mapM subExpResType res
-    pure (ts, res)
-
-  let ret (SubExpRes cs se) = Returns manifest cs se
-  letTupExp desc <=< renameExp $
-    Op . SegOp $
-      SegMap lvl segspace ts $
-        KernelBody () stms $
-          map ret res
+segMap3D desc lvl manifest (dim_x, dim_y, dim_z) f =
+  segMapND desc lvl manifest [dim_z, dim_y, dim_x] (\(z : y : x : _) -> f (z, y, x))
 
 segScatter2D ::
   String ->
