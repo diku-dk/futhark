@@ -284,10 +284,13 @@ forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "iota" == fname,
     [n] <- getArgs args = do
-      -- n' <- toExp n
-      -- i <- newNameFromString "i"
-      -- pure $ View (Forall i (Iota n')) (toCases $ Var i)
-      undefined
+      view <- forward n
+      i <- newNameFromString "i"
+      case view of
+        View Empty (Cases ((Bool True, m) NE.:| [])) ->
+              normalise $ View (Forall i (Iota m)) (toCases $ Var i)
+        _ -> undefined -- TODO We've no way to express this yet.
+                       -- Have talked with Cosmin about an "outer if" before.
   | Just fname <- getFun f,
     fname == "not",
     [arg] <- getArgs args = do
