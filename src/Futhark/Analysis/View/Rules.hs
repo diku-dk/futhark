@@ -116,9 +116,6 @@ rewrite (View it@(Forall i'' _) (Cases cases))
     justRecurrence _ = Nothing
 rewrite view = pure view
 
-getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
-getSoP = SoP.sopToLists . SoP.normalize
-
 toNNF' :: View -> View
 toNNF' (View i (Cases cs)) =
   View i (Cases (NE.map (bimap toNNF toNNF) cs))

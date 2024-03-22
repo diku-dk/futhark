@@ -89,7 +89,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView1 <- simplify newView >>= rewrite >>= normalise
     tracePrettyM newView1
     traceM "🪨 refining"
-    newView2 <- refineView newView1 >>= simplify >>= rewrite >>= normalise
+    newView2 <- refineView newView1 -- should do: >>= simplify >>= rewrite >>= normalise
     tracePrettyM newView2
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"

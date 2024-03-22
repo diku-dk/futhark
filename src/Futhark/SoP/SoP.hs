@@ -51,6 +51,7 @@ module Futhark.SoP.SoP
     orRel,
     andRel,
     normalize,
+    padWithZero,
   )
 where
 

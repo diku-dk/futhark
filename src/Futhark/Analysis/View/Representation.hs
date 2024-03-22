@@ -376,3 +376,6 @@ cmap f (Cases xs) = Cases (fmap f xs)
 
 cmapValues :: (a -> a) -> Cases a -> Cases a
 cmapValues f = cmap (second f)
+
+getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
+getSoP = SoP.sopToLists . SoP.normalize
