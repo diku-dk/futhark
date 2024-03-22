@@ -6,8 +6,7 @@
 --       [x] introduce let bindings inside maps
 --       [ ] Make substition of view into conditions of other view
 --           work. See tests/refinement/nikolaj/view_cond.fut and hoistCases'.
---       [ ] use exclusive scan and dont subtract one from indices later
---           (also changes definition of lst)
+--       [ ] part2indices_scan_exc; make Sum merge
 --       [ ] use parts from partition2L as inspiration fro changes, like:
 --           let begs   = scan (+) 0 shp --- prepend 0 here; prepend 0 to shp
 --       - etc

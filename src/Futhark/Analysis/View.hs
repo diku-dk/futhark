@@ -137,6 +137,9 @@ toView e = View Empty (toCases e)
 forward :: E.Exp -> ViewM View
 forward (E.Parens e _) = forward e
 forward (E.Attr _ e _) = forward e
+forward (E.Not e _) = do
+  View it e' <- forward e
+  pure $ View it $ cmapValues (toNNF . Not) e'
 -- Leaves.
 forward (E.Literal (E.BoolValue x) _) =
   pure . toView $ Bool x
@@ -227,21 +230,23 @@ forward (E.AppExp (E.If c t f _) _) = do
   View it_c c' <- forward c
   View it_t t' <- forward t
   View it_f f' <- forward f
-  -- `c` has cases, so the case conditions and values are put in conjunction.
-  let c'' = flattenCases c'
-  let cases_t = [(cc :&& cx, vx) | cc <- c'',
+  -- Negating `c` means negating the case _values_ of c, keeping the
+  -- conditions of any nested if-statements (case conditions) untouched.
+  let neg_c' = cmapValues (toNNF . Not) c'
+  let cases_t = [(cc :&& cx, vx) | cc <- flattenCases c',
                                    (cx, vx) <- casesToList t']
-  let cases_f = [(toNNF (Not cc) :&& cx, vx) | cc <- c'',
-                                               (cx, vx) <- casesToList f']
-  let it = combineIt it_c (combineIt it_t it_f)
+  let cases_f = [(neg_cc :&& cx, vx) | neg_cc <- flattenCases neg_c',
+                                       (cx, vx) <- casesToList f']
+  let it = combineIt it_c $ combineIt it_t it_f
   normalise $ View it (Cases . NE.fromList $ cases_t ++ cases_f)
   where
+    -- `c` has cases, so the case conditions and values are put in conjunction.
     flattenCases (Cases xs) = NE.toList $ fmap (uncurry (:&&)) xs
 forward (E.AppExp (E.Apply f args _) _)
   | Just fname <- getFun f,
     "map" `L.isPrefixOf` fname,
     E.Lambda params body _ _ _ : args' <- getArgs args = do
-      traceM ("🪲 map body: " <> show body <> "\n")
+      -- traceM ("🪲 map body: " <> show body <> "\n")
       -- 0. Create iterator and transform expression to use it
       i <- newNameFromString "i"
       -- TODO Right now we only support variables as arguments.
