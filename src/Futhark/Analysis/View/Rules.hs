@@ -100,6 +100,7 @@ rewrite (View it@(Forall i'' _) (Cases cases))
     i == i'',
     i == i',
     b == b',
+    b == SoP (SoP.int2SoP 0), -- TODO allow non-zero by splitting sum?
     Just x' <- justRecurrence y,
     x == x' = do
       traceM "👀 Using Rule 4 (recursive sum)"
