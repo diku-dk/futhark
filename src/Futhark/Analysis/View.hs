@@ -88,6 +88,9 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     tracePrettyM newView
     newView1 <- simplify newView >>= rewrite >>= normalise
     tracePrettyM newView1
+    traceM "🪨 refining"
+    newView2 <- refineView newView1 >>= simplify >>= rewrite >>= normalise
+    tracePrettyM newView2
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"
     -- newView1 <- hoistCases newView >>= normalise
@@ -104,7 +107,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     -- newView6 <- refineView newView5 >>= normalise
     -- tracePrettyM newView6
     traceM "\n"
-    insertView x newView1
+    insertView x newView2
     forwards body
     pure ()
 forwards _ = pure ()

@@ -56,8 +56,6 @@ normalise view =
 simplify :: View -> ViewM View
 simplify view =
   removeDeadCases view
-  >>= simplifyRule1
-  >>= removeDeadCases
   >>= simplifyRule3
   >>= removeDeadCases
 
@@ -72,26 +70,6 @@ removeDeadCases (View it (Cases cases))
     f (Bool False, _) = False
     f _ = True
 removeDeadCases view = pure view
-
--- Eliminate check for non-empty range
-simplifyRule1 :: View -> ViewM View
-simplifyRule1 view@(View it _) =
-  pure $ toNNF' $ idMap m view
-  where
-    m =
-      ASTMapper
-        { mapOnExp = normExp }
-    normExp (Var x) = pure $ Var x
-    normExp (x :> y)
-      | y == SoP (SoP.int2SoP 0),
-        Just n <- getIterSize it,
-        x == n =
-          trace "👀 Using Simplification Rule 1" $
-            pure (Bool True)
-      where
-        getIterSize (Forall _ (Iota sz)) = Just sz
-        getIterSize _ = Nothing
-    normExp e = astMap m e
 
 -- TODO Maybe this should only apply to | True => 1 | False => 0
 -- (and its negation)?

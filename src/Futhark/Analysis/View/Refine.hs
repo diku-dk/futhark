@@ -35,13 +35,8 @@ refineView (View it (Cases cases)) = do
   env <- gets algenv
   -- let env =  addIteratorLocal env it
   preds' <- NE.fromList <$> mapM (onExp env) preds
-  let cases' = NE.filter (eliminateFalse . fst) $
-                 NE.zipWith (\c (_,e) -> (c,e)) preds' cases
   delIterator it
-  case cases' of
-    [] -> error "No true case; this should never happen."
-    cs -> pure $ View it (Cases $ NE.fromList cs)
-  -- ^ this is probably a janky way to do it, I just made it typecheck.
+  pure $ View it (Cases $ NE.zipWith (\c (_,e) -> (c,e)) preds' cases)
   where
     m env =
       ASTMapper
@@ -62,13 +57,6 @@ refineView (View it (Cases cases)) = do
       b <- expToSoP x $<$ expToSoP y
       pure $ if b then Bool True else e
     onExp env v = astMap (m env) v
-
-    eliminateFalse (Bool False) = False
-    eliminateFalse (Not (Bool True)) = False
-    eliminateFalse _ = True
-refineView _ = error "unnormalised view (just apply hoistCases)"
--- XXX I should change the representation to ensure cases outermost, I guess.
-
 
 refineCasePredicate :: Exp -> ViewM Exp
 refineCasePredicate = undefined
