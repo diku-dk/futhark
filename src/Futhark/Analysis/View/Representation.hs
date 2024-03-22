@@ -47,6 +47,7 @@ import Control.Monad.RWS.Strict hiding (Sum)
 import Data.List.NonEmpty qualified as NE
 import Futhark.SoP.Monad
 import Futhark.SoP.Convert (ToSoP (toSoPNum))
+import Debug.Trace (traceM)
 
 data Exp =
     Var VName
@@ -379,3 +380,6 @@ cmapValues f = cmap (second f)
 
 getSoP :: SoP.SoP Exp -> [([Exp], Integer)]
 getSoP = SoP.sopToLists . SoP.normalize
+
+debugM :: Applicative f => String -> f ()
+debugM x = traceM $ "🪲 " <> x

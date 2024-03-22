@@ -7,6 +7,7 @@ import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
+import Futhark.Util.Pretty
 
 normalise :: View -> ViewM View
 normalise view =

@@ -58,8 +58,6 @@ refineView (View it (Cases cases)) = do
   (preds'', vals'') <- rollbackAlgEnv (
     do
       addIterator it
-      env <- gets algenv
-      traceM $ "Alg env: " <> prettyString env
       preds' <- mapM refineExp preds
       vals' <- mapM refineCase (zip preds' vals)
       pure (preds', vals'))
@@ -76,7 +74,7 @@ refineView (View it (Cases cases)) = do
           do
             addRel rel
             env' <- gets algenv
-            traceM $ "refine " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
+            debugM $ "refine " <> prettyString (p,v) <> " Alg env: " <> prettyString env'
             refineExp v)
     refineCase (_, v) =
       refineExp v

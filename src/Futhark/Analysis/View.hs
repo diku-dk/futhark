@@ -89,7 +89,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     newView1 <- simplify newView >>= rewrite >>= normalise
     tracePrettyM newView1
     traceM "🪨 refining"
-    newView2 <- refineView newView1 -- should do: >>= simplify >>= rewrite >>= normalise
+    newView2 <- refineView newView1 >>= simplify >>= rewrite >>= normalise
     tracePrettyM newView2
     -- newView6 <- substituteViews newView
     -- traceM "🎭 hoisting cases"
@@ -106,6 +106,7 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
     -- tracePrettyM newView5
     -- newView6 <- refineView newView5 >>= normalise
     -- tracePrettyM newView6
+    traceM (show newView2)
     traceM "\n"
     insertView x newView2
     forwards body
@@ -123,13 +124,6 @@ combineCases :: (Exp -> Exp -> Exp) -> Cases Exp -> Cases Exp -> Cases Exp
 combineCases f (Cases xs) (Cases ys) =
   Cases . NE.fromList $
     [(cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
-
-combineCasesM :: (Exp -> Exp -> ViewM Exp) -> Cases Exp -> Cases Exp -> ViewM (Cases Exp)
-combineCasesM f (Cases xs) (Cases ys) = do
-  -- Cases . NE.fromList $
-  cs <- sequence $
-          [sequence (cx :&& cy, f vx vy) | (cx, vx) <- NE.toList xs, (cy, vy) <- NE.toList ys]
-  pure . Cases . NE.fromList $ cs
 
 casesToList :: Cases a -> [(a, a)]
 casesToList (Cases xs) = NE.toList xs
@@ -164,7 +158,6 @@ forward e@(E.Var (E.QualName _ vn) _ _) = do
 forward e@(E.AppExp (E.Index xs slice _) _)
   | [E.DimFix idx] <- slice, -- XXX support only simple indexing for now
     (E.Var (E.QualName _ vn) _ _) <- stripExp xs = do
-      -- traceM $ "🪲 Index1 " <> prettyString e
       View i e_i <- forward idx
       -- Gets previous top-level views.
       views <- gets views
@@ -175,8 +168,16 @@ forward e@(E.AppExp (E.Index xs slice _) _)
         Just (View j xs')
           | Just j' <- iteratorName j -> do
           traceM ("🪸 substituting " <> prettyString e <> " for " <> prettyString xs')
-          e2 <- combineCasesM (substituteName j') e_i xs'
-          normalise $ View (combineIt i j) e2
+          -- Substitute j for each value in e_i, combining cases.
+          cs <- sequence $
+                  [seq' ((cx :&&) <$> substituteName j' vx cy, substituteName j' vx vy)
+                      | (cx, vx) <- casesToList e_i, (cy, vy) <- casesToList xs']
+          normalise $ View (combineIt i j) (Cases . NE.fromList $ cs)
+          where
+            seq' (x, y) = do
+              x' <- x
+              y' <- y
+              pure (x', y')
         _ -> do
           -- TODO this is duplicated below.
           View j xs' <- forward xs
@@ -275,6 +276,7 @@ forward (E.AppExp (E.Apply f args _) _)
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       sz <- getSize xs'
       i <- newNameFromString "i"
+      debugM $ "scan i: " <> prettyString i
       let i' = Var i
       op <-
         case E.baseString vn of
