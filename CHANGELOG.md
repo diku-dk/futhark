@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+* Incremental Flattening generates fewer redundant code versions.
+
+* Better simplification of slices. (#2125)
+
 ### Removed
 
 ### Changed
