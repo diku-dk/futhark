@@ -16,6 +16,7 @@ import Futhark.IR.GPU
 import Futhark.IR.Prop.Aliases (consumedInStm)
 import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling
+import Futhark.Optimise.TCTiling
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Pass
 import Futhark.Tools
@@ -50,17 +51,22 @@ optimiseStms env stms =
 
 optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
 optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
-  res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
+  -- TODO: do I need to wrap the call in localScope (...) here?
+  resTCTiling <- doTCTiling env stm
   stms' <-
-    case res3dtiling of
-      Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+    case resTCTiling of
+      Just (host_stms, kernel_stm) -> pure (host_stms <> oneStm kernel_stm)
       Nothing -> do
-        blkRegTiling_res <- mmBlkRegTiling env stm
-        case blkRegTiling_res of
+        res3dtiling <- localScope (scopeOfSegSpace space) $ doRegTiling3D stm
+        case res3dtiling of
           Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
-          Nothing -> localScope (scopeOfSegSpace space) $ do
-            (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
-            pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
+          Nothing -> do
+            blkRegTiling_res <- mmBlkRegTiling env stm
+            case blkRegTiling_res of
+              Just (extra_stms, stmt') -> pure (extra_stms <> oneStm stmt')
+              Nothing -> localScope (scopeOfSegSpace space) $ do
+                (host_stms, (lvl', space', kbody')) <- tileInKernelBody mempty initial_variance lvl space ts kbody
+                pure $ host_stms <> oneStm (Let pat aux $ Op $ SegOp $ SegMap lvl' space' ts kbody')
   pure (env, stms')
   where
     initial_variance = M.map mempty $ scopeOfSegSpace space

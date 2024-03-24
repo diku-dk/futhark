@@ -305,6 +305,7 @@ library
       Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
       Futhark.Optimise.BlkRegTiling
+      Futhark.Optimise.TCTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
       Futhark.Optimise.EntryPointMem
