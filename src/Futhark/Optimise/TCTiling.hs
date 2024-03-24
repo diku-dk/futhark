@@ -120,25 +120,12 @@ doTCTiling _env _orig_stm@(Let pat aux (Op (SegOp (SegMap SegThread {} seg_space
 
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
           let segthd_lvl = SegThreadInBlock (SegNoVirtFull (SegSeqDims []))
-          reg_tiles <- fmap head $ segMapND "reg_tiles" segthd_lvl ResultPrivate tiles_T $ const $ do
+          reg_tiles <- segMapND_ "reg_tiles" segthd_lvl ResultPrivate tiles_T $ const $ do
             reg_tile_init <- scratch "reg_tile_init" (elemType res_type) tiles_R
+            fmap varsRes $
+              forLoopNest tiles_R [reg_tile_init] $ \loop_inds [merge] ->
+                (: []) <$> update "reg_tile" merge loop_inds red_ne
 
-            reg_tile <- forLoopNest tiles_R [reg_tile_init] $ \loop_inds [merge] ->
-              (: []) <$> update "reg_tile" merge loop_inds red_ne
-            pure [varRes $ reg_tile]
-
-          -- segMapND "foo" (SegThreadInBlock (SegNoVirtFull (SegSeqDims [])))
-          -- forM_ (zip gtids [0..]) $ \(gtid, i) -> do
-          --   myDebugM $ "gtid: " ++ prettyString gtid
-          --   letBindNames [gtid] =<< toExp (intConst Int64 i)
-          -- pure [RegTileReturns mempty [] foo]
-
-          -- is_in_bounds <-
-          --   letSubExp "is_in_bounds"
-          --     =<< toExp
-          --       ( foldr1 (.&&.) $
-          --           map (\(gtid, dim_len) -> le64 gtid .<. pe64 dim_len) inner_dims
-          --       )
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
                   ++ zip3 inner_dims tiles_T tiles_R

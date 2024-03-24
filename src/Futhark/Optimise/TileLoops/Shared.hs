@@ -6,14 +6,14 @@ module Futhark.Optimise.TileLoops.Shared
     scratch,
     index,
     update,
-    forLoop',
     forLoop,
-    forLoopNest',
+    forLoop_,
     forLoopNest,
+    forLoopNest_,
     segMap1D,
     segMap2D,
-    segMap3D,
     segMapND,
+    segMapND_,
     segScatter2D,
     VarianceTable,
     varianceInStms,
@@ -76,7 +76,7 @@ update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr idxs new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) idxs) new_elem
 
-forLoop' ::
+forLoop ::
   SubExp -> -- loop bound.
   [VName] -> -- loop merge initializers.
   ( VName -> -- loop count variable.
@@ -84,7 +84,7 @@ forLoop' ::
     Builder GPU [VName] -- merge update values.
   ) ->
   Builder GPU [VName]
-forLoop' i_bound merge body = do
+forLoop i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
   let loop_form = ForLoop i Int64 i_bound
 
@@ -99,7 +99,7 @@ forLoop' i_bound merge body = do
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
-forLoop ::
+forLoop_ ::
   SubExp -> -- loop bound.
   [VName] -> -- loop merge initializers.
   ( VName -> -- loop count variable.
@@ -107,9 +107,9 @@ forLoop ::
     Builder GPU [VName] -- merge update values.
   ) ->
   Builder GPU VName
-forLoop i_bound merge body = head <$> forLoop' i_bound merge body
+forLoop_ i_bound merge body = head <$> forLoop i_bound merge body
 
-forLoopNest' ::
+forLoopNest ::
   [SubExp] -> -- loop bound for each loop in the nest.
   [VName] -> -- merge variable initializers.
   ( [VName] -> -- loop variables ->
@@ -117,14 +117,14 @@ forLoopNest' ::
     Builder GPU [VName] -- merge update values.
   ) ->
   Builder GPU [VName]
-forLoopNest' = buildNest []
+forLoopNest = buildNest []
   where
     -- recursively build nest; finally pass accumulated loop vars to loop body.
     buildNest is (bound : bounds) inits body =
-      forLoop' bound inits $ \i merge -> buildNest (i : is) bounds merge body
+      forLoop bound inits $ \i merge -> buildNest (i : is) bounds merge body
     buildNest is _ merge body = body is merge
 
-forLoopNest ::
+forLoopNest_ ::
   [SubExp] ->
   [VName] ->
   ( [VName] ->
@@ -132,7 +132,7 @@ forLoopNest ::
     Builder GPU [VName]
   ) ->
   Builder GPU VName
-forLoopNest bounds inits body = head <$> forLoopNest' bounds inits body
+forLoopNest_ bounds inits body = head <$> forLoopNest bounds inits body
 
 segMapND ::
   String -> -- desc
@@ -163,6 +163,19 @@ segMapND desc lvl manifest dims f = do
         KernelBody () stms $
           map ret res
 
+segMapND_ ::
+  String ->
+  SegLevel ->
+  ResultManifest ->
+  [SubExp] -> 
+  ( [VName] ->
+    Builder GPU Result
+  ) ->
+  Builder GPU VName
+segMapND_ desc lvl manifest dims f =
+  head <$> segMapND desc lvl manifest dims f
+
+
 segMap1D ::
   String ->
   SegLevel ->
@@ -184,18 +197,6 @@ segMap2D ::
   Builder GPU [VName]
 segMap2D desc lvl manifest (dim_y, dim_x) f =
   segMapND desc lvl manifest [dim_y, dim_x] (\(y : x : _) -> f (y, x))
-
-segMap3D ::
-  String ->
-  SegLevel ->
-  ResultManifest ->
-  (SubExp, SubExp, SubExp) -> -- (dim_x, dim_y, dim_z)
-  ( (VName, VName, VName) ->
-    Builder GPU Result
-  ) ->
-  Builder GPU [VName]
-segMap3D desc lvl manifest (dim_x, dim_y, dim_z) f =
-  segMapND desc lvl manifest [dim_z, dim_y, dim_x] (\(z : y : x : _) -> f (z, y, x))
 
 segScatter2D ::
   String ->
