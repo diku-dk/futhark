@@ -56,6 +56,7 @@ data Stmt
   | If Exp Stmt Stmt
   | For Ident Exp Exp Stmt Stmt
   | While Exp Stmt
+  | Call Ident [Exp]
 
 data Attrib = Attrib Ident [Exp]
 data Param = Param Ident Typ [Attrib]
@@ -151,6 +152,7 @@ instance Pretty Stmt where
     "while" <+> pretty cond <+> "{"
     </> indent 2 (pretty body) <> ";"
     </> "}"
+  pretty (Call f args) = pretty f <> parens (commasep $ map pretty args)
 
 instance Pretty Attrib where
   pretty (Attrib name []) = "@" <> pretty name

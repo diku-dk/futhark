@@ -1,4 +1,6 @@
 function typeSize(type) {
+	if (type == 'i8') { return 1; }
+	if (type == 'u8') { return 1; }
 	if (type == 'i32') { return 4; }
 	if (type == 'u32') { return 4; }
 	if (type == 'i64') { return 8; }
@@ -7,7 +9,14 @@ function typeSize(type) {
 	throw "unsupported type";
 }
 
+function alignArraySize(len) {
+	const r = len % 4;
+	return r ? len + (4 - r) : len;
+}
+
 function toTypedArray(array, type) {
+	if (type == 'i8') { return new Int8Array(array); }
+	if (type == 'u8') { return new Uint8Array(array); }
 	if (type == 'i32') { return new Int32Array(array); }
 	if (type == 'u32') { return new Uint32Array(array); }
 	if (type == 'i64') {
@@ -35,6 +44,8 @@ function toTypedArray(array, type) {
 }
 
 function arrayBufferToTypedArray(buffer, type) {
+	if (type == 'i8') { return new Int8Array(buffer); }
+	if (type == 'u8') { return new Uint8Array(buffer); }
 	if (type == 'i32') { return new Int32Array(buffer); }
 	if (type == 'u32') { return new Uint32Array(buffer); }
 	if (type == 'i64') { return new Int32Array(buffer); }
@@ -69,7 +80,8 @@ async function runTest(device, shaderModule, testInfo) {
 	// Create input buffers.
 	let inputBuffers = [];
 	for (let i = 0; i < templateRun.input.length; i++) {
-		const inputElemSize = typeSize(templateRun.inputTypes[i]);
+		const ty = templateRun.inputTypes[i];
+		const inputElemSize = typeSize(ty);
 		
 		// Find maximum required size for buffer.
 		let maxLength = 0;
@@ -80,7 +92,7 @@ async function runTest(device, shaderModule, testInfo) {
 		}
 
 		const buffer = device.createBuffer({
-			size: maxLength * inputElemSize,
+			size: alignArraySize(maxLength * inputElemSize),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 		});
 		inputBuffers.push(buffer);
@@ -99,11 +111,11 @@ async function runTest(device, shaderModule, testInfo) {
 	const outputElemSize = typeSize(outputType);
 
 	let outputBuffer = device.createBuffer({
-		size: maxLength * outputElemSize,
+		size: alignArraySize(maxLength * outputElemSize),
 		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 
 	});
 	let stagingBuffer = device.createBuffer({
-		size: maxLength * outputElemSize,
+		size: alignArraySize(maxLength * outputElemSize),
 		usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST, 
 	});
 
@@ -169,6 +181,8 @@ async function runTest(device, shaderModule, testInfo) {
 	for (let ri = 0; ri < testInfo.runs.length; ri++) {
 		const run = testInfo.runs[ri];
 		const length = run.input[0].length;
+		const alignedOutLength = alignArraySize(length * outputElemSize);
+
 		let hScalars = new Int32Array(2);
 		hScalars[0] = length;
 		hScalars[1] = 0;
@@ -179,6 +193,10 @@ async function runTest(device, shaderModule, testInfo) {
 			const inputType = run.inputTypes[i];
 
 			let hInput = toTypedArray(input, inputType);
+			let alignedLen = alignArraySize(hInput.byteLength);
+			if (alignedLen != hInput.byteLength) {
+				hInput = hInput.buffer.transfer(alignedLen);
+			}
 			device.queue.writeBuffer(inputBuffers[i], 0, hInput, 0);
 		}
 
@@ -191,11 +209,11 @@ async function runTest(device, shaderModule, testInfo) {
 		passEncoder.dispatchWorkgroups(Math.ceil(length / block_size));
 		passEncoder.end();
 		commandEncoder.copyBufferToBuffer(
-			outputBuffer, 0, stagingBuffer, 0, length * outputElemSize);
+			outputBuffer, 0, stagingBuffer, 0, alignedOutLength);
 		device.queue.submit([commandEncoder.finish()]);
 
-		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, length * outputElemSize);
-		const stagingMapped = stagingBuffer.getMappedRange(0, length * outputElemSize);
+		await stagingBuffer.mapAsync(GPUMapMode.READ, 0, alignedOutLength);
+		const stagingMapped = stagingBuffer.getMappedRange(0, alignedOutLength);
 		const data = arrayBufferToTypedArray(stagingMapped.slice(), outputType);
 		stagingBuffer.unmap();
 

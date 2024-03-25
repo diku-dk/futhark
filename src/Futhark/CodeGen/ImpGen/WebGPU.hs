@@ -279,16 +279,23 @@ genWGSLStm (DeclareArray {}) = pure $ WGSL.Comment "TODO: Unimplemented statemen
 genWGSLStm (Allocate {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Copy {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
+genWGSLStm (Write mem i (IntType Int8) _ _ v) =
+  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
+   in WGSL.Call "write_i8" <$> sequence [buf, indexExp i, genWGSLExp v]
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
+genWGSLStm (Read tgt mem i (IntType Int8) _ _) =
+  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
+      call = WGSL.CallExp "read_i8" <$> sequence [buf, indexExp i]
+   in WGSL.Assign <$> getIdent tgt <*> call
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
 genWGSLStm (SetMem {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Call [dest] f args) = do
-  fun <- (WGSL.CallExp . ("futrts_" <>)) <$> getIdent f
+  fun <- WGSL.CallExp . ("futrts_" <>) <$> getIdent f
   let getArg (ExpArg e) = genWGSLExp e
       getArg (MemArg n) = WGSL.VarExp <$> getIdent n
   argExps <- mapM getArg args
@@ -450,7 +457,7 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
 
 intLiteral :: IntValue -> WGSL.Exp
 intLiteral (Int8Value v) =
-  WGSL.CallExp "sext_i32_i64" [WGSL.IntExp $ fromIntegral v]
+  WGSL.CallExp "sext_i8_i32" [WGSL.IntExp $ fromIntegral v]
 intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
   where
     low = WGSL.IntExp $ fromIntegral $ v Bits..&. 0xffffff
