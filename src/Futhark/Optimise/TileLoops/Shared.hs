@@ -144,9 +144,13 @@ segMapND ::
   ) ->
   Builder GPU [VName]
 segMapND desc lvl manifest dims f = do
+  let n_dims = length dims
   ltids <-
     mapM (newVName . ("ltid_dim_" ++)) $
-      if length dims <= 3 then ["z", "y", "x"] else map show $ reverse $ indices dims
+      take n_dims $
+        if n_dims <= 3
+          then ["z", "y", "x"]
+          else reverse $ map show $ indices dims
 
   ltid_flat <- newVName "ltid_flat"
   let segspace = SegSpace ltid_flat $ zip ltids dims
@@ -167,14 +171,13 @@ segMapND_ ::
   String ->
   SegLevel ->
   ResultManifest ->
-  [SubExp] -> 
+  [SubExp] ->
   ( [VName] ->
     Builder GPU Result
   ) ->
   Builder GPU VName
 segMapND_ desc lvl manifest dims f =
   head <$> segMapND desc lvl manifest dims f
-
 
 segMap1D ::
   String ->
@@ -273,8 +276,7 @@ varianceInStm v0 stm@(Let _ _ (Op (OtherOp Screma {})))
           red_ps = lambdaParams red_lam
           map_ps = lambdaParams map_lam
           card_red = length red_nes
-          acc_lam_f = take (card_red `quot` 2) red_ps
-          arr_lam_f = drop (card_red `quot` 2) red_ps
+          (acc_lam_f, arr_lam_f) = splitAt (card_red `quot` 2) red_ps
           stm_lam = bodyStms (lambdaBody map_lam) <> bodyStms (lambdaBody red_lam)
 
           f vacc (v_a, v_fm, v_fr_acc, v_fr_var) =

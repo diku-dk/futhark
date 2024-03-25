@@ -16,7 +16,13 @@
 --          the redomap has exactly two array input
 --          the redomap produces one scalar result
 --          the kernel produces one scalar result
-module Futhark.Optimise.BlkRegTiling (mmBlkRegTiling, doRegTiling3D, matchCodeStreamCode) where
+module Futhark.Optimise.BlkRegTiling
+  ( mmBlkRegTiling,
+    doRegTiling3D,
+    matchCodeStreamCode,
+    processIndirections,
+  )
+where
 
 import Control.Monad
 import Data.List qualified as L
@@ -126,19 +132,16 @@ kkLoopBody
         -- hence the length of inner dim is (tr_par + 1)
         let e = le64 i + le64 k * (pe64 tr_par + pe64 se1)
         pure (i, k, e)
+
       isInnerCoal :: Env -> VName -> Stm GPU -> Bool
       isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
         | [slc_X'] <- patNames pat,
-          slc_X == slc_X',
-          Nothing <- M.lookup x ixfn_env =
-            True -- if not in the table, we assume not-transposed!
-      isInnerCoal (_, ixfn_env) slc_X (Let pat _ (BasicOp (Index x _)))
-        | [slc_X'] <- patNames pat,
-          slc_X == slc_X',
-          Just lmad <- M.lookup x ixfn_env =
-            innerHasStride1 lmad
+          slc_X == slc_X' =
+            -- if x is not in the table, we assume not-transposed
+            maybe True innerHasStride1 (M.lookup x ixfn_env)
       isInnerCoal _ _ _ =
         error "kkLoopBody.isInnerCoal: not an error, but I would like to know why!"
+
       innerHasStride1 lmad =
         let lmad_dims = LMAD.dims lmad
             stride = LMAD.ldStride $ last lmad_dims
@@ -675,11 +678,7 @@ matchesBlkRegTile seg_space kstms
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
     --    is independent; these are recorded in `code2''`
-    Just (code2'', tab_inv_stm) <-
-      foldl
-        (processIndirections (namesFromList arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+    Just (code2'', tab_inv_stm) <- processIndirections code1 arrs res_red_var,
     -- identify load_A, load_B
     tmp_stms <- mapMaybe (`M.lookup` tab_inv_stm) arrs,
     length tmp_stms == length arrs =
@@ -885,23 +884,26 @@ isInvarToAllButOneInnerDim n_dims branch_variant dims variance arrs
         variants = M.findWithDefault mempty arr variance
 
 processIndirections ::
-  Names -> -- input arrays to redomap
-  Names -> -- variables on which the result of redomap depends on.
-  Maybe (Stms GPU, M.Map VName (Stm GPU)) ->
-  Stm GPU ->
+  Stms GPU -> -- code1
+  [VName] -> -- redomap_arrs
+  Names -> -- red_res_variance
   Maybe (Stms GPU, M.Map VName (Stm GPU))
-processIndirections arrs _ acc stm@(Let patt _ (BasicOp (Index _ _)))
-  | Just (ss, tab) <- acc,
-    [p] <- patElems patt,
-    p_nm <- patElemName p,
-    p_nm `nameIn` arrs =
-      Just (ss, M.insert p_nm stm tab)
-processIndirections _ res_red_var acc stm'@(Let patt _ _)
-  | Just (ss, tab) <- acc,
-    ps <- patElems patt,
-    all (\p -> patElemName p `notNameIn` res_red_var) ps =
-      Just (ss Seq.|> stm', tab)
-  | otherwise = Nothing
+processIndirections code1 redomap_arrs red_res_variance =
+  foldl
+    (processIndirections_ (namesFromList redomap_arrs) red_res_variance)
+    (Just (Seq.empty, M.empty))
+    code1
+  where
+    processIndirections_ arrs red_res_var (Just (code2', tab)) stm
+      | BasicOp Index {} <- stmExp stm,
+        [p_name] <- p_names,
+        p_name `nameIn` arrs = do
+          Just (code2', M.insert p_name stm tab)
+      | all (`notNameIn` red_res_var) p_names =
+          Just (code2' Seq.|> stm, tab)
+      where
+        p_names = map patElemName $ patElems $ stmPat stm
+    processIndirections_ _ _ _ _ = Nothing
 
 getParTiles :: (String, String) -> (Name, Name) -> SubExp -> Builder GPU (SubExp, SubExp)
 getParTiles (t_str, r_str) (t_name, r_name) len_dim =
@@ -1010,11 +1012,7 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
     --    to produce the input for the redomap, and
     -- 2. potentially some statements on which the redomap
     --    is independent; these are recorded in `code2''`
-    Just (code2'', arr_tab0) <-
-      foldl
-        (processIndirections (namesFromList inp_soac_arrs) res_red_var)
-        (Just (Seq.empty, M.empty))
-        code1,
+    Just (code2'', arr_tab0) <- processIndirections code1 inp_soac_arrs res_red_var,
     -- check that code1 contains exacly one slice for each of the input array to redomap
     tmp_stms <- mapMaybe (`M.lookup` arr_tab0) inp_soac_arrs,
     length tmp_stms == length inp_soac_arrs,
@@ -1123,10 +1121,9 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                         let body = KernelBody () stms [ret]
                         shr_Y_nm_t <- lookupType shr_Y_nm
 
-                        fmap head $
-                          letTupExp "Y_glb2shr" <=< renameExp $
-                            Op . SegOp $
-                              SegMap segthd_lvl segspace [shr_Y_nm_t] body
+                        letExp "Y_glb2shr" <=< renameExp $
+                          Op . SegOp $
+                            SegMap segthd_lvl segspace [shr_Y_nm_t] body
                     pure shr_arr_merge2_nms'
 
                 redomap_res <-
