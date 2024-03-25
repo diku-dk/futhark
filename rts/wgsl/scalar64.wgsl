@@ -161,7 +161,7 @@ fn zext_i32_i64(a: i32) -> i64 {
 
 fn sext_i32_i64(a: i32) -> i64 {
   if (a < 0) { return i64(a, -1); }
-  else { return i64(a, 0); }
+  return i64(a, 0);
 }
 
 fn trunc_i64_i32(a: i64) -> i32 {
