@@ -94,8 +94,6 @@ gpuPipeline =
         tileLoops,
         simplifyGPU,
         histAccsGPU,
-        babysitKernels,
-        simplifyGPU,
         unstreamGPU,
         performCSE True,
         simplifyGPU,

@@ -307,7 +307,7 @@ seqStm'
   ( Let
       pat
       aux
-      (Op (SegOp (SegRed lvl@(SegThread {}) space binops ts kbody)))
+      (Op (SegOp (SegRed lvl@(SegThreadInBlock {}) space binops ts kbody)))
     )
     | L.length (unSegSpace space) /= 1 = throwError ()
     | differentSize space env = throwError ()
@@ -340,7 +340,7 @@ seqStm'
           _
           ( Op
               ( SegOp
-                  (SegMap lvl@(SegThread {}) space ts kbody)
+                  (SegMap lvl@(SegThreadInBlock {}) space ts kbody)
                 )
             )
         )
@@ -374,7 +374,7 @@ seqStm'
   ( Let
       pat
       aux
-      (Op (SegOp (SegScan (SegThread {}) space binops ts kbody)))
+      (Op (SegOp (SegScan (SegThreadInBlock {}) space binops ts kbody)))
     )
     | L.length (unSegSpace space) /= 1 = throwError ()
     | differentSize space env = throwError ()
@@ -395,7 +395,7 @@ seqStm'
           phys <- newVName "phys_tid"
           binops' <- renameSegBinOp binops
 
-          let lvl' = SegThread SegNoVirt Nothing
+          let lvl' = SegThreadInBlock SegNoVirt 
           let space' = SegSpace phys [(tid', grpSize env'')]
           results <- mapM (buildKernelResult env'') scanReds
           let ts' = L.take numResConsumed ts
@@ -452,7 +452,7 @@ seqStm'
                   L.take numResConsumed res
           fused <- mapM (buildKernelResult env'') fusedReds
 
-          let lvl' = SegThread SegNoVirt Nothing
+          let lvl' = SegThreadInBlock SegNoVirt 
           let space' = SegSpace phys [(tid', grpSize env)]
           let types' = scremaType (seqFactor env) scanSoac
           pure (usedRes ++ fused, lvl', space', types')
@@ -535,7 +535,7 @@ seqScatter
       aux
       ( Op
           ( SegOp
-              (SegMap (SegThread {}) space ts kbody)
+              (SegMap (SegThreadInBlock {}) space ts kbody)
             )
         )
     )
@@ -673,7 +673,7 @@ seqScatter
                 _ -> error "Expected WriteReturns in scatter"
 
             -- Return the results of the update statements form the segmap
-            let lvl' = SegThread SegNoVirt Nothing
+            let lvl' = SegThreadInBlock SegNoVirt
             let space' = SegSpace phys [(tid, grpSize env)]
             -- let res' = L.map (Returns ResultMaySimplify mempty) updates
             pure (res', lvl', space', ts)
@@ -943,7 +943,7 @@ mkIntmRed env kbody retTs binops = do
             letSubExp "red_res" $ BasicOp $ Index (getVName r) (Slice newDims)
         )
     let res' = redRes ++ mapRes
-    let lvl' = SegThread SegNoVirt Nothing
+    let lvl' = SegThreadInBlock SegNoVirt 
     let space' = SegSpace phys [(tid, grpSize env)]
     let kres = L.map (Returns ResultMaySimplify mempty) res'
     types' <- mapM subExpType res'
@@ -1125,7 +1125,7 @@ mkTiles env = do
       let slice = Slice [DimSlice start (seqFactor env) (intConst Int64 1)]
       chunk <- letSubExp "chunk" $ BasicOp $ Index tileStaging slice
 
-      let lvl = SegThread SegNoVirt Nothing
+      let lvl = SegThreadInBlock SegNoVirt 
       let space = SegSpace phys [(tid, grpSize env)]
       let types = [Array tp (Shape [seqFactor env]) NoUniqueness]
       let res = [Returns ResultPrivate mempty chunk]
