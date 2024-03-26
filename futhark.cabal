@@ -122,6 +122,8 @@ library
       Futhark.AD.Rev.Scan
       Futhark.AD.Rev.Scatter
       Futhark.AD.Rev.SOAC
+      Futhark.Analysis.AccessPattern
+      Futhark.Analysis.AnalysePrimExp
       Futhark.Analysis.AlgSimplify
       Futhark.Analysis.Alias
       Futhark.Analysis.CallGraph
@@ -323,6 +325,9 @@ library
       Futhark.Optimise.ArrayShortCircuiting.MemRefAggreg
       Futhark.Optimise.ArrayShortCircuiting.TopdownAnalysis
       Futhark.Optimise.MergeGPUBodies
+      Futhark.Optimise.ArrayLayout
+      Futhark.Optimise.ArrayLayout.Transform
+      Futhark.Optimise.ArrayLayout.Layout
       Futhark.Optimise.ReduceDeviceSyncs
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable
       Futhark.Optimise.ReduceDeviceSyncs.MigrationTable.Graph
@@ -360,7 +365,6 @@ library
       Futhark.Pass.ExtractKernels.ToGPU
       Futhark.Pass.ExtractMulticore
       Futhark.Pass.FirstOrderTransform
-      Futhark.Pass.KernelBabysitting
       Futhark.Pass.LiftAllocations
       Futhark.Pass.LowerAllocations
       Futhark.Pass.Simplify
@@ -515,6 +519,10 @@ test-suite unit
       Futhark.IR.SyntaxTests
       Futhark.Internalise.TypesValuesTests
       Futhark.Optimise.MemoryBlockMerging.GreedyColoringTests
+      Futhark.Pass.OptimiseArrayLayout.AnalysePrimExpTests
+      Futhark.Pass.OptimiseArrayLayout.AnalyseTests
+      Futhark.Pass.OptimiseArrayLayout.LayoutTests
+      Futhark.Pass.OptimiseArrayLayoutTests
       Futhark.Pkg.SolveTests
       Futhark.ProfileTests
       Language.Futhark.CoreTests
@@ -525,6 +533,7 @@ test-suite unit
       Paths_futhark
   build-depends:
       QuickCheck >=2.8
+      , mtl >=2.2.1
     , base
     , containers
     , free
