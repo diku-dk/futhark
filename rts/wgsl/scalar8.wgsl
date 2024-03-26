@@ -7,7 +7,6 @@ fn norm(a: i8) -> i32 {
   return a & 0x000000ff;
 }
 
-
 fn read_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>, i: i32) -> i8 {
   let elem_idx = i / 4;
   let idx_in_elem = i % 4;
@@ -16,6 +15,12 @@ fn read_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>, i: i32) -> i8 {
   // int: b3b2b1b0
   let v = atomicLoad(&((*buffer)[elem_idx]));
   return norm(v >> bitcast<u32>(idx_in_elem * 8));
+}
+
+fn read_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
+             i: i32
+) -> bool {
+  return read_i8(buffer, i) != 0;
 }
 
 fn write_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>,
@@ -36,6 +41,14 @@ fn write_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>,
   atomicAnd(&((*buffer)[elem_idx]), ~mask);
   // And then write the new value.
   atomicOr(&((*buffer)[elem_idx]), shifted_val);
+}
+
+fn write_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
+            i: i32,
+			val: bool
+) {
+  if val { write_i8(buffer, i, 1); }
+  else { write_i8(buffer, i, 0); }
 }
 
 fn add_i8(a: i8, b: i8) -> i8 {

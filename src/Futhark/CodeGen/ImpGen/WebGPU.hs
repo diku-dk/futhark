@@ -254,7 +254,21 @@ wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
 wgslBufferType :: PrimType -> WGSL.Typ
 wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType Bool = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType t = WGSL.Array $ wgslPrimType t
+
+genFunWrite :: WGSL.Ident -> VName -> Count Elements (TExp Int64) -> Exp
+            -> KernelM WGSL.Stmt
+genFunWrite fun mem i v =
+  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
+   in WGSL.Call fun <$> sequence [buf, indexExp i, genWGSLExp v]
+
+genFunRead :: WGSL.Ident -> VName -> VName -> Count Elements (TExp Int64)
+            -> KernelM WGSL.Stmt
+genFunRead fun tgt mem i =
+  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
+      call = WGSL.CallExp fun <$> sequence [buf, indexExp i]
+   in WGSL.Assign <$> getIdent tgt <*> call
 
 genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 genWGSLStm Skip = pure WGSL.Skip
@@ -283,17 +297,14 @@ genWGSLStm (DeclareArray {}) = pure $ WGSL.Comment "TODO: Unimplemented statemen
 genWGSLStm (Allocate {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Copy {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
-genWGSLStm (Write mem i (IntType Int8) _ _ v) =
-  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
-   in WGSL.Call "write_i8" <$> sequence [buf, indexExp i, genWGSLExp v]
+genWGSLStm (Write mem i Bool _ _ v) = genFunWrite "write_bool" mem i v
+genWGSLStm (Write mem i (IntType Int8) _ _ v) = genFunWrite "write_i8" mem i v
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
-genWGSLStm (Read tgt mem i (IntType Int8) _ _) =
-  let buf = WGSL.UnOpExp "&" . WGSL.VarExp <$> getIdent mem
-      call = WGSL.CallExp "read_i8" <$> sequence [buf, indexExp i]
-   in WGSL.Assign <$> getIdent tgt <*> call
+genWGSLStm (Read tgt mem i Bool _ _) = genFunRead "read_bool" tgt mem i
+genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genFunRead "read_i8" tgt mem i
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
