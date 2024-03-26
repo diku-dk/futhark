@@ -1,4 +1,5 @@
 function typeSize(type) {
+	if (type == 'bool') { return 1; }
 	if (type == 'i8') { return 1; }
 	if (type == 'u8') { return 1; }
 	if (type == 'i32') { return 4; }
@@ -15,6 +16,10 @@ function alignArraySize(len) {
 }
 
 function toTypedArray(array, type) {
+	if (type == 'bool') { 
+		const conv = array.map((x) => x ? 1 : 0);
+		return new Int8Array(conv); 
+	}
 	if (type == 'i8') { return new Int8Array(array); }
 	if (type == 'u8') { return new Uint8Array(array); }
 	if (type == 'i32') { return new Int32Array(array); }
@@ -44,6 +49,7 @@ function toTypedArray(array, type) {
 }
 
 function arrayBufferToTypedArray(buffer, type) {
+	if (type == 'bool') { return new Int8Array(buffer); }
 	if (type == 'i8') { return new Int8Array(buffer); }
 	if (type == 'u8') { return new Uint8Array(buffer); }
 	if (type == 'i32') { return new Int32Array(buffer); }
@@ -65,7 +71,7 @@ async function runTest(device, shaderModule, testInfo) {
 	// Find kernel corresponding to entry.
 	let kernelInfo = undefined;
 	for (const k of window.kernels) {
-		if (k.name.includes(testInfo.entry)) {
+		if (k.name.includes(testInfo.entry + "zi")) {
 			kernelInfo = k;
 			break;
 		}
@@ -106,8 +112,7 @@ async function runTest(device, shaderModule, testInfo) {
 		}
 	}
 
-	// TODO: This is not always true.
-	const outputType = templateRun.inputTypes[0];
+	const outputType = templateRun.expectedTypes[0];
 	const outputElemSize = typeSize(outputType);
 
 	let outputBuffer = device.createBuffer({

@@ -76,6 +76,7 @@ data JsTestSpec = JsTestSpec
 data JsTestRun = JsTestRun
   { jsInputTypes :: [V.PrimType],
     jsInput :: [V.Value],
+    jsExpectedTypes :: [V.PrimType],
     jsExpected :: [V.Value]
   }
 
@@ -84,18 +85,23 @@ mkTestSpec (InputOutputs entry runs) = JsTestSpec entry (mapMaybe mkRun runs)
 
 mkRun :: TestRun -> Maybe JsTestRun
 mkRun (TestRun _ (Values vals)
-                 (Succeeds (Just (SuccessValues (Values expect)))) _ _) =
-  let typs = map V.valueElemType vals
-   in Just $ JsTestRun typs vals expect
+                 (Succeeds (Just (SuccessValues (Values expected)))) _ _) =
+  let inputTyps = map V.valueElemType vals
+      expectedTyps = map V.valueElemType expected
+   in Just $ JsTestRun inputTyps vals expectedTyps expected
 mkRun _ = Nothing
 
 instance Pretty JsTestRun where
-  pretty (JsTestRun typs input expected) =
+  pretty (JsTestRun typs input expectedTyps expected) =
     "{" </> indent 2 (
       "inputTypes: ["
         <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'") typs)
         <> "],"
       </> "input: " <> fmt input <> ","
+      </> "expectedTypes: [" 
+        <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'")
+            expectedTyps)
+        <> "],"
       </> "expected: " <> fmt expected <> ","
     ) </> "}"
     where
