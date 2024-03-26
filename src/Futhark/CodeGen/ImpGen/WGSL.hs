@@ -28,6 +28,7 @@ type Ident = T.Text
 
 data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
               | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
+              | Atomic PrimType
 
 data Typ = Prim PrimType | Array PrimType | Named Ident
 
@@ -101,6 +102,7 @@ instance Pretty PrimType where
   pretty (Vec2 t) = "vec2<" <> pretty t <> ">"
   pretty (Vec3 t) = "vec3<" <> pretty t <> ">"
   pretty (Vec4 t) = "vec4<" <> pretty t <> ">"
+  pretty (Atomic t) = "atomic<" <> pretty t <> ">"
 
 instance Pretty Typ where
   pretty (Prim t) = pretty t

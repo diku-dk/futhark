@@ -165,7 +165,7 @@ fn sext_i32_i64(a: i32) -> i64 {
 }
 
 fn trunc_i64_i32(a: i64) -> i32 {
-	return a.x;
+  return a.x;
 }
 
 // End of scalar64.wgsl

@@ -239,18 +239,22 @@ wgslInt8, wgslInt64 :: WGSL.PrimType
 wgslInt8 = WGSL.Int32
 wgslInt64 = WGSL.Vec2 WGSL.Int32
 
-primWGSLType :: PrimType -> WGSL.PrimType
-primWGSLType (IntType Int32) = WGSL.Int32
-primWGSLType (IntType Int8) = wgslInt8
-primWGSLType (IntType Int64) = wgslInt64
-primWGSLType (FloatType Float16) = WGSL.Float16
-primWGSLType (FloatType Float32) = WGSL.Float32
-primWGSLType (FloatType Float64) = error "TODO: WGSL has no f64"
-primWGSLType Bool = WGSL.Bool
+wgslPrimType :: PrimType -> WGSL.PrimType
+wgslPrimType (IntType Int8) = wgslInt8
+wgslPrimType (IntType Int32) = WGSL.Int32
+wgslPrimType (IntType Int64) = wgslInt64
+wgslPrimType (FloatType Float16) = WGSL.Float16
+wgslPrimType (FloatType Float32) = WGSL.Float32
+wgslPrimType (FloatType Float64) = error "TODO: WGSL has no f64"
+wgslPrimType Bool = WGSL.Bool
 -- TODO: Deal with smaller integers
-primWGSLType (IntType Int16) = WGSL.Int32
+wgslPrimType (IntType Int16) = WGSL.Int32
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
-primWGSLType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
+wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
+
+wgslBufferType :: PrimType -> WGSL.Typ
+wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType t = WGSL.Array $ wgslPrimType t
 
 genWGSLStm :: Code ImpGPU.KernelOp -> KernelM WGSL.Stmt
 genWGSLStm Skip = pure WGSL.Skip
@@ -274,7 +278,7 @@ genWGSLStm (While cond body) = liftM2
   WGSL.While (genWGSLExp $ untyped cond) (genWGSLStm body)
 genWGSLStm (DeclareMem _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (DeclareScalar name _ typ) = pure $
-  WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ primWGSLType typ)
+  WGSL.DeclareVar (nameToIdent name) (WGSL.Prim $ wgslPrimType typ)
 genWGSLStm (DeclareArray {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Allocate {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
@@ -379,33 +383,31 @@ wgslBinOp (SQuot _ _) = WGSL.BinOpExp "/"
 wgslBinOp (SRem Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
 wgslBinOp (SRem Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
 wgslBinOp (SRem _ _) = WGSL.BinOpExp "%"
-wgslBinOp (SMin Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
 wgslBinOp (SMin Int64) = call2 "smin_i64"
 wgslBinOp (SMin _) = call2 "min"
-wgslBinOp (UMin Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UMin Int8) = call2 "umin_i8"
 wgslBinOp (UMin Int64) = call2 "umin_i64"
 wgslBinOp (UMin _) = call2 "umin_i32"
 wgslBinOp (FMin _) = call2 "min"
-wgslBinOp (SMax Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
 wgslBinOp (SMax Int64) = call2 "smax_i64"
 wgslBinOp (SMax _) = call2 "max"
-wgslBinOp (UMax Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UMax Int8) = call2 "umax_i8"
 wgslBinOp (UMax Int64) = call2 "umax_i64"
 wgslBinOp (UMax _) = call2 "umax_i32"
 wgslBinOp (FMax _) = call2 "max"
-wgslBinOp (Shl Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (Shl Int8) = call2 "shl_i8"
 wgslBinOp (Shl Int64) = call2 "shl_i64"
 wgslBinOp (Shl _) = call2 "shl_i32"
-wgslBinOp (LShr Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (LShr Int8) = call2 "lshr_i8"
 wgslBinOp (LShr Int64) = call2 "lshr_i64"
 wgslBinOp (LShr _) = call2 "lshr_i32"
-wgslBinOp (AShr Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (AShr Int8) = call2 "ashr_i8"
 wgslBinOp (AShr Int64) = call2 "ashr_i64"
 wgslBinOp (AShr _) = call2 "ashr_i32"
 wgslBinOp (And _) = WGSL.BinOpExp "&"
 wgslBinOp (Or _) = WGSL.BinOpExp "|"
 wgslBinOp (Xor _) = WGSL.BinOpExp "^"
-wgslBinOp (Pow Int8) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (Pow Int8) = call2 "pow_i8"
 wgslBinOp (Pow Int64) = call2 "pow_i64"
 wgslBinOp (Pow _) = call2 "pow_i32"
 wgslBinOp (FPow _) = call2 "pow"
@@ -431,7 +433,8 @@ wgslCmpOp (FCmpLe _) = WGSL.BinOpExp "<="
 wgslCmpOp CmpLlt = call2 "llt"
 wgslCmpOp CmpLle = call2 "lle"
 
--- TODO: i8
+-- Similarly to CmpOps above, the defaults work for smaller integers already
+-- given our representation.
 wgslUnOp :: UnOp -> WGSL.Exp -> WGSL.Exp
 wgslUnOp Not = WGSL.UnOpExp "!"
 wgslUnOp (Complement _) = WGSL.UnOpExp "~"
@@ -449,8 +452,14 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
   where
     fun (ZExt Int8 Int32) = "zext_i8_i32"
     fun (SExt Int8 Int32) = "sext_i8_i32"
+    fun (ZExt Int8 Int64) = "zext_i8_i64"
+    fun (SExt Int8 Int64) = "sext_i8_i64"
+    fun (ZExt Int32 Int8) = "trunc_i32_i8"
+    fun (SExt Int32 Int8) = "trunc_i32_i8"
     fun (ZExt Int32 Int64) = "zext_i32_i64"
     fun (SExt Int32 Int64) = "sext_i32_i64"
+    fun (ZExt Int64 Int8) = "trunc_i64_i8"
+    fun (SExt Int64 Int8) = "trunc_i64_i8"
     fun (ZExt Int64 Int32) = "trunc_i64_i32"
     fun (SExt Int64 Int32) = "trunc_i64_i32"
     fun _ = "TODO_not_implemented"
@@ -500,7 +509,7 @@ genScalarDecls = do
   bufferName <- mkGlobalIdent "scalars"
   uses <- asks (ImpGPU.kernelUses . krKernel)
 
-  let scalars = [(nameToIdent name, WGSL.Prim (primWGSLType typ))
+  let scalars = [(nameToIdent name, WGSL.Prim (wgslPrimType typ))
                   | ImpGPU.ScalarUse name typ <- uses]
   let structDecl = WGSL.StructDecl $
         WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
@@ -555,7 +564,7 @@ genMemoryDecls = do
       ident <- mkGlobalIdent name
       slot <- assignBindSlot
       pure $ WGSL.VarDecl (WGSL.bindingAttribs 0 slot)
-        (WGSL.Storage WGSL.ReadWrite) ident (WGSL.Array $ primWGSLType typ)
+        (WGSL.Storage WGSL.ReadWrite) ident (wgslBufferType typ)
     rename (name, _) = (name, ) <$> mkGlobalIdent name
 
 -- | Generate `override` declarations for kernel 'ConstUse's and
