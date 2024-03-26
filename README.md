@@ -1,10 +1,3 @@
-# Note
-This repository contains the code of the modified Futhark compiler used in the MSc thesis "Efficient Sequentialization of Parallelism" done at the University of Copenhagen.
-
-All tests and auxiliary files can be found at: https://github.com/kaff3/intraseq/.
-
-
-
 <img src="assets/logo.svg" height="50px"/> The Futhark Programming Language
 ==========
 
