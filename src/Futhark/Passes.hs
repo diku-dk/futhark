@@ -106,7 +106,6 @@ gpuPipeline =
         mergeGPUBodies,
         simplifyGPU, -- Cleanup merged GPUBody kernels.
         sinkGPU, -- Sink reads within GPUBody kernels.
-        inPlaceLoweringGPU
         babysitKernels,
         -- Important to simplify after babysitting in order to fix up
         -- redundant manifests.

@@ -177,7 +177,7 @@ seqStm ::
   Stm GPU ->
   SeqBuilder ()
 seqStm stm@(Let pat aux (Op (SegOp (
-              SegMap (SegGroup virt (Just grid)) space ts
+              SegMap (SegBlock virt (Just grid)) space ts
                      (KernelBody _ stms kres)))))
   | L.length (unSegSpace space) /= 1 = lift $ do addStm stm
   | not $ shouldSequentialize (stmAuxAttrs aux) = lift $ do addStm stm
@@ -185,7 +185,7 @@ seqStm stm@(Let pat aux (Op (SegOp (
 
     let seqFactor = getSeqFactor $ stmAuxAttrs aux
     let grpId   = fst $ head $ unSegSpace space
-    let sizeOld = unCount $ gridGroupSize grid
+    let sizeOld = unCount $ gridBlockSize grid
     sizeNew <- lift $ do letSubExp "group_size" =<< eBinOp (SDivUp Int64 Unsafe)
                                                     (eSubExp sizeOld)
                                                     (eSubExp seqFactor)
@@ -199,8 +199,8 @@ seqStm stm@(Let pat aux (Op (SegOp (
           exp' <- buildSegMap' $ do
               env' <- mkTiles env
 
-              let grid' = Just $ KernelGrid (gridNumGroups grid) (Count sizeNew)
-              let lvl' = SegGroup virt grid'
+              let grid' = Just $ KernelGrid (gridNumBlocks grid) (Count sizeNew)
+              let lvl' = SegBlock virt grid'
 
               _ <- seqStms' env' stms
 
