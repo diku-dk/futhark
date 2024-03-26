@@ -92,17 +92,18 @@ mkRun (TestRun _ (Values vals)
 mkRun _ = Nothing
 
 instance Pretty JsTestRun where
-  pretty (JsTestRun typs input expectedTyps expected) =
+  pretty (JsTestRun inputTyps input expectedTyps expected) =
     "{" </> indent 2 (
       "inputTypes: ["
-        <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'") typs)
+        <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'")
+            inputTyps)
         <> "],"
-      </> "input: " <> fmt input <> ","
+      </> "input: " <> fmt inputTyps input <> ","
       </> "expectedTypes: [" 
         <> commasep (map (\t -> "'" <> pretty (V.primTypeText t) <> "'")
             expectedTyps)
         <> "],"
-      </> "expected: " <> fmt expected <> ","
+      </> "expected: " <> fmt expectedTyps expected <> ","
     ) </> "}"
     where
       fmtVal V.I64 v = pretty v <> "n"
@@ -116,7 +117,7 @@ instance Pretty JsTestRun where
         T.replace ".nan" "NaN" $ T.replace ".inf" "Infinity" $ docText d
       fmtArray typ vs = fixSpecials $ fixAnnots typ $
         fmtArrRaw typ (V.valueElems vs)
-      fmt vss = "[" <> commasep (zipWith fmtArray typs vss) <> "]"
+      fmt typs vss = "[" <> commasep (zipWith fmtArray typs vss) <> "]"
 
 instance Pretty JsTestSpec where
   pretty (JsTestSpec entry runs) =
