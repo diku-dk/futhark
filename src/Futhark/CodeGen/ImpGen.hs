@@ -38,7 +38,6 @@ module Futhark.CodeGen.ImpGen
     hasFunction,
     collect,
     collect',
-    comment,
     VarEntry (..),
     ArrayEntry (..),
 
@@ -76,6 +75,7 @@ module Futhark.CodeGen.ImpGen
     caseMatch,
 
     -- * Constructing code.
+    newVName,
     dLParams,
     dFParams,
     addLoopVar,
@@ -140,7 +140,6 @@ import Futhark.CodeGen.ImpCode
 import Futhark.CodeGen.ImpCode qualified as Imp
 import Futhark.Construct hiding (ToExp (..))
 import Futhark.IR.Mem
-import Futhark.IR.Mem.IxFun qualified as IxFun
 import Futhark.IR.Mem.LMAD qualified as LMAD
 import Futhark.IR.SOACS (SOACS)
 import Futhark.Util
@@ -391,13 +390,6 @@ collect' m = do
   modify $ \s -> s {stateCode = prev_code}
   pure (x, new_code)
 
--- | Execute a code generation action, wrapping the generated code
--- within a 'Imp.Comment' with the given description.
-comment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
-comment desc m = do
-  code <- collect m
-  emit $ Imp.Comment desc code
-
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM rep r op ()
 emit code = modify $ \s -> s {stateCode = stateCode s <> code}
@@ -408,7 +400,7 @@ warnings ws = modify $ \s -> s {stateWarnings = ws <> stateWarnings s}
 -- | Emit a warning about something the user should be aware of.
 warn :: (Located loc) => loc -> [loc] -> T.Text -> ImpM rep r op ()
 warn loc locs problem =
-  warnings $ singleWarning' (srclocOf loc) (map srclocOf locs) (pretty problem)
+  warnings $ singleWarning' (locOf loc) (map locOf locs) (pretty problem)
 
 -- | Emit a function in the generated code.
 emitFunction :: Name -> Imp.Function op -> ImpM rep r op ()
@@ -493,6 +485,7 @@ entryPointSignedness types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> map valueTypeSign vts
     OpaqueRecord fs -> foldMap (entryPointSignedness types . snd) fs
+    OpaqueSum vts _ -> map valueTypeSign vts
 
 -- | How many value parameters are accepted by this entry point?  This
 -- is used to determine which of the function parameters correspond to
@@ -504,6 +497,7 @@ entryPointSize types (TypeOpaque desc) =
   case lookupOpaqueType desc types of
     OpaqueType vts -> length vts
     OpaqueRecord fs -> sum $ map (entryPointSize types . snd) fs
+    OpaqueSum vts _ -> length vts
 
 compileInParam ::
   (Mem rep inner) =>
@@ -515,7 +509,7 @@ compileInParam fparam = case paramDec fparam of
   MemMem space ->
     pure $ Left $ Imp.MemParam name space
   MemArray bt shape _ (ArrayIn mem lmad) ->
-    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+    pure $ Right $ ArrayDecl name bt $ MemLoc mem (shapeDims shape) lmad
   MemAcc {} ->
     error "Functions may not have accumulator parameters."
   where
@@ -781,7 +775,10 @@ compileExp pat e = do
 caseMatch :: [SubExp] -> [Maybe PrimValue] -> Imp.TExp Bool
 caseMatch ses vs = foldl (.&&.) true (zipWith cmp ses vs)
   where
-    cmp se (Just v) = isBool $ toExp' (primValueType v) se ~==~ ValueExp v
+    cmp se (Just (BoolValue True)) =
+      isBool $ toExp' Bool se
+    cmp se (Just v) =
+      isBool $ toExp' (primValueType v) se ~==~ ValueExp v
     cmp _ Nothing = true
 
 defCompileExp ::
@@ -870,7 +867,7 @@ defCompileBasicOp (Pat [pe]) (Opaque op se) = do
   copyDWIM (patElemName pe) [] se []
   case op of
     OpaqueNil -> pure ()
-    OpaqueTrace s -> comment ("Trace: " <> s) $ do
+    OpaqueTrace s -> sComment ("Trace: " <> s) $ do
       se_t <- subExpType se
       case se_t of
         Prim t -> tracePrim s t se
@@ -937,7 +934,7 @@ defCompileBasicOp (Pat [pe]) (Iota n e s it) = do
       dPrimV "x" . TPrimExp $
         BinOpExp (Add it OverflowUndef) e' $
           BinOpExp (Mul it OverflowUndef) i' s'
-    copyDWIM (patElemName pe) [DimFix i] (Var (tvVar x)) []
+    copyDWIMFix (patElemName pe) [i] (Var (tvVar x)) []
 defCompileBasicOp (Pat [pe]) (Manifest _ src) =
   copyDWIM (patElemName pe) [] (Var src) []
 defCompileBasicOp (Pat [pe]) (Concat i (x :| ys) _) = do
@@ -967,7 +964,7 @@ defCompileBasicOp (Pat [pe]) (ArrayLit es _)
       copy t dest_mem static_src
   | otherwise =
       forM_ (zip [0 ..] es) $ \(i, e) ->
-        copyDWIM (patElemName pe) [DimFix $ fromInteger i] e []
+        copyDWIMFix (patElemName pe) [fromInteger i] e []
   where
     isLiteral (Constant v) = Just v
     isLiteral _ = Nothing
@@ -1110,7 +1107,7 @@ memBoundToVarEntry e (MemMem space) =
 memBoundToVarEntry e (MemAcc acc ispace ts _) =
   AccVar e (acc, ispace, ts)
 memBoundToVarEntry e (MemArray bt shape _ (ArrayIn mem lmad)) =
-  let location = MemLoc mem (shapeDims shape) $ IxFun.ixfunLMAD lmad
+  let location = MemLoc mem (shapeDims shape) lmad
    in ArrayVar
         e
         ArrayEntry
@@ -1412,7 +1409,7 @@ lmadCopy t dstloc srcloc = do
   srcspace <- entryMemSpace <$> lookupMemory srcmem
   dstspace <- entryMemSpace <$> lookupMemory dstmem
   emit $
-    Imp.LMADCopy
+    Imp.Copy
       t
       (elements <$> LMAD.shape dstlmad)
       (dstmem, dstspace)
@@ -1589,8 +1586,8 @@ copyDWIM dest dest_slice src src_slice = do
         case dest_entry of
           ScalarVar _ _ ->
             ScalarDestination dest
-          ArrayVar _ (ArrayEntry (MemLoc mem shape ixfun) _) ->
-            ArrayDestination $ Just $ MemLoc mem shape ixfun
+          ArrayVar _ (ArrayEntry (MemLoc mem shape lmad) _) ->
+            ArrayDestination $ Just $ MemLoc mem shape lmad
           MemVar _ _ ->
             MemoryDestination dest
           AccVar {} ->
@@ -1665,6 +1662,8 @@ sWhile cond body = do
   body' <- collect body
   emit $ Imp.While cond body'
 
+-- | Execute a code generation action, wrapping the generated code
+-- within a 'Imp.Comment' with the given description.
 sComment :: T.Text -> ImpM rep r op () -> ImpM rep r op ()
 sComment s code = do
   code' <- collect code
@@ -1713,9 +1712,9 @@ sAlloc name size space = do
   pure name'
 
 sArray :: String -> PrimType -> ShapeBase SubExp -> VName -> LMAD -> ImpM rep r op VName
-sArray name bt shape mem ixfun = do
+sArray name bt shape mem lmad = do
   name' <- newVName name
-  dArray name' bt shape mem ixfun
+  dArray name' bt shape mem lmad
   pure name'
 
 -- | Declare an array in row-major order in the given memory block.
@@ -1731,9 +1730,9 @@ sAllocArrayPerm :: String -> PrimType -> ShapeBase SubExp -> Space -> [Int] -> I
 sAllocArrayPerm name pt shape space perm = do
   let permuted_dims = rearrangeShape perm $ shapeDims shape
   mem <- sAlloc (name ++ "_mem") (typeSize (Array pt shape NoUniqueness)) space
-  let iota_ixfun = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
+  let iota_lmad = LMAD.iota 0 $ map (isInt64 . primExpFromSubExp int64) permuted_dims
   sArray name pt shape mem $
-    LMAD.permute iota_ixfun $
+    LMAD.permute iota_lmad $
       rearrangeInverse perm
 
 -- | Uses linear/iota index function.

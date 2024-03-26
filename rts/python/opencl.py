@@ -102,6 +102,16 @@ def apply_size_heuristics(self, size_heuristics, sizes):
     return sizes
 
 
+def to_c_str_rep(x):
+    if type(x) is bool or type(x) is np.bool_:
+        if x:
+            return "true"
+        else:
+            return "false"
+    else:
+        return str(x)
+
+
 def initialise_opencl_object(
     self,
     program_src="",
@@ -119,6 +129,7 @@ def initialise_opencl_object(
     required_types=[],
     all_sizes={},
     user_sizes={},
+    constants=[],
 ):
     if command_queue is None:
         self.ctx = get_prefered_context(
@@ -138,21 +149,28 @@ def initialise_opencl_object(
     max_group_size = int(self.device.max_work_group_size)
     max_tile_size = int(np.sqrt(self.device.max_work_group_size))
 
-    self.max_group_size = max_group_size
+    self.max_thread_block_size = max_group_size
     self.max_tile_size = max_tile_size
     self.max_threshold = 0
-    self.max_num_groups = 0
+    self.max_grid_size = 0
 
-    self.max_local_memory = int(self.device.local_mem_size)
+    self.max_shared_memory = int(self.device.local_mem_size)
 
     # Futhark reserves 4 bytes of local memory for its own purposes.
-    self.max_local_memory -= 4
+    self.max_shared_memory -= 4
 
     # See comment in rts/c/opencl.h.
     if self.platform.name.find("NVIDIA CUDA") >= 0:
-        self.max_local_memory -= 12
+        self.max_shared_memory -= 12
     elif self.platform.name.find("AMD") >= 0:
-        self.max_local_memory -= 16
+        self.max_shared_memory -= 16
+
+    self.max_registers = int(2**16)  # Not sure how to query for this.
+
+    self.max_cache = self.device.get_info(cl.device_info.GLOBAL_MEM_CACHE_SIZE)
+
+    if self.max_cache == 0:
+        self.max_cache = 1024 * 1024
 
     self.free_list = {}
 
@@ -236,10 +254,10 @@ def initialise_opencl_object(
 
     self.sizes = {}
     for k, v in all_sizes.items():
-        if v["class"] == "group_size":
+        if v["class"] == "thread_block_size":
             max_value = max_group_size
             default_value = default_group_size
-        elif v["class"] == "num_groups":
+        elif v["class"] == "grid_size":
             max_value = max_group_size  # Intentional!
             default_value = default_num_groups
         elif v["class"] == "tile_size":
@@ -272,7 +290,9 @@ def initialise_opencl_object(
     if len(program_src) >= 0:
         build_options += ["-DLOCKSTEP_WIDTH={}".format(lockstep_width)]
 
-        build_options += ["-D{}={}".format("max_group_size", max_group_size)]
+        build_options += [
+            "-D{}={}".format("max_thread_block_size", max_group_size)
+        ]
 
         build_options += [
             "-D{}={}".format(
@@ -283,6 +303,10 @@ def initialise_opencl_object(
                 v,
             )
             for (s, v) in self.sizes.items()
+        ]
+
+        build_options += [
+            "-D{}={}".format(s, to_c_str_rep(f())) for (s, f) in constants
         ]
 
         if self.platform.name == "Oclgrind":

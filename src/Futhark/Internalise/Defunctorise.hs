@@ -148,7 +148,7 @@ runTransformM src (TransformM m) = runRWS m env src
 
 maybeAscript ::
   SrcLoc ->
-  Maybe (SigExp, Info (M.Map VName VName)) ->
+  Maybe (ModTypeExp, Info (M.Map VName VName)) ->
   ModExp ->
   ModExp
 maybeAscript loc (Just (mtye, substs)) me = ModAscript me mtye substs loc
@@ -262,7 +262,7 @@ transformNames x = do
               astMap (substituter $ modScope mod <> scope) e'
         _ -> astMap (substituter scope) e
 
-transformTypeExp :: TypeExp Info VName -> TransformM (TypeExp Info VName)
+transformTypeExp :: TypeExp Exp VName -> TransformM (TypeExp Exp VName)
 transformTypeExp = transformNames
 
 transformStructType :: StructType -> TransformM StructType
@@ -311,7 +311,7 @@ transformModBind mb = do
     evalModExp
       $ foldr
         addParam
-        (maybeAscript (srclocOf mb) (modSignature mb) $ modExp mb)
+        (maybeAscript (srclocOf mb) (modType mb) $ modExp mb)
       $ modParams mb
   mname <- transformName $ modName mb
   pure $ Scope (scopeSubsts $ modScope mod) $ M.singleton mname mod
@@ -331,7 +331,7 @@ transformDecs ds =
       bindingNames [typeAlias tb] $ do
         transformTypeBind tb
         transformDecs ds'
-    SigDec {} : ds' ->
+    ModTypeDec {} : ds' ->
       transformDecs ds'
     ModDec mb : ds' ->
       bindingNames [modName mb] $ do

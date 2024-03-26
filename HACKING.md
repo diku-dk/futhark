@@ -147,14 +147,21 @@ allows you to tailor your own compilation pipeline using command line
 options. It is also useful for seeing what the AST looks like after
 specific passes.
 
-You may wish to set the environment variable
-`FUTHARK_COMPILER_DEBUGGING=1`. This has the following effects:
+### `FUTHARK_COMPILER_DEBUGGING` environment variable
 
-- The frontend prints internal names. (This may affect code
-  generation in some cases, so turn it off when actually
-  generating code.)
-- Tools that talk to server-mode executables will print the messages
-  sent back and forth on the standard error stream.
+You can set the level of debug verbosity via the environment variable
+`FUTHARK_COMPILER_DEBUGGING`. It has the following effects:
+
+- `FUTHARK_COMPILER_DEBUGGING=1`:
+  + The frontend prints internal names. (This may affect code
+    generation in some cases, so turn it off when actually
+    generating code.)
+  + Tools that talk to server-mode executables will print the messages
+    sent back and forth on the standard error stream.
+
+- `FUTHARK_COMPILER_DEBUGGING=2`:
+  + All of the effects of `FUTHARK_COMPILER_DEBUGGING=1`.
+  + The frontend prints explicit type annotations.
 
 ## Running compiler pipelines
 
@@ -277,3 +284,34 @@ execute](https://github.com/jrprice/Oclgrind/issues/204).  To work
 around this, disable optimisations in the OpenCL compiler:
 
     futhark test foo.fut --backend=opencl --runner=tools/oclgrindrunner.sh --pass-option=--build-option=-O0
+
+## Using `futhark script`
+
+The `futhark script` command is a handy way to run (server-mode)
+executables with arbitrary input, while also seeing logging output in
+real time. This is particularly useful for programs whose benchmarking
+input are complicated FutharkScript expressions.
+
+If you have a program `infinite.fut` containing
+
+```Futhark
+entry main n = iterate 1000000000 (map (+1)) (iota n)
+```
+
+then you can run
+
+```
+$ futhark script -D infinite.fut 'main 10i64'
+```
+
+to run it with debug prints. You can also use `-L` instead of `-D` to
+just enable logging. The `main 10i64` can be an arbitrary FutharkScript
+expression.
+
+The above will compile `infinite.fut` using the `c` backend before
+running it. Pass a `--backend` option to `futhark script` to use a
+different backend, or pass an already compiled program instead of a
+`.fut` file (e.g., `infinite`).
+
+See the manpages for `futhark script` and `futhark literate` for more
+information.

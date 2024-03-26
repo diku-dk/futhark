@@ -31,7 +31,6 @@ module Futhark.IR.SOACS.SOAC
     isScanSOAC,
     isReduceSOAC,
     isMapSOAC,
-    scremaLambda,
     ppScrema,
     ppHist,
     ppStream,
@@ -143,11 +142,16 @@ data HistOp rep = HistOp
 
 -- | The essential parts of a 'Screma' factored out (everything
 -- except the input arrays).
-data ScremaForm rep
-  = ScremaForm
-      [Scan rep]
-      [Reduce rep]
-      (Lambda rep)
+data ScremaForm rep = ScremaForm
+  { scremaScans :: [Scan rep],
+    scremaReduces :: [Reduce rep],
+    -- | The "main" lambda of the Screma. For a map, this is
+    -- equivalent to 'isMapSOAC'. Note that the meaning of the return
+    -- value of this lambda depends crucially on exactly which Screma
+    -- this is. The parameters will correspond exactly to elements of
+    -- the input arrays, however.
+    scremaLambda :: Lambda rep
+  }
   deriving (Eq, Ord, Show)
 
 singleBinOp :: (Buildable rep) => [Lambda rep] -> Lambda rep
@@ -316,17 +320,9 @@ isMapSOAC (ScremaForm scans reds map_lam) = do
   guard $ null reds
   pure map_lam
 
--- | Return the "main" lambda of the Screma.  For a map, this is
--- equivalent to 'isMapSOAC'.  Note that the meaning of the return
--- value of this lambda depends crucially on exactly which Screma this
--- is.  The parameters will correspond exactly to elements of the
--- input arrays, however.
-scremaLambda :: ScremaForm rep -> Lambda rep
-scremaLambda (ScremaForm _ _ map_lam) = map_lam
-
 -- | @groupScatterResults <output specification> <results>@
 --
--- Groups the index values and result values of <results> according to the
+-- Blocks the index values and result values of <results> according to the
 -- <output specification>.
 --
 -- This function is used for extracting and grouping the results of a
@@ -348,7 +344,7 @@ groupScatterResults output_spec results =
 
 -- | @groupScatterResults' <output specification> <results>@
 --
--- Groups the index values and result values of <results> according to the
+-- Blocks the index values and result values of <results> according to the
 -- output specification. This is the simpler version of @groupScatterResults@,
 -- which doesn't return any information about shapes or output arrays.
 --
@@ -535,10 +531,10 @@ soacType (Hist _ _ ops _bucket_fun) = do
 soacType (Screma w _arrs form) =
   scremaType w form
 
-instance (ASTRep rep) => TypedOp (SOAC rep) where
+instance TypedOp SOAC where
   opType = pure . staticShapes . soacType
 
-instance (Aliased rep) => AliasedOp (SOAC rep) where
+instance AliasedOp SOAC where
   opAliases = map (const mempty) . soacType
 
   consumedInOp JVP {} = mempty
@@ -594,7 +590,7 @@ instance CanBeAliased SOAC where
       onRed red = red {redLambda = Alias.analyseLambda aliases $ redLambda red}
       onScan scan = scan {scanLambda = Alias.analyseLambda aliases $ scanLambda scan}
 
-instance (ASTRep rep) => IsOp (SOAC rep) where
+instance IsOp SOAC where
   safeOp _ = False
   cheapOp _ = False
   opDependencies (Stream w arrs accs lam) =
@@ -625,20 +621,21 @@ instance (ASTRep rep) => IsOp (SOAC rep) where
          in map (is_flat <>) vs
   opDependencies (Scatter w arrs lam outputs) =
     let deps = lambdaDependencies mempty lam (depsOfArrays w arrs)
-     in map flattenGroups (groupScatterResults outputs deps)
+     in map flattenBlocks (groupScatterResults outputs deps)
     where
-      flattenGroups (_, _, ivs) =
-        mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
+      flattenBlocks (_, arr, ivs) =
+        oneName arr <> mconcat (map (mconcat . fst) ivs) <> mconcat (map snd ivs)
   opDependencies (JVP lam args vec) =
     mconcat $
       replicate 2 $
         lambdaDependencies mempty lam $
           zipWith (<>) (map depsOf' args) (map depsOf' vec)
   opDependencies (VJP lam args vec) =
-    mconcat $
-      replicate 2 $
-        lambdaDependencies mempty lam $
-          zipWith (<>) (map depsOf' args) (map depsOf' vec)
+    lambdaDependencies
+      mempty
+      lam
+      (zipWith (<>) (map depsOf' args) (map depsOf' vec))
+      <> map (const $ freeIn args <> freeIn lam) (lambdaParams lam)
   opDependencies (Screma w arrs (ScremaForm scans reds map_lam)) =
     let (scans_in, reds_in, map_deps) =
           splitAt3 (scanResults scans) (redResults reds) $

@@ -214,7 +214,7 @@ parseExp sep =
 -- | Parse a FutharkScript expression with normal whitespace handling.
 parseExpFromText :: FilePath -> T.Text -> Either T.Text Exp
 parseExpFromText f s =
-  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space) f s
+  either (Left . T.pack . errorBundlePretty) Right $ parse (parseExp space <* eof) f s
 
 readVar :: (MonadError T.Text m, MonadIO m) => Server -> VarName -> m V.Value
 readVar server v =
@@ -514,25 +514,36 @@ evalExp builtin sserver top_level_e = do
               throwError $
                 "Function \""
                   <> name
-                  <> "\" expects arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom in_types)
-                  <> "\nBut called with arguments of types:\n"
-                  <> prettyText (V.mkCompound $ map V.ValueAtom es_types)
+                  <> "\" expects "
+                  <> prettyText (length in_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine in_types)
+                  <> "\nBut applied to "
+                  <> prettyText (length es_types)
+                  <> " argument(s) of types:\n"
+                  <> T.intercalate "\n" (map prettyTextOneLine es_types)
+
+            tryApply args = do
+              arg_types <- zipWithM (interValToVar cannotApply) in_types args
+
+              if length in_types == length arg_types
+                then do
+                  outs <- replicateM (length out_types) $ newVar "out"
+                  void $ cmdEither $ cmdCall server name outs arg_types
+                  pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
+                else
+                  pure . V.ValueAtom . SFun name in_types out_types $
+                    zipWith SValue in_types $
+                      map VVar arg_types
 
         -- Careful to not require saturated application, but do still
         -- check for over-saturation.
         when (length es_types > length in_types) cannotApply
-        ins <- zipWithM (interValToVar cannotApply) in_types es'
 
-        if length in_types == length ins
-          then do
-            outs <- replicateM (length out_types) $ newVar "out"
-            void $ cmdEither $ cmdCall server name outs ins
-            pure $ V.mkCompound $ map V.ValueAtom $ zipWith SValue out_types $ map VVar outs
-          else
-            pure . V.ValueAtom . SFun name in_types out_types $
-              zipWith SValue in_types $
-                map VVar ins
+        -- Allow automatic uncurrying if applicable.
+        case es' of
+          [V.ValueTuple es''] | length es'' == length in_types -> tryApply es''
+          _ -> tryApply es'
       evalExp' _ (StringLit s) =
         case V.putValue s of
           Just s' ->

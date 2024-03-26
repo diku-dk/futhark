@@ -25,6 +25,10 @@ pipeline is used.
 macOS).  If using ``--library``, you will need to do the same when
 linking the final binary.
 
+The GPU terminology used is derived from CUDA nomenclature (e.g.
+"thread block" instead of "workgroup"), but OpenCL nomenclature is
+also supported for compatibility.
+
 OPTIONS
 =======
 
@@ -64,14 +68,14 @@ The following additional options are accepted.
   options are supported.  Be careful - some options can easily
   result in invalid results.
 
---default-group-size=INT
+--default-thread-block-size=INT, --default-group-size=INT
 
-  The default size of OpenCL workgroups that are launched.  Capped
-  to the hardware limit if necessary.
+  The default size of thread blocks that are launched. Capped to the
+  hardware limit if necessary.
 
---default-num-groups=INT
+--default-num-thread-blocks, --default-num-groups=INT
 
-  The default number of OpenCL workgroups that are launched.
+  The default number of thread blocks that are launched.
 
 --default-threshold=INT
 

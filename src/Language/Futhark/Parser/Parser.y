@@ -163,12 +163,11 @@ import Language.Futhark.Parser.Monad
       hole            { L $$ HOLE }
 
 %left bottom
-%left typeprec
 %left ifprec letprec caseprec typeprec enumprec sumprec
 %left ',' case id constructor '(' '{'
 %right ':' ':>'
 %right '...' '..<' '..>' '..'
-%left '`' '!...'
+%left '`'
 %right '->'
 %left with
 %left '='
@@ -218,7 +217,7 @@ Decs_ :: { [UncheckedDec] }
 Dec_ :: { UncheckedDec }
     : Val               { ValDec $1 }
     | TypeAbbr          { TypeDec $1 }
-    | SigBind           { SigDec $1 }
+    | ModTypeBind       { ModTypeDec $1 }
     | ModBind           { ModDec $1 }
     | open ModExp       { OpenDec $2 (srclocOf $1) }
     | import stringlit
@@ -229,29 +228,29 @@ Dec_ :: { UncheckedDec }
 
 ;
 
-SigExp :: { UncheckedSigExp }
-        : QualName            { let (v, loc) = $1 in SigVar v NoInfo (srclocOf loc) }
-        | '{' Specs '}'  { SigSpecs $2 (srcspan $1 $>) }
-        | SigExp with TypeRef { SigWith $1 $3 (srcspan $1 $>) }
-        | '(' SigExp ')'      { SigParens $2 (srcspan $1 $>) }
-        | '(' id ':' SigExp ')' '->' SigExp
-                              { let L _ (ID name) = $2
-                                in SigArrow (Just name) $4 $7 (srcspan $1 $>) }
-        | SigExp '->' SigExp  { SigArrow Nothing $1 $3 (srcspan $1 $>) }
+ModTypeExp :: { UncheckedModTypeExp }
+        : QualName                { let (v, loc) = $1 in ModTypeVar v NoInfo (srclocOf loc) }
+        | '{' Specs '}'           { ModTypeSpecs $2 (srcspan $1 $>) }
+        | ModTypeExp with TypeRef { ModTypeWith $1 $3 (srcspan $1 $>) }
+        | '(' ModTypeExp ')'      { ModTypeParens $2 (srcspan $1 $>) }
+        | '(' id ':' ModTypeExp ')' '->' ModTypeExp
+                                  { let L _ (ID name) = $2
+                                    in ModTypeArrow (Just name) $4 $7 (srcspan $1 $>) }
+        | ModTypeExp '->' ModTypeExp  { ModTypeArrow Nothing $1 $3 (srcspan $1 $>) }
 
 TypeRef :: { TypeRefBase NoInfo Name }
          : QualName TypeParams '=' TypeExpTerm
            { TypeRef (fst $1) $2 $4 (srcspan (snd $1) $>) }
 
-SigBind :: { SigBindBase NoInfo Name }
-         : module type id '=' SigExp
+ModTypeBind :: { ModTypeBindBase NoInfo Name }
+         : module type id '=' ModTypeExp
           { let L _ (ID name) = $3
-            in SigBind name $5 Nothing (srcspan $1 $>) }
+            in ModTypeBind name $5 Nothing (srcspan $1 $>) }
 
 ModExp :: { UncheckedModExp }
-        : ModExp ':' SigExp
+        : ModExp ':' ModTypeExp
           { ModAscript $1 $3 NoInfo (srcspan $1 $>) }
-        | '\\' ModParam maybeAscription(SimpleSigExp) '->' ModExp
+        | '\\' ModParam maybeAscription(SimpleModTypeExp) '->' ModExp
           { ModLambda $2 (fmap (,NoInfo) $3) $5 (srcspan $1 $>) }
         | import stringlit
           { let L _ (STRINGLIT s) = $2 in ModImport (T.unpack s) NoInfo (srcspan $1 $>) }
@@ -274,18 +273,18 @@ ModExpAtom :: { UncheckedModExp }
               { let (v, loc) = $1 in ModVar v (srclocOf loc) }
             | '{' Decs '}' { ModDecs $2 (srcspan $1 $>) }
 
-SimpleSigExp :: { UncheckedSigExp }
-             : QualName            { let (v, loc) = $1 in SigVar v NoInfo (srclocOf loc) }
-             | '(' SigExp ')'      { $2 }
+SimpleModTypeExp :: { UncheckedModTypeExp }
+             : QualName            { let (v, loc) = $1 in ModTypeVar v NoInfo (srclocOf loc) }
+             | '(' ModTypeExp ')'      { $2 }
 
 ModBind :: { ModBindBase NoInfo Name }
-         : module id ModParams maybeAscription(SigExp) '=' ModExp
+         : module id ModParams maybeAscription(ModTypeExp) '=' ModExp
            { let L floc (ID fname) = $2;
              in ModBind fname $3 (fmap (,NoInfo) $4) $6 Nothing (srcspan $1 $>)
            }
 
 ModParam :: { ModParamBase NoInfo Name }
-          : '(' id ':' SigExp ')' { let L _ (ID name) = $2 in ModParam name $4 NoInfo (srcspan $1 $>) }
+          : '(' id ':' ModTypeExp ')' { let L _ (ID name) = $2 in ModParam name $4 NoInfo (srcspan $1 $>) }
 
 ModParams :: { [ModParamBase NoInfo Name] }
            : ModParam ModParams { $1 : $2 }
@@ -309,10 +308,10 @@ Spec :: { SpecBase NoInfo Name }
         { let L _ (ID name) = $3
           in TypeSpec $2 name $4 Nothing (srcspan $1 $>) }
 
-      | module id ':' SigExp
+      | module id ':' ModTypeExp
         { let L _ (ID name) = $2
           in ModSpec name $4 Nothing (srcspan $1 $>) }
-      | include SigExp
+      | include ModTypeExp
         { IncludeSpec $2 (srcspan $1 $>) }
       | Doc Spec
         { addDocSpec $1 $2 }
@@ -496,15 +495,14 @@ TypeExpAtom :: { UncheckedTypeExp }
              : '(' TypeExp ')'                { TEParens $2 (srcspan $1 $>) }
              | '(' ')'                        { TETuple [] (srcspan $1 $>) }
              | '(' TypeExp ',' TupleTypes ')' { TETuple ($2:$4) (srcspan $1 $>) }
-             | '{' '}'                        { TERecord [] (srcspan $1 $>) }
-             | '{' FieldTypes1 '}'            { TERecord $2 (srcspan $1 $>) }
+             | '{' FieldTypes '}'             { TERecord $2 (srcspan $1 $>) }
              | SizeExp TypeExpTerm            { TEArray $1 $2 (srcspan $1 $>) }
              | QualName                       { TEVar (fst $1) (srclocOf (snd $1)) }
 
 Constr :: { (Name, Loc) }
         : constructor { let L _ (CONSTRUCTOR c) = $1 in (c, locOf $1) }
 
-TypeArg :: { TypeArgExp NoInfo Name }
+TypeArg :: { TypeArgExp UncheckedExp Name }
          : SizeExp %prec top
            { TypeArgExpSize $1 }
          | TypeExpAtom
@@ -513,16 +511,18 @@ TypeArg :: { TypeArgExp NoInfo Name }
 FieldType :: { (Name, UncheckedTypeExp) }
 FieldType : FieldId ':' TypeExp { (fst $1, $3) }
 
-FieldTypes1 :: { [(Name, UncheckedTypeExp)] }
-FieldTypes1 : FieldType                 { [$1] }
-            | FieldType ',' FieldTypes1 { $1 : $3 }
+FieldTypes :: { [(Name, UncheckedTypeExp)] }
+FieldTypes :                          { [] }
+           | FieldType                { [$1] }
+           | FieldType ',' FieldTypes { $1 : $3 }
 
 TupleTypes :: { [UncheckedTypeExp] }
             : TypeExp                { [$1] }
+            | TypeExp ','            { [$1] }
             | TypeExp ',' TupleTypes { $1 : $3 }
 
 
-SizeExp :: { SizeExp NoInfo Name }
+SizeExp :: { SizeExp UncheckedExp }
          : '[' Exp ']'    { SizeExp $2 (srcspan $1 $>) }
          | '['     ']'    { SizeExpAny (srcspan $1 $>) }
          | '...[' Exp ']' { SizeExp $2 (srcspan $1 $>) }
@@ -659,6 +659,7 @@ Exps1 :: { [UncheckedExp] }
 
 Exps1_ :: { [UncheckedExp] }
         : Exps1_ ',' Exp { $3 : $1 }
+        | Exps1_ ','     { $1 }
         | Exp            { [$1] }
 
 FieldAccesses :: { [(Name, Loc)] }
@@ -673,12 +674,9 @@ Field :: { FieldBase NoInfo Name }
        | id              { let L loc (ID s) = $1 in RecordFieldImplicit s NoInfo (srclocOf loc) }
 
 Fields :: { [FieldBase NoInfo Name] }
-        : Fields1 { $1 }
-        |         { [] }
-
-Fields1 :: { [FieldBase NoInfo Name] }
-        : Field ',' Fields1 { $1 : $3 }
-        | Field             { [$1] }
+       : Field ',' Fields { $1 : $3 }
+       | Field            { [$1] }
+       |                  { [] }
 
 LetExp :: { UncheckedExp }
      : let SizeBinders1 Pat '=' Exp LetBody
@@ -808,7 +806,8 @@ ParamPat :: { PatBase NoInfo Name StructType }
                                         in PatConstr n NoInfo [] (srclocOf loc) }
 
 Pats1 :: { [PatBase NoInfo Name StructType] }
-           : Pat               { [$1] }
+           : Pat            { [$1] }
+           | Pat ','       { [$1] }
            | Pat ',' Pats1 { $1 : $3 }
 
 InnerPat :: { PatBase NoInfo Name StructType }
@@ -841,7 +840,8 @@ CFieldPats :: { [(Name, PatBase NoInfo Name StructType)] }
 
 CFieldPats1 :: { [(Name, PatBase NoInfo Name StructType)] }
                  : CFieldPat ',' CFieldPats1 { $1 : $3 }
-                 | CFieldPat                    { [$1] }
+                 | CFieldPat ','             { [$1] }
+                 | CFieldPat                 { [$1] }
 
 PatLiteralNoNeg :: { (PatLit, Loc) }
              : charlit  { let L loc (CHARLIT x) = $1
@@ -878,12 +878,9 @@ DimIndex :: { UncheckedDimIndex }
          |      ':'      ':' Exp2 { DimSlice Nothing Nothing (Just $3) }
 
 DimIndices :: { [UncheckedDimIndex] }
-            :             { [] }
-            | DimIndices1 { fst $1 : snd $1 }
-
-DimIndices1 :: { (UncheckedDimIndex, [UncheckedDimIndex]) }
-             : DimIndex                 { ($1, []) }
-             | DimIndex ',' DimIndices1 { ($1, fst $3 : snd $3) }
+             :                         { [] }
+             | DimIndex                { [$1] }
+             | DimIndex ',' DimIndices { $1 : $3 }
 
 VarId :: { IdentBase NoInfo Name StructType }
 VarId : id { let L loc (ID name) = $1 in Ident name NoInfo (srclocOf loc) }
@@ -902,9 +899,9 @@ AttrAtom :: { (AttrAtom Name, Loc) }
 
 AttrInfo :: { AttrInfo Name }
          : AttrAtom         { let (x,y) = $1 in AttrAtom x (srclocOf y) }
-         | id '('       ')' { let L _ (ID s) = $1 in AttrComp s [] (srcspan $1 $>) }
          | id '(' Attrs ')' { let L _ (ID s) = $1 in AttrComp s $3 (srcspan $1 $>) }
 
 Attrs :: { [AttrInfo Name] }
-       : AttrInfo           { [$1] }
+       :                    { [] }
+       | AttrInfo           { [$1] }
        | AttrInfo ',' Attrs { $1 : $3 }

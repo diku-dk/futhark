@@ -27,6 +27,7 @@ module Language.Futhark.Traversals
 where
 
 import Data.Bifunctor
+import Data.Bitraversable
 import Data.List.NonEmpty qualified as NE
 import Language.Futhark.Syntax
 
@@ -225,7 +226,7 @@ instance ASTMappable (LoopFormBase Info VName) where
   astMap tv (ForIn pat e) = ForIn <$> astMap tv pat <*> mapOnExp tv e
   astMap tv (While e) = While <$> mapOnExp tv e
 
-instance ASTMappable (TypeExp Info VName) where
+instance ASTMappable (TypeExp (ExpBase Info VName) VName) where
   astMap tv (TEVar qn loc) =
     TEVar <$> mapOnName tv qn <*> pure loc
   astMap tv (TEParens te loc) =
@@ -247,11 +248,11 @@ instance ASTMappable (TypeExp Info VName) where
   astMap tv (TEDim dims t loc) =
     TEDim dims <$> astMap tv t <*> pure loc
 
-instance ASTMappable (TypeArgExp Info VName) where
+instance ASTMappable (TypeArgExp (ExpBase Info VName) VName) where
   astMap tv (TypeArgExpSize dim) = TypeArgExpSize <$> astMap tv dim
   astMap tv (TypeArgExpType te) = TypeArgExpType <$> astMap tv te
 
-instance ASTMappable (SizeExp Info VName) where
+instance ASTMappable (SizeExp (ExpBase Info VName)) where
   astMap tv (SizeExp e loc) = SizeExp <$> mapOnExp tv e <*> pure loc
   astMap _ (SizeExpAny loc) = pure $ SizeExpAny loc
 
@@ -324,31 +325,36 @@ instance ASTMappable (IdentBase Info VName StructType) where
   astMap tv (Ident name (Info t) loc) =
     Ident name <$> (Info <$> mapOnStructType tv t) <*> pure loc
 
-traversePat :: (Monad m) => (t1 -> m t2) -> PatBase Info VName t1 -> m (PatBase Info VName t2)
-traversePat f (Id name (Info t) loc) =
+traversePat ::
+  (Monad m) =>
+  (t1 -> m t2) ->
+  (ExpBase Info VName -> m (ExpBase Info VName)) ->
+  PatBase Info VName t1 ->
+  m (PatBase Info VName t2)
+traversePat f _ (Id name (Info t) loc) =
   Id name <$> (Info <$> f t) <*> pure loc
-traversePat f (TuplePat pats loc) =
-  TuplePat <$> mapM (traversePat f) pats <*> pure loc
-traversePat f (RecordPat fields loc) =
-  RecordPat <$> mapM (traverse $ traversePat f) fields <*> pure loc
-traversePat f (PatParens pat loc) =
-  PatParens <$> traversePat f pat <*> pure loc
-traversePat f (PatAscription pat t loc) =
-  PatAscription <$> traversePat f pat <*> pure t <*> pure loc
-traversePat f (Wildcard (Info t) loc) =
+traversePat f g (TuplePat pats loc) =
+  TuplePat <$> mapM (traversePat f g) pats <*> pure loc
+traversePat f g (RecordPat fields loc) =
+  RecordPat <$> mapM (traverse $ traversePat f g) fields <*> pure loc
+traversePat f g (PatParens pat loc) =
+  PatParens <$> traversePat f g pat <*> pure loc
+traversePat f g (PatAscription pat t loc) =
+  PatAscription <$> traversePat f g pat <*> bitraverse g pure t <*> pure loc
+traversePat f _ (Wildcard (Info t) loc) =
   Wildcard <$> (Info <$> f t) <*> pure loc
-traversePat f (PatLit v (Info t) loc) =
+traversePat f _ (PatLit v (Info t) loc) =
   PatLit v <$> (Info <$> f t) <*> pure loc
-traversePat f (PatConstr n (Info t) ps loc) =
-  PatConstr n <$> (Info <$> f t) <*> mapM (traversePat f) ps <*> pure loc
-traversePat f (PatAttr attr p loc) =
-  PatAttr attr <$> traversePat f p <*> pure loc
+traversePat f g (PatConstr n (Info t) ps loc) =
+  PatConstr n <$> (Info <$> f t) <*> mapM (traversePat f g) ps <*> pure loc
+traversePat f g (PatAttr attr p loc) =
+  PatAttr attr <$> traversePat f g p <*> pure loc
 
 instance ASTMappable (PatBase Info VName StructType) where
-  astMap tv = traversePat $ mapOnStructType tv
+  astMap tv = traversePat (mapOnStructType tv) (mapOnExp tv)
 
 instance ASTMappable (PatBase Info VName ParamType) where
-  astMap tv = traversePat $ mapOnParamType tv
+  astMap tv = traversePat (mapOnParamType tv) (mapOnExp tv)
 
 instance ASTMappable (FieldBase Info VName) where
   astMap tv (RecordFieldExplicit name e loc) =
@@ -416,11 +422,11 @@ bareLoopForm (While e) = While (bareExp e)
 bareCase :: CaseBase Info VName -> CaseBase NoInfo VName
 bareCase (CasePat pat e loc) = CasePat (barePat pat) (bareExp e) loc
 
-bareSizeExp :: SizeExp Info VName -> SizeExp NoInfo VName
+bareSizeExp :: SizeExp (ExpBase Info VName) -> SizeExp (ExpBase NoInfo VName)
 bareSizeExp (SizeExp e loc) = SizeExp (bareExp e) loc
 bareSizeExp (SizeExpAny loc) = SizeExpAny loc
 
-bareTypeExp :: TypeExp Info VName -> TypeExp NoInfo VName
+bareTypeExp :: TypeExp (ExpBase Info VName) VName -> TypeExp (ExpBase NoInfo VName) VName
 bareTypeExp (TEVar qn loc) = TEVar qn loc
 bareTypeExp (TEParens te loc) = TEParens (bareTypeExp te) loc
 bareTypeExp (TETuple tys loc) = TETuple (map bareTypeExp tys) loc

@@ -10,7 +10,7 @@ module Futhark.CodeGen.ImpCode.GPU
     KernelOp (..),
     Fence (..),
     AtomicOp (..),
-    GroupDim,
+    BlockDim,
     Kernel (..),
     KernelUse (..),
     module Futhark.CodeGen.ImpCode,
@@ -34,7 +34,7 @@ type KernelCode = Code KernelOp
 
 -- | A run-time constant related to kernels.
 data KernelConst
-  = SizeConst Name
+  = SizeConst Name SizeClass
   | SizeMaxConst SizeClass
   deriving (Eq, Ord, Show)
 
@@ -49,30 +49,29 @@ data HostOp
   | GetSizeMax VName SizeClass
   deriving (Show)
 
--- | The size of one dimension of a group.
-type GroupDim = Either Exp KernelConst
+-- | The size of one dimension of a block.
+type BlockDim = Either Exp KernelConstExp
 
 -- | A generic kernel containing arbitrary kernel code.
 data Kernel = Kernel
   { kernelBody :: Code KernelOp,
     -- | The host variables referenced by the kernel.
     kernelUses :: [KernelUse],
-    kernelNumGroups :: [Exp],
-    kernelGroupSize :: [GroupDim],
+    kernelNumBlocks :: [Exp],
+    kernelBlockSize :: [BlockDim],
     -- | A short descriptive and _unique_ name - should be
     -- alphanumeric and without spaces.
     kernelName :: Name,
-    -- | If true, this kernel does not need to check
-    -- whether we are in a failing state, as it can cope.
-    -- Intuitively, it means that the kernel does not
-    -- depend on any non-scalar parameters to make control
-    -- flow decisions.  Replication, transpose, and copy
+    -- | If true, this kernel does not need to check whether we are in
+    -- a failing state, as it can cope. Intuitively, it means that the
+    -- kernel does not depend on any non-scalar parameters to make
+    -- control flow decisions. Replication, transpose, and copy
     -- kernels are examples of this.
     kernelFailureTolerant :: Bool,
     -- | If true, multi-versioning branches will consider this kernel
-    -- when considering the local memory requirements.  Set this to
+    -- when considering the shared memory requirements. Set this to
     -- false for kernels that do their own checking.
-    kernelCheckLocalMemory :: Bool
+    kernelCheckSharedMemory :: Bool
   }
   deriving (Show)
 
@@ -86,11 +85,13 @@ data KernelUse
   deriving (Eq, Ord, Show)
 
 instance Pretty KernelConst where
-  pretty (SizeConst key) = "get_size" <> parens (pretty key)
-  pretty (SizeMaxConst size_class) = "get_max_size" <> parens (pretty size_class)
+  pretty (SizeConst key size_class) =
+    "get_size" <> parens (commasep [pretty key, pretty size_class])
+  pretty (SizeMaxConst size_class) =
+    "get_max_size" <> parens (pretty size_class)
 
 instance FreeIn KernelConst where
-  freeIn' (SizeConst _) = mempty
+  freeIn' SizeConst {} = mempty
   freeIn' (SizeMaxConst _) = mempty
 
 instance Pretty KernelUse where
@@ -133,27 +134,30 @@ instance FreeIn Kernel where
   freeIn' kernel =
     freeIn'
       ( kernelBody kernel,
-        kernelNumGroups kernel,
-        kernelGroupSize kernel
+        kernelNumBlocks kernel,
+        kernelBlockSize kernel
       )
 
 instance Pretty Kernel where
   pretty kernel =
     "kernel"
       <+> brace
-        ( "groups"
-            <+> brace (pretty $ kernelNumGroups kernel)
-            </> "group_size"
-            <+> brace (list $ map (either pretty pretty) $ kernelGroupSize kernel)
+        ( "blocks"
+            <+> brace (pretty $ kernelNumBlocks kernel)
+            </> "tblock_size"
+            <+> brace (list $ map pSize $ kernelBlockSize kernel)
             </> "uses"
-            <+> brace (commasep $ map pretty $ kernelUses kernel)
+            <+> brace (stack $ map pretty $ kernelUses kernel)
             </> "failure_tolerant"
             <+> brace (pretty $ kernelFailureTolerant kernel)
-            </> "check_local_memory"
-            <+> brace (pretty $ kernelCheckLocalMemory kernel)
+            </> "check_shared_memory"
+            <+> brace (pretty $ kernelCheckSharedMemory kernel)
             </> "body"
             <+> brace (pretty $ kernelBody kernel)
         )
+    where
+      pSize (Left x) = "dyn" <+> pretty x
+      pSize (Right x) = "const" <+> pretty x
 
 -- | When we do a barrier or fence, is it at the local or global
 -- level?  By the 'Ord' instance, global is greater than local.
@@ -162,14 +166,14 @@ data Fence = FenceLocal | FenceGlobal
 
 -- | An operation that occurs within a kernel body.
 data KernelOp
-  = GetGroupId VName Int
+  = GetBlockId VName Int
   | GetLocalId VName Int
   | GetLocalSize VName Int
   | GetLockstepWidth VName
   | Atomic Space AtomicOp
   | Barrier Fence
   | MemFence Fence
-  | LocalAlloc VName (Count Bytes (TExp Int64))
+  | SharedAlloc VName (Count Bytes (TExp Int64))
   | -- | Perform a barrier and also check whether any
     -- threads have failed an assertion.  Make sure all
     -- threads would reach all 'ErrorSync's if any of them
@@ -210,10 +214,10 @@ instance FreeIn AtomicOp where
   freeIn' (AtomicXchg _ _ arr i x) = freeIn' arr <> freeIn' i <> freeIn' x
 
 instance Pretty KernelOp where
-  pretty (GetGroupId dest i) =
+  pretty (GetBlockId dest i) =
     pretty dest
       <+> "<-"
-      <+> "get_group_id"
+      <+> "get_tblock_id"
       <> parens (pretty i)
   pretty (GetLocalId dest i) =
     pretty dest
@@ -237,8 +241,8 @@ instance Pretty KernelOp where
     "mem_fence_local()"
   pretty (MemFence FenceGlobal) =
     "mem_fence_global()"
-  pretty (LocalAlloc name size) =
-    pretty name <+> equals <+> "local_alloc" <> parens (pretty size)
+  pretty (SharedAlloc name size) =
+    pretty name <+> equals <+> "shared_alloc" <> parens (pretty size)
   pretty (ErrorSync FenceLocal) =
     "error_sync_local()"
   pretty (ErrorSync FenceGlobal) =
@@ -312,6 +316,7 @@ instance Pretty KernelOp where
 
 instance FreeIn KernelOp where
   freeIn' (Atomic _ op) = freeIn' op
+  freeIn' (SharedAlloc _ size) = freeIn' size
   freeIn' _ = mempty
 
 brace :: Doc a -> Doc a

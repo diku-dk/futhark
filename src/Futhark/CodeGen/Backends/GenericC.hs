@@ -62,7 +62,7 @@ defError msg stacktrace = do
               err = FUTHARK_PROGRAM_ERROR;
               goto cleanup;|]
 
-lmadcopyCPU :: DoLMADCopy op s
+lmadcopyCPU :: DoCopy op s
 lmadcopyCPU _ t shape dst (dstoffset, dststride) src (srcoffset, srcstride) = do
   let fname :: String
       (fname, ty) =
@@ -573,7 +573,7 @@ generateTuningParams params = do
       size_default_inits = map (intinit . fromMaybe 0 . sizeDefault) param_classes
       size_decls = map (\k -> [C.csdecl|typename int64_t *$id:k;|]) param_names
       num_params = length params
-  earlyDecl [C.cedecl|struct tuning_params { $sdecls:size_decls };|]
+  earlyDecl [C.cedecl|struct tuning_params { int dummy; $sdecls:size_decls };|]
   earlyDecl [C.cedecl|static const int num_tuning_params = $int:num_params;|]
   earlyDecl [C.cedecl|static const char *tuning_param_names[] = { $inits:size_name_inits, NULL };|]
   earlyDecl [C.cedecl|static const char *tuning_param_vars[] = { $inits:size_var_inits, NULL };|]
@@ -650,9 +650,13 @@ generateCommonLibFuns memreport = do
                  str_builder_str(&builder, "\"memory\":{");
                  $items:(L.intersperse comma memreport)
                  str_builder_str(&builder, "},\"events\":[");
-                 report_events_in_list(&ctx->event_list, &builder);
-                 str_builder_str(&builder, "]}");
-                 return builder.str;
+                 if (report_events_in_list(&ctx->event_list, &builder) != 0) {
+                   free(builder.str);
+                   return NULL;
+                 } else {
+                   str_builder_str(&builder, "]}");
+                   return builder.str;
+                 }
                }|]
     )
 

@@ -2,8 +2,6 @@
 module Language.Futhark.TypeChecker.Types
   ( checkTypeExp,
     renameRetType,
-    checkForDuplicateNames,
-    checkTypeParams,
     typeParamToArg,
     Subst (..),
     substFromAbbr,
@@ -20,7 +18,6 @@ where
 
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.Reader
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (find, foldl', sort, unzip4, (\\))
@@ -86,26 +83,27 @@ renameRetType (RetType dims st)
       pure $ RetType dims st
 
 evalTypeExp ::
-  (MonadTypeChecker m) =>
-  TypeExp NoInfo Name ->
-  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
-evalTypeExp (TEVar name loc) = do
-  (name', ps, t, l) <- lookupType loc name
+  (MonadTypeChecker m, Pretty df) =>
+  (df -> m Exp) ->
+  TypeExp df VName ->
+  m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
+evalTypeExp _ (TEVar name loc) = do
+  (ps, t, l) <- lookupType name
   t' <- renameRetType $ toResRet Nonunique t
   case ps of
-    [] -> pure (TEVar name' loc, [], t', l)
+    [] -> pure (TEVar name loc, [], t', l)
     _ ->
       typeError loc mempty $
         "Type constructor"
           <+> dquotes (hsep (pretty name : map pretty ps))
           <+> "used without any arguments."
 --
-evalTypeExp (TEParens te loc) = do
-  (te', svars, ts, ls) <- evalTypeExp te
+evalTypeExp df (TEParens te loc) = do
+  (te', svars, ts, ls) <- evalTypeExp df te
   pure (TEParens te' loc, svars, ts, ls)
 --
-evalTypeExp (TETuple ts loc) = do
-  (ts', svars, ts_s, ls) <- unzip4 <$> mapM evalTypeExp ts
+evalTypeExp df (TETuple ts loc) = do
+  (ts', svars, ts_s, ls) <- unzip4 <$> mapM (evalTypeExp df) ts
   pure
     ( TETuple ts' loc,
       mconcat svars,
@@ -113,14 +111,14 @@ evalTypeExp (TETuple ts loc) = do
       foldl' max Unlifted ls
     )
 --
-evalTypeExp t@(TERecord fs loc) = do
+evalTypeExp df t@(TERecord fs loc) = do
   -- Check for duplicate field names.
   let field_names = map fst fs
   unless (sort field_names == sort (nubOrd field_names)) $
     typeError loc mempty $
       "Duplicate record fields in" <+> pretty t <> "."
 
-  checked <- traverse evalTypeExp $ M.fromList fs
+  checked <- traverse (evalTypeExp df) $ M.fromList fs
   let fs' = fmap (\(x, _, _, _) -> x) checked
       fs_svars = foldMap (\(_, y, _, _) -> y) checked
       ts_s = fmap (\(_, _, z, _) -> z) checked
@@ -132,9 +130,9 @@ evalTypeExp t@(TERecord fs loc) = do
       foldl' max Unlifted ls
     )
 --
-evalTypeExp (TEArray d t loc) = do
+evalTypeExp df (TEArray d t loc) = do
   (d_svars, d', d'') <- checkSizeExp d
-  (t', svars, RetType dims st, l) <- evalTypeExp t
+  (t', svars, RetType dims st, l) <- evalTypeExp df t
   case (l, arrayOfWithAliases Nonunique (Shape [d'']) st) of
     (Unlifted, st') ->
       pure
@@ -158,11 +156,11 @@ evalTypeExp (TEArray d t loc) = do
       dv <- newTypeName "d"
       pure ([dv], SizeExpAny dloc, sizeFromName (qualName dv) dloc)
     checkSizeExp (SizeExp e dloc) = do
-      e' <- checkExpForSize e
+      e' <- df e
       pure ([], SizeExp e' dloc, e')
 --
-evalTypeExp (TEUnique t loc) = do
-  (t', svars, RetType dims st, l) <- evalTypeExp t
+evalTypeExp df (TEUnique t loc) = do
+  (t', svars, RetType dims st, l) <- evalTypeExp df t
   unless (mayContainArray st) $
     warn loc $
       "Declaring" <+> dquotes (pretty st) <+> "as unique has no effect."
@@ -175,22 +173,20 @@ evalTypeExp (TEUnique t loc) = do
     mayContainArray (Scalar Arrow {}) = False
     mayContainArray (Scalar (Sum cs)) = (any . any) mayContainArray cs
 --
-evalTypeExp (TEArrow (Just v) t1 t2 loc) = do
-  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp t1
-  bindSpaced [(Term, v)] $ do
-    v' <- checkName Term v loc
-    bindVal v' (BoundV [] $ toStruct st1) $ do
-      (t2', svars2, RetType dims2 st2, _) <- evalTypeExp t2
-      pure
-        ( TEArrow (Just v') t1' t2' loc,
-          svars1 ++ dims1 ++ svars2,
-          RetType [] $ Scalar $ Arrow Nonunique (Named v') (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
-          Lifted
-        )
+evalTypeExp df (TEArrow (Just v) t1 t2 loc) = do
+  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df t1
+  bindVal v (BoundV [] $ toStruct st1) $ do
+    (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df t2
+    pure
+      ( TEArrow (Just v) t1' t2' loc,
+        svars1 ++ dims1 ++ svars2,
+        RetType [] $ Scalar $ Arrow Nonunique (Named v) (diet $ resToParam st1) (toStruct st1) (RetType dims2 st2),
+        Lifted
+      )
 --
-evalTypeExp (TEArrow Nothing t1 t2 loc) = do
-  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp t1
-  (t2', svars2, RetType dims2 st2, _) <- evalTypeExp t2
+evalTypeExp df (TEArrow Nothing t1 t2 loc) = do
+  (t1', svars1, RetType dims1 st1, _) <- evalTypeExp df t1
+  (t2', svars2, RetType dims2 st2, _) <- evalTypeExp df t2
   pure
     ( TEArrow Nothing t1' t2' loc,
       svars1 ++ dims1 ++ svars2,
@@ -200,31 +196,29 @@ evalTypeExp (TEArrow Nothing t1 t2 loc) = do
       Lifted
     )
 --
-evalTypeExp (TEDim dims t loc) = do
-  bindSpaced (map (Term,) dims) $ do
-    dims' <- mapM (flip (checkName Term) loc) dims
-    bindDims dims' $ do
-      (t', svars, RetType t_dims st, l) <- evalTypeExp t
-      let (witnessed, _) = determineSizeWitnesses $ toStruct st
-      case find (`S.notMember` witnessed) dims' of
-        Just d ->
-          typeError loc mempty . withIndexLink "unused-existential" $
-            "Existential size "
-              <> dquotes (prettyName d)
-              <> " not used as array size."
-        Nothing ->
-          pure
-            ( TEDim dims' t' loc,
-              svars,
-              RetType (dims' ++ t_dims) st,
-              max l SizeLifted
-            )
+evalTypeExp df (TEDim dims t loc) = do
+  bindDims dims $ do
+    (t', svars, RetType t_dims st, l) <- evalTypeExp df t
+    let (witnessed, _) = determineSizeWitnesses $ toStruct st
+    case find (`S.notMember` witnessed) dims of
+      Just d ->
+        typeError loc mempty . withIndexLink "unused-existential" $
+          "Existential size "
+            <> dquotes (prettyName d)
+            <> " not used as array size."
+      Nothing ->
+        pure
+          ( TEDim dims t' loc,
+            svars,
+            RetType (dims ++ t_dims) st,
+            max l SizeLifted
+          )
   where
     bindDims [] m = m
     bindDims (d : ds) m =
       bindVal d (BoundV [] $ Scalar $ Prim $ Signed Int64) $ bindDims ds m
 --
-evalTypeExp t@(TESum cs loc) = do
+evalTypeExp df t@(TESum cs loc) = do
   let constructors = map fst cs
   unless (sort constructors == sort (nubOrd constructors)) $
     typeError loc mempty $
@@ -233,7 +227,7 @@ evalTypeExp t@(TESum cs loc) = do
   unless (length constructors < 256) $
     typeError loc mempty "Sum types must have less than 256 constructors."
 
-  checked <- (traverse . traverse) evalTypeExp $ M.fromList cs
+  checked <- (traverse . traverse) (evalTypeExp df) $ M.fromList cs
   let cs' = (fmap . fmap) (\(x, _, _, _) -> x) checked
       cs_svars = (foldMap . foldMap) (\(_, y, _, _) -> y) checked
       ts_s = (fmap . fmap) (\(_, _, z, _) -> z) checked
@@ -247,9 +241,9 @@ evalTypeExp t@(TESum cs loc) = do
             M.map (map retType) ts_s,
       foldl' max Unlifted ls
     )
-evalTypeExp ote@TEApply {} = do
+evalTypeExp df ote@TEApply {} = do
   (tname, tname_loc, targs) <- rootAndArgs ote
-  (tname', ps, tname_t, l) <- lookupType tloc tname
+  (ps, tname_t, l) <- lookupType tname
   RetType t_dims t <- renameRetType $ toResRet Nonunique tname_t
   if length ps /= length targs
     then
@@ -264,7 +258,7 @@ evalTypeExp ote@TEApply {} = do
     else do
       (targs', dims, substs) <- unzip3 <$> zipWithM checkArgApply ps targs
       pure
-        ( foldl (\x y -> TEApply x y tloc) (TEVar tname' tname_loc) targs',
+        ( foldl (\x y -> TEApply x y tloc) (TEVar tname tname_loc) targs',
           [],
           RetType (t_dims ++ mconcat dims) $
             applySubst (`M.lookup` mconcat substs) t,
@@ -273,10 +267,6 @@ evalTypeExp ote@TEApply {} = do
   where
     tloc = srclocOf ote
 
-    rootAndArgs ::
-      (MonadTypeChecker m) =>
-      TypeExp NoInfo Name ->
-      m (QualName Name, SrcLoc, [TypeArgExp NoInfo Name])
     rootAndArgs (TEVar qn loc) = pure (qn, loc, [])
     rootAndArgs (TEApply op arg _) = do
       (op', loc, args) <- rootAndArgs op
@@ -286,7 +276,7 @@ evalTypeExp ote@TEApply {} = do
         "Type" <+> dquotes (pretty te') <+> "is not a type constructor."
 
     checkSizeExp (SizeExp e dloc) = do
-      e' <- checkExpForSize e
+      e' <- df e
       pure
         ( TypeArgExpSize (SizeExp e' dloc),
           [],
@@ -304,7 +294,7 @@ evalTypeExp ote@TEApply {} = do
       (d', svars, subst) <- checkSizeExp d
       pure (d', svars, M.singleton pv subst)
     checkArgApply (TypeParamType _ pv _) (TypeArgExpType te) = do
-      (te', svars, RetType dims st, _) <- evalTypeExp te
+      (te', svars, RetType dims st, _) <- evalTypeExp df te
       pure
         ( TypeArgExpType te',
           svars ++ dims,
@@ -325,128 +315,11 @@ evalTypeExp ote@TEApply {} = do
 -- * The elaborated type.
 -- * The liftedness of the type.
 checkTypeExp ::
-  (MonadTypeChecker m) =>
-  TypeExp NoInfo Name ->
-  m (TypeExp Info VName, [VName], ResRetType, Liftedness)
-checkTypeExp te = do
-  checkForDuplicateNamesInType te
-  evalTypeExp te
-
--- | Check for duplication of names inside a binding group.
-checkForDuplicateNames ::
-  (MonadTypeChecker m) => [UncheckedTypeParam] -> [UncheckedPat t] -> m ()
-checkForDuplicateNames tps pats = (`evalStateT` mempty) $ do
-  mapM_ checkTypeParam tps
-  mapM_ checkPat pats
-  where
-    checkTypeParam (TypeParamType _ v loc) = seen Type v loc
-    checkTypeParam (TypeParamDim v loc) = seen Term v loc
-
-    checkPat (Id v _ loc) = seen Term v loc
-    checkPat (PatParens p _) = checkPat p
-    checkPat (PatAttr _ p _) = checkPat p
-    checkPat Wildcard {} = pure ()
-    checkPat (TuplePat ps _) = mapM_ checkPat ps
-    checkPat (RecordPat fs _) = mapM_ (checkPat . snd) fs
-    checkPat (PatAscription p _ _) = checkPat p
-    checkPat PatLit {} = pure ()
-    checkPat (PatConstr _ _ ps _) = mapM_ checkPat ps
-
-    seen ns v loc = do
-      already <- gets $ M.lookup (ns, v)
-      case already of
-        Just prev_loc ->
-          lift $
-            typeError loc mempty $
-              "Name"
-                <+> dquotes (pretty v)
-                <+> "also bound at"
-                <+> pretty (locStr prev_loc)
-                <> "."
-        Nothing ->
-          modify $ M.insert (ns, v) loc
-
--- | Check whether the type contains arrow types that define the same
--- parameter.  These might also exist further down, but that's not
--- really a problem - we mostly do this checking to help the user,
--- since it is likely an error, but it's easy to assign a semantics to
--- it (normal name shadowing).
-checkForDuplicateNamesInType ::
-  (MonadTypeChecker m) =>
-  TypeExp NoInfo Name ->
-  m ()
-checkForDuplicateNamesInType = check mempty
-  where
-    bad v loc prev_loc =
-      typeError loc mempty $
-        "Name"
-          <+> dquotes (pretty v)
-          <+> "also bound at"
-          <+> pretty (locStr prev_loc)
-          <> "."
-
-    check seen (TEArrow (Just v) t1 t2 loc)
-      | Just prev_loc <- M.lookup v seen =
-          bad v loc prev_loc
-      | otherwise =
-          check seen' t1 >> check seen' t2
-      where
-        seen' = M.insert v loc seen
-    check seen (TEArrow Nothing t1 t2 _) =
-      check seen t1 >> check seen t2
-    check seen (TETuple ts _) = mapM_ (check seen) ts
-    check seen (TERecord fs _) = mapM_ (check seen . snd) fs
-    check seen (TEUnique t _) = check seen t
-    check seen (TESum cs _) = mapM_ (mapM (check seen) . snd) cs
-    check seen (TEApply t1 (TypeArgExpType t2) _) =
-      check seen t1 >> check seen t2
-    check seen (TEApply t1 TypeArgExpSize {} _) =
-      check seen t1
-    check seen (TEDim (v : vs) t loc)
-      | Just prev_loc <- M.lookup v seen =
-          bad v loc prev_loc
-      | otherwise =
-          check (M.insert v loc seen) (TEDim vs t loc)
-    check seen (TEDim [] t _) =
-      check seen t
-    check _ TEArray {} = pure ()
-    check _ TEVar {} = pure ()
-    check seen (TEParens te _) = check seen te
-
--- | @checkTypeParams ps m@ checks the type parameters @ps@, then
--- invokes the continuation @m@ with the checked parameters, while
--- extending the monadic name map with @ps@.
-checkTypeParams ::
-  (MonadTypeChecker m) =>
-  [TypeParamBase Name] ->
-  ([TypeParamBase VName] -> m a) ->
-  m a
-checkTypeParams ps m =
-  bindSpaced (map typeParamSpace ps) $
-    m =<< evalStateT (mapM checkTypeParam ps) mempty
-  where
-    typeParamSpace (TypeParamDim pv _) = (Term, pv)
-    typeParamSpace (TypeParamType _ pv _) = (Type, pv)
-
-    checkParamName ns v loc = do
-      seen <- gets $ M.lookup (ns, v)
-      case seen of
-        Just prev ->
-          lift $
-            typeError loc mempty $
-              "Type parameter"
-                <+> dquotes (pretty v)
-                <+> "previously defined at"
-                <+> pretty (locStr prev)
-                <> "."
-        Nothing -> do
-          modify $ M.insert (ns, v) loc
-          lift $ checkName ns v loc
-
-    checkTypeParam (TypeParamDim pv loc) =
-      TypeParamDim <$> checkParamName Term pv loc <*> pure loc
-    checkTypeParam (TypeParamType l pv loc) =
-      TypeParamType l <$> checkParamName Type pv loc <*> pure loc
+  (MonadTypeChecker m, Pretty df) =>
+  (df -> m Exp) ->
+  TypeExp df VName ->
+  m (TypeExp Exp VName, [VName], ResRetType, Liftedness)
+checkTypeExp = evalTypeExp
 
 -- | Construct a type argument corresponding to a type parameter.
 typeParamToArg :: TypeParam -> StructTypeArg
@@ -547,11 +420,11 @@ instance Substitutable (Pat ParamType) where
           }
 
 applyType ::
-  (Monoid als) =>
+  (Monoid u) =>
   [TypeParam] ->
-  TypeBase Size als ->
+  TypeBase Size u ->
   [StructTypeArg] ->
-  TypeBase Size als
+  TypeBase Size u
 applyType ps t args = substTypesAny (`M.lookup` substs) t
   where
     substs = M.fromList $ zipWith mkSubst ps args
@@ -564,10 +437,10 @@ applyType ps t args = substTypesAny (`M.lookup` substs) t
       error $ "applyType mkSubst: cannot substitute " ++ prettyString a ++ " for " ++ prettyString p
 
 substTypesRet ::
-  (Monoid as) =>
-  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
-  TypeBase Size as ->
-  RetTypeBase Size as
+  (Monoid u) =>
+  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
+  TypeBase Size u ->
+  RetTypeBase Size u
 substTypesRet lookupSubst ot =
   uncurry (flip RetType) $ runState (onType ot) []
   where
@@ -579,7 +452,7 @@ substTypesRet lookupSubst ot =
     -- XXX: the size names we invent here not globally unique.  This
     -- is _probably_ not a problem, since substituting types with
     -- outermost non-null existential sizes is done only when type
-    -- checking modules.
+    -- checking modules and monomorphising.
     freshDims (RetType [] t) = pure $ RetType [] t
     freshDims (RetType ext t) = do
       seen_ext <- get
@@ -601,7 +474,7 @@ substTypesRet lookupSubst ot =
 
     onType (Array u shape et) =
       arrayOfWithAliases u (applySubst lookupSubst' shape)
-        <$> onType (second (const mempty) $ Scalar et)
+        <$> onType (Scalar et)
     onType (Scalar (Prim t)) = pure $ Scalar $ Prim t
     onType (Scalar (TypeVar u v targs)) = do
       targs' <- mapM subsTypeArg targs
@@ -614,8 +487,8 @@ substTypesRet lookupSubst ot =
           pure $ Scalar $ TypeVar u v targs'
     onType (Scalar (Record ts)) =
       Scalar . Record <$> traverse onType ts
-    onType (Scalar (Arrow als v d t1 t2)) =
-      Scalar <$> (Arrow als v d <$> onType t1 <*> onRetType t2)
+    onType (Scalar (Arrow u v d t1 t2)) =
+      Scalar <$> (Arrow u v d <$> onType t1 <*> onRetType t2)
     onType (Scalar (Sum ts)) =
       Scalar . Sum <$> traverse (traverse onType) ts
 
@@ -642,10 +515,10 @@ substTypesRet lookupSubst ot =
 -- | Perform substitutions, from type names to types, on a type. Works
 -- regardless of what shape and uniqueness information is attached to the type.
 substTypesAny ::
-  (Monoid as) =>
-  (VName -> Maybe (Subst (RetTypeBase Size as))) ->
-  TypeBase Size as ->
-  TypeBase Size as
+  (Monoid u) =>
+  (VName -> Maybe (Subst (RetTypeBase Size u))) ->
+  TypeBase Size u ->
+  TypeBase Size u
 substTypesAny lookupSubst ot =
   case substTypesRet lookupSubst ot of
     RetType [] ot' -> ot'

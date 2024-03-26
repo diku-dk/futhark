@@ -28,7 +28,7 @@
 -- ImpCode does not have arrays. 'DeclareArray' is for declaring
 -- constant array literals, not arrays in general.  Instead, ImpCode
 -- deals only with memory.  Array operations present in core IR
--- programs are turned into 'Write', v'Read', and 'LMADCopy'
+-- programs are turned into 'Write', v'Read', and 'Copy'
 -- operations that use flat indexes and offsets based on the index
 -- function of the original array.
 --
@@ -280,8 +280,8 @@ data Code a
     -- all memory blocks will be freed with this statement.
     -- Backends are free to ignore it entirely.
     Free VName Space
-  | -- | @LMADcopy pt dest dest_lmad src src_lmad shape@
-    LMADCopy
+  | -- | @Copy pt shape dest dest_lmad src src_lmad@.
+    Copy
       PrimType
       [Count Elements (TExp Int64)]
       (VName, Space)
@@ -326,7 +326,7 @@ data Code a
     -- statement.
     DebugPrint String (Maybe Exp)
   | -- | Log the given message, *without* a trailing linebreak (unless
-    -- part of the mssage).
+    -- part of the message).
     TracePrint (ErrorMsg Exp)
   | -- | Perform an extensible operation.
     Op a
@@ -609,7 +609,7 @@ instance (Pretty op) => Pretty (Code op) where
     pretty dest <+> "<-" <+> pretty from <+> "@" <> pretty space
   pretty (Assert e msg _) =
     "assert" <> parens (commasep [pretty msg, pretty e])
-  pretty (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+  pretty (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
     ("lmadcopy_" <> pretty (length shape) <> "d_" <> pretty t)
       <> (parens . align)
         ( foldMap (brackets . pretty) shape
@@ -707,8 +707,8 @@ instance Traversable Code where
     pure $ Allocate name size s
   traverse _ (Free name space) =
     pure $ Free name space
-  traverse _ (LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
-    pure $ LMADCopy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
+  traverse _ (Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)) =
+    pure $ Copy t shape (dst, dstspace) (dstoffset, dststrides) (src, srcspace) (srcoffset, srcstrides)
   traverse _ (Write name i bt val space vol) =
     pure $ Write name i bt val space vol
   traverse _ (Read x name i bt space vol) =
@@ -781,7 +781,7 @@ instance (FreeIn a) => FreeIn (Code a) where
     freeIn' name <> freeIn' size <> freeIn' space
   freeIn' (Free name _) =
     freeIn' name
-  freeIn' (LMADCopy _ shape (dst, _) (dstoffset, dststrides) (src, _) (srcoffset, srcstrides)) =
+  freeIn' (Copy _ shape (dst, _) (dstoffset, dststrides) (src, _) (srcoffset, srcstrides)) =
     freeIn' shape <> freeIn' dst <> freeIn' dstoffset <> freeIn' dststrides <> freeIn' src <> freeIn' srcoffset <> freeIn' srcstrides
   freeIn' (SetMem x y _) =
     freeIn' x <> freeIn' y

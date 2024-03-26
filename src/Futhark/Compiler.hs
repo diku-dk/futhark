@@ -148,7 +148,7 @@ prettyProgErrors = stack . punctuate line . map onError . sortOn (rep . locOf) .
     onError (ProgWarning loc msg) =
       annotate (color Yellow) $ "Warning at " <> pretty (locText (srclocOf loc)) <> ":" </> unAnnotate msg
 
--- | Throw an exception formatted with 'pprProgErrors' if there's
+-- | Throw an exception formatted with 'prettyProgErrors' if there's
 -- an error.
 throwOnProgError ::
   (MonadError CompilerError m) =>

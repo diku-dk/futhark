@@ -2,13 +2,19 @@
 -- module-free Futhark program into an equivalent with only simple expresssions.
 -- Notably, all non-trivial expression are converted into a list of
 -- let-bindings to make them simpler, with no nested apply, nested lets...
--- This module only performs synthatic operations.
+-- This module only performs syntactic operations.
 --
--- Also, it performs desugaring that is:
--- * Turn operator section into lambda
--- * turn BinOp into application (&& and || are converted to if structure)
--- * turn `let x [i] = e1` into `let x = x with [i] = e1`
--- * binds all implicit sizes
+-- Also, it performs various kinds of desugaring:
+--
+-- * Turns operator sections into explicit lambdas.
+--
+-- * Rewrites BinOp nodes to Apply nodes (&& and || are converted to conditionals).
+--
+-- * Turns `let x [i] = e1` into `let x = x with [i] = e1`.
+--
+-- * Binds all implicit sizes.
+--
+-- * Turns implicit record fields into explicit record fields.
 --
 -- This is currently not done for expressions inside sizes, this processing
 -- still needed in monomorphisation for now.
@@ -43,7 +49,7 @@ applyModifiers =
 -- A binding that occurs in the calculation flow
 data Binding
   = PatBind [SizeBinder VName] (Pat StructType) Exp
-  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Info VName), Info ResRetType, Exp)
+  | FunBind VName ([TypeParam], [Pat ParamType], Maybe (TypeExp Exp VName), Info ResRetType, Exp)
 
 type NormState = (([Binding], [BindModifier]), VNameSource)
 
@@ -164,7 +170,8 @@ getOrdering _ (RecordLit fs loc) = do
     f (RecordFieldExplicit n e floc) = do
       e' <- getOrdering False e
       pure $ RecordFieldExplicit n e' floc
-    f field@RecordFieldImplicit {} = pure field
+    f (RecordFieldImplicit v t _) =
+      f $ RecordFieldExplicit (baseName v) (Var (qualName v) t loc) loc
 getOrdering _ (ArrayLit es ty loc) = do
   es' <- mapM (getOrdering False) es
   pure $ ArrayLit es' ty loc
@@ -202,7 +209,7 @@ getOrdering final (OpSectionLeft op ty e (Info (xp, _, xext), Info (yp, yty)) (I
   let y = Var (qualName yn) (Info $ toStruct yty) mempty
       ret' = applySubst (pSubst x y) ret
       body =
-        mkApply (Var op ty mempty) [(Observe, xext, x), (Observe, Nothing, y)] $
+        mkApply (Var op ty mempty) [(xext, x), (Nothing, y)] $
           AppRes (toStruct ret') exts
   nameExp final $ Lambda [Id yn (Info yty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
@@ -215,7 +222,7 @@ getOrdering final (OpSectionRight op ty e (Info (xp, xty), Info (yp, _, yext)) (
   y <- getOrdering False e
   let x = Var (qualName xn) (Info $ toStruct xty) mempty
       ret' = applySubst (pSubst x y) ret
-      body = mkApply (Var op ty mempty) [(Observe, Nothing, x), (Observe, yext, y)] $ AppRes (toStruct ret') []
+      body = mkApply (Var op ty mempty) [(Nothing, x), (yext, y)] $ AppRes (toStruct ret') []
   nameExp final $ Lambda [Id xn (Info xty) mempty] body Nothing (Info (RetType dims ret')) loc
   where
     pSubst x y vn
@@ -304,7 +311,7 @@ getOrdering final (AppExp (BinOp (op, oloc) opT (el, Info elp) (er, Info erp) lo
     (False, False) -> do
       el' <- naming (prettyString op <> "_lhs") $ getOrdering False el
       er' <- naming (prettyString op <> "_rhs") $ getOrdering False er
-      pure $ mkApply (Var op opT oloc) [(Observe, elp, el'), (Observe, erp, er')] resT
+      pure $ mkApply (Var op opT oloc) [(elp, el'), (erp, er')] resT
   nameExp final expr'
   where
     isOr = baseName (qualLeaf op) == "||"
@@ -349,11 +356,10 @@ transformBody e = do
     f body (FunBind vn infos) =
       AppExp (LetFun vn infos body mempty) appRes
 
-transformDec :: (MonadFreshNames m) => Dec -> m Dec
-transformDec (ValDec valbind) = do
+transformValBind :: (MonadFreshNames m) => ValBind -> m ValBind
+transformValBind valbind = do
   body' <- transformBody $ valBindBody valbind
-  pure $ ValDec (valbind {valBindBody = body'})
-transformDec d = pure d
+  pure $ valbind {valBindBody = body'}
 
-transformProg :: (MonadFreshNames m) => [Dec] -> m [Dec]
-transformProg = mapM transformDec
+transformProg :: (MonadFreshNames m) => [ValBind] -> m [ValBind]
+transformProg = mapM transformValBind

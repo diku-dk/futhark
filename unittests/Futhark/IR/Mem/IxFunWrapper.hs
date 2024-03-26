@@ -13,8 +13,8 @@ module Futhark.IR.Mem.IxFunWrapper
 where
 
 import Control.Monad (join)
-import Futhark.IR.Mem.IxFun qualified as I
 import Futhark.IR.Mem.IxFun.Alg qualified as IA
+import Futhark.IR.Mem.LMAD qualified as I
 import Futhark.IR.Syntax (FlatSlice, Slice)
 import Futhark.Util.IntegralExp
 
@@ -22,16 +22,15 @@ type Shape num = [num]
 
 type Permutation = [Int]
 
-type IxFun num = (Maybe (I.IxFun num), IA.IxFun num)
+type IxFun num = (Maybe (I.LMAD num), IA.IxFun num)
 
 iota ::
   (IntegralExp num) =>
   Shape num ->
   IxFun num
-iota x = (Just $ I.iota x, IA.iota x)
+iota x = (Just $ I.iota 0 x, IA.iota x)
 
 permute ::
-  (IntegralExp num) =>
   IxFun num ->
   Permutation ->
   IxFun num
@@ -45,7 +44,6 @@ reshape ::
 reshape (l, a) x = (join (I.reshape <$> l <*> pure x), IA.reshape a x)
 
 coerce ::
-  (Eq num, IntegralExp num) =>
   IxFun num ->
   Shape num ->
   IxFun num
@@ -59,16 +57,16 @@ slice ::
 slice (l, a) x = (I.slice <$> l <*> pure x, IA.slice a x)
 
 flatSlice ::
-  (Eq num, IntegralExp num) =>
+  (IntegralExp num) =>
   IxFun num ->
   FlatSlice num ->
   IxFun num
 flatSlice (l, a) x = (I.flatSlice <$> l <*> pure x, IA.flatSlice a x)
 
 expand ::
-  (Eq num, IntegralExp num) =>
+  (IntegralExp num) =>
   num ->
   num ->
   IxFun num ->
   IxFun num
-expand o p (lf, af) = (I.expand o p =<< lf, IA.expand o p af)
+expand o p (lf, af) = (Just . I.expand o p =<< lf, IA.expand o p af)

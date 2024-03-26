@@ -7,6 +7,7 @@ module Language.Futhark.Pretty
     prettyTuple,
     leadingOperator,
     IsName (..),
+    prettyNameString,
     Annot (..),
   )
 where
@@ -54,6 +55,10 @@ instance IsName Name where
   prettyName = pretty
   toName = id
 
+-- | Prettyprint name as string.  Only use this for debugging.
+prettyNameString :: (IsName v) => v -> String
+prettyNameString = T.unpack . docText . prettyName
+
 -- | Class for type constructors that represent annotations.  Used in
 -- the prettyprinter to either print the original AST, or the computed
 -- decoration.
@@ -81,7 +86,7 @@ instance Pretty PrimValue where
   pretty (BoolValue False) = "false"
   pretty (FloatValue v) = pretty v
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SizeExp f vn) where
+instance (Pretty d) => Pretty (SizeExp d) where
   pretty SizeExpAny {} = brackets mempty
   pretty (SizeExp e _) = brackets $ pretty e
 
@@ -162,7 +167,7 @@ prettyTypeArg p (TypeArgType t) = prettyType p t
 instance Pretty (TypeArg Size) where
   pretty = prettyTypeArg 0
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
+instance (IsName vn, Pretty d) => Pretty (TypeExp d vn) where
   pretty (TEUnique t _) = "*" <> pretty t
   pretty (TEArray d at _) = pretty d <> pretty at
   pretty (TETuple ts _) = parens $ commasep $ map pretty ts
@@ -183,7 +188,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (TypeExp f vn) where
   pretty (TEDim dims te _) =
     "?" <> mconcat (map (brackets . prettyName) dims) <> "." <> pretty te
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (TypeArgExp f vn) where
+instance (Pretty d, IsName vn) => Pretty (TypeArgExp d vn) where
   pretty (TypeArgExpSize d) = pretty d
   pretty (TypeArgExpType t) = pretty t
 
@@ -460,7 +465,7 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (ProgBase f vn) where
 instance (Eq vn, IsName vn, Annot f) => Pretty (DecBase f vn) where
   pretty (ValDec dec) = pretty dec
   pretty (TypeDec dec) = pretty dec
-  pretty (SigDec sig) = pretty sig
+  pretty (ModTypeDec sig) = pretty sig
   pretty (ModDec sd) = pretty sd
   pretty (OpenDec x _) = "open" <+> pretty x
   pretty (LocalDec dec _) = "local" <+> pretty dec
@@ -544,19 +549,19 @@ instance (Eq vn, IsName vn, Annot f) => Pretty (SpecBase f vn) where
   pretty (IncludeSpec e _) =
     "include" <+> pretty e
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SigExpBase f vn) where
-  pretty (SigVar v _ _) = pretty v
-  pretty (SigParens e _) = parens $ pretty e
-  pretty (SigSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
-  pretty (SigWith s (TypeRef v ps td _) _) =
+instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeExpBase f vn) where
+  pretty (ModTypeVar v _ _) = pretty v
+  pretty (ModTypeParens e _) = parens $ pretty e
+  pretty (ModTypeSpecs ss _) = nestedBlock "{" "}" (stack $ punctuate line $ map pretty ss)
+  pretty (ModTypeWith s (TypeRef v ps td _) _) =
     pretty s <+> "with" <+> pretty v <+> hsep (map pretty ps) <> " =" <+> pretty td
-  pretty (SigArrow (Just v) e1 e2 _) =
+  pretty (ModTypeArrow (Just v) e1 e2 _) =
     parens (prettyName v <> colon <+> pretty e1) <+> "->" <+> pretty e2
-  pretty (SigArrow Nothing e1 e2 _) =
+  pretty (ModTypeArrow Nothing e1 e2 _) =
     pretty e1 <+> "->" <+> pretty e2
 
-instance (Eq vn, IsName vn, Annot f) => Pretty (SigBindBase f vn) where
-  pretty (SigBind name e _ _) =
+instance (Eq vn, IsName vn, Annot f) => Pretty (ModTypeBindBase f vn) where
+  pretty (ModTypeBind name e _ _) =
     "module type" <+> prettyName name <+> equals <+> pretty e
 
 instance (Eq vn, IsName vn, Annot f) => Pretty (ModParamBase f vn) where

@@ -50,6 +50,7 @@ struct futhark_context {
   int64_t peak_mem_usage_default;
   int64_t cur_mem_usage_default;
   struct program* program;
+  bool program_initialised;
   // Uniform fields above.
 
   lock_t event_list_lock;

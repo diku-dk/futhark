@@ -76,7 +76,7 @@ asBasicOp _ = Nothing
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
 -- bounds.  On the other hand, adding two numbers cannot fail.
-safeExp :: (IsOp (Op rep)) => Exp rep -> Bool
+safeExp :: (ASTRep rep) => Exp rep -> Bool
 safeExp (BasicOp op) = safeBasicOp op
   where
     safeBasicOp (BinOp (SDiv _ Safe) _ _) = True
@@ -128,7 +128,7 @@ safeExp (Match _ cases def_case _) =
 safeExp WithAcc {} = True -- Although unlikely to matter.
 safeExp (Op op) = safeOp op
 
-safeBody :: (IsOp (Op rep)) => Body rep -> Bool
+safeBody :: (ASTRep rep) => Body rep -> Bool
 safeBody = all (safeExp . stmExp) . bodyStms
 
 -- | Return the variable names used in 'Var' subexpressions.  May contain
@@ -184,17 +184,17 @@ type ASTConstraints a =
   (Eq a, Ord a, Show a, Rename a, Substitute a, FreeIn a, Pretty a)
 
 -- | A type class for operations.
-class (ASTConstraints op, TypedOp op) => IsOp op where
+class (TypedOp op) => IsOp op where
   -- | Like 'safeExp', but for arbitrary ops.
-  safeOp :: op -> Bool
+  safeOp :: (ASTRep rep) => op rep -> Bool
 
   -- | Should we try to hoist this out of branches?
-  cheapOp :: op -> Bool
+  cheapOp :: (ASTRep rep) => op rep -> Bool
 
   -- | Compute the data dependencies of an operation.
-  opDependencies :: op -> [Names]
+  opDependencies :: (ASTRep rep) => op rep -> [Names]
 
-instance IsOp (NoOp rep) where
+instance IsOp NoOp where
   safeOp NoOp = True
   cheapOp NoOp = True
   opDependencies NoOp = []
@@ -213,7 +213,8 @@ class
     FreeIn (LParamInfo rep),
     FreeIn (RetType rep),
     FreeIn (BranchType rep),
-    IsOp (Op rep),
+    ASTConstraints (OpC rep rep),
+    IsOp (OpC rep),
     RephraseOp (OpC rep)
   ) =>
   ASTRep rep

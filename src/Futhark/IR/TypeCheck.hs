@@ -558,6 +558,8 @@ checkOpaques (OpaqueTypes types) = descend [] types
       descend (name : known) ts
     check known (OpaqueRecord fs) =
       mapM_ (checkEntryPointType known . snd) fs
+    check known (OpaqueSum _ cs) =
+      mapM_ (mapM_ (checkEntryPointType known . fst) . snd) cs
     check _ (OpaqueType _) =
       pure ()
     checkEntryPointType known (TypeOpaque s) =
@@ -650,7 +652,7 @@ checkFunParams ::
   [FParam rep] ->
   TypeM rep ()
 checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkFParamDec (paramName param) (paramDec param)
 
 checkLambdaParams ::
@@ -658,7 +660,7 @@ checkLambdaParams ::
   [LParam rep] ->
   TypeM rep ()
 checkLambdaParams = mapM_ $ \param ->
-  context ("In lambda parameter " <> prettyText param) $
+  context ("In parameter " <> prettyText param) $
     checkLParamDec (paramName param) (paramDec param)
 
 checkNoDuplicateParams :: Name -> [VName] -> TypeM rep ()
@@ -1437,7 +1439,7 @@ requirePrimExp t e = context ("in PrimExp " <> prettyText e) $ do
     prettyText e <> " must have type " <> prettyText t
 
 -- | The class of representations that can be type-checked.
-class (AliasableRep rep, TypedOp (OpC rep (Aliases rep))) => Checkable rep where
+class (AliasableRep rep, TypedOp (OpC rep)) => Checkable rep where
   checkExpDec :: ExpDec rep -> TypeM rep ()
   checkBodyDec :: BodyDec rep -> TypeM rep ()
   checkFParamDec :: VName -> FParamInfo rep -> TypeM rep ()

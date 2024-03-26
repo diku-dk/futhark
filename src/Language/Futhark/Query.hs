@@ -120,7 +120,7 @@ typeBindDefs tbind =
 modParamDefs :: ModParam -> Defs
 modParamDefs (ModParam p se _ loc) =
   M.singleton p (DefBound $ BoundModule $ locOf loc)
-    <> sigExpDefs se
+    <> modTypeExpDefs se
 
 modExpDefs :: ModExp -> Defs
 modExpDefs ModVar {} =
@@ -143,7 +143,7 @@ modBindDefs mbind =
   M.singleton (modName mbind) (DefBound $ BoundModule $ locOf mbind)
     <> mconcat (map modParamDefs (modParams mbind))
     <> modExpDefs (modExp mbind)
-    <> case modSignature mbind of
+    <> case modType mbind of
       Nothing -> mempty
       Just (_, Info substs) ->
         M.map DefIndirect substs
@@ -159,28 +159,28 @@ specDefs spec =
       M.singleton v $ DefBound $ BoundType $ locOf loc
     ModSpec v se _ loc ->
       M.singleton v (DefBound $ BoundModuleType $ locOf loc)
-        <> sigExpDefs se
-    IncludeSpec se _ -> sigExpDefs se
+        <> modTypeExpDefs se
+    IncludeSpec se _ -> modTypeExpDefs se
 
-sigExpDefs :: SigExp -> Defs
-sigExpDefs se =
+modTypeExpDefs :: ModTypeExp -> Defs
+modTypeExpDefs se =
   case se of
-    SigVar _ (Info substs) _ -> M.map DefIndirect substs
-    SigParens e _ -> sigExpDefs e
-    SigSpecs specs _ -> mconcat $ map specDefs specs
-    SigWith e _ _ -> sigExpDefs e
-    SigArrow _ e1 e2 _ -> sigExpDefs e1 <> sigExpDefs e2
+    ModTypeVar _ (Info substs) _ -> M.map DefIndirect substs
+    ModTypeParens e _ -> modTypeExpDefs e
+    ModTypeSpecs specs _ -> mconcat $ map specDefs specs
+    ModTypeWith e _ _ -> modTypeExpDefs e
+    ModTypeArrow _ e1 e2 _ -> modTypeExpDefs e1 <> modTypeExpDefs e2
 
-sigBindDefs :: SigBind -> Defs
+sigBindDefs :: ModTypeBind -> Defs
 sigBindDefs sbind =
-  M.singleton (sigName sbind) (DefBound $ BoundModuleType $ locOf sbind)
-    <> sigExpDefs (sigExp sbind)
+  M.singleton (modTypeName sbind) (DefBound $ BoundModuleType $ locOf sbind)
+    <> modTypeExpDefs (modTypeExp sbind)
 
 decDefs :: Dec -> Defs
 decDefs (ValDec vbind) = valBindDefs vbind
 decDefs (TypeDec vbind) = typeBindDefs vbind
 decDefs (ModDec mbind) = modBindDefs mbind
-decDefs (SigDec mbind) = sigBindDefs mbind
+decDefs (ModTypeDec mbind) = sigBindDefs mbind
 decDefs (OpenDec me _) = modExpDefs me
 decDefs (LocalDec dec _) = decDefs dec
 decDefs ImportDec {} = mempty
@@ -204,7 +204,7 @@ contains a pos =
     Loc start end -> pos >= start && pos <= end
     NoLoc -> False
 
-atPosInTypeExp :: TypeExp Info VName -> Pos -> Maybe RawAtPos
+atPosInTypeExp :: TypeExp Exp VName -> Pos -> Maybe RawAtPos
 atPosInTypeExp te pos =
   case te of
     TEVar qn loc -> do
@@ -312,19 +312,19 @@ atPosInSpec spec pos =
     ValSpec _ _ te _ _ _ -> atPosInTypeExp te pos
     TypeAbbrSpec tbind -> atPosInTypeBind tbind pos
     TypeSpec {} -> Nothing
-    ModSpec _ se _ _ -> atPosInSigExp se pos
-    IncludeSpec se _ -> atPosInSigExp se pos
+    ModSpec _ se _ _ -> atPosInModTypeExp se pos
+    IncludeSpec se _ -> atPosInModTypeExp se pos
 
-atPosInSigExp :: SigExp -> Pos -> Maybe RawAtPos
-atPosInSigExp se pos =
+atPosInModTypeExp :: ModTypeExp -> Pos -> Maybe RawAtPos
+atPosInModTypeExp se pos =
   case se of
-    SigVar qn _ loc -> do
+    ModTypeVar qn _ loc -> do
       guard $ loc `contains` pos
       Just $ RawAtName qn $ locOf loc
-    SigParens e _ -> atPosInSigExp e pos
-    SigSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
-    SigWith e _ _ -> atPosInSigExp e pos
-    SigArrow _ e1 e2 _ -> atPosInSigExp e1 pos `mplus` atPosInSigExp e2 pos
+    ModTypeParens e _ -> atPosInModTypeExp e pos
+    ModTypeSpecs specs _ -> msum $ map (`atPosInSpec` pos) specs
+    ModTypeWith e _ _ -> atPosInModTypeExp e pos
+    ModTypeArrow _ e1 e2 _ -> atPosInModTypeExp e1 pos `mplus` atPosInModTypeExp e2 pos
 
 atPosInValBind :: ValBind -> Pos -> Maybe RawAtPos
 atPosInValBind vbind pos =
@@ -341,12 +341,12 @@ atPosInModBind (ModBind _ params sig e _ _) pos =
     `mplus` atPosInModExp e pos
     `mplus` case sig of
       Nothing -> Nothing
-      Just (se, _) -> atPosInSigExp se pos
+      Just (se, _) -> atPosInModTypeExp se pos
   where
-    inParam (ModParam _ se _ _) = atPosInSigExp se pos
+    inParam (ModParam _ se _ _) = atPosInModTypeExp se pos
 
-atPosInSigBind :: SigBind -> Pos -> Maybe RawAtPos
-atPosInSigBind = atPosInSigExp . sigExp
+atPosInModTypeBind :: ModTypeBind -> Pos -> Maybe RawAtPos
+atPosInModTypeBind = atPosInModTypeExp . modTypeExp
 
 atPosInDec :: Dec -> Pos -> Maybe RawAtPos
 atPosInDec dec pos = do
@@ -355,7 +355,7 @@ atPosInDec dec pos = do
     ValDec vbind -> atPosInValBind vbind pos
     TypeDec tbind -> atPosInTypeBind tbind pos
     ModDec mbind -> atPosInModBind mbind pos
-    SigDec sbind -> atPosInSigBind sbind pos
+    ModTypeDec sbind -> atPosInModTypeBind sbind pos
     OpenDec e _ -> atPosInModExp e pos
     LocalDec dec' _ -> atPosInDec dec' pos
     ImportDec {} -> Nothing

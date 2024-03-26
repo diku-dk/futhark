@@ -227,7 +227,7 @@ readEvalPrint = do
         Right (Right e) -> do
           valOrErr <- onExp e
           case valOrErr of
-            Left err -> liftIO $ putDoc err
+            Left err -> liftIO $ putDocLn err
             Right val -> liftIO $ putDocLn $ I.prettyValue val
   modify $ \s -> s {futharkiCount = futharkiCount s + 1}
   where
@@ -377,7 +377,12 @@ runInterpreterNoBreak m = runF m (pure . Right) intOp
     intOp (I.ExtOpTrace w v c) = do
       liftIO $ putDocLn $ pretty w <> ":" <+> align (unAnnotate v)
       c
-    intOp (I.ExtOpBreak _ _ _ c) = c
+    intOp (I.ExtOpBreak _ I.BreakNaN _ c) = c
+    intOp (I.ExtOpBreak w _ _ c) = do
+      liftIO $
+        T.putStrLn $
+          locText w <> ": " <> "ignoring breakpoint when computating constant."
+      c
 
 type Command = T.Text -> FutharkiM ()
 

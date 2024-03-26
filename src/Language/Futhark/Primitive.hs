@@ -1271,6 +1271,34 @@ primFuns =
       f32_2 "nextafter32" nextafterf,
       f64_2 "nextafter64" nextafter,
       --
+      ( "ldexp16",
+        ( [FloatType Float16, IntType Int32],
+          FloatType Float16,
+          \case
+            [FloatValue (Float16Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float16Value $ x * (2 ** fromIntegral y)
+            _ -> Nothing
+        )
+      ),
+      ( "ldexp32",
+        ( [FloatType Float32, IntType Int32],
+          FloatType Float32,
+          \case
+            [FloatValue (Float32Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float32Value $ ldexpf x $ fromIntegral y
+            _ -> Nothing
+        )
+      ),
+      ( "ldexp64",
+        ( [FloatType Float64, IntType Int32],
+          FloatType Float64,
+          \case
+            [FloatValue (Float64Value x), IntValue (Int32Value y)] ->
+              Just $ FloatValue $ Float64Value $ ldexp x $ fromIntegral y
+            _ -> Nothing
+        )
+      ),
+      --
       f16 "gamma16" $ convFloat . tgammaf . convFloat,
       f32 "gamma32" tgammaf,
       f64 "gamma64" tgamma,
@@ -1287,6 +1315,10 @@ primFuns =
       f16 "erfc16" $ convFloat . erfcf . convFloat,
       f32 "erfc32" erfcf,
       f64 "erfc64" erfc,
+      --
+      f16_2 "copysign16" $ \x y -> convFloat (copysign (convFloat x) (convFloat y)),
+      f32_2 "copysign32" copysignf,
+      f64_2 "copysign64" copysign,
       --
       i8 "clz8" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,
       i16 "clz16" $ IntValue . Int32Value . fromIntegral . countLeadingZeros,

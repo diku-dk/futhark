@@ -990,6 +990,18 @@ def futhark_lerp64(v0, v1, t):
     return v0 + (v1 - v0) * t
 
 
+def futhark_ldexp16(x, y):
+    return np.ldexp(x, y)
+
+
+def futhark_ldexp32(x, y):
+    return np.ldexp(x, y)
+
+
+def futhark_ldexp64(x, y):
+    return np.ldexp(x, y)
+
+
 def futhark_mad16(a, b, c):
     return a * b + c
 
@@ -1013,5 +1025,7 @@ def futhark_fma32(a, b, c):
 def futhark_fma64(a, b, c):
     return a * b + c
 
+
+futhark_copysign16 = futhark_copysign32 = futhark_copysign64 = np.copysign
 
 # End of scalar.py.
