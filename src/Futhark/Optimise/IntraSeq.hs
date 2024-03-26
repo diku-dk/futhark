@@ -1,11 +1,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# HLINT ignore "Use zipWith" #-}
-{-# HLINT ignore "Use uncurry" #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# HLINT ignore "Use lambda-case" #-}
-{-# HLINT ignore "Replace case with maybe" #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.IntraSeq (intraSeq) where
 
 import Language.Futhark.Core
@@ -20,11 +16,9 @@ import Control.Monad.State
 
 import Data.Map as M
 import Data.IntMap.Strict as IM
-import Data.List as L
+import qualified Data.List as L
 import Data.Set as S
 
-import Debug.Pretty.Simple
-import Debug.Trace
 import Data.Sequence
 import Control.Monad.Trans.Except
 import Control.Monad.Except
@@ -37,7 +31,7 @@ type SeqM a = ReaderT (Scope GPU) (State VNameSource) a
 type SeqBuilder a = ExceptT () (Builder GPU) a
 
 runSeqBuilder ::
-  (MonadFreshNames m, HasScope GPU m, SameScope GPU GPU) =>
+  (MonadFreshNames m, HasScope GPU m) =>
   SeqBuilder a ->
   m (Maybe (Stms GPU))
 runSeqBuilder (ExceptT b) = do
@@ -789,7 +783,7 @@ getUsedArraysIn env kbody = do
   scope <- askScope
   let (arrays, _) = L.unzip $ M.toList $ M.filter isArray scope
   let free = IM.elems $ namesIntMap $ freeIn kbody
-  let freeArrays = arrays `intersect` free
+  let freeArrays = arrays `L.intersect` free
   let arrays' =
         L.map ( \ arr ->
           if M.member arr (nameMap env) then

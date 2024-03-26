@@ -487,7 +487,6 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
-    , pretty-simple
 executable futhark
   import: common
   main-is: src/main.hs
