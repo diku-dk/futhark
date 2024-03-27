@@ -304,6 +304,7 @@ library
       Futhark.LSP.State
       Futhark.LSP.PositionMapping
       Futhark.MonadFreshNames
+      Futhark.Optimise.IntraSeq
       Futhark.Optimise.BlkRegTiling
       Futhark.Optimise.CSE
       Futhark.Optimise.DoubleBuffer
@@ -486,7 +487,6 @@ library
     , mwc-random
     , prettyprinter >= 1.7
     , prettyprinter-ansi-terminal >= 1.1
-
 executable futhark
   import: common
   main-is: src/main.hs

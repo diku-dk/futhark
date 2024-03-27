@@ -32,6 +32,7 @@ import Futhark.Optimise.ReduceDeviceSyncs
 import Futhark.Optimise.Sink
 import Futhark.Optimise.TileLoops
 import Futhark.Optimise.Unstream
+import Futhark.Optimise.IntraSeq
 import Futhark.Pass.AD
 import Futhark.Pass.ExpandAllocations
 import Futhark.Pass.ExplicitAllocations.GPU qualified as GPU
@@ -87,6 +88,7 @@ gpuPipeline =
     >>> onePass extractKernels
     >>> passes
       [ simplifyGPU,
+        intraSeq,
         optimiseGenRed,
         simplifyGPU,
         tileLoops,
