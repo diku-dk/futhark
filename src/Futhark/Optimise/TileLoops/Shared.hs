@@ -147,10 +147,9 @@ segMapND desc lvl manifest dims f = do
   let n_dims = length dims
   ltids <-
     mapM (newVName . ("ltid_dim_" ++)) $
-      take n_dims $
-        if n_dims <= 3
-          then ["z", "y", "x"]
-          else reverse $ map show $ indices dims
+      if n_dims <= 3
+        then reverse $ take n_dims ["x", "y", "z"]
+        else map show $ indices dims
 
   ltid_flat <- newVName "ltid_flat"
   let segspace = SegSpace ltid_flat $ zip ltids dims
