@@ -168,4 +168,12 @@ fn trunc_i64_i32(a: i64) -> i32 {
   return a.x;
 }
 
+fn bool_to_i64(a: bool) -> i64 {
+  if a { return one_i64; } else { return zero_i64; }
+}
+
+fn i64_to_bool(a: i64) -> bool {
+  if eq_i64(a, zero_i64) { return false; } else { return true; }
+}
+
 // End of scalar64.wgsl

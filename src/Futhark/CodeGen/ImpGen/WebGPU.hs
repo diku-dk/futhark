@@ -505,6 +505,12 @@ wgslConvOp op a = WGSL.CallExp (fun op) [a]
     fun (SExt Int64 Int16) = "trunc_i64_i16"
     fun (ZExt Int64 Int32) = "trunc_i64_i32"
     fun (SExt Int64 Int32) = "trunc_i64_i32"
+    fun (IToB Int64) = "i64_to_bool"
+    fun (IToB _) = "bool"
+    fun (BToI Int8) = "bool_to_i8"
+    fun (BToI Int16) = "bool_to_i16"
+    fun (BToI Int32) = "i32"
+    fun (BToI Int64) = "bool_to_i64"
     fun _ = "TODO_not_implemented"
 
 intLiteral :: IntValue -> WGSL.Exp

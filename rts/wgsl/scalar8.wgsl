@@ -140,4 +140,8 @@ fn trunc_i64_i8(a: i64) -> i8 {
   return trunc_i32_i8(a.x);
 }
 
+fn bool_to_i8(a: bool) -> i8 {
+  if a { return 1; } else { return 0; }
+}
+
 // End of scalar8.wgsl

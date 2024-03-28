@@ -110,4 +110,8 @@ fn trunc_i64_i16(a: i64) -> i16 {
   return trunc_i32_i16(a.x);
 }
 
+fn bool_to_i16(a: bool) -> i16 {
+  if a { return 1; } else { return 0; }
+}
+
 // End of scalar16.wgsl

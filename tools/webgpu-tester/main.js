@@ -84,7 +84,7 @@ async function runTest(device, shaderModule, testInfo) {
 	}
 	if (kernelInfo === undefined) {
 		console.error("Could not find kernel info for", testInfo);
-		return {0: "❌ failed to find kernel info"};
+		return {0: "❗ failed to find kernel info"};
 	}
 
 	const templateRun = testInfo.runs[0];
