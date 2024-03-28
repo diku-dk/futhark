@@ -80,6 +80,7 @@ extra-source-files:
     rts/python/scalar.py
     rts/wgsl/scalar.wgsl
     rts/wgsl/scalar8.wgsl
+    rts/wgsl/scalar16.wgsl
     rts/wgsl/scalar64.wgsl
     prelude/functional.fut
     prelude/math.fut

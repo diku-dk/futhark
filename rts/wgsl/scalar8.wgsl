@@ -2,7 +2,7 @@
 
 alias i8 = i32;
 
-fn norm(a: i8) -> i32 {
+fn norm_i8(a: i8) -> i32 {
   if (a & 0x80) != 0 { return a | bitcast<i32>(0xffffff00u); }
   return a & 0x000000ff;
 }
@@ -14,7 +14,7 @@ fn read_i8(buffer: ptr<storage, array<atomic<i8>>, read_write>, i: i32) -> i8 {
   // mem: b0b1b2b3
   // int: b3b2b1b0
   let v = atomicLoad(&((*buffer)[elem_idx]));
-  return norm(v >> bitcast<u32>(idx_in_elem * 8));
+  return norm_i8(v >> bitcast<u32>(idx_in_elem * 8));
 }
 
 fn read_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
@@ -52,7 +52,7 @@ fn write_bool(buffer: ptr<storage, array<atomic<i8>>, read_write>,
 }
 
 fn add_i8(a: i8, b: i8) -> i8 {
-  return norm(a + b);
+  return norm_i8(a + b);
 }
 
 fn neg_i8(a: i8) -> i8 {
@@ -64,7 +64,7 @@ fn sub_i8(a: i8, b: i8) -> i8 {
 }
 
 fn mul_i8(a: i8, b: i8) -> i8 {
-  return norm(a * b);
+  return norm_i8(a * b);
 }
 
 fn umin_i8(a: i8, b: i8) -> i8 {
@@ -103,12 +103,20 @@ fn pow_i8(a_p: i8, b: i8) -> i8 {
   return res;
 }
 
+fn zext_i8_i16(a: i8) -> i16 {
+  return a & 0xff;
+}
+
+fn sext_i8_i16(a: i8) -> i16 {
+  return a;
+}
+
 fn zext_i8_i32(a: i8) -> i32 {
   return a & 0xff;
 }
 
-// Our representation is already a sign-extended i32.
 fn sext_i8_i32(a: i8) -> i32 {
+  // The representation is already a sign-extended i32.
   return a;
 }
 
@@ -118,6 +126,10 @@ fn zext_i8_i64(a: i8) -> i64 {
 
 fn sext_i8_i64(a: i8) -> i64 {
   return sext_i32_i64(a);
+}
+
+fn trunc_i16_i8(a: i32) -> i8 {
+  return a & 0xff;
 }
 
 fn trunc_i32_i8(a: i32) -> i8 {

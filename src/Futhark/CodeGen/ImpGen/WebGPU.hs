@@ -216,7 +216,7 @@ kernelsToWebGPU prog =
         map (\(KernelInterface n o s) -> (nameFromText n, (o, s)))
         (wsKernels translation)
 
-      webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar64
+      webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar16 <> RTS.scalar64
       constants = mempty
       params = mempty
       failures = mempty
@@ -235,26 +235,27 @@ kernelsToWebGPU prog =
 compileProg :: (MonadFreshNames m) => F.Prog F.GPUMem -> m (Warnings, Program)
 compileProg prog = second kernelsToWebGPU <$> ImpGPU.compileProgOpenCL prog
 
-wgslInt8, wgslInt64 :: WGSL.PrimType
+wgslInt8, wgslInt16, wgslInt64 :: WGSL.PrimType
 wgslInt8 = WGSL.Int32
+wgslInt16 = WGSL.Int32
 wgslInt64 = WGSL.Vec2 WGSL.Int32
 
 wgslPrimType :: PrimType -> WGSL.PrimType
 wgslPrimType (IntType Int8) = wgslInt8
+wgslPrimType (IntType Int16) = wgslInt16
 wgslPrimType (IntType Int32) = WGSL.Int32
 wgslPrimType (IntType Int64) = wgslInt64
 wgslPrimType (FloatType Float16) = WGSL.Float16
 wgslPrimType (FloatType Float32) = WGSL.Float32
 wgslPrimType (FloatType Float64) = error "TODO: WGSL has no f64"
 wgslPrimType Bool = WGSL.Bool
--- TODO: Deal with smaller integers
-wgslPrimType (IntType Int16) = WGSL.Int32
 -- TODO: Make sure we do not ever codegen statements involving Unit variables
 wgslPrimType Unit = WGSL.Float16 -- error "TODO: no unit in WGSL"
 
 wgslBufferType :: PrimType -> WGSL.Typ
-wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
 wgslBufferType Bool = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType (IntType Int8) = WGSL.Array $ WGSL.Atomic wgslInt8
+wgslBufferType (IntType Int16) = WGSL.Array $ WGSL.Atomic wgslInt16
 wgslBufferType t = WGSL.Array $ wgslPrimType t
 
 genFunWrite :: WGSL.Ident -> VName -> Count Elements (TExp Int64) -> Exp
@@ -299,12 +300,14 @@ genWGSLStm (Free _ _) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Copy {}) = pure $ WGSL.Comment "TODO: Unimplemented statement"
 genWGSLStm (Write mem i Bool _ _ v) = genFunWrite "write_bool" mem i v
 genWGSLStm (Write mem i (IntType Int8) _ _ v) = genFunWrite "write_i8" mem i v
+genWGSLStm (Write mem i (IntType Int16) _ _ v) = genFunWrite "write_i16" mem i v
 genWGSLStm (Write mem i _ _ _ v) =
   liftM3 WGSL.AssignIndex (getIdent mem) (indexExp i) (genWGSLExp v)
 genWGSLStm (SetScalar name e) =
   liftM2 WGSL.Assign (getIdent name) (genWGSLExp e)
 genWGSLStm (Read tgt mem i Bool _ _) = genFunRead "read_bool" tgt mem i
 genWGSLStm (Read tgt mem i (IntType Int8) _ _) = genFunRead "read_i8" tgt mem i
+genWGSLStm (Read tgt mem i (IntType Int16) _ _) = genFunRead "read_i16" tgt mem i
 genWGSLStm (Read tgt mem i _ _ _) =
   let index = liftM2 WGSL.IndexExp (getIdent mem) (indexExp i)
    in liftM2 WGSL.Assign (getIdent tgt) index
@@ -356,78 +359,95 @@ call2 f a b = WGSL.CallExp f [a, b]
 
 wgslBinOp :: BinOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslBinOp (Add Int8 _) = call2 "add_i8"
+wgslBinOp (Add Int16 _) = call2 "add_i16"
+wgslBinOp (Add Int32 _) = WGSL.BinOpExp "+"
 wgslBinOp (Add Int64 _) = call2 "add_i64"
-wgslBinOp (Add _ _) = WGSL.BinOpExp "+"
 wgslBinOp (FAdd _) = WGSL.BinOpExp "+"
 wgslBinOp (Sub Int8 _) = call2 "sub_i8"
+wgslBinOp (Sub Int16 _) = call2 "sub_i16"
+wgslBinOp (Sub Int32 _) = WGSL.BinOpExp "-"
 wgslBinOp (Sub Int64 _) = call2 "sub_i64"
-wgslBinOp (Sub _ _) = WGSL.BinOpExp "-"
 wgslBinOp (FSub _) = WGSL.BinOpExp "-"
 wgslBinOp (Mul Int8 _) = call2 "mul_i8"
+wgslBinOp (Mul Int16 _) = call2 "mul_i16"
+wgslBinOp (Mul Int32 _) = WGSL.BinOpExp "*"
 wgslBinOp (Mul Int64 _) = call2 "mul_i64"
-wgslBinOp (Mul _ _) = WGSL.BinOpExp "*"
 wgslBinOp (FMul _) = WGSL.BinOpExp "*"
 -- Division is always safe in WGSL, so we can ignore the Safety parameter.
 wgslBinOp (UDiv Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UDiv Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UDiv Int32 _) = call2 "udiv_i32"
 wgslBinOp (UDiv Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (UDiv _ _) = call2 "udiv_i32"
 wgslBinOp (UDivUp Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UDivUp Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UDivUp Int32 _) = call2 "udiv_up_i32"
 wgslBinOp (UDivUp Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (UDivUp _ _) = call2 "udiv_up_i32"
 wgslBinOp (SDiv Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SDiv Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SDiv Int32 _) = call2 "sdiv_i32"
 wgslBinOp (SDiv Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (SDiv _ _) = call2 "sdiv_i32"
 wgslBinOp (SDivUp Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SDivUp Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SDivUp Int32 _) = call2 "sdiv_up_i32"
 wgslBinOp (SDivUp Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (SDivUp _ _) = call2 "sdiv_up_i32"
 wgslBinOp (FDiv _) = WGSL.BinOpExp "/"
 wgslBinOp (FMod _) = WGSL.BinOpExp "%"
 wgslBinOp (UMod Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UMod Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (UMod Int32 _) = call2 "umod_i32"
 wgslBinOp (UMod Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (UMod _ _) = call2 "umod_i32"
 wgslBinOp (SMod Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SMod Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SMod Int32 _) = call2 "smod_i32"
 wgslBinOp (SMod Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (SMod _ _) = call2 "smod_i32"
 wgslBinOp (SQuot Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SQuot Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SQuot Int32 _) = WGSL.BinOpExp "/"
 wgslBinOp (SQuot Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (SQuot _ _) = WGSL.BinOpExp "/"
 wgslBinOp (SRem Int8 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SRem Int16 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
+wgslBinOp (SRem Int32 _) = WGSL.BinOpExp "%"
 wgslBinOp (SRem Int64 _) = WGSL.BinOpExp "<TODO: unimplemented binop>"
-wgslBinOp (SRem _ _) = WGSL.BinOpExp "%"
 wgslBinOp (SMin Int64) = call2 "smin_i64"
 wgslBinOp (SMin _) = call2 "min"
 wgslBinOp (UMin Int8) = call2 "umin_i8"
+wgslBinOp (UMin Int16) = call2 "umin_i16"
+wgslBinOp (UMin Int32) = call2 "umin_i32"
 wgslBinOp (UMin Int64) = call2 "umin_i64"
-wgslBinOp (UMin _) = call2 "umin_i32"
 wgslBinOp (FMin _) = call2 "min"
 wgslBinOp (SMax Int64) = call2 "smax_i64"
 wgslBinOp (SMax _) = call2 "max"
 wgslBinOp (UMax Int8) = call2 "umax_i8"
+wgslBinOp (UMax Int16) = call2 "umax_i16"
+wgslBinOp (UMax Int32) = call2 "umax_i32"
 wgslBinOp (UMax Int64) = call2 "umax_i64"
-wgslBinOp (UMax _) = call2 "umax_i32"
 wgslBinOp (FMax _) = call2 "max"
 wgslBinOp (Shl Int8) = call2 "shl_i8"
+wgslBinOp (Shl Int16) = call2 "shl_i16"
+wgslBinOp (Shl Int32) = call2 "shl_i32"
 wgslBinOp (Shl Int64) = call2 "shl_i64"
-wgslBinOp (Shl _) = call2 "shl_i32"
 wgslBinOp (LShr Int8) = call2 "lshr_i8"
+wgslBinOp (LShr Int16) = call2 "lshr_i16"
+wgslBinOp (LShr Int32) = call2 "lshr_i32"
 wgslBinOp (LShr Int64) = call2 "lshr_i64"
-wgslBinOp (LShr _) = call2 "lshr_i32"
 wgslBinOp (AShr Int8) = call2 "ashr_i8"
+wgslBinOp (AShr Int16) = call2 "ashr_i16"
+wgslBinOp (AShr Int32) = call2 "ashr_i32"
 wgslBinOp (AShr Int64) = call2 "ashr_i64"
-wgslBinOp (AShr _) = call2 "ashr_i32"
 wgslBinOp (And _) = WGSL.BinOpExp "&"
 wgslBinOp (Or _) = WGSL.BinOpExp "|"
 wgslBinOp (Xor _) = WGSL.BinOpExp "^"
 wgslBinOp (Pow Int8) = call2 "pow_i8"
+wgslBinOp (Pow Int16) = call2 "pow_i16"
+wgslBinOp (Pow Int32) = call2 "pow_i32"
 wgslBinOp (Pow Int64) = call2 "pow_i64"
-wgslBinOp (Pow _) = call2 "pow_i32"
 wgslBinOp (FPow _) = call2 "pow"
 wgslBinOp LogAnd = call2 "log_and"
 wgslBinOp LogOr = call2 "log_or"
 
 -- Because we (in e.g. scalar8.wgsl) make sure to always sign-extend an i8 value
 -- across its whole i32 representation, we can just use the normal comparison
--- operators for smaller integers.
+-- operators for smaller integers. The same applies for i16.
 wgslCmpOp :: CmpOp -> WGSL.Exp -> WGSL.Exp -> WGSL.Exp
 wgslCmpOp (CmpEq (IntType Int64)) = call2 "eq_i64"
 wgslCmpOp (CmpEq _) = WGSL.BinOpExp "=="
@@ -461,23 +481,37 @@ wgslUnOp (FSignum _) = call1 "sign"
 wgslConvOp :: ConvOp -> WGSL.Exp -> WGSL.Exp
 wgslConvOp op a = WGSL.CallExp (fun op) [a]
   where
+    fun (ZExt Int8 Int16) = "zext_i8_i16"
+    fun (SExt Int8 Int16) = "sext_i8_i16"
     fun (ZExt Int8 Int32) = "zext_i8_i32"
     fun (SExt Int8 Int32) = "sext_i8_i32"
     fun (ZExt Int8 Int64) = "zext_i8_i64"
     fun (SExt Int8 Int64) = "sext_i8_i64"
-    fun (ZExt Int32 Int8) = "trunc_i32_i8"
-    fun (SExt Int32 Int8) = "trunc_i32_i8"
+    fun (ZExt Int16 Int32) = "zext_i16_i32"
+    fun (SExt Int16 Int32) = "sext_i16_i32"
+    fun (ZExt Int16 Int64) = "zext_i16_i64"
+    fun (SExt Int16 Int64) = "sext_i16_i64"
     fun (ZExt Int32 Int64) = "zext_i32_i64"
     fun (SExt Int32 Int64) = "sext_i32_i64"
+    fun (ZExt Int16 Int8) = "trunc_i16_i8"
+    fun (SExt Int16 Int8) = "trunc_i16_i8"
+    fun (ZExt Int32 Int8) = "trunc_i32_i8"
+    fun (SExt Int32 Int8) = "trunc_i32_i8"
     fun (ZExt Int64 Int8) = "trunc_i64_i8"
     fun (SExt Int64 Int8) = "trunc_i64_i8"
+    fun (ZExt Int32 Int16) = "trunc_i32_i16"
+    fun (SExt Int32 Int16) = "trunc_i32_i16"
+    fun (ZExt Int64 Int16) = "trunc_i64_i16"
+    fun (SExt Int64 Int16) = "trunc_i64_i16"
     fun (ZExt Int64 Int32) = "trunc_i64_i32"
     fun (SExt Int64 Int32) = "trunc_i64_i32"
     fun _ = "TODO_not_implemented"
 
 intLiteral :: IntValue -> WGSL.Exp
 intLiteral (Int8Value v) =
-  WGSL.CallExp "sext_i8_i32" [WGSL.IntExp $ fromIntegral v]
+  WGSL.CallExp "norm_i8" [WGSL.IntExp $ fromIntegral v]
+intLiteral (Int16Value v) =
+  WGSL.CallExp "norm_i16" [WGSL.IntExp $ fromIntegral v]
 intLiteral (Int64Value v) = WGSL.CallExp "i64" [low, high]
   where
     low = WGSL.IntExp $ fromIntegral $ v Bits..&. 0xffffff

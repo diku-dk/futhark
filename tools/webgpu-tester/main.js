@@ -2,6 +2,8 @@ function typeSize(type) {
 	if (type == 'bool') { return 1; }
 	if (type == 'i8') { return 1; }
 	if (type == 'u8') { return 1; }
+	if (type == 'i16') { return 2; }
+	if (type == 'u16') { return 2; }
 	if (type == 'i32') { return 4; }
 	if (type == 'u32') { return 4; }
 	if (type == 'i64') { return 8; }
@@ -22,6 +24,8 @@ function toTypedArray(array, type) {
 	}
 	if (type == 'i8') { return new Int8Array(array); }
 	if (type == 'u8') { return new Uint8Array(array); }
+	if (type == 'i16') { return new Int16Array(array); }
+	if (type == 'u16') { return new Uint16Array(array); }
 	if (type == 'i32') { return new Int32Array(array); }
 	if (type == 'u32') { return new Uint32Array(array); }
 	if (type == 'i64') {
@@ -52,6 +56,8 @@ function arrayBufferToTypedArray(buffer, type) {
 	if (type == 'bool') { return new Int8Array(buffer); }
 	if (type == 'i8') { return new Int8Array(buffer); }
 	if (type == 'u8') { return new Uint8Array(buffer); }
+	if (type == 'i16') { return new Int16Array(buffer); }
+	if (type == 'u16') { return new Uint16Array(buffer); }
 	if (type == 'i32') { return new Int32Array(buffer); }
 	if (type == 'u32') { return new Uint32Array(buffer); }
 	if (type == 'i64') { return new Int32Array(buffer); }
