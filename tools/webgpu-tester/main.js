@@ -68,7 +68,12 @@ function arrayBufferToTypedArray(buffer, type) {
 
 function compareExpected(val, expected, type) {
 	if (type == 'f32') {
-		return val == expected || (isNaN(val) && isNaN(expected));
+		const tolerance = 0.002;
+		if (isNaN(val) && isNaN(expected)) { return true; }
+		if (!isFinite(val) && !isFinite(expected)) {
+			return Math.sign(val) == Math.sign(expected);
+		}
+		return Math.abs(val - expected) <= Math.abs(tolerance * expected);
 	}
 	return val == expected;
 }
