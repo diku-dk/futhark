@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | The value representation used in the interpreter.
 --
 -- Kept simple and free of unnecessary operational details (in
@@ -210,7 +212,9 @@ toArray' rowshape vs = ValueArray shape (listArray (0, length vs - 1) vs)
 
 -- | Produce multidimensional array from a flat list of values.
 toArrayR :: [Int64] -> ValueShape -> [Value m] -> Value m
-toArrayR [] _ = error "toArrayR: empty shape"
+toArrayR [] _ = \case
+  [v] -> v
+  _ -> error "toArrayR: empty shape"
 toArrayR [_] elemshape = toArray' elemshape
 toArrayR (n : ns) elemshape =
   toArray (foldr ShapeDim elemshape (n : ns))
