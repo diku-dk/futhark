@@ -810,7 +810,7 @@ checkExp (AppExp (LetFun fname (typarams, params, te, Info (RetType ext ret), fu
 --
 checkExp (AppExp (BinOp (op, oploc) opt (x, xp) (y, yp) loc) appres) = do
   op_als <- observeVar (locOf oploc) (qualLeaf op) (unInfo opt)
-  let at1 : at2 : _ = fst $ unfoldFunType op_als
+  let (_, at1) : (_, at2) : _ = fst $ unfoldFunType op_als
   (x', x_als) <- checkArg [] at1 mempty x
   (y', y_als) <- checkArg [(x', x_als)] at2 mempty y
   res_als <- checkFuncall loc (Just op) op_als [(mempty, x_als), (mempty, y_als)]

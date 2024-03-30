@@ -690,7 +690,7 @@ checkEntryPoint loc tparams params maybe_tdecl rettype
   where
     (RetType _ rettype_t) = rettype
     (rettype_params, rettype') = unfoldFunType rettype_t
-    param_ts = map patternType params ++ rettype_params
+    param_ts = map patternType params ++ map snd rettype_params
 
 checkValBind :: ValBindBase NoInfo Name -> TypeM (Env, ValBind)
 checkValBind vb = do

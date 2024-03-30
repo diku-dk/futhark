@@ -499,7 +499,7 @@ transformProg = mapM transformValBind
 
 -- | Expands 'AutoMap' annotations into explicit @map@s and @replicates@.
 expandAMAnnotations :: (MonadFreshNames m) => Exp -> m Exp
-expandAMAnnotations e = do
+expandAMAnnotations e =
   case e of
     (AppExp (Apply f args loc) (Info res)) -> do
       let ((exts, ams), arg_es) = first unzip $ unzip $ map (first unInfo) $ NE.toList args
@@ -511,7 +511,9 @@ expandAMAnnotations e = do
               case unfoldFunTypeWithRet $ typeOf f' of
                 Nothing -> error "Function type expected."
                 Just (ptypes, f_ret) ->
-                  foldFunType (drop (length args') ptypes) f_ret
+                  let parsubsts = mapMaybe parSub $ zip ptypes args'
+                   in applySubst (`lookup` parsubsts) $
+                        foldFunType (drop (length args') $ map snd ptypes) f_ret
         pure $
           mkApply f' (zip3 exts (repeat mempty) args') $
             res {appResType = rettype}
@@ -531,6 +533,10 @@ expandAMAnnotations e = do
             (Info res {appResType = stripArray (shapeRank $ autoFrame yam) (appResType res)})
     _ -> astMap identityMapper {mapOnExp = expandAMAnnotations} e
   where
+    parSub ((Named v, Scalar (Prim (Signed Int64))), arg) =
+      Just (v, ExpSubst arg)
+    parSub _ = Nothing
+
     setNewType e t = astMap identityMapper {mapOnStructType = const $ pure t} e
 
     funDiets :: TypeBase dim as -> [Diet]

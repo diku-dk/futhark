@@ -60,7 +60,7 @@ mustBeExplicitInBinding :: StructType -> S.Set VName
 mustBeExplicitInBinding bind_t =
   let (ts, ret) = unfoldFunType bind_t
       alsoRet = M.unionWith (&&) $ M.fromList $ map (,True) (S.toList (fvVars (freeInType ret)))
-   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map toStruct ts
+   in S.fromList $ M.keys $ M.filter id $ alsoRet $ foldl' onType mempty $ map (toStruct . snd) ts
   where
     onType uses t = uses <> mustBeExplicitAux t -- Left-biased union.
 

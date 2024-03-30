@@ -526,19 +526,22 @@ foldFunType ps ret =
 
 -- | Extract the parameter types and return type from a type.
 -- If the type is not an arrow type, the list of parameter types is empty.
-unfoldFunType :: TypeBase dim as -> ([TypeBase dim Diet], TypeBase dim NoUniqueness)
-unfoldFunType (Scalar (Arrow _ _ d t1 (RetType _ t2))) =
+unfoldFunType :: TypeBase dim as -> ([(PName, TypeBase dim Diet)], TypeBase dim NoUniqueness)
+unfoldFunType (Scalar (Arrow _ p d t1 (RetType _ t2))) =
   let (ps, r) = unfoldFunType t2
-   in (second (const d) t1 : ps, r)
+   in ((p, second (const d) t1) : ps, r)
 unfoldFunType t = ([], toStruct t)
 
 -- | Extract the parameter types and 'RetTypeBase' from a function type.
 -- If the type is not an arrow type, returns 'Nothing'.
-unfoldFunTypeWithRet :: TypeBase dim as -> Maybe ([TypeBase dim Diet], RetTypeBase dim Uniqueness)
-unfoldFunTypeWithRet (Scalar (Arrow _ _ d t1 (RetType _ t2@(Scalar Arrow {})))) = do
+unfoldFunTypeWithRet ::
+  TypeBase dim as ->
+  Maybe ([(PName, TypeBase dim Diet)], RetTypeBase dim Uniqueness)
+unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 (RetType _ t2@(Scalar Arrow {})))) = do
   (ps, r) <- unfoldFunTypeWithRet t2
-  pure (second (const d) t1 : ps, r)
-unfoldFunTypeWithRet (Scalar (Arrow _ _ d t1 r@RetType {})) = Just ([second (const d) t1], r)
+  pure ((p, second (const d) t1) : ps, r)
+unfoldFunTypeWithRet (Scalar (Arrow _ p d t1 r@RetType {})) =
+  Just ([(p, second (const d) t1)], r)
 unfoldFunTypeWithRet _ = Nothing
 
 -- | The type scheme of a value binding, comprising the type

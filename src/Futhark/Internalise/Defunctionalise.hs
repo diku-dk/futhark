@@ -851,7 +851,7 @@ unRetType (RetType ext t) = do
 
 defuncApplyFunction :: Exp -> Int -> DefM (Exp, StaticVal)
 defuncApplyFunction e@(Var qn (Info t) loc) num_args = do
-  let (argtypes, rettype) = unfoldFunType t
+  let (argtypes, rettype) = first (map snd) $ unfoldFunType t
   sv <- lookupVar (toStruct t) (qualLeaf qn)
 
   case sv of
@@ -1001,8 +1001,8 @@ defuncApply f args appres loc = do
           (argtypes, _) = unfoldFunType $ typeOf f
       fmap (first $ updateReturn appres) $
         foldM (defuncApplyArg fname) (f', f_sv) $
-          NE.zip args $
-            NE.tails argtypes
+          NE.zip args . NE.tails . map snd $
+            argtypes
   where
     intrinsicOrHole e' = do
       -- If the intrinsic is fully applied, then we are done.

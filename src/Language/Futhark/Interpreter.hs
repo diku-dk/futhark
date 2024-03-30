@@ -2031,7 +2031,7 @@ checkEntryArgs entry args entry_t
           </> "Got input of types"
           </> indent 2 (stack (map pretty args_ts))
   where
-    (param_ts, _) = unfoldFunType entry_t
+    param_ts = map snd $ fst $ unfoldFunType entry_t
     args_ts = map (valueStructType . valueType) args
     expected
       | null param_ts =
