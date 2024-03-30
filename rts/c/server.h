@@ -553,7 +553,17 @@ void cmd_unpause_profiling(struct server_state *s, const char *args[]) {
 void cmd_report(struct server_state *s, const char *args[]) {
   (void)args;
   char *report = futhark_context_report(s->ctx);
-  puts(report);
+  if (report) {
+    puts(report);
+  } else {
+    failure();
+    report = futhark_context_get_error(s->ctx);
+    if (report) {
+      puts(report);
+    } else {
+      puts("Failed to produce profiling report.\n");
+    }
+  }
   free(report);
 }
 

@@ -942,7 +942,7 @@ static int gpu_scalar_to_device(struct futhark_context* ctx,
   }
   CUDA_SUCCEED_OR_RETURN(cuMemcpyHtoD(dst + offset, src, size));
   if (event != NULL) {
-    CUDA_SUCCEED_FATAL(cuEventRecord(event->start, ctx->stream));
+    CUDA_SUCCEED_FATAL(cuEventRecord(event->end, ctx->stream));
   }
   return FUTHARK_SUCCESS;
 }

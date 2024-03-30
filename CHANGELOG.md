@@ -9,13 +9,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-* Incremental Flattening generates fewer redundant code versions.
-
-* Better simplification of slices. (#2125)
-
 ### Removed
 
 ### Changed
+
+### Fixed
+
+## [0.25.15]
+
+### Added
+
+* Incremental Flattening generates fewer redundant code versions.
+
+* Better simplification of slices. (#2125)
 
 ### Fixed
 
@@ -23,6 +29,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * In the C API, opaque types that correspond to an array of an opaque
   type are now once again named `futhark_opaque_arr_...`.
+
+* `cuda` backend did not correctly profile CPU-to-GPU scalar copies.
 
 ## [0.25.14]
 
