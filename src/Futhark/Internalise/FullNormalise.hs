@@ -501,22 +501,26 @@ transformProg = mapM transformValBind
 expandAMAnnotations :: (MonadFreshNames m) => Exp -> m Exp
 expandAMAnnotations e =
   case e of
-    (AppExp (Apply f args loc) (Info res)) -> do
-      let ((exts, ams), arg_es) = first unzip $ unzip $ map (first unInfo) $ NE.toList args
-      f' <- expandAMAnnotations f
-      arg_es' <- mapM expandAMAnnotations arg_es
-      let diets = funDiets $ typeOf f
-      withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
-        let rettype =
-              case unfoldFunTypeWithRet $ typeOf f' of
-                Nothing -> error "Function type expected."
-                Just (ptypes, f_ret) ->
-                  let parsubsts = mapMaybe parSub $ zip ptypes args'
-                   in applySubst (`lookup` parsubsts) $
-                        foldFunType (drop (length args') $ map snd ptypes) f_ret
-        pure $
-          mkApply f' (zip3 exts (repeat mempty) args') $
-            res {appResType = rettype}
+    (AppExp (Apply f args loc) (Info res))
+      | ((exts, ams), arg_es) <-
+          first unzip $ unzip $ map (first unInfo) $ NE.toList args,
+        any (/= mempty) ams -> do
+          f' <- expandAMAnnotations f
+          arg_es' <- mapM expandAMAnnotations arg_es
+          let diets = funDiets $ typeOf f
+          withMapNest loc (zip4 exts ams arg_es' diets) $ \args' -> do
+            let rettype =
+                  case unfoldFunTypeWithRet $ typeOf f' of
+                    Nothing -> error "Function type expected."
+                    Just (ptypes, f_ret) ->
+                      let parsubsts = mapMaybe parSub $ zip ptypes args'
+                       in applySubst (`lookup` parsubsts) $
+                            foldFunType (drop (length args') $ map snd ptypes) f_ret
+            when (appResExt res /= []) $
+              error "expandAMAnnotations: cannot handle existential yet."
+            pure $
+              mkApply f' (zip3 exts (repeat mempty) args') $
+                res {appResType = rettype}
     (AppExp (BinOp op (Info t) (x, Info (xext, xam)) (y, Info (yext, yam)) loc) (Info res)) -> do
       x' <- expandAMAnnotations x
       y' <- expandAMAnnotations y
