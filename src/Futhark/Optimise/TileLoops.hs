@@ -52,6 +52,8 @@ optimiseStms env stms =
 optimiseStm :: Env -> Stm GPU -> TileM (Env, Stms GPU)
 optimiseStm env stm@(Let pat aux (Op (SegOp (SegMap lvl@SegThread {} space ts kbody)))) = do
   -- TODO: do I need to wrap the call in localScope (...) here?
+  -- resTCTiling <- localScope (scopeOfSegSpace space) $ doTCTiling env stm
+  -- let resTCTiling = Nothing
   resTCTiling <- doTCTiling env stm
   stms' <-
     case resTCTiling of

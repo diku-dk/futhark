@@ -1,140 +1,179 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Futhark.Optimise.TCTiling (doTCTiling) where
 
 import Control.Monad
 import Data.Char
-import Data.List -- (zip5, findIndices, elemIndex)
+import Data.List (elemIndex, findIndices, zip6)
 import Data.Map.Strict qualified as M
 import Data.Maybe
 import Futhark.IR.GPU
--- import Futhark.IR.Mem.LMAD qualified as LMAD
--- import Futhark.MonadFreshNames
 import Futhark.Optimise.BlkRegTiling (matchCodeStreamCode, processIndirections)
 import Futhark.Optimise.TileLoops.Shared
 import Futhark.Tools
 import Futhark.Transform.Rename
--- import Futhark.Util (splitFromEnd)
 
-
-
--- forM2 :: Monad m => [a] -> [b] -> (a -> b -> m c) -> m [c]
--- forM2 xs ys f = zipWithM f xs ys
+forM2 :: Monad m => [a] -> [b] -> (a -> b -> m c) -> m [c]
+forM2 xs ys f = zipWithM f xs ys
 
 -- forM2_ :: Monad m => [a] -> [b] -> (a -> b -> m c) -> m ()
 -- forM2_ xs ys f = forM2 xs ys f >> pure ()
---
+
 forM3 :: Monad m => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m [d]
 forM3 xs ys zs f = forM (zip3 xs ys zs) (\(a, b, c) -> f a b c)
---
+
 -- forM3_ :: Monad m => [a] -> [b] -> [c] -> (a -> b -> c -> m d) -> m ()
 -- forM3_ xs ys zs f = forM3 xs ys zs f >> pure ()
+
+se0 :: SubExp
+se0 = intConst Int64 0
 
 se1 :: SubExp
 se1 = intConst Int64 1
 
-se42 :: SubExp
-se42 = intConst Int64 42
-
 seglvl_thd :: SegLevel
 seglvl_thd = SegThreadInBlock $ SegNoVirtFull $ SegSeqDims []
 
-gather :: [a] -> [Int] -> [a]
-gather xs = map (xs !!) . filter (`elem` indices xs)
-
-gather_ :: [a] -> a -> [Maybe Int] -> [a]
-gather_ xs x = map (maybe x (xs !!) . checkIdx)
-  where
-    checkIdx (Just i)
-      | i `elem` indices xs = Just i
-    checkIdx _ = Nothing
-
 reductionLoopBody ::
-  TCTilingHostInfo ->
-  TCTilingKernelInfo ->
+  TCEnv ->
   VName ->
-  VName ->
-  VName ->
-  VName ->
+  [VName] ->
   Builder GPU [VName]
-reductionLoopBody host_info kernel_info qq0 reg_tiles_in shr_A_in shr_B_in = do
-  qq <- letExp "qq" =<< toExp (le64 qq0 * pe64 tq)
+reductionLoopBody tc_env qq0 arrs_in = do
+  let (reg_tiles_in : shr_arrs) = arrs_in
+  qq <- letSubExp "qq" =<< toExp (le64 qq0 * pe64 tq)
 
-  -- TODO: finish copyGlb2Shr.
-  let shr_A_withacc_inputs = [(shr_A_shape, [shr_A_in], Nothing)]
-
-  cert_param <- newParam "cert_p" $ Prim Unit
-  t <- stripArray (shapeRank shr_A_shape) <$> lookupType shr_A_in
-  acc_param <- newParam "acc_p" $ Acc (paramName cert_param) shr_A_shape [t] NoUniqueness
-
-  iters <- letSubExp "iters" =<< toExp se42
-  lam_load_A <-
-    -- mkLambda [cert_param, acc_param] $ varsRes [paramName acc_param]
-    mkLambda [cert_param, acc_param] $
-      fmap varsRes $
-        forLoop iters [paramName acc_param] $ \i [acc_merge] -> do
-          let gtids = gather (innerGtids host_info) $ catMaybes var_dims_A
-          forM_ gtids $ \gtid ->
-            letBindNames [gtid] =<< toExp (le64 i)
-          addStm load_A
-          val <- index "A_elem" slice_A [i]
-          letTupExp "acc_out" $
-            BasicOp $
-              UpdateAcc
-                acc_merge
-                [Var i, Var i]
-                [Var val]
-
-  shr_A_out <- letExp "shr_A_new" $ WithAcc shr_A_withacc_inputs lam_load_A
-
-  shr_B <- pure shr_B_in -- TODO
+  redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr qq
 
   reg_tiles_out <- forLoop_ tq [reg_tiles_in] $ \q [reg_tiles_merge] -> do
     letTupExp "reg_tiles"
       =<< eIf
-        (toExp $ le64 qq + le64 q .<. pe64 len_q)
-        (accumulateRegTile q reg_tiles_merge shr_A_out shr_B)
+        (toExp $ pe64 qq + le64 q .<. pe64 len_q)
+        (accumulateRegTile q reg_tiles_merge redomap_inputs_shr)
         (resultBodyM [Var reg_tiles_merge])
 
-  pure [reg_tiles_out, shr_A_out, shr_B]
+  pure $ reg_tiles_out : redomap_inputs_shr
   where
-    accumulateRegTile q reg_tiles_in shr_A shr_B = do
-      reg_tiles_out <- segMapND_ "reg_tile_res" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
-        reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
-        fmap varsRes $ forLoopNest tiles_R [reg_tile_in] $ \loop_inds [reg_tile_merge] -> do
+    -- TODO: document this mess.
+    copyGlb2Shr :: SubExp -> VName -> ArrMeta -> Builder GPU VName
+    copyGlb2Shr qq shr_arr arr_meta = do
+      tile_size_flat <- letSubExp "tile_size_flat" =<< toExp (product tile_dims)
 
-          let inds_A = gather_ loop_inds q var_dims_A
-          let inds_B = gather_ loop_inds q var_dims_B
+      -- Setup parameters for the WithAcc.
+      cert_p <- newParam "cert_p" $ Prim Unit
+      t <- stripArray (shapeRank shape) <$> lookupType shr_arr
+      acc_p <- newParam "acc_p" $ Acc (paramName cert_p) shape [t] NoUniqueness
+      let withacc_inputs = [(shape, [shr_arr], Nothing)]
 
-          a <- index "elem_A" shr_A inds_A
-          b <- index "elem_B" shr_B inds_B
-          acc <- index "acc" reg_tile_merge loop_inds
+      -- We need the WithAcc to exist in thread scope. The simplest way to
+      -- accomplish this that I can think of is to place the copy in a
+      -- thread-level SegMap.
+      let s = baseString shr_arr ++ "_shr"
+      shr_arr_out <- segMapND_ s seglvl_thd ResultNoSimplify [se1] $ \[ltid] -> do
+        -- The copy is essentially an LMAD copy. The strategy is to flatten the
+        -- tblock and then unflatten it to fit the dimensions of the array in
+        -- shared memory, using a virtualization loop in case the tile is larger
+        -- than the tblock, and a boundary guard for the converse.
+        iters <- letSubExp "iters" =<< ceilDiv tile_size_flat tblock_size_flat
+        lam <-
+          mkLambda [cert_p, acc_p] $
+            fmap varsRes $
+              forLoop iters [paramName acc_p] $ \i0 [acc_merge] -> do
+                -- Unflatten index.
+                i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
+                letTupExp "copy_res"
+                  =<< eIf
+                    (toExp $ le64 i .<. pe64 tile_size_flat)
+                    (loopBody i acc_merge)
+                    (resultBodyM [Var acc_merge])
 
-          map_f <- renameLambda $ mapLam host_info
-          red_op <- renameLambda $ redLam host_info
+        fmap varsRes $ letTupExp "shr_arr_out" $ WithAcc withacc_inputs lam
+      index_ (baseString shr_arr_out) shr_arr_out [se0]
+      where
+        tblock_size_flat = tblockSizeFlat kernel_params
+        tile_dims = map pe64 $ tileDims arr_meta
+        shape = Shape $ tileDims arr_meta
+        tb_offsets = gatherFor_ (tbOffsets tc_env) qq arr_meta
 
-          map_res <- eLambda map_f $ map (eSubExp . Var) [a, b]
-          red_res <- eLambda red_op $ map eSubExp $ Var acc : map resSubExp map_res
-          res <- update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
-          pure [res]
+        base_arr = baseArr arr_meta
+        base_arr_dims = baseArrDims arr_meta
+
+        loopBody i acc = do
+          -- Unflatten the flat thread index wrt. tile dims of the array to copy
+          unflattened_inds <-
+            forM (unflattenIndex tile_dims $ le64 i) $
+              letSubExp "unflat_ind" <=< toExp
+
+          -- The shared mem indices are simply the unflattened indices, while
+          -- the global mem indices need to have tblock offsets added onto them.
+          let shr_arr_inds = unflattened_inds
+          glb_arr_inds <-
+            forM2 tb_offsets unflattened_inds $ \offset i ->
+              letExp "glb_ind" =<< toExp (pe64 offset + pe64 i)
+
+          -- Perform a boundary check and read from the global mem array!
+          in_bounds <-
+            letExp "in_bounds"
+              =<< toExp
+                ( foldr (.&&.) true $
+                    zipWith
+                      (\i dim -> le64 i .<. pe64 dim)
+                      glb_arr_inds
+                      base_arr_dims
+                )
+          glb_elem <-
+            letExp "glb_elem"
+              =<< eIf
+                (toExp in_bounds)
+                ( index "glb_elem" (baseArr arr_meta) glb_arr_inds
+                    >>= resultBodyM . (: []) . Var
+                )
+                -- TODO: the reduce neutral element is a placeholder here. It
+                -- will fail in many cases, e.g. if the map input type is
+                -- different from the reduce input element type.
+                (resultBodyM [redNe tc_env])
+
+          -- Finally, update shared mem array accumulator.
+          acc_out <-
+            letSubExp "acc_out" $
+              BasicOp $
+                UpdateAcc -- Unsafe (TODO)
+                  acc
+                  shr_arr_inds
+                  [Var glb_elem]
+          resultBodyM [acc_out]
+
+    -- TODO: slightly less of a mess, but also needs documentation.
+    accumulateRegTile q reg_tiles_in shr_arrs = do
+      reg_tiles_out <-
+        segMapND_ "reg_tile_res" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
+          reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
+          fmap varsRes $ forLoopNest tiles_R [reg_tile_in] $ \loop_inds [reg_tile_merge] -> do
+
+            let shr_ltids = map (gatherFor ltids) arr_metas
+            let shr_inds = map (gatherFor_ loop_inds q) arr_metas
+
+            map_operands <- mapM (uncurry (index "shr_elem")) $ zip shr_arrs shr_inds
+            acc <- index "acc" reg_tile_merge loop_inds
+
+            map_f <- renameLambda $ mapLam tc_env
+            red_op <- renameLambda $ redLam tc_env
+
+            map_res <- eLambda map_f $ map (eSubExp . Var) map_operands
+            red_res <- eLambda red_op $ map eSubExp $ Var acc : map resSubExp map_res
+            res <- update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
+            pure [res]
 
       resultBodyM [Var reg_tiles_out]
 
-    copyGlb2Shr glb_X shr_X tile_dims = do
-      pure undefined
+    kernel_params = kernelParams tc_env
+    tq = tileSeq kernel_params
+    tiles_T = tilesT kernel_params
+    tiles_R = tilesR kernel_params
+    len_q = commonDim kernel_params
 
-    tq = tileSeq host_info
-    tiles_T = tilesT host_info
-    tiles_R = tilesR host_info
-    len_q = commonDim host_info
-    gtids = innerGtids host_info
-
-    arr_infos = arrsInfo kernel_info
-    [slice_A, slice_B] = map slice arr_infos
-    [shr_A_shape, shr_B_shape] = map (Shape . tileDims) arr_infos
-    [var_dims_A, var_dims_B] = map variantDims arr_infos
-    [load_A, load_B] = map arrLoadStm arr_infos
+    arr_metas = arrsInfo tc_env
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -177,11 +216,13 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
     -- and the result of redomap is one scalar
     length redomap_arrs == 2,
     [red_ne] <- red_nes,
-    map_ts <- map paramDec $ lambdaParams map_lam,
-    [map_t1, map_t2] <- map elemType map_ts,
-    [red_t, _] <- map paramDec $ lambdaParams red_lam,
-    all primType map_ts,
-    primType red_t,
+
+    [_red_t, _] <- map paramDec $ lambdaParams red_lam,
+    primType _red_t,
+
+    map_ts_ <- map paramDec $ lambdaParams map_lam,
+    all primType map_ts_,
+    map_ts@[_map_t1, _map_t2] <- map elemType map_ts_,
 
     initial_variance <- M.map mempty $ scopeOfSegSpace seg_space,
     variance <- varianceInStms initial_variance kstms,
@@ -215,34 +256,26 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
 
       (new_kernel, host_stms) <- runBuilder $ do
 
-        host_info@( HostInfo
-                      _gtids
-                      _inner_dims
-                      _common_dim
-                      inner_dim_names
-                      tiles_T
-                      tiles_R
-                      tiles_TR
-                      tile_seq
-                      grid_dims
-                      grid_size_flat
-                      tblock_dims
-                      tblock_size_flat
-                      tbids
-                      tbid_flat
-                      _map_lam
-                      _red_lam
-                    ) <-
-          makeHostInfo gtids inner_dims common_dim map_lam red_lam
+        kernel_params@( TCKernelParams
+                          _gtids
+                          _inner_dims
+                          _common_dim
+                          _inner_dim_names
+                          tiles_T
+                          tiles_R
+                          _tiles_TR
+                          tile_seq
+                          grid_dims
+                          grid_size_flat
+                          _tblock_dims
+                          tblock_size_flat
+                          tbids
+                          tbid_flat
+                        ) <-
+          makeTCKernelParams gtids inner_dims common_dim
 
         (ret_seggroup, stms_seggroup) <- runBuilder $ do
-          kernel_info@(KernelInfo tb_offsets arrs_params) <-
-            makeKernelInfo host_info inner_dims load_stms
-
-          -- Assuming exactly two input arrays.
-          let (info_A : info_B : _) = arrs_params
-          let shr_A_size = tileDims info_A
-          let shr_B_size = tileDims info_B
+          tc_env <- makeTCEnv kernel_params load_stms map_lam red_lam red_ne
 
           -- Zero-initialize register tile.
           reg_tiles_init <- segMapND_ "reg_tiles" seglvl_thd ResultPrivate tiles_T $ \_ -> do
@@ -251,17 +284,18 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
               (: []) <$> update "reg_tile" merge loop_inds red_ne
             pure $ varsRes css
 
-          shr_A_init <- scratch "A_shr" map_t1 shr_A_size
-          shr_B_init <- scratch "B_shr" map_t2 shr_B_size
+          -- Declare shared memory arrays.
+          shr_arrs_init <-
+            forM2 map_ts (arrsInfo tc_env) $ \t arr ->
+              scratch "shmem_arr" t $ tileDims arr
 
           num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
 
           reduction_loop_res <-
-            forLoop num_seq_tiles [reg_tiles_init, shr_A_init, shr_B_init] $
-              \qq [reg_tile_merge, shr_A_merge, shr_B_merge] ->
-                reductionLoopBody host_info kernel_info qq reg_tile_merge shr_A_merge shr_B_merge
+            forLoop num_seq_tiles (reg_tiles_init : shr_arrs_init) $
+              reductionLoopBody tc_env
 
-          let [reg_tiles_res, _shr_A, _shr_B] = reduction_loop_res
+          let reg_tiles_res : _ = reduction_loop_res
 
           let regtile_ret_dims =
                 map ((,se1,se1) . snd) rem_outer_gtids_dims
@@ -277,7 +311,6 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
 
       -- END HOST BUILDER
       pure $ Just (host_stms, new_kernel)
-  where
 
 doTCTiling _seg_space _kstms = pure Nothing
 
@@ -322,68 +355,89 @@ variantInnerDimsPerArr variance arrs inner_dims
 
 -- | All the various kernel parameters and related information we need to
 -- declare and/or compute in host code.
--- TODO: give a proper name to this one.
-data TCTilingHostInfo = HostInfo
-  { innerGtids :: [VName],
+data TCKernelParams = TCKernelParams
+  { -- Gtids and sizes of those dimensions of the inner segspace which we are tiling.
+    innerGtids :: [VName],
     innerDims :: [SubExp],
     commonDim :: SubExp,
-    -- not strictly necessary, but nice to have for consistent names throughout
+    -- Not strictly necessary, but nice to have for consistent names throughout
     -- the generated code.
     innerDimNames :: [String],
-    -- T, R, and TR tiles for each dim in the result.
+    -- T, R, and TR tiles for each inner dimension.
     tilesT :: [SubExp],
     tilesR :: [SubExp],
     tilesTR :: [SubExp],
-    -- sequential tile (tiling the sequential/reduction dimension).
+    -- Tile size for the sequential (reduction) dimension.
     tileSeq :: SubExp,
+    -- Grid and tblock parameters.
     gridDims :: [SubExp],
     gridSizeFlat :: SubExp,
     tblockDims :: [SubExp],
     tblockSizeFlat :: SubExp,
-    -- tblock indices.
+    -- VNames for the tblock id's.
     tbidVns :: [VName],
-    tbidFlatVn :: VName,
+    tbidFlatVn :: VName
+  }
+  deriving (Show)
+
+-- | All of the information needed for code generation in kernel scope. Also
+-- carries the kernel parameters declared in host scope.
+data TCEnv = TCEnv
+  { kernelParams :: TCKernelParams,
+    -- Tblock offset for each dimension in the result.
+    tbOffsets :: [SubExp],
+    -- Lambdas for the map function and reduction operators for the contraction.
     mapLam :: Lambda GPU,
-    redLam :: Lambda GPU
+    redLam :: Lambda GPU,
+    redNe :: SubExp,
+    -- For each reduction array, the information needed to handle this
+    -- particular array during code generation.
+    arrsInfo :: [ArrMeta]
   }
   deriving (Show)
 
--- | Holds the various kernel information which needs to be declared and/or
--- computed in kernel code.
+-- | All the information needed to handle a given operand array.
 -- TODO: give a proper name to this one.
-data TCTilingKernelInfo = KernelInfo
-  { tbOffsets :: [SubExp],
-    arrsInfo :: [ArrInfo]
-  }
-  deriving (Show)
-
--- | All the information needed to handle reading from an operand array.
--- TODO: give a proper name to this one.
-data ArrInfo = ArrInfo
-  { slice :: VName,
+-- TODO: should this carry variant gtids?
+data ArrMeta = ArrMeta
+  { baseArr :: VName,
     baseArrDims :: [SubExp],
     tileDims :: [SubExp],
-    tbOffsets :: [SubExp],
-    -- variantGtids :: [VName],
-    variantDims :: [Maybe Int],
+    arrTbOffsets :: [SubExp],
+    variantDims_ :: [Maybe Int],
+    variantDims :: [Int],
     arrLoadStm :: Stm GPU
   }
   deriving (Show)
 
-makeHostInfo ::
+gather :: [a] -> [Int] -> [a]
+gather xs = map (xs !!) . filter (`elem` indices xs)
+
+gather_ :: [a] -> a -> [Maybe Int] -> [a]
+gather_ xs x = map (maybe x (xs !!) . checkIdx)
+  where
+    checkIdx (Just i)
+      | i `elem` indices xs = Just i
+    checkIdx _ = Nothing
+
+gatherFor :: [a] -> ArrMeta -> [a]
+gatherFor src arr = gather src $ variantDims arr
+
+gatherFor_ :: [a] -> a -> ArrMeta -> [a]
+gatherFor_ src x arr = gather_ src x $ variantDims_ arr
+
+makeTCKernelParams ::
   [VName] ->
   [SubExp] ->
   SubExp ->
-  Lambda GPU ->
-  Lambda GPU ->
-  Builder GPU TCTilingHostInfo
-makeHostInfo gtids inner_dims_se common_dim map_lam red_lam = do
+  Builder GPU TCKernelParams
+makeTCKernelParams gtids inner_dims_se common_dim = do
   -- various names.
   tile_common_dim_vn <- newVName "T_common_dim"
   tile_T_vns <- newPrefixedVNames "T_" inner_dim_names
   tile_R_vns <- newPrefixedVNames "R_" inner_dim_names
-  tbid_vns <- newPrefixedVNames "tbid_" inner_dim_names
-  tbid_flat_vn <- newVName "tbid_flat"
+  tbids <- newPrefixedVNames "tbid_" inner_dim_names
+  tbid_flat <- newVName "tbid_flat"
 
   -- tile sizes.
   tile_seq <- getTileSE SizeTile tile_common_dim_vn
@@ -397,13 +451,13 @@ makeHostInfo gtids inner_dims_se common_dim map_lam red_lam = do
   grid_dims <-
     zipWithM ceilDiv inner_dims_se tiles_TR
       >>= zipWithM letSubExp (map ("grid_dim_" ++) inner_dim_names)
+  grid_size_flat <- letSubExp "grid_size_flat" =<< toExp (product $ map pe64 grid_dims)
 
   let tblock_dims = tiles_T
-  grid_size_flat <- letSubExp "grid_size_flat" =<< toExp (product $ map pe64 grid_dims)
   tblock_size_flat <- letSubExp "tblock_size_flat" =<< toExp (product $ map pe64 tiles_T)
 
   pure $
-    HostInfo
+    TCKernelParams
       gtids
       inner_dims_se
       common_dim
@@ -416,29 +470,30 @@ makeHostInfo gtids inner_dims_se common_dim map_lam red_lam = do
       grid_size_flat
       tblock_dims
       tblock_size_flat
-      tbid_vns
-      tbid_flat_vn
-      map_lam
-      red_lam
+      tbids
+      tbid_flat
   where
     inner_dim_names
       | Just name_strs <- mapM getNameStrFor inner_dims_se = name_strs
       | otherwise = map show $ indices inner_dims_se
-
-    getNameStrFor (Var v) = Just $ filter isAscii $ baseString v
-    getNameStrFor _ = Nothing
+      where
+        getNameStrFor (Var v) = Just $ filter isAscii $ baseString v
+        getNameStrFor _ = Nothing
 
     newPrefixedVNames s = mapM (newVName . (s ++))
 
     getTileSE tile_type v =
       letSubExp (baseString v) $ Op $ SizeOp $ GetSize (baseName v) tile_type
 
-makeKernelInfo ::
-  TCTilingHostInfo ->
-  [SubExp] ->
+makeTCEnv ::
+  TCKernelParams ->
   [Stm GPU] ->
-  Builder GPU TCTilingKernelInfo
-makeKernelInfo host_stuff inner_dims load_stms = do
+  Lambda GPU ->
+  Lambda GPU ->
+  SubExp ->
+  Builder GPU TCEnv
+makeTCEnv kernel_params load_stms map_lam red_lam red_ne = do
+
   -- We need to extract the dimensions of each input array, and unfortunately
   -- the Redomap passed into this module only indirectly carries this
   -- information, as part of the kernel stms loading each redomap input slice.
@@ -450,7 +505,7 @@ makeKernelInfo host_stuff inner_dims load_stms = do
   -- the dims of each input array -- since these are not simply (M: (Ty, Ry))
   -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
   -- checks later on.
-  let (redomap_slices, base_arrs) = unzip $ map getArraysFromLoadStm load_stms
+  let base_arrs = map getArraysFromLoadStm load_stms
   dims_per_arr <- mapM getArrDims base_arrs
 
   tb_offsets <-
@@ -477,18 +532,33 @@ makeKernelInfo host_stuff inner_dims load_stms = do
   let tile_dims_per_arr = map (gather_ tiles_TR tile_seq) var_inds_per_arr
   let tb_offsets_per_arr = map (gather tb_offsets) $ map catMaybes var_inds_per_arr
 
-  let arrs_params =
+  let arr_metas =
         map
-          ( \(redomap_slice, dim, tile_dim, tb_offset, var_gtids, load_stm) ->
-              ArrInfo redomap_slice dim tile_dim tb_offset var_gtids load_stm
+          ( \(base_arr, dim, tile_dim, tb_offset, var_gtids, load_stm) ->
+              ArrMeta
+                base_arr
+                dim
+                tile_dim
+                tb_offset
+                var_gtids
+                (catMaybes var_gtids)
+                load_stm
           )
-          $ zip6 redomap_slices dims_per_arr tile_dims_per_arr tb_offsets_per_arr var_inds_per_arr load_stms
+          $ zip6
+            base_arrs
+            dims_per_arr
+            tile_dims_per_arr
+            tb_offsets_per_arr
+            var_inds_per_arr
+            load_stms
 
-  pure $ KernelInfo tb_offsets arrs_params
+  pure $ TCEnv kernel_params tb_offsets map_lam red_lam red_ne arr_metas
   where
-    getArraysFromLoadStm :: Stm GPU -> (VName, VName)
-    getArraysFromLoadStm (Let pat _ (BasicOp (Index arr _))) =
-      (patElemName $ head $ patElems pat, arr)
+    -- getArraysFromLoadStm :: Stm GPU -> (VName, VName)
+    -- getArraysFromLoadStm (Let pat _ (BasicOp (Index arr _))) =
+    --   (patElemName $ head $ patElems pat, arr)
+    getArraysFromLoadStm :: Stm GPU -> VName
+    getArraysFromLoadStm (Let _ _ (BasicOp (Index arr _))) = arr
     getArraysFromLoadStm stm =
       error $
         "getArraysFromLoadStm error: expected a BasicOp Index stm, got: "
@@ -503,7 +573,8 @@ makeKernelInfo host_stuff inner_dims load_stms = do
         arrDims tp =
           error $ "getTileDimsForArr error: expected array type, got: " ++ prettyString tp
 
-    inner_dim_names = innerDimNames host_stuff
-    tbids = tbidVns host_stuff
-    tiles_TR = tilesTR host_stuff
-    tile_seq = tileSeq host_stuff
+    tbids = tbidVns kernel_params
+    tiles_TR = tilesTR kernel_params
+    tile_seq = tileSeq kernel_params
+    inner_dim_names = innerDimNames kernel_params
+    inner_dims = innerDims kernel_params

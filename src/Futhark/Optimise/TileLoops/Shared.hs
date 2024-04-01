@@ -5,6 +5,7 @@ module Futhark.Optimise.TileLoops.Shared
     indices,
     scratch,
     index,
+    index_,
     update,
     forLoop,
     forLoop_,
@@ -22,6 +23,7 @@ module Futhark.Optimise.TileLoops.Shared
     TileKind (..),
     myDebug,
     myDebugM,
+    debugType,
   )
 where
 
@@ -38,6 +40,11 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 
+
+debugType :: (Monad m, HasScope rep m) => [Char] -> VName -> m ()
+debugType s v =
+  lookupType v >>= myDebugM . ((s ++ ":\n") ++) . (++ "\n") . prettyString
+
 myDebug :: String -> a -> a
 myDebug s = trace $ concat [sep, "\n", s', "\n", sep]
   where
@@ -52,7 +59,7 @@ type TileM = ReaderT (Scope GPU) (State VNameSource)
 -- | Are we working with full or partial tiles?
 data TileKind = TilePartial | TileFull
 
--- list of valid indices into a given list.
+-- | list of valid indices into a given list.
 indices :: Traversable t => t a -> [Int]
 indices xs = [0 .. length xs - 1]
 
@@ -67,9 +74,12 @@ scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 -- index an array with indices given in outer_indices; any inner
 -- dims of arr not indexed by outer_indices are sliced entirely
 index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
-index se_desc arr outer_indices = do
+index se_desc arr = index_ se_desc arr . map Var
+
+index_ :: (MonadBuilder m) => String -> VName -> [SubExp] -> m VName
+index_ se_desc arr outer_indices = do
   arr_t <- lookupType arr
-  let slice = fullSlice arr_t $ map (DimFix . Var) outer_indices
+  let slice = fullSlice arr_t $ map DimFix outer_indices
   letExp se_desc $ BasicOp $ Index arr slice
 
 update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
@@ -165,6 +175,7 @@ segMapND desc lvl manifest dims f = do
       SegMap lvl segspace ts $
         KernelBody () stms $
           map ret res
+
 
 segMapND_ ::
   String ->
