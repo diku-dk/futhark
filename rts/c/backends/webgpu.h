@@ -141,7 +141,6 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
-
   WGPUBufferMapAsyncStatus status = 
     wgpu_map_buffer_sync(readback, WGPUMapMode_Read, 0, size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
@@ -167,6 +166,98 @@ static int gpu_memcpy(struct futhark_context *ctx,
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
   return FUTHARK_SUCCESS:
+}
+
+static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
+                           gpu_mem dst, int64_t dst_offset,
+                           const unsigned char *src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
+
+  // There is no async copy to device memory at the moment (the spec for
+  // `writeBuffer` specifies that a copy of the data is always made and there is
+  // no other good option to use here), so we ignore the sync parameter.
+  (void)sync;
+
+  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src, src_offset, nbytes);
+}
+
+static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
+                           unsigned char *dst, int64_t dst_offset,
+                           gpu_mem src, int64_t src_offset,
+                           int64_t nbytes) {
+  if (nbytes <= 0) { return FUTHARK_SUCCESS; }
+
+  WGPUBufferDescriptor desc = {
+    .label = "tmp_readback",
+    .size = nbytes,
+    .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
+  };
+  WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
+  
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
+  wgpuCommandEncoderCopyBufferToBuffer(encoder,
+    src, offset,
+    readback, 0,
+    nbytes);
+
+  WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
+  wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
+
+  // TODO: Could we do an actual async mapping here if `sync` is false?
+  WGPUBufferMapAsyncStatus status = 
+    wgpu_map_buffer_sync(readback, WGPUMapMode_Read, 0, nbytes);
+  if (status != WGPUBufferMapAsyncStatus_Success) {
+    futhark_panic(-1, "Failed to copy from device memory with error %d\n",
+                  status);
+  }
+
+  const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, nbytes);
+  memcpy(dst, mapped, nbytes);
+
+  wgpuBufferUnmap(readback);
+  wgpuBufferDestroy(readback);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_launch_kernel(struct futhark_context* ctx,
+                             gpu_kernel kernel, const char *name,
+                             const int32_t grid[3],
+                             const int32_t block[3],
+                             unsigned int shared_mem_bytes,
+                             int num_args,
+                             void* args[num_args],
+                             size_t args_sizes[num_args]) {
+  // This is going to be a bit interesting.
+  // With current WGSL generation, all scalar arguments are passed as one
+  // uniform buffer, while all memory arguments are bound as part of a
+  // WGPUBindGroup. That... doesn't seem to fit this interface super well.
+  // I think this ties into `gpu_create_kernel` a lot. Again the two basic
+  // options are:
+  // 1. Generate some data structure that allows us to look up which arguments
+  //    (by index) go to which offset in the scalars struct / which bind group
+  //    index.
+  // 2. Generate e.g. a function per kernel that does this mapping more
+  //    directly. I guess then we can still implement this function if generate
+  //    a table of kernel (name) -> that function.
+}
+
+static int gpu_alloc_actual(struct futhark_context *ctx,
+                            size_t size, gpu_mem *mem_out) {
+  WGPUBufferDescriptor desc = {
+    .size = size,
+    .usage = WGPUBufferUsage_CopySrc
+           | WGPUBufferUsage_CopyDst
+           | WGPUBufferUsage_Storage,
+  };
+  *mem_out = wgpuDeviceCreateBuffer(ctx->device, &desc);
+  return FUTHARK_SUCCESS;
+}
+
+static int gpu_free_actual(struct futhark_context *ctx, gpu_mem mem) {
+  (void)ctx;
+  wgpuBufferDestroy(mem);
+  return FUTHARK_SUCCESS;
 }
 
 // End of backends/webgpu.h.
