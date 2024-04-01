@@ -349,7 +349,7 @@ ruleBasicOp vtable pat aux (SubExp (Var v))
               Var v
 -- Remove UpdateAccs that contribute the neutral value, which is
 -- always a no-op.
-ruleBasicOp vtable pat aux (UpdateAcc acc _ vs)
+ruleBasicOp vtable pat aux (UpdateAcc _ acc _ vs)
   | Pat [pe] <- pat,
     Acc token _ _ _ <- patElemType pe,
     Just (_, _, Just (_, ne)) <- ST.entryAccInput =<< ST.lookup token vtable,
