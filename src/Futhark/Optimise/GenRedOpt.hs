@@ -105,7 +105,6 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- some `code1`, followed by one accumulation, followed by some `code2`
     -- UpdateAcc VName [SubExp] [SubExp]
     (code1, Just accum_stmt, code2) <- matchCodeAccumCode kstms,
-    -- TODO: should Unsafe UpdateAccs be treated differently?
     Let pat_accum _aux_acc (BasicOp (UpdateAcc safety acc_nm acc_inds acc_vals)) <- accum_stmt,
     [pat_acc_nm] <- patNames pat_accum,
     -- check that the `acc_inds` are invariant to at least one
