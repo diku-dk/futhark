@@ -1,30 +1,110 @@
 // Start of backends/webgpu.h.
 
-struct wgpu_map_sync_info {
+// Synchronous wrapper around asynchronous WebGPU APIs, based on looping with
+// emscripten_sleep until the respective callback gets called.
+
+struct wgpu_wait_info {
   bool released;
-  WGPUBufferMapAsyncStatus status;
+  void *result;
 };
 
 void wgpu_map_sync_callback(WGPUBufferMapAsyncStatus status, void *info_v) {
-  wgpu_map_sync_info *info = (wgpu_map_sync_info *)info_v;
-  info->status = status;
+  wgpu_wait_info *info = (wgpu_wait_info *)info_v;
+  *info->result = status;
   info->released = true;
 }
 
 WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUBuffer buffer,
                                               WGPUMapModeFlags mode,
                                               size_t offset, size_t size) {
-  wgpu_map_sync_info info = {};
+  WGPUBufferMapAsyncStatus status;
+  wgpu_wait_info info = {
+    .released = false,
+    .result = (void *)&status,
+  };
 
   wgpuBufferMapAsync(buffer, mode, offset, size,
                      wgpu_map_sync_callback, (void *) &info);
 
   // TODO: Should this do some kind of volatile load?
+  // (Same for other _sync wrappers below.)
   while (!info.released) {
     emscripten_sleep(0);
   }
 
-  return info.status;
+  return status;
+}
+
+struct wgpu_request_adapter_result {
+  WGPURequestAdapterStatus status;
+  WGPUAdapter adapter;
+  char *message;
+};
+
+void wgpu_request_adapter_callback(WGPURequestAdapterStatus status,
+                                   WGPUAdapter adapter,
+                                   const char *message, void *userdata) {
+  wgpu_wait_info *info = (wgpu_wait_info *)info_v;
+  wgpu_request_adapter_result *result
+    = (wgpu_request_adapter_result *)info->result;
+  result->status = status;
+  result->adapter = adapter;
+  result->message = message;
+  info->released = true;
+}
+
+wgpu_request_adapter_result wgpu_request_adapter_sync(
+    WGPUInstance instance, WGPURequestAdapterOptions const * options) {
+  wgpu_request_adapter_result result = {};
+  wgpu_wait_info info = {
+    .released = false,
+    .result = (void *)&result,
+  };
+
+  wgpuInstanceRequestAdapter(instance, options, wgpu_request_adapter_callback,
+                             (void *)&info;
+
+  while (!info.released) {
+    emscripten_sleep(0);
+  }
+
+  return result;
+}
+
+struct wgpu_request_device_result {
+  WGPURequestDeviceStatus status;
+  WGPUDevice device;
+  char *message;
+};
+
+void wgpu_request_device_callback(WGPURequestDeviceStatus status,
+                                   WGPUDevice device,
+                                   const char *message, void *userdata) {
+  wgpu_wait_info *info = (wgpu_wait_info *)info_v;
+  wgpu_request_device_result *result
+    = (wgpu_request_device_result *)info->result;
+  result->status = status;
+  result->device = device;
+  result->message = message;
+  info->released = true;
+}
+
+wgpu_request_device_result wgpu_request_device_sync(
+    WGPUAdapter adapter, WGPUDeviceDescriptor const * descriptor) {
+  wgpu_request_device_result result = {};
+  wgpu_wait_info info = {
+    .released = false,
+    .result = (void *)&result,
+  };
+
+  wgpuAdapterRequestDevice(adapter, descriptor, wgpu_request_device_callback,
+                           (void *)&info;
+
+  while (!info.released) {
+    emscripten_sleep(0);
+  }
+
+  return result;
 }
 
 struct futhark_context_config {
@@ -42,6 +122,14 @@ struct futhark_context_config {
   
   char *program;
 };
+
+static void backend_context_config_setup(struct futhark_context_config *cfg) {
+  cfg->program = strconcat(gpu_program);
+}
+
+static void backend_context_config_teardown(struct futhark_context_config *cfg) {
+  free(cfg->program);
+}
 
 const char* futhark_context_config_get_program(struct futhark_context_config *cfg) {
   return cfg->program;
@@ -85,6 +173,40 @@ struct futhark_context {
 
   struct builtin_kernels* kernels;
 };
+
+int backend_context_setup(struct futhark_context *ctx) {
+  ctx->kernels = NULL;
+
+  ctx->instance = wgpuCreateInstance(NULL);
+
+  wgpu_request_adapter_result adapter_result
+    = wgpu_request_adapter_sync(ctx->instance, NULL);
+  if (adapter_result.status != WGPURequestAdapterStatus_Success) {
+    if (adapter_result.message != NULL) {
+      futhark_panic(-1, "Could not get WebGPU adapter, status: %d\nMessage: %s\n",
+                    adapter_result.status, adapter_result.message);
+    } else {
+      futhark_panic(-1, "Could not get WebGPU adapter, status: %d\n",
+                    adapter_result.status);
+    }
+  }
+  ctx->adapter = adapter_result.adapter;
+
+  wgpu_request_device_result device_result
+    = wgpu_request_device_sync(ctx->adapter, NULL);
+  if (device_result.status != WGPURequestDeviceStatus_Success) {
+    if (device_result.message != NULL) {
+      futhark_panic(-1, "Could not get WebGPU device, status: %d\nMessage: %s\n",
+                    device_result.status, device_result.message);
+    } else {
+      futhark_panic(-1, "Could not get WebGPU device, status: %d\n",
+                    device_result.status);
+    }
+  }
+  ctx->device = device_result.device;
+
+  ctx->queue = wgpuDeviceGetQueue(ctx->device);
+}
 
 // GPU ABSTRACTION LAYER
 
