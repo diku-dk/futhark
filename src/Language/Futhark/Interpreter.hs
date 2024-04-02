@@ -900,7 +900,7 @@ evalAppExp env (Apply f args loc) = do
   f' <- eval env f
   foldM apply' f' args'
   where
-    ft = typeOf f
+    ft = expandType env $ typeOf f
     apply' f' (v', am') = applyAM loc env (f', ft) am' v'
     evalArg' (Info (ext, am), x) = evalArg env x ext am
 evalAppExp env (Index e is loc) = do
