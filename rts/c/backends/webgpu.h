@@ -167,12 +167,16 @@ struct futhark_context {
   // One module contains all the kernels as separate entry points.
   WGPUShaderModule module;
 
+  WGPUBuffer scalar_readback_buffer;
   struct free_list gpu_free_list;
 
   size_t lockstep_width;
 
   struct builtin_kernels* kernels;
 };
+
+struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
+void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context *ctx) {
   ctx->kernels = NULL;
@@ -206,6 +210,32 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->device = device_result.device;
 
   ctx->queue = wgpuDeviceGetQueue(ctx->device);
+
+  WGPUBufferDescriptor desc = {
+    .label = "scalar_readback",
+    .size = 8,
+    .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
+  };
+  ctx->scalar_readback_buffer = wgpuDeviceCreateBuffer(ctx->device, &desc);
+  free_list_init(&ctx->gpu_free_list);
+
+  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+    return 1;
+  }
+
+  return 0;
+}
+
+void backend_context_teardown(struct futhark_context *ctx) {
+  if (ctx->kernels != NULL) {
+    free_builtin_kernels(ctx, ctx->kernels);
+    if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
+      futhark_panic(-1, "gpu_free_all failed");
+    }
+    wgpuBufferDestroy(ctx->scalar_readback_buffer);
+    wgpuDeviceDestroy(ctx->device);
+  }
+  free_list_destroy(&ctx->gpu_free_list);
 }
 
 // GPU ABSTRACTION LAYER
@@ -244,37 +274,32 @@ static int gpu_scalar_to_device(struct futhark_context *ctx,
 static int gpu_scalar_from_device(struct futhark_context *ctx,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
-  // TODO: It would probably be nice to re-use a buffer here instead.
-  // Is there a guarantee for a maximum size when the _scalar_ functions are
-  // used?
-  WGPUBufferDescriptor desc = {
-    .label = "tmp_readback",
-    .size = size,
-    .usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst,
-  };
-  WGPUBuffer readback = wgpuDeviceCreateBuffer(ctx->device, &desc);
-  
+  if (size > 8) {
+    futhark_panic(-1, "gpu_scalar_from_device with size %zd > 8 is not allowed\n",
+                  size);
+  }
+
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
     src, offset,
-    readback, 0,
+    ctx->scalar_readback_buffer, 0,
     size);
 
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
 
   WGPUBufferMapAsyncStatus status = 
-    wgpu_map_buffer_sync(readback, WGPUMapMode_Read, 0, size);
+    wgpu_map_buffer_sync(ctx->scalar_readback_buffer, WGPUMapMode_Read, 0, size);
   if (status != WGPUBufferMapAsyncStatus_Success) {
     futhark_panic(-1, "Failed to read scalar from device memory with error %d\n",
                   status);
   }
 
-  const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, size);
+  const void *mapped = wgpuBufferGetConstMappedRange(ctx->scalar_readback_buffer,
+                                                     0, size);
   memcpy(dst, mapped, size);
 
   wgpuBufferUnmap(readback);
-  wgpuBufferDestroy(readback);
   return FUTHARK_SUCCESS;
 }
 
