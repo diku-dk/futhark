@@ -4,9 +4,13 @@
 -- XXX Next: Make it robust: play with part2indices; rewrite it in other ways such as
 --       [x] fflgs using negation on conds
 --       [x] introduce let bindings inside maps
---       [ ] Make substition of view into conditions of other view
+--       [x] Make substition of view into conditions of other view
 --           work. See tests/refinement/nikolaj/view_cond.fut and hoistCases'.
 --       [ ] part2indices_scan_exc; make Sum merge
+--           Just do a simple quadratic complexity rule that rewrites
+--              x[i] + sum_{j=i+1}^n x[j]  to  sum_{j=i}^n x[j]
+--           and
+--              sum_{j=k}^i x[j] + sum_{j=i+1}^n x[j]  to  sum_{j=k}^n x[j].
 --       [ ] use parts from partition2L as inspiration fro changes, like:
 --           let begs   = scan (+) 0 shp --- prepend 0 here; prepend 0 to shp
 --       - etc
