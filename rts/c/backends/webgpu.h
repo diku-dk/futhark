@@ -151,6 +151,7 @@ struct futhark_context {
   char *error;
   lock_t error_lock;
   FILE *log;
+  // TODO: What are constants? Should I be using this overrides/macros?
   struct constants *constants;
   struct free_list free_list;
   struct event_list event_list;
@@ -159,6 +160,10 @@ struct futhark_context {
   struct program* program;
   bool program_initialised;
   // Uniform fields above.
+
+  int num_overrides;
+  char **override_names;
+  double *override_values;
  
   WGPUInstance instance;
   WGPUAdapter adapter;
@@ -174,6 +179,21 @@ struct futhark_context {
 
   struct builtin_kernels* kernels;
 };
+
+void wgpu_module_setup(struct futhark_context *ctx) {
+  WGPUShaderModuleWGSLDescriptor wgsl_desc = {
+    .chain = {
+      .sType = WGPUSType_ShaderModuleWGSLDescriptor
+    },
+    .code = ctx->cfg->program
+  };
+  WGPUShaderModuleDescriptor desc = {
+    .nextInChain = &wgsl_desc.chain
+  };
+  ctx->module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
+  // TODO: Report shader errors
+  //wgpuShaderModuleGetCompilationInfo(shader_module, on_shader_compiled, NULL);
+}
 
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
 void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
@@ -223,12 +243,27 @@ int backend_context_setup(struct futhark_context *ctx) {
     return 1;
   }
 
+  // We implement macros as override constants.
+  int64_t *macro_vals;
+  ctx->num_overrides = gpu_macros(ctx, &ctx->override_names,
+                                  &macro_vals);
+  ctx->override_vals = malloc(ctx->num_overrides * sizeof(double));
+  for (int i = 0; i < ctx->num_overrides; i++) {
+    ctx->override_vals[i] = (double) macro_vals[i];
+  }
+  free(macro_vals);
+
+  wgpu_module_setup(ctx);
+
   return 0;
 }
 
 void backend_context_teardown(struct futhark_context *ctx) {
   if (ctx->kernels != NULL) {
     free_builtin_kernels(ctx, ctx->kernels);
+    free(ctx->override_names);
+    free(ctx->override_values);
+
     if (gpu_free_all(ctx) != FUTHARK_SUCCESS) {
       futhark_panic(-1, "gpu_free_all failed");
     }
@@ -238,6 +273,34 @@ void backend_context_teardown(struct futhark_context *ctx) {
   free_list_destroy(&ctx->gpu_free_list);
 }
 
+// Definitions for these are included as part of code generation.
+// wgpu_kernel_info contains:
+//   char *name;
+//   char *entry_point;
+//
+//   size_t num_args;
+//   int8_t *arg_types; // (0 -> scalar, 1 -> binding)
+//
+//   size_t num_bindings;
+//   uint32_t *binding_indices;
+//
+//   size_t scalars_binding;
+//   size_t scalars_size; 
+//   size_t *scalar_offsets;
+struct wgpu_kernel_info;
+size_t wgpu_num_kernel_infos;
+wgpu_kernel_info wgpu_kernel_infos[];
+
+struct wgpu_kernel_info *wgpu_get_kernel_info(const char *name) {
+  for (int i = 0; i < wgpu_num_kernel_infos; i++) {
+    if (strcmp(name, wgpu_kernel_infos[i].name) == 0) {
+      return &wgpu_kernel_infos[i];
+    }
+  }
+
+  return NULL;
+}
+
 // GPU ABSTRACTION LAYER
 
 // Types.
@@ -245,24 +308,88 @@ struct wgpu_kernel {
   WGPUBindGroupLayout bind_group_layout;
   WGPUPipelineLayout pipeline_layout;
   WGPUComputePipeline pipeline;
+  WGPUBuffer scalars_buffer;
 };
 typedef struct wgpu_kernel* gpu_kernel;
 typedef WGPUBuffer gpu_mem;
 
 static void gpu_create_kernel(struct futhark_context *ctx,
-                              gpu_kernel *kernel,
+                              gpu_kernel *kernel_out,
                               const char *name) {
   if (ctx->debugging) {
     fprintf(ctx->log, "Creating kernel %s.\n", name);
   }
 
-  // TODO: Need layout information here to create pipeline etc.
+  struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
+  struct wgpu_kernel *kernel = malloc(sizeof(struct wgpu_kernel));
+  
+  // Create bind group layout.
+  WGPUBindGroupLayoutEntry *bgl_entries
+    = calloc(1 + kernel_info->num_bindings, sizeof(WGPUBindGroupLayoutEntry));
+
+  WGPUBindGroupEntry scalar_entry = bgl_entries;
+  scalar_entry->binding = kernel_info->scalars_binding;
+  scalar_entry->visibility = WGPUShaderStage_COMPUTE;
+  scalar_entry->buffer = { .type = WGPUBufferBindingType_Uniform };
+
+  for (int i = 0; i < kernel_info->num_bindings; i++) {
+    WGPUBindGroupLayoutEntry *entry = &bgl_entries[1 + i];
+    entry->binding = kernel_info->binding_indices[i];
+    entry->visibility = WGPUShaderStage_COMPUTE;
+    entry->buffer = { .type = WGPUBufferBindingType_Storage };
+  }
+  WGPUBindGroupLayoutDescriptor bgl_desc = {
+    .entryCount = 1 + kernel_info->num_bindings,
+    .entries = bgl_entries
+  };
+  kernel->bind_group_layout
+    = wgpuDeviceCreateBindGroupLayout(ctx->device, &bgl_desc);
+  free(bgl_entries);
+
+  // Create pipeline layout.
+  WGPUPipelineLayoutDescriptor pl = {
+    .bindGroupLayoutCount = 1,
+    .bindGroupLayouts = &kernel->bind_group_layout,
+  };
+  kernel->pipeline_layout = wgpuDeviceCreatePipelineLayout(ctx->device, &pl);
+
+  // Create constants / overrides. 
+  WGPUConstantEntry *const_entries = calloc(ctx->num_overrides,
+                                            sizeof(WGPUConstantEntry));
+  for (int i = 0; i < ctx->num_overrides; i++) {
+    WGPUConstantEntry *entry = &const_entries[i];
+    entry->key = ctx->override_names[i];
+    entry->value = ctx->override_values[i];
+  }
+
+  // Create pipeline.
+  WGPUComputePipelineDescriptor desc = {
+    .layout = kernel->pipeline_layout,
+    .compute = {
+      .module = ctx->module,
+      .entryPoint = kernel_info->entry_point,
+      .constantCount = ctx->num_overrides,
+      .constants = const_entries,
+    }
+  };
+  kernel->pipeline = wgpuDeviceCreateComputePipeline(ctx->device, &desc);
+  free(const_entries);
+
+  WGPUBufferDescriptor scalars_desc = {
+    .label = "kernel scalars",
+    .size = kernel_info->scalars_size,
+    .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst
+  };
+  kernel->scalars_buffer = wgpuDeviceCreateBuffer(ctx->device, &scalars_desc);
+
+  *kernel_out = kernel;
 }
 
 static void gpu_free_kernel(struct futhark_context *ctx,
                             gpu_kernel kernel) {
   (void)ctx;
-  (void)kernel;
+  wgpuBufferDestroy(kernel->scalars_buffer);
+  free(kernel);
 }
 
 static int gpu_scalar_to_device(struct futhark_context *ctx,
@@ -275,7 +402,7 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
                                   void *dst,
                                   gpu_mem src, size_t offset, size_t size) {
   if (size > 8) {
-    futhark_panic(-1, "gpu_scalar_from_device with size %zd > 8 is not allowed\n",
+    futhark_panic(-1, "gpu_scalar_from_device with size %zu > 8 is not allowed\n",
                   size);
   }
 
@@ -375,18 +502,78 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
                              int num_args,
                              void* args[num_args],
                              size_t args_sizes[num_args]) {
-  // This is going to be a bit interesting.
-  // With current WGSL generation, all scalar arguments are passed as one
-  // uniform buffer, while all memory arguments are bound as part of a
-  // WGPUBindGroup. That... doesn't seem to fit this interface super well.
-  // I think this ties into `gpu_create_kernel` a lot. Again the two basic
-  // options are:
-  // 1. Generate some data structure that allows us to look up which arguments
-  //    (by index) go to which offset in the scalars struct / which bind group
-  //    index.
-  // 2. Generate e.g. a function per kernel that does this mapping more
-  //    directly. I guess then we can still implement this function if generate
-  //    a table of kernel (name) -> that function.
+  // TODO: Deal with `block` not matching what's set in the pipeline constants
+  // at creation time. Also, there, deal with no const block size being
+  // available at all.
+
+  struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
+
+  if (num_args != kernel_info->num_args) {
+    futhark_panic(-1, "Kernel %s called with num_args not maching its info\n",
+                  name);
+  }
+
+  WGPUBindGroupEntry *bg_entries = calloc(1 + kernel_info->num_bindings,
+                                          sizeof(WGPUBindGroupEntry));
+  void *scalars = malloc(kernel_info->scalars_size);
+
+  int scalar_index = 0;
+  int binding_index = 0;
+  for (int i = 0; i < num_args; i++) {
+    if (kernel_info->arg_types[i] == 0) {
+      // Scalar arg
+      memcpy(scalars + kernel_info->scalar_offsets[scalar_index],
+             args[i], args_sizes[i]);
+
+      scalar_index++;
+    }
+    else {
+      WGPUBindGroupEntry *entry = &bg_entries[1 + binding_index];
+      entry->binding = kernel_info->binding_indices[binding_index];
+      entry->buffer = (gpu_mem) *args[i];
+      // In theory setting (offset, size) to (0, 0) should also work and mean
+      // 'the entire buffer', but as of writing this, Firefox requires
+      // specifying the size.
+      entry->offset = 0;
+      entry->size = wgpuBufferGetSize(entry->buffer);
+
+      binding_index++;
+    }
+  }
+
+  wgpuQueueWriteBuffer(ctx->queue, kernel->scalars_buffer, 0,
+                       scalars, kernel_info->scalars_size);
+
+  WGPUBindGroupEntry *scalar_entry = bg_entries;
+  scalar_entry->binding = kernel_info->scalars_binding;
+  scalar_entry->buffer = kernel->scalars_buffer;
+  scalar_entry->offset = 0;
+  scalar_entry->size = kernel_info->scalars_size;
+
+
+  WGPUBindGroupDescriptor bg_desc = {
+    .layout = kernel->bind_group_layout,
+    .entryCount = 1 + kernel_info->num_bindings,
+    .entries = bg_entries,
+  };
+  WGPUBindGroup bg = wgpuDeviceCreateBindGroup(ctx->device, &bg_desc);
+
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
+
+  WGPUComputePassEncoder pass_encoder
+    = wgpuCommandEncoderBeginComputePass(encoder, NULL);
+  wgpuComputePassEncoderSetPipeline(pass_encoder, kernel->pipeline);
+  wgpuComputePassEncoderSetBindGroup(pass_encoder, 0, bg, 0, NULL);
+  wgpuComputePassEncoderDispatchWorkgroups(pass_encoder,
+                                           grid[0], grid[1], grid[2]);
+  wgpuComputePassEncoderEnd(pass_encoder);
+
+  WGPUCommandBuffer cmd_buffer = wgpuCommandEncoderFinish(encoder, NULL);
+  wgpuQueueSubmit(ctx->queue, 1, &cmd_buffer);
+
+  free(scalars);
+
+  return FUTHARK_SUCCESS;
 }
 
 static int gpu_alloc_actual(struct futhark_context *ctx,
