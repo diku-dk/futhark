@@ -107,6 +107,11 @@ wgpu_request_device_result wgpu_request_device_sync(
   return result;
 }
 
+void wgpu_on_uncaptured_error(WGPUErrorType error_type, const char *msg,
+                              void *userdata) {
+  futhark_panic(-1, "Uncaptured WebGPU error, type: %d\n%s\n", error_type, msg);
+}
+
 struct futhark_context_config {
   int in_use;
   int debugging;
@@ -228,6 +233,8 @@ int backend_context_setup(struct futhark_context *ctx) {
     }
   }
   ctx->device = device_result.device;
+  wgpuDeviceSetUncapturedErrorCallback(ctx->device,
+                                       wgpu_on_uncaptured_error, NULL);
 
   ctx->queue = wgpuDeviceGetQueue(ctx->device);
 
