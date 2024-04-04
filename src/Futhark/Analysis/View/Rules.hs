@@ -94,28 +94,41 @@ simplifyRule3 (View it (Cases cases))
 simplifyRule3 v = pure v
 
 
+-- XXX Currently changing recursive sum rule to be indifferent to the
+-- base case. If the base case is mergeable with the recursive
+-- case, we merge it later based on sum merging rules.
 rewrite :: View -> ViewM View
-rewrite (View it@(Forall i'' _) (Cases cases))
-  | -- Rule 4 (recursive sum)
-    (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
+-- Rule 4 (recursive sum)
+--
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
+--    | i == b => e              (e may depend on i)
+--    | i /= b => y[i-1] ⊕ x[i]
+-- ____________________________________
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e{b/i} ⊕ (⊕_{j=b+1}^i x[j])
+--
+-- If e{b/i} happens to be x[b] it later simplifies to
+-- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (⊕_{j=b}^i x[j])
+rewrite (View it@(Forall i'' (Iota _)) (Cases cases))
+  | (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
     i == i'',
     i == i',
     b == b',
-    b == SoP (SoP.int2SoP 0), -- TODO allow non-zero by splitting sum?
-    Just x' <- justRecurrence y,
-    x == x' = do
+    b == SoP (SoP.int2SoP 0), -- Domain is iota so b must be 0.
+    Just x' <- justTermPlusRecurence y,
+    x == x' || x == SoP (SoP.int2SoP 0) = do
       traceM "👀 Using Rule 4 (recursive sum)"
       j <- Var <$> newNameFromString "j"
-      let lb = SoP (SoP.int2SoP 0)
+      let lb = b ~+~ SoP (SoP.int2SoP 1)
       let ub = Var i
-      z <- substituteName i j x
-      pure $ View it (Cases $ NE.singleton (Bool True, Sum j lb ub z))
+      base <- substituteName i b x
+      z <- substituteName i j x'
+      pure $ View it (toCases $ base ~+~ Sum j lb ub z)
   where
-    justRecurrence :: Exp -> Maybe Exp
-    justRecurrence (SoP sop)
+    justTermPlusRecurence :: Exp -> Maybe Exp
+    justTermPlusRecurence (SoP sop)
       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
           Just x
-    justRecurrence _ = Nothing
+    justTermPlusRecurence _ = Nothing
 rewrite view = pure view
 
 toNNF' :: View -> View

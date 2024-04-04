@@ -76,9 +76,6 @@ getSize e = error $ "getSize:" <> prettyString e <> "\n" <> show e
 stripExp :: E.Exp -> E.Exp
 stripExp x = fromMaybe x (E.stripExp x)
 
-toCases :: Exp -> Cases Exp
-toCases e = Cases (NE.fromList [(Bool True, e)])
-
 forwards :: E.Exp -> ViewM ()
 forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do

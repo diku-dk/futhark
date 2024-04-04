@@ -6,6 +6,8 @@
 --       [x] introduce let bindings inside maps
 --       [x] Make substition of view into conditions of other view
 --           work. See tests/refinement/nikolaj/view_cond.fut and hoistCases'.
+--       [ ] part2indices_scan_exc; exclusive scan is not
+--           recognised due to early substitution of tflags_rot.
 --       [ ] part2indices_scan_exc; make Sum merge
 --           Just do a simple quadratic complexity rule that rewrites
 --              x[i] + sum_{j=i+1}^n x[j]  to  sum_{j=i}^n x[j]
@@ -387,3 +389,6 @@ getSoP = SoP.sopToLists . SoP.normalize
 
 debugM :: Applicative f => String -> f ()
 debugM x = traceM $ "🪲 " <> x
+
+toCases :: Exp -> Cases Exp
+toCases e = Cases (NE.singleton (Bool True, e))
