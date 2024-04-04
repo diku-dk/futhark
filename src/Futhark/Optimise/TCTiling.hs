@@ -46,8 +46,8 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
   redomap_inputs_shr <- forM2 shr_arrs arr_metas $ copyGlb2Shr qq
 
-  reg_tiles_out <- forLoop_ tq [reg_tiles_in] $ \q [reg_tiles_merge] -> do
-    letTupExp "reg_tiles"
+  reg_tiles_out <- forLoop_ tq reg_tiles_in $ \q reg_tiles_merge -> do
+    letExp "reg_tiles"
       =<< eIf
         (toExp $ pe64 qq + le64 q .<. pe64 len_q)
         (accumulateRegTile q reg_tiles_merge redomap_inputs_shr)
@@ -70,40 +70,44 @@ reductionLoopBody tc_env qq0 arrs_in = do
       -- accomplish this that I can think of is to place the copy in a
       -- thread-level SegMap.
       let s = baseString shr_arr ++ "_shr"
-      shr_arr_out <- segMapND_ s seglvl_thd ResultNoSimplify [se1] $ \[ltid] -> do
-        -- The copy is essentially an LMAD copy. The strategy is to flatten the
-        -- tblock and then unflatten it to fit the dimensions of the array in
-        -- shared memory, using a virtualization loop in case the tile is larger
-        -- than the tblock, and a boundary guard for the converse.
-        iters <- letSubExp "iters" =<< ceilDiv tile_size_flat tblock_size_flat
-        lam <-
-          mkLambda [cert_p, acc_p] $
-            fmap varsRes $
-              forLoop iters [paramName acc_p] $ \i0 [acc_merge] -> do
-                -- Unflatten index.
-                i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
-                letTupExp "copy_res"
-                  =<< eIf
-                    (toExp $ le64 i .<. pe64 tile_size_flat)
-                    (loopBody i acc_merge)
-                    (resultBodyM [Var acc_merge])
 
-        fmap varsRes $ letTupExp "shr_arr_out" $ WithAcc withacc_inputs lam
-      index_ (baseString shr_arr_out) shr_arr_out [se0]
+      -- The copy is essentially an LMAD copy. The strategy is to flatten the
+      -- tblock and then unflatten it to fit the dimensions of the array in
+      -- shared memory, using a virtualization loop in case the tile is larger
+      -- than the tblock, and a boundary guard for the converse.
+      iters <- letSubExp "iters" =<< ceilDiv tile_size_flat tblock_size_flat
+      lam <- mkLambda [cert_p, acc_p] $ do
+        res <- forLoop_ iters (paramName acc_p) $ \i0 acc_merge ->
+          segMapND_ "foo" seglvl_thd ResultNoSimplify tile_dims' $ \ltids -> do
+            -- Unflatten index.
+            -- i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
+            foo <- letExp "copy_res"
+              =<< eIf
+                (toExp $ pe64 se0 .==. pe64 se0) -- toExp $ le64 i .<. pe64 tile_size_flat)
+                (loopBody (map Var ltids) acc_merge)
+                (resultBodyM [Var acc_merge])
+            pure [varRes foo]
+        pure [varRes res]
+
+      letExp "shr_arr_out" $ WithAcc withacc_inputs lam
       where
         tblock_size_flat = tblockSizeFlat kernel_params
-        tile_dims = map pe64 $ tileDims arr_meta
+        tile_dims' = tileDims arr_meta
+        tile_dims = map pe64 tile_dims'
         shape = Shape $ tileDims arr_meta
         tb_offsets = gatherFor_ (tbOffsets tc_env) qq arr_meta
 
         base_arr = baseArr arr_meta
         base_arr_dims = baseArrDims arr_meta
 
-        loopBody i acc = do
+        loopBody unflattened_inds acc = do
+
+          -- TODO: find out whether it is best to unflatten here or using an N-D
+          -- segmap outside the loopBody.
           -- Unflatten the flat thread index wrt. tile dims of the array to copy
-          unflattened_inds <-
-            forM (unflattenIndex tile_dims $ le64 i) $
-              letSubExp "unflat_ind" <=< toExp
+          -- unflattened_inds <-
+          --   forM (unflattenIndex tile_dims $ le64 i) $
+          --     letSubExp "unflat_ind" <=< toExp
 
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
@@ -146,24 +150,23 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
     -- TODO: slightly less of a mess, but also needs documentation.
     accumulateRegTile q reg_tiles_in shr_arrs = do
-      reg_tiles_out <-
-        segMapND_ "reg_tile_res" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
-          reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
-          fmap varsRes $ forLoopNest tiles_R [reg_tile_in] $ \loop_inds [reg_tile_merge] -> do
+      reg_tiles_out <- segMapND_ "reg_tiles_out" seglvl_thd ResultPrivate tiles_T $ \ltids -> do
+        reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
+        reg_tile_out <- forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
 
-            let shr_ltids = map (gatherFor ltids) arr_metas
-            let shr_inds = map (gatherFor_ loop_inds q) arr_metas
+          let shr_ltids = map (gatherFor ltids) arr_metas
+          let shr_inds = map (gatherFor_ loop_inds q) arr_metas
 
-            map_operands <- mapM (uncurry (index "shr_elem")) $ zip shr_arrs shr_inds
-            acc <- index "acc" reg_tile_merge loop_inds
+          map_operands <- mapM (uncurry (index "shr_elem")) $ zip shr_arrs shr_inds
+          acc <- index "acc" reg_tile_merge loop_inds
 
-            map_f <- renameLambda $ mapLam tc_env
-            red_op <- renameLambda $ redLam tc_env
+          map_f <- renameLambda $ mapLam tc_env
+          red_op <- renameLambda $ redLam tc_env
 
-            map_res <- eLambda map_f $ map (eSubExp . Var) map_operands
-            red_res <- eLambda red_op $ map eSubExp $ Var acc : map resSubExp map_res
-            res <- update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
-            pure [res]
+          map_res <- eLambda map_f $ map (eSubExp . Var) map_operands
+          red_res <- eLambda red_op $ map eSubExp $ Var acc : map resSubExp map_res
+          update "res" reg_tile_merge loop_inds $ resSubExp $ head red_res
+        pure [varRes reg_tile_out]
 
       resultBodyM [Var reg_tiles_out]
 
@@ -280,9 +283,9 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
           -- Zero-initialize register tile.
           reg_tiles_init <- segMapND_ "reg_tiles" seglvl_thd ResultPrivate tiles_T $ \_ -> do
             reg_tile_init <- scratch "reg_tile_init" (elemType res_type) tiles_R
-            css <- forLoopNest tiles_R [reg_tile_init] $ \loop_inds [merge] ->
-              (: []) <$> update "reg_tile" merge loop_inds red_ne
-            pure $ varsRes css
+            css <- forLoopNest_ tiles_R reg_tile_init $ \loop_inds merge ->
+              update "reg_tile" merge loop_inds red_ne
+            pure [varRes css]
 
           -- Declare shared memory arrays.
           shr_arrs_init <-
@@ -505,7 +508,7 @@ makeTCEnv kernel_params load_stms map_lam red_lam red_ne = do
   -- the dims of each input array -- since these are not simply (M: (Ty, Ry))
   -- and (N: (Tx, Rx)) as in the 2D case -- as well as to generate boundary
   -- checks later on.
-  let base_arrs = map getArraysFromLoadStm load_stms
+  let base_arrs = map getArrayFromLoadStm load_stms
   dims_per_arr <- mapM getArrDims base_arrs
 
   tb_offsets <-
@@ -557,11 +560,11 @@ makeTCEnv kernel_params load_stms map_lam red_lam red_ne = do
     -- getArraysFromLoadStm :: Stm GPU -> (VName, VName)
     -- getArraysFromLoadStm (Let pat _ (BasicOp (Index arr _))) =
     --   (patElemName $ head $ patElems pat, arr)
-    getArraysFromLoadStm :: Stm GPU -> VName
-    getArraysFromLoadStm (Let _ _ (BasicOp (Index arr _))) = arr
-    getArraysFromLoadStm stm =
+    getArrayFromLoadStm :: Stm GPU -> VName
+    getArrayFromLoadStm (Let _ _ (BasicOp (Index arr _))) = arr
+    getArrayFromLoadStm stm =
       error $
-        "getArraysFromLoadStm error: expected a BasicOp Index stm, got: "
+        "getArrayFromLoadStm error: expected a BasicOp Index stm, got: "
           ++ prettyString stm
 
     getArrDims :: VName -> Builder GPU [SubExp]
