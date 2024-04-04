@@ -44,6 +44,7 @@ extra-source-files:
     rts/c/backends/hip.h
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
+	rts/c/backends/webgpu.h
     rts/c/lock.h
     rts/c/copy.h
     rts/c/timing.h
@@ -179,6 +180,7 @@ library
       Futhark.CLI.WASM
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.COpenCL
+      Futhark.CodeGen.Backends.CWebGPU
       Futhark.CodeGen.Backends.HIP
       Futhark.CodeGen.Backends.GenericC
       Futhark.CodeGen.Backends.GenericC.CLI

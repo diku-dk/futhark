@@ -29,6 +29,7 @@ module Futhark.CodeGen.RTS.C
     backendsHipH,
     backendsCH,
     backendsMulticoreH,
+    backendsWebGPUH
   )
 where
 
@@ -167,6 +168,11 @@ backendsCH = $(embedStringFile "rts/c/backends/c.h")
 backendsMulticoreH :: T.Text
 backendsMulticoreH = $(embedStringFile "rts/c/backends/multicore.h")
 {-# NOINLINE backendsMulticoreH #-}
+
+-- | @rts/c/backends/webgpu.h@
+backendsWebGPUH :: T.Text
+backendsWebGPUH = $(embedStringFile "rts/c/backends/webgpu.h")
+{-# NOINLINE backendsWebGPUH #-}
 
 -- | @rts/c/copy.h@
 copyH :: T.Text
