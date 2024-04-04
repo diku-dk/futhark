@@ -40,7 +40,6 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-
 debugType :: (Monad m, HasScope rep m) => [Char] -> VName -> m ()
 debugType s v =
   lookupType v >>= myDebugM . ((s ++ ":\n") ++) . (++ "\n") . prettyString
@@ -59,23 +58,24 @@ type TileM = ReaderT (Scope GPU) (State VNameSource)
 -- | Are we working with full or partial tiles?
 data TileKind = TilePartial | TileFull
 
--- | list of valid indices into a given list.
+-- | List of valid indices into a given list.
 indices :: Traversable t => t a -> [Int]
 indices xs = [0 .. length xs - 1]
 
--- ceiled integer division expression
+-- | Ceiled integer division expression
 ceilDiv :: (MonadBuilder m) => SubExp -> SubExp -> m (Exp (Rep m))
 ceilDiv x y = pure $ BasicOp $ BinOp (SDivUp Int64 Unsafe) x y
 
--- scratch memory of a given shape.
+-- | Scratch memory of a given shape.
 scratch :: (MonadBuilder m) => String -> PrimType -> [SubExp] -> m VName
 scratch se_name t shape = letExp se_name $ BasicOp $ Scratch t shape
 
--- index an array with indices given in outer_indices; any inner
--- dims of arr not indexed by outer_indices are sliced entirely
+-- | Index an array with the given outer_indices; any inner dims of arr
+-- not indexed by outer_indices are sliced entirely.
 index :: (MonadBuilder m) => String -> VName -> [VName] -> m VName
 index se_desc arr = index_ se_desc arr . map Var
 
+-- | Like index, but with indices given as SubExps.
 index_ :: (MonadBuilder m) => String -> VName -> [SubExp] -> m VName
 index_ se_desc arr outer_indices = do
   arr_t <- lookupType arr
@@ -86,6 +86,8 @@ update :: (MonadBuilder m) => String -> VName -> [VName] -> SubExp -> m VName
 update se_desc arr idxs new_elem =
   letExp se_desc $ BasicOp $ Update Unsafe arr (Slice $ map (DimFix . Var) idxs) new_elem
 
+-- | Build a single for loop given a loop bound, loop merge initializers, and
+-- the loop body.
 forLoop ::
   SubExp -> -- loop bound.
   [VName] -> -- loop merge initializers.
@@ -109,19 +111,25 @@ forLoop i_bound merge body = do
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
 
+-- | Like forLoop, but with just one merge variable.
 forLoop_ ::
-  SubExp -> -- loop bound.
-  [VName] -> -- loop merge initializers.
-  ( VName -> -- loop count variable.
-    [VName] -> -- merge variables.
-    Builder GPU [VName] -- merge update values.
+  SubExp ->
+  VName ->
+  ( VName ->
+    VName ->
+    Builder GPU VName
   ) ->
   Builder GPU VName
-forLoop_ i_bound merge body = head <$> forLoop i_bound merge body
+forLoop_ bound merge body =
+  fmap head $
+    forLoop bound [merge] $
+      \bound' [merge'] -> (: []) <$> body bound' merge'
 
+-- | Build a perfect loop nest given a list of loop bounds, merge initializers,
+-- and a loop body.
 forLoopNest ::
   [SubExp] -> -- loop bound for each loop in the nest.
-  [VName] -> -- merge variable initializers.
+  [VName] -> -- loop merge initializers.
   ( [VName] -> -- loop variables ->
     [VName] -> -- merge variables ->
     Builder GPU [VName] -- merge update values.
@@ -129,20 +137,25 @@ forLoopNest ::
   Builder GPU [VName]
 forLoopNest = buildNest []
   where
-    -- recursively build nest; finally pass accumulated loop vars to loop body.
-    buildNest is (bound : bounds) inits body =
-      forLoop bound inits $ \i merge -> buildNest (i : is) bounds merge body
+    -- Recursively build nest; finally pass accumulated loop vars to loop body.
+    buildNest is (bound : bounds) merge_inits body =
+      forLoop bound merge_inits $
+        \i merge -> buildNest (i : is) bounds merge body
     buildNest is _ merge body = body is merge
 
+-- | Like forLoopNest, but with just one merge variable.
 forLoopNest_ ::
   [SubExp] ->
-  [VName] ->
+  VName ->
   ( [VName] ->
-    [VName] ->
-    Builder GPU [VName]
+    VName ->
+    Builder GPU VName
   ) ->
   Builder GPU VName
-forLoopNest_ bounds inits body = head <$> forLoopNest bounds inits body
+forLoopNest_ bounds merge_init body =
+  fmap head $
+    forLoopNest bounds [merge_init] $
+      \bounds' [merge_init'] -> (: []) <$> body bounds' merge_init'
 
 segMapND ::
   String -> -- desc
@@ -175,7 +188,6 @@ segMapND desc lvl manifest dims f = do
       SegMap lvl segspace ts $
         KernelBody () stms $
           map ret res
-
 
 segMapND_ ::
   String ->

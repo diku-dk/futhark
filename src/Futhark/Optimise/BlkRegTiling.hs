@@ -92,8 +92,8 @@ kkLoopBody
       copyGlb2ShMem kk (gtid_x, jjj, map_t2, width_B, inp_B, load_B, b_shr_init')
 
     -- inner loop updating this thread's accumulator (loop k in mmm_kernels).
-    thd_acc <- forLoop_ tk [thd_res_merge] $ \k [acc_merge] ->
-      letTupExp "foo"
+    thd_acc <- forLoop_ tk thd_res_merge $ \k acc_merge ->
+      letExp "foo"
         =<< eIf
           ( toExp $
               if epilogue
@@ -155,9 +155,9 @@ kkLoopBody
             bs <- index "bs" bsss [ltid_y, ltid_x]
             css_init <- index "css_init" acc_merge [ltid_y, ltid_x]
 
-            css <- forLoop_ ry [css_init] $ \i [css_merge] ->
-              forLoop rx [css_merge] $ \j [css_merge'] ->
-                letTupExp "foo"
+            css <- forLoop_ ry css_init $ \i css_merge ->
+              forLoop_ rx css_merge $ \j css_merge' ->
+                letExp "foo"
                   =<< eIf
                     ( toExp $
                         if fits_ij
@@ -225,7 +225,7 @@ kkLoopBody
           copyShr2Reg is_inner_coal str_A x_shr k ltid_yx = do
             let (r_par, t_seq, tr_par) = (rx, tk, tx_rx)
             xsss_init <- scratch (str_A ++ "_init_regs") ptp_X_el [r_par]
-            forLoop_ r_par [xsss_init] $ \ij [xsss_merge] -> do
+            forLoop_ r_par xsss_init $ \ij xsss_merge -> do
               x_shr_ind <-
                 letExp (str_A ++ "_shr_ind")
                   =<< toExp
@@ -233,10 +233,8 @@ kkLoopBody
                         then le64 k + (le64 ltid_yx * pe64 r_par + le64 ij) * (pe64 t_seq + pe64 se1)
                         else le64 ij + le64 ltid_yx * pe64 r_par + le64 k * (pe64 tr_par + pe64 se1)
                     )
-              xsss <-
-                update (str_A ++ "_regs") xsss_merge [ij] . Var
-                  =<< index (str_A ++ "_shr_elem") x_shr [x_shr_ind]
-              pure [xsss]
+              update (str_A ++ "_regs") xsss_merge [ij] . Var
+                =<< index (str_A ++ "_shr_elem") x_shr [x_shr_ind]
 
           --
           scatterFun ::
@@ -447,12 +445,12 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
         rss_init <- getAccumFV res_tp
         epilogue_res_acc <- segMapND_ "rssss" segthd_lvl ResultMaySimplify [ty, tx] $ \[ltid_y, ltid_x] -> do
           (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-          rss <- forLoop_ ry [rss_init] $ \i [rss_merge] -> do
-            forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+          rss <- forLoop_ ry rss_init $ \i rss_merge -> do
+            forLoop_ rx rss_merge $ \j rss_merge' -> do
               prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
               let code2_subs = substituteNames (M.singleton rss_init rss_merge') code2'
 
-              letTupExp "res_elem"
+              letExp "res_elem"
                 =<< eIf
                   ( toExp $
                       le64 gtid_y
@@ -591,8 +589,8 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
             else segMapND_ "rssss" segthd_lvl ResultPrivate [ty, tx] $ \[ltid_y, ltid_x] -> do
               rss_init <- scratch "rss_init" (elemType res_tp) [ry, rx]
               (css, ii, jj) <- getThdRedomapRes (rx, ry) (ltid_x, ltid_y) (iii, jjj, redomap_res)
-              rss <- forLoop_ ry [rss_init] $ \i [rss_merge] -> do
-                forLoop rx [rss_merge] $ \j [rss_merge'] -> do
+              rss <- forLoop_ ry rss_init $ \i rss_merge -> do
+                forLoop_ rx rss_merge $ \j rss_merge' -> do
                   prereqAddCode2 (gtid_x, gtid_y) (ii, i, jj, j) (css, redomap_orig_res)
 
                   res_el <-
@@ -609,8 +607,7 @@ mmBlkRegTilingNrm env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
                             resultBodyM [Var res_nm]
                         )
                         (eBody [eBlank res_tp])
-                  rss'' <- update "rss" rss_merge' [i, j] res_el
-                  pure [rss'']
+                  update "rss" rss_merge' [i, j] res_el
               pure [varRes rss]
 
         let regtile_ret_dims =
@@ -796,10 +793,9 @@ initRegShmem
     -- initialize register mem with neutral elements.
     cssss <- segMapND_ "cssss" segthd_lvl ResultPrivate [ty, tx] $ \_ -> do
       css_init <- scratch "css_init" red_t [ry, rx]
-      css <- forLoop_ ry [css_init] $ \i [css_merge] -> do
-        forLoop rx [css_merge] $ \j [css_merge'] -> do
-          css'' <- update "css" css_merge' [i, j] red_ne
-          pure [css'']
+      css <- forLoop_ ry css_init $ \i css_merge ->
+        forLoop_ rx css_merge $ \j css_merge' ->
+          update "css" css_merge' [i, j] red_ne
       pure [varRes css]
     -- scratch shared memory
     a_shr_init <- scratch "A_shr" map_t1 [a_shr_sz]
@@ -1070,9 +1066,8 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
           reg_arr_nms <- segMapND "res" segthd_lvl ResultPrivate [ty, tx] $ \_ ->
             forM (zip red_nes red_res_tps) $ \(red_ne, red_t) -> do
               css_init <- scratch "res_init" (elemType red_t) [rz]
-              css <- forLoop_ rz [css_init] $ \i [css_merge] -> do
-                css' <- update "css" css_merge [i] red_ne
-                pure [css']
+              css <- forLoop_ rz css_init $ \i css_merge ->
+                update "css" css_merge [i] red_ne
               pure $ varRes css
 
           -- scratch the shared-memory arrays corresponding to the arrays that are
@@ -1191,10 +1186,10 @@ doRegTiling3D (Let pat aux (Op (SegOp old_kernel)))
                 forM (zip kertp redomap_res) $ \(res_tp, res) -> do
                   rss_init <- scratch "rss_init" (elemType res_tp) [rz, se1, se1]
                   fmap varRes $
-                    forLoop_ rz [rss_init] $ \i [rss] -> do
+                    forLoop_ rz rss_init $ \i rss -> do
                       let slice = Slice [DimFix $ Var i, DimFix se0, DimFix se0]
                       thread_res <- index "thread_res" res [ltid_y, ltid_x, i]
-                      letTupExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
+                      letExp "rss" $ BasicOp $ Update Unsafe rss slice $ Var thread_res
               else segMapND "rssss" segthd_lvl ResultPrivate [se1, ty, tx] $ \[_ltid_z, ltid_y, ltid_x] -> do
                 letBindNames [gtid_y] =<< toExp (le64 jj1 + le64 ltid_y)
                 letBindNames [gtid_x] =<< toExp (le64 jj2 + le64 ltid_x)
