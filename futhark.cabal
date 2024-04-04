@@ -44,7 +44,7 @@ extra-source-files:
     rts/c/backends/hip.h
     rts/c/backends/multicore.h
     rts/c/backends/opencl.h
-	rts/c/backends/webgpu.h
+    rts/c/backends/webgpu.h
     rts/c/lock.h
     rts/c/copy.h
     rts/c/timing.h
@@ -216,6 +216,7 @@ library
       Futhark.CodeGen.RTS.WGSL
       Futhark.CodeGen.ImpCode
       Futhark.CodeGen.ImpCode.GPU
+      Futhark.CodeGen.ImpCode.Kernels
       Futhark.CodeGen.ImpCode.Multicore
       Futhark.CodeGen.ImpCode.OpenCL
       Futhark.CodeGen.ImpCode.Sequential

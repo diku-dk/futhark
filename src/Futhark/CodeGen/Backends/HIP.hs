@@ -19,7 +19,8 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.HIP qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsHipH)
 import Futhark.IR.GPUMem hiding
-  ( CmpSizeLe,
+  ( HostOp,
+    CmpSizeLe,
     GetSize,
     GetSizeMax,
   )
@@ -33,7 +34,7 @@ mkBoilerplate ::
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
-  GC.CompilerM OpenCL () ()
+  GC.CompilerM HostOp () ()
 mkBoilerplate hip_program macros kernels types failures = do
   generateGPUBoilerplate
     hip_program
@@ -84,7 +85,7 @@ cliOptions =
            }
        ]
 
-hipMemoryType :: GC.MemoryType OpenCL ()
+hipMemoryType :: GC.MemoryType HostOp ()
 hipMemoryType "device" = pure [C.cty|typename hipDeviceptr_t|]
 hipMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
@@ -107,7 +108,7 @@ compileProg version prog = do
       cliOptions
       prog'
   where
-    operations :: GC.Operations OpenCL ()
+    operations :: GC.Operations HostOp ()
     operations =
       gpuOperations
         { GC.opsMemoryType = hipMemoryType

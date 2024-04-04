@@ -113,7 +113,7 @@ cleanSizes m = M.map clean m
 
 findParamUsers ::
   Env ->
-  Definitions ImpOpenCL.OpenCL ->
+  Definitions ImpOpenCL.HostOp ->
   M.Map Name SizeClass ->
   ParamMap
 findParamUsers env defs = M.mapWithKey onParam
@@ -219,7 +219,7 @@ envFromProg prog = Env funs (funsMayFail cg funs) cg
     funs = defFuns prog
     cg = ImpGPU.callGraph calledInHostOp funs
 
-lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function HostOp)
+lookupFunction :: Name -> Env -> Maybe (ImpGPU.Function ImpGPU.HostOp)
 lookupFunction fname = lookup fname . unFunctions . envFuns
 
 functionMayFail :: Name -> Env -> Bool
@@ -231,8 +231,8 @@ addSize :: Name -> SizeClass -> OnKernelM ()
 addSize key sclass =
   modify $ \s -> s {clSizes = M.insert key sclass $ clSizes s}
 
-onHostOp :: KernelTarget -> HostOp -> OnKernelM OpenCL
-onHostOp target (CallKernel k) = onKernel target k
+onHostOp :: KernelTarget -> ImpGPU.HostOp -> OnKernelM ImpOpenCL.HostOp
+onHostOp target (ImpGPU.CallKernel k) = onKernel target k
 onHostOp _ (ImpGPU.GetSize v key size_class) = do
   addSize key size_class
   pure $ ImpOpenCL.GetSize v key
@@ -304,7 +304,7 @@ ensureDeviceFun fname host_func = do
   exists <- gets $ M.member fname . clDevFuns
   unless exists $ generateDeviceFun fname host_func
 
-calledInHostOp :: HostOp -> S.Set Name
+calledInHostOp :: ImpGPU.HostOp -> S.Set Name
 calledInHostOp (CallKernel k) = calledFuncs calledInKernelOp $ kernelBody k
 calledInHostOp _ = mempty
 
@@ -328,7 +328,7 @@ ensureDeviceFuns code = do
       Nothing -> pure Nothing
   where
     bad = compilerLimitationS "Cannot generate GPU functions that contain parallelism."
-    toDevice :: HostOp -> KernelOp
+    toDevice :: ImpGPU.HostOp -> KernelOp
     toDevice _ = bad
 
 isConst :: BlockDim -> Maybe KernelConstExp
@@ -338,7 +338,7 @@ isConst (Right e) =
   Just e
 isConst _ = Nothing
 
-onKernel :: KernelTarget -> Kernel -> OnKernelM OpenCL
+onKernel :: KernelTarget -> Kernel -> OnKernelM ImpOpenCL.HostOp
 onKernel target kernel = do
   called <- ensureDeviceFuns $ kernelBody kernel
 

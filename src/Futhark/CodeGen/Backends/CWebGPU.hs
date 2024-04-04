@@ -19,10 +19,10 @@ import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
 import Futhark.IR.GPUMem hiding
-  ( CmpSizeLe,
+  ( HostOp,
+    CmpSizeLe,
     GetSize,
     GetSizeMax,
-    HostOp
   )
 import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C

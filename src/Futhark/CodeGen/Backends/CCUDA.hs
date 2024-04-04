@@ -19,7 +19,8 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import Futhark.CodeGen.ImpGen.CUDA qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsCudaH)
 import Futhark.IR.GPUMem hiding
-  ( CmpSizeLe,
+  ( HostOp,
+    CmpSizeLe,
     GetSize,
     GetSizeMax,
   )
@@ -33,7 +34,7 @@ mkBoilerplate ::
   M.Map Name KernelSafety ->
   [PrimType] ->
   [FailureMsg] ->
-  GC.CompilerM OpenCL () ()
+  GC.CompilerM HostOp () ()
 mkBoilerplate cuda_program macros kernels types failures = do
   generateGPUBoilerplate
     cuda_program
@@ -102,7 +103,7 @@ cliOptions =
            }
        ]
 
-cudaMemoryType :: GC.MemoryType OpenCL ()
+cudaMemoryType :: GC.MemoryType HostOp ()
 cudaMemoryType "device" = pure [C.cty|typename CUdeviceptr|]
 cudaMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
 
@@ -125,7 +126,7 @@ compileProg version prog = do
       cliOptions
       prog'
   where
-    operations :: GC.Operations OpenCL ()
+    operations :: GC.Operations HostOp ()
     operations =
       gpuOperations
         { GC.opsMemoryType = cudaMemoryType,
