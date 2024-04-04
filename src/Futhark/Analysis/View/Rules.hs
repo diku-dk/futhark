@@ -94,6 +94,21 @@ simplifyRule3 (View it (Cases cases))
 simplifyRule3 v = pure v
 
 
+-- View {iterator = Forall (VName (Name "i") 6204) (Iota (Var (VName (Name "n") 6068))),
+--       value = Cases ((Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "i") 6204)),
+--                        Sum (Var (VName (Name "j") 6200)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (Var (VName (Name "i") 6204)) (Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6200),1)]},1)]})))))
+--                     :| [(Not (Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "i") 6204))),
+--                           SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6200)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]})) (Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6200),1)]},1)]})))),1)]},1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6202)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (Var (VName (Name "i") 6204)) (Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "j") 6202))))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]}))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},0)]})))),1)]},1)]}))
+--                         ])}
+
+mergeSums :: View -> ViewM View
+mergeSums (View _it (Cases cases))
+  | cases is a SoP =
+    -- merge sums in SoP if compatible; just do simple O(n^2) matching
+    undefined
+mergeSums view = pure view
+
+
 -- XXX Currently changing recursive sum rule to be indifferent to the
 -- base case. If the base case is mergeable with the recursive
 -- case, we merge it later based on sum merging rules.
