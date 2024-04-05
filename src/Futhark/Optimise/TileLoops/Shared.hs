@@ -100,8 +100,10 @@ forLoop i_bound merge body = do
   i <- newVName "i" -- could give this as arg to the function
   let loop_form = ForLoop i Int64 i_bound
 
-  merge_ts <- mapM lookupType merge
-  loop_inits <- mapM (\merge_t -> newParam "merge" $ toDecl merge_t Unique) merge_ts
+  loop_inits <-
+    mapM
+      (\m -> lookupType m >>= newParam (baseString m ++ "_merge") . flip toDecl Unique)
+      merge
 
   loop_body <-
     runBodyBuilder . localScope (scopeOfLoopForm loop_form <> scopeOfFParams loop_inits) $
@@ -110,6 +112,9 @@ forLoop i_bound merge body = do
 
   letTupExp "loop" $
     Loop (zip loop_inits $ map Var merge) loop_form loop_body
+  where
+    makeLoopInit m =
+      lookupType m >>= newParam (baseString m ++ "_merge") . flip toDecl Unique
 
 -- | Like forLoop, but with just one merge variable.
 forLoop_ ::
@@ -141,7 +146,7 @@ forLoopNest = buildNest []
     buildNest is (bound : bounds) merge_inits body =
       forLoop bound merge_inits $
         \i merge -> buildNest (i : is) bounds merge body
-    buildNest is _ merge body = body is merge
+    buildNest is _ merge body = body (reverse is) merge
 
 -- | Like forLoopNest, but with just one merge variable.
 forLoopNest_ ::
