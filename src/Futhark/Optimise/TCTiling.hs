@@ -28,7 +28,6 @@ forM3 xs ys zs f = forM (zip3 xs ys zs) (\(a, b, c) -> f a b c)
 
 se0 :: SubExp
 se0 = intConst Int64 0
-
 se1 :: SubExp
 se1 = intConst Int64 1
 
@@ -78,18 +77,23 @@ reductionLoopBody tc_env qq0 arrs_in = do
       iters <- letSubExp "iters" =<< ceilDiv tile_size_flat tblock_size_flat
       lam <- mkLambda [cert_p, acc_p] $ do
         res <- forLoop_ iters (paramName acc_p) $ \i0 acc_merge ->
-          segMapND_ "foo" seglvl_thd ResultNoSimplify tile_dims' $ \ltids -> do
+          -- segMapND_ "foo" seglvl_thd ResultNoSimplify tile_dims' $ \ltids -> do
+          segMapND_ "foo" seglvl_thd ResultNoSimplify [tile_size_flat] $ \[ltid] -> do
             -- Unflatten index.
-            -- i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
+            i <- letExp "i" =<< toExp (le64 i0 * pe64 tblock_size_flat + le64 ltid)
             foo <- letExp "copy_res"
               =<< eIf
-                (toExp $ pe64 se0 .==. pe64 se0) -- toExp $ le64 i .<. pe64 tile_size_flat)
-                (loopBody (map Var ltids) acc_merge)
+                (toExp $ le64 i .<. pe64 tile_size_flat)
+                -- TODO: as mentioned below, we could also use an ND segmap,
+                -- rather than using a flat 1D segmap of size `tile_size_flat`,
+                -- and then pass the ltids to loopBody.
+                -- (loopBody (map Var ltids) acc_merge)
+                (loopBody i acc_merge)
                 (resultBodyM [Var acc_merge])
             pure [varRes foo]
         pure [varRes res]
 
-      letExp "shr_arr_out" $ WithAcc withacc_inputs lam
+      letExp (baseString shr_arr) $ WithAcc withacc_inputs lam
       where
         tblock_size_flat = tblockSizeFlat kernel_params
         tile_dims' = tileDims arr_meta
@@ -100,14 +104,15 @@ reductionLoopBody tc_env qq0 arrs_in = do
         base_arr = baseArr arr_meta
         base_arr_dims = baseArrDims arr_meta
 
-        loopBody unflattened_inds acc = do
+        -- loopBody unflattened_inds acc = do
+        loopBody i acc = do
 
           -- TODO: find out whether it is best to unflatten here or using an N-D
           -- segmap outside the loopBody.
           -- Unflatten the flat thread index wrt. tile dims of the array to copy
-          -- unflattened_inds <-
-          --   forM (unflattenIndex tile_dims $ le64 i) $
-          --     letSubExp "unflat_ind" <=< toExp
+          unflattened_inds <-
+            forM (unflattenIndex tile_dims $ le64 i) $
+              letSubExp "unflat_ind" <=< toExp
 
           -- The shared mem indices are simply the unflattened indices, while
           -- the global mem indices need to have tblock offsets added onto them.
@@ -122,15 +127,15 @@ reductionLoopBody tc_env qq0 arrs_in = do
               =<< toExp
                 ( foldr (.&&.) true $
                     zipWith
-                      (\i dim -> le64 i .<. pe64 dim)
+                      (\ind dim -> le64 ind .<. pe64 dim)
                       glb_arr_inds
                       base_arr_dims
                 )
           glb_elem <-
-            letExp "glb_elem"
+            letExp (baseString base_arr)
               =<< eIf
                 (toExp in_bounds)
-                ( index "glb_elem" (baseArr arr_meta) glb_arr_inds
+                ( index "glb_elem" base_arr glb_arr_inds
                     >>= resultBodyM . (: []) . Var
                 )
                 -- TODO: the reduce neutral element is a placeholder here. It
@@ -154,10 +159,19 @@ reductionLoopBody tc_env qq0 arrs_in = do
         reg_tile_in <- index "reg_tile_in" reg_tiles_in ltids
         reg_tile_out <- forLoopNest_ tiles_R reg_tile_in $ \loop_inds reg_tile_merge -> do
 
-          let shr_ltids = map (gatherFor ltids) arr_metas
-          let shr_inds = map (gatherFor_ loop_inds q) arr_metas
+          dummy_ltid <- letExp "dummy_ltid_q" =<< toExp se0
+          let dummy_tile = se1
 
-          map_operands <- mapM (uncurry (index "shr_elem")) $ zip shr_arrs shr_inds
+          shr_inds <- forM arr_metas $ \meta -> do
+            let ltids' = gatherFor_ ltids dummy_ltid meta
+            let tiles_R' = gatherFor_ tiles_R dummy_tile meta
+            let loop_inds' = gatherFor_ loop_inds q meta
+            forM3 ltids' tiles_R' loop_inds' $ \ltid tile loop_ind ->
+              letExp "shr_ind" =<< toExp (le64 ltid * pe64 tile + le64 loop_ind)
+
+          map_operands <- forM2 shr_arrs shr_inds $ \arr inds ->
+            index (baseString arr ++ "_elem") arr inds
+
           acc <- index "acc" reg_tile_merge loop_inds
 
           map_f <- renameLambda $ mapLam tc_env
@@ -170,13 +184,13 @@ reductionLoopBody tc_env qq0 arrs_in = do
 
       resultBodyM [Var reg_tiles_out]
 
+    arr_metas = arrsInfo tc_env
     kernel_params = kernelParams tc_env
     tq = tileSeq kernel_params
     tiles_T = tilesT kernel_params
     tiles_R = tilesR kernel_params
     len_q = commonDim kernel_params
 
-    arr_metas = arrsInfo tc_env
 
 doTCTiling :: Env -> Stm GPU -> TileM (Maybe (Stms GPU, Stm GPU))
 doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kbody))))
@@ -290,7 +304,7 @@ doTCTiling _env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts old_kb
           -- Declare shared memory arrays.
           shr_arrs_init <-
             forM2 map_ts (arrsInfo tc_env) $ \t arr ->
-              scratch "shmem_arr" t $ tileDims arr
+              scratch ("shr_" ++ baseString (baseArr arr)) t $ tileDims arr
 
           num_seq_tiles <- letSubExp "num_seq_tiles" =<< ceilDiv common_dim tile_seq
 
