@@ -36,20 +36,22 @@ shaderLiteral prog = "window.shader = `\n"
 -- window.kernels = [
 --   { name: 'some_vname_5568',
 --     overrides: ['override', 'declarations'],
---     bindSlots: [0, 1, 2],
+--     scalarsBindSlot: 0,
+--     bindSlots: [1, 2, 3],
 --   },
 -- ];
 kernelInfoLiteral :: Program -> T.Text
 kernelInfoLiteral prog = "window.kernels = " <> docText fmtInfos <> ";"
   where
-    infos = M.toList $ webgpuKernelInfo prog
+    infos = M.toList $ webgpuKernels prog
     fmtInfos = "[" </> indent 2 (commastack $ map fmtInfo infos) </> "]"
-    fmtInfo (name, (overrides, slots)) =
+    fmtInfo (name, ki) =
       "{" </> indent 2 (
         "name: '" <> pretty name <> "',"
         </> "overrides: [" <> commasep
-          (map (\o -> "'" <> pretty o <> "'") overrides) <> "],"
-        </> "bindSlots: " <> pretty slots <> ","
+          (map (\o -> "'" <> pretty o <> "'") (overrideNames ki)) <> "],"
+        </> "scalarsBindSlot: " <> pretty (scalarsBindSlot ki) <> ","
+        </> "bindSlots: " <> pretty (memBindSlots ki) <> ","
       ) </> "}"
 
 -- window.tests = [

@@ -1,6 +1,8 @@
 module Futhark.CodeGen.ImpGen.WGSL
   ( Ident,
     PrimType (..),
+    hsLayout,
+    structLayout,
     Typ (..),
     BinOp,
     UnOp,
@@ -29,6 +31,38 @@ type Ident = T.Text
 data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
               | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
               | Atomic PrimType
+
+-- | AlignOf and SizeOf of host-shareable primitive types.
+--
+-- See https://www.w3.org/TR/WGSL/#alignment-and-size.
+hsLayout :: PrimType -> Maybe (Int, Int)
+hsLayout Bool = Nothing
+hsLayout Int32 = Just (4, 4)
+hsLayout UInt32 = Just (4, 4)
+hsLayout Float16 = Just (2, 2)
+hsLayout Float32 = Just (4, 4)
+hsLayout (Vec2 t) =
+  (\(a, s) -> (a * 2, s * 2)) <$> hsLayout t
+hsLayout (Vec3 t) =
+  (\(a, s) -> (a * 4, s * 3)) <$> hsLayout t
+hsLayout (Vec4 t) =
+  (\(a, s) -> (a * 4, s * 4)) <$> hsLayout t
+hsLayout (Atomic t) = hsLayout t
+
+-- | Field offsets, AlignOf, and SizeOf of a host-shareable struct type with the
+-- given fields.
+structLayout :: [PrimType] -> Maybe ([Int], Int, Int)
+structLayout fields = do
+  fieldLayouts <- mapM hsLayout fields
+  let (fieldAligns, fieldSizes) = unzip fieldLayouts
+  let structAlign = maximum fieldAligns
+  let fieldOffsets = init $ scanl
+        (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
+        0 (zip (tail fieldAligns) fieldSizes)
+  let structSize = roundUp structAlign (last fieldOffsets + last fieldSizes)
+  pure (fieldOffsets, structAlign, structSize)
+    where 
+      roundUp k n = ceiling ((fromIntegral n :: Double) / fromIntegral k) * k
 
 data Typ = Prim PrimType | Array PrimType | Named Ident
 
@@ -209,4 +243,4 @@ instance Pretty Declaration where
       <+> "=" <+> pretty initial <> ";"
 
 prettyDecls :: [Declaration] -> Doc a
-prettyDecls decls = stack (map pretty decls) 
+prettyDecls decls = stack (map pretty decls)

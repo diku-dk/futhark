@@ -283,17 +283,14 @@ void backend_context_teardown(struct futhark_context *ctx) {
 // Definitions for these are included as part of code generation.
 // wgpu_kernel_info contains:
 //   char *name;
-//   char *entry_point;
 //
-//   size_t num_args;
-//   int8_t *arg_types; // (0 -> scalar, 1 -> binding)
-//
-//   size_t num_bindings;
-//   uint32_t *binding_indices;
-//
+//   size_t num_scalars;
 //   size_t scalars_binding;
 //   size_t scalars_size; 
 //   size_t *scalar_offsets;
+//
+//   size_t num_bindings; // excluding the scalars binding
+//   uint32_t *binding_indices;
 struct wgpu_kernel_info;
 size_t wgpu_num_kernel_infos;
 wgpu_kernel_info wgpu_kernel_infos[];
@@ -374,7 +371,7 @@ static void gpu_create_kernel(struct futhark_context *ctx,
     .layout = kernel->pipeline_layout,
     .compute = {
       .module = ctx->module,
-      .entryPoint = kernel_info->entry_point,
+      .entryPoint = kernel_info->name,
       .constantCount = ctx->num_overrides,
       .constants = const_entries,
     }
@@ -515,37 +512,27 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
 
   struct wgpu_kernel_info *kernel_info = wgpu_get_kernel_info(name);
 
-  if (num_args != kernel_info->num_args) {
+  if (num_args != kernel_info->num_scalars + kernel_info->num_bindings) {
     futhark_panic(-1, "Kernel %s called with num_args not maching its info\n",
                   name);
   }
 
+  void *scalars = malloc(kernel_info->scalars_size);
+  for (int i = 0; i < kernel_info->num_scalars; i++) {
+    memcpy(scalars + kernel_info->scalar_offsets[i], args[i], args_sizes[i]);
+  }
+
   WGPUBindGroupEntry *bg_entries = calloc(1 + kernel_info->num_bindings,
                                           sizeof(WGPUBindGroupEntry));
-  void *scalars = malloc(kernel_info->scalars_size);
-
-  int scalar_index = 0;
-  int binding_index = 0;
-  for (int i = 0; i < num_args; i++) {
-    if (kernel_info->arg_types[i] == 0) {
-      // Scalar arg
-      memcpy(scalars + kernel_info->scalar_offsets[scalar_index],
-             args[i], args_sizes[i]);
-
-      scalar_index++;
-    }
-    else {
-      WGPUBindGroupEntry *entry = &bg_entries[1 + binding_index];
-      entry->binding = kernel_info->binding_indices[binding_index];
-      entry->buffer = (gpu_mem) *args[i];
-      // In theory setting (offset, size) to (0, 0) should also work and mean
-      // 'the entire buffer', but as of writing this, Firefox requires
-      // specifying the size.
-      entry->offset = 0;
-      entry->size = wgpuBufferGetSize(entry->buffer);
-
-      binding_index++;
-    }
+  for (int i = 0; i < kernel_info->num_bindings; i++) {
+    WGPUBindGroupEntry *entry = &bg_entries[1 + i];
+    entry->binding = kernel_info->binding_indices[i];
+    entry->buffer = (gpu_mem) *args[kernel_info->num_scalars + i];
+    // In theory setting (offset, size) to (0, 0) should also work and mean
+    // 'the entire buffer', but as of writing this, Firefox requires
+    // specifying the size.
+    entry->offset = 0;
+    entry->size = wgpuBufferGetSize(entry->buffer);
   }
 
   wgpuQueueWriteBuffer(ctx->queue, kernel->scalars_buffer, 0,
@@ -556,7 +543,6 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   scalar_entry->buffer = kernel->scalars_buffer;
   scalar_entry->offset = 0;
   scalar_entry->size = kernel_info->scalars_size;
-
 
   WGPUBindGroupDescriptor bg_desc = {
     .layout = kernel->bind_group_layout,

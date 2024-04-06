@@ -141,30 +141,30 @@ async function runTest(device, shaderModule, testInfo) {
 	});
 
 	let bglEntries = [
-		{ binding: kernelInfo.bindSlots[0], visibility: GPUShaderStage.COMPUTE,
+		{ binding: kernelInfo.scalarsBindSlot, visibility: GPUShaderStage.COMPUTE,
 		  buffer: { type: "uniform" } }
 	];
 	let bgEntries = [
-		{ binding: kernelInfo.bindSlots[0], resource: { buffer: scalarBuffer } }
+		{ binding: kernelInfo.scalarsBindSlot, resource: { buffer: scalarBuffer } }
 	];
 	for (let i = 0; i < inputBuffers.length; i++) {
 		bglEntries.push({
-			binding: kernelInfo.bindSlots[i + 1],
+			binding: kernelInfo.bindSlots[i],
 			visibility: GPUShaderStage.COMPUTE,
 			buffer: { type: "storage" }
 		});
 		bgEntries.push({
-			binding: kernelInfo.bindSlots[i + 1],
+			binding: kernelInfo.bindSlots[i],
 			resource: { buffer: inputBuffers[i] }
 		});
 	}
 	bglEntries.push({
-		binding: kernelInfo.bindSlots[inputBuffers.length + 1],
+		binding: kernelInfo.bindSlots[inputBuffers.length],
 		visibility: GPUShaderStage.COMPUTE,
 		buffer: { type: "storage" } }
 	);
 	bgEntries.push({
-		binding: kernelInfo.bindSlots[inputBuffers.length + 1],
+		binding: kernelInfo.bindSlots[inputBuffers.length],
 		resource: { buffer: outputBuffer }
 	});
 	const bgl = device.createBindGroupLayout({

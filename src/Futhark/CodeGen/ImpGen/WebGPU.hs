@@ -9,7 +9,7 @@ import Control.Monad (liftM2, liftM3)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.RWS hiding (get, modify, put)
 import Control.Monad.Trans.State
-import Data.Bifunctor (second)
+import Data.Bifunctor (first, second)
 import Data.Bits qualified as Bits
 import Data.Map qualified as M
 import Data.Maybe (catMaybes)
@@ -27,19 +27,13 @@ import Futhark.Util.Pretty (docText)
 import Language.Futhark.Warnings (Warnings)
 import Data.List (foldl')
 
-data KernelInterface = KernelInterface
-  { kiName :: WGSL.Ident,
-    kiOverrides :: [WGSL.Ident],
-    kiBindSlots :: [Int]
-  }
-
 -- State carried during WebGPU translation.
 data WebGPUS = WebGPUS
   { -- | Accumulated code.
     wsCode :: T.Text,
     wsSizes :: M.Map Name SizeClass,
     -- | Interface of kernels already generated into wsCode.
-    wsKernels :: [KernelInterface],
+    wsKernels :: [(WGSL.Ident, KernelInterface)],
     wsNextBindSlot :: Int
   }
 
@@ -71,14 +65,16 @@ addRenames renames r = r { krNameReplacements = insert (krNameReplacements r) }
 
 data KernelW = KernelW
   { kwOverrides :: [WGSL.Ident],
+    kwScalars :: [WGSL.PrimType],
     kwBindSlots :: [Int]
   }
 
 instance Semigroup KernelW where
-  (KernelW ao as) <> (KernelW bo bs) = KernelW (ao <> bo) (as <> bs)
+  (KernelW ao as ab) <> (KernelW bo bs bb) =
+    KernelW (ao <> bo) (as <> bs) (ab <> bb)
 
 instance Monoid KernelW where
-  mempty = KernelW [] []
+  mempty = KernelW [] [] []
 
 type KernelM = RWST KernelR KernelW () WebGPUM
 
@@ -102,23 +98,33 @@ assignBindSlot :: KernelM Int
 assignBindSlot = do
   wState <- lift get
   let slot = wsNextBindSlot wState
-  tell (KernelW [] [slot])
+  tell (KernelW [] [] [slot])
   lift $ put (wState {wsNextBindSlot = slot + 1})
   pure slot
 
 -- | Write an override declaration to add to the current kernel's interface.
 addOverride :: WGSL.Ident -> KernelM ()
-addOverride ident = tell (KernelW [ident] [])
+addOverride ident = tell (KernelW [ident] [] [])
+
+addScalar :: WGSL.PrimType -> KernelM ()
+addScalar typ = tell (KernelW [] [typ] [])
 
 finishKernel :: KernelR -> KernelW -> WebGPUM ()
-finishKernel (KernelR kernel _) (KernelW overrides slots) = do
+finishKernel (KernelR kernel _) kw = do
   s <- get
+  let (offsets, _align, size) = case WGSL.structLayout (kwScalars kw) of
+                                  Just t -> t
+                                  Nothing -> error "invalid scalars struct"
+  let name = textToIdent $ nameToText $ ImpGPU.kernelName kernel
   let interface = KernelInterface {
-    kiName = textToIdent $ nameToText $ ImpGPU.kernelName kernel,
-    kiOverrides = overrides,
-    kiBindSlots = slots
+    safety = SafetyNone, -- TODO
+    scalarsOffsets = offsets,
+    scalarsSize = size,
+    scalarsBindSlot = head (kwBindSlots kw),
+    memBindSlots = tail (kwBindSlots kw),
+    overrideNames = kwOverrides kw
   }
-  put $ s {wsKernels = wsKernels s <> [interface]}
+  put $ s {wsKernels = wsKernels s <> [(name, interface)]}
 
 entryParams :: [WGSL.Param]
 entryParams =
@@ -210,12 +216,7 @@ kernelsToWebGPU prog =
       prog' =
         Definitions types (Constants ps consts') (Functions funs')
 
-      kernels = M.fromList $ map (\ki -> (nameFromText $ kiName ki, SafetyNone))
-        (wsKernels translation)
-      kernelInfo = M.fromList $
-        map (\(KernelInterface n o s) -> (nameFromText n, (o, s)))
-        (wsKernels translation)
-
+      kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
       webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar16 <> RTS.scalar64
       constants = mempty
       params = mempty
@@ -224,10 +225,9 @@ kernelsToWebGPU prog =
         { webgpuProgram = wsCode translation,
           webgpuPrelude = webgpu_prelude,
           webgpuMacroDefs = constants,
-          webgpuKernelNames = kernels,
+          webgpuKernels = kernels,
           webgpuParams = params,
           webgpuFailures = failures,
-          webgpuKernelInfo = kernelInfo,
           hostDefinitions = prog'
         }
 
@@ -560,10 +560,14 @@ genScalarDecls = do
   bufferName <- mkGlobalIdent "scalars"
   uses <- asks (ImpGPU.kernelUses . krKernel)
 
-  let scalars = [(nameToIdent name, WGSL.Prim (wgslPrimType typ))
+  -- TODO: This probably needs to use the wgslBufferType to ensure
+  -- host-shareable scalar structs. Should then convert in the copy stmt below.
+  let scalars = [(nameToIdent name, WGSL.Prim $ wgslPrimType typ)
                   | ImpGPU.ScalarUse name typ <- uses]
   let structDecl = WGSL.StructDecl $
         WGSL.Struct structName (map (uncurry WGSL.Field) scalars)
+
+  mapM_ addScalar [t | (_, WGSL.Prim t) <- scalars]
 
   slot <- assignBindSlot
   let bufferAttribs = WGSL.bindingAttribs 0 slot

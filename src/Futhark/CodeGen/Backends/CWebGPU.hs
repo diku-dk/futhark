@@ -31,7 +31,7 @@ import NeatInterpolation (untrimming)
 mkBoilerplate ::
   T.Text ->
   [(Name, KernelConstExp)] ->
-  M.Map Name KernelSafety ->
+  M.Map Name KernelInterface ->
   [PrimType] ->
   [FailureMsg] ->
   GC.CompilerM HostOp () ()
@@ -53,13 +53,13 @@ cliOptions =
 
 webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]
-webgpuMemoryType space = error $ "GPU backend does not support '" ++ space ++ "' memory space."
+webgpuMemoryType space = error $ "WebGPU backend does not support '" ++ space ++ "' memory space."
 
 -- | Compile the program to C with calls to WebGPU.
 compileProg :: (MonadFreshNames m) => T.Text -> Prog GPUMem -> m (ImpGen.Warnings, GC.CParts)
 compileProg version prog = do
   ( ws,
-    Program wgsl_code wgsl_prelude macros kernels params failures kernel_infos prog'
+    Program wgsl_code wgsl_prelude macros kernels params failures prog'
     ) <- ImpGen.compileProg prog
   (ws,)
     <$> GC.compileProg

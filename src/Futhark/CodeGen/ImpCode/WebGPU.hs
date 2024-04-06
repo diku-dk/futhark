@@ -7,7 +7,8 @@
 -- The imperative code has been augmented with a 'LaunchKernel'
 -- operation that allows one to execute a WebGPU kernel.
 module Futhark.CodeGen.ImpCode.WebGPU
-  ( Program (..),
+  ( KernelInterface (..),
+    Program (..),
     module Futhark.CodeGen.ImpCode.Kernels,
   )
 where
@@ -17,7 +18,27 @@ import Data.Text qualified as T
 import Futhark.CodeGen.ImpCode.Kernels
 import Futhark.Util.Pretty
 
--- | An program calling WebGPU kernels.
+-- | The interface to a WebGPU/WGSL kernel.
+--
+-- Arguments are assumed to be passed as all scalars first, and then all memory
+-- bindings.
+data KernelInterface = KernelInterface 
+  { safety :: KernelSafety,
+    -- | Offsets of all fields in the corresponding scalars struct.
+    scalarsOffsets :: [Int],
+    -- | Total size in bytes of the scalars uniform buffer.
+    scalarsSize :: Int,
+    -- | Bind slot index for the scalars uniform buffer.
+    scalarsBindSlot :: Int,
+    -- | Bind slot indices for all memory arguments.
+    memBindSlots :: [Int],
+    -- | Names of all the override declarations used by the kernel. Only
+    -- required for the ad-hoc WGSL testing setup, in normal code generation
+    -- these get passed through 'webgpuMacroDefs'.
+    overrideNames :: [T.Text]
+  }
+
+-- | A program calling WebGPU kernels.
 data Program = Program
   { webgpuProgram :: T.Text,
     -- | Must be prepended to the program.
@@ -25,17 +46,11 @@ data Program = Program
     -- | Definitions to be passed as macro definitions to the kernel
     -- compiler.
     webgpuMacroDefs :: [(Name, KernelConstExp)],
-    webgpuKernelNames :: M.Map KernelName KernelSafety,
+    webgpuKernels :: M.Map KernelName KernelInterface,
     -- | Runtime-configurable constants.
     webgpuParams :: ParamMap,
     -- | Assertion failure error messages.
     webgpuFailures :: [FailureMsg],
-    -- | Information about arguments passed to a kernel. List of override
-    -- variable names and the bind slots used by the kernel.
-    --
-    -- Mostly to support the temporary WGSL kernel testing setup, should not be
-    -- required in this form when proper host-side code generation is done.
-    webgpuKernelInfo :: M.Map KernelName ([T.Text], [Int]),
     hostDefinitions :: Definitions HostOp
   }
 
