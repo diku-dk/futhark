@@ -292,8 +292,8 @@ void backend_context_teardown(struct futhark_context *ctx) {
 //   size_t num_bindings; // excluding the scalars binding
 //   uint32_t *binding_indices;
 struct wgpu_kernel_info;
-size_t wgpu_num_kernel_infos;
-wgpu_kernel_info wgpu_kernel_infos[];
+static size_t wgpu_num_kernel_infos;
+static wgpu_kernel_info wgpu_kernel_infos[];
 
 struct wgpu_kernel_info *wgpu_get_kernel_info(const char *name) {
   for (int i = 0; i < wgpu_num_kernel_infos; i++) {

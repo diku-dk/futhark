@@ -28,6 +28,47 @@ import Futhark.MonadFreshNames
 import Language.C.Quote.C qualified as C
 import NeatInterpolation (untrimming)
 
+mkKernelInfos :: M.Map Name KernelInterface -> GC.CompilerM HostOp () ()
+mkKernelInfos kernels = do
+  mapM_ GC.earlyDecl 
+    [C.cunit|typedef struct wgpu_kernel_info {
+               char *name;
+               typename size_t num_scalars;
+               typename size_t scalars_binding;
+               typename size_t scalars_size;
+               typename size_t *scalar_offsets;
+               typename size_t num_bindings;
+               typename uint32_t *binding_indices;
+             } wgpu_kernel_info;
+             static typename size_t wgpu_num_kernel_infos = $exp:num_kernels; |]
+  mapM_ GC.earlyDecl $ concatMap sc_offs_decl (M.toList kernels)
+  mapM_ GC.earlyDecl $ concatMap bind_idxs_decl (M.toList kernels)
+  mapM_ GC.earlyDecl
+    [C.cunit|static struct wgpu_kernel_info wgpu_kernel_infos[]
+               = {$inits:info_inits};|]
+  where
+    num_kernels = M.size kernels
+    sc_offs_decl (n, k) = 
+      let offs = map (\o -> [C.cinit|$int:o|]) (scalarsOffsets k)
+       in [C.cunit|static typename size_t $id:(n <> "_scalar_offsets")[] 
+                     = {$inits:offs};|]
+    bind_idxs_decl (n, k) =
+      let idxs = map (\i -> [C.cinit|$int:i|]) (memBindSlots k)
+       in [C.cunit|static typename uint32_t $id:(n <> "_binding_indices")[]
+                     = {$inits:idxs};|]
+    info_init (n, k) =
+      let num_scalars = length (scalarsOffsets k)
+          num_bindings = length (memBindSlots k)
+       in [C.cinit|{ .name = $string:(nameToString n),
+                     .num_scalars = $int:num_scalars,
+                     .scalars_binding = $int:(scalarsBindSlot k),
+                     .scalars_size = $int:(scalarsSize k),
+                     .scalar_offsets = $id:(n <> "_scalar_offsets"),
+                     .num_bindings = $int:num_bindings,
+                     .binding_indices = $id:(n <> "_binding_indices"),
+                   }|]
+    info_inits = map info_init (M.toList kernels)
+
 mkBoilerplate ::
   T.Text ->
   [(Name, KernelConstExp)] ->
@@ -36,6 +77,7 @@ mkBoilerplate ::
   [FailureMsg] ->
   GC.CompilerM HostOp () ()
 mkBoilerplate wgsl_program macros kernels types failures = do
+  mkKernelInfos kernels
   generateGPUBoilerplate
     wgsl_program
     macros
