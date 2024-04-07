@@ -41,8 +41,9 @@ static void add_event_to_list(struct event_list *l,
   l->num_events++;
 }
 
-static void report_events_in_list(struct event_list *l,
-                                  struct str_builder* sb) {
+static int report_events_in_list(struct event_list *l,
+                                 struct str_builder* sb) {
+  int ret = 0;
   for (int i = 0; i < l->num_events; i++) {
     if (i != 0) {
       str_builder_str(sb, ",");
@@ -52,11 +53,15 @@ static void report_events_in_list(struct event_list *l,
     str_builder_str(sb, ",\"description\":");
     str_builder_json_str(sb, l->events[i].description);
     free(l->events[i].description);
-    l->events[i].f(sb, l->events[i].data);
+    if (l->events[i].f(sb, l->events[i].data) != 0) {
+      ret = 1;
+      break;
+    }
     str_builder(sb, "}");
   }
   event_list_free(l);
   event_list_init(l);
+  return ret;
 }
 
 // End of event_list.h

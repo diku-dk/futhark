@@ -650,9 +650,13 @@ generateCommonLibFuns memreport = do
                  str_builder_str(&builder, "\"memory\":{");
                  $items:(L.intersperse comma memreport)
                  str_builder_str(&builder, "},\"events\":[");
-                 report_events_in_list(&ctx->event_list, &builder);
-                 str_builder_str(&builder, "]}");
-                 return builder.str;
+                 if (report_events_in_list(&ctx->event_list, &builder) != 0) {
+                   free(builder.str);
+                   return NULL;
+                 } else {
+                   str_builder_str(&builder, "]}");
+                   return builder.str;
+                 }
                }|]
     )
 
