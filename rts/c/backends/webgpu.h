@@ -3,14 +3,14 @@
 // Synchronous wrapper around asynchronous WebGPU APIs, based on looping with
 // emscripten_sleep until the respective callback gets called.
 
-struct wgpu_wait_info {
+typedef struct wgpu_wait_info {
   bool released;
   void *result;
-};
+} wgpu_wait_info;
 
 void wgpu_map_sync_callback(WGPUBufferMapAsyncStatus status, void *info_v) {
   wgpu_wait_info *info = (wgpu_wait_info *)info_v;
-  *info->result = status;
+  *((WGPUBufferMapAsyncStatus *) info->result) = status;
   info->released = true;
 }
 
@@ -35,16 +35,16 @@ WGPUBufferMapAsyncStatus wgpu_map_buffer_sync(WGPUBuffer buffer,
   return status;
 }
 
-struct wgpu_request_adapter_result {
+typedef struct wgpu_request_adapter_result {
   WGPURequestAdapterStatus status;
   WGPUAdapter adapter;
-  char *message;
-};
+  const char *message;
+} wgpu_request_adapter_result;
 
 void wgpu_request_adapter_callback(WGPURequestAdapterStatus status,
                                    WGPUAdapter adapter,
                                    const char *message, void *userdata) {
-  wgpu_wait_info *info = (wgpu_wait_info *)info_v;
+  wgpu_wait_info *info = (wgpu_wait_info *)userdata;
   wgpu_request_adapter_result *result
     = (wgpu_request_adapter_result *)info->result;
   result->status = status;
@@ -62,7 +62,7 @@ wgpu_request_adapter_result wgpu_request_adapter_sync(
   };
 
   wgpuInstanceRequestAdapter(instance, options, wgpu_request_adapter_callback,
-                             (void *)&info;
+                             (void *)&info);
 
   while (!info.released) {
     emscripten_sleep(0);
@@ -71,16 +71,16 @@ wgpu_request_adapter_result wgpu_request_adapter_sync(
   return result;
 }
 
-struct wgpu_request_device_result {
+typedef struct wgpu_request_device_result {
   WGPURequestDeviceStatus status;
   WGPUDevice device;
-  char *message;
-};
+  const char *message;
+} wgpu_request_device_result;
 
 void wgpu_request_device_callback(WGPURequestDeviceStatus status,
                                    WGPUDevice device,
                                    const char *message, void *userdata) {
-  wgpu_wait_info *info = (wgpu_wait_info *)info_v;
+  wgpu_wait_info *info = (wgpu_wait_info *)userdata;
   wgpu_request_device_result *result
     = (wgpu_request_device_result *)info->result;
   result->status = status;
@@ -98,7 +98,7 @@ wgpu_request_device_result wgpu_request_device_sync(
   };
 
   wgpuAdapterRequestDevice(adapter, descriptor, wgpu_request_device_callback,
-                           (void *)&info;
+                           (void *)&info);
 
   while (!info.released) {
     emscripten_sleep(0);
@@ -254,9 +254,9 @@ int backend_context_setup(struct futhark_context *ctx) {
   int64_t *macro_vals;
   ctx->num_overrides = gpu_macros(ctx, &ctx->override_names,
                                   &macro_vals);
-  ctx->override_vals = malloc(ctx->num_overrides * sizeof(double));
+  ctx->override_values = malloc(ctx->num_overrides * sizeof(double));
   for (int i = 0; i < ctx->num_overrides; i++) {
-    ctx->override_vals[i] = (double) macro_vals[i];
+    ctx->override_values[i] = (double) macro_vals[i];
   }
   free(macro_vals);
 
@@ -331,15 +331,15 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   WGPUBindGroupLayoutEntry *bgl_entries
     = calloc(1 + kernel_info->num_bindings, sizeof(WGPUBindGroupLayoutEntry));
 
-  WGPUBindGroupEntry scalar_entry = bgl_entries;
+  WGPUBindGroupLayoutEntry *scalar_entry = bgl_entries;
   scalar_entry->binding = kernel_info->scalars_binding;
-  scalar_entry->visibility = WGPUShaderStage_COMPUTE;
+  scalar_entry->visibility = WGPUShaderStage_Compute;
   scalar_entry->buffer = { .type = WGPUBufferBindingType_Uniform };
 
   for (int i = 0; i < kernel_info->num_bindings; i++) {
     WGPUBindGroupLayoutEntry *entry = &bgl_entries[1 + i];
     entry->binding = kernel_info->binding_indices[i];
-    entry->visibility = WGPUShaderStage_COMPUTE;
+    entry->visibility = WGPUShaderStage_Compute;
     entry->buffer = { .type = WGPUBufferBindingType_Storage };
   }
   WGPUBindGroupLayoutDescriptor bgl_desc = {
@@ -430,7 +430,7 @@ static int gpu_scalar_from_device(struct futhark_context *ctx,
                                                      0, size);
   memcpy(dst, mapped, size);
 
-  wgpuBufferUnmap(readback);
+  wgpuBufferUnmap(ctx->scalar_readback_buffer);
   return FUTHARK_SUCCESS;
 }
 
@@ -443,7 +443,7 @@ static int gpu_memcpy(struct futhark_context *ctx,
       src, src_offset, dst, dst_offset, nbytes);
   WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, NULL);
   wgpuQueueSubmit(ctx->queue, 1, &commandBuffer);
-  return FUTHARK_SUCCESS:
+  return FUTHARK_SUCCESS;
 }
 
 static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
@@ -457,7 +457,7 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   // no other good option to use here), so we ignore the sync parameter.
   (void)sync;
 
-  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src, src_offset, nbytes);
+  wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src + src_offset, nbytes);
 }
 
 static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
@@ -475,7 +475,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   
   WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx->device, NULL);
   wgpuCommandEncoderCopyBufferToBuffer(encoder,
-    src, offset,
+    src, src_offset,
     readback, 0,
     nbytes);
 
@@ -491,7 +491,7 @@ static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,
   }
 
   const void *mapped = wgpuBufferGetConstMappedRange(readback, 0, nbytes);
-  memcpy(dst, mapped, nbytes);
+  memcpy(dst + dst_offset, mapped, nbytes);
 
   wgpuBufferUnmap(readback);
   wgpuBufferDestroy(readback);
@@ -527,7 +527,7 @@ static int gpu_launch_kernel(struct futhark_context* ctx,
   for (int i = 0; i < kernel_info->num_bindings; i++) {
     WGPUBindGroupEntry *entry = &bg_entries[1 + i];
     entry->binding = kernel_info->binding_indices[i];
-    entry->buffer = (gpu_mem) *args[kernel_info->num_scalars + i];
+    entry->buffer = (gpu_mem) *((gpu_mem *)args[kernel_info->num_scalars + i]);
     // In theory setting (offset, size) to (0, 0) should also work and mean
     // 'the entire buffer', but as of writing this, Firefox requires
     // specifying the size.

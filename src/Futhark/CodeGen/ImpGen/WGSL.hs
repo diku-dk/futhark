@@ -31,6 +31,7 @@ type Ident = T.Text
 data PrimType = Bool | Int32 | UInt32 | Float16 | Float32
               | Vec2 PrimType | Vec3 PrimType | Vec4 PrimType
               | Atomic PrimType
+  deriving (Show)
 
 -- | AlignOf and SizeOf of host-shareable primitive types.
 --
@@ -56,7 +57,7 @@ structLayout fields = do
   fieldLayouts <- mapM hsLayout fields
   let (fieldAligns, fieldSizes) = unzip fieldLayouts
   let structAlign = maximum fieldAligns
-  let fieldOffsets = init $ scanl
+  let fieldOffsets = scanl
         (\prev_off (al, prev_sz) -> roundUp al (prev_off + prev_sz))
         0 (zip (tail fieldAligns) fieldSizes)
   let structSize = roundUp structAlign (last fieldOffsets + last fieldSizes)

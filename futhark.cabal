@@ -178,6 +178,7 @@ library
       Futhark.CLI.Script
       Futhark.CLI.Test
       Futhark.CLI.WASM
+      Futhark.CLI.WebGPU
       Futhark.CodeGen.Backends.CCUDA
       Futhark.CodeGen.Backends.COpenCL
       Futhark.CodeGen.Backends.CWebGPU
