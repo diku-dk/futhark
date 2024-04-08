@@ -59,12 +59,16 @@ topLevelOps =
       opsCopyCompiler = parallelCopy
     }
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> MulticoreGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, _space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -113,8 +117,8 @@ withAcc pat inputs lam = do
           locksForInputs atomics inputs'
 
 compileMCExp :: ExpCompiler MCMem HostEnv Imp.Multicore
-compileMCExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileMCExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileMCExp pat (WithAcc inputs lam) =
   withAcc pat inputs lam
 compileMCExp dest e =

@@ -130,12 +130,16 @@ threadAlloc (Pat [mem]) _ _ =
 threadAlloc dest _ _ =
   error $ "Invalid target for in-kernel allocation: " ++ show dest
 
-updateAcc :: VName -> [SubExp] -> [SubExp] -> InKernelGen ()
-updateAcc acc is vs = sComment "UpdateAcc" $ do
+updateAcc :: Safety -> VName -> [SubExp] -> [SubExp] -> InKernelGen ()
+updateAcc safety acc is vs = sComment "UpdateAcc" $ do
   -- See the ImpGen implementation of UpdateAcc for general notes.
   let is' = map pe64 is
   (c, space, arrs, dims, op) <- lookupAcc acc is'
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         forM_ (zip arrs vs) $ \(arr, v) -> copyDWIMFix arr is' v []
@@ -176,8 +180,8 @@ compileThreadExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileThreadExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileThreadExp _ (BasicOp (UpdateAcc acc is vs)) =
-  updateAcc acc is vs
+compileThreadExp _ (BasicOp (UpdateAcc safety acc is vs)) =
+  updateAcc safety acc is vs
 compileThreadExp dest e =
   defCompileExp dest e
 

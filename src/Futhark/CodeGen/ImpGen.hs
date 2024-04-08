@@ -972,7 +972,7 @@ defCompileBasicOp _ Rearrange {} =
   pure ()
 defCompileBasicOp _ Reshape {} =
   pure ()
-defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
+defCompileBasicOp _ (UpdateAcc safety acc is vs) = sComment "UpdateAcc" $ do
   -- We are abusing the comment mechanism to wrap the operator in
   -- braces when we end up generating code.  This is necessary because
   -- we might otherwise end up declaring lambda parameters (if any)
@@ -985,7 +985,11 @@ defCompileBasicOp _ (UpdateAcc acc is vs) = sComment "UpdateAcc" $ do
   -- index parameters.
   (_, _, arrs, dims, op) <- lookupAcc acc is'
 
-  sWhen (inBounds (Slice (map DimFix is')) dims) $
+  let boundsCheck =
+        case safety of
+          Safe -> sWhen (inBounds (Slice (map DimFix is')) dims)
+          _ -> id
+  boundsCheck $
     case op of
       Nothing ->
         -- Scatter-like.
