@@ -247,8 +247,7 @@ forward (E.AppExp (E.Apply f args _) _)
       View it_body body'' <- forward body'
       let it = combineIt (Forall i (Iota sz)) it_body
       normalise $ View it body''
-  | Just fname <- getFun f,
-    "scan" == fname, -- XXX support only builtin ops for now
+  | Just "scan" <- getFun f,
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       sz <- getSize xs'
       i <- newNameFromString "i"
@@ -266,8 +265,7 @@ forward (E.AppExp (E.Apply f args _) _)
       let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
       let it = combineIt (Forall i (Iota sz)) it_xs
       normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
-  | Just fname <- getFun f,
-    "iota" == fname,
+  | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       view <- forward n
       i <- newNameFromString "i"
@@ -276,8 +274,7 @@ forward (E.AppExp (E.Apply f args _) _)
               normalise $ View (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
-  | Just fname <- getFun f,
-    "replicate" == fname,
+  | Just "replicate" <- getFun f,
     [n, x] <- getArgs args = do
       n' <- forward n
       x' <- forward x
@@ -287,8 +284,7 @@ forward (E.AppExp (E.Apply f args _) _)
          View Empty cases) -> -- XXX support only 1D arrays for now.
               normalise $ View (Forall i (Iota m)) cases
         _ -> undefined -- TODO See iota comment.
-  | Just fname <- getFun f,
-    fname == "not",
+  | Just "not" <- getFun f,
     [arg] <- getArgs args = do
       View it body <- forward arg
       normalise $ View it (cmapValues (toNNF . Not) body)
