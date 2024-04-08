@@ -378,8 +378,10 @@ data BasicOp
     -- must be a permutation of @[0,n-1]@, where @n@ is the
     -- number of dimensions in the input array.
     Rearrange [Int] VName
-  | -- | Update an accumulator at the given index with the given value.
-    -- Consumes the accumulator and produces a new one.
+  | -- | Update an accumulator at the given index with the given
+    -- value. Consumes the accumulator and produces a new one. If
+    -- 'Safe', perform a run-time bounds check and ignore the write if
+    -- out of bounds (like @Scatter@).
     UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
