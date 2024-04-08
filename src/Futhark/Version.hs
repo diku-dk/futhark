@@ -29,7 +29,11 @@ version = Paths_futhark.version
 -- | The version of Futhark that we are using, in human-readable form.
 versionString :: T.Text
 versionString =
-  T.pack (showVersion version) <> unreleased <> gitversion $$tGitInfoCwdTry <> ghcversion
+  T.pack (showVersion version)
+    <> unreleased
+    <> "\n"
+    <> gitversion $$tGitInfoCwdTry
+    <> ghcversion
   where
     unreleased =
       if last (versionBranch version) == 0
@@ -38,11 +42,10 @@ versionString =
     gitversion (Left _) =
       case commitIdFromFile of
         Nothing -> ""
-        Just commit -> "\ngit: " <> T.pack commit
+        Just commit -> "git: " <> T.pack commit
     gitversion (Right gi) =
       mconcat
-        [ "\n",
-          "git: ",
+        [ "git: ",
           branch,
           T.pack (take 7 $ giHash gi),
           " (",
