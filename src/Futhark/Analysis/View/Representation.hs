@@ -17,6 +17,8 @@
 --           let begs   = scan (+) 0 shp --- prepend 0 here; prepend 0 to shp
 --       - etc
 -- Next: mkFlagArray
+--   [ ] Extend representation to allow Union iterator
+--   [ ] Support necessary scatter rule
 -- Next: partition2L
 --       - empty segments may be problematic in lstL;
 --         maybe add outer condition to index funciton representation?

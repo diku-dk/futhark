@@ -265,6 +265,12 @@ forward (E.AppExp (E.Apply f args _) _)
       let e2 = [(Not base_case :&& cx, Recurrence `op` vx) | (cx, vx) <- casesToList xs]
       let it = combineIt (Forall i (Iota sz)) it_xs
       normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
+  | Just "scatter" <- getFun f,
+    [dest_arg, inds_arg, vals_arg] <- getArgs args = do
+      dest <- forward dest_arg
+      inds <- forward inds_arg
+      vals <- forward vals_arg
+      undefined
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do
       view <- forward n
