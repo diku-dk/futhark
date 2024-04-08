@@ -1,3 +1,4 @@
+-- | @futhark script@
 module Futhark.CLI.Script (main) where
 
 import Control.Monad.Except
