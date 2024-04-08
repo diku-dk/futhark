@@ -281,9 +281,9 @@ compileBlockExp (Pat [pe]) (BasicOp (Opaque _ se)) =
 compileBlockExp (Pat [dest]) (BasicOp (ArrayLit es _)) =
   forM_ (zip [0 ..] es) $ \(i, e) ->
     copyDWIMFix (patElemName dest) [fromIntegral (i :: Int64)] e []
-compileBlockExp _ (BasicOp (UpdateAcc acc is vs)) = do
+compileBlockExp _ (BasicOp (UpdateAcc safety acc is vs)) = do
   ltid <- kernelLocalThreadId . kernelConstants <$> askEnv
-  sWhen (ltid .==. 0) $ updateAcc acc is vs
+  sWhen (ltid .==. 0) $ updateAcc safety acc is vs
   sOp $ Imp.Barrier Imp.FenceLocal
 compileBlockExp (Pat [dest]) (BasicOp (Replicate ds se)) | ds /= mempty = do
   flat <- newVName "rep_flat"

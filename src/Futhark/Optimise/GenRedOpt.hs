@@ -105,7 +105,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
     -- some `code1`, followed by one accumulation, followed by some `code2`
     -- UpdateAcc VName [SubExp] [SubExp]
     (code1, Just accum_stmt, code2) <- matchCodeAccumCode kstms,
-    Let pat_accum _aux_acc (BasicOp (UpdateAcc acc_nm acc_inds acc_vals)) <- accum_stmt,
+    Let pat_accum _aux_acc (BasicOp (UpdateAcc safety acc_nm acc_inds acc_vals)) <- accum_stmt,
     [pat_acc_nm] <- patNames pat_accum,
     -- check that the `acc_inds` are invariant to at least one
     -- parallel kernel dimensions, and return the innermost such one:
@@ -153,7 +153,7 @@ genRed2Tile2d env kerstm@(Let pat_ker aux (Op (SegOp (SegMap seg_thd seg_space k
         let op_exp = Op (OtherOp (Screma inv_dim_len [iota] (ScremaForm [] [red] map_lam)))
         res_redmap <- letTupExp "res_mapred" op_exp
         letSubExp (baseString pat_acc_nm ++ "_big_update") $
-          BasicOp (UpdateAcc acc_nm acc_inds $ map Var res_redmap)
+          BasicOp (UpdateAcc safety acc_nm acc_inds $ map Var res_redmap)
 
       -- 1.3. build the kernel expression and rename it!
       gid_flat_1 <- newVName "gid_flat"

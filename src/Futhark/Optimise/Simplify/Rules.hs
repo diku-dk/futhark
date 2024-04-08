@@ -210,7 +210,7 @@ elimUpdates get_rid_of = flip runState mempty . onBody
       stms' <- onStms $ bodyStms body
       pure body {bodyStms = stms'}
     onStms = traverse onStm
-    onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc acc _ _)))
+    onStm (Let pat@(Pat [PatElem _ dec]) aux (BasicOp (UpdateAcc _ acc _ _)))
       | Acc c _ _ _ <- typeOf dec,
         c `elem` get_rid_of = do
           modify (insert c)

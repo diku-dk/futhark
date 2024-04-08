@@ -933,7 +933,7 @@ checkBasicOp (Assert e (ErrorMsg parts) _) = do
   where
     checkPart ErrorString {} = pure ()
     checkPart (ErrorVal t x) = require [Prim t] x
-checkBasicOp (UpdateAcc acc is ses) = do
+checkBasicOp (UpdateAcc _ acc is ses) = do
   (shape, ts) <- checkAccIdent acc
 
   unless (length ses == length ts) . bad . TypeError $

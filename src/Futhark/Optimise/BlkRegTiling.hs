@@ -436,7 +436,7 @@ mmBlkRegTilingAcc env (Let pat aux (Op (SegOp (SegMap SegThread {} seg_space ts 
       foldl getAccumStm False $ reverse $ stmsToList acc_code
       where
         getAccumStm True _ = True
-        getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc _acc_nm _ind vals)))
+        getAccumStm False (Let (Pat [pat_el]) _aux (BasicOp (UpdateAcc Safe _acc_nm _ind vals)))
           | [v] <- vals,
             patElemName pat_el == res_nm =
               v == Var redomap_orig_res

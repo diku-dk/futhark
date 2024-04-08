@@ -394,7 +394,7 @@ updateAdj v d = do
           ~[v_adj'] <-
             tabNest (length dims) [d, v_adj] $ \is [d', v_adj'] ->
               letTupExp "acc" . BasicOp $
-                UpdateAcc v_adj' (map Var is) [Var d']
+                UpdateAcc Safe v_adj' (map Var is) [Var d']
           insAdj v v_adj'
         _ -> do
           v_adj' <- letExp (baseString v <> "_adj") =<< addExp v_adj d
@@ -417,7 +417,7 @@ updateAdjSlice slice v d = do
               fixSlice (fmap pe64 slice) $
                 map le64 is
           letTupExp (baseString v_adj') . BasicOp $
-            UpdateAcc v_adj' slice' [Var d']
+            UpdateAcc Safe v_adj' slice' [Var d']
       pure v_adj'
     _ -> do
       v_adjslice <-
@@ -458,7 +458,7 @@ updateAdjIndex v (check, i) se = do
                 ~[v_adj'] <-
                   tabNest (length dims) [se_v, v_adj] $ \is [se_v', v_adj'] ->
                     letTupExp "acc" . BasicOp $
-                      UpdateAcc v_adj' (i : map Var is) [Var se_v']
+                      UpdateAcc Safe v_adj' (i : map Var is) [Var se_v']
                 pure v_adj'
           _ -> do
             let stms s = do
