@@ -360,13 +360,25 @@ substituteNames substitutions x = do
         { mapOnExp = onExp subst }
     onExp subst e@(Var x') =
       case M.lookup x' subst of
-        -- Just x'' -> trace ("hihi substituting " <> prettyString x' <> " for " <> prettyString x'') $ pure x''
         Just x'' -> pure x''
         Nothing -> pure e
     onExp subst e = astMap (substituter subst) e
 
 substituteName :: ASTMappable x => VName -> Exp -> x -> ViewM x
 substituteName vn x = substituteNames (M.singleton vn x)
+
+lel :: ASTMappable x => M.Map VName Exp -> x -> x
+lel substitutions x = do
+  runIdentity $ astMap (substituter substitutions) x
+  where
+    substituter subst =
+      ASTMapper
+        { mapOnExp = onExp subst }
+    onExp subst e@(Var x') =
+      case M.lookup x' subst of
+        Just x'' -> pure x''
+        Nothing -> pure e
+    onExp subst e = astMap (substituter subst) e
 
 -- Convert expression to Negation Normal Form.
 toNNF :: Exp -> Exp

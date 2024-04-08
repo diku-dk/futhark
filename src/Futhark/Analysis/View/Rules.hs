@@ -8,6 +8,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
 import Futhark.Util.Pretty
+import qualified Data.Map as M
 
 normalise :: View -> ViewM View
 normalise view =
@@ -43,15 +44,49 @@ normalise view =
     normExp x@(SoP _) = do
       x' <- astMap m x
       case x' of
-        SoP sop -> pure . SoP . normaliseNegation $ sop
+        SoP sop -> pure . SoP . normaliseNegation . mergeSumRanges $ sop
         _ -> pure x'
       where
-       -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
-       -- or the only terms.
-       normaliseNegation sop -- 1 + -1*[[c]] => [[not c]]
-        | [([], 1), ([Indicator c], -1)] <- getSoP sop =
-          SoP.sym2SoP $ Indicator (Not c)
-       normaliseNegation sop = sop
+        -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
+        -- or the only terms.
+        normaliseNegation sop -- 1 + -1*[[c]] => [[not c]]
+          | [([], 1), ([Indicator c], -1)] <- getSoP sop =
+            SoP.sym2SoP $ Indicator (Not c)
+        normaliseNegation sop = sop
+
+        mergeSumRanges sop =
+          let sop' = getSoP sop
+          in SoP.sopFromList $ foldl f [] sop'
+
+        -- Apply merge at most once.
+        f [] term = [term]
+        f (t:ts) term
+          | Just t' <- merge t term =
+            t':ts
+        f (t:ts) term = t : f ts term
+
+        -- Merge
+        --   sum_{j=lb}^ub e[j] + e[lb-1] ==> sum_{j=lb-1}^ub e[j].
+        -- Specifically to clean up the Recursive Sum rule:
+        --   sum_{j=1}^n e[j] + e[0] ==> sum_{j=0}^n e[j].
+        merge ([Sum (Var j) (SoP lb) ub e1], 1) ([e2], 1) =
+          -- | lb SoP..-. SoP.int2SoP 1 == lbm1,
+          --   e1 == e2 = -- TODO replace j in e1 with lb - 1 for matching
+            let lbm1 = SoP $ lb SoP..-. SoP.int2SoP 1
+            in  if lel (M.singleton j lbm1) e1 == e2
+                then Just ([Sum (Var j) lbm1 ub e1], 1)
+                else Nothing
+        -- Add two sums.
+        -- merge ([Sum i lb1 ub1 e1], 1) ([Sum _j lb2 ub2 e2], 1)
+        --   | lb2 == ub1,
+        --     e1 == e2 = -- TODO replace j in e2 with i for matching
+        --       Just ([Sum i lb1 ub2 e1], 1)
+        merge a b =
+          trace ("🪲 merge on: " <> prettyString a <> " and " <> prettyString b) $
+            trace ("    " <> show a) $
+              trace ("    " <> show b)
+                Nothing
+        -- merge _ _ = Nothing
     normExp v = astMap m v
 
 simplify :: View -> ViewM View
@@ -101,12 +136,12 @@ simplifyRule3 v = pure v
 --                           SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6200)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]})) (Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6200),1)]},1)]})))),1)]},1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6202)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (Var (VName (Name "i") 6204)) (Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "j") 6202))))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]}))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},0)]})))),1)]},1)]}))
 --                         ])}
 
-mergeSums :: View -> ViewM View
-mergeSums (View _it (Cases cases))
-  | cases is a SoP =
-    -- merge sums in SoP if compatible; just do simple O(n^2) matching
-    undefined
-mergeSums view = pure view
+-- mergeSums :: View -> ViewM View
+-- mergeSums (View _it (Cases cases))
+--   | cases is a SoP =
+--     -- merge sums in SoP if compatible; just do simple O(n^2) matching
+--     undefined
+-- mergeSums view = pure view
 
 
 -- XXX Currently changing recursive sum rule to be indifferent to the
