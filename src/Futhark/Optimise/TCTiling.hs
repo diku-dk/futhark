@@ -65,11 +65,6 @@ reductionLoopBody tc_env qq0 arrs_in = do
       acc_p <- newParam "acc_p" $ Acc (paramName cert_p) shape [t] NoUniqueness
       let withacc_inputs = [(shape, [shr_arr], Nothing)]
 
-      -- We need the WithAcc to exist in thread scope. The simplest way to
-      -- accomplish this that I can think of is to place the copy in a
-      -- thread-level SegMap.
-      let s = baseString shr_arr ++ "_shr"
-
       -- The copy is essentially an LMAD copy. The strategy is to flatten the
       -- tblock and then unflatten it to fit the dimensions of the array in
       -- shared memory, using a virtualization loop in case the tile is larger
@@ -448,18 +443,18 @@ makeTCKernelParams ::
   [SubExp] ->
   SubExp ->
   Builder GPU TCKernelParams
-makeTCKernelParams gtids inner_dims_se common_dim = do
+makeTCKernelParams gtids inner_dims_se common_dim_se = do
   -- various names.
-  tile_common_dim_vn <- newVName "T_common_dim"
-  tile_T_vns <- newPrefixedVNames "T_" inner_dim_names
-  tile_R_vns <- newPrefixedVNames "R_" inner_dim_names
-  tbids <- newPrefixedVNames "tbid_" inner_dim_names
+  tile_common_dim_vn <- newVName $ "T_" ++ common_dim_name
+  tile_T_vns <- mapM (newVName . ("T_" ++)) inner_dim_names
+  tile_R_vns <- mapM (newVName . ("R_" ++)) inner_dim_names
+  tbids <- mapM (newVName . ("tbid_" ++)) inner_dim_names
   tbid_flat <- newVName "tbid_flat"
 
   -- tile sizes.
-  tile_seq <- getTileSE SizeTile tile_common_dim_vn
-  tiles_T <- mapM (getTileSE SizeTile) tile_T_vns
-  tiles_R <- mapM (getTileSE SizeRegTile) tile_R_vns
+  tile_seq <- letTileSE SizeTile tile_common_dim_vn
+  tiles_T <- mapM (letTileSE SizeTile) tile_T_vns
+  tiles_R <- mapM (letTileSE SizeRegTile) tile_R_vns
   tiles_TR <-
     zipWithM (\t r -> toExp $ pe64 t * pe64 r) tiles_T tiles_R
       >>= zipWithM letSubExp (map ("TR_" ++) inner_dim_names)
@@ -477,7 +472,7 @@ makeTCKernelParams gtids inner_dims_se common_dim = do
     TCKernelParams
       gtids
       inner_dims_se
-      common_dim
+      common_dim_se
       inner_dim_names
       tiles_T
       tiles_R
@@ -493,13 +488,12 @@ makeTCKernelParams gtids inner_dims_se common_dim = do
     inner_dim_names
       | Just name_strs <- mapM getNameStrFor inner_dims_se = name_strs
       | otherwise = map show $ indices inner_dims_se
-      where
-        getNameStrFor (Var v) = Just $ filter isAscii $ baseString v
-        getNameStrFor _ = Nothing
+    common_dim_name = maybe "seq" id $ getNameStrFor common_dim_se
 
-    newPrefixedVNames s = mapM (newVName . (s ++))
+    getNameStrFor (Var v) = Just $ filter isAscii $ baseString v
+    getNameStrFor _ = Nothing
 
-    getTileSE tile_type v =
+    letTileSE tile_type v =
       letSubExp (baseString v) $ Op $ SizeOp $ GetSize (baseName v) tile_type
 
 makeTCEnv ::
