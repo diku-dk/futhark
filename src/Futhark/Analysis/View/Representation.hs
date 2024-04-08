@@ -90,17 +90,12 @@ data Exp =
     Recurrence -- self-reference y[i-1]
   deriving (Show, Eq, Ord)
 
--- Match (ExpBase f vn) (NE.NonEmpty (CaseBase f vn)) SrcLoc
--- | A case in a match expression.
--- data CaseBase f vn = CasePat (PatBase f vn StructType) (ExpBase f vn) SrcLoc
-
 newtype Domain = Iota Exp -- [0, ..., n-1]
             -- | Union ...
   deriving (Show, Eq, Ord)
 
 data Iterator = Forall VName Domain
-              | Empty    -- Promoted variable. -- XXX Is this nicer than Iota 0?
-              -- | Union VName Iterator
+              | Empty    -- Promoted variable.
   deriving (Show, Ord)
 
 iteratorName :: Iterator -> Maybe VName
@@ -111,21 +106,6 @@ instance Eq Iterator where
   (Forall _ dom_i) == (Forall _ dom_j) = dom_i == dom_j
   _ == _ = False -- TODO
 
--- Case statement evaluated from left to right to ensure no two
--- cases overlap. Must additionally partition the domain, so the
--- last element should be a tautology. The plan is to enforce this
--- by construction. Alternatively, we could ensure this by defining:
---
---   data Case p e = Case
---                     [(p, e)] -- [predicate => value]
---                     e        -- otherwise
---     deriving (Show, Eq, Ord)
---
--- but this makes it more convoluted to merge the "otherwise" cases
--- when substituting views into views.
--- newtype Cases a = Cases (NE.NonEmpty (a, a)) -- [predicate => value]
---   deriving (Show, Eq, Ord)
-
 newtype Cases a = Cases (NE.NonEmpty (a, a))
   deriving (Show, Eq)
 
@@ -133,7 +113,6 @@ newtype Cases a = Cases (NE.NonEmpty (a, a))
 data View = View
   { iterator :: Iterator,
     value :: Cases Exp
-    -- shape :: Maybe Shape -- Might make sense to use this.
   }
   deriving (Show, Eq)
 
@@ -178,8 +157,6 @@ insertView :: VName -> View -> ViewM ()
 insertView x v =
   modify $ \env -> env {views = M.insert x v $ views env}
 
--- Copy code from Futhark.Traversals
--- (Copying Robert's code)
 newtype ASTMapper m = ASTMapper
   { mapOnExp :: Exp -> m Exp }
 
@@ -194,15 +171,9 @@ instance ASTMappable View where
 instance ASTMappable (Cases Exp) where
   astMap m (Cases cases) = Cases <$> traverse (astMap m) cases
 
--- instance ASTMappable [Exp] where
---   astMap m = map (mapOnExp m)
-
 instance ASTMappable (Exp, Exp) where
   astMap m (p, e) = (,) <$> mapOnExp m p <*> mapOnExp m e
 
--- TODO shouldn't many of these astMaps should be mapOnExp? if I want
--- to be able to target them using mapOnExp (usually define
--- mapOnExp catch all to be `astMap m`)
 instance ASTMappable Exp where
   astMap _ Recurrence = pure Recurrence
   astMap m (Var x) = mapOnExp m $ Var x
@@ -275,22 +246,6 @@ x ~*~ y = flatten $ SoP $ expToSoP x SoP..*. expToSoP y
 -- (~==~) :: Exp -> Exp -> Exp
 -- x ~==~ y = flatten $ SoP (expToSoP x) :== SoP (expToSoP y)
 
--- SoP foreshadowing:
-
--- instance (ASTMappable a) => Substitute VName Exp a where
---   substitute subst = idMap m
---     where
---       m =
---         ASTMapper
---           { mapOnExp =
---               \e ->
---                 case e of
---                   (Var x)
---                     | Just x' <- M.lookup x subst -> pure x'
---                     | otherwise -> pure $ Var x
---                   _ -> astMap m e
---           }
-
 prettyName :: VName -> Doc a
 prettyName (VName vn i) = pretty vn <> pretty (mapMaybe subscript (show i))
   where
@@ -337,12 +292,6 @@ instance Pretty a => Pretty (Cases a) where
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
-
--- instance Pretty a => Pretty (Cases a) where
---   pretty (Cases cases) = -- stack (map prettyCase (NE.toList cases))
---     line <> indent 4 (stack (map prettyCase (NE.toList cases)))
---     where
---       prettyCase (p, e) = "|" <+> pretty p <+> "=>" <+> pretty e
 
 instance Pretty View where
   pretty (View (Forall i dom) e) =
