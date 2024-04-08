@@ -152,7 +152,7 @@ forward e@(E.AppExp (E.Index xs slice _) _)
           cs <- sequence $
                   [seq' ((cx :&&) <$> substituteName j' vx cy, substituteName j' vx vy)
                       | (cx, vx) <- casesToList e_i, (cy, vy) <- casesToList xs']
-          normalise $ View (combineIt i j) (Cases . NE.fromList $ cs)
+          normalise $ View (idxCombineIt i j) (Cases . NE.fromList $ cs)
           where
             seq' (x, y) = do
               x' <- x
@@ -161,12 +161,18 @@ forward e@(E.AppExp (E.Index xs slice _) _)
         _ -> do
           -- TODO this is duplicated below.
           View j xs' <- forward xs
-          normalise $ View (combineIt i j) (combineCases Idx xs' e_i)
+          normalise $ View (idxCombineIt i j) (combineCases Idx xs' e_i)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
     -- traceM $ "🪲 Index2 " <> prettyString e
     View i e_i <- forward idx
     View it_xs xs' <- forward xs
-    normalise $ View (combineIt i it_xs) (combineCases Idx xs' e_i)
+    normalise $ View (idxCombineIt i it_xs) (combineCases Idx xs' e_i)
+  where
+    -- Special version of combineIt for substituting into
+    -- indexing statements; if the destination is a scalar,
+    -- then indexing statement reduces the source iterator to Empty.
+    idxCombineIt Empty _ = Empty
+    idxCombineIt a b = combineIt a b
 -- Nodes.
 forward (E.ArrayLit es _ _) = do
   es' <- mapM forward es
@@ -195,10 +201,6 @@ forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
       View it_y y <- forward e_y
       let it = combineIt it_x it_y
       let doOp bopExp = normalise $ View it (combineCases bopExp x y)
-      -- traceM $ "binop bop " <> show bop
-      -- traceM $ "binop x " <> prettyString x
-      -- traceM $ "binop y " <> prettyString y
-      -- traceM $ "binop lol " <> prettyString (doOp (:||))
       case bop of
         E.Plus -> doOp (~+~)
         E.Times -> doOp (~*~)
@@ -281,6 +283,17 @@ forward (E.AppExp (E.Apply f args _) _)
               normalise $ View (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
+  -- | Just fname <- getFun f,
+  --   "replicate" == fname,
+  --   [n, x] <- getArgs args = do
+  --     n' <- forward n
+  --     x' <- forward x
+  --     i <- newNameFromString "i"
+  --     case (n', x') of
+  --       View Empty (Cases ((Bool True, m) NE.:| [])) ->
+  --             normalise $ View (Forall i (Iota m)) (toCases $ Var i)
+  --       _ -> undefined -- TODO We've no way to express this yet.
+  --                      -- Have talked with Cosmin about an "outer if" before.
   | Just fname <- getFun f,
     fname == "not",
     [arg] <- getArgs args = do
