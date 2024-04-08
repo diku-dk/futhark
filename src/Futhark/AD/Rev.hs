@@ -212,7 +212,7 @@ diffBasicOp pat aux e m =
           updateAdj arr
             =<< letExp "update_src_adj" (BasicOp $ Update safety pat_adj slice zeroes)
     -- See Note [Adjoints of accumulators]
-    UpdateAcc _ is vs -> do
+    UpdateAcc _ _ is vs -> do
       addStm $ Let pat aux $ BasicOp e
       m
       pat_adjs <- mapM lookupAdjVal (patNames pat)

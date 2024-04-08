@@ -117,7 +117,7 @@ basicOpType (Manifest _ v) =
   pure <$> lookupType v
 basicOpType Assert {} =
   pure [Prim Unit]
-basicOpType (UpdateAcc v _ _) =
+basicOpType (UpdateAcc _ v _ _) =
   pure <$> lookupType v
 
 -- | The type of an expression.

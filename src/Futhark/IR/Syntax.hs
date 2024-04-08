@@ -380,7 +380,7 @@ data BasicOp
     Rearrange [Int] VName
   | -- | Update an accumulator at the given index with the given value.
     -- Consumes the accumulator and produces a new one.
-    UpdateAcc VName [SubExp] [SubExp]
+    UpdateAcc Safety VName [SubExp] [SubExp]
   deriving (Eq, Ord, Show)
 
 -- | The input to a 'WithAcc' construct.  Comprises the index space of
