@@ -11,4 +11,5 @@ let mkFlagArray 't [m]
                 if shp == 0 then -1 else ind
              ) aoa_shp shp_scn
   let zeros = replicate aoa_len zero
-  in  scatter zeros shp_ind aoa_val
+  let res = scatter zeros shp_ind aoa_val
+  in  res

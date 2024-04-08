@@ -163,7 +163,6 @@ forward e@(E.AppExp (E.Index xs slice _) _)
           View j xs' <- forward xs
           normalise $ View (idxCombineIt i j) (combineCases Idx xs' e_i)
   | [E.DimFix idx] <- slice = do -- XXX support only simple indexing for now
-    -- traceM $ "🪲 Index2 " <> prettyString e
     View i e_i <- forward idx
     View it_xs xs' <- forward xs
     normalise $ View (idxCombineIt i it_xs) (combineCases Idx xs' e_i)
@@ -178,9 +177,6 @@ forward (E.ArrayLit es _ _) = do
   es' <- mapM forward es
   let arrs = foldr (combineCases f) (toCases $ Array []) (getCases es')
   let it = foldl1 combineIt (getIters es')
-  -- traceM ("🪲 array forward: " <> prettyString es')
-  -- traceM ("🪲 array combine: " <> prettyString arrs)
-  -- traceM ("🪲 array iterators: " <> show it <> "\n")
   normalise $ View it arrs
   where
     getCases [] = []
@@ -189,8 +185,6 @@ forward (E.ArrayLit es _ _) = do
     getIters (View it _ : xs) = it : getIters xs
     f y (Array acc) = Array (y : acc)
     f _ _ = error "impossible"
-  -- let es' = map toExp es
-  -- in  Array <$> sequence es'
 forward (E.AppExp (E.LetPat _ (E.Id vn _ _) x y _) _) =
   substituteNameE vn x y >>= forward >>= normalise
 forward (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
@@ -258,14 +252,13 @@ forward (E.AppExp (E.Apply f args _) _)
     [E.OpSection (E.QualName [] vn) _ _, _ne, xs'] <- getArgs args = do
       sz <- getSize xs'
       i <- newNameFromString "i"
-      debugM $ "scan i: " <> prettyString i
       let i' = Var i
       op <-
         case E.baseString vn of
           "+" -> pure (~+~)
           "-" -> pure (~-~)
           "*" -> pure (~*~)
-          _ -> error ("toExp not implemented for bin op: " <> show vn)
+          _ -> error ("scan not implemented for bin op: " <> show vn)
       -- Note forward on indexed xs.
       View it_xs xs <- forward (index xs' i)
       let base_case = i' :== SoP (SoP.int2SoP 0)
@@ -283,22 +276,21 @@ forward (E.AppExp (E.Apply f args _) _)
               normalise $ View (Forall i (Iota m)) (toCases $ Var i)
         _ -> undefined -- TODO We've no way to express this yet.
                        -- Have talked with Cosmin about an "outer if" before.
-  -- | Just fname <- getFun f,
-  --   "replicate" == fname,
-  --   [n, x] <- getArgs args = do
-  --     n' <- forward n
-  --     x' <- forward x
-  --     i <- newNameFromString "i"
-  --     case (n', x') of
-  --       View Empty (Cases ((Bool True, m) NE.:| [])) ->
-  --             normalise $ View (Forall i (Iota m)) (toCases $ Var i)
-  --       _ -> undefined -- TODO We've no way to express this yet.
-  --                      -- Have talked with Cosmin about an "outer if" before.
+  | Just fname <- getFun f,
+    "replicate" == fname,
+    [n, x] <- getArgs args = do
+      n' <- forward n
+      x' <- forward x
+      i <- newNameFromString "i"
+      case (n', x') of
+        (View Empty (Cases ((Bool True, m) NE.:| [])),
+         View Empty cases) -> -- XXX support only 1D arrays for now.
+              normalise $ View (Forall i (Iota m)) cases
+        _ -> undefined -- TODO See iota comment.
   | Just fname <- getFun f,
     fname == "not",
     [arg] <- getArgs args = do
       View it body <- forward arg
-      -- toView . toNNF . Not <$> toExp arg
       normalise $ View it (cmapValues (toNNF . Not) body)
 forward e = error $ "forward on " <> show e
 
@@ -306,29 +298,10 @@ forward e = error $ "forward on " <> show e
 getArgs :: NE.NonEmpty (a, E.Exp) -> [E.Exp]
 getArgs = map (stripExp . snd) . NE.toList
 
+-- Used for converting sizes of function arguments.
 toExp :: E.Exp -> ViewM Exp
 toExp (E.Var (E.QualName _ x) _ _) =
   pure $ Var x
-toExp (E.ArrayLit es _ _) =
-  let es' = map toExp es
-  in  Array <$> sequence es'
-toExp (E.AppExp (E.BinOp (op, _) _ (e_x, _) (e_y, _) _) _)
-  | E.baseTag (E.qualLeaf op) <= E.maxIntrinsicTag,
-    name <- E.baseString $ E.qualLeaf op,
-    Just bop <- L.find ((name ==) . prettyString) [minBound .. maxBound :: E.BinOp] = do
-      x <- toExp e_x
-      y <- toExp e_y
-      case bop of
-        E.Plus -> pure $ x ~+~ y
-        E.Times -> pure $ x ~*~ y
-        E.Minus -> pure $ x ~-~ y
-        E.Equal -> pure $ x :== y
-        E.Less -> pure $ x :< y
-        E.Greater -> pure $ x :> y
-        E.Leq -> pure $ x :<= y
-        E.LogAnd -> pure $ x :&& y
-        E.LogOr -> pure $ x :|| y
-        _ -> error ("toExp not implemented for bin op: " <> show bop)
 toExp (E.Parens e _) = toExp e
 toExp (E.Attr _ e _) = toExp e
 toExp (E.IntLit x _ _) = pure $ SoP $ SoP.int2SoP x
