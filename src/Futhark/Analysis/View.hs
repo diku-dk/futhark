@@ -267,9 +267,33 @@ forward (E.AppExp (E.Apply f args _) _)
       normalise $ View it (Cases . NE.fromList $ e1 ++ e2)
   | Just "scatter" <- getFun f,
     [dest_arg, inds_arg, vals_arg] <- getArgs args = do
-      dest <- forward dest_arg
+      -- Scatter in-bounds-monotonic indices.
+      --
+      -- b has size m
+      -- b[k-1] <= b[k] for all k     (e.g., sum of positive ints; can be checked from SoP?)
+      -- inds = ∀k ∈ [1, ..., m] .
+      --     | c1 => OOB              (c1 may depend on i)
+      --     | c2 => b[k-1]           (c2 may depend on i)
+      -- dest has size b[m-1]
+      -- y = scatter dest inds vals
+      -- ___________________________________________________
+      -- y = ∀i ∈ ⋃k=1,...,m ([b[k-1], ..., b[k]]) .
+      --     | i == inds[k] => vals[k]
+      --     | i /= inds[k] => dest[i]
+      --
+      -- From type checking, we have:
+      -- scatter : (dest : [n]t) -> (inds : [m]i64) -> (vals : [m]t) : [n]t
+      -- * inds and vals are same size
+      -- * dest and result are same size
       inds <- forward inds_arg
+      -- get size m
+      -- extract b from inds
+      -- check monotonicity on b
+      -- check that cases match pattern with OOB < 0 or OOB > b[m-1]
       vals <- forward vals_arg
+      -- check that iterator matches that of inds
+      dest <- forward dest_arg
+      -- check dest has size b[m-1]
       undefined
   | Just "iota" <- getFun f,
     [n] <- getArgs args = do

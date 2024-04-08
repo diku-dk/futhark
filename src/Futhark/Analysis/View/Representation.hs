@@ -90,8 +90,12 @@ data Exp =
     Recurrence -- self-reference y[i-1]
   deriving (Show, Eq, Ord)
 
-newtype Domain = Iota Exp -- [0, ..., n-1]
-            -- | Union ...
+data Domain = Iota Exp      -- [0, ..., n-1]
+            | Range Exp Exp -- [from, ..., to]
+            | Union         -- Union_{k=1}^{m-1} [b_{k-1}, ..., b_k)
+                VName       -- k
+                Exp         -- m
+                Domain      -- D
   deriving (Show, Eq, Ord)
 
 data Iterator = Forall VName Domain
@@ -292,6 +296,14 @@ instance Pretty a => Pretty (Cases a) where
 
 instance Pretty Domain where
   pretty (Iota e) = "iota" <+> pretty e
+  pretty (Range start end) =
+      brackets (commasep [pretty start, "...", pretty end])
+  pretty (Union k e dom) =
+    "⋃"
+      <> pretty k
+      <> "="
+      <> commasep ["1", "...", pretty e]
+      <+> parens (pretty dom)
 
 instance Pretty View where
   pretty (View (Forall i dom) e) =
