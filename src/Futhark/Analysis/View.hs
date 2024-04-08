@@ -81,29 +81,12 @@ forwards (E.AppExp (E.LetPat _ p e body _) _)
   | (E.Named x, _, _) <- E.patternParam p = do
     traceM (prettyString p <> " = " <> prettyString e)
     newView <- forward e
-    -- traceM . show $ newView
     tracePrettyM newView
-    newView1 <- simplify newView >>= rewrite >>= normalise
+    newView1 <- rewrite newView
     tracePrettyM newView1
     traceM "🪨 refining"
-    newView2 <- refineView newView1 >>= simplify >>= rewrite >>= normalise
+    newView2 <- refineView newView1 >>= rewrite
     tracePrettyM newView2
-    -- newView6 <- substituteViews newView
-    -- traceM "🎭 hoisting cases"
-    -- newView1 <- hoistCases newView >>= normalise
-    -- tracePrettyM newView1
-    -- newView2 <- substituteViews newView1
-    -- tracePrettyM newView2
-    -- traceM "🎭 hoisting cases"
-    -- newView3 <- hoistCases newView2 >>= normalise
-    -- tracePrettyM newView3
-    -- newView4 <- normalise (simplify newView3)
-    -- tracePrettyM newView4
-    -- newView5 <- rewrite newView4 >>= normalise
-    -- tracePrettyM newView5
-    -- newView6 <- refineView newView5 >>= normalise
-    -- tracePrettyM newView6
-    traceM (show newView2)
     traceM "\n"
     insertView x newView2
     forwards body

@@ -7,7 +7,6 @@ import Data.Bifunctor (bimap)
 import qualified Data.List.NonEmpty as NE
 import qualified Futhark.SoP.SoP as SoP
 import Futhark.MonadFreshNames
-import Futhark.Util.Pretty
 import qualified Data.Map as M
 
 normalise :: View -> ViewM View
@@ -44,7 +43,7 @@ normalise view =
     normExp x@(SoP _) = do
       x' <- astMap m x
       case x' of
-        SoP sop -> pure . SoP . normaliseNegation . mergeSumRanges $ sop
+        SoP sop -> pure . SoP . normaliseNegation . mergeSums $ sop
         _ -> pure x'
       where
         -- TODO extend this to find any 1 + -1*[[c]] without them being adjacent
@@ -54,39 +53,45 @@ normalise view =
             SoP.sym2SoP $ Indicator (Not c)
         normaliseNegation sop = sop
 
-        mergeSumRanges sop =
+        -- Takes a sum of products which may have Sum terms and tries to absorb terms into
+        -- those Sums. Time complexity is quadratic in the number of terms in the SoP.
+        mergeSums sop =
           let sop' = getSoP sop
-          in SoP.sopFromList $ foldl f [] sop'
+          in SoP.sopFromList $
+               foldl (absorbTerm (applyFirstMatch [mergeUb, mergeLb])) [] sop'
 
-        -- Apply merge at most once.
-        f [] term = [term]
-        f (t:ts) term
-          | Just t' <- merge t term =
+        absorbTerm _ [] term = [term]
+        absorbTerm f (t:ts) term
+          | Just t' <- f t term =
             t':ts
-        f (t:ts) term = t : f ts term
+        absorbTerm f (t:ts) term = t : absorbTerm f ts term
 
-        -- Merge
-        --   sum_{j=lb}^ub e[j] + e[lb-1] ==> sum_{j=lb-1}^ub e[j].
-        -- Specifically to clean up the Recursive Sum rule:
-        --   sum_{j=1}^n e[j] + e[0] ==> sum_{j=0}^n e[j].
-        merge ([Sum (Var j) (SoP lb) ub e1], 1) ([e2], 1) =
-          -- | lb SoP..-. SoP.int2SoP 1 == lbm1,
-          --   e1 == e2 = -- TODO replace j in e1 with lb - 1 for matching
+        -- Naively apply the first function with a Just result
+        -- from a list of functions.
+        applyFirstMatch :: [a -> a -> Maybe a] -> a -> a -> Maybe a
+        applyFirstMatch [] _ _ = Nothing
+        applyFirstMatch (f:fs) x y =
+          case f x y of
+            Nothing -> applyFirstMatch fs x y
+            z -> z
+
+        -- Rewrite sum_{j=lb}^ub e[j] + e[ub+1] ==> sum_{j=lb}^{ub+1} e[j].
+        -- Relies on sorting of SoP and Exp to match.
+        mergeUb ([Sum (Var j) lb (SoP ub) e1], 1) ([e2], 1) =
+            let ubp1 = SoP $ ub SoP..+. SoP.int2SoP 1
+            in  if substituteNames' (M.singleton j ubp1) e1 == e2
+                then Just ([Sum (Var j) lb ubp1 e1], 1)
+                else Nothing
+        mergeUb _ _ = Nothing
+
+        -- Rewrite sum_{j=lb}^ub e[j] + e[lb-1] ==> sum_{j=lb-1}^ub e[j].
+        -- Relies on sorting of SoP and Exp to match.
+        mergeLb ([Sum (Var j) (SoP lb) ub e1], 1) ([e2], 1) =
             let lbm1 = SoP $ lb SoP..-. SoP.int2SoP 1
-            in  if lel (M.singleton j lbm1) e1 == e2
+            in  if substituteNames' (M.singleton j lbm1) e1 == e2
                 then Just ([Sum (Var j) lbm1 ub e1], 1)
                 else Nothing
-        -- Add two sums.
-        -- merge ([Sum i lb1 ub1 e1], 1) ([Sum _j lb2 ub2 e2], 1)
-        --   | lb2 == ub1,
-        --     e1 == e2 = -- TODO replace j in e2 with i for matching
-        --       Just ([Sum i lb1 ub2 e1], 1)
-        merge a b =
-          trace ("🪲 merge on: " <> prettyString a <> " and " <> prettyString b) $
-            trace ("    " <> show a) $
-              trace ("    " <> show b)
-                Nothing
-        -- merge _ _ = Nothing
+        mergeLb _ _ = Nothing
     normExp v = astMap m v
 
 simplify :: View -> ViewM View
@@ -94,6 +99,7 @@ simplify view =
   removeDeadCases view
   >>= simplifyRule3
   >>= removeDeadCases
+  >>= normalise
 
 removeDeadCases :: View -> ViewM View
 removeDeadCases (View it (Cases cases))
@@ -129,57 +135,44 @@ simplifyRule3 (View it (Cases cases))
 simplifyRule3 v = pure v
 
 
--- View {iterator = Forall (VName (Name "i") 6204) (Iota (Var (VName (Name "n") 6068))),
---       value = Cases ((Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "i") 6204)),
---                        Sum (Var (VName (Name "j") 6200)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (Var (VName (Name "i") 6204)) (Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6200),1)]},1)]})))))
---                     :| [(Not (Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "i") 6204))),
---                           SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6200)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]})) (Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "j") 6200),1)]},1)]})))),1)]},1),(Term {getTerm = fromOccurList [(Sum (Var (VName (Name "j") 6202)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},1)]})) (Var (VName (Name "i") 6204)) (Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (Var (VName (Name "j") 6202))))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},-1),(Term {getTerm = fromOccurList [(Var (VName (Name "n") 6068),1)]},1)]}))),1)]},1),(Term {getTerm = fromOccurList [(Indicator (Not (Idx (Var (VName (Name "conds") 6070)) (SoP (SoP {getTerms = fromList [(Term {getTerm = fromOccurList []},0)]})))),1)]},1)]}))
---                         ])}
-
--- mergeSums :: View -> ViewM View
--- mergeSums (View _it (Cases cases))
---   | cases is a SoP =
---     -- merge sums in SoP if compatible; just do simple O(n^2) matching
---     undefined
--- mergeSums view = pure view
-
-
--- XXX Currently changing recursive sum rule to be indifferent to the
--- base case. If the base case is mergeable with the recursive
--- case, we merge it later based on sum merging rules.
-rewrite :: View -> ViewM View
+rewriteRule4 :: View -> ViewM View
 -- Rule 4 (recursive sum)
 --
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] .
 --    | i == b => e              (e may depend on i)
 --    | i /= b => y[i-1] ⊕ x[i]
--- ____________________________________
+-- _______________________________________________________________
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . e{b/i} ⊕ (⊕_{j=b+1}^i x[j])
 --
 -- If e{b/i} happens to be x[b] it later simplifies to
 -- y = ∀i ∈ [b, b+1, ..., b + n - 1] . (⊕_{j=b}^i x[j])
-rewrite (View it@(Forall i'' (Iota _)) (Cases cases))
-  | (Var i :== b, x) :| [(Not (Var i' :== b'), y)] <- cases,
+rewriteRule4 (View it@(Forall i'' (Iota _)) (Cases cases))
+  | (Var i :== b, e) :| [(Not (Var i' :== b'), x)] <- cases,
     i == i'',
     i == i',
     b == b',
     b == SoP (SoP.int2SoP 0), -- Domain is iota so b must be 0.
-    Just x' <- justTermPlusRecurence y,
-    x == x' || x == SoP (SoP.int2SoP 0) = do
+    Just x' <- justTermPlusRecurence x = do
       traceM "👀 Using Rule 4 (recursive sum)"
       j <- Var <$> newNameFromString "j"
       let lb = b ~+~ SoP (SoP.int2SoP 1)
       let ub = Var i
-      base <- substituteName i b x
-      z <- substituteName i j x'
-      pure $ View it (toCases $ base ~+~ Sum j lb ub z)
+      base <- substituteName i b e
+      x'' <- substituteName i j x'
+      pure $ View it (toCases $ base ~+~ Sum j lb ub x'')
   where
     justTermPlusRecurence :: Exp -> Maybe Exp
     justTermPlusRecurence (SoP sop)
       | [([x], 1), ([Recurrence], 1)] <- getSoP sop =
           Just x
     justTermPlusRecurence _ = Nothing
-rewrite view = pure view
+rewriteRule4 view = pure view
+
+rewrite :: View -> ViewM View
+rewrite view =
+  simplify view >>=
+  rewriteRule4 >>=
+  simplify
 
 toNNF' :: View -> View
 toNNF' (View i (Cases cs)) =
