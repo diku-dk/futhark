@@ -89,9 +89,10 @@ mkBoilerplate wgsl_program macros kernels types failures = do
   GC.headerDecl GC.InitDecl [C.cedecl|const char* futhark_context_config_get_program(struct futhark_context_config *cfg);|]
   GC.headerDecl GC.InitDecl [C.cedecl|void futhark_context_config_set_program(struct futhark_context_config *cfg, const char* s);|]
 
+-- TODO: Check GPU.gpuOptions and see which of these make sense for us to
+-- support.
 cliOptions :: [Option]
-cliOptions =
-  gpuOptions
+cliOptions = []
 
 webgpuMemoryType :: GC.MemoryType HostOp ()
 webgpuMemoryType "device" = pure [C.cty|typename WGPUBuffer|]

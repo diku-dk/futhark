@@ -107,6 +107,31 @@ wgpu_request_device_result wgpu_request_device_sync(
   return result;
 }
 
+void wgpu_on_work_done_callback(WGPUQueueWorkDoneStatus status,
+                                void *userdata) {
+  wgpu_wait_info *info = (wgpu_wait_info *)userdata;
+  *((WGPUQueueWorkDoneStatus *)info->result) = status;
+  info->released = true;
+}
+
+WGPUQueueWorkDoneStatus wgpu_block_until_work_done(WGPUQueue queue) {
+  WGPUQueueWorkDoneStatus status;
+  wgpu_wait_info info = {
+    .released = false,
+    .result = (void *)&status,
+  };
+
+  // TODO: What does the signalValue (second arg) mean here?
+  wgpuQueueOnSubmittedWorkDone(queue, 0, wgpu_on_work_done_callback,
+                               (void *)&info);
+
+  while (!info.released) {
+    emscripten_sleep(0);
+  }
+
+  return status;
+}
+
 void wgpu_on_uncaptured_error(WGPUErrorType error_type, const char *msg,
                               void *userdata) {
   futhark_panic(-1, "Uncaptured WebGPU error, type: %d\n%s\n", error_type, msg);
@@ -145,6 +170,18 @@ void futhark_context_config_set_program(struct futhark_context_config *cfg, cons
   cfg->program = strdup(s);
 }
 
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value) {
+  for (int i = 0; i < cfg->num_tuning_params; i++) {
+    if (strcmp(param_name, cfg->tuning_param_names[i]) == 0) {
+      cfg->tuning_params[i] = new_value;
+      return 0;
+    }
+  }
+  return 1;
+}
+
 struct futhark_context {
   struct futhark_context_config* cfg;
   int detail_memory;
@@ -166,6 +203,14 @@ struct futhark_context {
   bool program_initialised;
   // Uniform fields above.
 
+  struct tuning_params tuning_params;
+  // True if a potentially failing kernel has been enqueued.
+  int32_t failure_is_an_option;
+  int total_runs;
+  long int total_runtime;
+  int64_t peak_mem_usage_device;
+  int64_t cur_mem_usage_device;
+
   int num_overrides;
   char **override_names;
   double *override_values;
@@ -184,6 +229,16 @@ struct futhark_context {
 
   struct builtin_kernels* kernels;
 };
+
+int futhark_context_sync(struct futhark_context *ctx) {
+  // TODO: All the error handling stuff.
+  WGPUQueueWorkDoneStatus status = wgpu_block_until_work_done(ctx->queue);
+  if (status != WGPUQueueWorkDoneStatus_Success) {
+    futhark_panic(-1, "Failed to wait for work to be done, status: %d\n",
+                  status);
+  }
+  return FUTHARK_SUCCESS;
+}
 
 void wgpu_module_setup(struct futhark_context *ctx) {
   WGPUShaderModuleWGSLDescriptor wgsl_desc = {
@@ -204,6 +259,11 @@ struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
 void free_builtin_kernels(struct futhark_context* ctx, struct builtin_kernels* kernels);
 
 int backend_context_setup(struct futhark_context *ctx) {
+  ctx->failure_is_an_option = 0;
+  ctx->total_runs = 0;
+  ctx->total_runtime = 0;
+  ctx->peak_mem_usage_device = 0;
+  ctx->cur_mem_usage_device = 0;
   ctx->kernels = NULL;
 
   ctx->instance = wgpuCreateInstance(NULL);
@@ -334,13 +394,17 @@ static void gpu_create_kernel(struct futhark_context *ctx,
   WGPUBindGroupLayoutEntry *scalar_entry = bgl_entries;
   scalar_entry->binding = kernel_info->scalars_binding;
   scalar_entry->visibility = WGPUShaderStage_Compute;
-  scalar_entry->buffer = { .type = WGPUBufferBindingType_Uniform };
+  WGPUBufferBindingLayout scalar_buffer_layout
+    = { .type = WGPUBufferBindingType_Uniform };
+  scalar_entry->buffer = scalar_buffer_layout;
 
   for (int i = 0; i < kernel_info->num_bindings; i++) {
     WGPUBindGroupLayoutEntry *entry = &bgl_entries[1 + i];
     entry->binding = kernel_info->binding_indices[i];
     entry->visibility = WGPUShaderStage_Compute;
-    entry->buffer = { .type = WGPUBufferBindingType_Storage };
+    WGPUBufferBindingLayout buffer_layout
+      = { .type = WGPUBufferBindingType_Storage };
+    entry->buffer = buffer_layout;
   }
   WGPUBindGroupLayoutDescriptor bgl_desc = {
     .entryCount = 1 + kernel_info->num_bindings,
@@ -400,6 +464,7 @@ static int gpu_scalar_to_device(struct futhark_context *ctx,
                                 gpu_mem dst, size_t offset, size_t size,
                                 void *src) {
   wgpuQueueWriteBuffer(ctx->queue, dst, offset, src, size);
+  return FUTHARK_SUCCESS;
 }
 
 static int gpu_scalar_from_device(struct futhark_context *ctx,
@@ -458,6 +523,7 @@ static int memcpy_host2gpu(struct futhark_context *ctx, bool sync,
   (void)sync;
 
   wgpuQueueWriteBuffer(ctx->queue, dst, dst_offset, src + src_offset, nbytes);
+  return FUTHARK_SUCCESS;
 }
 
 static int memcpy_gpu2host(struct futhark_context *ctx, bool sync,

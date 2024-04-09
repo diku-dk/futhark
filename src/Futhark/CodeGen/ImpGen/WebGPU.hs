@@ -109,7 +109,7 @@ addOverride ident = tell (KernelW [ident] [] [])
 addScalar :: WGSL.PrimType -> KernelM ()
 addScalar typ = tell (KernelW [] [typ] [])
 
-finishKernel :: KernelR -> KernelW -> WebGPUM ()
+finishKernel :: KernelR -> KernelW -> WebGPUM KernelName
 finishKernel (KernelR kernel _) kw = do
   s <- get
   let (offsets, _align, size) = case WGSL.structLayout (kwScalars kw) of
@@ -125,6 +125,7 @@ finishKernel (KernelR kernel _) kw = do
     overrideNames = kwOverrides kw
   }
   put $ s {wsKernels = wsKernels s <> [(name, interface)]}
+  pure (nameFromText name)
 
 entryParams :: [WGSL.Param]
 entryParams =
@@ -179,9 +180,9 @@ onKernel :: ImpGPU.Kernel -> WebGPUM HostOp
 onKernel kernel = do
   let r = KernelR kernel M.empty
   ((), (), w) <- runRWST genKernel r ()
-  finishKernel r w
+  name <- finishKernel r w
   -- TODO: return something sensible.
-  pure $ LaunchKernel SafetyNone (ImpGPU.kernelName kernel) 0 [] [] []
+  pure $ LaunchKernel SafetyNone name 0 [] [] []
 
 onHostOp :: ImpGPU.HostOp -> WebGPUM HostOp
 onHostOp (ImpGPU.CallKernel k) = onKernel k
@@ -219,7 +220,8 @@ kernelsToWebGPU prog =
       kernels = M.fromList $ map (first nameFromText) (wsKernels translation)
       webgpu_prelude = RTS.scalar <> RTS.scalar8 <> RTS.scalar16 <> RTS.scalar64
       constants = mempty
-      params = mempty
+      -- TODO: Compute functions using tuning params
+      params = M.map (, S.empty) $ wsSizes translation
       failures = mempty
    in Program
         { webgpuProgram = wsCode translation,
