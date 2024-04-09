@@ -137,6 +137,16 @@ void wgpu_on_uncaptured_error(WGPUErrorType error_type, const char *msg,
   futhark_panic(-1, "Uncaptured WebGPU error, type: %d\n%s\n", error_type, msg);
 }
 
+void wgpu_on_shader_compiled(WGPUCompilationInfoRequestStatus status,
+                             struct WGPUCompilationInfo const * compilationInfo,
+                             void * userdata) {
+  // TODO: Check status, better printing
+  for (int i = 0; i < compilationInfo->messageCount; i++) {
+    WGPUCompilationMessage msg = compilationInfo->messages[i];
+    printf("Shader compilation message: %s\n", msg.message);
+  }
+}
+
 struct futhark_context_config {
   int in_use;
   int debugging;
@@ -151,10 +161,30 @@ struct futhark_context_config {
   // Uniform fields above.
   
   char *program;
+
+  size_t default_block_size;
+  size_t default_grid_size;
+  size_t default_tile_size;
+  size_t default_reg_tile_size;
+  size_t default_threshold;
+
+  int default_block_size_changed;
+  int default_grid_size_changed;
+  int default_tile_size_changed;
 };
 
 static void backend_context_config_setup(struct futhark_context_config *cfg) {
   cfg->program = strconcat(gpu_program);
+
+  cfg->default_block_size = 256;
+  cfg->default_grid_size = 0; // Set properly later.
+  cfg->default_tile_size = 32;
+  cfg->default_reg_tile_size = 2;
+  cfg->default_threshold = 32*1024;
+
+  cfg->default_block_size_changed = 0;
+  cfg->default_grid_size_changed = 0;
+  cfg->default_tile_size_changed = 0;
 }
 
 static void backend_context_config_teardown(struct futhark_context_config *cfg) {
@@ -170,6 +200,37 @@ void futhark_context_config_set_program(struct futhark_context_config *cfg, cons
   cfg->program = strdup(s);
 }
 
+void futhark_context_config_set_default_thread_block_size(struct futhark_context_config *cfg, int size) {
+  cfg->default_block_size = size;
+  cfg->default_block_size_changed = 1;
+}
+
+void futhark_context_config_set_default_grid_size(struct futhark_context_config *cfg, int num) {
+  cfg->default_grid_size = num;
+  cfg->default_grid_size_changed = 1;
+}
+
+void futhark_context_config_set_default_group_size(struct futhark_context_config *cfg, int size) {
+  futhark_context_config_set_default_thread_block_size(cfg, size);
+}
+
+void futhark_context_config_set_default_num_groups(struct futhark_context_config *cfg, int num) {
+  futhark_context_config_set_default_grid_size(cfg, num);
+}
+
+void futhark_context_config_set_default_tile_size(struct futhark_context_config *cfg, int size) {
+  cfg->default_tile_size = size;
+  cfg->default_tile_size_changed = 1;
+}
+
+void futhark_context_config_set_default_reg_tile_size(struct futhark_context_config *cfg, int size) {
+  cfg->default_reg_tile_size = size;
+}
+
+void futhark_context_config_set_default_threshold(struct futhark_context_config *cfg, int size) {
+  cfg->default_threshold = size;
+}
+
 int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
                                             const char *param_name,
                                             size_t new_value) {
@@ -179,6 +240,30 @@ int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
       return 0;
     }
   }
+
+  if (strcmp(param_name, "default_thread_block_size") == 0
+      || strcmp(param_name, "default_group_size") == 0) {
+    cfg->default_block_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_num_groups") == 0 ||
+      strcmp(param_name, "default_grid_size") == 0) {
+    cfg->default_grid_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_threshold") == 0) {
+    cfg->default_threshold = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_tile_size") == 0) {
+    cfg->default_tile_size = new_value;
+    return 0;
+  }
+  if (strcmp(param_name, "default_reg_tile_size") == 0) {
+    cfg->default_reg_tile_size = new_value;
+    return 0;
+  }
+
   return 1;
 }
 
@@ -240,6 +325,58 @@ int futhark_context_sync(struct futhark_context *ctx) {
   return FUTHARK_SUCCESS;
 }
 
+static void wgpu_size_setup(struct futhark_context *ctx) {
+  struct futhark_context_config *cfg = ctx->cfg;
+  // TODO: Deal with the device limits here, see cuda.h.
+
+  // TODO: See if we can also do some proper heuristic for default_grid_size
+  // here.
+  if (!cfg->default_grid_size_changed) {
+    cfg->default_grid_size = 16;
+  }
+
+  for (int i = 0; i < cfg->num_tuning_params; i++) {
+    const char *size_class = cfg->tuning_param_classes[i];
+    int64_t *size_value = &cfg->tuning_params[i];
+    const char* size_name = cfg->tuning_param_names[i];
+    //int64_t max_value = 0;
+    int64_t default_value = 0;
+
+    if (strstr(size_class, "thread_block_size") == size_class) {
+      //max_value = ctx->max_thread_block_size;
+      default_value = cfg->default_block_size;
+    } else if (strstr(size_class, "grid_size") == size_class) {
+      //max_value = ctx->max_grid_size;
+      default_value = cfg->default_grid_size;
+      // XXX: as a quick and dirty hack, use twice as many threads for
+      // histograms by default.  We really should just be smarter
+      // about sizes somehow.
+      if (strstr(size_name, ".seghist_") != NULL) {
+        default_value *= 2;
+      }
+    } else if (strstr(size_class, "tile_size") == size_class) {
+      //max_value = ctx->max_tile_size;
+      default_value = cfg->default_tile_size;
+    } else if (strstr(size_class, "reg_tile_size") == size_class) {
+      //max_value = 0; // No limit.
+      default_value = cfg->default_reg_tile_size;
+    } else if (strstr(size_class, "threshold") == size_class) {
+      // Threshold can be as large as it takes.
+      default_value = cfg->default_threshold;
+    } else {
+      // Bespoke sizes have no limit or default.
+    }
+
+    if (*size_value == 0) {
+      *size_value = default_value;
+    //} else if (max_value > 0 && *size_value > max_value) {
+    //  fprintf(stderr, "Note: Device limits %s to %zu (down from %zu)\n",
+    //          size_name, max_value, *size_value);
+    //  *size_value = max_value;
+    }
+  }
+}
+
 void wgpu_module_setup(struct futhark_context *ctx) {
   WGPUShaderModuleWGSLDescriptor wgsl_desc = {
     .chain = {
@@ -251,8 +388,8 @@ void wgpu_module_setup(struct futhark_context *ctx) {
     .nextInChain = &wgsl_desc.chain
   };
   ctx->module = wgpuDeviceCreateShaderModule(ctx->device, &desc);
-  // TODO: Report shader errors
-  //wgpuShaderModuleGetCompilationInfo(shader_module, on_shader_compiled, NULL);
+ 
+  wgpuShaderModuleGetCompilationInfo(ctx->module, wgpu_on_shader_compiled, NULL);
 }
 
 struct builtin_kernels* init_builtin_kernels(struct futhark_context* ctx);
@@ -298,6 +435,8 @@ int backend_context_setup(struct futhark_context *ctx) {
 
   ctx->queue = wgpuDeviceGetQueue(ctx->device);
 
+  wgpu_size_setup(ctx);
+
   WGPUBufferDescriptor desc = {
     .label = "scalar_readback",
     .size = 8,
@@ -306,9 +445,11 @@ int backend_context_setup(struct futhark_context *ctx) {
   ctx->scalar_readback_buffer = wgpuDeviceCreateBuffer(ctx->device, &desc);
   free_list_init(&ctx->gpu_free_list);
 
-  if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
-    return 1;
-  }
+  // TODO: Do builtin kernels at some point
+  //if ((ctx->kernels = init_builtin_kernels(ctx)) == NULL) {
+  //  printf("Failed to init builtin kernels\n");
+  //  return 1;
+  //}
 
   // We implement macros as override constants.
   int64_t *macro_vals;
@@ -328,6 +469,7 @@ int backend_context_setup(struct futhark_context *ctx) {
 void backend_context_teardown(struct futhark_context *ctx) {
   if (ctx->kernels != NULL) {
     free_builtin_kernels(ctx, ctx->kernels);
+  } // TODO
     free(ctx->override_names);
     free(ctx->override_values);
 
@@ -336,7 +478,7 @@ void backend_context_teardown(struct futhark_context *ctx) {
     }
     wgpuBufferDestroy(ctx->scalar_readback_buffer);
     wgpuDeviceDestroy(ctx->device);
-  }
+  //}
   free_list_destroy(&ctx->gpu_free_list);
 }
 

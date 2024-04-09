@@ -121,7 +121,7 @@ finishKernel (KernelR kernel _) kw = do
   let (offsets, _align, size) = case WGSL.structLayout (kwScalars kw) of
                                   Just t -> t
                                   Nothing -> error "invalid scalars struct"
-  let name = textToIdent $ nameToText $ ImpGPU.kernelName kernel
+  let name = nameToText $ ImpGPU.kernelName kernel
   let interface = KernelInterface {
     safety = SafetyNone, -- TODO
     scalarsOffsets = offsets,
@@ -657,13 +657,13 @@ genConstAndBuiltinDecls = do
         [(nameFromText n, e) | (n, e) <- builtins]
 
   let consts = [(n, e) | ImpGPU.ConstUse n e <- ImpGPU.kernelUses kernel]
-  moduleNames <- mapM (mkGlobalIdent . nameToIdent . fst) consts
+  moduleNames <- mapM (mkGlobalIdent . (<> "_x") . nameToIdent . fst) consts
   let constMap = [(nameFromText i, e) | ((_, e), i) <- zip consts moduleNames]
-  let constDecls = [WGSL.OverrideDecl (i <> "_x") (WGSL.Prim WGSL.Int32)
+  let constDecls = [WGSL.OverrideDecl i (WGSL.Prim WGSL.Int32)
                      (Just $ WGSL.IntExp 0) | i <- moduleNames]
   let constInits =
         [WGSL.Seq (WGSL.DeclareVar (nameToIdent n) (WGSL.Prim wgslInt64))
-          (WGSL.Assign (nameToIdent n) (WGSL.CallExp "i64" [WGSL.VarExp (i <> "_x"),
+          (WGSL.Assign (nameToIdent n) (WGSL.CallExp "i64" [WGSL.VarExp i,
                                                             WGSL.IntExp 0]))
           | ((n, _), i) <- zip consts moduleNames]
 

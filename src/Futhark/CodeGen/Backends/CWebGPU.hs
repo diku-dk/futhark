@@ -15,6 +15,7 @@ import Data.Text qualified as T
 import Futhark.CodeGen.Backends.GPU
 import Futhark.CodeGen.Backends.GenericC qualified as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.Backends.GenericC.Pretty (idText)
 import Futhark.CodeGen.ImpCode.WebGPU
 import Futhark.CodeGen.ImpGen.WebGPU qualified as ImpGen
 import Futhark.CodeGen.RTS.C (backendsWebGPUH)
@@ -59,7 +60,7 @@ mkKernelInfos kernels = do
     info_init (n, k) =
       let num_scalars = length (scalarsOffsets k)
           num_bindings = length (memBindSlots k)
-       in [C.cinit|{ .name = $string:(nameToString n),
+       in [C.cinit|{ .name = $string:(T.unpack (idText (C.toIdent n mempty))),
                      .num_scalars = $int:num_scalars,
                      .scalars_binding = $int:(scalarsBindSlot k),
                      .scalars_size = $int:(scalarsSize k),
